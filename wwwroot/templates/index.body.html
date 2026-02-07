@@ -1,0 +1,29 @@
+    <nav class="navbar navbar-expand-lg bg-primary navbar-dark fixed-top bm-navbar">
+      <div class="container-fluid">
+        <a class="navbar-brand" href="#">{{AppName}}</a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
+          <span class="navbar-toggler-icon"></span>
+        </button>
+        <div class="collapse navbar-collapse" id="navbarSupportedContent">
+          <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+            {{links_left}}
+          </ul>
+          <ul class="navbar-nav ms-auto mb-2 mb-lg-0">
+            {{links_right}}
+          </ul>
+        </div>
+      </div>
+    </nav>
+    <div class="container-fluid py-4 px-4 bm-content">
+      <div class="card shadow-sm bm-page-card">
+        <div class="card-header">
+          <h1 class="h5 mb-0">{{title}}</h1>
+        </div>
+        <div class="card-body">
+          {{message}}
+          {{table}}
+          {{form}}
+          {{what}}
+        </div>
+      </div>
+    </div>

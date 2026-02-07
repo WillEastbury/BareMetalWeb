@@ -1,0 +1,24 @@
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.5.2.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BareMetalWeb", "BareMetalWeb.csproj", "{EB7459FC-A723-05A2-13CC-FB4F2894CE69}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{EB7459FC-A723-05A2-13CC-FB4F2894CE69}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{EB7459FC-A723-05A2-13CC-FB4F2894CE69}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{EB7459FC-A723-05A2-13CC-FB4F2894CE69}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{EB7459FC-A723-05A2-13CC-FB4F2894CE69}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {54D560A9-6DA1-47B4-BFCD-22D24CB0D59C}
+	EndGlobalSection
+EndGlobal

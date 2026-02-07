@@ -1,0 +1,63 @@
+using System;
+using System.Threading.Tasks;
+using BareMetalWeb.WebServer;
+using Microsoft.AspNetCore.Http;
+
+namespace BareMetalWeb.Interfaces;
+
+public interface IRouteHandlers
+{
+    ValueTask TimeRawHandler(HttpContext context);
+    RouteHandlerDelegate BuildPageHandler(Action<HttpContext> configure);
+    RouteHandlerDelegate BuildPageHandler(Func<HttpContext, ValueTask> configureAsync);
+    RouteHandlerDelegate BuildPageHandler(Func<HttpContext, ValueTask<bool>> configureAsync, bool renderWhenTrue = true);
+    ValueTask LoginHandler(HttpContext context);
+    ValueTask LoginPostHandler(HttpContext context);
+    ValueTask MfaChallengeHandler(HttpContext context);
+    ValueTask MfaChallengePostHandler(HttpContext context);
+    ValueTask RegisterHandler(HttpContext context);
+    ValueTask RegisterPostHandler(HttpContext context);
+    ValueTask LogoutHandler(HttpContext context);
+    ValueTask LogoutPostHandler(HttpContext context);
+    ValueTask AccountHandler(HttpContext context);
+    ValueTask MfaStatusHandler(HttpContext context);
+    ValueTask MfaSetupHandler(HttpContext context);
+    ValueTask MfaSetupPostHandler(HttpContext context);
+    ValueTask MfaResetHandler(HttpContext context);
+    ValueTask MfaResetPostHandler(HttpContext context);
+    ValueTask UsersListHandler(HttpContext context);
+    ValueTask SetupHandler(HttpContext context);
+    ValueTask SetupPostHandler(HttpContext context);
+    ValueTask ReloadTemplatesHandler(HttpContext context);
+    ValueTask DefaultPageHandler(HttpContext context);
+    ValueTask DataEntitiesHandler(HttpContext context);
+    ValueTask DataListHandler(HttpContext context);
+    ValueTask DataListCsvHandler(HttpContext context);
+    ValueTask DataListHtmlHandler(HttpContext context);
+    ValueTask DataViewHandler(HttpContext context);
+    ValueTask DataViewRtfHandler(HttpContext context);
+    ValueTask DataViewHtmlHandler(HttpContext context);
+    ValueTask DataImportHandler(HttpContext context);
+    ValueTask DataImportPostHandler(HttpContext context);
+    ValueTask DataCreateHandler(HttpContext context);
+    ValueTask DataCreatePostHandler(HttpContext context);
+    ValueTask DataEditHandler(HttpContext context);
+    ValueTask DataEditPostHandler(HttpContext context);
+    ValueTask DataClonePostHandler(HttpContext context);
+    ValueTask DataCloneEditPostHandler(HttpContext context);
+    ValueTask DataDeleteHandler(HttpContext context);
+    ValueTask DataDeletePostHandler(HttpContext context);
+    ValueTask MetricsJsonHandler(HttpContext context);
+    ValueTask LogsViewerHandler(HttpContext context);
+    ValueTask LogsPruneHandler(HttpContext context);
+    ValueTask LogsPrunePostHandler(HttpContext context);
+    ValueTask LogsDownloadHandler(HttpContext context);
+    ValueTask SampleDataHandler(HttpContext context);
+    ValueTask SampleDataPostHandler(HttpContext context);
+    ValueTask DataApiListHandler(HttpContext context);
+    ValueTask DataApiGetHandler(HttpContext context);
+    ValueTask DataApiPostHandler(HttpContext context);
+    ValueTask DataApiPutHandler(HttpContext context);
+    ValueTask DataApiPatchHandler(HttpContext context);
+    ValueTask DataApiDeleteHandler(HttpContext context);
+}
