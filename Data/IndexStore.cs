@@ -150,7 +150,10 @@ public sealed class IndexStore
 
                 if (op == 'D')
                 {
-                    current = null;
+                    // Only clear when the delete matches the last seen value.
+                    if (!string.IsNullOrWhiteSpace(current)
+                        && string.Equals(current, entryValue, StringComparison.OrdinalIgnoreCase))
+                        current = null;
                     return;
                 }
 
@@ -352,7 +355,9 @@ public sealed class IndexStore
             var normalizedKey = normalizeKey ? NormalizeKey(key) : key;
             if (op == 'D')
             {
-                map.Remove(normalizedKey);
+                if (map.TryGetValue(normalizedKey, out var existing)
+                    && string.Equals(existing, id, StringComparison.OrdinalIgnoreCase))
+                    map.Remove(normalizedKey);
                 return;
             }
 

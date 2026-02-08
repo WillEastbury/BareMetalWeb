@@ -5,7 +5,10 @@ using BareMetalWeb.WebServer;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Net;
+using System.Text;
 using System.Text.Json;
 
 // Setup 
@@ -13,11 +16,15 @@ WebApplication app = WebApplication.Create();
 IBufferedLogger logger = ProgramSetup.CreateLogger(app);
 logger.LogInfo("Starting BareMetalWeb server...");
 
-ISchemaAwareObjectSerializer serializer = new BinaryObjectSerializer();
-IDataQueryEvaluator queryEvaluator = new DataQueryEvaluator();
-IDataObjectStore dataStore = ProgramSetup.CreateDataStore(app, serializer, queryEvaluator, logger);
+var contentRoot = app.Environment.ContentRootPath;
+var dataRoot = app.Configuration.GetValue("Data:Root", Path.Combine(contentRoot, "Data"));
+CookieProtection.ConfigureKeyRoot(dataRoot);
 
+ISchemaAwareObjectSerializer serializer = BinaryObjectSerializer.CreateDefault(dataRoot);
+IDataQueryEvaluator queryEvaluator = new DataQueryEvaluator();
 DataEntityRegistry.RegisterAllEntities();
+IDataObjectStore dataStore = ProgramSetup.CreateDataStore(app, serializer, queryEvaluator, logger);
+ProgramSetup.ConfigureEntityLeadership(app, logger);
 var entityPermissions = DataScaffold.Entities
     .SelectMany(entity => (entity.Permissions ?? string.Empty)
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
@@ -39,7 +46,6 @@ IMetricsTracker metricsTracker = new MetricsTracker();
 IClientRequestTracker throttling = ProgramSetup.CreateClientRequestTracker(app, logger);
 
 bool allowAccountCreation = app.Configuration.GetValue("Auth:AllowAccountCreation", false);
-var dataRoot = app.Configuration.GetValue("Data:Root", Path.Combine(AppContext.BaseDirectory, "Data"));
 IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot);
 IHtmlTemplate mainTemplate = templateStore.Get("Index");
 IHtmlTemplate blankTemplate = templateStore.Get("Blank");
@@ -63,6 +69,151 @@ appInfo.RegisterRoute("GET /metrics", new RouteHandlerData(pageInfoFactory.Templ
     context.AddTable(tableColumns, tableRows);
 })));
 appInfo.RegisterRoute("GET /metrics/json", new RouteHandlerData(pageInfoFactory.RawPage("monitoring", false), routeHandlers.MetricsJsonHandler));
+appInfo.RegisterRoute("GET /admin/index-leadership/view", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Index Leadership", "" }, "monitoring", true, 1, navGroup: "System", navAlignment: NavAlignment.Right), routeHandlers.BuildPageHandler(context =>
+{
+    var provider = DataStoreProvider.PrimaryProvider;
+    context.SetStringValue("title", "Index Leadership");
+    if (provider == null)
+    {
+        context.SetStringValue("message", "<p>Primary provider not configured.</p>");
+        return;
+    }
+
+    var storageKey = provider.Name;
+    var staleThreshold = TimeSpan.FromSeconds(app.Configuration.GetValue("IndexLeadership:HeartbeatStaleSeconds", 20));
+    var forceTarget = context.Request.Query.TryGetValue("force", out var forceValues) ? forceValues.ToString() : string.Empty;
+    var forceAll = string.Equals(forceTarget, "all", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(forceTarget, "*", StringComparison.OrdinalIgnoreCase);
+
+    var rows = new List<string[]>();
+    foreach (var entity in DataScaffold.Entities.OrderBy(e => e.Type.Name))
+    {
+        var entityName = entity.Type.Name;
+        var matchesForce = forceAll || string.Equals(forceTarget, entityName, StringComparison.OrdinalIgnoreCase);
+        string forceStatus = string.Empty;
+        if (!string.IsNullOrWhiteSpace(forceTarget) && matchesForce)
+        {
+            try
+            {
+                DataStoreProvider.EnsureEntityLeader(storageKey, entityName);
+                forceStatus = DataStoreProvider.IsEntityLeader(storageKey, entityName) ? "acquired" : "denied";
+            }
+            catch (Exception ex)
+            {
+                forceStatus = $"error: {WebUtility.HtmlEncode(ex.Message)}";
+            }
+        }
+
+        var leaseKey = DataStoreProvider.BuildEntityLeaseKey(storageKey, entityName);
+        var isLeader = DataStoreProvider.IsEntityLeader(storageKey, entityName);
+        var heartbeatPath = IndexLeadership.GetLeaderHeartbeatPath(provider, leaseKey);
+        var heartbeat = ProgramSetup.ReadHeartbeatStatus(heartbeatPath, staleThreshold);
+        var leaderNodeId = DataStoreProvider.TryGetEntityLeader(storageKey, entityName, out var leader)
+            ? leader.NodeId
+            : string.Empty;
+
+        var forceLink = $"<a class=\"btn btn-sm btn-outline-primary\" href=\"/admin/index-leadership/view?force={Uri.EscapeDataString(entityName)}\">Force</a>";
+        rows.Add(new[]
+        {
+            WebUtility.HtmlEncode(entityName),
+            isLeader ? "yes" : "no",
+            WebUtility.HtmlEncode(leaderNodeId),
+            WebUtility.HtmlEncode(heartbeat.State),
+            heartbeat.AgeSeconds.HasValue ? heartbeat.AgeSeconds.Value.ToString("0.0") : string.Empty,
+            WebUtility.HtmlEncode(heartbeat.NodeId ?? string.Empty),
+            WebUtility.HtmlEncode(leaseKey),
+            string.IsNullOrWhiteSpace(forceStatus) ? forceLink : WebUtility.HtmlEncode(forceStatus)
+        });
+    }
+
+    var message = string.Concat(
+        "<p>JSON: <a href=\"/admin/index-leadership\">/admin/index-leadership</a></p>",
+        "<p><a class=\"btn btn-sm btn-outline-secondary\" href=\"/admin/index-leadership/view?force=all\">Force All</a></p>");
+    context.SetStringValue("message", message);
+    context.AddTable(new[] { "Entity", "Leader", "Leader Node", "Heartbeat", "Age (s)", "Heartbeat Node", "Lease Key", "Force" }, rows.ToArray());
+})));
+appInfo.RegisterRoute("GET /admin/index-leadership", new RouteHandlerData(pageInfoFactory.RawPage("monitoring", false), async context =>
+{
+    var provider = DataStoreProvider.PrimaryProvider;
+    if (provider == null)
+    {
+        context.Response.StatusCode = 500;
+        return;
+    }
+
+    var storageKey = provider.Name;
+    var staleThreshold = TimeSpan.FromSeconds(app.Configuration.GetValue("IndexLeadership:HeartbeatStaleSeconds", 20));
+    var forceTarget = context.Request.Query.TryGetValue("force", out var forceValues) ? forceValues.ToString() : string.Empty;
+    var forceAll = string.Equals(forceTarget, "all", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(forceTarget, "*", StringComparison.OrdinalIgnoreCase);
+    context.Response.ContentType = "application/json";
+
+    await using var stream = context.Response.Body;
+    using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
+    writer.WriteStartObject();
+    writer.WriteString("storageKey", storageKey);
+    writer.WriteString("forceTarget", forceTarget);
+    writer.WriteStartArray("entities");
+    foreach (var entity in DataScaffold.Entities.OrderBy(e => e.Type.Name))
+    {
+        var entityName = entity.Type.Name;
+        var matchesForce = forceAll || string.Equals(forceTarget, entityName, StringComparison.OrdinalIgnoreCase);
+        var forceAttempted = false;
+        var forceAcquired = false;
+        string? forceError = null;
+        if (!string.IsNullOrWhiteSpace(forceTarget) && matchesForce)
+        {
+            forceAttempted = true;
+            try
+            {
+                DataStoreProvider.EnsureEntityLeader(storageKey, entityName);
+                forceAcquired = DataStoreProvider.IsEntityLeader(storageKey, entityName);
+            }
+            catch (Exception ex)
+            {
+                forceError = ex.Message;
+            }
+        }
+
+        var leaseKey = DataStoreProvider.BuildEntityLeaseKey(storageKey, entityName);
+        var isLeader = DataStoreProvider.IsEntityLeader(storageKey, entityName);
+        var heartbeatPath = IndexLeadership.GetLeaderHeartbeatPath(provider, leaseKey);
+        var heartbeat = ProgramSetup.ReadHeartbeatStatus(heartbeatPath, staleThreshold);
+
+        writer.WriteStartObject();
+        writer.WriteString("entity", entityName);
+        writer.WriteString("leaseKey", leaseKey);
+        writer.WriteBoolean("isLeader", isLeader);
+        writer.WriteBoolean("forceAttempted", forceAttempted);
+        writer.WriteBoolean("forceAcquired", forceAcquired);
+        if (forceError == null)
+            writer.WriteNull("forceError");
+        else
+            writer.WriteString("forceError", forceError);
+
+        if (DataStoreProvider.TryGetEntityLeader(storageKey, entityName, out var leader))
+            writer.WriteString("leaderNodeId", leader.NodeId);
+        else
+            writer.WriteNull("leaderNodeId");
+
+        writer.WriteString("heartbeatPath", heartbeatPath);
+        writer.WriteString("heartbeatState", heartbeat.State);
+        if (heartbeat.AgeSeconds.HasValue)
+            writer.WriteNumber("heartbeatAgeSeconds", heartbeat.AgeSeconds.Value);
+        else
+            writer.WriteNull("heartbeatAgeSeconds");
+
+        if (string.IsNullOrWhiteSpace(heartbeat.NodeId))
+            writer.WriteNull("heartbeatNodeId");
+        else
+            writer.WriteString("heartbeatNodeId", heartbeat.NodeId);
+
+        writer.WriteEndObject();
+    }
+    writer.WriteEndArray();
+    writer.WriteEndObject();
+    await writer.FlushAsync();
+}));
 appInfo.RegisterRoute("GET /admin/logs", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Logs", "" }, "monitoring", true, 1, navGroup: "System", navAlignment: NavAlignment.Right), routeHandlers.LogsViewerHandler));
 appInfo.RegisterRoute("GET /admin/logs/prune", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Prune Logs", "" }, "monitoring", false, 1), routeHandlers.LogsPruneHandler));
 appInfo.RegisterRoute("POST /admin/logs/prune", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Prune Logs", "" }, "monitoring", false, 1), routeHandlers.LogsPrunePostHandler));
@@ -189,55 +340,12 @@ static class ProgramSetup
         var dataStore = new DataObjectStore();
         DataStoreProvider.Current = dataStore;
         var provider = new LocalFolderBinaryDataProvider(
-            app.Configuration.GetValue("Data:Root", Path.Combine(AppContext.BaseDirectory, "Data")),
+            app.Configuration.GetValue("Data:Root", Path.Combine(app.Environment.ContentRootPath, "Data")),
             serializer,
             queryEvaluator,
             logger);
+        DataStoreProvider.PrimaryProvider = provider;
         dataStore.RegisterProvider(provider);
-        var storageKey = provider.Name;
-        var heartbeatIntervalSeconds = app.Configuration.GetValue("IndexLeadership:HeartbeatIntervalSeconds", 5);
-        var heartbeatStaleSeconds = app.Configuration.GetValue("IndexLeadership:HeartbeatStaleSeconds", 20);
-        var leaderRetrySeconds = app.Configuration.GetValue("IndexLeadership:LeaderRetrySeconds", 5);
-        DataStoreProvider.IndexHeartbeatMonitor = IndexLeadership.StartHeartbeatMonitor(
-            provider,
-            storageKey,
-            TimeSpan.FromSeconds(heartbeatIntervalSeconds),
-            TimeSpan.FromSeconds(heartbeatStaleSeconds),
-            logger);
-        var nodeId = $"{Environment.MachineName}:{Environment.ProcessId}";
-        DataStoreProvider.IndexLeader = IndexLeadership.TryAcquireLeader(provider, storageKey, nodeId, TimeSpan.FromSeconds(heartbeatIntervalSeconds), logger);
-        if (DataStoreProvider.IndexLeader != null)
-        {
-            DataStoreProvider.IndexLeases = IndexStore.RecoverTrackedIndexes(provider, logger);
-        }
-        else
-        {
-            DataStoreProvider.IndexLeases = Array.Empty<IndexStore.IndexLease>();
-            logger.LogInfo("Index recovery skipped (not leader).");
-        }
-
-        DataStoreProvider.IndexLeaderElection = IndexLeadership.StartLeaderElectionLoop(
-            provider,
-            storageKey,
-            nodeId,
-            TimeSpan.FromSeconds(heartbeatIntervalSeconds),
-            TimeSpan.FromSeconds(leaderRetrySeconds),
-            isLeader: () => DataStoreProvider.IndexLeader != null,
-            onLeaderAcquired: leader =>
-            {
-                lock (DataStoreProvider.IndexLeaderSync)
-                {
-                    if (DataStoreProvider.IndexLeader != null)
-                    {
-                        leader.Dispose();
-                        return;
-                    }
-
-                    DataStoreProvider.IndexLeader = leader;
-                    DataStoreProvider.IndexLeases = IndexStore.RecoverTrackedIndexes(provider, logger);
-                }
-            },
-            logger: logger);
 
         var checkpointEnabled = app.Configuration.GetValue("ClusteredStore:CheckpointEnabled", true);
         var checkpointSeconds = app.Configuration.GetValue("ClusteredStore:CheckpointSeconds", 300);
@@ -249,6 +357,57 @@ static class ProgramSetup
                 logger);
         }
         return dataStore;
+    }
+
+    public static void ConfigureEntityLeadership(WebApplication app, IBufferedLogger logger)
+    {
+        if (DataStoreProvider.PrimaryProvider is not LocalFolderBinaryDataProvider provider)
+            return;
+
+        var storageKey = provider.Name;
+        var heartbeatIntervalSeconds = app.Configuration.GetValue("IndexLeadership:HeartbeatIntervalSeconds", 5);
+        var heartbeatStaleSeconds = app.Configuration.GetValue("IndexLeadership:HeartbeatStaleSeconds", 20);
+        var leaderRetrySeconds = app.Configuration.GetValue("IndexLeadership:LeaderRetrySeconds", 5);
+        var nodeId = $"{Environment.MachineName}:{Environment.ProcessId}";
+
+        DataStoreProvider.ConfigureEntityLeadership(
+            storageKey,
+            nodeId,
+            TimeSpan.FromSeconds(heartbeatIntervalSeconds),
+            TimeSpan.FromSeconds(heartbeatStaleSeconds),
+            TimeSpan.FromSeconds(leaderRetrySeconds),
+            logger);
+    }
+
+    public static (string State, double? AgeSeconds, string? NodeId) ReadHeartbeatStatus(string heartbeatPath, TimeSpan staleThreshold)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(heartbeatPath) || !File.Exists(heartbeatPath))
+                return ("missing", null, null);
+
+            var content = File.ReadAllText(heartbeatPath, Encoding.UTF8).Trim();
+            if (string.IsNullOrWhiteSpace(content))
+                return ("invalid", null, null);
+
+            var parts = content.Split('|');
+            if (parts.Length != 2 || !long.TryParse(parts[1], out var ticks))
+                return ("invalid", null, null);
+
+            var ageTicks = DateTime.UtcNow.Ticks - ticks;
+            if (ageTicks < 0)
+                ageTicks = 0;
+
+            var ageSeconds = ageTicks / (double)TimeSpan.TicksPerSecond;
+            if (ageTicks > staleThreshold.Ticks)
+                return ("stale", ageSeconds, parts[0]);
+
+            return ("healthy", ageSeconds, parts[0]);
+        }
+        catch
+        {
+            return ("error", null, null);
+        }
     }
 
     public static IClientRequestTracker CreateClientRequestTracker(WebApplication app, IBufferedLogger logger)
@@ -267,6 +426,20 @@ static class ProgramSetup
     {
         if (requiredPermissions is null || requiredPermissions.Length == 0)
             return;
+
+        var provider = DataStoreProvider.PrimaryProvider;
+        if (provider != null)
+        {
+            try
+            {
+                DataStoreProvider.EnsureEntityLeader(provider.Name, nameof(User));
+            }
+            catch
+            {
+                logger.LogInfo("Root permission update skipped (not leader for User entity).");
+                return;
+            }
+        }
 
         var query = new QueryDefinition
         {

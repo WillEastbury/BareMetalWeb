@@ -68,6 +68,18 @@ public static class IndexLeadership
     private const string LeaderHeartbeatFileName = "index.leader.heartbeat";
     private const long TicksPerSecond = TimeSpan.TicksPerSecond;
 
+    public static string GetLeaderHeartbeatPath(IDataProvider provider, string storageKey)
+    {
+        if (provider == null)
+            throw new ArgumentNullException(nameof(provider));
+        if (string.IsNullOrWhiteSpace(storageKey))
+            throw new ArgumentException("Storage key cannot be empty.", nameof(storageKey));
+
+        var folder = Path.Combine(provider.IndexRootPath, provider.IndexFolderName);
+        Directory.CreateDirectory(folder);
+        return Path.Combine(folder, BuildLeaderFileName(LeaderHeartbeatFileName, storageKey));
+    }
+
     public static IndexLeader? TryAcquireLeader(IDataProvider provider, string storageKey, string nodeId, TimeSpan heartbeatInterval, IBufferedLogger? logger = null)
     {
         if (provider == null)

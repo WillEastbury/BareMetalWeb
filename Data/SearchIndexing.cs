@@ -253,7 +253,15 @@ internal sealed class SearchIndexManager
             if (attr.Kind != IndexKind.Inverted)
             {
                 var warningKey = $"{type.FullName}:{prop.Name}:{attr.Kind}";
-                if (index.WarnedKinds.Add(warningKey))
+                var shouldLog = false;
+                // Protect shared warning set from concurrent tokenization.
+                lock (index.WarnedKinds)
+                {
+                    if (index.WarnedKinds.Add(warningKey))
+                        shouldLog = true;
+                }
+
+                if (shouldLog)
                     _logger?.LogInfo($"Index kind {attr.Kind} not implemented; using inverted index for {type.Name}.{prop.Name}.");
             }
 

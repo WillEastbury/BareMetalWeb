@@ -9,12 +9,21 @@ namespace BareMetalWeb.WebServer;
 public static class CookieProtection
 {
     private const int HmacKeySize = 32;
+    private static string KeyRootFolder = AppContext.BaseDirectory;
 
     private static readonly Lazy<SynchronousEncryption> Encryption = new(() =>
-        SynchronousEncryption.CreateFromKeyFile(Path.Combine(AppContext.BaseDirectory, ".keys", "cookie.enc.key")));
+        SynchronousEncryption.CreateFromKeyFile(Path.Combine(KeyRootFolder, ".keys", "cookie.enc.key")));
 
     private static readonly Lazy<byte[]> HmacKey = new(() =>
-        LoadOrCreateKey(Path.Combine(AppContext.BaseDirectory, ".keys", "cookie.hmac.key"), HmacKeySize));
+        LoadOrCreateKey(Path.Combine(KeyRootFolder, ".keys", "cookie.hmac.key"), HmacKeySize));
+
+    public static void ConfigureKeyRoot(string rootFolder)
+    {
+        if (string.IsNullOrWhiteSpace(rootFolder))
+            throw new ArgumentException("Key root folder cannot be null or whitespace.", nameof(rootFolder));
+
+        KeyRootFolder = rootFolder;
+    }
 
     public static string Protect(string value)
     {

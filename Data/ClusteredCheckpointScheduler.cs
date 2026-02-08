@@ -62,17 +62,10 @@ public sealed class ClusteredCheckpointScheduler : IDisposable
 
     private static bool IsEntityLockOwned(string entityName)
     {
-        var leases = DataStoreProvider.IndexLeases;
-        if (leases == null || leases.Count == 0)
+        var provider = DataStoreProvider.PrimaryProvider;
+        if (provider == null)
             return false;
 
-        foreach (var lease in leases)
-        {
-            if (string.Equals(lease.EntityName, entityName, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(lease.FieldName, "_clustered", StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-
-        return false;
+        return DataStoreProvider.IsEntityLeader(provider.Name, entityName);
     }
 }

@@ -32,10 +32,6 @@ also the logs are written per-day-per-hour-per-minute log files to keep them man
 
 // We also have a pluggable data abstraction storage framework and repository pattern that allows you to easily swap out different storage implementations - we have a simple file-based binary implementation for user accounts and sessions, but you could easily swap in a database-backed implementation if you wanted to - the interfaces are designed to be flexible and easy to work with, and the file-based implementation is designed to be simple and easy to understand as well.
 
-
-
-// todo --> 4.4 simple api endpoint example (json input/output)
-
 //Static file / content streaming with caching headers
 // - configured in appsettings.json (StaticFiles)
 // - serves files from a fixed folder (default: wwwroot/static) via a fixed prefix (default: /static)

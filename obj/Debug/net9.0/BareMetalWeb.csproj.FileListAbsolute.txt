@@ -186,3 +186,4 @@ C:\source\BareMetalWeb\obj\Debug\net9.0\compressed\7wt2mbz4i5-kf74usqr82.gz
 C:\source\BareMetalWeb\bin\Debug\net9.0\wwwroot\templates\fragments\InputTextArea.html
 C:\source\BareMetalWeb\bin\Debug\net9.0\wwwroot\templates\fragments\InputTextArea.html.gz
 C:\source\BareMetalWeb\obj\Debug\net9.0\compressed\hp6bwv2cc9-8oehxpz99s.gz
+C:\source\BareMetalWeb\obj\Debug\net9.0\BareMetalWeb.sourcelink.json

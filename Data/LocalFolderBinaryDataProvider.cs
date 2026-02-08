@@ -33,6 +33,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private readonly ConcurrentDictionary<string, ClusteredPagedObjectStore> _clusteredStores = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _clusteredLocationMaps = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<Type, SchemaCache> _schemaCache = new();
+    private readonly ConcurrentDictionary<Type, object> _schemaLocks = new();
 
     private sealed class SchemaCache
     {
@@ -193,6 +194,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         if (string.IsNullOrWhiteSpace(obj.Id))
             throw new ArgumentException("DataObject must have a non-empty Id.", nameof(obj));
 
+        DataStoreProvider.EnsureEntityLeader(Name, typeof(T).Name);
+
         var now = DateTime.UtcNow;
         if (obj.CreatedOnUtc == default)
             obj.CreatedOnUtc = now;
@@ -205,26 +208,31 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
 
         var cache = LoadSchemaCache(type);
         var currentSchema = BuildSchemaFor(_serializer, type);
-        SchemaDefinitionFile? existing = null;
-        if (cache.HashToVersion.TryGetValue(currentSchema.Hash, out var existingVersion))
-            cache.Versions.TryGetValue(existingVersion, out existing);
-
         int schemaVersion;
-        if (existing == null)
+        lock (GetSchemaLock(type))
         {
-            schemaVersion = cache.Versions.Count == 0 ? 1 : cache.Versions.Keys.Max() + 1;
-            var schemaFile = BuildSchemaFile(currentSchema, schemaVersion);
-            cache.Versions[schemaVersion] = schemaFile;
-            cache.HashToVersion[currentSchema.Hash] = schemaVersion;
+            // Serialize schema cache updates per type to avoid version races.
+            SchemaDefinitionFile? existing = null;
+            if (cache.HashToVersion.TryGetValue(currentSchema.Hash, out var existingVersion))
+                cache.Versions.TryGetValue(existingVersion, out existing);
+
+            if (existing == null)
+            {
+                schemaVersion = cache.Versions.Count == 0 ? 1 : cache.Versions.Keys.Max() + 1;
+                var schemaFile = BuildSchemaFile(currentSchema, schemaVersion);
+                cache.Versions[schemaVersion] = schemaFile;
+                cache.HashToVersion[currentSchema.Hash] = schemaVersion;
+                cache.CurrentVersion = schemaVersion;
+                SaveSchemaFile(type, schemaFile);
+                _logger?.LogInfo($"Schema updated for {type.Name}. New version {schemaVersion} (hash {currentSchema.Hash}).");
+            }
+            else
+            {
+                schemaVersion = existing.Version;
+            }
+
             cache.CurrentVersion = schemaVersion;
-            SaveSchemaFile(type, schemaFile);
-            _logger?.LogInfo($"Schema updated for {type.Name}. New version {schemaVersion} (hash {currentSchema.Hash}).");
         }
-        else
-        {
-            schemaVersion = existing.Version;
-        }
-        cache.CurrentVersion = schemaVersion;
 
         try
         {
@@ -232,15 +240,18 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             var store = GetClusteredStore(type.Name);
             var location = store.Write(obj.Id, bytes);
             var map = GetClusteredLocationMap(type.Name);
+            map.TryGetValue(obj.Id, out var existingLocation);
 
-            if (map.TryGetValue(obj.Id, out var existingLocation))
+            // Append the new location first so a crash never loses the last committed record.
+            _indexStore.AppendEntry(type.Name, ClusteredIndexFieldName, obj.Id, location, 'A', normalizeKey: false);
+            map[obj.Id] = location;
+
+            if (!string.IsNullOrWhiteSpace(existingLocation)
+                && !string.Equals(existingLocation, location, StringComparison.OrdinalIgnoreCase))
             {
                 _indexStore.AppendEntry(type.Name, ClusteredIndexFieldName, obj.Id, existingLocation, 'D', normalizeKey: false);
                 store.Delete(existingLocation);
             }
-
-            _indexStore.AppendEntry(type.Name, ClusteredIndexFieldName, obj.Id, location, 'A', normalizeKey: false);
-            map[obj.Id] = location;
         }
         catch (Exception ex)
         {
@@ -262,7 +273,12 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         var store = GetClusteredStore(type.Name);
         var bytes = store.Read(location);
         if (bytes == null)
+        {
+            // Evict stale map entries so later reads re-check the index.
+            if (_clusteredLocationMaps.TryGetValue(type.Name, out var map))
+                map.TryRemove(id, out _);
             return ValueTask.FromResult<T?>(null);
+        }
 
         try
         {
@@ -454,6 +470,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     {
         if (string.IsNullOrWhiteSpace(id))
             throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
+
+        DataStoreProvider.EnsureEntityLeader(Name, typeof(T).Name);
 
         if (TryGetClusteredLocation(typeof(T).Name, id, out var location))
         {
@@ -699,20 +717,27 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private SchemaDefinitionFile? GetSchemaDefinition(Type type, int version)
     {
         var cache = _schemaCache.GetOrAdd(type, LoadSchemaCacheCore);
-        if (cache.Versions.TryGetValue(version, out var schemaFile))
-            return schemaFile;
+        lock (GetSchemaLock(type))
+        {
+            if (cache.Versions.TryGetValue(version, out var cached))
+                return cached;
+        }
 
         var filePath = GetSchemaFilePath(type, version);
         if (!File.Exists(filePath))
             return null;
 
-        schemaFile = LoadSchemaFile(filePath);
+        var schemaFile = LoadSchemaFile(filePath);
         if (schemaFile == null)
             return null;
 
         schemaFile.Version = version;
-        cache.Versions[version] = schemaFile;
-        cache.HashToVersion[schemaFile.Hash] = version;
+        lock (GetSchemaLock(type))
+        {
+            cache.Versions[version] = schemaFile;
+            cache.HashToVersion[schemaFile.Hash] = version;
+        }
+
         return schemaFile;
     }
 
@@ -802,17 +827,23 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         if (registry == null)
             return;
 
-        foreach (var schema in registry.Versions)
+        lock (GetSchemaLock(type))
         {
-            cache.Versions[schema.Version] = schema;
-            cache.HashToVersion[schema.Hash] = schema.Version;
-            SaveSchemaFile(type, schema);
-        }
+            foreach (var schema in registry.Versions)
+            {
+                cache.Versions[schema.Version] = schema;
+                cache.HashToVersion[schema.Hash] = schema.Version;
+                SaveSchemaFile(type, schema);
+            }
 
-        cache.CurrentVersion = registry.CurrentVersion > 0
-            ? registry.CurrentVersion
-            : (cache.Versions.Count == 0 ? 0 : cache.Versions.Keys.Max());
+            cache.CurrentVersion = registry.CurrentVersion > 0
+                ? registry.CurrentVersion
+                : (cache.Versions.Count == 0 ? 0 : cache.Versions.Keys.Max());
+        }
     }
+
+    private object GetSchemaLock(Type type)
+        => _schemaLocks.GetOrAdd(type, _ => new object());
 
     private static SchemaRegistryFile ParseLegacySchema(ReadOnlySpan<byte> bytes)
     {

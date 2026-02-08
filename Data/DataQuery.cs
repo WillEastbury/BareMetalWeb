@@ -365,7 +365,16 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
             return string.Compare(ls, rs, StringComparison.OrdinalIgnoreCase);
 
         if (left is IComparable comparable)
-            return comparable.CompareTo(right);
+        {
+            try
+            {
+                return comparable.CompareTo(right);
+            }
+            catch
+            {
+                // Fall back to string comparison when types are incompatible.
+            }
+        }
 
         return string.Compare(left.ToString(), right.ToString(), StringComparison.OrdinalIgnoreCase);
     }
