@@ -1,0 +1,5 @@
+INFO | 2026-02-11T22:42:56.1608752Z | Schema updated for ConferenceSession. New version 1 (hash 3109605022).
+INFO | 2026-02-11T22:42:56.1904948Z | Tracked index ConferenceSession._clustered.
+INFO | 2026-02-11T22:42:56.2049077Z | POST /admin/data/conference-sessions/create|POST|/admin/data/{type}/create|type=conference-sessions|200|::1
+INFO | 2026-02-11T22:42:56.3039715Z | GET /admin/data/conference-sessions|GET|/admin/data/{type}|type=conference-sessions|200|::1
+INFO | 2026-02-11T22:43:00.9711463Z | Log segment complete; cycling to next segment.
