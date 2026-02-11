@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("BareMetalWeb.Core")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0669fff37dc7ea65202523b9b8af73f08826e1da")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+478a9f45d7ee2d8131377d0275caa8d4558a88fd")]
 [assembly: System.Reflection.AssemblyProductAttribute("BareMetalWeb.Core")]
 [assembly: System.Reflection.AssemblyTitleAttribute("BareMetalWeb.Core")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

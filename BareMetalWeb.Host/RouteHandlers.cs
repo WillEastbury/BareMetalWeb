@@ -2766,7 +2766,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         await BuildPageHandler(ctx =>
         {
-            RenderSampleDataForm(ctx, "<p>Generate sample data for load and indexing tests.</p>", 100, 50, 25, 25);
+            RenderSampleDataForm(ctx, "<p>Generate sample data for load and indexing tests.</p>", 100, 50, 25, 25, clearExisting: false);
         })(context);
     }
 
@@ -2786,7 +2786,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.SetStringValue("title", "Generate Sample Data");
             context.SetStringValue("message", "<p>Invalid security token. Please try again.</p>");
-            RenderSampleDataForm(context, "<p>Invalid security token. Please try again.</p>", 100, 50, 25, 25);
+            RenderSampleDataForm(context, "<p>Invalid security token. Please try again.</p>", 100, 50, 25, 25, clearExisting: false);
             await _renderer.RenderPage(context);
             return;
         }
@@ -2796,6 +2796,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var customerCount = ParseSampleCount(form, "customers", errors);
         var unitCount = ParseSampleCount(form, "units", errors);
         var productCount = ParseSampleCount(form, "products", errors);
+        var clearExisting = ParseSampleToggle(form, "clearExisting");
 
         if (customerCount > 0 && addressCount == 0)
             errors.Add("Customers require at least one address.");
@@ -2806,15 +2807,40 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.SetStringValue("title", "Generate Sample Data");
             context.SetStringValue("message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
-            RenderSampleDataForm(context, $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>", addressCount, customerCount, unitCount, productCount);
+            RenderSampleDataForm(context, $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>", addressCount, customerCount, unitCount, productCount, clearExisting);
             await _renderer.RenderPage(context);
             return;
         }
 
-        var addresses = GenerateAddresses(addressCount);
-        var units = GenerateUnits(unitCount);
-        var customers = GenerateCustomers(customerCount, addresses);
-        var products = GenerateProducts(productCount, units);
+        if (clearExisting)
+        {
+            await DeleteAllAsync<Customer>();
+            await DeleteAllAsync<Product>();
+            await DeleteAllAsync<Address>();
+            await DeleteAllAsync<UnitOfMeasure>();
+        }
+
+        var usedAddressIds = new HashSet<string>(
+            DataStoreProvider.Current.Query<Address>(null)
+                .Select(address => address.Id),
+            StringComparer.OrdinalIgnoreCase);
+        var usedUnitIds = new HashSet<string>(
+            DataStoreProvider.Current.Query<UnitOfMeasure>(null)
+                .Select(unit => unit.Id),
+            StringComparer.OrdinalIgnoreCase);
+        var usedCustomerIds = new HashSet<string>(
+            DataStoreProvider.Current.Query<Customer>(null)
+                .Select(customer => customer.Id),
+            StringComparer.OrdinalIgnoreCase);
+        var usedProductIds = new HashSet<string>(
+            DataStoreProvider.Current.Query<Product>(null)
+                .Select(product => product.Id),
+            StringComparer.OrdinalIgnoreCase);
+
+        var addresses = GenerateAddresses(addressCount, usedAddressIds);
+        var units = GenerateUnits(unitCount, usedUnitIds);
+        var customers = GenerateCustomers(customerCount, addresses, usedCustomerIds);
+        var products = GenerateProducts(productCount, units, usedProductIds);
 
         foreach (var address in addresses)
         {
@@ -2843,7 +2869,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var message = $"<div class=\"alert alert-success\">" +
                       $"Created {addresses.Count} addresses, {customers.Count} customers, {units.Count} units, {products.Count} products." +
                       "</div>";
-        RenderSampleDataForm(context, message, addressCount, customerCount, unitCount, productCount);
+        RenderSampleDataForm(context, message, addressCount, customerCount, unitCount, productCount, clearExisting);
         await _renderer.RenderPage(context);
     }
 
@@ -3809,7 +3835,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    private void RenderSampleDataForm(HttpContext context, string? message, int addresses, int customers, int units, int products)
+    private void RenderSampleDataForm(HttpContext context, string? message, int addresses, int customers, int units, int products, bool clearExisting)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Generate Sample Data");
@@ -3821,10 +3847,34 @@ public sealed class RouteHandlers : IRouteHandlers
             new FormField(FormFieldType.Integer, "addresses", "Addresses", Required: true, Value: addresses.ToString(CultureInfo.InvariantCulture)),
             new FormField(FormFieldType.Integer, "customers", "Customers", Required: true, Value: customers.ToString(CultureInfo.InvariantCulture)),
             new FormField(FormFieldType.Integer, "units", "Units Of Measure", Required: true, Value: units.ToString(CultureInfo.InvariantCulture)),
-            new FormField(FormFieldType.Integer, "products", "Products", Required: true, Value: products.ToString(CultureInfo.InvariantCulture))
+            new FormField(FormFieldType.Integer, "products", "Products", Required: true, Value: products.ToString(CultureInfo.InvariantCulture)),
+            new FormField(FormFieldType.YesNo, "clearExisting", "Clear existing data", false, SelectedValue: clearExisting ? "true" : "false")
         };
 
         context.AddFormDefinition(new FormDefinition("/admin/sample-data", "post", "Generate", fields));
+    }
+
+    private static bool ParseSampleToggle(IFormCollection form, string key)
+    {
+        var raw = form[key].ToString();
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        return string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async ValueTask DeleteAllAsync<T>() where T : BaseDataObject
+    {
+        var items = DataStoreProvider.Current.Query<T>(null).ToList();
+        foreach (var item in items)
+        {
+            if (item == null || string.IsNullOrWhiteSpace(item.Id))
+                continue;
+            await DataStoreProvider.Current.DeleteAsync<T>(item.Id);
+        }
     }
 
     private static int ParseSampleCount(IFormCollection form, string key, List<string> errors)
@@ -3845,7 +3895,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return value;
     }
 
-    private static List<Address> GenerateAddresses(int count)
+    private static List<Address> GenerateAddresses(int count, HashSet<string> usedIds)
     {
         var list = new List<Address>(count);
         if (count <= 0)
@@ -3871,13 +3921,14 @@ public sealed class RouteHandlers : IRouteHandlers
                 PostalCode = rnd.Next(10000, 99999).ToString(CultureInfo.InvariantCulture),
                 Country = "US"
             };
+            EnsureUniqueId(address, usedIds);
             list.Add(address);
         }
 
         return list;
     }
 
-    private static List<UnitOfMeasure> GenerateUnits(int count)
+    private static List<UnitOfMeasure> GenerateUnits(int count, HashSet<string> usedIds)
     {
         var list = new List<UnitOfMeasure>(count);
         if (count <= 0)
@@ -3905,6 +3956,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 Description = string.Empty,
                 IsActive = true
             });
+            EnsureUniqueId(list[^1], usedIds);
         }
 
         while (list.Count < count)
@@ -3916,13 +3968,14 @@ public sealed class RouteHandlers : IRouteHandlers
                 Description = string.Empty,
                 IsActive = true
             });
+            EnsureUniqueId(list[^1], usedIds);
             index++;
         }
 
         return list;
     }
 
-    private static List<Customer> GenerateCustomers(int count, List<Address> addresses)
+    private static List<Customer> GenerateCustomers(int count, List<Address> addresses, HashSet<string> usedIds)
     {
         var list = new List<Customer>(count);
         if (count <= 0)
@@ -3953,12 +4006,13 @@ public sealed class RouteHandlers : IRouteHandlers
                 Notes = string.Empty,
                 Tags = new List<string>()
             });
+            EnsureUniqueId(list[^1], usedIds);
         }
 
         return list;
     }
 
-    private static List<Product> GenerateProducts(int count, List<UnitOfMeasure> units)
+    private static List<Product> GenerateProducts(int count, List<UnitOfMeasure> units, HashSet<string> usedIds)
     {
         var list = new List<Product>(count);
         if (count <= 0)
@@ -3987,10 +4041,28 @@ public sealed class RouteHandlers : IRouteHandlers
                 Description = string.Empty,
                 Tags = new List<string>()
             };
+            EnsureUniqueId(product, usedIds);
             list.Add(product);
         }
 
         return list;
+    }
+
+    private static void EnsureUniqueId(BaseDataObject dataObject, HashSet<string> usedIds)
+    {
+        var id = dataObject.Id;
+        if (string.IsNullOrWhiteSpace(id) || usedIds.Contains(id))
+        {
+            do
+            {
+                id = Guid.NewGuid().ToString("N");
+            }
+            while (usedIds.Contains(id));
+
+            dataObject.Id = id;
+        }
+
+        usedIds.Add(id);
     }
 
     private static async ValueTask<Dictionary<string, JsonElement>?> ReadJsonBodyAsync(HttpContext context)

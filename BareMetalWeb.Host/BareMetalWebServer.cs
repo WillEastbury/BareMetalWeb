@@ -418,14 +418,17 @@ public class BareMetalWebServer : IBareWebHost
         }
         catch (Exception ex)
         {
-            BufferedLogger.LogError($"Exception: {path} | {sourceIp}", ex);
+            var errorId = Guid.NewGuid().ToString("N");
+            BufferedLogger.LogError($"Exception: {path} | {sourceIp} | ErrorId={errorId}", ex);
             if (context.Response.HasStarted)
             {
                 context.Abort();
                 return;
             }
             context.Response.Clear();
+            context.Response.Headers["X-Error-Id"] = errorId;
             context.SetPageInfo(ErrorPageInfo);
+            context.SetStringValue("message", $"<p>An unexpected error occurred.</p><p>Error ID: <code>{errorId}</code></p>");
             await HtmlRenderer.RenderPage(context); // Render error page
             BufferedLogger.LogInfo($"{path}|500|{sourceIp}");
         }

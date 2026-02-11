@@ -1,0 +1,9 @@
+ERROR | 2026-02-11T21:22:29.1192015Z | Exception: GET /admin/data/customers | ::1
+System.ArgumentException: An item with the same key has already been added. Key: 7ad1fb99b27144e7aaaa8dd25d01ed6f
+   at System.Collections.Generic.Dictionary`2.TryInsert(TKey key, TValue value, InsertionBehavior behavior)
+   at System.Collections.Generic.Dictionary`2.Add(TKey key, TValue value)
+   at System.Linq.Enumerable.SpanToDictionary[TSource,TKey,TElement](ReadOnlySpan`1 source, Func`2 keySelector, Func`2 elementSelector, IEqualityComparer`1 comparer)
+   at System.Linq.Enumerable.ToDictionary[TSource,TKey,TElement](IEnumerable`1 source, Func`2 keySelector, Func`2 elementSelector, IEqualityComparer`1 comparer)
+   at BareMetalWeb.Core.DataScaffold.BuildListRows(DataEntityMetadata metadata, IEnumerable items, String basePath, Boolean includeActions, Func`2 canRenderLookupLink, String cloneToken, String cloneReturnUrl) in C:\source\BareMetalWeb\BareMetalWeb.Data\DataScaffold.cs:line 370
+   at BareMetalWeb.Host.RouteHandlers.DataListHandler(HttpContext context) in C:\source\BareMetalWeb\BareMetalWeb.Host\RouteHandlers.cs:line 1400
+   at BareMetalWeb.Host.BareMetalWebServer.RequestHandler(HttpContext context) in C:\source\BareMetalWeb\BareMetalWeb.Host\BareMetalWebServer.cs:line 372

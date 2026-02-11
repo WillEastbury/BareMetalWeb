@@ -19,6 +19,7 @@ logger.LogInfo("Starting BareMetalWeb server...");
 
 var contentRoot = app.Environment.ContentRootPath;
 var dataRoot = app.Configuration.GetValue("Data:Root", Path.Combine(contentRoot, "Data"));
+ProgramSetup.ResetDataIfRequested(app, dataRoot, logger);
 CookieProtection.ConfigureKeyRoot(dataRoot);
 
 ISchemaAwareObjectSerializer serializer = BinaryObjectSerializer.CreateDefault(dataRoot);
@@ -38,11 +39,13 @@ var entityPermissions = DataScaffold.Entities
         .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
     .Distinct(StringComparer.OrdinalIgnoreCase)
     .ToArray();
+    
 var rootPermissionSet = new HashSet<string>(entityPermissions, StringComparer.OrdinalIgnoreCase)
 {
     "admin",
     "monitoring"
 };
+
 ProgramSetup.EnsureRootPermissions(logger, rootPermissionSet.ToArray());
 
 IHtmlFragmentStore fragmentStore = new HtmlFragmentStore();
@@ -211,6 +214,54 @@ static class ProgramSetup
         dataStore.RegisterProvider(provider);
 
         return dataStore;
+    }
+
+    public static void ResetDataIfRequested(WebApplication app, string dataRoot, IBufferedLogger logger)
+    {
+        var resetFlagPath = Path.Combine(app.Environment.ContentRootPath, "reset-data.flag");
+        var shouldReset = app.Configuration.GetValue("Data:ResetOnStartup", false) || File.Exists(resetFlagPath);
+        if (!shouldReset)
+            return;
+
+        var fullRoot = Path.GetFullPath(dataRoot);
+        if (IsUnsafeDataRoot(fullRoot))
+        {
+            logger.LogError($"Refusing to reset data root '{fullRoot}'. Path is not safe.", new InvalidOperationException("Unsafe data root path."));
+            return;
+        }
+
+        try
+        {
+            if (Directory.Exists(fullRoot))
+            {
+                Directory.Delete(fullRoot, recursive: true);
+            }
+            Directory.CreateDirectory(fullRoot);
+
+            if (File.Exists(resetFlagPath))
+            {
+                File.Delete(resetFlagPath);
+            }
+
+            logger.LogInfo($"Data reset complete. Root: {fullRoot}");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError($"Failed to reset data root '{fullRoot}'.", ex);
+            throw;
+        }
+    }
+
+    private static bool IsUnsafeDataRoot(string fullRoot)
+    {
+        if (string.IsNullOrWhiteSpace(fullRoot))
+            return true;
+
+        var root = Path.GetPathRoot(fullRoot);
+        if (string.IsNullOrWhiteSpace(root))
+            return true;
+
+        return string.Equals(fullRoot.TrimEnd(Path.DirectorySeparatorChar), root.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase);
     }
 
 

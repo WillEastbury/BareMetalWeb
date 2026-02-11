@@ -1,0 +1,6 @@
+INFO | 2026-02-11T21:17:28.8261594Z | GET /admin/data/products/create|GET|/admin/data/{type}/create|type=products|200|::1
+INFO | 2026-02-11T21:17:59.0388305Z | Schema updated for Product. New version 1 (hash 1759554342).
+INFO | 2026-02-11T21:17:59.0641376Z | Tracked index Product._clustered.
+INFO | 2026-02-11T21:17:59.0727268Z | POST /admin/data/products/create|POST|/admin/data/{type}/create|type=products|200|::1
+INFO | 2026-02-11T21:17:59.1564214Z | GET /admin/data/products|GET|/admin/data/{type}|type=products|200|::1
+INFO | 2026-02-11T21:18:02.1337789Z | Log segment complete; cycling to next segment.
