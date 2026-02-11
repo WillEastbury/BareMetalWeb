@@ -1,0 +1,25 @@
+INFO | 2026-02-11T18:09:07.1383514Z | GET /setup|200|::1
+INFO | 2026-02-11T18:09:07.2553258Z | GET /static/css/site.css|200|::1|static
+INFO | 2026-02-11T18:09:07.2655582Z | GET /static/css/bootstrap.min.css|200|::1|static
+INFO | 2026-02-11T18:09:07.3395983Z | GET /favicon.ico|302|::1|setup=required
+INFO | 2026-02-11T18:09:07.3450330Z | GET /setup|200|::1
+INFO | 2026-02-11T18:09:31.5295064Z | Schema updated for User. New version 1 (hash 2153498544).
+INFO | 2026-02-11T18:09:31.5896886Z | Tracked index User._clustered.
+INFO | 2026-02-11T18:09:31.6141699Z | Schema updated for Currency. New version 1 (hash 2683102419).
+INFO | 2026-02-11T18:09:31.6284218Z | Tracked index Currency._clustered.
+INFO | 2026-02-11T18:09:31.6867829Z | Schema updated for UnitOfMeasure. New version 1 (hash 1429579167).
+INFO | 2026-02-11T18:09:31.7004456Z | Tracked index UnitOfMeasure._clustered.
+INFO | 2026-02-11T18:09:31.7146683Z | Schema updated for Address. New version 1 (hash 3676399832).
+INFO | 2026-02-11T18:09:31.7302917Z | Tracked index Address._clustered.
+INFO | 2026-02-11T18:09:31.7358888Z | POST /setup|200|::1
+INFO | 2026-02-11T18:09:31.9618070Z | GET /favicon.ico|404|::1
+INFO | 2026-02-11T18:09:34.2952253Z | GET /login|200|::1
+INFO | 2026-02-11T18:09:43.0757651Z | Schema updated for UserSession. New version 1 (hash 2067267894).
+INFO | 2026-02-11T18:09:43.0950553Z | Tracked index UserSession._clustered.
+INFO | 2026-02-11T18:09:43.1583976Z | POST /login|200|::1
+INFO | 2026-02-11T18:09:43.1844847Z | GET /|200|::1
+INFO | 2026-02-11T18:09:47.0884959Z | GET /admin/logs|200|::1
+INFO | 2026-02-11T18:09:47.9778062Z | GET /account|200|::1
+INFO | 2026-02-11T18:09:50.5010378Z | GET /admin/data|200|::1
+INFO | 2026-02-11T18:09:56.3653183Z | GET /account/mfa|200|::1
+INFO | 2026-02-11T18:11:57.0409030Z | Log segment complete; cycling to next segment.

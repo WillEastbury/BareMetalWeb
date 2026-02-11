@@ -1,2 +1,0 @@
-C:\source\BareMetalWeb\bin\Release\net9.0\win-x64\publish\BareMetalWeb.exe
-C:\source\BareMetalWeb\bin\Release\net9.0\win-x64\publish\aspnetcorev2_inprocess.dll

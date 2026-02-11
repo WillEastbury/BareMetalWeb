@@ -1,0 +1,12 @@
+C:\source\BareMetalWeb\BareMetalWeb.Core\obj\Debug\net9.0\BareMetalWeb.Core.GeneratedMSBuildEditorConfig.editorconfig
+C:\source\BareMetalWeb\BareMetalWeb.Core\obj\Debug\net9.0\BareMetalWeb.Core.AssemblyInfoInputs.cache
+C:\source\BareMetalWeb\BareMetalWeb.Core\obj\Debug\net9.0\BareMetalWeb.Core.AssemblyInfo.cs
+C:\source\BareMetalWeb\BareMetalWeb.Core\obj\Debug\net9.0\BareMetalWeb.Core.csproj.CoreCompileInputs.cache
+C:\source\BareMetalWeb\BareMetalWeb.Core\obj\Debug\net9.0\BareMetalWeb.Core.sourcelink.json
+C:\source\BareMetalWeb\BareMetalWeb.Core\bin\Debug\net9.0\BareMetalWeb.Core.deps.json
+C:\source\BareMetalWeb\BareMetalWeb.Core\bin\Debug\net9.0\BareMetalWeb.Core.dll
+C:\source\BareMetalWeb\BareMetalWeb.Core\bin\Debug\net9.0\BareMetalWeb.Core.pdb
+C:\source\BareMetalWeb\BareMetalWeb.Core\obj\Debug\net9.0\BareMetalWeb.Core.dll
+C:\source\BareMetalWeb\BareMetalWeb.Core\obj\Debug\net9.0\refint\BareMetalWeb.Core.dll
+C:\source\BareMetalWeb\BareMetalWeb.Core\obj\Debug\net9.0\BareMetalWeb.Core.pdb
+C:\source\BareMetalWeb\BareMetalWeb.Core\obj\Debug\net9.0\ref\BareMetalWeb.Core.dll

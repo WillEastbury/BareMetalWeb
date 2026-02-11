@@ -1,0 +1,56 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v9.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v9.0": {
+      "BareMetalWeb.UserClasses/1.0.0": {
+        "dependencies": {
+          "BareMetalWeb.Core": "1.0.0",
+          "BareMetalWeb.Data": "1.0.0"
+        },
+        "runtime": {
+          "BareMetalWeb.UserClasses.dll": {}
+        }
+      },
+      "BareMetalWeb.Core/1.0.0": {
+        "runtime": {
+          "BareMetalWeb.Core.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "BareMetalWeb.Data/1.0.0": {
+        "dependencies": {
+          "BareMetalWeb.Core": "1.0.0"
+        },
+        "runtime": {
+          "BareMetalWeb.Data.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "BareMetalWeb.UserClasses/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "BareMetalWeb.Core/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "BareMetalWeb.Data/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

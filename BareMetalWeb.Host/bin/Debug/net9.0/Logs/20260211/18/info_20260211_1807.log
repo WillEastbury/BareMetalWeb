@@ -1,0 +1,64 @@
+INFO | 2026-02-11T18:07:42.5191123Z | GET /|302|::1|setup=required
+INFO | 2026-02-11T18:07:42.5404987Z | GET /setup|200|::1
+INFO | 2026-02-11T18:07:42.6181278Z | GET /static/css/bootstrap.min.css|404|::1|static
+INFO | 2026-02-11T18:07:42.6246142Z | GET /static/css/site.css|404|::1|static
+INFO | 2026-02-11T18:07:42.9714675Z | GET /favicon.ico|302|::1|setup=required
+INFO | 2026-02-11T18:07:42.9769064Z | GET /setup|200|::1
+INFO | 2026-02-11T18:07:56.6332783Z | Starting BareMetalWeb server...
+INFO | 2026-02-11T18:07:56.8769324Z | Route registered: GET / with handler DefaultPageHandler
+INFO | 2026-02-11T18:07:56.8770824Z | Route registered: GET /metrics with handler <BuildPageHandler>b__0
+INFO | 2026-02-11T18:07:56.8771774Z | Route registered: GET /metrics/json with handler MetricsJsonHandler
+INFO | 2026-02-11T18:07:56.8774571Z | Route registered: GET /admin/logs with handler LogsViewerHandler
+INFO | 2026-02-11T18:07:56.8774679Z | Route registered: GET /admin/logs/prune with handler LogsPruneHandler
+INFO | 2026-02-11T18:07:56.8774722Z | Route registered: POST /admin/logs/prune with handler LogsPrunePostHandler
+INFO | 2026-02-11T18:07:56.8774813Z | Route registered: GET /admin/logs/download with handler LogsDownloadHandler
+INFO | 2026-02-11T18:07:56.8774851Z | Route registered: GET /admin/sample-data with handler SampleDataHandler
+INFO | 2026-02-11T18:07:56.8774883Z | Route registered: POST /admin/sample-data with handler SampleDataPostHandler
+INFO | 2026-02-11T18:07:56.8774925Z | Route registered: GET /topips with handler <BuildPageHandler>b__0
+INFO | 2026-02-11T18:07:56.8774988Z | Route registered: GET /suspiciousips with handler <BuildPageHandler>b__0
+INFO | 2026-02-11T18:07:56.8775022Z | Route registered: GET /login with handler LoginHandler
+INFO | 2026-02-11T18:07:56.8775046Z | Route registered: POST /login with handler LoginPostHandler
+INFO | 2026-02-11T18:07:56.8775090Z | Route registered: GET /mfa with handler MfaChallengeHandler
+INFO | 2026-02-11T18:07:56.8775116Z | Route registered: POST /mfa with handler MfaChallengePostHandler
+INFO | 2026-02-11T18:07:56.8775143Z | Route registered: GET /logout with handler LogoutHandler
+INFO | 2026-02-11T18:07:56.8775169Z | Route registered: POST /logout with handler LogoutPostHandler
+INFO | 2026-02-11T18:07:56.8775237Z | Route registered: GET /account with handler AccountHandler
+INFO | 2026-02-11T18:07:56.8775263Z | Route registered: GET /account/mfa with handler MfaStatusHandler
+INFO | 2026-02-11T18:07:56.8775308Z | Route registered: GET /account/mfa/setup with handler MfaSetupHandler
+INFO | 2026-02-11T18:07:56.8775334Z | Route registered: POST /account/mfa/setup with handler MfaSetupPostHandler
+INFO | 2026-02-11T18:07:56.8775358Z | Route registered: GET /account/mfa/reset with handler MfaResetHandler
+INFO | 2026-02-11T18:07:56.8775384Z | Route registered: POST /account/mfa/reset with handler MfaResetPostHandler
+INFO | 2026-02-11T18:07:56.8775409Z | Route registered: GET /setup with handler SetupHandler
+INFO | 2026-02-11T18:07:56.8775468Z | Route registered: POST /setup with handler SetupPostHandler
+INFO | 2026-02-11T18:07:56.8775498Z | Route registered: GET /admin/data with handler DataEntitiesHandler
+INFO | 2026-02-11T18:07:56.8775541Z | Route registered: GET /admin/data/{type} with handler DataListHandler
+INFO | 2026-02-11T18:07:56.8775568Z | Route registered: GET /admin/data/{type}/csv with handler DataListCsvHandler
+INFO | 2026-02-11T18:07:56.8775594Z | Route registered: GET /admin/data/{type}/html with handler DataListHtmlHandler
+INFO | 2026-02-11T18:07:56.8775621Z | Route registered: GET /admin/data/{type}/import with handler DataImportHandler
+INFO | 2026-02-11T18:07:56.8775648Z | Route registered: POST /admin/data/{type}/import with handler DataImportPostHandler
+INFO | 2026-02-11T18:07:56.8775726Z | Route registered: GET /admin/data/{type}/create with handler DataCreateHandler
+INFO | 2026-02-11T18:07:56.8775803Z | Route registered: POST /admin/data/{type}/create with handler DataCreatePostHandler
+INFO | 2026-02-11T18:07:56.8775832Z | Route registered: GET /admin/data/{type}/{id} with handler DataViewHandler
+INFO | 2026-02-11T18:07:56.8775862Z | Route registered: GET /admin/data/{type}/{id}/rtf with handler DataViewRtfHandler
+INFO | 2026-02-11T18:07:56.8775892Z | Route registered: GET /admin/data/{type}/{id}/html with handler DataViewHtmlHandler
+INFO | 2026-02-11T18:07:56.8775938Z | Route registered: GET /admin/data/{type}/{id}/edit with handler DataEditHandler
+INFO | 2026-02-11T18:07:56.8776009Z | Route registered: POST /admin/data/{type}/{id}/edit with handler DataEditPostHandler
+INFO | 2026-02-11T18:07:56.8776039Z | Route registered: POST /admin/data/{type}/{id}/clone with handler DataClonePostHandler
+INFO | 2026-02-11T18:07:56.8776068Z | Route registered: POST /admin/data/{type}/{id}/clone-edit with handler DataCloneEditPostHandler
+INFO | 2026-02-11T18:07:56.8776098Z | Route registered: GET /admin/data/{type}/{id}/delete with handler DataDeleteHandler
+INFO | 2026-02-11T18:07:56.8776126Z | Route registered: POST /admin/data/{type}/{id}/delete with handler DataDeletePostHandler
+INFO | 2026-02-11T18:07:56.8776156Z | Route registered: GET /api/{type} with handler DataApiListHandler
+INFO | 2026-02-11T18:07:56.8776186Z | Route registered: POST /api/{type} with handler DataApiPostHandler
+INFO | 2026-02-11T18:07:56.8776251Z | Route registered: GET /api/{type}/{id} with handler DataApiGetHandler
+INFO | 2026-02-11T18:07:56.8776282Z | Route registered: PUT /api/{type}/{id} with handler DataApiPutHandler
+INFO | 2026-02-11T18:07:56.8776312Z | Route registered: PATCH /api/{type}/{id} with handler DataApiPatchHandler
+INFO | 2026-02-11T18:07:56.8776341Z | Route registered: DELETE /api/{type}/{id} with handler DataApiDeleteHandler
+INFO | 2026-02-11T18:07:56.8776368Z | Route registered: GET /admin/reload-templates with handler ReloadTemplatesHandler
+INFO | 2026-02-11T18:07:56.8776387Z | Route registered: GET /status with handler <BuildPageHandler>b__0
+INFO | 2026-02-11T18:07:56.8776411Z | Route registered: GET /statusRaw with handler TimeRawHandler
+INFO | 2026-02-11T18:07:56.8953910Z | ClientRequestTracker pruning loop starting.
+INFO | 2026-02-11T18:07:56.8971022Z | WireUpRequestHandlingAndLoggerAsyncLifetime completed and request handling is live.
+INFO | 2026-02-11T18:07:56.9283143Z | BareMetalWeb server is ready - listening for requests on http://localhost:5232
+INFO | 2026-02-11T18:07:56.9298085Z | HTTPS redirect settings: mode=IfAvailable, trustForwardedHeaders=False, redirectHost=(auto), redirectPort=(auto)
+INFO | 2026-02-11T18:07:56.9301021Z | HTTPS endpoint not configured. Configure HTTPS (ASPNETCORE_URLS / Kestrel) to expose an https:// address.
+INFO | 2026-02-11T18:09:07.1633429Z | Log segment complete; cycling to next segment.
