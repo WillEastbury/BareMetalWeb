@@ -534,8 +534,11 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     {
         location = string.Empty;
         var map = GetClusteredLocationMap(entityName);
-        if (map.TryGetValue(id, out location))
+        if (map.TryGetValue(id, out var tempLocation))
+        {
+            location = tempLocation;
             return true;
+        }
 
         if (_indexStore.TryGetLatestValue(entityName, ClusteredIndexFieldName, id, out location, normalizeKey: false)
             && !string.IsNullOrWhiteSpace(location))
