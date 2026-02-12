@@ -172,7 +172,7 @@ public class HtmlRenderer : IHtmlRenderer
                         {
                             if (keySpan.SequenceEqual(scopedKeys[k]))
                             {
-                                Write(writer, scopedValues[k]);
+                                WriteHtmlEncoded(writer, scopedValues[k]);
                                 matched = true;
                                 break;
                             }
@@ -186,7 +186,7 @@ public class HtmlRenderer : IHtmlRenderer
                         {
                             if (keySpan.SequenceEqual(keys[k]))
                             {
-                                Write(writer, values[k]);
+                                WriteHtmlEncoded(writer, values[k]);
                                 matched = true;
                                 break;
                             }
@@ -200,7 +200,7 @@ public class HtmlRenderer : IHtmlRenderer
                         {
                             if (keySpan.SequenceEqual(appkeys[k]))
                             {
-                                Write(writer, appvalues[k]);
+                                WriteHtmlEncoded(writer, appvalues[k]);
                                 matched = true;
                                 break;
                             }
@@ -457,6 +457,13 @@ public class HtmlRenderer : IHtmlRenderer
             new ReadOnlySpan<char>(ref c),
             buffer);
         writer.Advance(bytesWritten);
+    }
+
+    private static void WriteHtmlEncoded(PipeWriter writer, string text)
+    {
+        // HTML encode the text to prevent XSS injection through template tokens
+        var encoded = WebUtility.HtmlEncode(text);
+        Write(writer, encoded);
     }
 
     public async ValueTask RenderPage(HttpContext context)

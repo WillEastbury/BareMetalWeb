@@ -10,6 +10,9 @@ namespace BareMetalWeb.Host;
 
 public class BareMetalWebServer : IBareWebHost
 {
+    // Content Security Policy: Includes 'unsafe-inline' for script-src and style-src to support inline scripts/styles.
+    // This is intentional for simplicity and compatibility with templates using inline styles/scripts.
+    // For stronger XSS protection, consider using nonces/hashes or removing inline allowances.
     private const string ContentSecurityPolicy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
     private static readonly TimeSpan MenuCacheTtl = TimeSpan.FromSeconds(30);
     private static readonly QueryDefinition RootUserQuery = new()
@@ -467,8 +470,9 @@ public class BareMetalWebServer : IBareWebHost
             return true;
 
         var permissionsNeeded = pageInfo.PageMetaData.PermissionsNeeded ?? string.Empty;
+        // Empty permissions means public/anonymous access is allowed
         if (string.IsNullOrWhiteSpace(permissionsNeeded))
-            return false;
+            return true;
 
         if (string.Equals(permissionsNeeded, "Public", StringComparison.OrdinalIgnoreCase))
             return true;

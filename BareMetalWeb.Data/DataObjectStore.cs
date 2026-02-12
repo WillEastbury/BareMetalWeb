@@ -34,6 +34,10 @@ public sealed class DataObjectStore : IDataObjectStore
 
     public void ClearProviders() => _providersList.Clear();
 
+    // Note: Synchronous methods block on async operations via GetAwaiter().GetResult().
+    // This can block threads and may risk deadlocks in certain sync contexts.
+    // Prefer using the async methods (SaveAsync, LoadAsync, etc.) when possible
+    // to avoid blocking and achieve better performance and scalability.
     public void Save<T>(T obj) where T : BaseDataObject
     {
         SaveAsync(obj).AsTask().GetAwaiter().GetResult();
