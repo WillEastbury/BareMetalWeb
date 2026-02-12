@@ -52,7 +52,10 @@ public sealed class RouteHandlers : IRouteHandlers
         _templateStore = templateStore;
         _allowAccountCreation = allowAccountCreation;
         _mfaProtector = MfaSecretProtector.CreateDefault(mfaKeyRootFolder);
-        _apiHandlers = apiHandlers ?? new ApiRouteHandlers(UserAuth.GetRequestUser);
+        _apiHandlers = apiHandlers ?? new ApiRouteHandlers(
+            UserAuth.GetRequestUser,
+            ctx => ctx.GetApp()?.Metrics,
+            ctx => ctx.GetPageContext());
     }
 
     public ValueTask DefaultPageHandler(HttpContext context)

@@ -7,17 +7,24 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Data;
 using BareMetalWeb.Core;
-using BareMetalWeb.Host;
+using BareMetalWeb.Core.Interfaces;
 
 namespace BareMetalWeb.API;
 
 public sealed class ApiRouteHandlers : IApiRouteHandlers
 {
     private readonly Func<HttpContext, User?> _getUser;
+    private readonly Func<HttpContext, IMetricsTracker?> _getMetrics;
+    private readonly Func<HttpContext, PageContext?> _getPageContext;
 
-    public ApiRouteHandlers(Func<HttpContext, User?> getUser)
+    public ApiRouteHandlers(
+        Func<HttpContext, User?> getUser,
+        Func<HttpContext, IMetricsTracker?> getMetrics,
+        Func<HttpContext, PageContext?> getPageContext)
     {
         _getUser = getUser ?? throw new ArgumentNullException(nameof(getUser));
+        _getMetrics = getMetrics ?? throw new ArgumentNullException(nameof(getMetrics));
+        _getPageContext = getPageContext ?? throw new ArgumentNullException(nameof(getPageContext));
     }
     public async ValueTask DataApiListHandler(HttpContext context)
     {
@@ -231,14 +238,14 @@ public sealed class ApiRouteHandlers : IApiRouteHandlers
 
     public async ValueTask MetricsJsonHandler(HttpContext context)
     {
-        var app = context.GetApp();
-        if (app == null)
+        var metrics = _getMetrics(context);
+        if (metrics == null)
         {
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             return;
         }
 
-        var snapshot = app.Metrics.GetSnapshot();
+        var snapshot = metrics.GetSnapshot();
         var payload = new Dictionary<string, object?>
         {
             ["totalRequests"] = snapshot.TotalRequests,
@@ -276,7 +283,7 @@ public sealed class ApiRouteHandlers : IApiRouteHandlers
         return data;
     }
 
-    private static DataEntityMetadata? ResolveEntity(HttpContext context, out string typeSlug, out string? errorMessage)
+    private DataEntityMetadata? ResolveEntity(HttpContext context, out string typeSlug, out string? errorMessage)
     {
         typeSlug = GetRouteValue(context, "type") ?? string.Empty;
         if (string.IsNullOrWhiteSpace(typeSlug))
@@ -295,9 +302,9 @@ public sealed class ApiRouteHandlers : IApiRouteHandlers
         return null;
     }
 
-    private static string? GetRouteValue(HttpContext context, string key)
+    private string? GetRouteValue(HttpContext context, string key)
     {
-        var pageContext = context.GetPageContext();
+        var pageContext = _getPageContext(context);
         if (pageContext == null)
             return null;
 
