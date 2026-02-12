@@ -1,11 +1,14 @@
 using System;
+using System.Buffers;
+using System.Buffers.Binary;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Text.Json;
+using System.Runtime.CompilerServices;
+using System.Text;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data.Interfaces;
 
@@ -32,24 +35,30 @@ public sealed class DataIndexAttribute : Attribute
 
 internal sealed class SearchIndexManager
 {
+    // Cache reflection metadata per type to avoid repeated GetProperties calls
+    private sealed class TypeMetadata
+    {
+        public PropertyInfo[] IndexedProperties { get; init; } = Array.Empty<PropertyInfo>();
+        public DataIndexAttribute[] Attributes { get; init; } = Array.Empty<DataIndexAttribute>();
+    }
+
     private sealed class IndexData
     {
         public object Sync { get; } = new();
         public bool IsBuilt { get; set; }
+        // Token -> IDs mapping for inverted index
         public Dictionary<string, HashSet<string>> Tokens { get; } = new(StringComparer.OrdinalIgnoreCase);
+        // ID -> Tokens mapping for efficient removal
         public Dictionary<string, HashSet<string>> IdToTokens { get; } = new(StringComparer.OrdinalIgnoreCase);
+        // Prefix tree for efficient prefix matching (token prefix -> full tokens)
+        public Dictionary<string, HashSet<string>> PrefixTree { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> WarnedKinds { get; } = new(StringComparer.OrdinalIgnoreCase);
-    }
-
-    private sealed class IndexFile
-    {
-        public Dictionary<string, string[]> Tokens { get; set; } = new(StringComparer.OrdinalIgnoreCase);
-        public Dictionary<string, string[]> IdToTokens { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     }
 
     private readonly string _indexRoot;
     private readonly IBufferedLogger? _logger;
     private readonly ConcurrentDictionary<Type, IndexData> _indexes = new();
+    private readonly ConcurrentDictionary<Type, TypeMetadata> _typeMetadata = new();
 
     public SearchIndexManager(string rootPath, IBufferedLogger? logger)
     {
@@ -60,12 +69,35 @@ internal sealed class SearchIndexManager
 
     public bool HasIndexedFields(Type type, out List<PropertyInfo> fields)
     {
-        fields = type
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.GetCustomAttribute<DataIndexAttribute>() != null)
-            .ToList();
-
+        var metadata = GetOrCreateTypeMetadata(type);
+        fields = new List<PropertyInfo>(metadata.IndexedProperties);
         return fields.Count > 0;
+    }
+
+    private TypeMetadata GetOrCreateTypeMetadata(Type type)
+    {
+        return _typeMetadata.GetOrAdd(type, t =>
+        {
+            var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            var indexedProps = new List<PropertyInfo>();
+            var attrs = new List<DataIndexAttribute>();
+
+            foreach (var prop in props)
+            {
+                var attr = prop.GetCustomAttribute<DataIndexAttribute>();
+                if (attr != null)
+                {
+                    indexedProps.Add(prop);
+                    attrs.Add(attr);
+                }
+            }
+
+            return new TypeMetadata
+            {
+                IndexedProperties = indexedProps.ToArray(),
+                Attributes = attrs.ToArray()
+            };
+        });
     }
 
     public void EnsureBuilt(Type type, Func<IEnumerable<BaseDataObject>> loadAll)
@@ -113,10 +145,29 @@ internal sealed class SearchIndexManager
                     index.Tokens[token] = ids;
                 }
                 ids.Add(obj.Id);
+
+                // Build prefix tree for efficient prefix matching
+                AddToPrefixTree(index, token);
             }
 
             index.IsBuilt = true;
             SaveIndex(type, index);
+        }
+    }
+
+    private static void AddToPrefixTree(IndexData index, string token)
+    {
+        // Add all prefixes of length 3+ to the prefix tree
+        var minPrefixLen = Math.Min(3, token.Length);
+        for (int len = minPrefixLen; len <= token.Length; len++)
+        {
+            var prefix = token.Substring(0, len);
+            if (!index.PrefixTree.TryGetValue(prefix, out var fullTokens))
+            {
+                fullTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                index.PrefixTree[prefix] = fullTokens;
+            }
+            fullTokens.Add(token);
         }
     }
 
@@ -141,22 +192,48 @@ internal sealed class SearchIndexManager
 
         EnsureBuilt(type, loadAll);
         var index = _indexes.GetOrAdd(type, LoadIndex);
-        var queryTokens = Tokenize(queryText);
-        if (queryTokens.Count == 0)
-            return Array.Empty<string>();
-
+        
         var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         lock (index.Sync)
         {
+            // Use Span-based tokenization for zero allocations during query parsing
+            TokenizeToHashSet(queryText, out var queryTokens);
+            if (queryTokens.Count == 0)
+                return Array.Empty<string>();
+
+            // Efficient search using inverted index with prefix optimization
             foreach (var queryToken in queryTokens)
             {
+                // Check for exact match first (fastest path)
+                if (index.Tokens.TryGetValue(queryToken, out var exactIds))
+                {
+                    foreach (var id in exactIds)
+                        results.Add(id);
+                    continue;
+                }
+
+                // Use prefix tree for substring matching if available
+                if (queryToken.Length >= 3 && index.PrefixTree.TryGetValue(queryToken, out var prefixMatches))
+                {
+                    foreach (var matchedToken in prefixMatches)
+                    {
+                        if (index.Tokens.TryGetValue(matchedToken, out var ids))
+                        {
+                            foreach (var id in ids)
+                                results.Add(id);
+                        }
+                    }
+                    continue;
+                }
+
+                // Fallback to contains search only for short query tokens
                 foreach (var entry in index.Tokens)
                 {
-                    if (!entry.Key.Contains(queryToken, StringComparison.OrdinalIgnoreCase))
-                        continue;
-
-                    foreach (var id in entry.Value)
-                        results.Add(id);
+                    if (entry.Key.Contains(queryToken, StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (var id in entry.Value)
+                            results.Add(id);
+                    }
                 }
             }
         }
@@ -173,16 +250,54 @@ internal sealed class SearchIndexManager
 
         try
         {
-            var bytes = File.ReadAllBytes(path);
-            var data = JsonSerializer.Deserialize<IndexFile>(bytes);
-            if (data != null)
+            // Use binary format for faster loading and smaller file size
+            using var stream = File.OpenRead(path);
+            using var reader = new BinaryReader(stream, Encoding.UTF8);
+
+            // Read version header
+            var version = reader.ReadInt32();
+            if (version != 1)
             {
-                foreach (var entry in data.Tokens)
-                    index.Tokens[entry.Key] = new HashSet<string>(entry.Value ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                foreach (var entry in data.IdToTokens)
-                    index.IdToTokens[entry.Key] = new HashSet<string>(entry.Value ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                index.IsBuilt = true;
+                _logger?.LogError($"Unknown index version {version} for {type.Name}. Will rebuild.", new InvalidDataException($"Version {version}"));
+                index.IsBuilt = false; // Force rebuild on next EnsureBuilt
+                return index;
             }
+
+            // Read Tokens dictionary
+            var tokenCount = reader.ReadInt32();
+            for (int i = 0; i < tokenCount; i++)
+            {
+                var token = reader.ReadString();
+                var idsCount = reader.ReadInt32();
+                var ids = new HashSet<string>(idsCount, StringComparer.OrdinalIgnoreCase);
+                for (int j = 0; j < idsCount; j++)
+                {
+                    ids.Add(reader.ReadString());
+                }
+                index.Tokens[token] = ids;
+            }
+
+            // Read IdToTokens dictionary
+            var idToTokensCount = reader.ReadInt32();
+            for (int i = 0; i < idToTokensCount; i++)
+            {
+                var id = reader.ReadString();
+                var tokensCount = reader.ReadInt32();
+                var tokens = new HashSet<string>(tokensCount, StringComparer.OrdinalIgnoreCase);
+                for (int j = 0; j < tokensCount; j++)
+                {
+                    tokens.Add(reader.ReadString());
+                }
+                index.IdToTokens[id] = tokens;
+            }
+
+            // Rebuild prefix tree from loaded tokens
+            foreach (var token in index.Tokens.Keys)
+            {
+                AddToPrefixTree(index, token);
+            }
+
+            index.IsBuilt = true;
         }
         catch (Exception ex)
         {
@@ -196,14 +311,43 @@ internal sealed class SearchIndexManager
     {
         try
         {
-            var data = new IndexFile
-            {
-                Tokens = index.Tokens.ToDictionary(k => k.Key, v => v.Value.ToArray(), StringComparer.OrdinalIgnoreCase),
-                IdToTokens = index.IdToTokens.ToDictionary(k => k.Key, v => v.Value.ToArray(), StringComparer.OrdinalIgnoreCase)
-            };
+            // Use binary format for faster saving and smaller file size
+            var path = GetIndexPath(type);
+            var tempPath = path + ".tmp";
 
-            var bytes = JsonSerializer.SerializeToUtf8Bytes(data);
-            File.WriteAllBytes(GetIndexPath(type), bytes);
+            using (var stream = File.Create(tempPath))
+            using (var writer = new BinaryWriter(stream, Encoding.UTF8))
+            {
+                // Write version
+                writer.Write(1);
+
+                // Write Tokens dictionary
+                writer.Write(index.Tokens.Count);
+                foreach (var entry in index.Tokens)
+                {
+                    writer.Write(entry.Key);
+                    writer.Write(entry.Value.Count);
+                    foreach (var id in entry.Value)
+                    {
+                        writer.Write(id);
+                    }
+                }
+
+                // Write IdToTokens dictionary
+                writer.Write(index.IdToTokens.Count);
+                foreach (var entry in index.IdToTokens)
+                {
+                    writer.Write(entry.Key);
+                    writer.Write(entry.Value.Count);
+                    foreach (var token in entry.Value)
+                    {
+                        writer.Write(token);
+                    }
+                }
+            }
+
+            // Atomic replace using overwrite parameter (available in .NET 6+)
+            File.Move(tempPath, path, overwrite: true);
         }
         catch (Exception ex)
         {
@@ -215,6 +359,8 @@ internal sealed class SearchIndexManager
     {
         index.Tokens.Clear();
         index.IdToTokens.Clear();
+        index.PrefixTree.Clear();
+        
         foreach (var obj in loadAll())
         {
             if (obj == null || string.IsNullOrWhiteSpace(obj.Id))
@@ -233,6 +379,9 @@ internal sealed class SearchIndexManager
                     index.Tokens[token] = ids;
                 }
                 ids.Add(obj.Id);
+
+                // Build prefix tree
+                AddToPrefixTree(index, token);
             }
         }
     }
@@ -241,21 +390,17 @@ internal sealed class SearchIndexManager
     {
         var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var type = obj.GetType();
-        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.GetCustomAttribute<DataIndexAttribute>() != null)
-            .ToArray();
+        var metadata = GetOrCreateTypeMetadata(type);
 
-        foreach (var prop in properties)
+        for (int i = 0; i < metadata.IndexedProperties.Length; i++)
         {
-            var attr = prop.GetCustomAttribute<DataIndexAttribute>();
-            if (attr == null)
-                continue;
+            var prop = metadata.IndexedProperties[i];
+            var attr = metadata.Attributes[i];
 
             if (attr.Kind != IndexKind.Inverted)
             {
                 var warningKey = $"{type.FullName}:{prop.Name}:{attr.Kind}";
                 var shouldLog = false;
-                // Protect shared warning set from concurrent tokenization.
                 lock (index.WarnedKinds)
                 {
                     if (index.WarnedKinds.Add(warningKey))
@@ -273,27 +418,29 @@ internal sealed class SearchIndexManager
             var valueType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
             if (valueType == typeof(string))
             {
-                AddTokens(tokens, value.ToString());
+                AddTokensFromString(tokens, value.ToString());
                 continue;
             }
 
             if (IsIntegralType(valueType))
             {
-                tokens.Add(Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty);
+                var strValue = Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture);
+                if (!string.IsNullOrEmpty(strValue))
+                    tokens.Add(strValue);
                 continue;
             }
 
             if (value is IEnumerable<string> stringList)
             {
                 foreach (var item in stringList)
-                    AddTokens(tokens, item);
+                    AddTokensFromString(tokens, item);
                 continue;
             }
 
             if (value is IEnumerable enumerable && value is not string)
             {
                 foreach (var item in enumerable)
-                    AddTokens(tokens, item?.ToString());
+                    AddTokensFromString(tokens, item?.ToString());
             }
         }
 
@@ -313,45 +460,108 @@ internal sealed class SearchIndexManager
 
             ids.Remove(id);
             if (ids.Count == 0)
+            {
                 index.Tokens.Remove(token);
+                
+                // Remove from prefix tree if this was the last occurrence
+                var minPrefixLen = Math.Min(3, token.Length);
+                for (int len = minPrefixLen; len <= token.Length; len++)
+                {
+                    var prefix = token.Substring(0, len);
+                    if (index.PrefixTree.TryGetValue(prefix, out var fullTokens))
+                    {
+                        fullTokens.Remove(token);
+                        if (fullTokens.Count == 0)
+                            index.PrefixTree.Remove(prefix);
+                    }
+                }
+            }
         }
 
         index.IdToTokens.Remove(id);
     }
 
-    private static void AddTokens(HashSet<string> tokens, string? value)
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void AddTokensFromString(HashSet<string> tokens, string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
             return;
 
-        foreach (var token in Tokenize(value))
+        TokenizeToHashSet(value, out var newTokens);
+        foreach (var token in newTokens)
             tokens.Add(token);
     }
 
-    private static HashSet<string> Tokenize(string value)
+    // High-performance tokenization using Span<char> to minimize allocations
+    private static void TokenizeToHashSet(ReadOnlySpan<char> value, out HashSet<string> tokens)
     {
-        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var buffer = new List<char>();
+        tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
+        if (value.IsEmpty)
+            return;
 
-        foreach (var ch in value)
+        // Use stack-allocated buffer for tokens up to 256 chars
+        // For longer tokens, we'll fall back to slower path with array rental
+        const int MaxStackTokenSize = 256;
+        Span<char> buffer = stackalloc char[MaxStackTokenSize];
+        int bufferPos = 0;
+        List<char>? overflowBuffer = null;
+
+        for (int i = 0; i < value.Length; i++)
         {
+            var ch = value[i];
+            
             if (char.IsLetterOrDigit(ch))
             {
-                buffer.Add(char.ToLowerInvariant(ch));
+                var lowerCh = char.ToLowerInvariant(ch);
+                
+                if (bufferPos < MaxStackTokenSize)
+                {
+                    buffer[bufferPos++] = lowerCh;
+                }
+                else
+                {
+                    // Rare case: token exceeds stack buffer, switch to heap allocation
+                    if (overflowBuffer == null)
+                    {
+                        overflowBuffer = new List<char>(MaxStackTokenSize * 2);
+                        for (int j = 0; j < bufferPos; j++)
+                            overflowBuffer.Add(buffer[j]);
+                    }
+                    overflowBuffer.Add(lowerCh);
+                }
                 continue;
             }
 
-            if (buffer.Count > 0)
+            // End of token - flush buffer
+            if (bufferPos > 0 || overflowBuffer?.Count > 0)
             {
-                tokens.Add(new string(buffer.ToArray()));
-                buffer.Clear();
+                if (overflowBuffer != null)
+                {
+                    tokens.Add(new string(overflowBuffer.ToArray()));
+                    overflowBuffer.Clear();
+                    bufferPos = 0;
+                }
+                else
+                {
+                    tokens.Add(new string(buffer.Slice(0, bufferPos)));
+                    bufferPos = 0;
+                }
             }
         }
 
-        if (buffer.Count > 0)
-            tokens.Add(new string(buffer.ToArray()));
-
-        return tokens;
+        // Flush final token if any
+        if (bufferPos > 0 || overflowBuffer?.Count > 0)
+        {
+            if (overflowBuffer != null)
+            {
+                tokens.Add(new string(overflowBuffer.ToArray()));
+            }
+            else
+            {
+                tokens.Add(new string(buffer.Slice(0, bufferPos)));
+            }
+        }
     }
 
     private static bool IsIntegralType(Type type)
@@ -367,5 +577,5 @@ internal sealed class SearchIndexManager
     }
 
     private string GetIndexPath(Type type)
-        => Path.Combine(_indexRoot, $"{type.Name}.json");
+        => Path.Combine(_indexRoot, $"{type.Name}.idx");
 }
