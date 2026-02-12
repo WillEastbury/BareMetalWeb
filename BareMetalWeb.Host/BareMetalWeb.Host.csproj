@@ -6,6 +6,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\BareMetalWeb.API\BareMetalWeb.API.csproj" />
     <ProjectReference Include="..\BareMetalWeb.Core\BareMetalWeb.Core.csproj" />
     <ProjectReference Include="..\BareMetalWeb.Data\BareMetalWeb.Data.csproj" />
     <ProjectReference Include="..\BareMetalWeb.Rendering\BareMetalWeb.Rendering.csproj" />
