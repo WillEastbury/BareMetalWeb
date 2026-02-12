@@ -8,6 +8,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\BareMetalWeb.Core\BareMetalWeb.Core.csproj" />
+    <ProjectReference Include="..\BareMetalWeb.Data\BareMetalWeb.Data.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
 </Project>
