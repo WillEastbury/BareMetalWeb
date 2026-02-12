@@ -94,6 +94,13 @@ public sealed class PageStoreHandlers
             totalBytesRead += read;
         }
 
+        if (totalBytesRead != data.Length)
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync($"Incomplete request body: expected {data.Length} bytes, got {totalBytesRead} bytes");
+            return;
+        }
+
         var result = await _pageStore.AddPageAsync(data, context.RequestAborted);
 
         if (!result.Success)
@@ -149,6 +156,13 @@ public sealed class PageStoreHandlers
             var read = await context.Request.Body.ReadAsync(data.AsMemory(bytesRead), context.RequestAborted);
             if (read == 0) break;
             bytesRead += read;
+        }
+
+        if (bytesRead != data.Length)
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync($"Incomplete request body: expected {data.Length} bytes, got {bytesRead} bytes");
+            return;
         }
 
         // Check for If-Match header (optimistic concurrency)

@@ -396,7 +396,7 @@ public sealed class PagedFileStore : IDisposable
 
             var options = new BoundedChannelOptions(queueCapacity)
             {
-                FullMode = BoundedChannelFullMode.Wait
+                FullMode = BoundedChannelFullMode.DropWrite
             };
             _commandQueue = Channel.CreateBounded<object>(options);
             _writerTask = Task.Run(WriterLoop, shutdownToken);

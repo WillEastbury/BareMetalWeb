@@ -59,4 +59,39 @@ also the logs are written per-day-per-hour-per-minute log files to keep them man
 // Configure Proxy:Route and Proxy:TargetBaseUrl in appsettings*.json
 // Requests to the route are forwarded to the target (headers/body preserved), excluding the auth session cookie
 
+// 4.8 Paged file store with optimistic concurrency
+// A page-addressable storage engine with deterministic write ordering, no locks for normal page writes,
+// and optional optimistic concurrency control. Uses extent-based partitioning with single-writer queues.
+//
+// Key features:
+// - Single-writer queue per extent (~64MB partitions) for deterministic FIFO write order
+// - No locks on hot path - extent writers serialize writes naturally
+// - Optimistic concurrency via version/LSN tracking and If-Match headers
+// - Bounded queues with backpressure (returns 429/503 when full)
+// - Durable sync flush per write for strong crash semantics
+// - In-memory metadata cache for fast reads
+// - HTTP API: GET, HEAD, POST, PUT /pages endpoints
+//
+// Configuration in appsettings.json:
+// "PageStore": {
+//   "Enabled": false,
+//   "PageSize": 4096,
+//   "ExtentSizeBytes": 67108864,    // 64 MB extents
+//   "QueueCapacity": 1000,           // Bounded queue per extent
+//   "RequiredPermission": "Public"   // or "Authenticated", "admin", etc.
+// }
+//
+// API endpoints when enabled:
+// POST   /pages           → create new page, returns { pageId, version } with ETag
+// GET    /pages/{id}      → read page data with ETag: "{version}" header
+// HEAD   /pages/{id}      → metadata only (ETag without body)
+// PUT    /pages/{id}      → update page, supports If-Match for optimistic concurrency
+//                           returns 412 Precondition Failed on version mismatch
+//
+// Benefits:
+// - No locks on hot path - extent writers serialize naturally
+// - Highly scalable write throughput via extent parallelism
+// - Simple optimistic control prevents lost updates  
+// - Durable sync flush per write gives strong crash semantics
+//
 
