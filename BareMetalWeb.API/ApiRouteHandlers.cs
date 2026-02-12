@@ -389,9 +389,9 @@ public sealed class ApiRouteHandlers : IApiRouteHandlers
             // Invalid JSON format - return null to indicate bad request
             return null;
         }
-        catch (Exception)
+        catch (InvalidOperationException)
         {
-            // Unexpected error during JSON parsing - return null to indicate bad request
+            // Stream already read or other state issue - return null to indicate bad request
             return null;
         }
     }
