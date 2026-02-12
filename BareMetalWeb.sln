@@ -23,6 +23,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BareMetalWeb.Rendering.Test
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BareMetalWeb.API.Tests", "BareMetalWeb.API.Tests\BareMetalWeb.API.Tests.csproj", "{ACFF938D-98FC-4AC0-A945-97FD609B9663}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BareMetalWeb.PerformanceTests", "BareMetalWeb.PerformanceTests\BareMetalWeb.PerformanceTests.csproj", "{4A1D3CB2-538D-4569-9327-D85157259377}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -153,6 +155,18 @@ Global
 		{ACFF938D-98FC-4AC0-A945-97FD609B9663}.Release|x64.Build.0 = Release|Any CPU
 		{ACFF938D-98FC-4AC0-A945-97FD609B9663}.Release|x86.ActiveCfg = Release|Any CPU
 		{ACFF938D-98FC-4AC0-A945-97FD609B9663}.Release|x86.Build.0 = Release|Any CPU
+		{4A1D3CB2-538D-4569-9327-D85157259377}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4A1D3CB2-538D-4569-9327-D85157259377}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4A1D3CB2-538D-4569-9327-D85157259377}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{4A1D3CB2-538D-4569-9327-D85157259377}.Debug|x64.Build.0 = Debug|Any CPU
+		{4A1D3CB2-538D-4569-9327-D85157259377}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{4A1D3CB2-538D-4569-9327-D85157259377}.Debug|x86.Build.0 = Debug|Any CPU
+		{4A1D3CB2-538D-4569-9327-D85157259377}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4A1D3CB2-538D-4569-9327-D85157259377}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4A1D3CB2-538D-4569-9327-D85157259377}.Release|x64.ActiveCfg = Release|Any CPU
+		{4A1D3CB2-538D-4569-9327-D85157259377}.Release|x64.Build.0 = Release|Any CPU
+		{4A1D3CB2-538D-4569-9327-D85157259377}.Release|x86.ActiveCfg = Release|Any CPU
+		{4A1D3CB2-538D-4569-9327-D85157259377}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
