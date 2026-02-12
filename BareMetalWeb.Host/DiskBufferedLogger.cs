@@ -156,10 +156,11 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         return Path.Combine(targetDirectory, fileName);
     }
 
-    // Note: Uses Thread.Sleep for retry backoff on IO errors, which blocks the calling thread.
-    // This is intentional to keep synchronous logging simple and avoid async complexity.
-    // The retries are bounded (3 attempts max) and delays are short (10-20ms).
-    // If logging becomes a hot path, consider refactoring to use async backoff.
+    // WARNING: Uses Thread.Sleep for retry backoff, which blocks a thread pool thread.
+    // This is a known limitation in the synchronous error logging path (used during shutdown/exceptions).
+    // The blocking is brief (10-20ms) and only occurs during IO errors on error logging (rare).
+    // For normal async logging operations, AppendLinesSharedAsync uses proper Task.Delay instead.
+    // Trade-off: Simplicity in error paths vs optimal thread pool usage. Acceptable for rare error conditions.
     private static void AppendTextShared(string path, string content)
     {
         for (var attempt = 0; attempt < 3; attempt++)
