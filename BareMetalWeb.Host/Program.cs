@@ -56,6 +56,28 @@ IPageInfoFactory pageInfoFactory = new PageInfoFactory();
 IMetricsTracker metricsTracker = new MetricsTracker();
 IClientRequestTracker throttling = ProgramSetup.CreateClientRequestTracker(app, logger);
 
+// Initialize page store
+bool pageStoreEnabled = app.Configuration.GetValue("PageStore:Enabled", false);
+BareMetalWeb.Data.PageStore.PagedFileStore? pageStore = null;
+PageStoreHandlers? pageStoreHandlers = null;
+if (pageStoreEnabled)
+{
+    var pageStoreProvider = dataStore.Providers.FirstOrDefault(p => p is LocalFolderBinaryDataProvider) as LocalFolderBinaryDataProvider;
+    if (pageStoreProvider != null)
+    {
+        var pageSize = app.Configuration.GetValue("PageStore:PageSize", 4096);
+        var extentSize = app.Configuration.GetValue("PageStore:ExtentSizeBytes", 64 * 1024 * 1024);
+        var queueCapacity = app.Configuration.GetValue("PageStore:QueueCapacity", 1000);
+        pageStore = new BareMetalWeb.Data.PageStore.PagedFileStore(pageStoreProvider, "pagestore", pageSize, extentSize, queueCapacity, logger);
+        pageStoreHandlers = new PageStoreHandlers(pageStore, logger);
+        logger.LogInfo($"Page store initialized: pageSize={pageSize}, extentSize={extentSize}, queueCapacity={queueCapacity}");
+    }
+    else
+    {
+        logger.LogError("Page store enabled but no LocalFolderBinaryDataProvider found", new InvalidOperationException("Provider not found"));
+    }
+}
+
 bool allowAccountCreation = app.Configuration.GetValue("Auth:AllowAccountCreation", false);
 IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot);
 IHtmlTemplate mainTemplate = templateStore.Get("Index");
@@ -151,6 +173,16 @@ appInfo.RegisterRoute("GET /status", new RouteHandlerData(pageInfoFactory.Templa
     context.SetStringValue("message", $"Current server time is: {DateTime.UtcNow:O}");
 })));
 appInfo.RegisterRoute("GET /statusRaw", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), routeHandlers.TimeRawHandler));
+
+// Register page store routes if enabled
+if (pageStoreEnabled && pageStoreHandlers != null)
+{
+    appInfo.RegisterRoute("GET /pages/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), pageStoreHandlers.GetPageAsync));
+    appInfo.RegisterRoute("HEAD /pages/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), pageStoreHandlers.HeadPageAsync));
+    appInfo.RegisterRoute("POST /pages", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), pageStoreHandlers.PostPageAsync));
+    appInfo.RegisterRoute("PUT /pages/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), pageStoreHandlers.PutPageAsync));
+    logger.LogInfo("Page store API routes registered");
+}
 
 appInfo.BuildAppInfoMenuOptions();
 await appInfo.WireUpRequestHandlingAndLoggerAsyncLifetime();
