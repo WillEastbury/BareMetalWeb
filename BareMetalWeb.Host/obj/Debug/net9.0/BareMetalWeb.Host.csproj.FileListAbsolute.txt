@@ -43,3 +43,4 @@ C:\source\BareMetalWeb\BareMetalWeb.Host\bin\Debug\net9.0\Data\UserSession\schem
 C:\source\BareMetalWeb\BareMetalWeb.Host\bin\Debug\net9.0\Data\User\schema-User-1.json
 C:\source\BareMetalWeb\BareMetalWeb.Host\bin\Debug\net9.0\Data\Customer\schema-Customer-1.json
 C:\source\BareMetalWeb\BareMetalWeb.Host\bin\Debug\net9.0\Data\Product\schema-Product-1.json
+C:\source\BareMetalWeb\BareMetalWeb.Host\bin\Debug\net9.0\Data\ConferenceSession\schema-ConferenceSession-1.json
