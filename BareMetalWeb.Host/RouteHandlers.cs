@@ -42,12 +42,17 @@ public sealed class RouteHandlers : IRouteHandlers
     private static readonly ConcurrentDictionary<string, AttemptTracker> MfaAttempts = new(StringComparer.Ordinal);
 
     public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder)
+        : this(renderer, templateStore, allowAccountCreation, mfaKeyRootFolder, null)
+    {
+    }
+
+    public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, IApiRouteHandlers? apiHandlers)
     {
         _renderer = renderer;
         _templateStore = templateStore;
         _allowAccountCreation = allowAccountCreation;
         _mfaProtector = MfaSecretProtector.CreateDefault(mfaKeyRootFolder);
-        _apiHandlers = new ApiRouteHandlers(UserAuth.GetRequestUser);
+        _apiHandlers = apiHandlers ?? new ApiRouteHandlers(UserAuth.GetRequestUser);
     }
 
     public ValueTask DefaultPageHandler(HttpContext context)

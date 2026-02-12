@@ -384,8 +384,14 @@ public sealed class ApiRouteHandlers : IApiRouteHandlers
 
             return payload;
         }
-        catch
+        catch (JsonException)
         {
+            // Invalid JSON format - return null to indicate bad request
+            return null;
+        }
+        catch (Exception)
+        {
+            // Unexpected error during JSON parsing - return null to indicate bad request
             return null;
         }
     }
