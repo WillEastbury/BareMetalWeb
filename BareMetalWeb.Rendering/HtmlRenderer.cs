@@ -462,7 +462,8 @@ public class HtmlRenderer : IHtmlRenderer
     private static void WriteHtmlEncoded(PipeWriter writer, string text)
     {
         // HTML encode the text to prevent XSS injection through template tokens
-        var encoded = WebUtility.HtmlEncode(text);
+        // Handle null by treating as empty string
+        var encoded = WebUtility.HtmlEncode(text ?? string.Empty);
         Write(writer, encoded);
     }
 

@@ -470,7 +470,7 @@ public class BareMetalWebServer : IBareWebHost
             return true;
 
         var permissionsNeeded = pageInfo.PageMetaData.PermissionsNeeded ?? string.Empty;
-        // Empty permissions means public/anonymous access is allowed
+        // Empty permissions mean public/anonymous access is allowed
         if (string.IsNullOrWhiteSpace(permissionsNeeded))
             return true;
 
