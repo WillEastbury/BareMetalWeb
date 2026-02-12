@@ -258,7 +258,8 @@ internal sealed class SearchIndexManager
             var version = reader.ReadInt32();
             if (version != 1)
             {
-                _logger?.LogError($"Unknown index version {version} for {type.Name}.", new InvalidDataException($"Version {version}"));
+                _logger?.LogError($"Unknown index version {version} for {type.Name}. Will rebuild.", new InvalidDataException($"Version {version}"));
+                index.IsBuilt = false; // Force rebuild on next EnsureBuilt
                 return index;
             }
 
@@ -345,10 +346,8 @@ internal sealed class SearchIndexManager
                 }
             }
 
-            // Atomic replace
-            if (File.Exists(path))
-                File.Delete(path);
-            File.Move(tempPath, path);
+            // Atomic replace using overwrite parameter (available in .NET 6+)
+            File.Move(tempPath, path, overwrite: true);
         }
         catch (Exception ex)
         {
@@ -502,8 +501,11 @@ internal sealed class SearchIndexManager
             return;
 
         // Use stack-allocated buffer for tokens up to 256 chars
-        Span<char> buffer = stackalloc char[256];
+        // For longer tokens, we'll fall back to slower path with array rental
+        const int MaxStackTokenSize = 256;
+        Span<char> buffer = stackalloc char[MaxStackTokenSize];
         int bufferPos = 0;
+        List<char>? overflowBuffer = null;
 
         for (int i = 0; i < value.Length; i++)
         {
@@ -511,26 +513,54 @@ internal sealed class SearchIndexManager
             
             if (char.IsLetterOrDigit(ch))
             {
-                if (bufferPos < buffer.Length)
+                var lowerCh = char.ToLowerInvariant(ch);
+                
+                if (bufferPos < MaxStackTokenSize)
                 {
-                    buffer[bufferPos++] = char.ToLowerInvariant(ch);
+                    buffer[bufferPos++] = lowerCh;
                 }
-                // If token exceeds buffer, we'll truncate it (rare case)
+                else
+                {
+                    // Rare case: token exceeds stack buffer, switch to heap allocation
+                    if (overflowBuffer == null)
+                    {
+                        overflowBuffer = new List<char>(MaxStackTokenSize * 2);
+                        for (int j = 0; j < bufferPos; j++)
+                            overflowBuffer.Add(buffer[j]);
+                    }
+                    overflowBuffer.Add(lowerCh);
+                }
                 continue;
             }
 
             // End of token - flush buffer
-            if (bufferPos > 0)
+            if (bufferPos > 0 || overflowBuffer?.Count > 0)
             {
-                tokens.Add(new string(buffer.Slice(0, bufferPos)));
-                bufferPos = 0;
+                if (overflowBuffer != null)
+                {
+                    tokens.Add(new string(overflowBuffer.ToArray()));
+                    overflowBuffer.Clear();
+                    bufferPos = 0;
+                }
+                else
+                {
+                    tokens.Add(new string(buffer.Slice(0, bufferPos)));
+                    bufferPos = 0;
+                }
             }
         }
 
         // Flush final token if any
-        if (bufferPos > 0)
+        if (bufferPos > 0 || overflowBuffer?.Count > 0)
         {
-            tokens.Add(new string(buffer.Slice(0, bufferPos)));
+            if (overflowBuffer != null)
+            {
+                tokens.Add(new string(overflowBuffer.ToArray()));
+            }
+            else
+            {
+                tokens.Add(new string(buffer.Slice(0, bufferPos)));
+            }
         }
     }
 
