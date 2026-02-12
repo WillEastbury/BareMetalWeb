@@ -217,6 +217,29 @@ public static class DataScaffold
                 continue;
 
             var value = instance != null ? field.Property.GetValue(instance) : null;
+            if (IsChildListType(field.Property.PropertyType, out var childType))
+            {
+                var html = BuildChildListEditorHtml(field, childType, value as IEnumerable);
+                fields.Add(new FormField(
+                    FormFieldType.CustomHtml,
+                    field.Name,
+                    field.Label,
+                    field.Required,
+                    Html: html));
+                continue;
+            }
+
+            if (IsDictionaryType(field.Property.PropertyType, out var valueType))
+            {
+                var html = BuildDictionaryEditorHtml(field, valueType, value as IEnumerable);
+                fields.Add(new FormField(
+                    FormFieldType.CustomHtml,
+                    field.Name,
+                    field.Label,
+                    field.Required,
+                    Html: html));
+                continue;
+            }
             var effectiveType = Nullable.GetUnderlyingType(field.Property.PropertyType) ?? field.Property.PropertyType;
             var effectiveFieldType = effectiveType == typeof(DateOnly) && field.FieldType == FormFieldType.DateTime
                 ? FormFieldType.DateOnly
@@ -304,6 +327,20 @@ public static class DataScaffold
                 var display = lookupMap.TryGetValue(key, out var resolved) ? resolved : key;
                 var relatedUrl = TryBuildLookupUrl(field.Lookup, key, canRenderLookupLink);
                 rows.Add((field.Label, BuildLookupHtml(key, display, relatedUrl), true));
+                continue;
+            }
+
+            if (IsChildListType(field.Property.PropertyType, out var childType))
+            {
+                var html = BuildChildListViewHtml(field, childType, value as IEnumerable);
+                rows.Add((field.Label, html, true));
+                continue;
+            }
+
+            if (IsDictionaryType(field.Property.PropertyType, out var valueType))
+            {
+                var html = BuildDictionaryViewHtml(field, valueType, value as IEnumerable);
+                rows.Add((field.Label, html, true));
                 continue;
             }
 
@@ -463,6 +500,44 @@ public static class DataScaffold
                 continue;
             if (!forCreate && !field.Edit)
                 continue;
+
+            if (IsChildListType(field.Property.PropertyType, out var childType))
+            {
+                if (!TryGetFormValue(values, field.Name, out var rawList) || rawList == null)
+                {
+                    if (field.Required)
+                        errors.Add($"{field.Label} is required.");
+                    continue;
+                }
+
+                if (!TryParseChildList(rawList, childType, out var listValue) || listValue == null)
+                {
+                    errors.Add($"{field.Label} is invalid.");
+                    continue;
+                }
+
+                field.Property.SetValue(instance, listValue);
+                continue;
+            }
+
+            if (IsDictionaryType(field.Property.PropertyType, out var dictValueType))
+            {
+                if (!TryGetFormValue(values, field.Name, out var rawDict) || rawDict == null)
+                {
+                    if (field.Required)
+                        errors.Add($"{field.Label} is required.");
+                    continue;
+                }
+
+                if (!TryParseDictionary(rawDict, dictValueType, out var dictValue) || dictValue == null)
+                {
+                    errors.Add($"{field.Label} is invalid.");
+                    continue;
+                }
+
+                field.Property.SetValue(instance, dictValue);
+                continue;
+            }
 
             if (!TryGetFormValue(values, field.Name, out var rawValue) || rawValue == null)
             {
@@ -802,7 +877,14 @@ public static class DataScaffold
         return false;
     }
 
-    private sealed record ChildFieldMeta(string Name, string Label, Type FieldType, bool Required);
+    private sealed record ChildFieldMeta(
+        string Name,
+        string Label,
+        Type FieldType,
+        bool Required,
+        FormFieldType FormFieldType,
+        IReadOnlyList<KeyValuePair<string, string>>? LookupOptions
+    );
 
     private static bool IsChildListType(Type type, out Type childType)
     {
@@ -827,6 +909,7 @@ public static class DataScaffold
                 continue;
 
             var fieldAttribute = prop.GetCustomAttribute<DataFieldAttribute>();
+            var lookupAttribute = prop.GetCustomAttribute<DataLookupAttribute>();
             if (fieldAttribute == null)
                 continue;
 
@@ -835,7 +918,33 @@ public static class DataScaffold
 
             var label = fieldAttribute.Label ?? DeCamelcaseWithId(prop.Name);
             var required = fieldAttribute.Required;
-            fields.Add(new ChildFieldMeta(prop.Name, label, prop.PropertyType, required));
+            var effectiveFieldType = fieldAttribute.FieldType == FormFieldType.Unknown
+                ? MapFieldType(prop.PropertyType)
+                : fieldAttribute.FieldType;
+
+            IReadOnlyList<KeyValuePair<string, string>>? lookupOptions = null;
+            if (lookupAttribute != null)
+            {
+                var lookup = new DataLookupConfig(
+                    lookupAttribute.TargetType,
+                    lookupAttribute.ValueField,
+                    lookupAttribute.DisplayField,
+                    lookupAttribute.QueryField,
+                    lookupAttribute.QueryOperator,
+                    lookupAttribute.QueryValue,
+                    lookupAttribute.SortField,
+                    lookupAttribute.SortDirection,
+                    TimeSpan.FromSeconds(Math.Max(0, lookupAttribute.CacheSeconds))
+                );
+                lookupOptions = GetLookupOptions(lookup);
+                effectiveFieldType = FormFieldType.LookupList;
+            }
+            else if (effectiveFieldType == FormFieldType.Enum)
+            {
+                lookupOptions = BuildEnumOptions(prop.PropertyType);
+            }
+
+            fields.Add(new ChildFieldMeta(prop.Name, label, prop.PropertyType, required, effectiveFieldType, lookupOptions));
         }
 
         return fields;
@@ -899,7 +1008,19 @@ public static class DataScaffold
             var inputType = MapChildInputType(child.FieldType, out var step);
             sb.Append("<div class=\"mb-3\">");
             sb.Append($"<label class=\"form-label\">{WebUtility.HtmlEncode(child.Label)}</label>");
-            if (inputType == "checkbox")
+            if (child.LookupOptions != null)
+            {
+                sb.Append($"<select class=\"form-select\" data-field=\"{WebUtility.HtmlEncode(child.Name)}\">");
+                sb.Append("<option value=\"\"></option>");
+                foreach (var option in child.LookupOptions)
+                {
+                    var optKey = WebUtility.HtmlEncode(option.Key);
+                    var optLabel = WebUtility.HtmlEncode(option.Value);
+                    sb.Append($"<option value=\"{optKey}\">{optLabel}</option>");
+                }
+                sb.Append("</select>");
+            }
+            else if (inputType == "checkbox")
             {
                 sb.Append($"<div class=\"form-check\"><input class=\"form-check-input\" type=\"checkbox\" data-field=\"{WebUtility.HtmlEncode(child.Name)}\" /></div>");
             }
@@ -926,6 +1047,22 @@ public static class DataScaffold
         sb.Append("if(!input||!table||!modal||!form){return;}" );
         sb.Append("var data=[]; try{data=JSON.parse(input.value||'[]');}catch(e){data=[];}" );
         sb.Append("var tbody=table.querySelector('tbody');" );
+        sb.Append("var lookupMaps=");
+        var lookupMaps = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var child in childFields.Where(child => child.LookupOptions != null))
+        {
+            var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var option in child.LookupOptions!)
+            {
+                if (string.IsNullOrWhiteSpace(option.Key))
+                    continue;
+                map[option.Key] = option.Value;
+            }
+            lookupMaps[child.Name] = map;
+        }
+        sb.Append(JsonSerializer.Serialize(lookupMaps));
+        sb.Append(";" );
+
         sb.Append("function render(){tbody.innerHTML='';data.forEach(function(row,idx){var tr=document.createElement('tr');" );
         sb.Append("var actions=document.createElement('td');actions.setAttribute('data-label','Actions');" );
         sb.Append("actions.innerHTML='<button type=\\\"button\\\" class=\\\"btn btn-sm btn-outline-info me-1\\\" data-action=\\\"edit\\\" data-index=\\\"'+idx+'\\\"><i class=\\\"bi bi-pencil\\\" aria-hidden=\\\"true\\\"></i></button>'+");
@@ -935,7 +1072,7 @@ public static class DataScaffold
         {
             var label = WebUtility.HtmlEncode(child.Label);
             var name = WebUtility.HtmlEncode(child.Name);
-            sb.Append($"var td_{name}=document.createElement('td');td_{name}.setAttribute('data-label','{label}');td_{name}.textContent=(row['{name}']||'');tr.appendChild(td_{name});");
+            sb.Append($"var td_{name}=document.createElement('td');td_{name}.setAttribute('data-label','{label}');var raw_{name}=(row['{name}']||'');var map_{name}=lookupMaps && lookupMaps['{name}'];td_{name}.textContent=(map_{name} && map_{name}[raw_{name}] ? map_{name}[raw_{name}] : raw_{name});tr.appendChild(td_{name});");
         }
         sb.Append("tbody.appendChild(tr);});input.value=JSON.stringify(data);}" );
         sb.Append("render();" );
@@ -943,10 +1080,10 @@ public static class DataScaffold
         sb.Append("if(!btn){return;}var idx=btn.getAttribute('data-index');" );
         sb.Append("form.querySelector('[name=_rowIndex]').value=(idx===null?'-1':idx);" );
         sb.Append("var fields=form.querySelectorAll('[data-field]');fields.forEach(function(f){var name=f.getAttribute('data-field');if(idx===null){if(f.type==='checkbox'){f.checked=false;}else{f.value='';}}else{var row=data[parseInt(idx,10)]||{};if(f.type==='checkbox'){f.checked=(row[name]==='true');}else{f.value=(row[name]||'');}}});});" );
-        sb.Append("modal.querySelector('[data-action=save]').addEventListener('click',function(){" );
+        sb.Append("modal.addEventListener('click',function(ev){var saveBtn=ev.target.closest('[data-action=save]');if(!saveBtn){return;}ev.preventDefault();" );
         sb.Append("var idx=parseInt(form.querySelector('[name=_rowIndex]').value,10);" );
         sb.Append("var row={};form.querySelectorAll('[data-field]').forEach(function(f){var name=f.getAttribute('data-field');if(f.type==='checkbox'){row[name]=f.checked?'true':'false';}else{row[name]=f.value||'';}});" );
-        sb.Append("if(isNaN(idx)||idx<0){data.push(row);}else{data[idx]=row;}render();var modalInstance=bootstrap.Modal.getInstance(modal);modalInstance.hide();});" );
+        sb.Append("if(isNaN(idx)||idx<0){data.push(row);}else{data[idx]=row;}render();var modalInstance=(window.bootstrap&&bootstrap.Modal?bootstrap.Modal.getOrCreateInstance(modal):null);if(modalInstance){modalInstance.hide();}});");
         sb.Append("tbody.addEventListener('click',function(ev){var btn=ev.target.closest('button');if(!btn){return;}var action=btn.getAttribute('data-action');var idx=parseInt(btn.getAttribute('data-index'),10);if(action==='delete'){if(!isNaN(idx)){data.splice(idx,1);render();}}if(action==='edit'){btn.setAttribute('data-bs-toggle','modal');btn.setAttribute('data-bs-target','#'+modal.id);}});");
         sb.Append("});");
         sb.Append("</script>");
@@ -979,7 +1116,14 @@ public static class DataScaffold
                 {
                     var prop = childType.GetProperty(child.Name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
                     var value = prop?.GetValue(item);
-                    var display = WebUtility.HtmlEncode(ToDisplayString(value, prop?.PropertyType ?? typeof(string)));
+                    var displayText = ToDisplayString(value, prop?.PropertyType ?? typeof(string));
+                    if (child.LookupOptions != null)
+                    {
+                        var map = child.LookupOptions.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                        var key = value?.ToString() ?? string.Empty;
+                        displayText = map.TryGetValue(key, out var resolved) ? resolved : key;
+                    }
+                    var display = WebUtility.HtmlEncode(displayText);
                     sb.Append($"<td data-label=\"{WebUtility.HtmlEncode(child.Label)}\">{display}</td>");
                 }
                 sb.Append("</tr>");
@@ -1069,6 +1213,183 @@ public static class DataScaffold
     private static string EscapeJs(string value)
     {
         return value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("'", "\\'");
+    }
+
+    private static bool IsDictionaryType(Type type, out Type valueType)
+    {
+        valueType = typeof(string);
+        var effectiveType = Nullable.GetUnderlyingType(type) ?? type;
+        if (effectiveType.IsGenericType)
+        {
+            var generic = effectiveType.GetGenericTypeDefinition();
+            if (generic == typeof(Dictionary<,>) || generic == typeof(IDictionary<,>) || generic == typeof(IReadOnlyDictionary<,>))
+            {
+                var args = effectiveType.GetGenericArguments();
+                if (args.Length == 2 && args[0] == typeof(string))
+                {
+                    valueType = args[1];
+                    return true;
+                }
+            }
+        }
+
+        foreach (var iface in effectiveType.GetInterfaces())
+        {
+            if (!iface.IsGenericType)
+                continue;
+            var generic = iface.GetGenericTypeDefinition();
+            if (generic != typeof(IDictionary<,>) && generic != typeof(IReadOnlyDictionary<,>))
+                continue;
+            var args = iface.GetGenericArguments();
+            if (args.Length == 2 && args[0] == typeof(string))
+            {
+                valueType = args[1];
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string BuildDictionaryEditorHtml(DataFieldMetadata field, Type valueType, IEnumerable? dictValue)
+    {
+        var rows = new List<Dictionary<string, string>>();
+        if (dictValue is IDictionary dictionary)
+        {
+            foreach (DictionaryEntry entry in dictionary)
+            {
+                var key = entry.Key?.ToString() ?? string.Empty;
+                var value = ToDisplayString(entry.Value, valueType);
+                rows.Add(new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["key"] = key,
+                    ["value"] = value
+                });
+            }
+        }
+
+        var json = JsonSerializer.Serialize(rows);
+        var modalId = $"modal_{field.Name}";
+        var tableId = $"table_{field.Name}";
+        var formId = $"form_{field.Name}";
+        var inputType = MapChildInputType(valueType, out var step);
+        var stepAttr = string.IsNullOrWhiteSpace(step) ? string.Empty : $" step=\"{step}\"";
+
+        var sb = new StringBuilder();
+        sb.Append($"<textarea class=\"d-none\" id=\"{WebUtility.HtmlEncode(field.Name)}\" name=\"{WebUtility.HtmlEncode(field.Name)}\">{WebUtility.HtmlEncode(json)}</textarea>");
+        sb.Append("<div class=\"mb-3\">");
+        sb.Append("<div class=\"d-flex align-items-center justify-content-between mb-2\">");
+        sb.Append($"<label class=\"form-label mb-0\">{WebUtility.HtmlEncode(field.Label)}</label>");
+        sb.Append($"<button type=\"button\" class=\"btn btn-sm btn-outline-success\" data-bs-toggle=\"modal\" data-bs-target=\"#{WebUtility.HtmlEncode(modalId)}\" data-action=\"add\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i> Add</button>");
+        sb.Append("</div>");
+        sb.Append($"<div class=\"table-responsive\"><table class=\"table table-striped table-sm align-middle mb-0 bm-table\" id=\"{WebUtility.HtmlEncode(tableId)}\"><thead><tr><th>Actions</th><th>Key</th><th>Value</th></tr></thead><tbody></tbody></table></div>");
+        sb.Append("</div>");
+
+        sb.Append($"<div class=\"modal fade\" id=\"{WebUtility.HtmlEncode(modalId)}\" tabindex=\"-1\" aria-hidden=\"true\"><div class=\"modal-dialog\"><div class=\"modal-content\">");
+        sb.Append($"<div class=\"modal-header\"><h5 class=\"modal-title\">Edit {WebUtility.HtmlEncode(field.Label)}</h5><button type=\"button\" class=\"btn-close\" data-bs-dismiss=\"modal\" aria-label=\"Close\"></button></div>");
+        sb.Append($"<div class=\"modal-body\"><form id=\"{WebUtility.HtmlEncode(formId)}\" onsubmit=\"return false;\">" );
+        sb.Append("<input type=\"hidden\" name=\"_rowIndex\" value=\"-1\" />");
+        sb.Append("<div class=\"mb-3\"><label class=\"form-label\">Key</label><input class=\"form-control\" type=\"text\" data-field=\"key\" /></div>");
+        sb.Append($"<div class=\"mb-3\"><label class=\"form-label\">Value</label><input class=\"form-control\" type=\"{inputType}\" data-field=\"value\"{stepAttr} /></div>");
+        sb.Append("</form></div>");
+        sb.Append("<div class=\"modal-footer\"><button type=\"button\" class=\"btn btn-secondary\" data-bs-dismiss=\"modal\">Cancel</button><button type=\"button\" class=\"btn btn-primary\" data-action=\"save\">Save</button></div>");
+        sb.Append("</div></div></div>");
+
+        sb.Append("<script>");
+        sb.Append("document.addEventListener('DOMContentLoaded',function(){");
+        sb.Append($"var input=document.getElementById('{EscapeJs(field.Name)}');");
+        sb.Append($"var table=document.getElementById('{EscapeJs(tableId)}');");
+        sb.Append($"var modal=document.getElementById('{EscapeJs(modalId)}');");
+        sb.Append($"var form=document.getElementById('{EscapeJs(formId)}');");
+        sb.Append("if(!input||!table||!modal||!form){return;}");
+        sb.Append("var data=[]; try{data=JSON.parse(input.value||'[]');}catch(e){data=[];}");
+        sb.Append("var tbody=table.querySelector('tbody');");
+        sb.Append("function render(){tbody.innerHTML='';data.forEach(function(row,idx){var tr=document.createElement('tr');");
+        sb.Append("var actions=document.createElement('td');actions.setAttribute('data-label','Actions');");
+        sb.Append(@"actions.innerHTML='<button type=""button"" class=""btn btn-sm btn-outline-info me-1"" data-action=""edit"" data-index=""'+idx+'""><i class=""bi bi-pencil"" aria-hidden=""true""></i></button>'+");
+        sb.Append(@"'<button type=""button"" class=""btn btn-sm btn-outline-danger"" data-action=""delete"" data-index=""'+idx+'""><i class=""bi bi-x-lg"" aria-hidden=""true""></i></button>';");
+        sb.Append("tr.appendChild(actions);");
+        sb.Append("var keyCell=document.createElement('td');keyCell.setAttribute('data-label','Key');keyCell.textContent=(row['key']||'');tr.appendChild(keyCell);");
+        sb.Append("var valCell=document.createElement('td');valCell.setAttribute('data-label','Value');valCell.textContent=(row['value']||'');tr.appendChild(valCell);");
+        sb.Append("tbody.appendChild(tr);});input.value=JSON.stringify(data);}");
+        sb.Append("render();");
+        sb.Append("modal.addEventListener('show.bs.modal',function(ev){var btn=ev.relatedTarget; if(!btn){return;}var idx=btn.getAttribute('data-index');");
+        sb.Append("form.querySelector('[name=_rowIndex]').value=(idx===null?'-1':idx);");
+        sb.Append("var fields=form.querySelectorAll('[data-field]');fields.forEach(function(f){var name=f.getAttribute('data-field');if(idx===null){f.value='';}else{var row=data[parseInt(idx,10)]||{};f.value=(row[name]||'');}});});");
+        sb.Append("modal.addEventListener('click',function(ev){var saveBtn=ev.target.closest('[data-action=save]');if(!saveBtn){return;}ev.preventDefault();");
+        sb.Append("var idx=parseInt(form.querySelector('[name=_rowIndex]').value,10);var row={};form.querySelectorAll('[data-field]').forEach(function(f){var name=f.getAttribute('data-field');row[name]=f.value||'';});");
+        sb.Append("if(isNaN(idx)||idx<0){data.push(row);}else{data[idx]=row;}render();var modalInstance=(window.bootstrap&&bootstrap.Modal?bootstrap.Modal.getOrCreateInstance(modal):null);if(modalInstance){modalInstance.hide();}});");
+        sb.Append("tbody.addEventListener('click',function(ev){var btn=ev.target.closest('button');if(!btn){return;}var action=btn.getAttribute('data-action');var idx=parseInt(btn.getAttribute('data-index'),10);if(action==='delete'){if(!isNaN(idx)){data.splice(idx,1);render();}}if(action==='edit'){btn.setAttribute('data-bs-toggle','modal');btn.setAttribute('data-bs-target','#'+modal.id);}});");
+        sb.Append("});");
+        sb.Append("</script>");
+
+        return sb.ToString();
+    }
+
+    private static string BuildDictionaryViewHtml(DataFieldMetadata field, Type valueType, IEnumerable? dictValue)
+    {
+        var sb = new StringBuilder();
+        sb.Append("<div class=\"mt-3\">");
+        sb.Append($"<h2 class=\"h6\">{WebUtility.HtmlEncode(field.Label)}</h2>");
+        sb.Append("<div class=\"table-responsive\"><table class=\"table table-striped table-sm align-middle mb-0 bm-table\"><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>");
+
+        if (dictValue is IDictionary dictionary)
+        {
+            foreach (DictionaryEntry entry in dictionary)
+            {
+                var key = WebUtility.HtmlEncode(entry.Key?.ToString() ?? string.Empty);
+                var value = WebUtility.HtmlEncode(ToDisplayString(entry.Value, valueType));
+                sb.Append($"<tr><td data-label=\"Key\">{key}</td><td data-label=\"Value\">{value}</td></tr>");
+            }
+        }
+
+        sb.Append("</tbody></table></div></div>");
+        return sb.ToString();
+    }
+
+    private static bool TryParseDictionary(string rawValue, Type valueType, out object? dictionary)
+    {
+        dictionary = null;
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            dictionary = Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(typeof(string), valueType));
+            return true;
+        }
+
+        try
+        {
+            var list = JsonSerializer.Deserialize<List<Dictionary<string, string>>>(rawValue)
+                ?? new List<Dictionary<string, string>>();
+            var dictType = typeof(Dictionary<,>).MakeGenericType(typeof(string), valueType);
+            var result = (IDictionary)Activator.CreateInstance(dictType)!;
+
+            foreach (var row in list)
+            {
+                if (!row.TryGetValue("key", out var key) || string.IsNullOrWhiteSpace(key))
+                    continue;
+                row.TryGetValue("value", out var raw);
+                if (!TryConvertValue(raw ?? string.Empty, valueType, out var converted))
+                {
+                    if ((Nullable.GetUnderlyingType(valueType) ?? valueType) == typeof(string))
+                    {
+                        converted = raw ?? string.Empty;
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                }
+
+                result[key] = converted ?? string.Empty;
+            }
+
+            dictionary = result;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public static string[] ParseStringList(string rawValue)

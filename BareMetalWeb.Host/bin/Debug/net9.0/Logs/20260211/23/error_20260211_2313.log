@@ -1,0 +1,24 @@
+ERROR | 2026-02-11T23:13:34.6276712Z | Exception: GET /admin/data/orders/create | ::1 | ErrorId=143623e27ca94be9830ec21078e1dcca
+System.ArgumentException: An item with the same key has already been added. Key: d03e47b71b8145b3935082a80a07d55e
+   at System.Collections.Generic.Dictionary`2.TryInsert(TKey key, TValue value, InsertionBehavior behavior)
+   at System.Collections.Generic.Dictionary`2.Add(TKey key, TValue value)
+   at System.Linq.Enumerable.SpanToDictionary[TSource,TKey,TElement](ReadOnlySpan`1 source, Func`2 keySelector, Func`2 elementSelector, IEqualityComparer`1 comparer)
+   at System.Linq.Enumerable.ToDictionary[TSource,TKey,TElement](IEnumerable`1 source, Func`2 keySelector, Func`2 elementSelector, IEqualityComparer`1 comparer)
+   at BareMetalWeb.Core.DataScaffold.<>c.<BuildChildListEditorHtml>b__48_2(ChildFieldMeta child) in C:\source\BareMetalWeb\BareMetalWeb.Data\DataScaffold.cs:line 1055
+   at System.Linq.Enumerable.ToDictionary[TSource,TKey,TElement](IEnumerable`1 source, Func`2 keySelector, Func`2 elementSelector, IEqualityComparer`1 comparer)
+   at BareMetalWeb.Core.DataScaffold.BuildChildListEditorHtml(DataFieldMetadata field, Type childType, IEnumerable listValue) in C:\source\BareMetalWeb\BareMetalWeb.Data\DataScaffold.cs:line 1051
+   at BareMetalWeb.Core.DataScaffold.BuildFormFields(DataEntityMetadata metadata, Object instance, Boolean forCreate) in C:\source\BareMetalWeb\BareMetalWeb.Data\DataScaffold.cs:line 222
+   at BareMetalWeb.Host.RouteHandlers.DataCreateHandler(HttpContext context) in C:\source\BareMetalWeb\BareMetalWeb.Host\RouteHandlers.cs:line 1839
+   at BareMetalWeb.Host.BareMetalWebServer.RequestHandler(HttpContext context) in C:\source\BareMetalWeb\BareMetalWeb.Host\BareMetalWebServer.cs:line 372
+ERROR | 2026-02-11T23:13:40.9185383Z | Exception: GET /admin/data/orders/create | ::1 | ErrorId=291720814cec43889dc321e8144ca5d1
+System.ArgumentException: An item with the same key has already been added. Key: d03e47b71b8145b3935082a80a07d55e
+   at System.Collections.Generic.Dictionary`2.TryInsert(TKey key, TValue value, InsertionBehavior behavior)
+   at System.Collections.Generic.Dictionary`2.Add(TKey key, TValue value)
+   at System.Linq.Enumerable.SpanToDictionary[TSource,TKey,TElement](ReadOnlySpan`1 source, Func`2 keySelector, Func`2 elementSelector, IEqualityComparer`1 comparer)
+   at System.Linq.Enumerable.ToDictionary[TSource,TKey,TElement](IEnumerable`1 source, Func`2 keySelector, Func`2 elementSelector, IEqualityComparer`1 comparer)
+   at BareMetalWeb.Core.DataScaffold.<>c.<BuildChildListEditorHtml>b__48_2(ChildFieldMeta child) in C:\source\BareMetalWeb\BareMetalWeb.Data\DataScaffold.cs:line 1055
+   at System.Linq.Enumerable.ToDictionary[TSource,TKey,TElement](IEnumerable`1 source, Func`2 keySelector, Func`2 elementSelector, IEqualityComparer`1 comparer)
+   at BareMetalWeb.Core.DataScaffold.BuildChildListEditorHtml(DataFieldMetadata field, Type childType, IEnumerable listValue) in C:\source\BareMetalWeb\BareMetalWeb.Data\DataScaffold.cs:line 1051
+   at BareMetalWeb.Core.DataScaffold.BuildFormFields(DataEntityMetadata metadata, Object instance, Boolean forCreate) in C:\source\BareMetalWeb\BareMetalWeb.Data\DataScaffold.cs:line 222
+   at BareMetalWeb.Host.RouteHandlers.DataCreateHandler(HttpContext context) in C:\source\BareMetalWeb\BareMetalWeb.Host\RouteHandlers.cs:line 1839
+   at BareMetalWeb.Host.BareMetalWebServer.RequestHandler(HttpContext context) in C:\source\BareMetalWeb\BareMetalWeb.Host\BareMetalWebServer.cs:line 372

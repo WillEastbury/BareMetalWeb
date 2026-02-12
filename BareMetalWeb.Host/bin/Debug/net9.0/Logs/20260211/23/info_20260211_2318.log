@@ -1,0 +1,3 @@
+INFO | 2026-02-11T23:18:21.1346236Z | GET /.well-known/appspecific/com.chrome.devtools.json|404|::1
+INFO | 2026-02-11T23:18:21.3497582Z | GET /static/css/bootstrap.min.css.map|404|::1|static
+INFO | 2026-02-11T23:20:24.9108615Z | Log segment complete; cycling to next segment.

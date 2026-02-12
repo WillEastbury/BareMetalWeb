@@ -20,7 +20,7 @@ public static class TableActionRenderer
         if (action.RequiresCsrf && string.IsNullOrWhiteSpace(csrfToken))
         {
             // Action requires CSRF but no token provided - render without form for safety
-            return $"<a class=\"btn btn-sm {action.ButtonClass} me-1\" href=\"{WebUtility.HtmlEncode(action.Url)}\" title=\"{WebUtility.HtmlEncode(action.Title)}\" aria-label=\"{WebUtility.HtmlEncode(action.Title)}\"><i class=\"bi {WebUtility.HtmlEncode(action.IconClass)}\" aria-hidden=\"true\"></i></a>";
+            return $"<a class=\"btn btn-sm {WebUtility.HtmlEncode(action.ButtonClass)} me-1\" href=\"{WebUtility.HtmlEncode(action.Url)}\" title=\"{WebUtility.HtmlEncode(action.Title)}\" aria-label=\"{WebUtility.HtmlEncode(action.Title)}\"><i class=\"bi {WebUtility.HtmlEncode(action.IconClass)}\" aria-hidden=\"true\"></i></a>";
         }
 
         if (action.RequiresCsrf)
@@ -47,7 +47,8 @@ public static class TableActionRenderer
         var safeUrl2 = WebUtility.HtmlEncode(action.Url);
         var safeTitle2 = WebUtility.HtmlEncode(action.Title);
         var safeIconClass2 = WebUtility.HtmlEncode(action.IconClass);
-        return $"<a class=\"btn btn-sm {action.ButtonClass} me-1\" href=\"{safeUrl2}\" title=\"{safeTitle2}\" aria-label=\"{safeTitle2}\"><i class=\"bi {safeIconClass2}\" aria-hidden=\"true\"></i></a>";
+        var safeButtonClass2 = WebUtility.HtmlEncode(action.ButtonClass);
+        return $"<a class=\"btn btn-sm {safeButtonClass2} me-1\" href=\"{safeUrl2}\" title=\"{safeTitle2}\" aria-label=\"{safeTitle2}\"><i class=\"bi {safeIconClass2}\" aria-hidden=\"true\"></i></a>";
     }
 
     /// <summary>

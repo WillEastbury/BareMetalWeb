@@ -1,0 +1,57 @@
+INFO | 2026-02-11T23:41:51.5070352Z | Starting BareMetalWeb server...
+INFO | 2026-02-11T23:41:51.9289475Z | Route registered: GET / with handler DefaultPageHandler
+INFO | 2026-02-11T23:41:51.9293045Z | Route registered: GET /metrics with handler <BuildPageHandler>b__0
+INFO | 2026-02-11T23:41:51.9295432Z | Route registered: GET /metrics/json with handler MetricsJsonHandler
+INFO | 2026-02-11T23:41:51.9300353Z | Route registered: GET /admin/logs with handler LogsViewerHandler
+INFO | 2026-02-11T23:41:51.9300555Z | Route registered: GET /admin/logs/prune with handler LogsPruneHandler
+INFO | 2026-02-11T23:41:51.9300751Z | Route registered: POST /admin/logs/prune with handler LogsPrunePostHandler
+INFO | 2026-02-11T23:41:51.9300886Z | Route registered: GET /admin/logs/download with handler LogsDownloadHandler
+INFO | 2026-02-11T23:41:51.9300956Z | Route registered: GET /admin/sample-data with handler SampleDataHandler
+INFO | 2026-02-11T23:41:51.9301017Z | Route registered: POST /admin/sample-data with handler SampleDataPostHandler
+INFO | 2026-02-11T23:41:51.9301078Z | Route registered: GET /topips with handler <BuildPageHandler>b__0
+INFO | 2026-02-11T23:41:51.9301140Z | Route registered: GET /suspiciousips with handler <BuildPageHandler>b__0
+INFO | 2026-02-11T23:41:51.9301198Z | Route registered: GET /login with handler LoginHandler
+INFO | 2026-02-11T23:41:51.9301263Z | Route registered: POST /login with handler LoginPostHandler
+INFO | 2026-02-11T23:41:51.9301351Z | Route registered: GET /mfa with handler MfaChallengeHandler
+INFO | 2026-02-11T23:41:51.9301404Z | Route registered: POST /mfa with handler MfaChallengePostHandler
+INFO | 2026-02-11T23:41:51.9301455Z | Route registered: GET /logout with handler LogoutHandler
+INFO | 2026-02-11T23:41:51.9301504Z | Route registered: POST /logout with handler LogoutPostHandler
+INFO | 2026-02-11T23:41:51.9301567Z | Route registered: GET /account with handler AccountHandler
+INFO | 2026-02-11T23:41:51.9301651Z | Route registered: GET /account/mfa with handler MfaStatusHandler
+INFO | 2026-02-11T23:41:51.9301714Z | Route registered: GET /account/mfa/setup with handler MfaSetupHandler
+INFO | 2026-02-11T23:41:51.9301766Z | Route registered: POST /account/mfa/setup with handler MfaSetupPostHandler
+INFO | 2026-02-11T23:41:51.9301812Z | Route registered: GET /account/mfa/reset with handler MfaResetHandler
+INFO | 2026-02-11T23:41:51.9301862Z | Route registered: POST /account/mfa/reset with handler MfaResetPostHandler
+INFO | 2026-02-11T23:41:51.9301949Z | Route registered: GET /setup with handler SetupHandler
+INFO | 2026-02-11T23:41:51.9302002Z | Route registered: POST /setup with handler SetupPostHandler
+INFO | 2026-02-11T23:41:51.9302061Z | Route registered: GET /admin/data with handler DataEntitiesHandler
+INFO | 2026-02-11T23:41:51.9302151Z | Route registered: GET /admin/data/{type} with handler DataListHandler
+INFO | 2026-02-11T23:41:51.9302223Z | Route registered: GET /admin/data/{type}/csv with handler DataListCsvHandler
+INFO | 2026-02-11T23:41:51.9302283Z | Route registered: GET /admin/data/{type}/html with handler DataListHtmlHandler
+INFO | 2026-02-11T23:41:51.9302341Z | Route registered: GET /admin/data/{type}/import with handler DataImportHandler
+INFO | 2026-02-11T23:41:51.9302401Z | Route registered: POST /admin/data/{type}/import with handler DataImportPostHandler
+INFO | 2026-02-11T23:41:51.9302460Z | Route registered: GET /admin/data/{type}/create with handler DataCreateHandler
+INFO | 2026-02-11T23:41:51.9302524Z | Route registered: POST /admin/data/{type}/create with handler DataCreatePostHandler
+INFO | 2026-02-11T23:41:51.9302583Z | Route registered: GET /admin/data/{type}/{id} with handler DataViewHandler
+INFO | 2026-02-11T23:41:51.9303053Z | Route registered: GET /admin/data/{type}/{id}/rtf with handler DataViewRtfHandler
+INFO | 2026-02-11T23:41:51.9303138Z | Route registered: GET /admin/data/{type}/{id}/html with handler DataViewHtmlHandler
+INFO | 2026-02-11T23:41:51.9303235Z | Route registered: GET /admin/data/{type}/{id}/edit with handler DataEditHandler
+INFO | 2026-02-11T23:41:51.9303322Z | Route registered: POST /admin/data/{type}/{id}/edit with handler DataEditPostHandler
+INFO | 2026-02-11T23:41:51.9303415Z | Route registered: POST /admin/data/{type}/{id}/clone with handler DataClonePostHandler
+INFO | 2026-02-11T23:41:51.9303473Z | Route registered: POST /admin/data/{type}/{id}/clone-edit with handler DataCloneEditPostHandler
+INFO | 2026-02-11T23:41:51.9303527Z | Route registered: GET /admin/data/{type}/{id}/delete with handler DataDeleteHandler
+INFO | 2026-02-11T23:41:51.9303581Z | Route registered: POST /admin/data/{type}/{id}/delete with handler DataDeletePostHandler
+INFO | 2026-02-11T23:41:51.9303637Z | Route registered: GET /api/{type} with handler DataApiListHandler
+INFO | 2026-02-11T23:41:51.9303694Z | Route registered: POST /api/{type} with handler DataApiPostHandler
+INFO | 2026-02-11T23:41:51.9303759Z | Route registered: GET /api/{type}/{id} with handler DataApiGetHandler
+INFO | 2026-02-11T23:41:51.9303821Z | Route registered: PUT /api/{type}/{id} with handler DataApiPutHandler
+INFO | 2026-02-11T23:41:51.9303930Z | Route registered: PATCH /api/{type}/{id} with handler DataApiPatchHandler
+INFO | 2026-02-11T23:41:51.9304010Z | Route registered: DELETE /api/{type}/{id} with handler DataApiDeleteHandler
+INFO | 2026-02-11T23:41:51.9304070Z | Route registered: GET /admin/reload-templates with handler ReloadTemplatesHandler
+INFO | 2026-02-11T23:41:51.9304102Z | Route registered: GET /status with handler <BuildPageHandler>b__0
+INFO | 2026-02-11T23:41:51.9304155Z | Route registered: GET /statusRaw with handler TimeRawHandler
+INFO | 2026-02-11T23:41:51.9593562Z | ClientRequestTracker pruning loop starting.
+INFO | 2026-02-11T23:41:51.9623367Z | WireUpRequestHandlingAndLoggerAsyncLifetime completed and request handling is live.
+INFO | 2026-02-11T23:41:52.0084806Z | BareMetalWeb server is ready - listening for requests on http://localhost:5232
+INFO | 2026-02-11T23:41:52.0127014Z | HTTPS redirect settings: mode=IfAvailable, trustForwardedHeaders=False, redirectHost=(auto), redirectPort=(auto)
+INFO | 2026-02-11T23:41:52.0133167Z | HTTPS endpoint not configured. Configure HTTPS (ASPNETCORE_URLS / Kestrel) to expose an https:// address.
