@@ -80,8 +80,8 @@ if (pageStoreEnabled)
 
 bool allowAccountCreation = app.Configuration.GetValue("Auth:AllowAccountCreation", false);
 IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot);
-IHtmlTemplate mainTemplate = templateStore.Get("Index");
-IHtmlTemplate blankTemplate = templateStore.Get("Blank");
+IHtmlTemplate mainTemplate = templateStore.Get("index");
+IHtmlTemplate blankTemplate = templateStore.Get("blank");
 CancellationTokenSource cts = new CancellationTokenSource();
 
 BareMetalWebServer appInfo = ProgramSetup.CreateAppInfo(app, logger, htmlRenderer, pageInfoFactory, mainTemplate, metricsTracker, throttling, cts);
@@ -177,10 +177,11 @@ appInfo.RegisterRoute("GET /statusRaw", new RouteHandlerData(pageInfoFactory.Raw
 // Register page store routes if enabled
 if (pageStoreEnabled && pageStoreHandlers != null)
 {
-    appInfo.RegisterRoute("GET /pages/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), pageStoreHandlers.GetPageAsync));
-    appInfo.RegisterRoute("HEAD /pages/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), pageStoreHandlers.HeadPageAsync));
-    appInfo.RegisterRoute("POST /pages", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), pageStoreHandlers.PostPageAsync));
-    appInfo.RegisterRoute("PUT /pages/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), pageStoreHandlers.PutPageAsync));
+    var pageStorePermission = app.Configuration.GetValue("PageStore:RequiredPermission", "Public");
+    appInfo.RegisterRoute("GET /pages/{id}", new RouteHandlerData(pageInfoFactory.RawPage(pageStorePermission, false), pageStoreHandlers.GetPageAsync));
+    appInfo.RegisterRoute("HEAD /pages/{id}", new RouteHandlerData(pageInfoFactory.RawPage(pageStorePermission, false), pageStoreHandlers.HeadPageAsync));
+    appInfo.RegisterRoute("POST /pages", new RouteHandlerData(pageInfoFactory.RawPage(pageStorePermission, false), pageStoreHandlers.PostPageAsync));
+    appInfo.RegisterRoute("PUT /pages/{id}", new RouteHandlerData(pageInfoFactory.RawPage(pageStorePermission, false), pageStoreHandlers.PutPageAsync));
     logger.LogInfo("Page store API routes registered");
 }
 

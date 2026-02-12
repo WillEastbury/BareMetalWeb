@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Data.PageStore;
 using BareMetalWeb.Core.Interfaces;
+using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Host;
 
@@ -201,13 +202,19 @@ public sealed class PageStoreHandlers
     {
         pageId = 0;
         
-        if (!context.Request.RouteValues.TryGetValue("id", out var idValue))
+        var pageContext = context.GetPageContext();
+        if (pageContext == null)
             return false;
 
-        var idString = idValue?.ToString();
-        if (string.IsNullOrWhiteSpace(idString))
-            return false;
+        for (int i = 0; i < pageContext.PageMetaDataKeys.Length; i++)
+        {
+            if (string.Equals(pageContext.PageMetaDataKeys[i], "id", StringComparison.OrdinalIgnoreCase))
+            {
+                var idString = pageContext.PageMetaDataValues[i];
+                return long.TryParse(idString, out pageId) && pageId > 0;
+            }
+        }
 
-        return long.TryParse(idString, out pageId) && pageId > 0;
+        return false;
     }
 }
