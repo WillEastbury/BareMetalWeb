@@ -13,7 +13,7 @@ public class BareMetalWebServer : IBareWebHost
     // Content Security Policy: SECURITY TRADE-OFF - Includes 'unsafe-inline' for script-src and style-src.
     // This weakens XSS protection in exchange for templating simplicity and avoiding nonce/hash management.
     // This is a conscious choice prioritizing developer experience and performance over maximum CSP security.
-    // Templates with HTML encoding (implemented) provide the primary XSS defense layer.
+    // HTML encoding in HtmlRenderer (see WriteHtmlEncoded) provides the primary XSS defense layer.
     // To eliminate 'unsafe-inline': implement CSP nonce generation and inject into all inline script/style tags.
     private const string ContentSecurityPolicy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
     private static readonly TimeSpan MenuCacheTtl = TimeSpan.FromSeconds(30);
