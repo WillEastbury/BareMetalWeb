@@ -1,8 +1,0 @@
-INFO | 2026-02-11T22:43:00.9079793Z | GET /.well-known/appspecific/com.chrome.devtools.json|404|::1
-INFO | 2026-02-11T22:43:01.1140932Z | GET /static/css/bootstrap.min.css.map|404|::1|static
-INFO | 2026-02-11T22:43:05.9048614Z | GET /admin/data/conference-sessions|GET|/admin/data/{type}|type=conference-sessions|200|::1
-INFO | 2026-02-11T22:43:05.9474533Z | GET /.well-known/appspecific/com.chrome.devtools.json|404|::1
-INFO | 2026-02-11T22:43:05.9937296Z | GET /static/css/site.css|200|::1|static
-INFO | 2026-02-11T22:43:05.9969464Z | GET /static/css/bootstrap.min.css|200|::1|static
-INFO | 2026-02-11T22:43:06.2604187Z | GET /static/css/bootstrap.min.css.map|404|::1|static
-INFO | 2026-02-11T22:44:03.9397202Z | Log segment complete; cycling to next segment.

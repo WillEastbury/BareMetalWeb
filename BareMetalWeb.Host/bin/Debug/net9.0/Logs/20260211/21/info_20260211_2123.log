@@ -1,4 +1,0 @@
-INFO | 2026-02-11T21:23:07.1798260Z | GET /admin/logs|200|::1
-INFO | 2026-02-11T21:23:09.7145826Z | GET /admin/logs|200|::1
-INFO | 2026-02-11T21:23:12.0994240Z | GET /admin/logs|200|::1
-INFO | 2026-02-11T21:25:25.2874324Z | Log segment complete; cycling to next segment.

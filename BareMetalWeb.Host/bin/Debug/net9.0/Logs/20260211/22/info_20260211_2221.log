@@ -1,5 +1,0 @@
-INFO | 2026-02-11T22:21:00.7707118Z | GET /admin/data|200|::1
-INFO | 2026-02-11T22:21:03.7294898Z | GET /admin/sample-data|200|::1
-INFO | 2026-02-11T22:21:34.0399762Z | POST /admin/sample-data|200|::1
-INFO | 2026-02-11T22:21:46.3118609Z | GET /admin/data/customers|500|::1
-INFO | 2026-02-11T22:24:15.4931438Z | Log segment complete; cycling to next segment.
