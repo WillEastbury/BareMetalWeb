@@ -46,7 +46,7 @@ var rootPermissionSet = new HashSet<string>(entityPermissions, StringComparer.Or
     "monitoring"
 };
 
-ProgramSetup.EnsureRootPermissions(logger, rootPermissionSet.ToArray());
+ProgramSetup.EnsureRootPermissionsAsync(logger, rootPermissionSet.ToArray()).AsTask().GetAwaiter().GetResult();
 
 IHtmlFragmentStore fragmentStore = new HtmlFragmentStore();
 IHtmlFragmentRenderer fragmentRenderer = new HtmlFragmentRenderer(fragmentStore);
@@ -152,7 +152,7 @@ appInfo.RegisterRoute("GET /status", new RouteHandlerData(pageInfoFactory.Templa
 })));
 appInfo.RegisterRoute("GET /statusRaw", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), routeHandlers.TimeRawHandler));
 
-appInfo.BuildAppInfoMenuOptions();
+await appInfo.BuildAppInfoMenuOptionsAsync();
 await appInfo.WireUpRequestHandlingAndLoggerAsyncLifetime();
 app.Lifetime.ApplicationStarted.Register(() =>
 {
@@ -277,7 +277,7 @@ static class ProgramSetup
             pruneInterval: TimeSpan.FromSeconds(app.Configuration.GetValue("ClientRequests:PruneIntervalSeconds", 30)),
             maxEntries: app.Configuration.GetValue("ClientRequests:MaxEntries", 100000));
 
-    public static void EnsureRootPermissions(IBufferedLogger logger, params string[] requiredPermissions)
+    public static async ValueTask EnsureRootPermissionsAsync(IBufferedLogger logger, string[] requiredPermissions, CancellationToken cancellationToken = default)
     {
         if (requiredPermissions is null || requiredPermissions.Length == 0)
             return;
@@ -291,7 +291,7 @@ static class ProgramSetup
             }
         };
 
-        var users = DataStoreProvider.Current.Query<User>(query).ToList();
+        var users = (await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false)).ToList();
         foreach (var user in users)
         {
             if (user is null || !user.IsActive)
@@ -313,7 +313,7 @@ static class ProgramSetup
                 continue;
 
             user.Permissions = perms.ToArray();
-            DataStoreProvider.Current.Save(user);
+            await DataStoreProvider.Current.SaveAsync(user, cancellationToken).ConfigureAwait(false);
             logger.LogInfo($"Updated root permissions for {user.UserName}.");
         }
     }

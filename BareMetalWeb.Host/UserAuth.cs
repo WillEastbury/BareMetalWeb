@@ -18,43 +18,6 @@ public static class UserAuth
     // logged out after the TTL expires even with continuous use. This is intentional
     // for simplicity and predictable session lifetimes. To implement sliding expiration,
     // update LastSeenUtc and extend ExpiresUtc on each request.
-    public static UserSession? GetSession(HttpContext context)
-    {
-        if (context == null) throw new ArgumentNullException(nameof(context));
-
-        var protectedSessionId = context.GetCookie(SessionCookieName);
-        if (string.IsNullOrWhiteSpace(protectedSessionId))
-            return null;
-
-        var sessionId = CookieProtection.Unprotect(protectedSessionId);
-        if (string.IsNullOrWhiteSpace(sessionId))
-        {
-            context.DeleteCookie(SessionCookieName);
-            return null;
-        }
-
-        var session = DataStoreProvider.Current.Load<UserSession>(sessionId);
-        if (session == null)
-            return null;
-
-        if (string.IsNullOrWhiteSpace(session.UserId))
-        {
-            session.IsRevoked = true;
-            DataStoreProvider.Current.Save(session);
-            context.DeleteCookie(SessionCookieName);
-            return null;
-        }
-
-        if (session.IsExpired(DateTime.UtcNow))
-        {
-            RevokeSession(session);
-            context.DeleteCookie(SessionCookieName);
-            return null;
-        }
-
-        return session;
-    }
-
     public static async ValueTask<UserSession?> GetSessionAsync(HttpContext context, CancellationToken cancellationToken = default)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
@@ -93,34 +56,6 @@ public static class UserAuth
         return session;
     }
 
-    public static User? GetUser(HttpContext context)
-    {
-        var session = GetSession(context);
-        if (session == null)
-            return null;
-
-        var user = Users.GetById(session.UserId);
-        if (user == null || !user.IsActive)
-            return null;
-
-        return user;
-    }
-
-    public static User? GetRequestUser(HttpContext context)
-    {
-        var sessionUser = GetUser(context);
-        if (sessionUser != null)
-            return sessionUser;
-
-        if (!IsApiRequest(context))
-            return null;
-
-        if (!TryGetApiKey(context, out var apiKey))
-            return null;
-
-        return SystemPrincipal.FindByApiKey(apiKey);
-    }
-
     public static async ValueTask<User?> GetUserAsync(HttpContext context, CancellationToken cancellationToken = default)
     {
         var session = await GetSessionAsync(context, cancellationToken).ConfigureAwait(false);
@@ -146,7 +81,7 @@ public static class UserAuth
         if (!TryGetApiKey(context, out var apiKey))
             return null;
 
-        return await Task.FromResult(SystemPrincipal.FindByApiKey(apiKey));
+        return await SystemPrincipal.FindByApiKeyAsync(apiKey, cancellationToken).ConfigureAwait(false);
     }
 
     public static async ValueTask SignInAsync(HttpContext context, User user, bool rememberMe, CancellationToken cancellationToken = default)
@@ -197,12 +132,6 @@ public static class UserAuth
         }
 
         context.DeleteCookie(SessionCookieName);
-    }
-
-    private static void RevokeSession(UserSession session)
-    {
-        session.IsRevoked = true;
-        DataStoreProvider.Current.Save(session);
     }
 
     private static bool IsApiRequest(HttpContext context)
