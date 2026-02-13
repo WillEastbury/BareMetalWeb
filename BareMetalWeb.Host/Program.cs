@@ -68,89 +68,13 @@ ProgramSetup.ConfigureCors(app, appInfo);
 ProgramSetup.ConfigureHttps(app, appInfo);
 ProgramSetup.ConfigureProxyRoutes(app, appInfo, logger, pageInfoFactory);
 
-// Standard render routes
-appInfo.RegisterRoute("GET /", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Home", "<p></p>" }, "Public", false, 60), routeHandlers.DefaultPageHandler)); // new method to register routes
-// appInfo.RegisterRoute("GET /about", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "About", "<p>This is the about page.</p>" }, "Public", true, 60), routeHandlers.DefaultPageHandler));
-// appInfo.RegisterRoute("GET /about/{what}", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "About", "<p>This is the about page.</p>" }, "Public", false, 60), routeHandlers.DefaultPageHandler));
-appInfo.RegisterRoute("GET /metrics", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Metric Viewer", "" }, "monitoring", true, 1, navGroup: "System", navAlignment: NavAlignment.Right), routeHandlers.BuildPageHandler(context =>
-{
-    var app = context.GetApp()!;
-    app.Metrics.GetMetricTable(out string[] tableColumns, out string[][] tableRows);
-    context.SetStringValue("title", "Metric Viewer");
-    context.AddTable(tableColumns, tableRows);
-})));
-appInfo.RegisterRoute("GET /metrics/json", new RouteHandlerData(pageInfoFactory.RawPage("monitoring", false), routeHandlers.MetricsJsonHandler));
-appInfo.RegisterRoute("GET /admin/logs", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Logs", "" }, "monitoring", true, 1, navGroup: "System", navAlignment: NavAlignment.Right), routeHandlers.LogsViewerHandler));
-appInfo.RegisterRoute("GET /admin/logs/prune", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Prune Logs", "" }, "monitoring", false, 1), routeHandlers.LogsPruneHandler));
-appInfo.RegisterRoute("POST /admin/logs/prune", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Prune Logs", "" }, "monitoring", false, 1), routeHandlers.LogsPrunePostHandler));
-appInfo.RegisterRoute("GET /admin/logs/download", new RouteHandlerData(pageInfoFactory.RawPage("monitoring", false), routeHandlers.LogsDownloadHandler));
-appInfo.RegisterRoute("GET /admin/sample-data", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Generate Sample Data", "" }, "admin", true, 1, navGroup: "System", navAlignment: NavAlignment.Right), routeHandlers.SampleDataHandler));
-appInfo.RegisterRoute("POST /admin/sample-data", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Generate Sample Data", "" }, "admin", false, 1), routeHandlers.SampleDataPostHandler));
-appInfo.RegisterRoute("GET /topips", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Top IPs", "" }, "monitoring", true, 1, navGroup: "System", navAlignment: NavAlignment.Right), routeHandlers.BuildPageHandler(context =>
-{
-    var app = context.GetApp()!;
-    app.ClientRequests.GetTopClientsTable(20, out var tableColumns, out var tableRows);
-    context.SetStringValue("title", "Top IPs");
-    context.AddTable(tableColumns, tableRows);
-})));
-appInfo.RegisterRoute("GET /suspiciousips", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Suspicious IPs", "" }, "monitoring", true, 1, navGroup: "System", navAlignment: NavAlignment.Right), routeHandlers.BuildPageHandler(context =>
-{
-    var app = context.GetApp()!;
-    app.ClientRequests.GetSuspiciousClientsTable(20, out var tableColumns, out var tableRows);
-    context.SetStringValue("title", "Suspicious IPs");
-    context.AddTable(tableColumns, tableRows);
-})));
-appInfo.RegisterRoute("GET /login", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Login", "" }, "AnonymousOnly", true, 1, navAlignment: NavAlignment.Right, navRenderStyle: NavRenderStyle.Button, navColorClass: "btn-success"), routeHandlers.LoginHandler));
-appInfo.RegisterRoute("POST /login", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Login", "" }, "AnonymousOnly", false, 1), routeHandlers.LoginPostHandler));
-appInfo.RegisterRoute("GET /mfa", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Verify MFA", "" }, "AnonymousOnly", false, 1), routeHandlers.MfaChallengeHandler));
-appInfo.RegisterRoute("POST /mfa", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Verify MFA", "" }, "AnonymousOnly", false, 1), routeHandlers.MfaChallengePostHandler));
-if (allowAccountCreation)
-{
-    appInfo.RegisterRoute("GET /register", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Create Account", "" }, "AnonymousOnly", false, 1, navAlignment: NavAlignment.Right), routeHandlers.RegisterHandler));
-    appInfo.RegisterRoute("POST /register", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Create Account", "" }, "AnonymousOnly", false, 1), routeHandlers.RegisterPostHandler));
-}
-appInfo.RegisterRoute("GET /logout", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Logout", "" }, "Authenticated", false, 1), routeHandlers.LogoutHandler));
-appInfo.RegisterRoute("POST /logout", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Logout", "" }, "Authenticated", false, 1), routeHandlers.LogoutPostHandler));
-appInfo.RegisterRoute("GET /account", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Account", "" }, "Authenticated", true, 1, navAlignment: NavAlignment.Right), routeHandlers.AccountHandler));
-appInfo.RegisterRoute("GET /account/mfa", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Multi-Factor Authentication", "" }, "Authenticated", true, 1), routeHandlers.MfaStatusHandler));
-appInfo.RegisterRoute("GET /account/mfa/setup", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Enable MFA", "" }, "Authenticated", false, 1), routeHandlers.MfaSetupHandler));
-appInfo.RegisterRoute("POST /account/mfa/setup", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Enable MFA", "" }, "Authenticated", false, 1), routeHandlers.MfaSetupPostHandler));
-appInfo.RegisterRoute("GET /account/mfa/reset", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reset MFA", "" }, "Authenticated", false, 1), routeHandlers.MfaResetHandler));
-appInfo.RegisterRoute("POST /account/mfa/reset", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reset MFA", "" }, "Authenticated", false, 1), routeHandlers.MfaResetPostHandler));
-appInfo.RegisterRoute("GET /setup", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Setup", "" }, "AnonymousOnly", false, 1), routeHandlers.SetupHandler));
-appInfo.RegisterRoute("POST /setup", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Setup", "" }, "AnonymousOnly", false, 1), routeHandlers.SetupPostHandler));
-appInfo.RegisterRoute("GET /admin/data", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Data", "" }, "Authenticated", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right), routeHandlers.DataEntitiesHandler));
-appInfo.RegisterRoute("GET /admin/data/{type}", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Data", "" }, "Authenticated", false, 1, navGroup: "Admin", navAlignment: NavAlignment.Right), routeHandlers.DataListHandler));
-appInfo.RegisterRoute("GET /admin/data/{type}/csv", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataListCsvHandler));
-appInfo.RegisterRoute("GET /admin/data/{type}/html", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataListHtmlHandler));
-appInfo.RegisterRoute("GET /admin/data/{type}/import", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Import CSV", "" }, "Authenticated", false, 1), routeHandlers.DataImportHandler));
-appInfo.RegisterRoute("POST /admin/data/{type}/import", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Import CSV", "" }, "Authenticated", false, 1), routeHandlers.DataImportPostHandler));
-appInfo.RegisterRoute("GET /admin/data/{type}/create", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Create", "" }, "Authenticated", false, 1), routeHandlers.DataCreateHandler));
-appInfo.RegisterRoute("POST /admin/data/{type}/create", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Create", "" }, "Authenticated", false, 1), routeHandlers.DataCreatePostHandler));
-appInfo.RegisterRoute("GET /admin/data/{type}/{id}", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "View", "" }, "Authenticated", false, 1), routeHandlers.DataViewHandler));
-appInfo.RegisterRoute("GET /admin/data/{type}/{id}/rtf", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataViewRtfHandler));
-appInfo.RegisterRoute("GET /admin/data/{type}/{id}/html", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataViewHtmlHandler));
-appInfo.RegisterRoute("GET /admin/data/{type}/{id}/edit", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Edit", "" }, "Authenticated", false, 1), routeHandlers.DataEditHandler));
-appInfo.RegisterRoute("POST /admin/data/{type}/{id}/edit", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Edit", "" }, "Authenticated", false, 1), routeHandlers.DataEditPostHandler));
-appInfo.RegisterRoute("POST /admin/data/{type}/{id}/clone", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataClonePostHandler));
-appInfo.RegisterRoute("POST /admin/data/{type}/{id}/clone-edit", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataCloneEditPostHandler));
-appInfo.RegisterRoute("GET /admin/data/{type}/{id}/delete", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Delete", "" }, "Authenticated", false, 1), routeHandlers.DataDeleteHandler));
-appInfo.RegisterRoute("POST /admin/data/{type}/{id}/delete", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Delete", "" }, "Authenticated", false, 1), routeHandlers.DataDeletePostHandler));
-
-appInfo.RegisterRoute("GET /api/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiListHandler));
-appInfo.RegisterRoute("POST /api/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPostHandler));
-appInfo.RegisterRoute("GET /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiGetHandler));
-appInfo.RegisterRoute("PUT /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPutHandler));
-appInfo.RegisterRoute("PATCH /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPatchHandler));
-appInfo.RegisterRoute("DELETE /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiDeleteHandler));
-appInfo.RegisterRoute("GET /admin/reload-templates", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "System", navAlignment: NavAlignment.Right), routeHandlers.ReloadTemplatesHandler));
-appInfo.RegisterRoute("GET /status", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "" }, "Public", false, 1), routeHandlers.BuildPageHandler(context =>
-{
-    context.Response.ContentType = "text/html";
-    context.SetStringValue("title", "Server Time");
-    context.SetStringValue("message", $"Current server time is: {DateTime.UtcNow:O}");
-})));
-appInfo.RegisterRoute("GET /statusRaw", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), routeHandlers.TimeRawHandler));
+// Register routes using plugin-like extension methods
+appInfo.RegisterStaticRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+appInfo.RegisterAuthRoutes(routeHandlers, pageInfoFactory, mainTemplate, allowAccountCreation);
+appInfo.RegisterMonitoringRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+appInfo.RegisterAdminRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+appInfo.RegisterDataRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
 
 appInfo.BuildAppInfoMenuOptions();
 await appInfo.WireUpRequestHandlingAndLoggerAsyncLifetime();
