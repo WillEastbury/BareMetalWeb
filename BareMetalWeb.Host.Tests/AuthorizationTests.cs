@@ -10,8 +10,14 @@ namespace BareMetalWeb.Host.Tests;
 /// Tests for authorization logic in BareMetalWebServer.IsAuthorized method.
 /// These tests validate that empty permissions allow public access (fix for blank permissions issue).
 /// </summary>
-public class AuthorizationTests
+public class AuthorizationTests : IClassFixture<DataStoreFixture>
 {
+    private readonly DataStoreFixture _fixture;
+
+    public AuthorizationTests(DataStoreFixture fixture)
+    {
+        _fixture = fixture;
+    }
     [Fact]
     public void IsAuthorized_NullPageInfo_ReturnsTrue()
     {
@@ -356,5 +362,43 @@ public class AuthorizationTests
         public string Body => "<body>Mock</body>";
         public string Footer => "<footer>Mock</footer>";
         public string Script => "<script>/* mock */</script>";
+    }
+}
+
+/// <summary>
+/// xUnit fixture to initialize the DataStoreProvider once for all tests.
+/// </summary>
+public class DataStoreFixture : IDisposable
+{
+    private readonly string _tempDataPath;
+
+    public DataStoreFixture()
+    {
+        // Create a temporary directory for test data
+        _tempDataPath = Path.Combine(Path.GetTempPath(), $"BareMetalWebTests_{Guid.NewGuid()}");
+        Directory.CreateDirectory(_tempDataPath);
+
+        // Initialize the data store with a temporary file-based provider
+        var dataStore = new DataObjectStore();
+        DataStoreProvider.Current = dataStore;
+        
+        var provider = new LocalFolderBinaryDataProvider(_tempDataPath);
+        dataStore.RegisterProvider(provider);
+    }
+
+    public void Dispose()
+    {
+        // Clean up the temporary directory
+        try
+        {
+            if (Directory.Exists(_tempDataPath))
+            {
+                Directory.Delete(_tempDataPath, recursive: true);
+            }
+        }
+        catch
+        {
+            // Best effort cleanup - if it fails, OS will eventually clean up temp files
+        }
     }
 }

@@ -486,12 +486,14 @@ public class BareMetalWebServer : IBareWebHost
         if (string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
             return !isAnonymous;
 
-        if (isAnonymous)
-            return false;
-
+        // Parse required permissions and check if empty after splitting
         var requiredPermissions = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (requiredPermissions.Length == 0)
-            return true;
+            return true; // No actual permissions after parsing, treat as public
+
+        // If we reach here, specific permissions are required
+        if (isAnonymous)
+            return false;
 
         var userPermissions = new HashSet<string>(user!.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
 
