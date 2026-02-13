@@ -13,11 +13,9 @@ public static class UserAuth
     private static readonly TimeSpan DefaultSessionLifetime = TimeSpan.FromHours(8);
     private static readonly TimeSpan RememberMeLifetime = TimeSpan.FromDays(30);
 
-    // Note: Session expiration uses a fixed TTL model (not sliding window).
-    // Sessions expire at ExpiresUtc regardless of activity. Active users will be
-    // logged out after the TTL expires even with continuous use. This is intentional
-    // for simplicity and predictable session lifetimes. To implement sliding expiration,
-    // update LastSeenUtc and extend ExpiresUtc on each request.
+    // Note: Session expiration uses a sliding window model.
+    // Sessions extend their expiration time with each access, keeping active users
+    // logged in. The session lifetime is reset on each request.
     public static UserSession? GetSession(HttpContext context)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
@@ -51,6 +49,15 @@ public static class UserAuth
             context.DeleteCookie(SessionCookieName);
             return null;
         }
+
+        // Update LastSeenUtc and extend ExpiresUtc for sliding expiration
+        // Note: Session updates are not synchronized across concurrent requests.
+        // In the rare case of simultaneous access, the last write wins. This is
+        // acceptable for session management and avoids locking overhead.
+        var now = DateTime.UtcNow;
+        session.LastSeenUtc = now;
+        session.ExpiresUtc = now.Add(session.RememberMe ? RememberMeLifetime : DefaultSessionLifetime);
+        DataStoreProvider.Current.Save(session);
 
         return session;
     }
@@ -89,6 +96,15 @@ public static class UserAuth
             context.DeleteCookie(SessionCookieName);
             return null;
         }
+
+        // Update LastSeenUtc and extend ExpiresUtc for sliding expiration
+        // Note: Session updates are not synchronized across concurrent requests.
+        // In the rare case of simultaneous access, the last write wins. This is
+        // acceptable for session management and avoids locking overhead.
+        var now = DateTime.UtcNow;
+        session.LastSeenUtc = now;
+        session.ExpiresUtc = now.Add(session.RememberMe ? RememberMeLifetime : DefaultSessionLifetime);
+        await DataStoreProvider.Current.SaveAsync(session, cancellationToken).ConfigureAwait(false);
 
         return session;
     }
