@@ -215,6 +215,8 @@ public class UserAuthTests : IDisposable
         
         if (!string.IsNullOrEmpty(sessionId))
         {
+            // Simulate protected cookie value as it would appear in a real HTTP request
+            // CookieProtection.Protect encrypts the session ID before storing it in the cookie
             var protectedSessionId = CookieProtection.Protect(sessionId);
             context.Request.Headers.Cookie = $"{UserAuth.SessionCookieName}={protectedSessionId}";
         }

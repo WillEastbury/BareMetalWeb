@@ -51,6 +51,9 @@ public static class UserAuth
         }
 
         // Update LastSeenUtc and extend ExpiresUtc for sliding expiration
+        // Note: Session updates are not synchronized across concurrent requests.
+        // In the rare case of simultaneous access, the last write wins. This is
+        // acceptable for session management and avoids locking overhead.
         var now = DateTime.UtcNow;
         session.LastSeenUtc = now;
         session.ExpiresUtc = now.Add(session.RememberMe ? RememberMeLifetime : DefaultSessionLifetime);
@@ -95,6 +98,9 @@ public static class UserAuth
         }
 
         // Update LastSeenUtc and extend ExpiresUtc for sliding expiration
+        // Note: Session updates are not synchronized across concurrent requests.
+        // In the rare case of simultaneous access, the last write wins. This is
+        // acceptable for session management and avoids locking overhead.
         var now = DateTime.UtcNow;
         session.LastSeenUtc = now;
         session.ExpiresUtc = now.Add(session.RememberMe ? RememberMeLifetime : DefaultSessionLifetime);
