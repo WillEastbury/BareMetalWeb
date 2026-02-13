@@ -1193,7 +1193,8 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static string BuildOtpClientScript(HttpContext context, string formAction)
     {
-        var action = WebUtility.HtmlEncode(formAction);
+        // JavaScript escape the action for safe embedding in script
+        var action = formAction.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\"", "\\\"");
         var nonce = context.GetCspNonce();
         return $"<script src=\"/static/js/otp.js\" nonce=\"{nonce}\"></script><script nonce=\"{nonce}\">setupOtpValidation('{action}');</script>";
     }

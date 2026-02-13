@@ -9,9 +9,18 @@ document.addEventListener('DOMContentLoaded', function () {
         var preview = document.getElementById(previewId);
         
         if (preview) {
+            var currentObjectUrl = null;
+            
             input.addEventListener('change', function () {
+                // Revoke previous object URL to prevent memory leak
+                if (currentObjectUrl) {
+                    window.URL.revokeObjectURL(currentObjectUrl);
+                    currentObjectUrl = null;
+                }
+                
                 if (this.files && this.files[0]) {
-                    preview.src = window.URL.createObjectURL(this.files[0]);
+                    currentObjectUrl = window.URL.createObjectURL(this.files[0]);
+                    preview.src = currentObjectUrl;
                 }
             });
         }
