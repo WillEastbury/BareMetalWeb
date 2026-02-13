@@ -1,0 +1,41 @@
+name: Copilot Setup Steps
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+      
+      - name: Restore dependencies
+        run: dotnet restore BareMetalWeb.sln
+      
+      - name: Build solution
+        run: dotnet build BareMetalWeb.sln --no-restore --configuration Release
+      
+      - name: Run tests
+        run: dotnet test BareMetalWeb.sln --no-build --configuration Release --verbosity minimal
+      
+      - name: Display environment info
+        run: |
+          echo "Environment setup complete!"
+          echo "- .NET SDK version: $(dotnet --version)"
+          echo "- Build configuration: Release"
+          echo "- Test framework: xUnit"
+          echo ""
+          echo "Available commands:"
+          echo "  dotnet build BareMetalWeb.sln"
+          echo "  dotnet test BareMetalWeb.sln"
+          echo "  dotnet run --project BareMetalWeb.Host"
+          echo "  dotnet run --project BareMetalWeb.PerformanceTests"
