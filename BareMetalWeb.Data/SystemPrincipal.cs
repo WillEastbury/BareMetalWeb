@@ -11,12 +11,13 @@ public sealed class SystemPrincipal : User
     [DataField(Label = "API Keys", Order = 10, Required = false, List = false, View = false, Edit = true, Create = true, Placeholder = "one key per line")]
     public List<string> ApiKeyHashes { get; set; } = new();
 
-    public static SystemPrincipal? FindByApiKey(string apiKey)
+    public static async ValueTask<SystemPrincipal?> FindByApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(apiKey))
             return null;
 
-        foreach (var principal in DataStoreProvider.Current.Query<SystemPrincipal>(null))
+        var principals = await DataStoreProvider.Current.QueryAsync<SystemPrincipal>(null, cancellationToken).ConfigureAwait(false);
+        foreach (var principal in principals)
         {
             if (principal == null || !principal.IsActive)
                 continue;

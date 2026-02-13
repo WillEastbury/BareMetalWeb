@@ -34,15 +34,6 @@ public sealed class DataObjectStore : IDataObjectStore
 
     public void ClearProviders() => _providersList.Clear();
 
-    // Note: Synchronous methods block on async operations via GetAwaiter().GetResult().
-    // This can block threads and may risk deadlocks in certain sync contexts.
-    // Prefer using the async methods (SaveAsync, LoadAsync, etc.) when possible
-    // to avoid blocking and achieve better performance and scalability.
-    public void Save<T>(T obj) where T : BaseDataObject
-    {
-        SaveAsync(obj).AsTask().GetAwaiter().GetResult();
-    }
-
     public async ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
     {
         if (obj is null) throw new ArgumentNullException(nameof(obj));
@@ -50,21 +41,11 @@ public sealed class DataObjectStore : IDataObjectStore
         await provider.SaveAsync(obj, cancellationToken).ConfigureAwait(false);
     }
 
-    public T? Load<T>(string id) where T : BaseDataObject
-    {
-        return LoadAsync<T>(id).AsTask().GetAwaiter().GetResult();
-    }
-
     public async ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
     {
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
         var provider = ResolveProvider(typeof(T));
         return await provider.LoadAsync<T>(id, cancellationToken).ConfigureAwait(false);
-    }
-
-    public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
-    {
-        return QueryAsync<T>(query).AsTask().GetAwaiter().GetResult();
     }
 
     public async ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
@@ -77,11 +58,6 @@ public sealed class DataObjectStore : IDataObjectStore
     {
         var provider = ResolveProvider(typeof(T));
         return await provider.CountAsync<T>(query, cancellationToken).ConfigureAwait(false);
-    }
-
-    public void Delete<T>(string id) where T : BaseDataObject
-    {
-        DeleteAsync<T>(id).AsTask().GetAwaiter().GetResult();
     }
 
     public async ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
