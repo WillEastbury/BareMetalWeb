@@ -84,7 +84,7 @@ public class TableActionRendererTests
     }
 
     [Fact]
-    public void RenderAction_AllBranches_EncodeIconClassToPreventAttributeInjection()
+    public void RenderAction_NonCsrfBranch_EncodeIconClassToPreventAttributeInjection()
     {
         // Arrange
         var maliciousIconClass = "bi-trash\" style=\"display:none\" data-hack=\"";
@@ -106,7 +106,7 @@ public class TableActionRendererTests
     }
 
     [Fact]
-    public void RenderAction_AllBranches_EncodeUrlToPreventJavaScriptInjection()
+    public void RenderAction_NonCsrfBranch_EncodeUrlToPreventJavaScriptInjection()
     {
         // Arrange
         var maliciousUrl = "javascript:alert('XSS')";
@@ -127,7 +127,7 @@ public class TableActionRendererTests
     }
 
     [Fact]
-    public void RenderAction_AllBranches_EncodeTitleToPreventAttributeInjection()
+    public void RenderAction_NonCsrfBranch_EncodeTitleToPreventAttributeInjection()
     {
         // Arrange
         var maliciousTitle = "Delete\" onmouseover=\"alert('XSS')";
