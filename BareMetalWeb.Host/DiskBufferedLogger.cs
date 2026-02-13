@@ -171,6 +171,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
                 using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 4096, useAsync: true);
                 using var writer = new StreamWriter(stream);
                 await writer.WriteAsync(content).ConfigureAwait(false);
+                await writer.FlushAsync().ConfigureAwait(false);
                 return;
             }
             catch (IOException) when (attempt < 2)
