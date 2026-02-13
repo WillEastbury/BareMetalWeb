@@ -758,9 +758,12 @@ public static class DataScaffold
 
     private static IEnumerable QueryByType(Type type, QueryDefinition? query)
     {
-        // Note: This uses sync-over-async for scaffolding/reflection scenarios.
+        // Note: This uses sync-over-async for scaffolding/reflection scenarios called from synchronous UI rendering.
         // This is a pragmatic choice to avoid cascading async changes through the entire scaffolding system.
-        // The scaffolding methods are typically called during page rendering and use caching to minimize calls.
+        // CancellationToken.None is used because:
+        // 1. This is only called during UI rendering with cached results (see GetLookupOptions cache)
+        // 2. The synchronous callers (BuildEditFormHtml, BuildListRows, etc.) don't have cancellation context
+        // 3. The operations are typically fast due to caching and small data sets for lookups
         var method = typeof(IDataObjectStore).GetMethod(nameof(IDataObjectStore.QueryAsync))!;
         var generic = method.MakeGenericMethod(type);
         var task = (ValueTask<IEnumerable>)generic.Invoke(DataStoreProvider.Current, new object?[] { query, CancellationToken.None })!;

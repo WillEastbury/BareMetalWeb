@@ -46,7 +46,7 @@ var rootPermissionSet = new HashSet<string>(entityPermissions, StringComparer.Or
     "monitoring"
 };
 
-ProgramSetup.EnsureRootPermissionsAsync(logger, rootPermissionSet.ToArray()).AsTask().GetAwaiter().GetResult();
+await ProgramSetup.EnsureRootPermissionsAsync(logger, rootPermissionSet.ToArray());
 
 IHtmlFragmentStore fragmentStore = new HtmlFragmentStore();
 IHtmlFragmentRenderer fragmentRenderer = new HtmlFragmentRenderer(fragmentStore);
