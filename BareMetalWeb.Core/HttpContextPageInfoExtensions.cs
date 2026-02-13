@@ -236,8 +236,16 @@ public static class HttpContextPageInfoExtensions
         if (pageContext != null)
             return pageContext;
 
-        var newContext = new PageContext(Array.Empty<string>(), Array.Empty<string>());
+        // Get or generate CSP nonce
+        var nonce = context.GetCspNonce();
+        
+        // Create new context with nonce pre-populated
+        var newContext = new PageContext(
+            new[] { "csp_nonce" }, 
+            new[] { nonce }
+        );
         context.SetPageContext(newContext);
+        
         return newContext;
     }
 }
