@@ -1023,7 +1023,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var info = string.IsNullOrWhiteSpace(message)
             ? "<p>Enter the 6-digit code from your authenticator app.</p>"
             : $"<div class=\"alert alert-danger\">{WebUtility.HtmlEncode(message)}</div>";
-        context.SetStringValue("message", info + BuildOtpClientScript("/mfa"));
+        context.SetStringValue("message", info + BuildOtpClientScript(context, "/mfa"));
 
         context.AddFormDefinition(new FormDefinition(
             Action: "/mfa",
@@ -1067,7 +1067,7 @@ public sealed class RouteHandlers : IRouteHandlers
               revealSecret +
               revealOtpAuth;
 
-        context.SetStringValue("message", intro + payload + BuildOtpClientScript("/account/mfa/setup"));
+        context.SetStringValue("message", intro + payload + BuildOtpClientScript(context, "/account/mfa/setup"));
         context.AddFormDefinition(new FormDefinition(
             Action: "/account/mfa/setup",
             Method: "post",
@@ -1191,10 +1191,11 @@ public sealed class RouteHandlers : IRouteHandlers
         return new string('*', secret.Length - reveal) + secret[^reveal..];
     }
 
-    private static string BuildOtpClientScript(string formAction)
+    private static string BuildOtpClientScript(HttpContext context, string formAction)
     {
         var action = WebUtility.HtmlEncode(formAction);
-        return $"<script>(function(){{const f=document.querySelector('form[action=\\\"{action}\\\"]');if(!f) return;const i=f.querySelector('input[name=\\\"code\\\"]');const b=f.querySelector('button[type=\\\"submit\\\"]');if(!i||!b) return;const u=()=>{{const v=(i.value||'').replace(/\\s+/g,'');b.disabled=v.length!==6;}};i.addEventListener('input',u);u();}})();</script>";
+        var nonce = context.GetCspNonce();
+        return $"<script src=\"/static/js/otp.js\" nonce=\"{nonce}\"></script><script nonce=\"{nonce}\">setupOtpValidation('{action}');</script>";
     }
 
     private static async ValueTask NotImplementedHandler(HttpContext context, string message)
@@ -2285,11 +2286,12 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.IsNullOrWhiteSpace(message))
             return string.Empty;
 
-         return $"<div class=\"toast-container position-fixed bottom-0 end-0 p-3\" style=\"z-index: 1100;\">" +
+        var nonce = context.GetCspNonce();
+        return $"<div class=\"toast-container position-fixed bottom-0 end-0 p-3 toast-z-index\">" +
              $"<div id=\"scaffold-toast\" class=\"toast text-bg-success border-0\" role=\"alert\" aria-live=\"assertive\" aria-atomic=\"true\" data-bs-delay=\"2500\">" +
              $"<div class=\"d-flex\"><div class=\"toast-body\">{message}</div>" +
              $"<button type=\"button\" class=\"btn-close btn-close-white me-2 m-auto\" data-bs-dismiss=\"toast\" aria-label=\"Close\"></button></div></div></div>" +
-               "<script>document.addEventListener('DOMContentLoaded',function(){var el=document.getElementById('scaffold-toast');if(!el||!window.bootstrap)return;var toast=new bootstrap.Toast(el);toast.show();var url=new URL(window.location.href);if(url.searchParams.has('toast')){url.searchParams.delete('toast');}if(url.searchParams.has('id')){url.searchParams.delete('id');}if(url.searchParams.has('apikey')){url.searchParams.delete('apikey');}window.history.replaceState({},'',url.toString());});</script>";
+             $"<script src=\"/static/js/toast.js\" nonce=\"{nonce}\"></script>";
     }
 
     public async ValueTask DataApiListHandler(HttpContext context)

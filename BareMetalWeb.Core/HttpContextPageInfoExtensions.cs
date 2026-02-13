@@ -238,6 +238,11 @@ public static class HttpContextPageInfoExtensions
 
         var newContext = new PageContext(Array.Empty<string>(), Array.Empty<string>());
         context.SetPageContext(newContext);
+        
+        // Automatically add CSP nonce to page context
+        var nonce = context.GetCspNonce();
+        context.SetStringValue("csp_nonce", nonce);
+        
         return newContext;
     }
 }
