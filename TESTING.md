@@ -58,6 +58,25 @@ Tests for the API library.
 **Coverage:**
 - Placeholder for future API tests
 
+### BareMetalWeb.Host.Tests
+
+Tests for the Host library which contains the web server and authorization logic.
+
+**Tests:**
+- `AuthorizationTests` - Tests for the IsAuthorized method in BareMetalWebServer
+
+**Coverage:**
+- Empty/null/whitespace permissions allow public access
+- "Public" keyword allows access for all users
+- "AnonymousOnly" keyword restricts access to anonymous users only
+- "Authenticated" keyword requires any authenticated user
+- Specific permission requirements
+- Multiple permission requirements (all must be present)
+- Case-insensitive permission matching
+- Edge cases (permissions that resolve to empty after parsing)
+
+**Test Count:** 18 tests
+
 ## Performance Test Project
 
 ### BareMetalWeb.PerformanceTests
@@ -87,6 +106,7 @@ dotnet test BareMetalWeb.Core.Tests/
 dotnet test BareMetalWeb.Data.Tests/
 dotnet test BareMetalWeb.Rendering.Tests/
 dotnet test BareMetalWeb.API.Tests/
+dotnet test BareMetalWeb.Host.Tests/
 ```
 
 ### Run Performance Tests
@@ -119,12 +139,13 @@ dotnet build BareMetalWeb.PerformanceTests/
 
 As of this implementation:
 
-- **Total Unit Test Projects:** 4
-- **Total Unit Tests:** 13
+- **Total Unit Test Projects:** 5
+- **Total Unit Tests:** 30
   - Core.Tests: 2 tests
-  - Data.Tests: 6 tests
-  - Rendering.Tests: 5 tests
+  - Data.Tests: 5 tests
+  - Rendering.Tests: 4 tests
   - API.Tests: 1 test
+  - Host.Tests: 18 tests
 - **Performance Test Projects:** 1
 - **Test Framework:** xUnit 2.9.3
 - **Target Framework:** .NET 9.0
