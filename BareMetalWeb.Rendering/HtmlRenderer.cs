@@ -172,7 +172,7 @@ public class HtmlRenderer : IHtmlRenderer
                         {
                             if (keySpan.SequenceEqual(scopedKeys[k]))
                             {
-                                WriteHtmlEncoded(writer, scopedValues[k]);
+                                Write(writer, scopedValues[k]);
                                 matched = true;
                                 break;
                             }
@@ -186,7 +186,7 @@ public class HtmlRenderer : IHtmlRenderer
                         {
                             if (keySpan.SequenceEqual(keys[k]))
                             {
-                                WriteHtmlEncoded(writer, values[k]);
+                                Write(writer, values[k]);
                                 matched = true;
                                 break;
                             }
@@ -200,7 +200,7 @@ public class HtmlRenderer : IHtmlRenderer
                         {
                             if (keySpan.SequenceEqual(appkeys[k]))
                             {
-                                WriteHtmlEncoded(writer, appvalues[k]);
+                                Write(writer, appvalues[k]);
                                 matched = true;
                                 break;
                             }
