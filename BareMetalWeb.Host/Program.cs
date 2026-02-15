@@ -4,6 +4,7 @@ using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
+using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Host;
 using BareMetalWeb.Interfaces;
@@ -148,8 +149,34 @@ appInfo.RegisterRoute("GET /query/ideas", new RouteHandlerData(pageInfoFactory.R
     var idea = context.Request.Query.ContainsKey("idea") ? context.Request.Query["idea"].ToString() : null;
     var caller = context.Request.Query.ContainsKey("caller") ? context.Request.Query["caller"].ToString() : null;
     var source = context.Request.Query.ContainsKey("source") ? context.Request.Query["source"].ToString() : null;
+
+    // If idea text provided, create a new ToDo entry from it
+    if (!string.IsNullOrWhiteSpace(idea))
+    {
+        var todo = new ToDo
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Title = idea,
+            Notes = $"caller={caller ?? ""}, source={source ?? ""}",
+            Deadline = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7)),
+            StartTime = TimeOnly.FromDateTime(DateTime.UtcNow),
+            IsCompleted = false
+        };
+        DataStoreProvider.Current.Save(todo);
+    }
+
+    // Return all ToDo entries regardless of query
+    var todos = DataStoreProvider.Current.Query<ToDo>(null);
+    var items = todos.Select(t => new
+    {
+        t.Id, t.Title, t.Notes, t.Link,
+        Deadline = t.Deadline.ToString("yyyy-MM-dd"),
+        StartTime = t.StartTime.ToString("HH:mm"),
+        t.IsCompleted, t.SubItems
+    });
+
     context.Response.ContentType = "application/json";
-    await context.Response.WriteAsync("{\"result\":\"idea not found\"}");
+    await context.Response.WriteAsync(JsonSerializer.Serialize(items, new JsonSerializerOptions { WriteIndented = true }));
 }));
 appInfo.RegisterRoute("GET /admin/reload-templates", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "System", navAlignment: NavAlignment.Right), routeHandlers.ReloadTemplatesHandler));
 appInfo.RegisterRoute("GET /status", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "" }, "Public", false, 1), routeHandlers.BuildPageHandler(context =>
