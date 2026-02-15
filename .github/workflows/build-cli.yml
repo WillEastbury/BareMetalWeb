@@ -11,26 +11,37 @@ on:
 jobs:
   build-cli:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - rid: win-x64
             os: windows-latest
             ext: .exe
+            cross: false
           - rid: win-x86
             os: windows-latest
             ext: .exe
+            cross: false
           - rid: win-arm64
             os: windows-latest
             ext: .exe
+            cross: false
           - rid: linux-x64
             os: ubuntu-latest
             ext: ""
+            cross: false
           - rid: linux-arm64
             os: ubuntu-latest
             ext: ""
+            cross: true
+            cross_pkgs: "gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu"
+            linker: aarch64-linux-gnu-gcc
           - rid: linux-arm
             os: ubuntu-latest
             ext: ""
+            cross: true
+            cross_pkgs: "gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf"
+            linker: arm-linux-gnueabihf-gcc
 
     runs-on: ${{ matrix.os }}
 
@@ -42,6 +53,14 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
+      - name: Install cross-compilation toolchain
+        if: matrix.cross
+        run: |
+          sudo dpkg --add-architecture armhf 2>/dev/null || true
+          sudo dpkg --add-architecture arm64 2>/dev/null || true
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ${{ matrix.cross_pkgs }} zlib1g-dev
+
       - name: Publish AOT
         run: >
           dotnet publish BareMetalWeb.CLI/BareMetalWeb.CLI.csproj
@@ -51,6 +70,8 @@ jobs:
           -p:PublishAot=true
           -p:PublishTrimmed=true
           --output ./cli-out/${{ matrix.rid }}
+        env:
+          CppCompilerAndLinker: ${{ matrix.cross && matrix.linker || '' }}
 
       - name: Rename binary
         shell: bash
