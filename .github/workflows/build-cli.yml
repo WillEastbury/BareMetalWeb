@@ -18,10 +18,6 @@ jobs:
             os: windows-latest
             ext: .exe
             cross: false
-          - rid: win-x86
-            os: windows-latest
-            ext: .exe
-            cross: false
           - rid: win-arm64
             os: windows-latest
             ext: .exe
@@ -34,14 +30,8 @@ jobs:
             os: ubuntu-latest
             ext: ""
             cross: true
-            cross_pkgs: "clang lld gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu"
+            cross_pkgs: "clang lld gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu zlib1g-dev:arm64"
             objcopy: aarch64-linux-gnu-objcopy
-          - rid: linux-arm
-            os: ubuntu-latest
-            ext: ""
-            cross: true
-            cross_pkgs: "clang lld gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf"
-            objcopy: arm-linux-gnueabihf-objcopy
 
     runs-on: ${{ matrix.os }}
 
@@ -56,6 +46,13 @@ jobs:
       - name: Install cross-compilation toolchain
         if: matrix.cross
         run: |
+          sudo dpkg --add-architecture arm64
+          # Pin existing repos to amd64 only
+          sudo sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true
+          # Add arm64 ports
+          CODENAME=$(lsb_release -cs)
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ $CODENAME main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ $CODENAME-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64-ports.list
           sudo apt-get update -qq
           sudo apt-get install -y -qq ${{ matrix.cross_pkgs }}
 
