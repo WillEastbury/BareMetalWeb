@@ -35,11 +35,13 @@ jobs:
             ext: ""
             cross: true
             cross_pkgs: "clang lld gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu"
+            objcopy: aarch64-linux-gnu-objcopy
           - rid: linux-arm
             os: ubuntu-latest
             ext: ""
             cross: true
             cross_pkgs: "clang lld gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf"
+            objcopy: arm-linux-gnueabihf-objcopy
 
     runs-on: ${{ matrix.os }}
 
@@ -57,7 +59,19 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq ${{ matrix.cross_pkgs }}
 
-      - name: Publish AOT
+      - name: Publish AOT (native)
+        if: ${{ !matrix.cross }}
+        run: >
+          dotnet publish BareMetalWeb.CLI/BareMetalWeb.CLI.csproj
+          --configuration Release
+          --runtime ${{ matrix.rid }}
+          --self-contained true
+          -p:PublishAot=true
+          -p:PublishTrimmed=true
+          --output ./cli-out/${{ matrix.rid }}
+
+      - name: Publish AOT (cross)
+        if: matrix.cross
         run: >
           dotnet publish BareMetalWeb.CLI/BareMetalWeb.CLI.csproj
           --configuration Release
@@ -66,6 +80,7 @@ jobs:
           -p:PublishAot=true
           -p:PublishTrimmed=true
           -p:LinkerFlavor=lld
+          -p:ObjCopyName=${{ matrix.objcopy }}
           --output ./cli-out/${{ matrix.rid }}
 
       - name: Rename binary
