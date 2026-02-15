@@ -34,14 +34,12 @@ jobs:
             os: ubuntu-latest
             ext: ""
             cross: true
-            cross_pkgs: "gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu"
-            linker: aarch64-linux-gnu-gcc
+            cross_pkgs: "clang lld gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu"
           - rid: linux-arm
             os: ubuntu-latest
             ext: ""
             cross: true
-            cross_pkgs: "gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf"
-            linker: arm-linux-gnueabihf-gcc
+            cross_pkgs: "clang lld gcc-arm-linux-gnueabihf binutils-arm-linux-gnueabihf"
 
     runs-on: ${{ matrix.os }}
 
@@ -57,7 +55,7 @@ jobs:
         if: matrix.cross
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq ${{ matrix.cross_pkgs }} zlib1g-dev
+          sudo apt-get install -y -qq ${{ matrix.cross_pkgs }}
 
       - name: Publish AOT
         run: >
@@ -67,9 +65,8 @@ jobs:
           --self-contained true
           -p:PublishAot=true
           -p:PublishTrimmed=true
+          -p:LinkerFlavor=lld
           --output ./cli-out/${{ matrix.rid }}
-        env:
-          CppCompilerAndLinker: ${{ matrix.cross && matrix.linker || '' }}
 
       - name: Rename binary
         shell: bash
