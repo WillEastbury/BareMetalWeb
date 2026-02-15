@@ -40,8 +40,14 @@ Download the binary for your platform from the GitHub Actions build artifacts (`
 # Connect with API key
 bmw connect https://your-site.azurewebsites.net your-api-key
 
-# Or connect then login with session cookie
+# Or connect then login via device code flow (opens browser)
 bmw connect https://your-site.azurewebsites.net
+bmw login
+
+# Or login via device code (headless/SSH — displays code to enter manually)
+bmw login --outofband
+
+# Or login directly with credentials
 bmw login username password
 
 # Show current config
@@ -55,7 +61,9 @@ Configuration is stored in `~/.bmw/config.json`, session cookies in `~/.bmw/cook
 | Command | Description |
 |---------|-------------|
 | `bmw connect <url> [api-key]` | Set server URL and optional API key |
-| `bmw login [user] [pass]` | Login with username/password |
+| `bmw login` | Login via device code (opens browser) |
+| `bmw login --outofband` | Login via device code (no browser, shows code) |
+| `bmw login <user> <pass>` | Login with username/password |
 | `bmw config` | Show current configuration |
 | `bmw types` | List available entity types (via `/api/_meta`) |
 | `bmw list <type>` | List all entities of a type |
@@ -140,6 +148,24 @@ https://your-site.azurewebsites.net/ideas/search?q=Build+a+rocket&caller=ai&sour
 ---
 
 ## Authentication
+
+### Device Code Flow (CLI)
+
+The recommended way to authenticate the CLI. Works like OAuth device authorization but is built into BareMetalWeb.
+
+1. CLI calls `POST /api/device/code` → receives `user_code` and `device_code`
+2. User opens `/device?code=XXXX-XXXX` in a browser and logs in
+3. User approves the code on the device page
+4. CLI polls `POST /api/device/token` with `device_code` → receives session cookie on approval
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/api/device/code` | POST | No | Request a device code. Returns `{ device_code, user_code, verification_url, expires_in, interval }` |
+| `/api/device/token` | POST | No | Poll with `{ "device_code": "..." }`. Returns `{ "status": "authorization_pending" }`, `{ "status": "approved", "user": "..." }`, or `{ "status": "expired" }` |
+| `/device` | GET | No | Browser page to enter the user code (accepts `?code=` to pre-fill) |
+| `/device` | POST | Yes | Submit the user code for approval |
+
+Codes expire after 15 minutes. User codes are 8 alphanumeric characters formatted as `XXXX-XXXX`.
 
 ### Session-Based (Browser)
 

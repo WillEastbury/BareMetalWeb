@@ -138,6 +138,139 @@ appInfo.RegisterRoute("POST /admin/data/{type}/{id}/clone-edit", new RouteHandle
 appInfo.RegisterRoute("GET /admin/data/{type}/{id}/delete", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Delete", "" }, "Authenticated", false, 1), routeHandlers.DataDeleteHandler));
 appInfo.RegisterRoute("POST /admin/data/{type}/{id}/delete", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Delete", "" }, "Authenticated", false, 1), routeHandlers.DataDeletePostHandler));
 
+appInfo.RegisterRoute("POST /api/device/code", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
+{
+    var dc = new DeviceCodeAuth
+    {
+        UserCode = DeviceCodeAuth.GenerateUserCode(),
+        DeviceCode = DeviceCodeAuth.GenerateDeviceCode(),
+        ExpiresUtc = DateTime.UtcNow.AddMinutes(15),
+        Status = "pending"
+    };
+    DataStoreProvider.Current.Save(dc);
+    var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
+    var json = JsonSerializer.Serialize(new Dictionary<string, object>
+    {
+        ["device_code"] = dc.DeviceCode,
+        ["user_code"] = dc.UserCode,
+        ["verification_url"] = $"{baseUrl}/device",
+        ["expires_in"] = 900,
+        ["interval"] = 5
+    });
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync(json);
+}));
+appInfo.RegisterRoute("POST /api/device/token", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
+{
+    string body;
+    using (var reader = new System.IO.StreamReader(context.Request.Body))
+        body = await reader.ReadToEndAsync();
+    var deviceCode = "";
+    try { var doc = JsonDocument.Parse(body); deviceCode = doc.RootElement.GetProperty("device_code").GetString() ?? ""; } catch { }
+    if (string.IsNullOrEmpty(deviceCode))
+    {
+        context.Response.StatusCode = 400;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"error\":\"missing device_code\"}");
+        return;
+    }
+    var all = DataStoreProvider.Current.Query<DeviceCodeAuth>(null).ToList();
+    var dc = all.FirstOrDefault(d => d.DeviceCode == deviceCode);
+    if (dc == null || dc.IsExpired(DateTime.UtcNow))
+    {
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"status\":\"expired\"}");
+        return;
+    }
+    if (dc.Status == "approved" && !string.IsNullOrEmpty(dc.UserId))
+    {
+        var user = await DataStoreProvider.Current.LoadAsync<User>(dc.UserId);
+        if (user != null)
+        {
+            await UserAuth.SignInAsync(context, user, false);
+            dc.Status = "consumed";
+            DataStoreProvider.Current.Save(dc);
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new Dictionary<string, object>
+            {
+                ["status"] = "approved",
+                ["user"] = user.DisplayName ?? user.UserName
+            }));
+            return;
+        }
+    }
+    if (dc.Status == "denied")
+    {
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"status\":\"denied\"}");
+        return;
+    }
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync("{\"status\":\"authorization_pending\"}");
+}));
+appInfo.RegisterRoute("GET /device", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
+{
+    var code = context.Request.Query.ContainsKey("code") ? context.Request.Query["code"].ToString() : "";
+    var msg = context.Request.Query.ContainsKey("msg") ? context.Request.Query["msg"].ToString() : "";
+    var sb = new System.Text.StringBuilder();
+    sb.Append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+    sb.Append("<title>Device Login - BareMetalWeb</title><style>");
+    sb.Append("*{margin:0;padding:0;box-sizing:border-box}");
+    sb.Append("body{font-family:system-ui,-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;display:flex;justify-content:center;align-items:center;min-height:100vh}");
+    sb.Append(".card{background:#16213e;border-radius:12px;padding:40px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.4);text-align:center}");
+    sb.Append("h1{font-size:1.6em;margin-bottom:8px;color:#fff}");
+    sb.Append("p{color:#a0a0b0;margin-bottom:24px;font-size:.95em}");
+    sb.Append("input[type=text]{width:100%;padding:14px;font-size:1.4em;text-align:center;letter-spacing:4px;border:2px solid #4361ee;border-radius:8px;background:#0f3460;color:#fff;outline:none;text-transform:uppercase}");
+    sb.Append("input:focus{border-color:#7c8cf8;box-shadow:0 0 12px rgba(67,97,238,.4)}");
+    sb.Append("button{width:100%;margin-top:16px;padding:14px;font-size:1.1em;background:#4361ee;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600}");
+    sb.Append("button:hover{background:#3a56d4}");
+    sb.Append(".msg{margin-top:16px;padding:12px;border-radius:6px;font-size:.9em}");
+    sb.Append(".msg-ok{background:#1b5e20;color:#a5d6a7}.msg-err{background:#b71c1c;color:#ef9a9a}");
+    sb.Append(".logo{font-size:2.5em;margin-bottom:16px}");
+    sb.Append("</style></head><body>");
+    sb.Append("<div class=\"card\">");
+    sb.Append("<div class=\"logo\">&#128272;</div>");
+    sb.Append("<h1>Device Login</h1>");
+    sb.Append("<p>Enter the code shown in your CLI to authorize this device.</p>");
+    sb.Append("<form method=\"post\" action=\"/device\">");
+    sb.Append($"<input type=\"text\" name=\"code\" maxlength=\"9\" placeholder=\"XXXX-XXXX\" value=\"{System.Net.WebUtility.HtmlEncode(code)}\" autocomplete=\"off\" autofocus>");
+    sb.Append("<button type=\"submit\">Authorize Device</button>");
+    sb.Append("</form>");
+    if (!string.IsNullOrEmpty(msg))
+    {
+        var isErr = msg.StartsWith("Error", StringComparison.OrdinalIgnoreCase);
+        sb.Append($"<div class=\"msg {(isErr ? "msg-err" : "msg-ok")}\">{System.Net.WebUtility.HtmlEncode(msg)}</div>");
+    }
+    sb.Append("</div></body></html>");
+    context.Response.ContentType = "text/html";
+    await context.Response.WriteAsync(sb.ToString());
+}));
+appInfo.RegisterRoute("POST /device", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), async context =>
+{
+    var user = await UserAuth.GetRequestUserAsync(context);
+    string code = "";
+    if (context.Request.HasFormContentType)
+    {
+        var form = await context.Request.ReadFormAsync();
+        code = form["code"].ToString().Trim().ToUpperInvariant();
+    }
+    if (string.IsNullOrEmpty(code) || user == null)
+    {
+        context.Response.Redirect("/device?msg=Error:+Invalid+request");
+        return;
+    }
+    var all = DataStoreProvider.Current.Query<DeviceCodeAuth>(null).ToList();
+    var dc = all.FirstOrDefault(d => d.UserCode == code && d.Status == "pending" && !d.IsExpired(DateTime.UtcNow));
+    if (dc == null)
+    {
+        context.Response.Redirect($"/device?msg=Error:+Invalid+or+expired+code&code={System.Net.WebUtility.UrlEncode(code)}");
+        return;
+    }
+    dc.Status = "approved";
+    dc.UserId = user.Id;
+    DataStoreProvider.Current.Save(dc);
+    context.Response.Redirect("/device?msg=Device+authorized+successfully!+You+can+close+this+tab.");
+}));
 appInfo.RegisterRoute("GET /api/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiListHandler));
 appInfo.RegisterRoute("POST /api/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPostHandler));
 appInfo.RegisterRoute("GET /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiGetHandler));

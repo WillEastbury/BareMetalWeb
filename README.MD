@@ -135,11 +135,17 @@ export DOTNET_GCHeapHardLimit=0x10000000
 # 1. Connect to a BareMetalWeb instance (with API key)
 bmw connect https://mysite.azurewebsites.net my-api-key-here
 
-# 2. Or connect and login with username/password (session cookie)
+# 2. Login via device code flow (opens browser, approve in browser)
 bmw connect https://mysite.azurewebsites.net
+bmw login
+
+# 3. Login via device code (headless/SSH - shows code to enter manually)
+bmw login --outofband
+
+# 4. Or login directly with credentials
 bmw login admin mypassword
 
-# 3. Discover what entity types are available
+# 5. Discover what entity types are available
 bmw types
 
 # 4. List all records of a type
@@ -165,7 +171,9 @@ bmw delete to-do abc123
 | Command | Description |
 |---------|-------------|
 | `bmw connect <url> [api-key]` | Set the server URL and optional API key |
-| `bmw login [user] [pass]` | Login with username/password (stores session cookie) |
+| `bmw login` | Login via device code flow (opens browser for approval) |
+| `bmw login --outofband` | Login via device code (displays code for manual entry) |
+| `bmw login <user> <pass>` | Login directly with username/password |
 | `bmw config` | Show current connection configuration |
 
 Authentication priority: API key (if configured) → Session cookie (from login).

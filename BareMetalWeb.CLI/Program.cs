@@ -129,17 +129,25 @@ internal static class Program
     static async Task<int> Login(string[] args)
     {
         if (string.IsNullOrEmpty(_config.Url)) return Help(1, "Not connected. Run: bmw connect <url>");
-        string user, pass;
-        if (args.Length >= 2)
-        {
-            user = args[0]; pass = args[1];
-        }
-        else
-        {
-            Console.Write("Username: "); user = Console.ReadLine() ?? "";
-            Console.Write("Password: "); pass = ReadPassword();
-        }
 
+        // bmw login --outofband → device code flow (no browser)
+        // bmw login → device code flow (opens browser)
+        // bmw login <user> <pass> → direct credentials
+        bool outOfBand = args.Any(a => a == "--outofband");
+        var filtered = args.Where(a => a != "--outofband").ToArray();
+
+        if (filtered.Length >= 2)
+            return await LoginDirect(filtered[0], filtered[1]);
+        if (filtered.Length == 0)
+            return await LoginDeviceCode(!outOfBand);
+
+        // Single arg — ambiguous, treat as username and prompt for password
+        Console.Write("Password: "); var pass = ReadPassword();
+        return await LoginDirect(filtered[0], pass);
+    }
+
+    static async Task<int> LoginDirect(string user, string pass)
+    {
         var content = new FormUrlEncodedContent(new[]
         {
             new KeyValuePair<string, string>("username", user),
@@ -153,6 +161,80 @@ internal static class Program
             return 0;
         }
         Console.Error.WriteLine($"Login failed: {resp.StatusCode}");
+        return 1;
+    }
+
+    static async Task<int> LoginDeviceCode(bool openBrowser)
+    {
+        // Step 1: Request device code
+        var resp = await _http.PostAsync("/api/device/code", new StringContent("{}", Encoding.UTF8, "application/json"));
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        var doc = JsonDocument.Parse(body);
+        var deviceCode = doc.RootElement.GetProperty("device_code").GetString()!;
+        var userCode = doc.RootElement.GetProperty("user_code").GetString()!;
+        var verifyUrl = doc.RootElement.GetProperty("verification_url").GetString()!;
+        var interval = doc.RootElement.GetProperty("interval").GetInt32();
+        var expiresIn = doc.RootElement.GetProperty("expires_in").GetInt32();
+
+        // Step 2: Display code and optionally open browser
+        Console.WriteLine();
+        Console.WriteLine("  To sign in, open your browser to:");
+        Console.WriteLine($"    {verifyUrl}");
+        Console.WriteLine();
+        Console.WriteLine($"  Enter code: {userCode}");
+        Console.WriteLine();
+
+        if (openBrowser)
+        {
+            var url = $"{verifyUrl}?code={Uri.EscapeDataString(userCode)}";
+            try
+            {
+                if (OperatingSystem.IsWindows())
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
+                else if (OperatingSystem.IsMacOS())
+                    System.Diagnostics.Process.Start("open", url);
+                else
+                    System.Diagnostics.Process.Start("xdg-open", url);
+                Console.WriteLine("  Browser opened. Waiting for approval...");
+            }
+            catch
+            {
+                Console.WriteLine("  Could not open browser. Please open the URL manually.");
+            }
+        }
+        else
+        {
+            Console.WriteLine("  Waiting for approval...");
+        }
+        Console.WriteLine();
+
+        // Step 3: Poll for approval
+        var deadline = DateTime.UtcNow.AddSeconds(expiresIn);
+        while (DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(interval * 1000);
+            var pollBody = JsonSerializer.Serialize(new Dictionary<string, string> { ["device_code"] = deviceCode }, BmwJsonContext.Default.DictionaryStringString);
+            var pollResp = await _http.PostAsync("/api/device/token", new StringContent(pollBody, Encoding.UTF8, "application/json"));
+            var pollText = await pollResp.Content.ReadAsStringAsync();
+            var pollDoc = JsonDocument.Parse(pollText);
+            var status = pollDoc.RootElement.GetProperty("status").GetString();
+
+            if (status == "approved")
+            {
+                SaveCookies();
+                var userName = pollDoc.RootElement.TryGetProperty("user", out var u) ? u.GetString() : "unknown";
+                Console.WriteLine($"  Logged in as {userName}. Session saved.");
+                return 0;
+            }
+            if (status == "expired" || status == "denied")
+            {
+                Console.Error.WriteLine($"  Login {status}.");
+                return 1;
+            }
+            Console.Write(".");
+        }
+        Console.Error.WriteLine("\n  Login timed out.");
         return 1;
     }
 
@@ -455,7 +537,9 @@ internal static class Program
 
             Connection:
               connect <url> [api-key]     Set server URL and optional API key
-              login [user] [pass]         Login with username/password (session cookie)
+              login                       Login via device code (opens browser)
+              login --outofband           Login via device code (no browser)
+              login <user> <pass>         Login with username/password directly
               config                      Show current configuration
 
             Entity Operations:
