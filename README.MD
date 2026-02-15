@@ -111,11 +111,9 @@ Pre-built binaries are available as GitHub Actions artifacts from the **Build CL
 | Platform             | Artifact Name     | Binary                    | Architecture |
 |----------------------|-------------------|---------------------------|--------------|
 | Windows x64          | `bmw-win-x64`     | `bmw-win-x64.exe`        | Intel/AMD 64-bit |
-| Windows x86          | `bmw-win-x86`     | `bmw-win-x86.exe`        | Intel/AMD 32-bit |
 | Windows ARM64        | `bmw-win-arm64`   | `bmw-win-arm64.exe`      | ARM 64-bit (Surface Pro X, etc.) |
 | Linux x64            | `bmw-linux-x64`   | `bmw-linux-x64`          | Intel/AMD 64-bit |
-| Linux ARM64          | `bmw-linux-arm64`  | `bmw-linux-arm64`        | ARM 64-bit (Raspberry Pi 4+, AWS Graviton) |
-| Linux ARM32          | `bmw-linux-arm`    | `bmw-linux-arm`          | ARM 32-bit (Raspberry Pi 2/3) |
+| Linux ARM64          | `bmw-linux-arm64`  | `bmw-linux-arm64`        | ARM 64-bit (Raspberry Pi 4+, AWS Graviton, Android/Termux) |
 | **All platforms**    | `bmw-all-platforms`| All of the above          | Combined download |
 
 **To download:** Go to [Actions → Build CLI Binaries](../../actions/workflows/build-cli.yml), click the latest successful run, and download the artifact for your platform from the bottom of the page.
@@ -123,6 +121,12 @@ Pre-built binaries are available as GitHub Actions artifacts from the **Build CL
 On Linux, make the binary executable after download:
 ```bash
 chmod +x bmw-linux-x64
+```
+
+**Termux / Android (proot):** The .NET runtime requires a GC heap limit in memory-constrained environments:
+```bash
+export DOTNET_GCHeapHardLimit=0x10000000
+./bmw-linux-arm64 help
 ```
 
 ### Quick Start
