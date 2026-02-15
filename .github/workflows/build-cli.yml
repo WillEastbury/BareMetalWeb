@@ -47,12 +47,18 @@ jobs:
         if: matrix.cross
         run: |
           sudo dpkg --add-architecture arm64
-          # Pin existing repos to amd64 only
-          sudo sed -i 's/^deb http/deb [arch=amd64] http/' /etc/apt/sources.list /etc/apt/sources.list.d/*.list 2>/dev/null || true
-          # Add arm64 ports
+          # Pin ALL existing sources to amd64 only (handles DEB822 .sources files too)
+          for f in /etc/apt/sources.list.d/*.sources; do
+            [ -f "$f" ] && sudo sed -i '/^Architectures:/d; /^Types:/a Architectures: amd64' "$f"
+          done
+          for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+            [ -f "$f" ] && sudo sed -i 's/^deb http/deb [arch=amd64] http/' "$f" 2>/dev/null || true
+          done
+          # Add arm64 from ports
           CODENAME=$(lsb_release -cs)
           echo "deb [arch=arm64] http://ports.ubuntu.com/ $CODENAME main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64-ports.list
           echo "deb [arch=arm64] http://ports.ubuntu.com/ $CODENAME-updates main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64-ports.list
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ $CODENAME-security main restricted universe multiverse" | sudo tee -a /etc/apt/sources.list.d/arm64-ports.list
           sudo apt-get update -qq
           sudo apt-get install -y -qq ${{ matrix.cross_pkgs }}
 
