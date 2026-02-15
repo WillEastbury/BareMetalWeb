@@ -41,6 +41,32 @@ All data entities registered with the `[DataEntity]` attribute automatically rec
 
 All API routes require authentication — either a valid session cookie or a Service Principal API key.
 
+### Query Endpoints
+
+| Verb  | Path              | Description                          | Auth Required |
+|-------|-------------------|--------------------------------------|---------------|
+| `GET` | `/query/ideas`    | Mock idea lookup (returns stub)      | No            |
+
+**Parameters:**
+
+| Parameter | Type   | Description          |
+|-----------|--------|----------------------|
+| `idea`    | string | The idea text to search for |
+
+**Example:**
+
+```bash
+curl "https://your-site.azurewebsites.net/query/ideas?idea=my+cool+idea"
+```
+
+**Response:**
+
+```json
+{"result":"idea not found"}
+```
+
+This is a public, unauthenticated endpoint that accepts an optional `idea` query string and always returns `"idea not found"` as a mock stub.
+
 ### Additional Endpoints
 
 | Verb   | Path                  | Description                      | Auth Required |
