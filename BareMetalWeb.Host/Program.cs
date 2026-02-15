@@ -146,6 +146,8 @@ appInfo.RegisterRoute("DELETE /api/{type}/{id}", new RouteHandlerData(pageInfoFa
 appInfo.RegisterRoute("GET /query/ideas", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
 {
     var idea = context.Request.Query.ContainsKey("idea") ? context.Request.Query["idea"].ToString() : null;
+    var caller = context.Request.Query.ContainsKey("caller") ? context.Request.Query["caller"].ToString() : null;
+    var source = context.Request.Query.ContainsKey("source") ? context.Request.Query["source"].ToString() : null;
     context.Response.ContentType = "application/json";
     await context.Response.WriteAsync("{\"result\":\"idea not found\"}");
 }));

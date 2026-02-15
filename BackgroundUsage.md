@@ -49,14 +49,16 @@ All API routes require authentication — either a valid session cookie or a Ser
 
 **Parameters:**
 
-| Parameter | Type   | Description          |
-|-----------|--------|----------------------|
-| `idea`    | string | The idea text to search for |
+| Parameter | Type   | Required | Description                              |
+|-----------|--------|----------|------------------------------------------|
+| `idea`    | string | No       | The idea text to search for              |
+| `caller`  | string | No       | Caller type (e.g. `ai`)                  |
+| `source`  | string | No       | Source system (e.g. `ChatGPT`)           |
 
 **Example:**
 
 ```bash
-curl "https://your-site.azurewebsites.net/query/ideas?idea=my+cool+idea"
+curl "https://your-site.azurewebsites.net/query/ideas?idea=my+cool+idea&caller=ai&source=ChatGPT"
 ```
 
 **Response:**
