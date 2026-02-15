@@ -45,48 +45,32 @@ All API routes require authentication — either a valid session cookie or a Ser
 
 | Verb  | Path              | Description                          | Auth Required |
 |-------|-------------------|--------------------------------------|---------------|
-| `GET` | `/query/ideas`    | Mock idea lookup (returns stub)      | No            |
+| `GET` | `/ideas/search`   | Search/create ideas (HTML page)      | No            |
 
 **Parameters:**
 
 | Parameter | Type   | Required | Description                                          |
 |-----------|--------|----------|------------------------------------------------------|
-| `idea`    | string | No       | Idea text — if provided, creates a new ToDo entry    |
+| `q`       | string | No       | Idea text — if provided, creates a new ToDo entry    |
 | `caller`  | string | No       | Caller type (e.g. `ai`), stored in notes             |
 | `source`  | string | No       | Source system (e.g. `ChatGPT`), stored in notes      |
 
 **Behaviour:**
-- Always returns **all** ToDo entries as a JSON array, regardless of parameters.
-- If `idea` is provided, a new ToDo is created first (title = idea text, deadline = 7 days, notes = caller/source info), then all ToDos are returned including the new one.
-- If `idea` is omitted, simply lists all existing ToDos.
+- Returns a styled HTML page listing **all** ToDo entries in a table.
+- If `q` is provided, a new ToDo is created first (title = idea text, deadline = 7 days, notes = caller/source info), then all ToDos are displayed including the new one.
+- If `q` is omitted, simply lists all existing ToDos.
+- The page includes a search/add form for browser use.
 
 **Example — list all:**
 
-```bash
-curl "https://your-site.azurewebsites.net/query/ideas"
+```
+https://your-site.azurewebsites.net/ideas/search
 ```
 
 **Example — create and list:**
 
-```bash
-curl "https://your-site.azurewebsites.net/query/ideas?idea=my+cool+idea&caller=ai&source=ChatGPT"
 ```
-
-**Response:**
-
-```json
-[
-  {
-    "Id": "abc123",
-    "Title": "my cool idea",
-    "Notes": "caller=ai, source=ChatGPT",
-    "Link": "",
-    "Deadline": "2026-02-22",
-    "StartTime": "13:55",
-    "IsCompleted": false,
-    "SubItems": []
-  }
-]
+https://your-site.azurewebsites.net/ideas/search?q=Build+a+rocket&caller=ai&source=ChatGPT
 ```
 
 ### Additional Endpoints

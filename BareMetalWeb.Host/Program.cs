@@ -144,19 +144,19 @@ appInfo.RegisterRoute("GET /api/{type}/{id}", new RouteHandlerData(pageInfoFacto
 appInfo.RegisterRoute("PUT /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPutHandler));
 appInfo.RegisterRoute("PATCH /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPatchHandler));
 appInfo.RegisterRoute("DELETE /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiDeleteHandler));
-appInfo.RegisterRoute("GET /query/ideas", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
+appInfo.RegisterRoute("GET /ideas/search", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
 {
-    var idea = context.Request.Query.ContainsKey("idea") ? context.Request.Query["idea"].ToString() : null;
+    var q = context.Request.Query.ContainsKey("q") ? context.Request.Query["q"].ToString() : null;
     var caller = context.Request.Query.ContainsKey("caller") ? context.Request.Query["caller"].ToString() : null;
     var source = context.Request.Query.ContainsKey("source") ? context.Request.Query["source"].ToString() : null;
 
     // If idea text provided, create a new ToDo entry from it
-    if (!string.IsNullOrWhiteSpace(idea))
+    if (!string.IsNullOrWhiteSpace(q))
     {
         var todo = new ToDo
         {
             Id = Guid.NewGuid().ToString("N"),
-            Title = idea,
+            Title = q,
             Notes = $"caller={caller ?? ""}, source={source ?? ""}",
             Deadline = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7)),
             StartTime = TimeOnly.FromDateTime(DateTime.UtcNow),
@@ -167,16 +167,58 @@ appInfo.RegisterRoute("GET /query/ideas", new RouteHandlerData(pageInfoFactory.R
 
     // Return all ToDo entries regardless of query
     var todos = DataStoreProvider.Current.Query<ToDo>(null);
-    var items = todos.Select(t => new
-    {
-        t.Id, t.Title, t.Notes, t.Link,
-        Deadline = t.Deadline.ToString("yyyy-MM-dd"),
-        StartTime = t.StartTime.ToString("HH:mm"),
-        t.IsCompleted, t.SubItems
-    });
+    var sb = new System.Text.StringBuilder();
+    sb.Append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+    sb.Append("<title>Ideas</title><style>");
+    sb.Append("*{margin:0;padding:0;box-sizing:border-box}");
+    sb.Append("body{font-family:system-ui,-apple-system,sans-serif;background:#f4f6f9;color:#333}");
+    sb.Append("header{background:#1a1a2e;color:#fff;padding:16px 24px;font-size:1.4em;font-weight:600}");
+    sb.Append(".container{max-width:900px;margin:24px auto;padding:0 16px}");
+    sb.Append("form{display:flex;gap:8px;margin-bottom:24px}");
+    sb.Append("input[type=text]{flex:1;padding:10px 14px;border:1px solid #ccc;border-radius:6px;font-size:1em}");
+    sb.Append("button{padding:10px 20px;background:#4361ee;color:#fff;border:none;border-radius:6px;font-size:1em;cursor:pointer}");
+    sb.Append("button:hover{background:#3a56d4}");
+    sb.Append("table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.1)}");
+    sb.Append("th{background:#e8eaf6;text-align:left;padding:12px 14px;font-weight:600;font-size:.9em;color:#555}");
+    sb.Append("td{padding:10px 14px;border-top:1px solid #eee;font-size:.95em}");
+    sb.Append("tr:hover{background:#f0f4ff}");
+    sb.Append(".done{text-decoration:line-through;color:#999}");
+    sb.Append(".badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.8em;font-weight:600}");
+    sb.Append(".badge-open{background:#e3f2fd;color:#1565c0}.badge-done{background:#e8f5e9;color:#2e7d32}");
+    sb.Append(".empty{text-align:center;padding:40px;color:#999;font-size:1.1em}");
+    sb.Append("footer{text-align:center;padding:24px;color:#999;font-size:.85em}");
+    sb.Append("</style></head><body>");
+    sb.Append("<header>&#128161; Ideas</header>");
+    sb.Append("<div class=\"container\">");
+    sb.Append("<form method=\"get\" action=\"/ideas/search\">");
+    sb.Append("<input type=\"text\" name=\"q\" placeholder=\"Enter a new idea...\" value=\"\">");
+    sb.Append("<button type=\"submit\">Add &amp; Search</button>");
+    sb.Append("</form>");
 
-    context.Response.ContentType = "application/json";
-    await context.Response.WriteAsync(JsonSerializer.Serialize(items, new JsonSerializerOptions { WriteIndented = true }));
+    var list = todos.ToList();
+    if (list.Count == 0)
+    {
+        sb.Append("<div class=\"empty\">No ideas yet. Add one above!</div>");
+    }
+    else
+    {
+        sb.Append("<table><thead><tr><th>Title</th><th>Notes</th><th>Deadline</th><th>Status</th></tr></thead><tbody>");
+        foreach (var t in list)
+        {
+            var css = t.IsCompleted ? " class=\"done\"" : "";
+            var badge = t.IsCompleted ? "<span class=\"badge badge-done\">Done</span>" : "<span class=\"badge badge-open\">Open</span>";
+            sb.Append($"<tr><td{css}>{System.Net.WebUtility.HtmlEncode(t.Title)}</td>");
+            sb.Append($"<td>{System.Net.WebUtility.HtmlEncode(t.Notes)}</td>");
+            sb.Append($"<td>{t.Deadline:yyyy-MM-dd}</td>");
+            sb.Append($"<td>{badge}</td></tr>");
+        }
+        sb.Append("</tbody></table>");
+    }
+
+    sb.Append("</div><footer>BareMetalWeb &middot; Ideas</footer></body></html>");
+
+    context.Response.ContentType = "text/html";
+    await context.Response.WriteAsync(sb.ToString());
 }));
 appInfo.RegisterRoute("GET /admin/reload-templates", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "System", navAlignment: NavAlignment.Right), routeHandlers.ReloadTemplatesHandler));
 appInfo.RegisterRoute("GET /status", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "" }, "Public", false, 1), routeHandlers.BuildPageHandler(context =>
