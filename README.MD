@@ -1,3 +1,42 @@
+# BareMetalWeb
+
+**A raw, high-performance web framework built on bare-metal ASP.NET Core.**
+
+No MVC. No middleware pipeline. No DI containers. No Razor. No magic.
+
+Just Kestrel, explicit routing, streaming HTML templates, a custom binary serializer, and total control.
+
+[![Build and Deploy](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/deploy.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/deploy.yml)
+[![Build CLI](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/build-cli.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/build-cli.yml)
+
+## What is this?
+
+BareMetalWeb is a lean, mean web server that uses ASP.NET Core **only** for HTTP/SSL — everything else is built from scratch for minimalism, performance, and clarity. Think classic-era `.ashx` handlers and `HttpModules` reborn in modern .NET 9.
+
+### Key Features
+
+- **Explicit data-driven routing** — routes are mutable at runtime, no convention magic
+- **Streaming HTML templates** — `{{token}}` replacement, `{{Loop%%key}}` / `{{For%%i|from|to|step}}` blocks via `PipeReader`/`PipeWriter`
+- **Custom binary serializer** — fast, compact session and data storage with schema versioning
+- **Pluggable data storage** — file-based binary provider by default, swap in anything via interfaces
+- **Auto-scaffolded CRUD** — decorate a class with `[DataEntity]` and get REST API + admin UI for free
+- **Built-in auth** — session cookies, MFA, Service Principal API keys (PBKDF2 hashed)
+- **Request throttling** — per-IP token bucket rate limiting
+- **Strong CSP & security** — secure headers, cookie hardening, request validation
+- **Async buffered logging** — per-minute log files, non-blocking, clean shutdown records
+- **Static file serving** — streaming with ETag/Last-Modified/Cache-Control, MIME mapping
+- **Reverse proxy** — route-based forwarding with cookie stripping
+- **Native AOT CLI tool** — `bmw` binary for managing any BareMetalWeb instance from the terminal
+
+### Live Instances
+
+| Environment | URL |
+|-------------|-----|
+| Development | https://baremetalweb.azurewebsites.net |
+| Production  | https://baremetalweb-prod.azurewebsites.net |
+
+---
+
 //////////////////////////////
 // Welcome to BareMetalWeb !// 
 //////////////////////////////
