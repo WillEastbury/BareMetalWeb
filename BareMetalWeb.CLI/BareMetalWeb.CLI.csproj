@@ -8,7 +8,7 @@
     <PublishAot>true</PublishAot>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>full</TrimMode>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <InvariantGlobalization>false</InvariantGlobalization>
     <AssemblyName>bmw</AssemblyName>
     <RootNamespace>BareMetalWeb.CLI</RootNamespace>
   </PropertyGroup>

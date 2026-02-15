@@ -96,6 +96,11 @@ internal static class Program
             Console.Error.WriteLine($"HTTP error: {ex.Message}");
             return 1;
         }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Error: {ex.GetType().Name}: {ex.Message}");
+            return 1;
+        }
     }
 
     // --- connect ---
