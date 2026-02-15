@@ -59,4 +59,122 @@ also the logs are written per-day-per-hour-per-minute log files to keep them man
 // Configure Proxy:Route and Proxy:TargetBaseUrl in appsettings*.json
 // Requests to the route are forwarded to the target (headers/body preserved), excluding the auth session cookie
 
+---
+
+## BareMetalWeb CLI (`bmw`)
+
+A cross-platform, native AOT-compiled command-line tool for managing BareMetalWeb instances. No .NET runtime required — download the single binary for your platform and go.
+
+### Download
+
+Pre-built binaries are available as GitHub Actions artifacts from the **Build CLI Binaries** workflow. Each platform has its own downloadable artifact:
+
+| Platform             | Artifact Name     | Binary                    | Architecture |
+|----------------------|-------------------|---------------------------|--------------|
+| Windows x64          | `bmw-win-x64`     | `bmw-win-x64.exe`        | Intel/AMD 64-bit |
+| Windows x86          | `bmw-win-x86`     | `bmw-win-x86.exe`        | Intel/AMD 32-bit |
+| Windows ARM64        | `bmw-win-arm64`   | `bmw-win-arm64.exe`      | ARM 64-bit (Surface Pro X, etc.) |
+| Linux x64            | `bmw-linux-x64`   | `bmw-linux-x64`          | Intel/AMD 64-bit |
+| Linux ARM64          | `bmw-linux-arm64`  | `bmw-linux-arm64`        | ARM 64-bit (Raspberry Pi 4+, AWS Graviton) |
+| Linux ARM32          | `bmw-linux-arm`    | `bmw-linux-arm`          | ARM 32-bit (Raspberry Pi 2/3) |
+| **All platforms**    | `bmw-all-platforms`| All of the above          | Combined download |
+
+**To download:** Go to [Actions → Build CLI Binaries](../../actions/workflows/build-cli.yml), click the latest successful run, and download the artifact for your platform from the bottom of the page.
+
+On Linux, make the binary executable after download:
+```bash
+chmod +x bmw-linux-x64
+```
+
+### Quick Start
+
+```bash
+# 1. Connect to a BareMetalWeb instance (with API key)
+bmw connect https://mysite.azurewebsites.net my-api-key-here
+
+# 2. Or connect and login with username/password (session cookie)
+bmw connect https://mysite.azurewebsites.net
+bmw login admin mypassword
+
+# 3. Discover what entity types are available
+bmw types
+
+# 4. List all records of a type
+bmw list to-do
+
+# 5. Create a new record
+bmw create to-do Title="Buy milk" Notes="From the store" IsCompleted=false
+
+# 6. Get a single record
+bmw get to-do abc123
+
+# 7. Update a record
+bmw update to-do abc123 IsCompleted=true
+
+# 8. Delete a record
+bmw delete to-do abc123
+```
+
+### Commands
+
+#### Connection & Auth
+
+| Command | Description |
+|---------|-------------|
+| `bmw connect <url> [api-key]` | Set the server URL and optional API key |
+| `bmw login [user] [pass]` | Login with username/password (stores session cookie) |
+| `bmw config` | Show current connection configuration |
+
+Authentication priority: API key (if configured) → Session cookie (from login).
+
+Configuration is stored in `~/.bmw/config.json`. Session cookies are persisted in `~/.bmw/cookies`.
+
+#### Entity Operations
+
+| Command | Description |
+|---------|-------------|
+| `bmw types` | List all entity types on the server (via `/api/_meta`) |
+| `bmw list <type>` | List all entities of a type |
+| `bmw get <type> <id>` | Get a single entity by ID (JSON output) |
+| `bmw create <type> key=value [...]` | Create a new entity |
+| `bmw update <type> <id> key=value [...]` | Partial update an entity (PATCH) |
+| `bmw delete <type> <id>` | Delete an entity |
+
+#### Querying
+
+```bash
+# Full-text search
+bmw query to-do q=milk
+
+# Filter by field with operator
+bmw query to-do field=Title op=contains value=milk
+
+# Sort and paginate
+bmw query to-do sort=Deadline dir=desc skip=0 top=10
+
+# Combine filters, sort, and pagination
+bmw query to-do field=IsCompleted op=eq value=false sort=Deadline dir=asc top=5
+```
+
+**Available operators:** `eq`, `ne`, `contains`, `startswith`, `endswith`, `in`, `notin`, `gt`, `lt`, `gte`, `lte`
+
+### Dynamic Entity Discovery
+
+The CLI uses `GET /api/_meta` to discover entity types at runtime. This means **one CLI binary works with any BareMetalWeb instance** — it dynamically adapts to whatever entities are registered on that server. Different BareMetalWeb editions with different data objects all work with the same CLI.
+
+### Building from Source
+
+The CLI is in `BareMetalWeb.CLI/` and can be built locally:
+
+```bash
+# Standard build (requires .NET 9 SDK)
+dotnet build BareMetalWeb.CLI
+
+# Native AOT publish for your current platform
+dotnet publish BareMetalWeb.CLI -c Release -p:PublishAot=true -p:PublishTrimmed=true
+
+# Cross-compile for a specific target (Linux ARM64 example, requires cross toolchain)
+dotnet publish BareMetalWeb.CLI -c Release --runtime linux-arm64 -p:PublishAot=true -p:PublishTrimmed=true
+```
+
 

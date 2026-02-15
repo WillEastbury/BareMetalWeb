@@ -56,8 +56,6 @@ jobs:
       - name: Install cross-compilation toolchain
         if: matrix.cross
         run: |
-          sudo dpkg --add-architecture armhf 2>/dev/null || true
-          sudo dpkg --add-architecture arm64 2>/dev/null || true
           sudo apt-get update -qq
           sudo apt-get install -y -qq ${{ matrix.cross_pkgs }} zlib1g-dev
 
