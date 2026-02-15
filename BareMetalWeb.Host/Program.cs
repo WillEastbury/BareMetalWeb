@@ -144,6 +144,33 @@ appInfo.RegisterRoute("GET /api/{type}/{id}", new RouteHandlerData(pageInfoFacto
 appInfo.RegisterRoute("PUT /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPutHandler));
 appInfo.RegisterRoute("PATCH /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPatchHandler));
 appInfo.RegisterRoute("DELETE /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiDeleteHandler));
+appInfo.RegisterRoute("GET /api/_meta", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), async context =>
+{
+    var entities = DataScaffold.Entities;
+    var result = entities.Select(e => new Dictionary<string, object?>
+    {
+        ["name"] = e.Name,
+        ["slug"] = e.Slug,
+        ["permissions"] = e.Permissions,
+        ["showOnNav"] = e.ShowOnNav,
+        ["navGroup"] = e.NavGroup,
+        ["fields"] = e.Fields.Select(f => new Dictionary<string, object?>
+        {
+            ["name"] = f.Name,
+            ["label"] = f.Label,
+            ["type"] = f.FieldType.ToString(),
+            ["order"] = f.Order,
+            ["required"] = f.Required,
+            ["list"] = f.List,
+            ["view"] = f.View,
+            ["edit"] = f.Edit,
+            ["create"] = f.Create,
+            ["readOnly"] = f.ReadOnly
+        }).ToArray()
+    }).ToArray();
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+}));
 appInfo.RegisterRoute("GET /ideas/search", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
 {
     var q = context.Request.Query.ContainsKey("q") ? context.Request.Query["q"].ToString() : null;

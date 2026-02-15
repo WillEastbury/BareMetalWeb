@@ -1,0 +1,473 @@
+﻿using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace BareMetalWeb.CLI;
+
+// AOT-compatible JSON contexts
+[JsonSerializable(typeof(BmwConfig))]
+[JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(Dictionary<string, JsonElement>[]))]
+[JsonSerializable(typeof(JsonDocument))]
+[JsonSerializable(typeof(JsonElement))]
+[JsonSerializable(typeof(JsonElement[]))]
+[JsonSerializable(typeof(MetaEntity[]))]
+[JsonSerializable(typeof(MetaField[]))]
+[JsonSourceGenerationOptions(WriteIndented = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+internal partial class BmwJsonContext : JsonSerializerContext { }
+
+internal sealed class BmwConfig
+{
+    public string Url { get; set; } = "";
+    public string ApiKey { get; set; } = "";
+}
+
+internal sealed class MetaEntity
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("slug")] public string Slug { get; set; } = "";
+    [JsonPropertyName("permissions")] public string Permissions { get; set; } = "";
+    [JsonPropertyName("showOnNav")] public bool ShowOnNav { get; set; }
+    [JsonPropertyName("navGroup")] public string? NavGroup { get; set; }
+    [JsonPropertyName("fields")] public MetaField[] Fields { get; set; } = [];
+}
+
+internal sealed class MetaField
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("label")] public string Label { get; set; } = "";
+    [JsonPropertyName("type")] public string Type { get; set; } = "";
+    [JsonPropertyName("order")] public int Order { get; set; }
+    [JsonPropertyName("required")] public bool Required { get; set; }
+    [JsonPropertyName("list")] public bool List { get; set; }
+    [JsonPropertyName("view")] public bool View { get; set; }
+    [JsonPropertyName("edit")] public bool Edit { get; set; }
+    [JsonPropertyName("create")] public bool Create { get; set; }
+    [JsonPropertyName("readOnly")] public bool ReadOnly { get; set; }
+}
+
+internal static class Program
+{
+    private static readonly string ConfigDir = Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".bmw");
+    private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
+    private static readonly string CookiePath = Path.Combine(ConfigDir, "cookies");
+
+    private static CookieContainer _cookies = new();
+    private static BmwConfig _config = new();
+    private static HttpClient _http = null!;
+    private static MetaEntity[]? _meta;
+
+    static async Task<int> Main(string[] args)
+    {
+        LoadConfig();
+        InitHttpClient();
+
+        if (args.Length == 0)
+        {
+            PrintUsage();
+            return 0;
+        }
+
+        var cmd = args[0].ToLowerInvariant();
+        var rest = args[1..];
+
+        try
+        {
+            return cmd switch
+            {
+                "connect" => Connect(rest),
+                "login" => await Login(rest),
+                "types" => await ListTypes(),
+                "list" => await ListEntities(rest),
+                "get" => await GetEntity(rest),
+                "create" => await CreateEntity(rest),
+                "update" => await UpdateEntity(rest),
+                "delete" => await DeleteEntity(rest),
+                "query" => await QueryEntities(rest),
+                "config" => ShowConfig(),
+                "help" or "--help" or "-h" => Help(0),
+                _ => Help(1, $"Unknown command: {cmd}")
+            };
+        }
+        catch (HttpRequestException ex)
+        {
+            Console.Error.WriteLine($"HTTP error: {ex.Message}");
+            return 1;
+        }
+    }
+
+    // --- connect ---
+    static int Connect(string[] args)
+    {
+        if (args.Length < 1) return Help(1, "Usage: bmw connect <url> [api-key]");
+        _config.Url = args[0].TrimEnd('/');
+        _config.ApiKey = args.Length > 1 ? args[1] : "";
+        SaveConfig();
+        InitHttpClient();
+        Console.WriteLine($"Connected to {_config.Url}");
+        if (!string.IsNullOrEmpty(_config.ApiKey))
+            Console.WriteLine("API key set.");
+        return 0;
+    }
+
+    // --- login ---
+    static async Task<int> Login(string[] args)
+    {
+        if (string.IsNullOrEmpty(_config.Url)) return Help(1, "Not connected. Run: bmw connect <url>");
+        string user, pass;
+        if (args.Length >= 2)
+        {
+            user = args[0]; pass = args[1];
+        }
+        else
+        {
+            Console.Write("Username: "); user = Console.ReadLine() ?? "";
+            Console.Write("Password: "); pass = ReadPassword();
+        }
+
+        var content = new FormUrlEncodedContent(new[]
+        {
+            new KeyValuePair<string, string>("username", user),
+            new KeyValuePair<string, string>("password", pass)
+        });
+        var resp = await _http.PostAsync("/login", content);
+        if (resp.IsSuccessStatusCode || resp.StatusCode == HttpStatusCode.Redirect || resp.StatusCode == HttpStatusCode.Found)
+        {
+            SaveCookies();
+            Console.WriteLine("Login successful. Session saved.");
+            return 0;
+        }
+        Console.Error.WriteLine($"Login failed: {resp.StatusCode}");
+        return 1;
+    }
+
+    // --- types ---
+    static async Task<int> ListTypes()
+    {
+        var meta = await FetchMeta();
+        if (meta == null) return 1;
+        Console.WriteLine($"{"Slug",-25} {"Name",-30} {"Permissions",-20} Fields");
+        Console.WriteLine(new string('-', 85));
+        foreach (var e in meta)
+            Console.WriteLine($"{e.Slug,-25} {e.Name,-30} {e.Permissions,-20} {e.Fields.Length}");
+        return 0;
+    }
+
+    // --- list ---
+    static async Task<int> ListEntities(string[] args)
+    {
+        if (args.Length < 1) return Help(1, "Usage: bmw list <type>");
+        var slug = args[0];
+        var resp = await _http.GetAsync($"/api/{slug}");
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        var items = JsonSerializer.Deserialize(body, BmwJsonContext.Default.JsonElement);
+        await PrintTable(slug, items);
+        return 0;
+    }
+
+    // --- get ---
+    static async Task<int> GetEntity(string[] args)
+    {
+        if (args.Length < 2) return Help(1, "Usage: bmw get <type> <id>");
+        var resp = await _http.GetAsync($"/api/{args[0]}/{args[1]}");
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        PrintJson(body);
+        return 0;
+    }
+
+    // --- create ---
+    static async Task<int> CreateEntity(string[] args)
+    {
+        if (args.Length < 2) return Help(1, "Usage: bmw create <type> key=value [key=value...]");
+        var slug = args[0];
+        var obj = ParseKeyValues(args[1..]);
+        var json = JsonSerializer.Serialize(obj, BmwJsonContext.Default.DictionaryStringString);
+        var resp = await _http.PostAsync($"/api/{slug}",
+            new StringContent(json, Encoding.UTF8, "application/json"));
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        Console.WriteLine("Created:");
+        PrintJson(body);
+        return 0;
+    }
+
+    // --- update ---
+    static async Task<int> UpdateEntity(string[] args)
+    {
+        if (args.Length < 3) return Help(1, "Usage: bmw update <type> <id> key=value [key=value...]");
+        var slug = args[0]; var id = args[1];
+        var obj = ParseKeyValues(args[2..]);
+        var json = JsonSerializer.Serialize(obj, BmwJsonContext.Default.DictionaryStringString);
+        var req = new HttpRequestMessage(HttpMethod.Patch, $"/api/{slug}/{id}")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json")
+        };
+        var resp = await _http.SendAsync(req);
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        Console.WriteLine("Updated:");
+        PrintJson(body);
+        return 0;
+    }
+
+    // --- delete ---
+    static async Task<int> DeleteEntity(string[] args)
+    {
+        if (args.Length < 2) return Help(1, "Usage: bmw delete <type> <id>");
+        var resp = await _http.DeleteAsync($"/api/{args[0]}/{args[1]}");
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        Console.WriteLine("Deleted.");
+        return 0;
+    }
+
+    // --- query ---
+    static async Task<int> QueryEntities(string[] args)
+    {
+        if (args.Length < 1) return Help(1, "Usage: bmw query <type> [field=X] [op=eq] [value=Y] [q=text] [sort=F] [dir=asc] [skip=0] [top=10]");
+        var slug = args[0];
+        var qs = new StringBuilder();
+        for (int i = 1; i < args.Length; i++)
+        {
+            var eqIdx = args[i].IndexOf('=');
+            if (eqIdx <= 0) continue;
+            var k = args[i][..eqIdx]; var v = args[i][(eqIdx + 1)..];
+            qs.Append(qs.Length == 0 ? '?' : '&');
+            qs.Append(Uri.EscapeDataString(k)).Append('=').Append(Uri.EscapeDataString(v));
+        }
+        var resp = await _http.GetAsync($"/api/{slug}{qs}");
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        var items = JsonSerializer.Deserialize(body, BmwJsonContext.Default.JsonElement);
+        await PrintTable(slug, items);
+        return 0;
+    }
+
+    // --- config ---
+    static int ShowConfig()
+    {
+        Console.WriteLine($"URL:     {_config.Url}");
+        Console.WriteLine($"API Key: {(string.IsNullOrEmpty(_config.ApiKey) ? "(none)" : "***" + _config.ApiKey[^4..])}");
+        Console.WriteLine($"Config:  {ConfigPath}");
+        Console.WriteLine($"Cookies: {CookiePath}");
+        return 0;
+    }
+
+    // --- helpers ---
+    static async Task<MetaEntity[]?> FetchMeta()
+    {
+        if (_meta != null) return _meta;
+        if (string.IsNullOrEmpty(_config.Url)) { Console.Error.WriteLine("Not connected. Run: bmw connect <url>"); return null; }
+        var resp = await _http.GetAsync("/api/_meta");
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return null; }
+        var body = await resp.Content.ReadAsStringAsync();
+        _meta = JsonSerializer.Deserialize(body, BmwJsonContext.Default.MetaEntityArray);
+        return _meta;
+    }
+
+    static async Task PrintTable(string slug, JsonElement items)
+    {
+        if (items.ValueKind != JsonValueKind.Array) { Console.WriteLine(items.ToString()); return; }
+        var meta = await FetchMeta();
+        var entity = meta?.FirstOrDefault(e => string.Equals(e.Slug, slug, StringComparison.OrdinalIgnoreCase));
+        var listFields = entity?.Fields.Where(f => f.List).OrderBy(f => f.Order).Select(f => f.Name).ToArray();
+
+        // Collect all rows to compute column widths
+        var rows = new List<string[]>();
+        string[] headers;
+        if (listFields != null && listFields.Length > 0)
+        {
+            headers = new[] { "Id" }.Concat(listFields).ToArray();
+        }
+        else
+        {
+            // Fallback: use keys from first item
+            var first = items.EnumerateArray().FirstOrDefault();
+            headers = first.ValueKind == JsonValueKind.Object
+                ? first.EnumerateObject().Select(p => p.Name).Take(6).ToArray()
+                : new[] { "Value" };
+        }
+
+        foreach (var item in items.EnumerateArray())
+        {
+            var row = new string[headers.Length];
+            for (int i = 0; i < headers.Length; i++)
+            {
+                if (item.TryGetProperty(headers[i], out var val))
+                    row[i] = val.ValueKind == JsonValueKind.String ? val.GetString() ?? "" : val.ToString();
+                else
+                    row[i] = "";
+            }
+            rows.Add(row);
+        }
+
+        // Compute widths
+        var widths = new int[headers.Length];
+        for (int i = 0; i < headers.Length; i++)
+            widths[i] = headers[i].Length;
+        foreach (var row in rows)
+            for (int i = 0; i < headers.Length; i++)
+                widths[i] = Math.Max(widths[i], Math.Min(row[i].Length, 40));
+
+        // Print
+        for (int i = 0; i < headers.Length; i++)
+            Console.Write(headers[i].PadRight(widths[i] + 2));
+        Console.WriteLine();
+        for (int i = 0; i < headers.Length; i++)
+            Console.Write(new string('-', widths[i]) + "  ");
+        Console.WriteLine();
+        foreach (var row in rows)
+        {
+            for (int i = 0; i < headers.Length; i++)
+            {
+                var v = row[i].Length > 40 ? row[i][..37] + "..." : row[i];
+                Console.Write(v.PadRight(widths[i] + 2));
+            }
+            Console.WriteLine();
+        }
+        Console.WriteLine($"\n{rows.Count} result(s).");
+    }
+
+    static Dictionary<string, string> ParseKeyValues(string[] args)
+    {
+        var dict = new Dictionary<string, string>();
+        foreach (var arg in args)
+        {
+            var eqIdx = arg.IndexOf('=');
+            if (eqIdx > 0) dict[arg[..eqIdx]] = arg[(eqIdx + 1)..];
+        }
+        return dict;
+    }
+
+    static void PrintJson(string body)
+    {
+        try
+        {
+            var doc = JsonDocument.Parse(body);
+            Console.WriteLine(JsonSerializer.Serialize(doc.RootElement, BmwJsonContext.Default.JsonElement));
+        }
+        catch { Console.WriteLine(body); }
+    }
+
+    static async Task PrintError(HttpResponseMessage resp)
+    {
+        var body = await resp.Content.ReadAsStringAsync();
+        Console.Error.WriteLine($"Error {(int)resp.StatusCode}: {body}");
+    }
+
+    static void InitHttpClient()
+    {
+        LoadCookies();
+        var handler = new HttpClientHandler { CookieContainer = _cookies, AllowAutoRedirect = false, UseCookies = true };
+        _http = new HttpClient(handler);
+        if (!string.IsNullOrEmpty(_config.Url))
+            _http.BaseAddress = new Uri(_config.Url);
+        if (!string.IsNullOrEmpty(_config.ApiKey))
+            _http.DefaultRequestHeaders.Add("ApiKey", _config.ApiKey);
+    }
+
+    static void LoadConfig()
+    {
+        if (!File.Exists(ConfigPath)) return;
+        var json = File.ReadAllText(ConfigPath);
+        _config = JsonSerializer.Deserialize(json, BmwJsonContext.Default.BmwConfig) ?? new BmwConfig();
+    }
+
+    static void SaveConfig()
+    {
+        Directory.CreateDirectory(ConfigDir);
+        File.WriteAllText(ConfigPath, JsonSerializer.Serialize(_config, BmwJsonContext.Default.BmwConfig));
+    }
+
+    static void SaveCookies()
+    {
+        if (string.IsNullOrEmpty(_config.Url)) return;
+        Directory.CreateDirectory(ConfigDir);
+        var uri = new Uri(_config.Url);
+        var cookies = _cookies.GetCookies(uri);
+        var lines = new List<string>();
+        foreach (Cookie c in cookies)
+            lines.Add($"{c.Name}\t{c.Value}\t{c.Domain}\t{c.Path}\t{c.Expires:O}\t{c.Secure}");
+        File.WriteAllLines(CookiePath, lines);
+    }
+
+    static void LoadCookies()
+    {
+        _cookies = new CookieContainer();
+        if (!File.Exists(CookiePath) || string.IsNullOrEmpty(_config.Url)) return;
+        var uri = new Uri(_config.Url);
+        foreach (var line in File.ReadAllLines(CookiePath))
+        {
+            var parts = line.Split('\t');
+            if (parts.Length < 4) continue;
+            var c = new Cookie(parts[0], parts[1], parts[3], parts[2]);
+            if (parts.Length > 4 && DateTime.TryParse(parts[4], out var exp)) c.Expires = exp;
+            if (parts.Length > 5 && bool.TryParse(parts[5], out var sec)) c.Secure = sec;
+            _cookies.Add(uri, c);
+        }
+    }
+
+    static string ReadPassword()
+    {
+        var sb = new StringBuilder();
+        while (true)
+        {
+            var key = Console.ReadKey(true);
+            if (key.Key == ConsoleKey.Enter) { Console.WriteLine(); break; }
+            if (key.Key == ConsoleKey.Backspace && sb.Length > 0) { sb.Remove(sb.Length - 1, 1); Console.Write("\b \b"); }
+            else if (!char.IsControl(key.KeyChar)) { sb.Append(key.KeyChar); Console.Write('*'); }
+        }
+        return sb.ToString();
+    }
+
+    static void PrintUsage()
+    {
+        Console.WriteLine("bmw - BareMetalWeb CLI");
+        Console.WriteLine();
+        Console.WriteLine("Usage: bmw <command> [args]");
+        Console.WriteLine();
+        Console.WriteLine("Run 'bmw help' for available commands.");
+    }
+
+    static int Help(int exitCode, string? error = null)
+    {
+        if (error != null) Console.Error.WriteLine($"Error: {error}\n");
+        Console.WriteLine("""
+            bmw - BareMetalWeb CLI
+
+            Usage: bmw <command> [args]
+
+            Connection:
+              connect <url> [api-key]     Set server URL and optional API key
+              login [user] [pass]         Login with username/password (session cookie)
+              config                      Show current configuration
+
+            Entity Operations:
+              types                       List available entity types
+              list <type>                 List all entities of a type
+              get <type> <id>             Get a single entity by ID
+              create <type> k=v [k=v..]   Create a new entity
+              update <type> <id> k=v ..   Update an entity (PATCH)
+              delete <type> <id>          Delete an entity
+
+            Query:
+              query <type> [params]       Query with filters
+                field=Name op=contains value=text
+                q=searchtext sort=Field dir=desc skip=0 top=10
+
+            Examples:
+              bmw connect https://mysite.azurewebsites.net abc123key
+              bmw types
+              bmw list to-do
+              bmw create to-do Title="Buy milk" Notes="From store"
+              bmw query to-do q=milk sort=Deadline dir=asc top=5
+              bmw get to-do abc123
+              bmw update to-do abc123 IsCompleted=true
+              bmw delete to-do abc123
+            """);
+        return exitCode;
+    }
+}

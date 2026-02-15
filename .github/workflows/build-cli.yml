@@ -1,0 +1,84 @@
+name: Build CLI Binaries
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'BareMetalWeb.CLI/**'
+      - '.github/workflows/build-cli.yml'
+  workflow_dispatch:
+
+jobs:
+  build-cli:
+    strategy:
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+            ext: .exe
+          - rid: win-x86
+            os: windows-latest
+            ext: .exe
+          - rid: win-arm64
+            os: windows-latest
+            ext: .exe
+          - rid: linux-x64
+            os: ubuntu-latest
+            ext: ""
+          - rid: linux-arm64
+            os: ubuntu-latest
+            ext: ""
+          - rid: linux-arm
+            os: ubuntu-latest
+            ext: ""
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Publish AOT
+        run: >
+          dotnet publish BareMetalWeb.CLI/BareMetalWeb.CLI.csproj
+          --configuration Release
+          --runtime ${{ matrix.rid }}
+          --self-contained true
+          -p:PublishAot=true
+          -p:PublishTrimmed=true
+          --output ./cli-out/${{ matrix.rid }}
+
+      - name: Rename binary
+        shell: bash
+        run: |
+          mkdir -p ./artifacts
+          cp ./cli-out/${{ matrix.rid }}/bmw${{ matrix.ext }} ./artifacts/bmw-${{ matrix.rid }}${{ matrix.ext }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bmw-${{ matrix.rid }}
+          path: ./artifacts/bmw-${{ matrix.rid }}${{ matrix.ext }}
+
+  collect:
+    needs: build-cli
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./all-binaries
+          merge-multiple: true
+
+      - name: List binaries
+        run: ls -lh ./all-binaries/
+
+      - name: Upload combined release
+        uses: actions/upload-artifact@v4
+        with:
+          name: bmw-all-platforms
+          path: ./all-binaries/

@@ -26,12 +26,65 @@ This document details the REST API endpoints, Service Principal authentication, 
 
 ---
 
+## CLI Tool (`bmw`)
+
+BareMetalWeb includes a cross-platform CLI tool for managing entities from the command line. It compiles to native AOT binaries for Windows and Linux on x64, x86, ARM64, and ARM32.
+
+### Installation
+
+Download the binary for your platform from the GitHub Actions build artifacts (`bmw-all-platforms`). No runtime required — it's a self-contained native binary.
+
+### Connection
+
+```bash
+# Connect with API key
+bmw connect https://your-site.azurewebsites.net your-api-key
+
+# Or connect then login with session cookie
+bmw connect https://your-site.azurewebsites.net
+bmw login username password
+
+# Show current config
+bmw config
+```
+
+Configuration is stored in `~/.bmw/config.json`, session cookies in `~/.bmw/cookies`.
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| `bmw connect <url> [api-key]` | Set server URL and optional API key |
+| `bmw login [user] [pass]` | Login with username/password |
+| `bmw config` | Show current configuration |
+| `bmw types` | List available entity types (via `/api/_meta`) |
+| `bmw list <type>` | List all entities of a type |
+| `bmw get <type> <id>` | Get a single entity |
+| `bmw create <type> k=v [k=v..]` | Create a new entity |
+| `bmw update <type> <id> k=v ..` | Partial update (PATCH) |
+| `bmw delete <type> <id>` | Delete an entity |
+| `bmw query <type> [params]` | Query with filters |
+
+### Query Parameters
+
+```bash
+bmw query to-do field=Title op=contains value=milk sort=Deadline dir=asc top=5
+bmw query to-do q=searchtext
+```
+
+### Discovery Endpoint
+
+The CLI uses `GET /api/_meta` (authenticated) to discover entity types and their fields dynamically. This means one CLI binary works with any BareMetalWeb instance regardless of which entities are registered.
+
+---
+
 ## REST API Endpoints
 
 All data entities registered with the `[DataEntity]` attribute automatically receive six REST endpoints under `/api/{slug}`:
 
 | HTTP Verb | Path                  | Operation                           |
 |-----------|-----------------------|-------------------------------------|
+| `GET`     | `/api/_meta`          | Entity metadata (types, fields)     |
 | `GET`     | `/api/{slug}`         | List / query entities               |
 | `POST`    | `/api/{slug}`         | Create a new entity                 |
 | `GET`     | `/api/{slug}/{id}`    | Read a single entity by ID          |
