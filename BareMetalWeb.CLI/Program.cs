@@ -49,10 +49,10 @@ internal sealed class MetaField
 
 internal static class Program
 {
-    private static readonly string ConfigDir = Path.Combine(
+    private static string ConfigDir => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".bmw");
-    private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
-    private static readonly string CookiePath = Path.Combine(ConfigDir, "cookies");
+    private static string ConfigPath => Path.Combine(ConfigDir, "config.json");
+    private static string CookiePath => Path.Combine(ConfigDir, "cookies");
 
     private static CookieContainer _cookies = new();
     private static BmwConfig _config = new();
@@ -61,6 +61,8 @@ internal static class Program
 
     static async Task<int> Main(string[] args)
     {
+        try
+        {
         LoadConfig();
         InitHttpClient();
 
@@ -100,6 +102,12 @@ internal static class Program
         {
             Console.Error.WriteLine($"Error: {ex.GetType().Name}: {ex.Message}");
             return 1;
+        }
+        } // end outer try
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Fatal: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            return 255;
         }
     }
 
