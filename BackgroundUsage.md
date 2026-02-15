@@ -26,58 +26,58 @@ This document details the REST API endpoints, Service Principal authentication, 
 
 ---
 
-## CLI Tool (`bmw`)
+## CLI Tool (`metal`)
 
 BareMetalWeb includes a cross-platform CLI tool for managing entities from the command line. It compiles to native AOT binaries for Windows and Linux on x64, x86, ARM64, and ARM32.
 
 ### Installation
 
-Download the binary for your platform from the GitHub Actions build artifacts (`bmw-all-platforms`). No runtime required — it's a self-contained native binary.
+Download the binary for your platform from the GitHub Actions build artifacts (`metal-all-platforms`). No runtime required — it's a self-contained native binary.
 
 ### Connection
 
 ```bash
 # Connect with API key
-bmw connect https://your-site.azurewebsites.net your-api-key
+metal connect https://your-site.azurewebsites.net your-api-key
 
 # Or connect then login via device code flow (opens browser)
-bmw connect https://your-site.azurewebsites.net
-bmw login
+metal connect https://your-site.azurewebsites.net
+metal login
 
 # Or login via device code (headless/SSH — displays code to enter manually)
-bmw login --outofband
+metal login --outofband
 
 # Or login directly with credentials
-bmw login username password
+metal login username password
 
 # Show current config
-bmw config
+metal config
 ```
 
-Configuration is stored in `~/.bmw/config.json`, session cookies in `~/.bmw/cookies`.
+Configuration is stored in `~/.metal/config.json`, session cookies in `~/.metal/cookies`.
 
 ### Commands
 
 | Command | Description |
 |---------|-------------|
-| `bmw connect <url> [api-key]` | Set server URL and optional API key |
-| `bmw login` | Login via device code (opens browser) |
-| `bmw login --outofband` | Login via device code (no browser, shows code) |
-| `bmw login <user> <pass>` | Login with username/password |
-| `bmw config` | Show current configuration |
-| `bmw types` | List available entity types (via `/api/_meta`) |
-| `bmw list <type>` | List all entities of a type |
-| `bmw get <type> <id>` | Get a single entity |
-| `bmw create <type> k=v [k=v..]` | Create a new entity |
-| `bmw update <type> <id> k=v ..` | Partial update (PATCH) |
-| `bmw delete <type> <id>` | Delete an entity |
-| `bmw query <type> [params]` | Query with filters |
+| `metal connect <url> [api-key]` | Set server URL and optional API key |
+| `metal login` | Login via device code (opens browser) |
+| `metal login --outofband` | Login via device code (no browser, shows code) |
+| `metal login <user> <pass>` | Login with username/password |
+| `metal config` | Show current configuration |
+| `metal types` | List available entity types (via `/api/_meta`) |
+| `metal list <type>` | List all entities of a type |
+| `metal get <type> <id>` | Get a single entity |
+| `metal create <type> k=v [k=v..]` | Create a new entity |
+| `metal update <type> <id> k=v ..` | Partial update (PATCH) |
+| `metal delete <type> <id>` | Delete an entity |
+| `metal query <type> [params]` | Query with filters |
 
 ### Query Parameters
 
 ```bash
-bmw query to-do field=Title op=contains value=milk sort=Deadline dir=asc top=5
-bmw query to-do q=searchtext
+metal query to-do field=Title op=contains value=milk sort=Deadline dir=asc top=5
+metal query to-do q=searchtext
 ```
 
 ### Discovery Endpoint

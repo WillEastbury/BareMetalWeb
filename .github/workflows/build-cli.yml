@@ -49,13 +49,13 @@ jobs:
         shell: bash
         run: |
           mkdir -p ./artifacts
-          cp ./cli-out/${{ matrix.rid }}/bmw${{ matrix.ext }} ./artifacts/bmw-${{ matrix.rid }}${{ matrix.ext }}
+          cp ./cli-out/${{ matrix.rid }}/metal${{ matrix.ext }} ./artifacts/metal-${{ matrix.rid }}${{ matrix.ext }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: bmw-${{ matrix.rid }}
-          path: ./artifacts/bmw-${{ matrix.rid }}${{ matrix.ext }}
+          name: metal-${{ matrix.rid }}
+          path: ./artifacts/metal-${{ matrix.rid }}${{ matrix.ext }}
 
   collect:
     needs: build-cli
@@ -73,5 +73,5 @@ jobs:
       - name: Upload combined release
         uses: actions/upload-artifact@v4
         with:
-          name: bmw-all-platforms
+          name: metal-all-platforms
           path: ./all-binaries/

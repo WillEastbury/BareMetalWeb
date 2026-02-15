@@ -26,7 +26,7 @@ BareMetalWeb is a lean, mean web server that uses ASP.NET Core **only** for HTTP
 - **Async buffered logging** — per-minute log files, non-blocking, clean shutdown records
 - **Static file serving** — streaming with ETag/Last-Modified/Cache-Control, MIME mapping
 - **Reverse proxy** — route-based forwarding with cookie stripping
-- **Native AOT CLI tool** — `bmw` binary for managing any BareMetalWeb instance from the terminal
+- **Native AOT CLI tool** — `metal` binary for managing any BareMetalWeb instance from the terminal
 
 ### Live Instances
 
@@ -100,7 +100,7 @@ also the logs are written per-day-per-hour-per-minute log files to keep them man
 
 ---
 
-## BareMetalWeb CLI (`bmw`)
+## BareMetalWeb CLI (`metal`)
 
 A cross-platform, native AOT-compiled command-line tool for managing BareMetalWeb instances. No .NET runtime required — download the single binary for your platform and go.
 
@@ -110,58 +110,58 @@ Pre-built binaries are available as GitHub Actions artifacts from the **Build CL
 
 | Platform             | Artifact Name     | Binary                    | Architecture |
 |----------------------|-------------------|---------------------------|--------------|
-| Windows x64          | `bmw-win-x64`     | `bmw-win-x64.exe`        | Intel/AMD 64-bit |
-| Windows ARM64        | `bmw-win-arm64`   | `bmw-win-arm64.exe`      | ARM 64-bit (Surface Pro X, etc.) |
-| Linux x64            | `bmw-linux-x64`   | `bmw-linux-x64`          | Intel/AMD 64-bit |
-| Linux ARM64          | `bmw-linux-arm64`  | `bmw-linux-arm64`        | ARM 64-bit (Raspberry Pi 4+, AWS Graviton, Android/Termux) |
-| **All platforms**    | `bmw-all-platforms`| All of the above          | Combined download |
+| Windows x64          | `metal-win-x64`     | `metal-win-x64.exe`        | Intel/AMD 64-bit |
+| Windows ARM64        | `metal-win-arm64`   | `metal-win-arm64.exe`      | ARM 64-bit (Surface Pro X, etc.) |
+| Linux x64            | `metal-linux-x64`   | `metal-linux-x64`          | Intel/AMD 64-bit |
+| Linux ARM64          | `metal-linux-arm64`  | `metal-linux-arm64`        | ARM 64-bit (Raspberry Pi 4+, AWS Graviton, Android/Termux) |
+| **All platforms**    | `metal-all-platforms`| All of the above          | Combined download |
 
 **To download:** Go to [Actions → Build CLI Binaries](../../actions/workflows/build-cli.yml), click the latest successful run, and download the artifact for your platform from the bottom of the page.
 
 On Linux, make the binary executable after download:
 ```bash
-chmod +x bmw-linux-x64
+chmod +x metal-linux-x64
 ```
 
 **Termux / Android (proot):** The .NET runtime requires a GC heap limit in memory-constrained environments:
 ```bash
 export DOTNET_GCHeapHardLimit=0x10000000
-./bmw-linux-arm64 help
+./metal-linux-arm64 help
 ```
 
 ### Quick Start
 
 ```bash
 # 1. Connect to a BareMetalWeb instance (with API key)
-bmw connect https://mysite.azurewebsites.net my-api-key-here
+metal connect https://mysite.azurewebsites.net my-api-key-here
 
 # 2. Login via device code flow (opens browser, approve in browser)
-bmw connect https://mysite.azurewebsites.net
-bmw login
+metal connect https://mysite.azurewebsites.net
+metal login
 
 # 3. Login via device code (headless/SSH - shows code to enter manually)
-bmw login --outofband
+metal login --outofband
 
 # 4. Or login directly with credentials
-bmw login admin mypassword
+metal login admin mypassword
 
 # 5. Discover what entity types are available
-bmw types
+metal types
 
 # 4. List all records of a type
-bmw list to-do
+metal list to-do
 
 # 5. Create a new record
-bmw create to-do Title="Buy milk" Notes="From the store" IsCompleted=false
+metal create to-do Title="Buy milk" Notes="From the store" IsCompleted=false
 
 # 6. Get a single record
-bmw get to-do abc123
+metal get to-do abc123
 
 # 7. Update a record
-bmw update to-do abc123 IsCompleted=true
+metal update to-do abc123 IsCompleted=true
 
 # 8. Delete a record
-bmw delete to-do abc123
+metal delete to-do abc123
 ```
 
 ### Commands
@@ -170,41 +170,41 @@ bmw delete to-do abc123
 
 | Command | Description |
 |---------|-------------|
-| `bmw connect <url> [api-key]` | Set the server URL and optional API key |
-| `bmw login` | Login via device code flow (opens browser for approval) |
-| `bmw login --outofband` | Login via device code (displays code for manual entry) |
-| `bmw login <user> <pass>` | Login directly with username/password |
-| `bmw config` | Show current connection configuration |
+| `metal connect <url> [api-key]` | Set the server URL and optional API key |
+| `metal login` | Login via device code flow (opens browser for approval) |
+| `metal login --outofband` | Login via device code (displays code for manual entry) |
+| `metal login <user> <pass>` | Login directly with username/password |
+| `metal config` | Show current connection configuration |
 
 Authentication priority: API key (if configured) → Session cookie (from login).
 
-Configuration is stored in `~/.bmw/config.json`. Session cookies are persisted in `~/.bmw/cookies`.
+Configuration is stored in `~/.metal/config.json`. Session cookies are persisted in `~/.metal/cookies`.
 
 #### Entity Operations
 
 | Command | Description |
 |---------|-------------|
-| `bmw types` | List all entity types on the server (via `/api/_meta`) |
-| `bmw list <type>` | List all entities of a type |
-| `bmw get <type> <id>` | Get a single entity by ID (JSON output) |
-| `bmw create <type> key=value [...]` | Create a new entity |
-| `bmw update <type> <id> key=value [...]` | Partial update an entity (PATCH) |
-| `bmw delete <type> <id>` | Delete an entity |
+| `metal types` | List all entity types on the server (via `/api/_meta`) |
+| `metal list <type>` | List all entities of a type |
+| `metal get <type> <id>` | Get a single entity by ID (JSON output) |
+| `metal create <type> key=value [...]` | Create a new entity |
+| `metal update <type> <id> key=value [...]` | Partial update an entity (PATCH) |
+| `metal delete <type> <id>` | Delete an entity |
 
 #### Querying
 
 ```bash
 # Full-text search
-bmw query to-do q=milk
+metal query to-do q=milk
 
 # Filter by field with operator
-bmw query to-do field=Title op=contains value=milk
+metal query to-do field=Title op=contains value=milk
 
 # Sort and paginate
-bmw query to-do sort=Deadline dir=desc skip=0 top=10
+metal query to-do sort=Deadline dir=desc skip=0 top=10
 
 # Combine filters, sort, and pagination
-bmw query to-do field=IsCompleted op=eq value=false sort=Deadline dir=asc top=5
+metal query to-do field=IsCompleted op=eq value=false sort=Deadline dir=asc top=5
 ```
 
 **Available operators:** `eq`, `ne`, `contains`, `startswith`, `endswith`, `in`, `notin`, `gt`, `lt`, `gte`, `lte`

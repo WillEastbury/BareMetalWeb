@@ -50,7 +50,7 @@ internal sealed class MetaField
 internal static class Program
 {
     private static string ConfigDir => Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".bmw");
+        Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".metal");
     private static string ConfigPath => Path.Combine(ConfigDir, "config.json");
     private static string CookiePath => Path.Combine(ConfigDir, "cookies");
 
@@ -115,7 +115,7 @@ internal static class Program
     // --- connect ---
     static int Connect(string[] args)
     {
-        if (args.Length < 1) return Help(1, "Usage: bmw connect <url> [api-key]");
+        if (args.Length < 1) return Help(1, "Usage: metal connect <url> [api-key]");
         _config.Url = args[0].TrimEnd('/');
         _config.ApiKey = args.Length > 1 ? args[1] : "";
         SaveConfig();
@@ -129,11 +129,11 @@ internal static class Program
     // --- login ---
     static async Task<int> Login(string[] args)
     {
-        if (string.IsNullOrEmpty(_config.Url)) return Help(1, "Not connected. Run: bmw connect <url>");
+        if (string.IsNullOrEmpty(_config.Url)) return Help(1, "Not connected. Run: metal connect <url>");
 
-        // bmw login --outofband → device code flow (no browser)
-        // bmw login → device code flow (opens browser)
-        // bmw login <user> <pass> → direct credentials
+        // metal login --outofband → device code flow (no browser)
+        // metal login → device code flow (opens browser)
+        // metal login <user> <pass> → direct credentials
         bool outOfBand = args.Any(a => a == "--outofband");
         var filtered = args.Where(a => a != "--outofband").ToArray();
 
@@ -254,7 +254,7 @@ internal static class Program
     // --- list ---
     static async Task<int> ListEntities(string[] args)
     {
-        if (args.Length < 1) return Help(1, "Usage: bmw list <type>");
+        if (args.Length < 1) return Help(1, "Usage: metal list <type>");
         var slug = args[0];
         var resp = await _http.GetAsync($"/api/{slug}");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
@@ -267,7 +267,7 @@ internal static class Program
     // --- get ---
     static async Task<int> GetEntity(string[] args)
     {
-        if (args.Length < 2) return Help(1, "Usage: bmw get <type> <id>");
+        if (args.Length < 2) return Help(1, "Usage: metal get <type> <id>");
         var resp = await _http.GetAsync($"/api/{args[0]}/{args[1]}");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
@@ -278,7 +278,7 @@ internal static class Program
     // --- create ---
     static async Task<int> CreateEntity(string[] args)
     {
-        if (args.Length < 2) return Help(1, "Usage: bmw create <type> key=value [key=value...]");
+        if (args.Length < 2) return Help(1, "Usage: metal create <type> key=value [key=value...]");
         var slug = args[0];
         var obj = ParseKeyValues(args[1..]);
         var json = JsonSerializer.Serialize(obj, BmwJsonContext.Default.DictionaryStringString);
@@ -294,7 +294,7 @@ internal static class Program
     // --- update ---
     static async Task<int> UpdateEntity(string[] args)
     {
-        if (args.Length < 3) return Help(1, "Usage: bmw update <type> <id> key=value [key=value...]");
+        if (args.Length < 3) return Help(1, "Usage: metal update <type> <id> key=value [key=value...]");
         var slug = args[0]; var id = args[1];
         var obj = ParseKeyValues(args[2..]);
         var json = JsonSerializer.Serialize(obj, BmwJsonContext.Default.DictionaryStringString);
@@ -313,7 +313,7 @@ internal static class Program
     // --- delete ---
     static async Task<int> DeleteEntity(string[] args)
     {
-        if (args.Length < 2) return Help(1, "Usage: bmw delete <type> <id>");
+        if (args.Length < 2) return Help(1, "Usage: metal delete <type> <id>");
         var resp = await _http.DeleteAsync($"/api/{args[0]}/{args[1]}");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         Console.WriteLine("Deleted.");
@@ -323,7 +323,7 @@ internal static class Program
     // --- query ---
     static async Task<int> QueryEntities(string[] args)
     {
-        if (args.Length < 1) return Help(1, "Usage: bmw query <type> [field=X] [op=eq] [value=Y] [q=text] [sort=F] [dir=asc] [skip=0] [top=10]");
+        if (args.Length < 1) return Help(1, "Usage: metal query <type> [field=X] [op=eq] [value=Y] [q=text] [sort=F] [dir=asc] [skip=0] [top=10]");
         var slug = args[0];
         var qs = new StringBuilder();
         for (int i = 1; i < args.Length; i++)
@@ -345,7 +345,7 @@ internal static class Program
     // --- first ---
     static async Task<int> FirstEntity(string[] args)
     {
-        if (args.Length < 1) return Help(1, "Usage: bmw first <type> [q=text] [field=X op=eq value=Y] [sort=F] [dir=asc|desc]");
+        if (args.Length < 1) return Help(1, "Usage: metal first <type> [q=text] [field=X op=eq value=Y] [sort=F] [dir=asc|desc]");
         var slug = args[0];
         // Default sort by CreatedOnUtc desc (newest first), overridable
         var hasSort = args.Skip(1).Any(a => a.StartsWith("sort=", StringComparison.OrdinalIgnoreCase));
@@ -391,7 +391,7 @@ internal static class Program
     static async Task<MetaEntity[]?> FetchMeta()
     {
         if (_meta != null) return _meta;
-        if (string.IsNullOrEmpty(_config.Url)) { Console.Error.WriteLine("Not connected. Run: bmw connect <url>"); return null; }
+        if (string.IsNullOrEmpty(_config.Url)) { Console.Error.WriteLine("Not connected. Run: metal connect <url>"); return null; }
         var resp = await _http.GetAsync("/api/_meta");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return null; }
         var body = await resp.Content.ReadAsStringAsync();
@@ -556,20 +556,20 @@ internal static class Program
 
     static void PrintUsage()
     {
-        Console.WriteLine("bmw - BareMetalWeb CLI");
+        Console.WriteLine("metal - BareMetalWeb CLI");
         Console.WriteLine();
-        Console.WriteLine("Usage: bmw <command> [args]");
+        Console.WriteLine("Usage: metal <command> [args]");
         Console.WriteLine();
-        Console.WriteLine("Run 'bmw help' for available commands.");
+        Console.WriteLine("Run 'metal help' for available commands.");
     }
 
     static int Help(int exitCode, string? error = null)
     {
         if (error != null) Console.Error.WriteLine($"Error: {error}\n");
         Console.WriteLine("""
-            bmw - BareMetalWeb CLI
+            metal - BareMetalWeb CLI
 
-            Usage: bmw <command> [args]
+            Usage: metal <command> [args]
 
             Connection:
               connect <url> [api-key]     Set server URL and optional API key
@@ -593,14 +593,14 @@ internal static class Program
               first <type> [q=text]       Get first matching entity (detail view)
 
             Examples:
-              bmw connect https://mysite.azurewebsites.net abc123key
-              bmw types
-              bmw list to-do
-              bmw create to-do Title="Buy milk" Notes="From store"
-              bmw query to-do q=milk sort=Deadline dir=asc top=5
-              bmw get to-do abc123
-              bmw update to-do abc123 IsCompleted=true
-              bmw delete to-do abc123
+              metal connect https://mysite.azurewebsites.net abc123key
+              metal types
+              metal list to-do
+              metal create to-do Title="Buy milk" Notes="From store"
+              metal query to-do q=milk sort=Deadline dir=asc top=5
+              metal get to-do abc123
+              metal update to-do abc123 IsCompleted=true
+              metal delete to-do abc123
             """);
         return exitCode;
     }

@@ -11,7 +11,7 @@
     <TrimMode>full</TrimMode>
     <SelfContained>true</SelfContained>
     <InvariantGlobalization>false</InvariantGlobalization>
-    <AssemblyName>bmw</AssemblyName>
+    <AssemblyName>metal</AssemblyName>
     <RootNamespace>BareMetalWeb.CLI</RootNamespace>
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <GarbageCollectionAdaptationMode>0</GarbageCollectionAdaptationMode>
