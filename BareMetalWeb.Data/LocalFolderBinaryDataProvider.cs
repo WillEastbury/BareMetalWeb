@@ -189,7 +189,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         return name;
     }
 
-    public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
+    public void Save<T>(T obj) where T : BaseDataObject
     {
         if (obj is null) throw new ArgumentNullException(nameof(obj));
         if (string.IsNullOrWhiteSpace(obj.Id))
@@ -257,26 +257,30 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             _logger?.LogError($"Serialization failed for {type.Name} with Id {obj.Id}.", ex);
             throw;
         }
+    }
+
+    public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
+    {
+        Save(obj);
         return ValueTask.CompletedTask;
     }
 
-    public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+    public T? Load<T>(string id) where T : BaseDataObject
     {
         if (string.IsNullOrWhiteSpace(id))
             throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
 
         var type = typeof(T);
         if (!TryGetClusteredLocation(type.Name, id, out var location))
-            return ValueTask.FromResult<T?>(null);
+            return default;
 
         var store = GetClusteredStore(type.Name);
         var bytes = store.Read(location);
         if (bytes == null)
         {
-            // Evict stale map entries so later reads re-check the index.
             if (_clusteredLocationMaps.TryGetValue(type.Name, out var map))
                 map.TryRemove(id, out _);
-            return ValueTask.FromResult<T?>(null);
+            return default;
         }
 
         try
@@ -286,7 +290,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             if (schemaFile == null)
             {
                 _logger?.LogInfo($"Schema fallback for {type.Name} with Id {id}. Missing version {schemaVersion}; returning null.");
-                return ValueTask.FromResult<T?>(null);
+                return default;
             }
 
             var schemaMembers = schemaFile.Members
@@ -295,8 +299,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             var schemaArchitecture = ParseArchitecture(schemaFile.Architecture);
             var schema = _serializer.CreateSchema(schemaFile.Version, schemaMembers, schemaArchitecture, schemaFile.Hash);
 
-            var obj = DeserializeFor<T>(_serializer, bytes, schema);
-            return ValueTask.FromResult(obj);
+            return DeserializeFor<T>(_serializer, bytes, schema);
         }
         catch (Exception ex)
         {
@@ -305,11 +308,16 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         }
     }
 
-    public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+    public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+    {
+        return ValueTask.FromResult(Load<T>(id));
+    }
+
+    public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
     {
         var type = typeof(T);
         if (!GetClusteredStore(type.Name).Exists())
-            return ValueTask.FromResult<IEnumerable<T>>(Array.Empty<T>());
+            return Array.Empty<T>();
 
         var locations = GetClusteredLocationMap(type.Name);
         var skip = query?.Skip ?? 0;
@@ -317,7 +325,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         if (skip < 0)
             skip = 0;
         if (top <= 0)
-            return ValueTask.FromResult<IEnumerable<T>>(Array.Empty<T>());
+            return Array.Empty<T>();
 
         var canShortCircuit = query == null || query.Sorts.Count == 0;
         if (canShortCircuit)
@@ -326,9 +334,6 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             var matched = 0;
             foreach (var entry in locations)
             {
-                if (cancellationToken.IsCancellationRequested)
-                    break;
-
                 try
                 {
                     var bytes = GetClusteredStore(type.Name).Read(entry.Value);
@@ -372,15 +377,12 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                 }
             }
 
-            return ValueTask.FromResult<IEnumerable<T>>(results);
+            return results;
         }
 
         var all = new List<T>();
         foreach (var entry in locations)
         {
-            if (cancellationToken.IsCancellationRequested)
-                break;
-
             try
             {
                 var bytes = GetClusteredStore(type.Name).Read(entry.Value);
@@ -414,25 +416,27 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         var sorted = _queryEvaluator.ApplySorts(filtered, query);
         if (skip > 0 || top != int.MaxValue)
             sorted = sorted.Skip(skip).Take(top);
-        return ValueTask.FromResult<IEnumerable<T>>(sorted.ToList());
+        return sorted.ToList();
     }
 
-    public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+    public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+    {
+        return ValueTask.FromResult(Query<T>(query));
+    }
+
+    public int Count<T>(QueryDefinition? query = null) where T : BaseDataObject
     {
         var type = typeof(T);
         if (!GetClusteredStore(type.Name).Exists())
-            return ValueTask.FromResult(0);
+            return 0;
 
         var locations = GetClusteredLocationMap(type.Name);
         if (query == null || (query.Clauses.Count == 0 && query.Groups.Count == 0))
-            return ValueTask.FromResult(locations.Count);
+            return locations.Count;
 
         var count = 0;
         foreach (var entry in locations)
         {
-            if (cancellationToken.IsCancellationRequested)
-                break;
-
             try
             {
                 var bytes = GetClusteredStore(type.Name).Read(entry.Value);
@@ -462,10 +466,15 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             }
         }
 
-        return ValueTask.FromResult(count);
+        return count;
     }
 
-    public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+    public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+    {
+        return ValueTask.FromResult(Count<T>(query));
+    }
+
+    public void Delete<T>(string id) where T : BaseDataObject
     {
         if (string.IsNullOrWhiteSpace(id))
             throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
@@ -478,7 +487,11 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             if (_clusteredLocationMaps.TryGetValue(typeof(T).Name, out var map))
                 map.TryRemove(id, out _);
         }
+    }
 
+    public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+    {
+        Delete<T>(id);
         return ValueTask.CompletedTask;
     }
 

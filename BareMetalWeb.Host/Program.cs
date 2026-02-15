@@ -143,6 +143,12 @@ appInfo.RegisterRoute("GET /api/{type}/{id}", new RouteHandlerData(pageInfoFacto
 appInfo.RegisterRoute("PUT /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPutHandler));
 appInfo.RegisterRoute("PATCH /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPatchHandler));
 appInfo.RegisterRoute("DELETE /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiDeleteHandler));
+appInfo.RegisterRoute("GET /query/ideas", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
+{
+    var idea = context.Request.Query.ContainsKey("idea") ? context.Request.Query["idea"].ToString() : null;
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync("{\"result\":\"idea not found\"}");
+}));
 appInfo.RegisterRoute("GET /admin/reload-templates", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "System", navAlignment: NavAlignment.Right), routeHandlers.ReloadTemplatesHandler));
 appInfo.RegisterRoute("GET /status", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "" }, "Public", false, 1), routeHandlers.BuildPageHandler(context =>
 {
