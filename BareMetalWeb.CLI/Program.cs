@@ -88,6 +88,7 @@ internal static class Program
                 "update" => await UpdateEntity(rest),
                 "delete" => await DeleteEntity(rest),
                 "query" => await QueryEntities(rest),
+                "first" => await FirstEntity(rest),
                 "config" => ShowConfig(),
                 "help" or "--help" or "-h" => Help(0),
                 _ => Help(1, $"Unknown command: {cmd}")
@@ -341,6 +342,41 @@ internal static class Program
         return 0;
     }
 
+    // --- first ---
+    static async Task<int> FirstEntity(string[] args)
+    {
+        if (args.Length < 1) return Help(1, "Usage: bmw first <type> [q=text] [field=X op=eq value=Y] [sort=F] [dir=asc|desc]");
+        var slug = args[0];
+        // Default sort by CreatedOnUtc desc (newest first), overridable
+        var hasSort = args.Skip(1).Any(a => a.StartsWith("sort=", StringComparison.OrdinalIgnoreCase));
+        var qs = new StringBuilder("?top=1");
+        if (!hasSort)
+            qs.Append("&sort=CreatedOnUtc&dir=desc");
+        for (int i = 1; i < args.Length; i++)
+        {
+            var eqIdx = args[i].IndexOf('=');
+            if (eqIdx <= 0) continue;
+            var k = args[i][..eqIdx]; var v = args[i][(eqIdx + 1)..];
+            qs.Append('&').Append(Uri.EscapeDataString(k)).Append('=').Append(Uri.EscapeDataString(v));
+        }
+        var resp = await _http.GetAsync($"/api/{slug}{qs}");
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        var items = JsonSerializer.Deserialize(body, BmwJsonContext.Default.JsonElement);
+        if (items.ValueKind == JsonValueKind.Array && items.GetArrayLength() == 0)
+        {
+            Console.WriteLine("No results.");
+            return 0;
+        }
+        var first = items.ValueKind == JsonValueKind.Array ? items[0] : items;
+        foreach (var prop in first.EnumerateObject())
+        {
+            var val = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString() : prop.Value.ToString();
+            Console.WriteLine($"  {prop.Name,-20} {val}");
+        }
+        return 0;
+    }
+
     // --- config ---
     static int ShowConfig()
     {
@@ -554,6 +590,7 @@ internal static class Program
               query <type> [params]       Query with filters
                 field=Name op=contains value=text
                 q=searchtext sort=Field dir=desc skip=0 top=10
+              first <type> [q=text]       Get first matching entity (detail view)
 
             Examples:
               bmw connect https://mysite.azurewebsites.net abc123key
