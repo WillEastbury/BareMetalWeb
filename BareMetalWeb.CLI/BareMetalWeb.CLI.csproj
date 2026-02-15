@@ -11,6 +11,13 @@
     <InvariantGlobalization>false</InvariantGlobalization>
     <AssemblyName>bmw</AssemblyName>
     <RootNamespace>BareMetalWeb.CLI</RootNamespace>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <GarbageCollectionAdaptationMode>0</GarbageCollectionAdaptationMode>
   </PropertyGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.Server" Value="false" />
+    <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="false" />
+  </ItemGroup>
 
 </Project>
