@@ -13,6 +13,11 @@ public static class UserAuth
     private static readonly TimeSpan DefaultSessionLifetime = TimeSpan.FromHours(8);
     private static readonly TimeSpan RememberMeLifetime = TimeSpan.FromDays(30);
 
+    // Note: Session expiration uses a fixed TTL model (not sliding window).
+    // Sessions expire at ExpiresUtc regardless of activity. Active users will be
+    // logged out after the TTL expires even with continuous use. This is intentional
+    // for simplicity and predictable session lifetimes. To implement sliding expiration,
+    // update LastSeenUtc and extend ExpiresUtc on each request.
     // Note: Session expiration uses a sliding window model.
     // Sessions extend their expiration time with each access, keeping active users
     // logged in. The session lifetime is reset on each request.
@@ -109,34 +114,6 @@ public static class UserAuth
         return session;
     }
 
-    public static User? GetUser(HttpContext context)
-    {
-        var session = GetSession(context);
-        if (session == null)
-            return null;
-
-        var user = Users.GetById(session.UserId);
-        if (user == null || !user.IsActive)
-            return null;
-
-        return user;
-    }
-
-    public static User? GetRequestUser(HttpContext context)
-    {
-        var sessionUser = GetUser(context);
-        if (sessionUser != null)
-            return sessionUser;
-
-        if (!IsApiRequest(context))
-            return null;
-
-        if (!TryGetApiKey(context, out var apiKey))
-            return null;
-
-        return SystemPrincipal.FindByApiKey(apiKey);
-    }
-
     public static async ValueTask<User?> GetUserAsync(HttpContext context, CancellationToken cancellationToken = default)
     {
         var session = await GetSessionAsync(context, cancellationToken).ConfigureAwait(false);
@@ -162,7 +139,7 @@ public static class UserAuth
         if (!TryGetApiKey(context, out var apiKey))
             return null;
 
-        return await Task.FromResult(SystemPrincipal.FindByApiKey(apiKey));
+        return await SystemPrincipal.FindByApiKeyAsync(apiKey, cancellationToken).ConfigureAwait(false);
     }
 
     public static async ValueTask SignInAsync(HttpContext context, User user, bool rememberMe, CancellationToken cancellationToken = default)
@@ -213,12 +190,6 @@ public static class UserAuth
         }
 
         context.DeleteCookie(SessionCookieName);
-    }
-
-    private static void RevokeSession(UserSession session)
-    {
-        session.IsRevoked = true;
-        DataStoreProvider.Current.Save(session);
     }
 
     private static bool IsApiRequest(HttpContext context)

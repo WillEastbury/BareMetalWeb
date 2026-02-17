@@ -76,10 +76,10 @@ public class BareMetalWebServer : IBareWebHost
         ErrorPageInfo = ErrorPage;
         cts = _cts;
     }
-    public void BuildAppInfoMenuOptions(HttpContext? context = null)
+    public async ValueTask BuildAppInfoMenuOptionsAsync(HttpContext? context = null, CancellationToken cancellationToken = default)
     {
         MenuOptionsList.Clear();
-        var user = context != null ? UserAuth.GetUser(context) : null;
+        var user = context != null ? await UserAuth.GetUserAsync(context, cancellationToken).ConfigureAwait(false) : null;
         bool isAnonymous = user == null;
         var userPermissions = new HashSet<string>(user?.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
 
@@ -252,7 +252,7 @@ public class BareMetalWebServer : IBareWebHost
         string path = method + " " + requestPath;
         string sourceIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         context.SetApp(this);
-        BuildAppInfoMenuOptions(context);
+        await BuildAppInfoMenuOptionsAsync(context, context.RequestAborted).ConfigureAwait(false);
 
         bool isHttps = IsHttpsRequest(context, TrustForwardedHeaders);
         context.Response.Headers["X-BareMetal-IsHttps"] = isHttps ? "true" : "false";
@@ -296,7 +296,7 @@ public class BareMetalWebServer : IBareWebHost
         }
         try
         {
-            if (ShouldForceSetup(requestPath))
+            if (await ShouldForceSetupAsync(requestPath, context.RequestAborted).ConfigureAwait(false))
             {
                 context.Response.StatusCode = StatusCodes.Status302Found;
                 context.Response.Headers.Location = "/setup";
@@ -318,10 +318,10 @@ public class BareMetalWebServer : IBareWebHost
                 {
                     context.SetPageInfo(page.PageInfo);
                 }
-                if (!IsAuthorized(page.PageInfo, context))
+                if (!await IsAuthorizedAsync(page.PageInfo, context, context.RequestAborted).ConfigureAwait(false))
                 {
                     await RenderForbidden(context);
-                    LogAccessDenied(path, sourceIp, context, page.PageInfo);
+                    await LogAccessDeniedAsync(path, sourceIp, context, page.PageInfo, context.RequestAborted).ConfigureAwait(false);
                     return;
                 }
                 await page.Handler(context);
@@ -334,10 +334,10 @@ public class BareMetalWebServer : IBareWebHost
                 {
                     context.SetPageInfo(allPage.PageInfo);
                 }
-                if (!IsAuthorized(allPage.PageInfo, context))
+                if (!await IsAuthorizedAsync(allPage.PageInfo, context, context.RequestAborted).ConfigureAwait(false))
                 {
                     await RenderForbidden(context);
-                    LogAccessDenied(path, sourceIp, context, allPage.PageInfo);
+                    await LogAccessDeniedAsync(path, sourceIp, context, allPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                     return;
                 }
                 await allPage.Handler(context);
@@ -365,10 +365,10 @@ public class BareMetalWebServer : IBareWebHost
                     {
                         context.SetPageInfo(injectedPage.PageInfo);
                     }
-                    if (!IsAuthorized(injectedPage.PageInfo, context))
+                    if (!await IsAuthorizedAsync(injectedPage.PageInfo, context, context.RequestAborted).ConfigureAwait(false))
                     {
                         await RenderForbidden(context);
-                        LogAccessDenied(path, sourceIp, context, injectedPage.PageInfo);
+                        await LogAccessDeniedAsync(path, sourceIp, context, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                         return;
                     }
                     await injectedPage.Handler(context);
@@ -391,10 +391,10 @@ public class BareMetalWebServer : IBareWebHost
                     {
                         context.SetPageInfo(injectedPage.PageInfo);
                     }
-                    if (!IsAuthorized(injectedPage.PageInfo, context))
+                    if (!await IsAuthorizedAsync(injectedPage.PageInfo, context, context.RequestAborted).ConfigureAwait(false))
                     {
                         await RenderForbidden(context);
-                        LogAccessDenied(path, sourceIp, context, injectedPage.PageInfo);
+                        await LogAccessDeniedAsync(path, sourceIp, context, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                         return;
                     }
                     await injectedPage.Handler(context);
@@ -463,7 +463,7 @@ public class BareMetalWebServer : IBareWebHost
         return true;
     }
 
-    private static bool IsAuthorized(PageInfo? pageInfo, HttpContext context)
+    private static async ValueTask<bool> IsAuthorizedAsync(PageInfo? pageInfo, HttpContext context, CancellationToken cancellationToken = default)
     {
         if (pageInfo == null)
             return true;
@@ -476,7 +476,7 @@ public class BareMetalWebServer : IBareWebHost
         if (string.Equals(permissionsNeeded, "Public", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        var user = UserAuth.GetRequestUser(context);
+        var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
         bool isAnonymous = user == null;
 
         if (string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase))
@@ -499,12 +499,15 @@ public class BareMetalWebServer : IBareWebHost
         return requiredPermissions.All(userPermissions.Contains);
     }
 
-    private static bool RootUserExists()
-        => DataStoreProvider.Current.Query<User>(RootUserQuery).Any();
-
-    private bool ShouldForceSetup(string requestPath)
+    private static async ValueTask<bool> RootUserExistsAsync(CancellationToken cancellationToken = default)
     {
-        if (RootUserExists())
+        var users = await DataStoreProvider.Current.QueryAsync<User>(RootUserQuery, cancellationToken).ConfigureAwait(false);
+        return users.Any();
+    }
+
+    private async ValueTask<bool> ShouldForceSetupAsync(string requestPath, CancellationToken cancellationToken = default)
+    {
+        if (await RootUserExistsAsync(cancellationToken).ConfigureAwait(false))
             return false;
 
         if (requestPath.StartsWith("/setup", StringComparison.OrdinalIgnoreCase))
@@ -523,9 +526,9 @@ public class BareMetalWebServer : IBareWebHost
         return true;
     }
 
-    private void LogAccessDenied(string path, string sourceIp, HttpContext context, PageInfo? pageInfo)
+    private async ValueTask LogAccessDeniedAsync(string path, string sourceIp, HttpContext context, PageInfo? pageInfo, CancellationToken cancellationToken = default)
     {
-        var user = UserAuth.GetRequestUser(context);
+        var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
         var userName = user?.UserName ?? "anonymous";
         var required = pageInfo?.PageMetaData.PermissionsNeeded ?? string.Empty;
         BufferedLogger.LogInfo($"{path}|403|{sourceIp}|user={userName}|required={required}");
