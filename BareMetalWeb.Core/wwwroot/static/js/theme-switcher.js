@@ -3,6 +3,7 @@
     const STORAGE_KEY = 'bm-selected-theme';
     const BOOTSWATCH_VERSION = '5.3.3';
     const BOOTSWATCH_CDN = `https://cdn.jsdelivr.net/npm/bootswatch@${BOOTSWATCH_VERSION}/dist/`;
+    const DEFAULT_THEME = 'cosmo';
     
     // Bootswatch CDN themes (colorful options)
     const BOOTSWATCH_THEMES = ['cosmo', 'flatly', 'superhero', 'darkly', 'cyborg'];
@@ -40,10 +41,10 @@
     
     // Apply a custom CSS variable theme
     function applyCustomTheme(themeName) {
-        // Remove Bootswatch link
+        // Remove Bootswatch link element
         const link = document.getElementById('bootswatch-theme');
-        if (link) {
-            link.href = '';
+        if (link && link.parentNode) {
+            link.parentNode.removeChild(link);
         }
         // Uncheck all Bootswatch radios
         BOOTSWATCH_THEMES.forEach(name => {
@@ -86,11 +87,11 @@
             }
         }
         
-        // Default to 'cosmo' if no saved theme
-        const defaultRadio = document.getElementById('theme-cosmo');
+        // Default to DEFAULT_THEME if no saved theme
+        const defaultRadio = document.getElementById(`theme-${DEFAULT_THEME}`);
         if (defaultRadio) {
             defaultRadio.checked = true;
-            applyTheme('cosmo');
+            applyTheme(DEFAULT_THEME);
         }
     }
     
