@@ -6,7 +6,6 @@
     const BOOTSWATCH_CDN_BASE = `https://cdn.jsdelivr.net/npm/bootswatch@${BOOTSWATCH_VERSION}/dist`;
     const STORAGE_KEY = 'bm-selected-theme';
     const DEFAULT_THEME = 'vapor';
-    const LIGHT_THEMES = ['flatly', 'lux'];
 
     // Get or create the theme stylesheet link element
     function getThemeLink() {
@@ -32,18 +31,18 @@
 
         // Remove custom theme classes from body
         document.body.classList.remove('bm-theme-contrast', 'bm-theme-muted');
+        // Bootswatch themes define colors at :root,[data-bs-theme=light]
+        // so remove data-bs-theme to avoid Bootstrap dark-mode overrides
+        document.body.removeAttribute('data-bs-theme');
 
         if (themeName === 'contrast') {
             themeLink.href = '';
             document.body.classList.add('bm-theme-contrast');
-            document.body.setAttribute('data-bs-theme', 'dark');
         } else if (themeName === 'muted') {
             themeLink.href = '';
             document.body.classList.add('bm-theme-muted');
-            document.body.setAttribute('data-bs-theme', 'dark');
         } else {
             themeLink.href = `${BOOTSWATCH_CDN_BASE}/${themeName}/bootstrap.min.css`;
-            document.body.setAttribute('data-bs-theme', LIGHT_THEMES.includes(themeName) ? 'light' : 'dark');
         }
 
         localStorage.setItem(STORAGE_KEY, themeName);
