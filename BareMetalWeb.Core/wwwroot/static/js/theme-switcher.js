@@ -60,15 +60,12 @@
         } else if (CUSTOM_THEMES.includes(themeName)) {
             applyCustomTheme(themeName);
         }
-        
         // Update localStorage
         try {
             localStorage.setItem(STORAGE_KEY, themeName);
         } catch (e) {
             // localStorage may be unavailable (private browsing, etc.)
-            if (console && console.warn) {
-                console.warn('Failed to save theme preference:', e);
-            }
+            console.warn('Failed to save theme preference:', e);
         }
     }
     
@@ -79,9 +76,7 @@
             savedTheme = localStorage.getItem(STORAGE_KEY);
         } catch (e) {
             // localStorage may be unavailable (private browsing, etc.)
-            if (console && console.warn) {
-                console.warn('Failed to load saved theme preference:', e);
-            }
+            console.warn('Failed to load saved theme preference:', e);
         }
         
         if (savedTheme) {
