@@ -213,18 +213,30 @@ public static class UserAuth
     private static bool TryGetApiKey(HttpContext context, out string apiKey)
     {
         apiKey = string.Empty;
-        if (!context.Request.Headers.TryGetValue("Authorization", out var authValues))
-            return false;
 
-        var header = authValues.ToString().Trim();
-        if (string.IsNullOrWhiteSpace(header))
-            return false;
+        // Option 1: ApiKey header with raw value
+        if (context.Request.Headers.TryGetValue("ApiKey", out var apiKeyHeader))
+        {
+            var raw = apiKeyHeader.ToString().Trim();
+            if (!string.IsNullOrWhiteSpace(raw))
+            {
+                apiKey = raw;
+                return true;
+            }
+        }
 
-        const string prefix = "ApiKey ";
-        if (!header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            return false;
+        // Option 2: Authorization header with "ApiKey <value>" prefix
+        if (context.Request.Headers.TryGetValue("Authorization", out var authValues))
+        {
+            var header = authValues.ToString().Trim();
+            const string prefix = "ApiKey ";
+            if (!string.IsNullOrWhiteSpace(header) && header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                apiKey = header[prefix.Length..].Trim();
+                return !string.IsNullOrWhiteSpace(apiKey);
+            }
+        }
 
-        apiKey = header[prefix.Length..].Trim();
-        return !string.IsNullOrWhiteSpace(apiKey);
+        return false;
     }
 }
