@@ -29,21 +29,10 @@
     function applyTheme(themeName) {
         const themeLink = getThemeLink();
 
-        // Remove custom theme classes from body
-        document.body.classList.remove('bm-theme-contrast', 'bm-theme-muted');
         // Bootswatch themes define colors at :root,[data-bs-theme=light]
         // so remove data-bs-theme to avoid Bootstrap dark-mode overrides
         document.body.removeAttribute('data-bs-theme');
-
-        if (themeName === 'contrast') {
-            themeLink.href = '';
-            document.body.classList.add('bm-theme-contrast');
-        } else if (themeName === 'muted') {
-            themeLink.href = '';
-            document.body.classList.add('bm-theme-muted');
-        } else {
-            themeLink.href = `${BOOTSWATCH_CDN_BASE}/${themeName}/bootstrap.min.css`;
-        }
+        themeLink.href = `${BOOTSWATCH_CDN_BASE}/${themeName}/bootstrap.min.css`;
 
         localStorage.setItem(STORAGE_KEY, themeName);
     }

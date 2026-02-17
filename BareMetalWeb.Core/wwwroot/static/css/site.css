@@ -354,65 +354,6 @@ body {
     border-color: rgba(255, 255, 255, 0.5);
 }
 
-body.bm-theme-contrast {
-    background: #000000 !important;
-    color: #ffffff !important;
-}
-
-body.bm-theme-contrast .navbar {
-    background: #000000 !important;
-    border-bottom: 2px solid #ffe600;
-}
-
-body.bm-theme-contrast a {
-    color: #ffe600;
-}
-
-body.bm-theme-contrast .bm-footer {
-    background: #000000 !important;
-    color: #ffffff;
-}
-
-body.bm-theme-contrast .form-control,
-body.bm-theme-contrast .form-select {
-    background: #000000;
-    color: #ffffff;
-    border-color: #ffffff;
-}
-
-body.bm-theme-contrast .table {
-    color: #ffffff;
-}
-
-body.bm-theme-muted {
-    background: #181b20 !important;
-    color: #d6dde5 !important;
-}
-
-body.bm-theme-muted .navbar {
-    background: #222b38 !important;
-}
-
-body.bm-theme-muted a {
-    color: #9db5c8;
-}
-
-body.bm-theme-muted .bm-footer {
-    background: #15181d !important;
-    color: #9aa7b5;
-}
-
-body.bm-theme-muted .form-control,
-body.bm-theme-muted .form-select {
-    background: #1b2026;
-    color: #d6dde5;
-    border-color: #323a46;
-}
-
-body.bm-theme-muted .table {
-    color: #d6dde5;
-}
-
 /* Toast container z-index */
 .toast-z-index {
     z-index: 1100;
