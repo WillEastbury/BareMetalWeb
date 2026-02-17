@@ -1,9 +1,14 @@
 using System.Text.Json;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
+using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.DataObjects;
+using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Host;
+using BareMetalWeb.Interfaces;
+using BareMetalWeb.Rendering;
+using BareMetalWeb.Rendering.Interfaces;
 
 WebApplication app = WebApplication.Create();
 
