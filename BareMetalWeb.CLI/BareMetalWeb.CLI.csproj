@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PublishAot>false</PublishAot>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>full</TrimMode>
+    <SelfContained>true</SelfContained>
+    <InvariantGlobalization>false</InvariantGlobalization>
+    <AssemblyName>metal</AssemblyName>
+    <RootNamespace>BareMetalWeb.CLI</RootNamespace>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <GarbageCollectionAdaptationMode>0</GarbageCollectionAdaptationMode>
+    <IlcDisableRegionGC>true</IlcDisableRegionGC>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.Server" Value="false" />
+    <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="false" />
+  </ItemGroup>
+
+</Project>

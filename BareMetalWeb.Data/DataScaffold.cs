@@ -203,6 +203,12 @@ public static class DataScaffold
             });
         }
 
+        if (query.TryGetValue("skip", out var skipStr) && int.TryParse(skipStr, out var skipVal))
+            definition.Skip = skipVal;
+
+        if (query.TryGetValue("top", out var topStr) && int.TryParse(topStr, out var topVal))
+            definition.Top = topVal;
+
         return definition;
     }
 
@@ -758,9 +764,16 @@ public static class DataScaffold
 
     private static IEnumerable QueryByType(Type type, QueryDefinition? query)
     {
-        var method = typeof(IDataObjectStore).GetMethod(nameof(IDataObjectStore.Query))!;
+        // Note: This uses sync-over-async for scaffolding/reflection scenarios called from synchronous UI rendering.
+        // This is a pragmatic choice to avoid cascading async changes through the entire scaffolding system.
+        // CancellationToken.None is used because:
+        // 1. This is only called during UI rendering with cached results (see GetLookupOptions cache)
+        // 2. The synchronous callers (BuildEditFormHtml, BuildListRows, etc.) don't have cancellation context
+        // 3. The operations are typically fast due to caching and small data sets for lookups
+        var method = typeof(IDataObjectStore).GetMethod(nameof(IDataObjectStore.QueryAsync))!;
         var generic = method.MakeGenericMethod(type);
-        return (IEnumerable)generic.Invoke(DataStoreProvider.Current, new object?[] { query })!;
+        var task = (ValueTask<IEnumerable>)generic.Invoke(DataStoreProvider.Current, new object?[] { query, CancellationToken.None })!;
+        return task.AsTask().GetAwaiter().GetResult();
     }
 
     private static IReadOnlyList<KeyValuePair<string, string>> BuildLookupOptions(IEnumerable items, string valueField, string displayField)

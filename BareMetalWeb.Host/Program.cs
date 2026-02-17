@@ -4,6 +4,7 @@ using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
+using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Host;
 using BareMetalWeb.Interfaces;
@@ -46,7 +47,7 @@ var rootPermissionSet = new HashSet<string>(entityPermissions, StringComparer.Or
     "monitoring"
 };
 
-ProgramSetup.EnsureRootPermissions(logger, rootPermissionSet.ToArray());
+await ProgramSetup.EnsureRootPermissionsAsync(logger, rootPermissionSet.ToArray());
 
 IHtmlFragmentStore fragmentStore = new HtmlFragmentStore();
 IHtmlFragmentRenderer fragmentRenderer = new HtmlFragmentRenderer(fragmentStore);
@@ -68,6 +69,13 @@ ProgramSetup.ConfigureCors(app, appInfo);
 ProgramSetup.ConfigureHttps(app, appInfo);
 ProgramSetup.ConfigureProxyRoutes(app, appInfo, logger, pageInfoFactory);
 
+// Register routes using plugin-like extension methods
+appInfo.RegisterStaticRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+appInfo.RegisterAuthRoutes(routeHandlers, pageInfoFactory, mainTemplate, allowAccountCreation);
+appInfo.RegisterMonitoringRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+appInfo.RegisterAdminRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+appInfo.RegisterDataRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
 // Standard render routes
 appInfo.RegisterRoute("GET /", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Home", "<p></p>" }, "Public", false, 60), routeHandlers.DefaultPageHandler)); // new method to register routes
 // appInfo.RegisterRoute("GET /about", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "About", "<p>This is the about page.</p>" }, "Public", true, 60), routeHandlers.DefaultPageHandler));
@@ -137,12 +145,248 @@ appInfo.RegisterRoute("POST /admin/data/{type}/{id}/clone-edit", new RouteHandle
 appInfo.RegisterRoute("GET /admin/data/{type}/{id}/delete", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Delete", "" }, "Authenticated", false, 1), routeHandlers.DataDeleteHandler));
 appInfo.RegisterRoute("POST /admin/data/{type}/{id}/delete", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Delete", "" }, "Authenticated", false, 1), routeHandlers.DataDeletePostHandler));
 
+appInfo.RegisterRoute("POST /api/device/code", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
+{
+    var dc = new DeviceCodeAuth
+    {
+        UserCode = DeviceCodeAuth.GenerateUserCode(),
+        DeviceCode = DeviceCodeAuth.GenerateDeviceCode(),
+        ExpiresUtc = DateTime.UtcNow.AddMinutes(15),
+        Status = "pending"
+    };
+    DataStoreProvider.Current.Save(dc);
+    var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
+    var json = JsonSerializer.Serialize(new Dictionary<string, object>
+    {
+        ["device_code"] = dc.DeviceCode,
+        ["user_code"] = dc.UserCode,
+        ["verification_url"] = $"{baseUrl}/device",
+        ["expires_in"] = 900,
+        ["interval"] = 5
+    });
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync(json);
+}));
+appInfo.RegisterRoute("POST /api/device/token", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
+{
+    string body;
+    using (var reader = new System.IO.StreamReader(context.Request.Body))
+        body = await reader.ReadToEndAsync();
+    var deviceCode = "";
+    try { var doc = JsonDocument.Parse(body); deviceCode = doc.RootElement.GetProperty("device_code").GetString() ?? ""; } catch { }
+    if (string.IsNullOrEmpty(deviceCode))
+    {
+        context.Response.StatusCode = 400;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"error\":\"missing device_code\"}");
+        return;
+    }
+    var all = DataStoreProvider.Current.Query<DeviceCodeAuth>(null).ToList();
+    var dc = all.FirstOrDefault(d => d.DeviceCode == deviceCode);
+    if (dc == null || dc.IsExpired(DateTime.UtcNow))
+    {
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"status\":\"expired\"}");
+        return;
+    }
+    if (dc.Status == "approved" && !string.IsNullOrEmpty(dc.UserId))
+    {
+        var user = await DataStoreProvider.Current.LoadAsync<User>(dc.UserId);
+        if (user != null)
+        {
+            await UserAuth.SignInAsync(context, user, false);
+            dc.Status = "consumed";
+            DataStoreProvider.Current.Save(dc);
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new Dictionary<string, object>
+            {
+                ["status"] = "approved",
+                ["user"] = user.DisplayName ?? user.UserName
+            }));
+            return;
+        }
+    }
+    if (dc.Status == "denied")
+    {
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"status\":\"denied\"}");
+        return;
+    }
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync("{\"status\":\"authorization_pending\"}");
+}));
+appInfo.RegisterRoute("GET /device", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
+{
+    var code = context.Request.Query.ContainsKey("code") ? context.Request.Query["code"].ToString() : "";
+    var msg = context.Request.Query.ContainsKey("msg") ? context.Request.Query["msg"].ToString() : "";
+    var sb = new System.Text.StringBuilder();
+    sb.Append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+    sb.Append("<title>Device Login - BareMetalWeb</title><style>");
+    sb.Append("*{margin:0;padding:0;box-sizing:border-box}");
+    sb.Append("body{font-family:system-ui,-apple-system,sans-serif;background:#1a1a2e;color:#e0e0e0;display:flex;justify-content:center;align-items:center;min-height:100vh}");
+    sb.Append(".card{background:#16213e;border-radius:12px;padding:40px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.4);text-align:center}");
+    sb.Append("h1{font-size:1.6em;margin-bottom:8px;color:#fff}");
+    sb.Append("p{color:#a0a0b0;margin-bottom:24px;font-size:.95em}");
+    sb.Append("input[type=text]{width:100%;padding:14px;font-size:1.4em;text-align:center;letter-spacing:4px;border:2px solid #4361ee;border-radius:8px;background:#0f3460;color:#fff;outline:none;text-transform:uppercase}");
+    sb.Append("input:focus{border-color:#7c8cf8;box-shadow:0 0 12px rgba(67,97,238,.4)}");
+    sb.Append("button{width:100%;margin-top:16px;padding:14px;font-size:1.1em;background:#4361ee;color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600}");
+    sb.Append("button:hover{background:#3a56d4}");
+    sb.Append(".msg{margin-top:16px;padding:12px;border-radius:6px;font-size:.9em}");
+    sb.Append(".msg-ok{background:#1b5e20;color:#a5d6a7}.msg-err{background:#b71c1c;color:#ef9a9a}");
+    sb.Append(".logo{font-size:2.5em;margin-bottom:16px}");
+    sb.Append("</style></head><body>");
+    sb.Append("<div class=\"card\">");
+    sb.Append("<div class=\"logo\">&#128272;</div>");
+    sb.Append("<h1>Device Login</h1>");
+    sb.Append("<p>Enter the code shown in your CLI to authorize this device.</p>");
+    sb.Append("<form method=\"post\" action=\"/device\">");
+    sb.Append($"<input type=\"text\" name=\"code\" maxlength=\"9\" placeholder=\"XXXX-XXXX\" value=\"{System.Net.WebUtility.HtmlEncode(code)}\" autocomplete=\"off\" autofocus>");
+    sb.Append("<button type=\"submit\">Authorize Device</button>");
+    sb.Append("</form>");
+    if (!string.IsNullOrEmpty(msg))
+    {
+        var isErr = msg.StartsWith("Error", StringComparison.OrdinalIgnoreCase);
+        sb.Append($"<div class=\"msg {(isErr ? "msg-err" : "msg-ok")}\">{System.Net.WebUtility.HtmlEncode(msg)}</div>");
+    }
+    sb.Append("</div></body></html>");
+    context.Response.ContentType = "text/html";
+    await context.Response.WriteAsync(sb.ToString());
+}));
+appInfo.RegisterRoute("POST /device", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), async context =>
+{
+    var user = await UserAuth.GetRequestUserAsync(context);
+    string code = "";
+    if (context.Request.HasFormContentType)
+    {
+        var form = await context.Request.ReadFormAsync();
+        code = form["code"].ToString().Trim().ToUpperInvariant();
+    }
+    if (string.IsNullOrEmpty(code) || user == null)
+    {
+        context.Response.Redirect("/device?msg=Error:+Invalid+request");
+        return;
+    }
+    var all = DataStoreProvider.Current.Query<DeviceCodeAuth>(null).ToList();
+    var dc = all.FirstOrDefault(d => d.UserCode == code && d.Status == "pending" && !d.IsExpired(DateTime.UtcNow));
+    if (dc == null)
+    {
+        context.Response.Redirect($"/device?msg=Error:+Invalid+or+expired+code&code={System.Net.WebUtility.UrlEncode(code)}");
+        return;
+    }
+    dc.Status = "approved";
+    dc.UserId = user.Id;
+    DataStoreProvider.Current.Save(dc);
+    context.Response.Redirect("/device?msg=Device+authorized+successfully!+You+can+close+this+tab.");
+}));
 appInfo.RegisterRoute("GET /api/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiListHandler));
 appInfo.RegisterRoute("POST /api/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPostHandler));
 appInfo.RegisterRoute("GET /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiGetHandler));
 appInfo.RegisterRoute("PUT /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPutHandler));
 appInfo.RegisterRoute("PATCH /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiPatchHandler));
 appInfo.RegisterRoute("DELETE /api/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiDeleteHandler));
+appInfo.RegisterRoute("GET /api/_meta", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), async context =>
+{
+    var entities = DataScaffold.Entities;
+    var result = entities.Select(e => new Dictionary<string, object?>
+    {
+        ["name"] = e.Name,
+        ["slug"] = e.Slug,
+        ["permissions"] = e.Permissions,
+        ["showOnNav"] = e.ShowOnNav,
+        ["navGroup"] = e.NavGroup,
+        ["fields"] = e.Fields.Select(f => new Dictionary<string, object?>
+        {
+            ["name"] = f.Name,
+            ["label"] = f.Label,
+            ["type"] = f.FieldType.ToString(),
+            ["order"] = f.Order,
+            ["required"] = f.Required,
+            ["list"] = f.List,
+            ["view"] = f.View,
+            ["edit"] = f.Edit,
+            ["create"] = f.Create,
+            ["readOnly"] = f.ReadOnly
+        }).ToArray()
+    }).ToArray();
+    context.Response.ContentType = "application/json";
+    await context.Response.WriteAsync(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+}));
+appInfo.RegisterRoute("GET /ideas/search", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
+{
+    var q = context.Request.Query.ContainsKey("q") ? context.Request.Query["q"].ToString() : null;
+    var caller = context.Request.Query.ContainsKey("caller") ? context.Request.Query["caller"].ToString() : null;
+    var source = context.Request.Query.ContainsKey("source") ? context.Request.Query["source"].ToString() : null;
+
+    // If idea text provided, create a new ToDo entry from it
+    if (!string.IsNullOrWhiteSpace(q))
+    {
+        var todo = new ToDo
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            Title = q,
+            Notes = $"caller={caller ?? ""}, source={source ?? ""}",
+            Deadline = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7)),
+            StartTime = TimeOnly.FromDateTime(DateTime.UtcNow),
+            IsCompleted = false
+        };
+        DataStoreProvider.Current.Save(todo);
+    }
+
+    // Return all ToDo entries regardless of query
+    var todos = DataStoreProvider.Current.Query<ToDo>(null);
+    var sb = new System.Text.StringBuilder();
+    sb.Append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+    sb.Append("<title>Ideas</title><style>");
+    sb.Append("*{margin:0;padding:0;box-sizing:border-box}");
+    sb.Append("body{font-family:system-ui,-apple-system,sans-serif;background:#f4f6f9;color:#333}");
+    sb.Append("header{background:#1a1a2e;color:#fff;padding:16px 24px;font-size:1.4em;font-weight:600}");
+    sb.Append(".container{max-width:900px;margin:24px auto;padding:0 16px}");
+    sb.Append("form{display:flex;gap:8px;margin-bottom:24px}");
+    sb.Append("input[type=text]{flex:1;padding:10px 14px;border:1px solid #ccc;border-radius:6px;font-size:1em}");
+    sb.Append("button{padding:10px 20px;background:#4361ee;color:#fff;border:none;border-radius:6px;font-size:1em;cursor:pointer}");
+    sb.Append("button:hover{background:#3a56d4}");
+    sb.Append("table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.1)}");
+    sb.Append("th{background:#e8eaf6;text-align:left;padding:12px 14px;font-weight:600;font-size:.9em;color:#555}");
+    sb.Append("td{padding:10px 14px;border-top:1px solid #eee;font-size:.95em}");
+    sb.Append("tr:hover{background:#f0f4ff}");
+    sb.Append(".done{text-decoration:line-through;color:#999}");
+    sb.Append(".badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:.8em;font-weight:600}");
+    sb.Append(".badge-open{background:#e3f2fd;color:#1565c0}.badge-done{background:#e8f5e9;color:#2e7d32}");
+    sb.Append(".empty{text-align:center;padding:40px;color:#999;font-size:1.1em}");
+    sb.Append("footer{text-align:center;padding:24px;color:#999;font-size:.85em}");
+    sb.Append("</style></head><body>");
+    sb.Append("<header>&#128161; Ideas</header>");
+    sb.Append("<div class=\"container\">");
+    sb.Append("<form method=\"get\" action=\"/ideas/search\">");
+    sb.Append("<input type=\"text\" name=\"q\" placeholder=\"Enter a new idea...\" value=\"\">");
+    sb.Append("<button type=\"submit\">Add &amp; Search</button>");
+    sb.Append("</form>");
+
+    var list = todos.ToList();
+    if (list.Count == 0)
+    {
+        sb.Append("<div class=\"empty\">No ideas yet. Add one above!</div>");
+    }
+    else
+    {
+        sb.Append("<table><thead><tr><th>Title</th><th>Notes</th><th>Deadline</th><th>Status</th></tr></thead><tbody>");
+        foreach (var t in list)
+        {
+            var css = t.IsCompleted ? " class=\"done\"" : "";
+            var badge = t.IsCompleted ? "<span class=\"badge badge-done\">Done</span>" : "<span class=\"badge badge-open\">Open</span>";
+            sb.Append($"<tr><td{css}>{System.Net.WebUtility.HtmlEncode(t.Title)}</td>");
+            sb.Append($"<td>{System.Net.WebUtility.HtmlEncode(t.Notes)}</td>");
+            sb.Append($"<td>{t.Deadline:yyyy-MM-dd}</td>");
+            sb.Append($"<td>{badge}</td></tr>");
+        }
+        sb.Append("</tbody></table>");
+    }
+
+    sb.Append("</div><footer>BareMetalWeb &middot; Ideas</footer></body></html>");
+
+    context.Response.ContentType = "text/html";
+    await context.Response.WriteAsync(sb.ToString());
+}));
 appInfo.RegisterRoute("GET /admin/reload-templates", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "System", navAlignment: NavAlignment.Right), routeHandlers.ReloadTemplatesHandler));
 appInfo.RegisterRoute("GET /status", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "" }, "Public", false, 1), routeHandlers.BuildPageHandler(context =>
 {
@@ -152,7 +396,7 @@ appInfo.RegisterRoute("GET /status", new RouteHandlerData(pageInfoFactory.Templa
 })));
 appInfo.RegisterRoute("GET /statusRaw", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), routeHandlers.TimeRawHandler));
 
-appInfo.BuildAppInfoMenuOptions();
+await appInfo.BuildAppInfoMenuOptionsAsync();
 await appInfo.WireUpRequestHandlingAndLoggerAsyncLifetime();
 app.Lifetime.ApplicationStarted.Register(() =>
 {
@@ -277,7 +521,7 @@ static class ProgramSetup
             pruneInterval: TimeSpan.FromSeconds(app.Configuration.GetValue("ClientRequests:PruneIntervalSeconds", 30)),
             maxEntries: app.Configuration.GetValue("ClientRequests:MaxEntries", 100000));
 
-    public static void EnsureRootPermissions(IBufferedLogger logger, params string[] requiredPermissions)
+    public static async ValueTask EnsureRootPermissionsAsync(IBufferedLogger logger, string[] requiredPermissions, CancellationToken cancellationToken = default)
     {
         if (requiredPermissions is null || requiredPermissions.Length == 0)
             return;
@@ -291,7 +535,7 @@ static class ProgramSetup
             }
         };
 
-        var users = DataStoreProvider.Current.Query<User>(query).ToList();
+        var users = (await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false)).ToList();
         foreach (var user in users)
         {
             if (user is null || !user.IsActive)
@@ -313,7 +557,7 @@ static class ProgramSetup
                 continue;
 
             user.Permissions = perms.ToArray();
-            DataStoreProvider.Current.Save(user);
+            await DataStoreProvider.Current.SaveAsync(user, cancellationToken).ConfigureAwait(false);
             logger.LogInfo($"Updated root permissions for {user.UserName}.");
         }
     }

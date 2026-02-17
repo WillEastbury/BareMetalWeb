@@ -35,7 +35,7 @@ public interface IBareWebHost
     string? HttpsRedirectHost { get; set; }
     int? HttpsRedirectPort { get; set; }
 
-    void BuildAppInfoMenuOptions(HttpContext? context = null);
+    ValueTask BuildAppInfoMenuOptionsAsync(HttpContext? context = null, CancellationToken cancellationToken = default);
     void RegisterRoute(string path, RouteHandlerData routeHandler);
     Task RenderForbidden(HttpContext context);
     Task RequestHandler(HttpContext context);

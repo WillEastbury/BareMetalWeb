@@ -123,7 +123,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var user = Users.FindByEmailOrUserName(identifier);
+        var user = await Users.FindByEmailOrUserNameAsync(identifier, context.RequestAborted).ConfigureAwait(false);
         if (user == null || !user.IsActive)
         {
             RenderLoginForm(context, "Invalid credentials.", identifier);
@@ -187,23 +187,23 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask MfaChallengeHandler(HttpContext context)
     {
-        await BuildPageHandler(ctx =>
+        await BuildPageHandler(async ctx =>
         {
-            var challenge = GetMfaChallenge(ctx);
+            var challenge = await GetMfaChallengeAsync(ctx, context.RequestAborted).ConfigureAwait(false);
             if (challenge == null)
             {
                 ctx.Response.Redirect("/login");
-                return ValueTask.FromResult(false);
+                return false;
             }
 
             RenderMfaChallengeForm(ctx, null);
-            return ValueTask.FromResult(true);
+            return true;
         })(context);
     }
 
     public async ValueTask MfaChallengePostHandler(HttpContext context)
     {
-        var challenge = GetMfaChallenge(context);
+        var challenge = await GetMfaChallengeAsync(context, context.RequestAborted).ConfigureAwait(false);
         if (challenge == null)
         {
             context.Response.Redirect("/login");
@@ -233,7 +233,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var user = Users.GetById(challenge.UserId);
+        var user = await Users.GetByIdAsync(challenge.UserId, context.RequestAborted).ConfigureAwait(false);
         if (user == null || !user.IsActive || !user.MfaEnabled || !TryGetActiveSecret(user, out var activeSecret, out var upgraded))
         {
             RenderMfaChallengeForm(context, "MFA is not available for this account.");
@@ -355,14 +355,14 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (Users.FindByEmail(email) != null)
+        if (await Users.FindByEmailAsync(email, context.RequestAborted).ConfigureAwait(false) != null)
         {
             RenderRegisterForm(context, "Email is already registered.", userName, displayName, email);
             await _renderer.RenderPage(context);
             return;
         }
 
-        if (Users.FindByUserName(userName) != null)
+        if (await Users.FindByUserNameAsync(userName, context.RequestAborted).ConfigureAwait(false) != null)
         {
             RenderRegisterForm(context, "Username is already taken.", userName, displayName, email);
             await _renderer.RenderPage(context);
@@ -711,12 +711,13 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask UsersListHandler(HttpContext context)
     {
-        await BuildPageHandler(ctx =>
+        await BuildPageHandler(async ctx =>
         {
             ctx.SetStringValue("title", "Users");
 
             var rows = new List<string[]>();
-            foreach (var user in DataStoreProvider.Current.Query<User>(new QueryDefinition()))
+            var users = await DataStoreProvider.Current.QueryAsync<User>(new QueryDefinition()).ConfigureAwait(false);
+            foreach (var user in users)
             {
                 rows.Add(new[]
                 {
@@ -739,9 +740,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask SetupHandler(HttpContext context)
     {
-        await BuildPageHandler(ctx =>
+        await BuildPageHandler(async ctx =>
         {
-            if (RootUserExists())
+            if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
             {
                 ctx.SetStringValue("title", "Setup");
                 ctx.SetStringValue("message", "<p>Root user already exists.</p>");
@@ -754,7 +755,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask SetupPostHandler(HttpContext context)
     {
-        if (RootUserExists())
+        if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
         {
             context.SetStringValue("title", "Setup");
             context.SetStringValue("message", "<p>Root user already exists.</p>");
@@ -834,7 +835,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private async ValueTask EnsureDefaultCurrencies(string createdBy)
     {
-        var existing = DataStoreProvider.Current.Query<Currency>(null).ToList();
+        var existing = (await DataStoreProvider.Current.QueryAsync<Currency>(null).ConfigureAwait(false)).ToList();
         var hasUsd = existing.Any(currency => string.Equals(currency.IsoCode, "USD", StringComparison.OrdinalIgnoreCase));
         var hasGbp = existing.Any(currency => string.Equals(currency.IsoCode, "GBP", StringComparison.OrdinalIgnoreCase));
         var hasBase = existing.Any(currency => currency.IsBase);
@@ -875,7 +876,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private async ValueTask EnsureDefaultUnitsOfMeasure(string createdBy)
     {
-        var existing = DataStoreProvider.Current.Query<UnitOfMeasure>(null).ToList();
+        var existing = (await DataStoreProvider.Current.QueryAsync<UnitOfMeasure>(null).ConfigureAwait(false)).ToList();
         var hasEa = existing.Any(unit => string.Equals(unit.Abbreviation, "EA", StringComparison.OrdinalIgnoreCase)
             || string.Equals(unit.Name, "EA", StringComparison.OrdinalIgnoreCase)
             || string.Equals(unit.Name, "Each", StringComparison.OrdinalIgnoreCase));
@@ -898,7 +899,8 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private async ValueTask EnsureDefaultAddress(string createdBy)
     {
-        var hasAddress = DataStoreProvider.Current.Query<Address>(null).Any();
+        var addresses = await DataStoreProvider.Current.QueryAsync<Address>(null).ConfigureAwait(false);
+        var hasAddress = addresses.Any();
         if (hasAddress)
             return;
 
@@ -1023,7 +1025,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var info = string.IsNullOrWhiteSpace(message)
             ? "<p>Enter the 6-digit code from your authenticator app.</p>"
             : $"<div class=\"alert alert-danger\">{WebUtility.HtmlEncode(message)}</div>";
-        context.SetStringValue("message", info + BuildOtpClientScript("/mfa"));
+        context.SetStringValue("message", info + BuildOtpClientScript(context, "/mfa"));
 
         context.AddFormDefinition(new FormDefinition(
             Action: "/mfa",
@@ -1067,7 +1069,7 @@ public sealed class RouteHandlers : IRouteHandlers
               revealSecret +
               revealOtpAuth;
 
-        context.SetStringValue("message", intro + payload + BuildOtpClientScript("/account/mfa/setup"));
+        context.SetStringValue("message", intro + payload + BuildOtpClientScript(context, "/account/mfa/setup"));
         context.AddFormDefinition(new FormDefinition(
             Action: "/account/mfa/setup",
             Method: "post",
@@ -1191,10 +1193,12 @@ public sealed class RouteHandlers : IRouteHandlers
         return new string('*', secret.Length - reveal) + secret[^reveal..];
     }
 
-    private static string BuildOtpClientScript(string formAction)
+    private static string BuildOtpClientScript(HttpContext context, string formAction)
     {
-        var action = WebUtility.HtmlEncode(formAction);
-        return $"<script>(function(){{const f=document.querySelector('form[action=\\\"{action}\\\"]');if(!f) return;const i=f.querySelector('input[name=\\\"code\\\"]');const b=f.querySelector('button[type=\\\"submit\\\"]');if(!i||!b) return;const u=()=>{{const v=(i.value||'').replace(/\\s+/g,'');b.disabled=v.length!==6;}};i.addEventListener('input',u);u();}})();</script>";
+        // JavaScript escape the action for safe embedding in script
+        var action = formAction.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\"", "\\\"");
+        var nonce = context.GetCspNonce();
+        return $"<script src=\"/static/js/otp.js\" nonce=\"{nonce}\"></script><script nonce=\"{nonce}\">setupOtpValidation('{action}');</script>";
     }
 
     private static async ValueTask NotImplementedHandler(HttpContext context, string message)
@@ -1364,13 +1368,31 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
             context.SetStringValue("message", "<p>You do not have permission to access this resource.</p>");
             await _renderer.RenderPage(context);
             return;
+        }
+
+        // Fetch user once for permission checks in callbacks
+        var currentUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        bool HasPermissionForMeta(DataEntityMetadata m)
+        {
+            var permissionsNeeded = m.Permissions?.Trim();
+            if (string.IsNullOrWhiteSpace(permissionsNeeded) || string.Equals(permissionsNeeded, "Public", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (currentUser == null)
+                return string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase))
+                return false;
+            var userPermissions = new HashSet<string>(currentUser.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return required.Length == 0 || required.All(userPermissions.Contains);
         }
 
         var queryDictionary = ToQueryDictionary(context.Request.Query);
@@ -1402,7 +1424,7 @@ public sealed class RouteHandlers : IRouteHandlers
             results,
             $"/admin/data/{typeSlug}",
             includeActions: true,
-            canRenderLookupLink: m => HasEntityPermission(context, m),
+            canRenderLookupLink: HasPermissionForMeta,
             cloneToken: cloneToken,
             cloneReturnUrl: returnUrl);
 
@@ -1471,13 +1493,31 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
             context.SetStringValue("message", "<p>You do not have permission to access this resource.</p>");
             await _renderer.RenderPage(context);
             return;
+        }
+
+        // Fetch user once for permission checks in callbacks
+        var currentUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        bool HasPermissionForMeta(DataEntityMetadata m)
+        {
+            var permissionsNeeded = m.Permissions?.Trim();
+            if (string.IsNullOrWhiteSpace(permissionsNeeded) || string.Equals(permissionsNeeded, "Public", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (currentUser == null)
+                return string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase);
+            if (string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase))
+                return false;
+            var userPermissions = new HashSet<string>(currentUser.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            return required.Length == 0 || required.All(userPermissions.Contains);
         }
 
         var instance = await DataScaffold.LoadAsync(meta, id);
@@ -1490,7 +1530,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var rows = DataScaffold.BuildViewRowsHtml(meta, instance, m => HasEntityPermission(context, m))
+        var rows = DataScaffold.BuildViewRowsHtml(meta, instance, HasPermissionForMeta)
             .Select(row => new[]
             {
                 WebUtility.HtmlEncode(row.Label),
@@ -1516,7 +1556,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
@@ -1542,7 +1582,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
@@ -1570,7 +1610,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
@@ -1609,7 +1649,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
@@ -1649,7 +1689,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
@@ -1685,7 +1725,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
@@ -1793,7 +1833,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 continue;
             }
 
-            ApplyAuditInfo(instance, context, isCreate);
+            ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate);
             await DataScaffold.SaveAsync(meta, instance);
             if (isCreate)
                 created++;
@@ -1826,7 +1866,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
@@ -1857,7 +1897,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
@@ -1909,7 +1949,7 @@ public sealed class RouteHandlers : IRouteHandlers
             newApiKey = createdKeys.FirstOrDefault();
         }
 
-        ApplyAuditInfo(instance, context, isCreate: true);
+        ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
         await DataScaffold.SaveAsync(meta, instance);
         var newId = instance is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) : null;
         var keyQuery = string.IsNullOrWhiteSpace(newApiKey) ? string.Empty : $"&apikey={WebUtility.UrlEncode(newApiKey)}";
@@ -1929,7 +1969,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
@@ -1971,7 +2011,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
@@ -2029,7 +2069,7 @@ public sealed class RouteHandlers : IRouteHandlers
             ApplySystemPrincipalKeys(principal, apiKeyInputs, isCreate: false);
         }
 
-        ApplyAuditInfo(instance, context, isCreate: false);
+        ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
         await DataScaffold.SaveAsync(meta, instance);
         context.Response.Redirect($"/admin/data/{typeSlug}?toast=updated&id={WebUtility.UrlEncode(id)}");
     }
@@ -2091,7 +2131,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
@@ -2126,7 +2166,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
@@ -2168,7 +2208,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
@@ -2199,7 +2239,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var clone = CreateClone(meta, source);
-        ApplyAuditInfo(clone, context, isCreate: true);
+        ApplyAuditInfo(clone, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
         await DataScaffold.SaveAsync(meta, clone);
 
         var newId = DataScaffold.GetIdValue(clone) ?? string.Empty;
@@ -2285,11 +2325,12 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.IsNullOrWhiteSpace(message))
             return string.Empty;
 
-         return $"<div class=\"toast-container position-fixed bottom-0 end-0 p-3\" style=\"z-index: 1100;\">" +
+        var nonce = context.GetCspNonce();
+        return $"<div class=\"toast-container position-fixed bottom-0 end-0 p-3 toast-z-index\">" +
              $"<div id=\"scaffold-toast\" class=\"toast text-bg-success border-0\" role=\"alert\" aria-live=\"assertive\" aria-atomic=\"true\" data-bs-delay=\"2500\">" +
              $"<div class=\"d-flex\"><div class=\"toast-body\">{message}</div>" +
              $"<button type=\"button\" class=\"btn-close btn-close-white me-2 m-auto\" data-bs-dismiss=\"toast\" aria-label=\"Close\"></button></div></div></div>" +
-               "<script>document.addEventListener('DOMContentLoaded',function(){var el=document.getElementById('scaffold-toast');if(!el||!window.bootstrap)return;var toast=new bootstrap.Toast(el);toast.show();var url=new URL(window.location.href);if(url.searchParams.has('toast')){url.searchParams.delete('toast');}if(url.searchParams.has('id')){url.searchParams.delete('id');}if(url.searchParams.has('apikey')){url.searchParams.delete('apikey');}window.history.replaceState({},'',url.toString());});</script>";
+             $"<script src=\"/static/js/toast.js\" nonce=\"{nonce}\"></script>";
     }
 
     public async ValueTask DataApiListHandler(HttpContext context)
@@ -2302,7 +2343,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
@@ -2327,7 +2368,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
@@ -2355,7 +2396,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
@@ -2380,7 +2421,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        ApplyAuditInfo(instance, context, isCreate: true);
+        ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
         await DataScaffold.SaveAsync(meta, instance);
         context.Response.StatusCode = StatusCodes.Status201Created;
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
@@ -2397,7 +2438,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
@@ -2428,7 +2469,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        ApplyAuditInfo(instance, context, isCreate: false);
+        ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
         await DataScaffold.SaveAsync(meta, instance);
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
     }
@@ -2444,7 +2485,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
@@ -2475,7 +2516,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        ApplyAuditInfo(instance, context, isCreate: false);
+        ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
         await DataScaffold.SaveAsync(meta, instance);
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
     }
@@ -2491,7 +2532,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!HasEntityPermission(context, meta))
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
@@ -2820,21 +2861,21 @@ public sealed class RouteHandlers : IRouteHandlers
             await DeleteAllAsync<UnitOfMeasure>();
         }
 
+        var addresses_query = await DataStoreProvider.Current.QueryAsync<Address>(null).ConfigureAwait(false);
         var usedAddressIds = new HashSet<string>(
-            DataStoreProvider.Current.Query<Address>(null)
-                .Select(address => address.Id),
+            addresses_query.Select(address => address.Id),
             StringComparer.OrdinalIgnoreCase);
+        var units_query = await DataStoreProvider.Current.QueryAsync<UnitOfMeasure>(null).ConfigureAwait(false);
         var usedUnitIds = new HashSet<string>(
-            DataStoreProvider.Current.Query<UnitOfMeasure>(null)
-                .Select(unit => unit.Id),
+            units_query.Select(unit => unit.Id),
             StringComparer.OrdinalIgnoreCase);
+        var customers_query = await DataStoreProvider.Current.QueryAsync<Customer>(null).ConfigureAwait(false);
         var usedCustomerIds = new HashSet<string>(
-            DataStoreProvider.Current.Query<Customer>(null)
-                .Select(customer => customer.Id),
+            customers_query.Select(customer => customer.Id),
             StringComparer.OrdinalIgnoreCase);
+        var products_query = await DataStoreProvider.Current.QueryAsync<Product>(null).ConfigureAwait(false);
         var usedProductIds = new HashSet<string>(
-            DataStoreProvider.Current.Query<Product>(null)
-                .Select(product => product.Id),
+            products_query.Select(product => product.Id),
             StringComparer.OrdinalIgnoreCase);
 
         var addresses = GenerateAddresses(addressCount, usedAddressIds);
@@ -2844,26 +2885,26 @@ public sealed class RouteHandlers : IRouteHandlers
 
         foreach (var address in addresses)
         {
-            ApplyAuditInfo(address, context, isCreate: true);
-            DataStoreProvider.Current.Save(address);
+            ApplyAuditInfo(address, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+            await DataStoreProvider.Current.SaveAsync(address).ConfigureAwait(false);
         }
 
         foreach (var unit in units)
         {
-            ApplyAuditInfo(unit, context, isCreate: true);
-            DataStoreProvider.Current.Save(unit);
+            ApplyAuditInfo(unit, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+            await DataStoreProvider.Current.SaveAsync(unit).ConfigureAwait(false);
         }
 
         foreach (var customer in customers)
         {
-            ApplyAuditInfo(customer, context, isCreate: true);
-            DataStoreProvider.Current.Save(customer);
+            ApplyAuditInfo(customer, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+            await DataStoreProvider.Current.SaveAsync(customer).ConfigureAwait(false);
         }
 
         foreach (var product in products)
         {
-            ApplyAuditInfo(product, context, isCreate: true);
-            DataStoreProvider.Current.Save(product);
+            ApplyAuditInfo(product, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+            await DataStoreProvider.Current.SaveAsync(product).ConfigureAwait(false);
         }
 
         var message = $"<div class=\"alert alert-success\">" +
@@ -3634,13 +3675,13 @@ public sealed class RouteHandlers : IRouteHandlers
         return builder.ToString();
     }
 
-    private static bool HasEntityPermission(HttpContext context, DataEntityMetadata meta)
+    private static async ValueTask<bool> HasEntityPermissionAsync(HttpContext context, DataEntityMetadata meta, CancellationToken cancellationToken = default)
     {
         var permissionsNeeded = meta.Permissions?.Trim();
         if (string.IsNullOrWhiteSpace(permissionsNeeded) || string.Equals(permissionsNeeded, "Public", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        var user = UserAuth.GetRequestUser(context);
+        var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
         if (user == null)
         {
             return string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase);
@@ -3787,13 +3828,10 @@ public sealed class RouteHandlers : IRouteHandlers
             user.SetPassword(password);
     }
 
-    private static void ApplyAuditInfo(object instance, HttpContext context, bool isCreate)
+    private static void ApplyAuditInfo(object instance, string userName, bool isCreate)
     {
         if (instance is not BaseDataObject dataObject)
             return;
-
-        var user = UserAuth.GetUser(context);
-        var userName = user?.UserName ?? "system";
 
         if (isCreate)
         {
@@ -3868,7 +3906,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static async ValueTask DeleteAllAsync<T>() where T : BaseDataObject
     {
-        var items = DataStoreProvider.Current.Query<T>(null).ToList();
+        var items = (await DataStoreProvider.Current.QueryAsync<T>(null).ConfigureAwait(false)).ToList();
         foreach (var item in items)
         {
             if (item == null || string.IsNullOrWhiteSpace(item.Id))
@@ -4231,19 +4269,19 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private static MfaChallenge? GetMfaChallenge(HttpContext context)
+    private static async ValueTask<MfaChallenge?> GetMfaChallengeAsync(HttpContext context, CancellationToken cancellationToken = default)
     {
         var challengeId = context.GetCookie(MfaChallengeCookieName);
         if (string.IsNullOrWhiteSpace(challengeId))
             return null;
 
-        var challenge = DataStoreProvider.Current.Load<MfaChallenge>(challengeId);
+        var challenge = await DataStoreProvider.Current.LoadAsync<MfaChallenge>(challengeId, cancellationToken).ConfigureAwait(false);
         if (challenge == null || challenge.IsExpired())
         {
             if (challenge != null)
             {
                 challenge.IsUsed = true;
-                DataStoreProvider.Current.Save(challenge);
+                await DataStoreProvider.Current.SaveAsync(challenge, cancellationToken).ConfigureAwait(false);
             }
             context.DeleteCookie(MfaChallengeCookieName);
             return null;
@@ -4252,7 +4290,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return challenge;
     }
 
-    private static bool RootUserExists()
+    private static async ValueTask<bool> RootUserExistsAsync(CancellationToken cancellationToken = default)
     {
         var query = new QueryDefinition
         {
@@ -4263,6 +4301,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
         };
 
-        return DataStoreProvider.Current.Query<User>(query).Any();
+        var users = await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false);
+        return users.Any();
     }
 }
