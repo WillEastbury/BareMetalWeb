@@ -1834,6 +1834,8 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate);
+            if (isCreate)
+                await DataScaffold.ApplyAutoIdAsync(meta, instance, context.RequestAborted).ConfigureAwait(false);
             await DataScaffold.SaveAsync(meta, instance);
             if (isCreate)
                 created++;
@@ -1950,6 +1952,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+        await DataScaffold.ApplyAutoIdAsync(meta, instance, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.SaveAsync(meta, instance);
         var newId = instance is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) : null;
         var keyQuery = string.IsNullOrWhiteSpace(newApiKey) ? string.Empty : $"&apikey={WebUtility.UrlEncode(newApiKey)}";
@@ -2240,6 +2243,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var clone = CreateClone(meta, source);
         ApplyAuditInfo(clone, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+        await DataScaffold.ApplyAutoIdAsync(meta, clone, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.SaveAsync(meta, clone);
 
         var newId = DataScaffold.GetIdValue(clone) ?? string.Empty;
@@ -2422,6 +2426,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+        await DataScaffold.ApplyAutoIdAsync(meta, instance, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.SaveAsync(meta, instance);
         context.Response.StatusCode = StatusCodes.Status201Created;
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
