@@ -380,39 +380,33 @@ body a:hover {
     }
 }
 
-.bm-theme-switcher {
-    display: inline-flex;
-    gap: 0.35rem;
-    padding: 0.35rem;
-    border-radius: 999px;
-    background: rgba(12, 16, 22, 0.8);
-    border: 1px solid var(--bm-border);
-    backdrop-filter: blur(8px);
-    float: right;
-}
-
-.bm-theme-switcher input {
-    position: absolute;
-    opacity: 0;
-    pointer-events: none;
-}
-
-.bm-theme-switcher label {
-    padding: 0.25rem 0.75rem;
+.bm-theme-label {
     font-size: 0.75rem;
     font-weight: 600;
-    border-radius: 999px;
+    color: var(--bm-muted);
+    margin-right: 0.4rem;
+    vertical-align: middle;
+}
+
+.bm-theme-select {
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 6px;
+    border: 1px solid var(--bm-border);
+    background: rgba(12, 16, 22, 0.8);
     color: var(--bm-muted);
     cursor: pointer;
-    transition: all 0.2s ease;
+    outline: none;
+    vertical-align: middle;
+    backdrop-filter: blur(8px);
 }
 
-.bm-theme-switcher input:checked + label {
-    background: var(--bm-accent-soft);
-    color: var(--bm-link-hover);
+.bm-theme-select:focus {
+    border-color: var(--bm-accent);
 }
 
-body:has(#theme-contrast:checked) {
+body.bm-theme-contrast {
     --bm-surface: #000000;
     --bm-surface-elevated: #0a0a0a;
     --bm-surface-soft: #111111;
@@ -439,7 +433,7 @@ body:has(#theme-contrast:checked) {
     --bm-input-border: #ffffff;
 }
 
-body:has(#theme-muted:checked) {
+body.bm-theme-muted {
     --bm-surface: #1a1d22;
     --bm-surface-elevated: #20242b;
     --bm-surface-soft: #252b34;
