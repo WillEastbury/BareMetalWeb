@@ -37,9 +37,6 @@
             themeLink.href = `${BOOTSWATCH_CDN_BASE}/${themeName}/bootstrap.min.css`;
         }
         
-        // Clear any body classes that might interfere
-        document.body.className = '';
-        
         // Save preference
         localStorage.setItem(STORAGE_KEY, themeName);
     }
