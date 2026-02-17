@@ -468,3 +468,13 @@ body:has(#theme-muted:checked) {
     --bm-input-placeholder: #8a96a3;
     --bm-input-border: #323a46;
 }
+
+/* Toast container z-index */
+.toast-z-index {
+    z-index: 1100;
+}
+
+/* Image preview max height */
+.img-preview-max {
+    max-height: 120px;
+}

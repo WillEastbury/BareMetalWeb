@@ -39,14 +39,26 @@ public sealed class DiskBufferedLogger : IBufferedLogger
     {
         // Deliberately NOT sharing the lock
         // Errors must not block info logging
-        var nowUtc = DateTime.UtcNow;
-        var path = GetLogFilePath(nowUtc, "error");
-        var content = $"ERROR | {nowUtc:O} | {message}{Environment.NewLine}{ex}{Environment.NewLine}";
+        // Fire-and-forget async to avoid blocking caller while still using async backoff
+        _ = LogErrorAsync(message, ex);
+    }
 
-        _ = AppendTextSharedAsync(path, content).ContinueWith(
-            t => Console.Error.WriteLine(
-                $"Failed to log {ex} || because of error: {t.Exception?.InnerException}"),
-            TaskContinuationOptions.OnlyOnFaulted);
+    private async Task LogErrorAsync(string message, Exception ex)
+    {
+        try
+        {
+            var nowUtc = DateTime.UtcNow;
+            await AppendTextSharedAsync(
+                GetLogFilePath(nowUtc, "error"),
+                $"ERROR | {nowUtc:O} | {message}{Environment.NewLine}{ex}{Environment.NewLine}").ConfigureAwait(false);
+        }
+        catch (Exception secondEx)
+        {
+            // Last line of defence: logging must never throw, BUT - we should at least know it failed
+            // While this is not ideal to log to the console for performance terms, logging failures are rare and likely indicate a serious issue
+            // So we should at least do SOMETHING
+            Console.Error.WriteLine($"Failed to log {ex.ToString()} || because of error: {secondEx}");  
+        }
     }
     [DebuggerNonUserCode] // Prevent stepping into this method during debugging as it will drive you insane 
     // If diagnosing why your logging is not working, remove this attribute
