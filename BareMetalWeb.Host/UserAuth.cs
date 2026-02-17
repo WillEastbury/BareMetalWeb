@@ -46,7 +46,8 @@ public static class UserAuth
 
         if (session.IsExpired(DateTime.UtcNow))
         {
-            RevokeSession(session);
+            session.IsRevoked = true;
+            DataStoreProvider.Current.Save(session);
             context.DeleteCookie(SessionCookieName);
             return null;
         }
