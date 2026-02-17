@@ -31,7 +31,7 @@ public class BareMetalWebServer : IBareWebHost
     public string AppName { get; set; }
     public string CompanyDescription { get; set; }
     public string CopyrightYear { get; set; }
-    public static string[] appMetaDataKeys { get; set; } = new[] { "AppName", "CompanyDescription", "CopyrightYear" };
+    public static string[] appMetaDataKeys { get; set; } = new[] { "AppName", "CompanyDescription", "CopyrightYear", "AppVersion" };
     public string[] AppMetaDataKeys => appMetaDataKeys;
     public string[] AppMetaDataValues { get; set; }
     public List<IMenuOption> MenuOptionsList { get; set; } = new List<IMenuOption>();
@@ -66,7 +66,8 @@ public class BareMetalWebServer : IBareWebHost
         AppName = appName;
         CompanyDescription = companyDescription;
         CopyrightYear = copyrightYear;
-        AppMetaDataValues = new[] { AppName, CompanyDescription, CopyrightYear };
+        var version = typeof(BareMetalWebServer).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        AppMetaDataValues = new[] { AppName, CompanyDescription, CopyrightYear, version };
         app = application;
         BufferedLogger = logger;
         HtmlRenderer = htmlRenderer;
