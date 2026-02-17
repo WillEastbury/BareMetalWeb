@@ -1,7 +1,9 @@
 using System.Reflection;
 using System.Threading;
 using BareMetalWeb.Core;
+using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
+using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Rendering;
 using Microsoft.AspNetCore.Http;
 
@@ -312,8 +314,11 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
         return new PageInfo(metadata, pageContext);
     }
 
-    private static HttpContext CreateMockHttpContext(User? user = null)
+    private HttpContext CreateMockHttpContext(User? user = null)
     {
+        // Ensure our fixture's store is active (guards against parallel test swaps)
+        DataStoreProvider.Current = _fixture.Store;
+
         var context = new DefaultHttpContext();
         
         if (user != null)
@@ -368,39 +373,86 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
 }
 
 /// <summary>
-/// xUnit fixture to initialize the DataStoreProvider once for all tests.
+/// xUnit fixture to initialize the DataStoreProvider once for all AuthorizationTests.
+/// Uses an InMemoryDataStore to avoid race conditions with other test classes
+/// that also swap DataStoreProvider.Current during parallel execution.
 /// </summary>
 public class DataStoreFixture : IDisposable
 {
-    private readonly string _tempDataPath;
+    private readonly IDataObjectStore _originalStore;
+    public IDataObjectStore Store { get; }
 
     public DataStoreFixture()
     {
-        // Create a temporary directory for test data
-        _tempDataPath = Path.Combine(Path.GetTempPath(), $"BareMetalWebTests_{Guid.NewGuid()}");
-        Directory.CreateDirectory(_tempDataPath);
-
-        // Initialize the data store with a temporary file-based provider
-        var dataStore = new DataObjectStore();
-        DataStoreProvider.Current = dataStore;
-        
-        var provider = new LocalFolderBinaryDataProvider(_tempDataPath);
-        dataStore.RegisterProvider(provider);
+        _originalStore = DataStoreProvider.Current;
+        Store = new InMemoryDataStore();
+        DataStoreProvider.Current = Store;
     }
 
     public void Dispose()
     {
-        // Clean up the temporary directory
-        try
+        DataStoreProvider.Current = _originalStore;
+    }
+
+    private class InMemoryDataStore : IDataObjectStore
+    {
+        private readonly Dictionary<string, BaseDataObject> _store = new();
+
+        public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
+
+        public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
+        public void RegisterFallbackProvider(IDataProvider provider) { }
+        public void ClearProviders() { }
+
+        public void Save<T>(T obj) where T : BaseDataObject
         {
-            if (Directory.Exists(_tempDataPath))
+            _store[obj.Id] = obj;
+        }
+
+        public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
+        {
+            Save(obj);
+            return ValueTask.CompletedTask;
+        }
+
+        public T? Load<T>(string id) where T : BaseDataObject
+        {
+            return _store.TryGetValue(id, out var obj) ? obj as T : null;
+        }
+
+        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        {
+            return ValueTask.FromResult(Load<T>(id));
+        }
+
+        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
+        {
+            foreach (var obj in _store.Values)
             {
-                Directory.Delete(_tempDataPath, recursive: true);
+                if (obj is T typedObj)
+                    yield return typedObj;
             }
         }
-        catch
+
+        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            // Best effort cleanup - if it fails, OS will eventually clean up temp files
+            return ValueTask.FromResult(Query<T>(query));
+        }
+
+        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+        {
+            return ValueTask.FromResult(Query<T>(query).Count());
+        }
+
+        public void Delete<T>(string id) where T : BaseDataObject
+        {
+            _store.Remove(id);
+        }
+
+        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        {
+            Delete<T>(id);
+            return ValueTask.CompletedTask;
         }
     }
 }
