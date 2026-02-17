@@ -69,6 +69,13 @@ ProgramSetup.ConfigureCors(app, appInfo);
 ProgramSetup.ConfigureHttps(app, appInfo);
 ProgramSetup.ConfigureProxyRoutes(app, appInfo, logger, pageInfoFactory);
 
+// Register routes using plugin-like extension methods
+appInfo.RegisterStaticRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+appInfo.RegisterAuthRoutes(routeHandlers, pageInfoFactory, mainTemplate, allowAccountCreation);
+appInfo.RegisterMonitoringRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+appInfo.RegisterAdminRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+appInfo.RegisterDataRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
 // Standard render routes
 appInfo.RegisterRoute("GET /", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Home", "<p></p>" }, "Public", false, 60), routeHandlers.DefaultPageHandler)); // new method to register routes
 // appInfo.RegisterRoute("GET /about", new RouteHandlerData(pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "About", "<p>This is the about page.</p>" }, "Public", true, 60), routeHandlers.DefaultPageHandler));
