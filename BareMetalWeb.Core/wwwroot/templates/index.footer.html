@@ -4,25 +4,19 @@
                 <div class="col-md-6 small">
                     <p class="mb-0">&copy;{{CopyrightYear}} - {{CompanyDescription}}, All rights reserved. {{footer_user}}<span id="tz-info" class="ms-2"></span></p>
                 </div>
-                <div class="col-md-6">
-                    <form class="bm-theme-switcher" aria-label="Theme selector">
-                        <input type="radio" name="bm-theme" id="theme-darkly" value="darkly">
-                        <label for="theme-darkly">Darkly</label>
-                        <input type="radio" name="bm-theme" id="theme-cyborg" value="cyborg">
-                        <label for="theme-cyborg">Cyborg</label>
-                        <input type="radio" name="bm-theme" id="theme-slate" value="slate">
-                        <label for="theme-slate">Slate</label>
-                        <input type="radio" name="bm-theme" id="theme-superhero" value="superhero">
-                        <label for="theme-superhero">Superhero</label>
-                        <input type="radio" name="bm-theme" id="theme-flatly" value="flatly">
-                        <label for="theme-flatly">Flatly</label>
-                        <input type="radio" name="bm-theme" id="theme-lux" value="lux">
-                        <label for="theme-lux">Lux</label>
-                        <input type="radio" name="bm-theme" id="theme-contrast" value="contrast">
-                        <label for="theme-contrast">HC</label>
-                        <input type="radio" name="bm-theme" id="theme-muted" value="muted">
-                        <label for="theme-muted">Muted</label>
-                    </form>
+                <div class="col-md-6 text-end">
+                    <label for="bm-theme-select" class="bm-theme-label">Theme</label>
+                    <select id="bm-theme-select" class="bm-theme-select" aria-label="Theme selector">
+                        <option value="vapor">Vapor</option>
+                        <option value="darkly">Darkly</option>
+                        <option value="cyborg">Cyborg</option>
+                        <option value="slate">Slate</option>
+                        <option value="superhero">Superhero</option>
+                        <option value="flatly">Flatly</option>
+                        <option value="lux">Lux</option>
+                        <option value="contrast">High Contrast</option>
+                        <option value="muted">Muted</option>
+                    </select>
                 </div>
             </div>
         </div>
