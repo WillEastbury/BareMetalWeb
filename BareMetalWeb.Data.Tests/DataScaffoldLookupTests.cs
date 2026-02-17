@@ -21,7 +21,8 @@ public class DataScaffoldLookupTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        // Ensure lookup target entities are registered
+        // Force UserClasses assembly to load before scanning
+        _ = typeof(Product).Assembly;
         DataEntityRegistry.RegisterAllEntities();
     }
 
