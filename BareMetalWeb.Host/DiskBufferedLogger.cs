@@ -39,12 +39,18 @@ public sealed class DiskBufferedLogger : IBufferedLogger
     {
         // Deliberately NOT sharing the lock
         // Errors must not block info logging
+        // Fire-and-forget async to avoid blocking caller while still using async backoff
+        _ = LogErrorAsync(message, ex);
+    }
+
+    private async Task LogErrorAsync(string message, Exception ex)
+    {
         try
         {
             var nowUtc = DateTime.UtcNow;
-            AppendTextShared(
+            await AppendTextSharedAsync(
                 GetLogFilePath(nowUtc, "error"),
-                $"ERROR | {nowUtc:O} | {message}{Environment.NewLine}{ex}{Environment.NewLine}");
+                $"ERROR | {nowUtc:O} | {message}{Environment.NewLine}{ex}{Environment.NewLine}").ConfigureAwait(false);
         }
         catch (Exception secondEx)
         {
@@ -156,24 +162,20 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         return Path.Combine(targetDirectory, fileName);
     }
 
-    // Note: Uses Thread.Sleep for retry backoff on IO errors, which blocks the calling thread.
-    // This is intentional to keep synchronous logging simple and avoid async complexity.
-    // The retries are bounded (3 attempts max) and delays are short (10-20ms).
-    // If logging becomes a hot path, consider refactoring to use async backoff.
-    private static void AppendTextShared(string path, string content)
+    private static async Task AppendTextSharedAsync(string path, string content)
     {
         for (var attempt = 0; attempt < 3; attempt++)
         {
             try
             {
-                using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite);
+                using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 4096, useAsync: true);
                 using var writer = new StreamWriter(stream);
-                writer.Write(content);
+                await writer.WriteAsync(content).ConfigureAwait(false);
                 return;
             }
             catch (IOException) when (attempt < 2)
             {
-                Thread.Sleep(10 * (attempt + 1));
+                await Task.Delay(10 * (attempt + 1)).ConfigureAwait(false);
             }
         }
     }
