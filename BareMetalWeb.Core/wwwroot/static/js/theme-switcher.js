@@ -29,14 +29,16 @@
         const themeLink = getThemeLink();
         
         if (themeName === 'contrast' || themeName === 'muted') {
-            // Use built-in CSS custom properties for HC and Muted
+            // Use built-in CSS custom properties for HC and Muted (defined in site.css)
+            // The :has() selectors automatically apply when radio buttons are checked
             themeLink.href = '';
-            document.body.className = '';
         } else {
             // Use Bootswatch CDN for other themes
             themeLink.href = `${BOOTSWATCH_CDN_BASE}/${themeName}/bootstrap.min.css`;
-            document.body.className = '';
         }
+        
+        // Clear any body classes that might interfere
+        document.body.className = '';
         
         // Save preference
         localStorage.setItem(STORAGE_KEY, themeName);
