@@ -12,6 +12,14 @@ public interface IDataObjectStore
     void RegisterProvider(IDataProvider provider, bool prepend = false);
     void RegisterFallbackProvider(IDataProvider provider);
     void ClearProviders();
+    
+    // Sync methods for backward compatibility
+    void Save<T>(T obj) where T : BaseDataObject;
+    T? Load<T>(string id) where T : BaseDataObject;
+    IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject;
+    void Delete<T>(string id) where T : BaseDataObject;
+    
+    // Async methods
     ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject;
     ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject;
     ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject;
