@@ -9,6 +9,7 @@ public sealed class DataEntityAttribute : Attribute
     public bool ShowOnNav { get; set; } = false;
     public string? NavGroup { get; set; }
     public int NavOrder { get; set; } = 0;
+    public AutoIdStrategy IdGeneration { get; set; } = AutoIdStrategy.Guid;
 
     public DataEntityAttribute(string name)
     {

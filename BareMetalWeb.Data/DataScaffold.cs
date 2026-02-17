@@ -35,6 +35,7 @@ public sealed record DataEntityMetadata(
     bool ShowOnNav,
     string? NavGroup,
     int NavOrder,
+    AutoIdStrategy IdGeneration,
     IReadOnlyList<DataFieldMetadata> Fields,
     DataEntityHandlers Handlers
 );
@@ -104,6 +105,39 @@ public static class DataScaffold
     public static async ValueTask SaveAsync(DataEntityMetadata metadata, object instance, CancellationToken cancellationToken = default)
     {
         await metadata.Handlers.SaveAsync((BaseDataObject)instance, cancellationToken);
+    }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _sequenceSeeded = new(StringComparer.OrdinalIgnoreCase);
+
+    public static async ValueTask ApplyAutoIdAsync(DataEntityMetadata metadata, BaseDataObject instance, CancellationToken cancellationToken = default)
+    {
+        switch (metadata.IdGeneration)
+        {
+            case AutoIdStrategy.Guid:
+                // Constructor already sets a GUID; nothing to do.
+                break;
+
+            case AutoIdStrategy.Sequential:
+                if (!_sequenceSeeded.ContainsKey(metadata.Name))
+                {
+                    var existing = await metadata.Handlers.QueryAsync(null, cancellationToken);
+                    long max = 0;
+                    foreach (var obj in existing)
+                    {
+                        if (long.TryParse(obj.Id, out var parsed) && parsed > max)
+                            max = parsed;
+                    }
+                    IdSequenceProvider.SeedIfHigher(metadata.Name, max);
+                    _sequenceSeeded[metadata.Name] = true;
+                }
+                instance.Id = IdSequenceProvider.NextId(metadata.Name);
+                break;
+
+            case AutoIdStrategy.None:
+                if (string.IsNullOrWhiteSpace(instance.Id))
+                    throw new InvalidOperationException($"Entity {metadata.Name} requires a manually specified Id (IdGeneration = None).");
+                break;
+        }
     }
 
     public static async ValueTask DeleteAsync(DataEntityMetadata metadata, string id, CancellationToken cancellationToken = default)
@@ -1857,6 +1891,7 @@ public static class DataScaffold
         var showOnNav = entityAttribute?.ShowOnNav ?? true;
         var navGroup = entityAttribute?.NavGroup ?? "Admin";
         var navOrder = entityAttribute?.NavOrder ?? 0;
+        var idGeneration = entityAttribute?.IdGeneration ?? AutoIdStrategy.Guid;
 
         var handlers = new DataEntityHandlers(
             static () => new T(),
@@ -1875,6 +1910,7 @@ public static class DataScaffold
             showOnNav,
             navGroup,
             navOrder,
+            idGeneration,
             fields.OrderBy(f => f.Order).ToList(),
             handlers
         );
