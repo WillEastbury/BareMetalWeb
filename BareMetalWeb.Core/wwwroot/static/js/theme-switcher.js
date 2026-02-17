@@ -43,8 +43,8 @@
     function applyCustomTheme(themeName) {
         // Remove Bootswatch link element
         const link = document.getElementById('bootswatch-theme');
-        if (link && link.parentNode) {
-            link.parentNode.removeChild(link);
+        if (link) {
+            link.remove();
         }
         // Uncheck all Bootswatch radios
         BOOTSWATCH_THEMES.forEach(name => {
@@ -65,7 +65,10 @@
         try {
             localStorage.setItem(STORAGE_KEY, themeName);
         } catch (e) {
-            // Ignore localStorage errors
+            // localStorage may be unavailable (private browsing, etc.)
+            if (console && console.warn) {
+                console.warn('Failed to save theme preference:', e);
+            }
         }
     }
     
@@ -75,7 +78,10 @@
         try {
             savedTheme = localStorage.getItem(STORAGE_KEY);
         } catch (e) {
-            // Ignore localStorage errors
+            // localStorage may be unavailable (private browsing, etc.)
+            if (console && console.warn) {
+                console.warn('Failed to load saved theme preference:', e);
+            }
         }
         
         if (savedTheme) {
