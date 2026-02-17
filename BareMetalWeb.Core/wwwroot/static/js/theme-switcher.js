@@ -110,15 +110,16 @@
         });
     }
     
-    // Initialize on DOMContentLoaded
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', function() {
-            setupEventListeners();
-            loadSavedTheme();
-        });
-    } else {
-        // DOM already loaded
+    // Initialize theme switcher
+    function initialize() {
         setupEventListeners();
         loadSavedTheme();
+    }
+    
+    // Initialize on DOMContentLoaded or immediately if DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initialize);
+    } else {
+        initialize();
     }
 })();
