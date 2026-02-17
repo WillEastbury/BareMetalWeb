@@ -4,6 +4,16 @@
 
 BareMetalWeb now supports automatic ID generation for data entities. Instead of requiring users to provide IDs manually, you can mark entity properties with the `[IdGeneration]` attribute to have IDs automatically generated when creating new instances.
 
+## ⚠️ Important Limitations
+
+Before using this feature, be aware of these critical limitations:
+
+1. **Sequential IDs reset on restart**: Sequential long IDs are stored in-memory only and reset to 1 when the application restarts. This can cause duplicate IDs if you have persistent data. For production use with persistent storage, you should implement a custom ID generator that persists counters or use GUID strategy instead.
+
+2. **Read-only after generation**: Once an ID is generated, it cannot be changed. Auto-generated IDs are intended for new entity creation only.
+
+3. **String storage**: All IDs are stored as strings (matching the base `BaseDataObject.Id` property type), even sequential integers.
+
 ## Strategies
 
 Two ID generation strategies are available:
@@ -142,6 +152,43 @@ Run tests with:
 dotnet test BareMetalWeb.Data.Tests/BareMetalWeb.Data.Tests.csproj --filter "FullyQualifiedName~IdGenerationTests"
 ```
 
+## Recommendations
+
+### For Development/Testing
+Both strategies work well for development and testing scenarios.
+
+### For Production with Persistent Storage
+
+**Use GuidString strategy** if:
+- You need globally unique IDs that survive application restarts
+- You don't need human-readable IDs
+- You're working in a distributed environment
+
+**Use SequentialLong with custom persistence** if:
+- You need human-readable, sequential IDs (e.g., invoice numbers)
+- You can implement a custom `IIdGenerator` that persists counters to storage
+- You need to avoid gaps in numbering
+
+**Example custom implementation with persistence:**
+```csharp
+public class PersistentSequentialIdGenerator : IIdGenerator
+{
+    public string GenerateId(Type entityType, IdGenerationStrategy strategy)
+    {
+        if (strategy == IdGenerationStrategy.SequentialLong)
+        {
+            // Load last used ID from database
+            var lastId = LoadLastIdFromDatabase(entityType);
+            var nextId = lastId + 1;
+            // Save to database before returning
+            SaveLastIdToDatabase(entityType, nextId);
+            return nextId.ToString();
+        }
+        return Guid.NewGuid().ToString("N");
+    }
+}
+```
+
 ## Migration from Manual IDs
 
 If you have existing entities with manual IDs and want to add auto-generation:
@@ -149,13 +196,13 @@ If you have existing entities with manual IDs and want to add auto-generation:
 1. Add the `[IdGeneration]` attribute to your entity
 2. Existing records keep their IDs unchanged
 3. New records get auto-generated IDs
-4. For `SequentialLong`, the counter starts at 1 - you may want to initialize it to a higher value if needed
+4. **For SequentialLong with existing data**: Initialize the counter to max(existing IDs) + 1 to avoid conflicts, or implement a custom generator that checks the database
 
-## Limitations
+## Previous Limitations Section
 
 - Auto-generated IDs are applied only during entity creation (not during edits)
 - Once generated, IDs cannot be changed (readonly)
-- Sequential IDs are in-memory only and reset on application restart (consider implementing persistence if needed)
+- **⚠️ Sequential IDs are in-memory only and reset on application restart** - implement persistence for production use
 - All IDs are stored as strings (base `BaseDataObject.Id` property type)
 
 ## Customization
