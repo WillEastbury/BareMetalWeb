@@ -13,14 +13,10 @@ public static class UserAuth
     private static readonly TimeSpan DefaultSessionLifetime = TimeSpan.FromHours(8);
     private static readonly TimeSpan RememberMeLifetime = TimeSpan.FromDays(30);
 
-    // Note: Session expiration uses a fixed TTL model (not sliding window).
-    // Sessions expire at ExpiresUtc regardless of activity. Active users will be
-    // logged out after the TTL expires even with continuous use. This is intentional
-    // for simplicity and predictable session lifetimes. To implement sliding expiration,
-    // update LastSeenUtc and extend ExpiresUtc on each request.
-    // Note: Session expiration uses a sliding window model.
+    // Session expiration uses a sliding window model.
     // Sessions extend their expiration time with each access, keeping active users
-    // logged in. The session lifetime is reset on each request.
+    // logged in. For RememberMe sessions, the cookie Expires is also reissued to
+    // match the extended server-side expiry.
     public static UserSession? GetSession(HttpContext context)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
@@ -63,6 +59,9 @@ public static class UserAuth
         session.LastSeenUtc = now;
         session.ExpiresUtc = now.Add(session.RememberMe ? RememberMeLifetime : DefaultSessionLifetime);
         DataStoreProvider.Current.Save(session);
+
+        if (session.RememberMe)
+            ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
 
         return session;
     }
@@ -110,6 +109,9 @@ public static class UserAuth
         session.LastSeenUtc = now;
         session.ExpiresUtc = now.Add(session.RememberMe ? RememberMeLifetime : DefaultSessionLifetime);
         await DataStoreProvider.Current.SaveAsync(session, cancellationToken).ConfigureAwait(false);
+
+        if (session.RememberMe)
+            ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
 
         return session;
     }
@@ -190,6 +192,18 @@ public static class UserAuth
         }
 
         context.DeleteCookie(SessionCookieName);
+    }
+
+    private static void ReissueCookie(HttpContext context, string protectedSessionId, DateTime expiresUtc)
+    {
+        var options = new CookieOptions
+        {
+            HttpOnly = true,
+            Secure = context.Request.IsHttps,
+            SameSite = SameSiteMode.Lax,
+            Expires = expiresUtc
+        };
+        context.SetCookie(SessionCookieName, protectedSessionId, options);
     }
 
     private static bool IsApiRequest(HttpContext context)
