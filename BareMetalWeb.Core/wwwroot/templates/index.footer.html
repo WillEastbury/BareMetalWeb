@@ -1,8 +1,26 @@
     <footer class="bg-dark text-white py-2 fixed-bottom bm-footer">
         <div class="container-fluid">
-            <div class="row">
+            <div class="row align-items-center">
                 <div class="col-md-6 small">
                     <p class="mb-0">&copy;{{CopyrightYear}} - {{CompanyDescription}}, All rights reserved. {{footer_user}}<span id="tz-info" class="ms-2"></span></p>
+                </div>
+                <div class="col-md-6 text-end">
+                    <form class="bm-theme-switcher-footer d-inline-flex" aria-label="Theme selector">
+                        <input type="radio" name="bm-theme" id="theme-cosmo">
+                        <label for="theme-cosmo">Cosmo</label>
+                        <input type="radio" name="bm-theme" id="theme-flatly">
+                        <label for="theme-flatly">Flatly</label>
+                        <input type="radio" name="bm-theme" id="theme-superhero">
+                        <label for="theme-superhero">Superhero</label>
+                        <input type="radio" name="bm-theme" id="theme-darkly">
+                        <label for="theme-darkly">Darkly</label>
+                        <input type="radio" name="bm-theme" id="theme-cyborg">
+                        <label for="theme-cyborg">Cyborg</label>
+                        <input type="radio" name="bm-theme" id="theme-contrast">
+                        <label for="theme-contrast">HC</label>
+                        <input type="radio" name="bm-theme" id="theme-muted">
+                        <label for="theme-muted">Muted</label>
+                    </form>
                 </div>
             </div>
         </div>
@@ -10,3 +28,4 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz" crossorigin="anonymous"></script>
     <script src="/static/js/timezone.js" nonce="{{csp_nonce}}"></script>
     <script src="/static/js/image-preview.js" nonce="{{csp_nonce}}"></script>
+    <script src="/static/js/theme-switcher.js" nonce="{{csp_nonce}}"></script>
