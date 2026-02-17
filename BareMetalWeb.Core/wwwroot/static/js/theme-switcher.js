@@ -94,27 +94,30 @@
         }
     }
     
+    // Set up event listeners
+    function setupEventListeners() {
+        const allThemes = [...BOOTSWATCH_THEMES, ...CUSTOM_THEMES];
+        allThemes.forEach(themeName => {
+            const radio = document.getElementById(`theme-${themeName}`);
+            if (radio) {
+                radio.addEventListener('change', function() {
+                    if (this.checked) {
+                        applyTheme(themeName);
+                    }
+                });
+            }
+        });
+    }
+    
     // Initialize on DOMContentLoaded
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', function() {
-            // Set up event listeners
-            const allThemes = [...BOOTSWATCH_THEMES, ...CUSTOM_THEMES];
-            allThemes.forEach(themeName => {
-                const radio = document.getElementById(`theme-${themeName}`);
-                if (radio) {
-                    radio.addEventListener('change', function() {
-                        if (this.checked) {
-                            applyTheme(themeName);
-                        }
-                    });
-                }
-            });
-            
-            // Load saved theme
+            setupEventListeners();
             loadSavedTheme();
         });
     } else {
         // DOM already loaded
+        setupEventListeners();
         loadSavedTheme();
     }
 })();
