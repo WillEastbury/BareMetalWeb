@@ -203,6 +203,12 @@ public static class DataScaffold
             });
         }
 
+        if (query.TryGetValue("skip", out var skipStr) && int.TryParse(skipStr, out var skipVal))
+            definition.Skip = skipVal;
+
+        if (query.TryGetValue("top", out var topStr) && int.TryParse(topStr, out var topVal))
+            definition.Top = topVal;
+
         return definition;
     }
 

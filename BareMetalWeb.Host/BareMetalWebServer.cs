@@ -10,10 +10,9 @@ namespace BareMetalWeb.Host;
 
 public class BareMetalWebServer : IBareWebHost
 {
-    // Content Security Policy: Includes 'unsafe-inline' for script-src and style-src to support inline scripts/styles.
-    // This is intentional for simplicity and compatibility with templates using inline styles/scripts.
-    // For stronger XSS protection, consider using nonces/hashes or removing inline allowances.
-    private const string ContentSecurityPolicy = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
+    // Content Security Policy: Uses nonces for inline scripts/styles to provide strong XSS protection.
+    // The {0} placeholder is replaced with the request-specific nonce at runtime.
+    private const string ContentSecurityPolicyTemplate = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'nonce-{0}'; style-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'nonce-{0}'; img-src 'self' data: blob:; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
     private static readonly TimeSpan MenuCacheTtl = TimeSpan.FromSeconds(30);
     private static readonly QueryDefinition RootUserQuery = new()
     {
@@ -486,12 +485,14 @@ public class BareMetalWebServer : IBareWebHost
         if (string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
             return !isAnonymous;
 
-        if (isAnonymous)
-            return false;
-
+        // Parse required permissions and check if empty after splitting
         var requiredPermissions = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         if (requiredPermissions.Length == 0)
-            return true;
+            return true; // No actual permissions after parsing, treat as public
+
+        // If we reach here, specific permissions are required
+        if (isAnonymous)
+            return false;
 
         var userPermissions = new HashSet<string>(user!.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
 
@@ -535,7 +536,8 @@ public class BareMetalWebServer : IBareWebHost
 
     private static void ApplySecurityHeaders(HttpContext context)
     {
-        context.Response.Headers["Content-Security-Policy"] = ContentSecurityPolicy;
+        var nonce = context.GenerateCspNonce();
+        context.Response.Headers["Content-Security-Policy"] = string.Format(ContentSecurityPolicyTemplate, nonce);
     }
 
     public async Task RenderForbidden(HttpContext context)

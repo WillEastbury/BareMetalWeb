@@ -29,7 +29,7 @@ public sealed class TemplateStore : ITemplateStore
             if (_cache.TryGetValue(name, out var cached))
                 return cached;
 
-            string basePath = Path.Combine(ResolveTemplatesBasePath(), name);
+            string basePath = Path.Combine(ResolveTemplatesBasePath(), name.ToLowerInvariant());
 
             var template = new HtmlTemplate(
                 File.ReadAllText(basePath + ".head.html"),

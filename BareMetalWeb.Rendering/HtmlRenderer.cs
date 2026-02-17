@@ -172,7 +172,7 @@ public class HtmlRenderer : IHtmlRenderer
                         {
                             if (keySpan.SequenceEqual(scopedKeys[k]))
                             {
-                                WriteHtmlEncoded(writer, scopedValues[k]);
+                                Write(writer, scopedValues[k]);
                                 matched = true;
                                 break;
                             }
@@ -186,7 +186,7 @@ public class HtmlRenderer : IHtmlRenderer
                         {
                             if (keySpan.SequenceEqual(keys[k]))
                             {
-                                WriteHtmlEncoded(writer, values[k]);
+                                Write(writer, values[k]);
                                 matched = true;
                                 break;
                             }
@@ -200,7 +200,7 @@ public class HtmlRenderer : IHtmlRenderer
                         {
                             if (keySpan.SequenceEqual(appkeys[k]))
                             {
-                                WriteHtmlEncoded(writer, appvalues[k]);
+                                Write(writer, appvalues[k]);
                                 matched = true;
                                 break;
                             }
@@ -483,6 +483,25 @@ public class HtmlRenderer : IHtmlRenderer
 
     public async ValueTask RenderPage(HttpContext context, PageInfo page, IBareWebHost app)
     {
+        // Ensure CSP nonce is in page context
+        var pageContext = page.PageContext;
+        var keys = pageContext.PageMetaDataKeys.ToList();
+        var values = pageContext.PageMetaDataValues.ToList();
+        
+        var nonceIndex = keys.FindIndex(k => string.Equals(k, "csp_nonce", StringComparison.Ordinal));
+        if (nonceIndex < 0)
+        {
+            var nonce = context.GetCspNonce();
+            keys.Add("csp_nonce");
+            values.Add(nonce);
+            pageContext = pageContext with
+            {
+                PageMetaDataKeys = keys.ToArray(),
+                PageMetaDataValues = values.ToArray()
+            };
+            page = page with { PageContext = pageContext };
+        }
+        
         byte[] output = await RenderToBytesAsync(
             page.PageMetaData.Template,
             page.PageContext.PageMetaDataKeys,
