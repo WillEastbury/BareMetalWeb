@@ -291,8 +291,9 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
         if (method == null)
             throw new InvalidOperationException("Could not find IsAuthorizedAsync method via reflection");
 
+        // Use Task.Run to avoid potential deadlocks with sync-over-async
         var task = (ValueTask<bool>)method.Invoke(null, new object?[] { pageInfo, context, default(CancellationToken) })!;
-        return task.AsTask().GetAwaiter().GetResult();
+        return Task.Run(async () => await task).GetAwaiter().GetResult();
     }
 
     private static PageInfo CreatePageInfo(string permissionsNeeded)
