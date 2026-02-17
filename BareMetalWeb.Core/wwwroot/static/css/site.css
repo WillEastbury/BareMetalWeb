@@ -381,10 +381,6 @@ body a:hover {
 }
 
 .bm-theme-switcher {
-    position: fixed;
-    top: calc(var(--bm-nav-height) + 0.75rem);
-    right: 1rem;
-    z-index: 1040;
     display: inline-flex;
     gap: 0.35rem;
     padding: 0.35rem;
@@ -392,6 +388,7 @@ body a:hover {
     background: rgba(12, 16, 22, 0.8);
     border: 1px solid var(--bm-border);
     backdrop-filter: blur(8px);
+    float: right;
 }
 
 .bm-theme-switcher input {
