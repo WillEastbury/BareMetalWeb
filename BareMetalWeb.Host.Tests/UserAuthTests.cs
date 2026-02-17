@@ -13,25 +13,30 @@ namespace BareMetalWeb.Host.Tests;
 public class UserAuthTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
+    private readonly IDataObjectStore _testStore;
 
     public UserAuthTests()
     {
-        // Save original store to restore later
         _originalStore = DataStoreProvider.Current;
-        // Set up a mock data store for testing
-        DataStoreProvider.Current = new InMemoryDataStore();
+        _testStore = new InMemoryDataStore();
+        DataStoreProvider.Current = _testStore;
     }
 
     public void Dispose()
     {
-        // Restore original store
         DataStoreProvider.Current = _originalStore;
+    }
+
+    private void EnsureStore()
+    {
+        DataStoreProvider.Current = _testStore;
     }
 
     [Fact]
     public async Task GetSessionAsync_ActiveSession_ExtendsExpirationTime()
     {
         // Arrange
+        EnsureStore();
         var now = DateTime.UtcNow;
         var session = new UserSession
         {
@@ -79,6 +84,7 @@ public class UserAuthTests : IDisposable
     public async Task GetSessionAsync_RememberMeSession_ExtendsWithRememberMeLifetime()
     {
         // Arrange
+        EnsureStore();
         var now = DateTime.UtcNow;
         var session = new UserSession
         {
@@ -120,6 +126,7 @@ public class UserAuthTests : IDisposable
     public void GetSession_ActiveSession_ExtendsExpirationTime()
     {
         // Arrange
+        EnsureStore();
         var now = DateTime.UtcNow;
         var session = new UserSession
         {
@@ -164,6 +171,7 @@ public class UserAuthTests : IDisposable
     public async Task GetSessionAsync_ExpiredSession_ReturnsNull()
     {
         // Arrange
+        EnsureStore();
         var now = DateTime.UtcNow;
         var session = new UserSession
         {
@@ -200,6 +208,7 @@ public class UserAuthTests : IDisposable
     public async Task GetSessionAsync_NoSession_ReturnsNull()
     {
         // Arrange
+        EnsureStore();
         var context = CreateHttpContext(null);
 
         // Act
