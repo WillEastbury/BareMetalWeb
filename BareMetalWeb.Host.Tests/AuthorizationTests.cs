@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Threading;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Rendering;
@@ -284,13 +285,14 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
 
     private static bool InvokeIsAuthorized(PageInfo? pageInfo, HttpContext context)
     {
-        var method = typeof(BareMetalWebServer).GetMethod("IsAuthorized",
+        var method = typeof(BareMetalWebServer).GetMethod("IsAuthorizedAsync",
             BindingFlags.NonPublic | BindingFlags.Static);
         
         if (method == null)
-            throw new InvalidOperationException("Could not find IsAuthorized method via reflection");
+            throw new InvalidOperationException("Could not find IsAuthorizedAsync method via reflection");
 
-        return (bool)method.Invoke(null, new object?[] { pageInfo, context })!;
+        var task = (ValueTask<bool>)method.Invoke(null, new object?[] { pageInfo, context, default(CancellationToken) })!;
+        return task.AsTask().GetAwaiter().GetResult();
     }
 
     private static PageInfo CreatePageInfo(string permissionsNeeded)
