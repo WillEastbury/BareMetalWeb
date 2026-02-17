@@ -154,7 +154,7 @@ appInfo.RegisterRoute("POST /api/device/code", new RouteHandlerData(pageInfoFact
         ExpiresUtc = DateTime.UtcNow.AddMinutes(15),
         Status = "pending"
     };
-    await DataStoreProvider.Current.SaveAsync(dc).ConfigureAwait(false);
+    DataStoreProvider.Current.Save(dc);
     var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
     var json = JsonSerializer.Serialize(new Dictionary<string, object>
     {
@@ -181,7 +181,7 @@ appInfo.RegisterRoute("POST /api/device/token", new RouteHandlerData(pageInfoFac
         await context.Response.WriteAsync("{\"error\":\"missing device_code\"}");
         return;
     }
-    var all = (await DataStoreProvider.Current.QueryAsync<DeviceCodeAuth>(null).ConfigureAwait(false)).ToList();
+    var all = DataStoreProvider.Current.Query<DeviceCodeAuth>(null).ToList();
     var dc = all.FirstOrDefault(d => d.DeviceCode == deviceCode);
     if (dc == null || dc.IsExpired(DateTime.UtcNow))
     {
@@ -191,12 +191,12 @@ appInfo.RegisterRoute("POST /api/device/token", new RouteHandlerData(pageInfoFac
     }
     if (dc.Status == "approved" && !string.IsNullOrEmpty(dc.UserId))
     {
-        var user = await DataStoreProvider.Current.LoadAsync<User>(dc.UserId).ConfigureAwait(false);
+        var user = await DataStoreProvider.Current.LoadAsync<User>(dc.UserId);
         if (user != null)
         {
             await UserAuth.SignInAsync(context, user, false);
             dc.Status = "consumed";
-            await DataStoreProvider.Current.SaveAsync(dc).ConfigureAwait(false);
+            DataStoreProvider.Current.Save(dc);
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync(JsonSerializer.Serialize(new Dictionary<string, object>
             {
@@ -266,7 +266,7 @@ appInfo.RegisterRoute("POST /device", new RouteHandlerData(pageInfoFactory.RawPa
         context.Response.Redirect("/device?msg=Error:+Invalid+request");
         return;
     }
-    var all = (await DataStoreProvider.Current.QueryAsync<DeviceCodeAuth>(null).ConfigureAwait(false)).ToList();
+    var all = DataStoreProvider.Current.Query<DeviceCodeAuth>(null).ToList();
     var dc = all.FirstOrDefault(d => d.UserCode == code && d.Status == "pending" && !d.IsExpired(DateTime.UtcNow));
     if (dc == null)
     {
@@ -275,7 +275,7 @@ appInfo.RegisterRoute("POST /device", new RouteHandlerData(pageInfoFactory.RawPa
     }
     dc.Status = "approved";
     dc.UserId = user.Id;
-    await DataStoreProvider.Current.SaveAsync(dc).ConfigureAwait(false);
+    DataStoreProvider.Current.Save(dc);
     context.Response.Redirect("/device?msg=Device+authorized+successfully!+You+can+close+this+tab.");
 }));
 appInfo.RegisterRoute("GET /api/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), routeHandlers.DataApiListHandler));
@@ -329,11 +329,11 @@ appInfo.RegisterRoute("GET /ideas/search", new RouteHandlerData(pageInfoFactory.
             StartTime = TimeOnly.FromDateTime(DateTime.UtcNow),
             IsCompleted = false
         };
-        await DataStoreProvider.Current.SaveAsync(todo).ConfigureAwait(false);
+        DataStoreProvider.Current.Save(todo);
     }
 
     // Return all ToDo entries regardless of query
-    var todos = await DataStoreProvider.Current.QueryAsync<ToDo>(null).ConfigureAwait(false);
+    var todos = DataStoreProvider.Current.Query<ToDo>(null);
     var sb = new System.Text.StringBuilder();
     sb.Append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
     sb.Append("<title>Ideas</title><style>");
