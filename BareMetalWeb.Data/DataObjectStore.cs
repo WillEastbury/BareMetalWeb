@@ -34,13 +34,6 @@ public sealed class DataObjectStore : IDataObjectStore
 
     public void ClearProviders() => _providersList.Clear();
 
-    public void Save<T>(T obj) where T : BaseDataObject
-    {
-        if (obj is null) throw new ArgumentNullException(nameof(obj));
-        var provider = ResolveProvider(typeof(T));
-        provider.Save(obj);
-    }
-
     public async ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
     {
         if (obj is null) throw new ArgumentNullException(nameof(obj));
@@ -48,24 +41,11 @@ public sealed class DataObjectStore : IDataObjectStore
         await provider.SaveAsync(obj, cancellationToken).ConfigureAwait(false);
     }
 
-    public T? Load<T>(string id) where T : BaseDataObject
-    {
-        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
-        var provider = ResolveProvider(typeof(T));
-        return provider.Load<T>(id);
-    }
-
     public async ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
     {
         if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
         var provider = ResolveProvider(typeof(T));
         return await provider.LoadAsync<T>(id, cancellationToken).ConfigureAwait(false);
-    }
-
-    public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
-    {
-        var provider = ResolveProvider(typeof(T));
-        return provider.Query<T>(query);
     }
 
     public async ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
@@ -78,13 +58,6 @@ public sealed class DataObjectStore : IDataObjectStore
     {
         var provider = ResolveProvider(typeof(T));
         return await provider.CountAsync<T>(query, cancellationToken).ConfigureAwait(false);
-    }
-
-    public void Delete<T>(string id) where T : BaseDataObject
-    {
-        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
-        var provider = ResolveProvider(typeof(T));
-        provider.Delete<T>(id);
     }
 
     public async ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject

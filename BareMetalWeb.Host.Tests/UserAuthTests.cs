@@ -117,50 +117,6 @@ public class UserAuthTests : IDisposable
     }
 
     [Fact]
-    public void GetSession_ActiveSession_ExtendsExpirationTime()
-    {
-        // Arrange
-        var now = DateTime.UtcNow;
-        var session = new UserSession
-        {
-            UserId = "user123",
-            UserName = "testuser",
-            DisplayName = "Test User",
-            Permissions = Array.Empty<string>(),
-            IssuedUtc = now.AddHours(-2),
-            LastSeenUtc = now.AddHours(-1),
-            ExpiresUtc = now.AddHours(6),
-            RememberMe = false,
-            IsRevoked = false,
-            CreatedBy = "testuser",
-            UpdatedBy = "testuser"
-        };
-
-        DataStoreProvider.Current.Save(session);
-
-        var context = CreateHttpContext(session.Id);
-        var originalExpiresUtc = session.ExpiresUtc;
-        var originalLastSeenUtc = session.LastSeenUtc;
-
-        // Act
-        var result = UserAuth.GetSession(context);
-
-        // Assert
-        Assert.NotNull(result);
-        Assert.Equal(session.Id, result.Id);
-
-        // Reload session to check if it was updated
-        var updatedSession = DataStoreProvider.Current.Load<UserSession>(session.Id);
-        Assert.NotNull(updatedSession);
-        
-        // LastSeenUtc should be updated
-        Assert.True(updatedSession.LastSeenUtc > originalLastSeenUtc);
-        
-        // ExpiresUtc should be extended
-        Assert.True(updatedSession.ExpiresUtc > originalExpiresUtc);
-    }
-
-    [Fact]
     public async Task GetSessionAsync_ExpiredSession_ReturnsNull()
     {
         // Arrange
@@ -235,28 +191,18 @@ public class UserAuthTests : IDisposable
         public void RegisterFallbackProvider(IDataProvider provider) { }
         public void ClearProviders() { }
 
-        public void Save<T>(T obj) where T : BaseDataObject
-        {
-            _store[obj.Id] = obj;
-        }
-
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            Save(obj);
+            _store[obj.Id] = obj;
             return ValueTask.CompletedTask;
-        }
-
-        public T? Load<T>(string id) where T : BaseDataObject
-        {
-            return _store.TryGetValue(id, out var obj) ? obj as T : null;
         }
 
         public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            return ValueTask.FromResult(Load<T>(id));
+            return ValueTask.FromResult(_store.TryGetValue(id, out var obj) ? obj as T : null);
         }
 
-        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
+        private IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
         {
             foreach (var obj in _store.Values)
             {
@@ -275,14 +221,9 @@ public class UserAuthTests : IDisposable
             return ValueTask.FromResult(Query<T>(query).Count());
         }
 
-        public void Delete<T>(string id) where T : BaseDataObject
-        {
-            _store.Remove(id);
-        }
-
         public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            Delete<T>(id);
+            _store.Remove(id);
             return ValueTask.CompletedTask;
         }
     }

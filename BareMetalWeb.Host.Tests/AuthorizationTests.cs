@@ -320,7 +320,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
         {
             // Create a session and set it up properly
             // Save the user to the data store
-            DataStoreProvider.Current.Save(user);
+            DataStoreProvider.Current.SaveAsync(user).GetAwaiter().GetResult();
             
             // Create a session for the user
             var session = new UserSession
@@ -332,7 +332,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
                 ExpiresUtc = DateTime.UtcNow.AddHours(8),
                 IsRevoked = false
             };
-            DataStoreProvider.Current.Save(session);
+            DataStoreProvider.Current.SaveAsync(session).GetAwaiter().GetResult();
             
             // Set the session cookie
             var protectedSessionId = CookieProtection.Protect(session.Id);
