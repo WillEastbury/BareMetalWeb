@@ -1447,7 +1447,16 @@ public sealed class RouteHandlers : IRouteHandlers
         // Standard table view with pagination
         var countQuery = DataScaffold.BuildQueryDefinition(queryDictionary, meta);
         var totalCount = await DataScaffold.CountAsync(meta, countQuery);
-        const int pageSize = 50;
+        
+        // Configurable page size (default 25)
+        var pageSize = 25;
+        if (queryDictionary.TryGetValue("size", out var sizeValue) 
+            && int.TryParse(sizeValue, out var parsedSize) 
+            && parsedSize > 0 && parsedSize <= 100)
+        {
+            pageSize = parsedSize;
+        }
+        
         var page = 1;
         if (context.Request.Query.TryGetValue("page", out var pageValue)
             && int.TryParse(pageValue.ToString(), out var parsedPage)
@@ -1465,7 +1474,6 @@ public sealed class RouteHandlers : IRouteHandlers
         query.Top = pageSize;
         var results = await DataScaffold.QueryAsync(meta, query);
 
-        var headers = DataScaffold.BuildListHeaders(meta, includeActions: true);
         var rows = DataScaffold.BuildListRows(
             meta,
             results,
@@ -1476,55 +1484,24 @@ public sealed class RouteHandlers : IRouteHandlers
             cloneReturnUrl: returnUrl);
 
         var toastHtml = BuildToastHtml(context, meta.Name);
-        var startRecord = totalCount == 0 ? 0 : (page - 1) * pageSize + 1;
-        var endRecord = Math.Min(page * pageSize, totalCount);
-
-        string BuildPageUrl(int targetPage)
-        {
-            if (targetPage < 1)
-                targetPage = 1;
-
-            var parts = new List<string>();
-            foreach (var pair in context.Request.Query)
-            {
-                if (string.Equals(pair.Key, "page", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                foreach (var value in pair.Value)
-                {
-                    parts.Add($"{WebUtility.UrlEncode(pair.Key)}={WebUtility.UrlEncode(value)}");
-                }
-            }
-
-            if (targetPage > 1)
-                parts.Add($"page={targetPage}");
-
-            var queryString = parts.Count > 0 ? "?" + string.Join("&", parts) : string.Empty;
-            return $"{context.Request.Path}{queryString}";
-        }
-
-        var prevUrl = BuildPageUrl(page - 1);
-        var nextUrl = BuildPageUrl(page + 1);
-        var prevDisabled = page <= 1;
-        var nextDisabled = endRecord >= totalCount;
-        var pagerHtml = $"<div class=\"d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2\">"
-            + $"<div class=\"small text-muted\">Records {startRecord} to {endRecord} of {totalCount} total</div>"
-            + "<div class=\"btn-group btn-group-sm\" role=\"group\" aria-label=\"Pagination\">"
-            + (prevDisabled
-                ? "<span class=\"btn btn-outline-secondary disabled\" aria-disabled=\"true\" title=\"Previous\"><i class=\"bi bi-arrow-left\" aria-hidden=\"true\"></i></span>"
-                : $"<a class=\"btn btn-outline-secondary\" href=\"{WebUtility.HtmlEncode(prevUrl)}\" title=\"Previous\" aria-label=\"Previous\"><i class=\"bi bi-arrow-left\" aria-hidden=\"true\"></i></a>")
-            + (nextDisabled
-                ? "<span class=\"btn btn-outline-secondary disabled\" aria-disabled=\"true\" title=\"Next\"><i class=\"bi bi-arrow-right\" aria-hidden=\"true\"></i></span>"
-                : $"<a class=\"btn btn-outline-secondary\" href=\"{WebUtility.HtmlEncode(nextUrl)}\" title=\"Next\" aria-label=\"Next\"><i class=\"bi bi-arrow-right\" aria-hidden=\"true\"></i></a>")
-            + "</div></div>";
+        
+        // Build UI components
+        var currentSearchText = queryDictionary.TryGetValue("q", out var searchVal) ? searchVal : null;
+        var searchBoxHtml = BuildSearchBox(currentSearchText, $"/admin/data/{typeSlug}");
+        var pageSizeHtml = BuildPageSizeSelector(pageSize, $"/admin/data/{typeSlug}", queryDictionary);
+        var pagerHtml = BuildEnhancedPagination(page, totalCount, pageSize, $"/admin/data/{typeSlug}", queryDictionary);
+        
         var queryString = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : string.Empty;
         var csvHtml = $"<a class=\"btn btn-sm btn-outline-success ms-2\" href=\"/admin/data/{typeSlug}/csv{WebUtility.HtmlEncode(queryString)}\" title=\"Download CSV\" aria-label=\"Download CSV\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-spreadsheet ms-1\" aria-hidden=\"true\"></i> CSV</a>";
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/html{WebUtility.HtmlEncode(queryString)}\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
         var viewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta.ParentField != null);
         var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a>{csvHtml}{htmlHtml}</p>";
+        
+        // Build custom table with sortable headers
+        var tableHtml = BuildTableWithSortableHeaders(meta, rows, $"/admin/data/{typeSlug}", queryDictionary, includeActions: true);
+        
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} List");
-        context.SetStringValue("message", toastHtml + viewSwitcher + pagerHtml + createHtml);
-        context.AddTable(headers.ToArray(), rows.ToArray());
+        context.SetStringValue("message", toastHtml + viewSwitcher + searchBoxHtml + "<div class=\"d-flex justify-content-between align-items-center mb-2\">" + pagerHtml + pageSizeHtml + "</div>" + createHtml + tableHtml);
         await _renderer.RenderPage(context);
     }
 
@@ -4422,6 +4399,233 @@ public sealed class RouteHandlers : IRouteHandlers
             ViewType.OrgChart => "Org Chart",
             _ => "Table View"
         };
+    }
+
+    private static string BuildSearchBox(string? currentSearchText, string actionUrl)
+    {
+        var safeSearchText = WebUtility.HtmlEncode(currentSearchText ?? string.Empty);
+        return $@"<div class=""mb-3"">
+    <form method=""get"" action=""{WebUtility.HtmlEncode(actionUrl)}"" class=""row g-2"">
+        <div class=""col-auto flex-grow-1"">
+            <input type=""search"" class=""form-control"" name=""q"" placeholder=""Search..."" value=""{safeSearchText}"" aria-label=""Search"" />
+        </div>
+        <div class=""col-auto"">
+            <button type=""submit"" class=""btn btn-primary""><i class=""bi bi-search"" aria-hidden=""true""></i> Search</button>
+        </div>
+    </form>
+</div>";
+    }
+
+    private static string BuildPageSizeSelector(int currentPageSize, string basePath, IDictionary<string, string?> queryParams)
+    {
+        var sizes = new[] { 10, 25, 50, 100 };
+        var html = new StringBuilder();
+        html.Append(@"<div class=""d-flex align-items-center gap-2"">
+    <label class=""form-label mb-0 small text-nowrap"">Page size:</label>
+    <select class=""form-select form-select-sm"" style=""width: auto;"" onchange=""window.location.href=this.value;"" aria-label=""Page size"">");
+
+        foreach (var size in sizes)
+        {
+            var selected = size == currentPageSize ? " selected" : string.Empty;
+            var url = BuildUrlWithParam(basePath, queryParams, "size", size.ToString(), excludeParams: new[] { "page" });
+            html.Append($@"<option value=""{WebUtility.HtmlEncode(url)}""{selected}>{size}</option>");
+        }
+
+        html.Append("</select></div>");
+        return html.ToString();
+    }
+
+    private static string BuildEnhancedPagination(int currentPage, int totalRecords, int pageSize, string basePath, IDictionary<string, string?> queryParams)
+    {
+        var maxPage = totalRecords == 0 ? 1 : (int)Math.Ceiling(totalRecords / (double)pageSize);
+        var startRecord = totalRecords == 0 ? 0 : (currentPage - 1) * pageSize + 1;
+        var endRecord = Math.Min(currentPage * pageSize, totalRecords);
+
+        var html = new StringBuilder();
+        html.Append(@"<div class=""d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2"">");
+        
+        // Record count
+        html.Append($@"<div class=""small text-muted"">Records {startRecord} to {endRecord} of {totalRecords} total</div>");
+        
+        // Pagination controls
+        html.Append(@"<nav aria-label=""Page navigation""><ul class=""pagination pagination-sm mb-0"">");
+        
+        // Previous button
+        if (currentPage > 1)
+        {
+            var prevUrl = BuildUrlWithParam(basePath, queryParams, "page", (currentPage - 1).ToString());
+            html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(prevUrl)}"" aria-label=""Previous""><i class=""bi bi-arrow-left"" aria-hidden=""true""></i></a></li>");
+        }
+        else
+        {
+            html.Append(@"<li class=""page-item disabled""><span class=""page-link"" aria-disabled=""true""><i class=""bi bi-arrow-left"" aria-hidden=""true""></i></span></li>");
+        }
+
+        // Page numbers (show current +/- 2 pages)
+        var startPage = Math.Max(1, currentPage - 2);
+        var endPage = Math.Min(maxPage, currentPage + 2);
+        
+        if (startPage > 1)
+        {
+            var firstUrl = BuildUrlWithParam(basePath, queryParams, "page", "1");
+            html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(firstUrl)}"">1</a></li>");
+            if (startPage > 2)
+            {
+                html.Append(@"<li class=""page-item disabled""><span class=""page-link"">...</span></li>");
+            }
+        }
+
+        for (var i = startPage; i <= endPage; i++)
+        {
+            if (i == currentPage)
+            {
+                html.Append($@"<li class=""page-item active"" aria-current=""page""><span class=""page-link"">{i}</span></li>");
+            }
+            else
+            {
+                var pageUrl = BuildUrlWithParam(basePath, queryParams, "page", i.ToString());
+                html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(pageUrl)}"">{i}</a></li>");
+            }
+        }
+
+        if (endPage < maxPage)
+        {
+            if (endPage < maxPage - 1)
+            {
+                html.Append(@"<li class=""page-item disabled""><span class=""page-link"">...</span></li>");
+            }
+            var lastUrl = BuildUrlWithParam(basePath, queryParams, "page", maxPage.ToString());
+            html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(lastUrl)}"">{maxPage}</a></li>");
+        }
+
+        // Next button
+        if (currentPage < maxPage)
+        {
+            var nextUrl = BuildUrlWithParam(basePath, queryParams, "page", (currentPage + 1).ToString());
+            html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(nextUrl)}"" aria-label=""Next""><i class=""bi bi-arrow-right"" aria-hidden=""true""></i></a></li>");
+        }
+        else
+        {
+            html.Append(@"<li class=""page-item disabled""><span class=""page-link"" aria-disabled=""true""><i class=""bi bi-arrow-right"" aria-hidden=""true""></i></span></li>");
+        }
+
+        html.Append("</ul></nav></div>");
+        return html.ToString();
+    }
+
+    private static string BuildUrlWithParam(string basePath, IDictionary<string, string?> queryParams, string key, string value, string[]? excludeParams = null)
+    {
+        var parts = new List<string>();
+        var exclude = new HashSet<string>(excludeParams ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        exclude.Add(key); // Always exclude the key we're setting
+
+        foreach (var pair in queryParams)
+        {
+            if (exclude.Contains(pair.Key))
+                continue;
+
+            var pairValue = pair.Value ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(pairValue))
+            {
+                parts.Add($"{WebUtility.UrlEncode(pair.Key)}={WebUtility.UrlEncode(pairValue)}");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            parts.Add($"{WebUtility.UrlEncode(key)}={WebUtility.UrlEncode(value)}");
+        }
+
+        var queryString = parts.Count > 0 ? "?" + string.Join("&", parts) : string.Empty;
+        return $"{basePath}{queryString}";
+    }
+
+    private static string BuildSortableColumnHeaders(DataEntityMetadata metadata, string basePath, IDictionary<string, string?> queryParams, bool includeActions)
+    {
+        var currentSort = queryParams.TryGetValue("sort", out var sortValue) ? sortValue : null;
+        var currentDir = queryParams.TryGetValue("dir", out var dirValue) ? dirValue : "asc";
+        
+        var html = new StringBuilder();
+        html.Append("<thead><tr>");
+
+        if (includeActions)
+        {
+            html.Append(@"<th scope=""col"">Actions</th>");
+        }
+
+        foreach (var field in metadata.Fields.Where(f => f.List).OrderBy(f => f.Order))
+        {
+            var isSorted = string.Equals(field.Name, currentSort, StringComparison.OrdinalIgnoreCase);
+            var nextDir = isSorted && string.Equals(currentDir, "asc", StringComparison.OrdinalIgnoreCase) ? "desc" : "asc";
+            
+            // Build sort URL - need to update both sort and dir parameters
+            var parts = new List<string>();
+            foreach (var pair in queryParams)
+            {
+                if (string.Equals(pair.Key, "sort", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pair.Key, "dir", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pair.Key, "page", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var pairValue = pair.Value ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(pairValue))
+                {
+                    parts.Add($"{WebUtility.UrlEncode(pair.Key)}={WebUtility.UrlEncode(pairValue)}");
+                }
+            }
+            parts.Add($"sort={WebUtility.UrlEncode(field.Name)}");
+            parts.Add($"dir={nextDir}");
+            var queryString = parts.Count > 0 ? "?" + string.Join("&", parts) : string.Empty;
+            var sortUrl = $"{basePath}{queryString}";
+            
+            var sortIcon = string.Empty;
+            if (isSorted)
+            {
+                sortIcon = string.Equals(currentDir, "desc", StringComparison.OrdinalIgnoreCase)
+                    ? @" <i class=""bi bi-arrow-down"" aria-hidden=""true""></i>"
+                    : @" <i class=""bi bi-arrow-up"" aria-hidden=""true""></i>";
+            }
+            else
+            {
+                sortIcon = @" <i class=""bi bi-arrow-down-up text-muted"" aria-hidden=""true"" style=""opacity: 0.3;""></i>";
+            }
+
+            html.Append($@"<th scope=""col""><a href=""{WebUtility.HtmlEncode(sortUrl)}"" class=""text-decoration-none text-reset"" title=""Sort by {WebUtility.HtmlEncode(field.Label)}"">{WebUtility.HtmlEncode(field.Label)}{sortIcon}</a></th>");
+        }
+
+        html.Append("</tr></thead>");
+        return html.ToString();
+    }
+
+    private static string BuildTableWithSortableHeaders(DataEntityMetadata metadata, IReadOnlyList<string[]> rows, string basePath, IDictionary<string, string?> queryParams, bool includeActions)
+    {
+        var html = new StringBuilder();
+        html.Append(@"<table class=""table table-striped table-sm align-middle mb-0 bm-table"">");
+        
+        // Add sortable headers
+        html.Append(BuildSortableColumnHeaders(metadata, basePath, queryParams, includeActions));
+        
+        // Add body rows
+        html.Append("<tbody>");
+        
+        var columnTitles = new List<string>();
+        if (includeActions)
+            columnTitles.Add("Actions");
+        columnTitles.AddRange(metadata.Fields.Where(f => f.List).OrderBy(f => f.Order).Select(f => f.Label));
+        
+        foreach (var row in rows)
+        {
+            html.Append("<tr>");
+            for (int i = 0; i < row.Length; i++)
+            {
+                var label = i < columnTitles.Count ? columnTitles[i] : string.Empty;
+                html.Append($@"<td data-label=""{WebUtility.HtmlEncode(label)}"">{row[i]}</td>");
+            }
+            html.Append("</tr>");
+        }
+        
+        html.Append("</tbody></table>");
+        return html.ToString();
     }
 
     private static string BuildCommandButtonsHtml(DataEntityMetadata meta, string typeSlug, string id)
