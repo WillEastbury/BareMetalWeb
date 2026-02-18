@@ -279,6 +279,15 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("POST /admin/data/{type}/{id}/delete", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Delete", "" }, "Authenticated", false, 1),
             routeHandlers.DataDeletePostHandler));
+
+        // Bulk operations
+        host.RegisterRoute("POST /admin/data/{type}/bulk-delete", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.DataBulkDeleteHandler));
+        
+        host.RegisterRoute("GET /admin/data/{type}/bulk-export", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.DataBulkExportHandler));
     }
 
     /// <summary>

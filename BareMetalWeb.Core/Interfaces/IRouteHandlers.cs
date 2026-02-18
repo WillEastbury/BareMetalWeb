@@ -49,6 +49,8 @@ public interface IRouteHandlers
     ValueTask DataCloneEditPostHandler(HttpContext context);
     ValueTask DataDeleteHandler(HttpContext context);
     ValueTask DataDeletePostHandler(HttpContext context);
+    ValueTask DataBulkDeleteHandler(HttpContext context);
+    ValueTask DataBulkExportHandler(HttpContext context);
     ValueTask MetricsJsonHandler(HttpContext context);
     ValueTask LogsViewerHandler(HttpContext context);
     ValueTask LogsPruneHandler(HttpContext context);

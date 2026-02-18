@@ -621,7 +621,7 @@ public static class DataScaffold
         return rows;
     }
 
-    public static IReadOnlyList<string> BuildListHeaders(DataEntityMetadata metadata, bool includeActions)
+    public static IReadOnlyList<string> BuildListHeaders(DataEntityMetadata metadata, bool includeActions, bool includeBulkSelection = false)
     {
         var headers = metadata.Fields
             .Where(f => f.List)
@@ -631,6 +631,9 @@ public static class DataScaffold
 
         if (includeActions)
             headers.Insert(0, "Actions");
+        
+        if (includeBulkSelection)
+            headers.Insert(0, "<input type=\"checkbox\" data-select-all-checkbox aria-label=\"Select all\" />");
 
         return headers;
     }
@@ -720,7 +723,7 @@ public static class DataScaffold
         return new TableRowActions(actions);
     }
 
-    public static IReadOnlyList<string[]> BuildListRows(DataEntityMetadata metadata, IEnumerable items, string basePath, bool includeActions, Func<DataEntityMetadata, bool>? canRenderLookupLink = null, string? cloneToken = null, string? cloneReturnUrl = null)
+    public static IReadOnlyList<string[]> BuildListRows(DataEntityMetadata metadata, IEnumerable items, string basePath, bool includeActions, Func<DataEntityMetadata, bool>? canRenderLookupLink = null, string? cloneToken = null, string? cloneReturnUrl = null, bool includeBulkSelection = false)
     {
         var rows = new List<string[]>();
         foreach (var item in items)
@@ -771,6 +774,13 @@ public static class DataScaffold
                 }
 
                 values.Insert(0, $"<a class=\"btn btn-sm btn-outline-info me-1\" href=\"{viewUrl}\" title=\"Open\" aria-label=\"Open\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i></a><a class=\"btn btn-sm btn-outline-warning me-1\" href=\"{editUrl}\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>{cloneHtml}<a class=\"btn btn-sm btn-outline-danger\" href=\"{deleteUrl}\" title=\"Delete\" aria-label=\"Delete\"><i class=\"bi bi-x-lg\" aria-hidden=\"true\"></i></a>");
+            }
+            
+            if (includeBulkSelection && item is BaseDataObject selectionDataObject)
+            {
+                var id = GetIdValue(selectionDataObject);
+                var safeId = WebUtility.HtmlEncode(id ?? string.Empty);
+                values.Insert(0, $"<input type=\"checkbox\" data-row-checkbox data-row-id=\"{safeId}\" aria-label=\"Select row\" />");
             }
 
             rows.Add(values.ToArray());
