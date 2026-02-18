@@ -1,11 +1,28 @@
-// Theme switcher for Bootswatch CDN themes
+// Theme switcher
 (function() {
     'use strict';
 
-    const BOOTSWATCH_VERSION = '5.3.3';
-    const BOOTSWATCH_CDN_BASE = `https://cdn.jsdelivr.net/npm/bootswatch@${BOOTSWATCH_VERSION}/dist`;
+    const LOCAL_THEME_PATH = '/static/css/bootstrap.min.css';
     const STORAGE_KEY = 'bm-selected-theme';
     const DEFAULT_THEME = 'vapor';
+
+    function setStoredTheme(themeName) {
+        document.cookie = `${STORAGE_KEY}=${encodeURIComponent(themeName)}; path=/; max-age=31536000; samesite=lax`;
+    }
+
+    function getStoredTheme() {
+        const cookies = document.cookie ? document.cookie.split(';') : [];
+        const key = `${STORAGE_KEY}=`;
+
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.startsWith(key)) {
+                return decodeURIComponent(cookie.substring(key.length)) || DEFAULT_THEME;
+            }
+        }
+
+        return DEFAULT_THEME;
+    }
 
     // Get or create the theme stylesheet link element
     function getThemeLink() {
@@ -25,16 +42,25 @@
         return link;
     }
 
+    // Allowed Bootswatch theme names
+    const ALLOWED_THEMES = new Set([
+        'cerulean', 'cosmo', 'cyborg', 'darkly', 'flatly', 'journal',
+        'litera', 'lumen', 'lux', 'materia', 'minty', 'morph',
+        'pulse', 'quartz', 'sandstone', 'simplex', 'sketchy', 'slate',
+        'solar', 'spacelab', 'superhero', 'united', 'vapor', 'yeti', 'zephyr'
+    ]);
+
     // Apply a theme
     function applyTheme(themeName) {
+        if (!ALLOWED_THEMES.has(themeName)) {
+            themeName = DEFAULT_THEME;
+        }
         const themeLink = getThemeLink();
 
-        // Bootswatch themes define colors at :root,[data-bs-theme=light]
-        // so remove data-bs-theme to avoid Bootstrap dark-mode overrides
         document.body.removeAttribute('data-bs-theme');
-        themeLink.href = `${BOOTSWATCH_CDN_BASE}/${themeName}/bootstrap.min.css`;
+        themeLink.href = `${BOOTSWATCH_CDN_BASE}/${encodeURIComponent(themeName)}/bootstrap.min.css`;
 
-        localStorage.setItem(STORAGE_KEY, themeName);
+        setStoredTheme(themeName);
     }
 
     // Initialize theme switcher
@@ -42,7 +68,7 @@
         const select = document.getElementById('bm-theme-select');
         if (!select) return;
 
-        const savedTheme = localStorage.getItem(STORAGE_KEY) || DEFAULT_THEME;
+        const savedTheme = getStoredTheme();
         select.value = savedTheme;
         applyTheme(savedTheme);
 

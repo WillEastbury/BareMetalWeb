@@ -3,6 +3,10 @@ name: Reset Data Store (Staging)
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   reset-and-deploy:
     runs-on: ubuntu-latest
