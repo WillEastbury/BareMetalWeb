@@ -133,6 +133,15 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                 new[] { id, name, value, placeholder }
             );
     }
+    private byte[] InputComputedTemplate(string id, string name, string value, string placeholder, string strategy)
+    {
+        return _fragmentStore
+            .ZeroAllocationReplaceCopyAndEncode(
+                _fragmentStore.ReturnTemplateFragment("InputComputed"),
+                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{strategy}}" },
+                new[] { id, name, value, placeholder, strategy }
+            );
+    }
     private byte[] InputTextAreaTemplate(string id, string name, string value, string placeholder, string required)
     {
         return _fragmentStore
@@ -492,6 +501,11 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
             case FormFieldType.Hidden:
                 return InputHiddenTemplate(name, name, value);
             case FormFieldType.ReadOnly:
+                // Check if this is a computed field and render with indicator
+                if (field.IsComputed && !string.IsNullOrEmpty(field.ComputedStrategy))
+                {
+                    return InputComputedTemplate(name, name, value, placeholder, field.ComputedStrategy);
+                }
                 return InputReadOnlyTemplate(name, name, value, placeholder);
             default:
                 return InputTextTemplate(name, name, value, placeholder, required);
