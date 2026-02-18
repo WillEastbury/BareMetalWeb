@@ -2297,7 +2297,7 @@ public static class DataScaffold
                 fieldAttribute?.View ?? true,
                 fieldAttribute?.Edit ?? true,
                 fieldAttribute?.Create ?? true,
-                fieldAttribute?.ReadOnly ?? (computed != null), // Computed fields are readonly
+                (fieldAttribute?.ReadOnly ?? false) || (computed != null), // Computed fields are always readonly
                 fieldAttribute?.Placeholder,
                 lookup,
                 idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
