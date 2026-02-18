@@ -345,6 +345,15 @@ public static class DataScaffold
                 ? BuildEnumOptions(field.Property.PropertyType)
                 : null;
 
+            string? lookupTargetType = null;
+            string? lookupTargetSlug = null;
+            if (field.Lookup != null && effectiveFieldType == FormFieldType.LookupList)
+            {
+                lookupTargetType = field.Lookup.TargetType.Name;
+                var targetMeta = GetEntityByType(field.Lookup.TargetType);
+                lookupTargetSlug = targetMeta?.Slug;
+            }
+
             fields.Add(new FormField(
                 effectiveFieldType,
                 field.Name,
@@ -353,7 +362,9 @@ public static class DataScaffold
                 field.Placeholder,
                 Value: stringValue,
                 SelectedValue: selectedValue,
-                LookupOptions: lookupOptions
+                LookupOptions: lookupOptions,
+                LookupTargetType: lookupTargetType,
+                LookupTargetSlug: lookupTargetSlug
             ));
         }
 
