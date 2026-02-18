@@ -39,6 +39,30 @@ More info cut from the readme that may be relevant to the agent:
 // - Avoid allocations/GC pressure; favor Span/Memory and streaming.
 // - Avoid new external dependencies unless explicitly requested.
 // - When adding data entities/serialization types: update explicit registries (DataEntityRegistry, BinaryObjectSerializer known types, JSON context/type registry) and any schema mappings.
+
+// 2) MANDATORY BUILD AND TEST REQUIREMENTS (CRITICAL - DO NOT SKIP)
+// BEFORE making any commits or checking in ANY code changes:
+// - MUST run a full build: `dotnet build BareMetalWeb.sln`
+// - MUST verify build succeeds with zero errors
+// - MUST run the complete test suite: `dotnet test BareMetalWeb.sln --no-build -v quiet`
+// - MUST verify all tests pass (or that any failures are pre-existing and unrelated to your changes)
+// - Alternative: Use the helper script `./run-tests.sh` which builds and tests in one step
+// - If tests fail due to your changes, you MUST fix them before committing
+// - If build fails, you MUST fix compilation errors before committing
+// - Document any pre-existing test failures you encounter so they can be distinguished from new failures
+// - Run these checks EVERY time before using report_progress to commit changes
+//
+// Test commands reference:
+// - Full build: `dotnet build BareMetalWeb.sln`
+// - Full test suite: `dotnet test BareMetalWeb.sln --no-build -v quiet`
+// - Specific project: `dotnet test BareMetalWeb.Core.Tests/ --no-build -v quiet`
+// - Helper script: `./run-tests.sh` (includes build)
+//
+// WHY THIS MATTERS:
+// - Prevents broken code from being committed to the repository
+// - Maintains code quality and stability
+// - Ensures all changes are validated before integration
+// - Protects the CI/CD pipeline from preventable failures
 // this is a LEAN and MEAN web server example
 // this will be lightning fast and efficient
 // think asp.net classic era ashx handlers and httpmodules but in modern .net 7+ form

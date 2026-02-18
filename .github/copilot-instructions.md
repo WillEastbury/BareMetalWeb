@@ -115,3 +115,32 @@ dotnet run --project BareMetalWeb.PerformanceTests
 3. Use existing linters/build tools (do not add new ones unless required)
 4. For data entity changes, update all registries (see Data and Storage section)
 5. Store useful codebase facts using the memory tool for future reference
+
+## Pre-Commit Requirements (MANDATORY)
+
+**BEFORE making any commits or checking in ANY code changes:**
+
+1. **MUST run full build**: `dotnet build BareMetalWeb.sln`
+   - Build must succeed with zero errors
+   - Build warnings are acceptable (document if new warnings are introduced)
+
+2. **MUST run complete test suite**: `dotnet test BareMetalWeb.sln --no-build -v quiet`
+   - All tests must pass, OR
+   - Any failures must be pre-existing and unrelated to your changes (document these)
+   - Alternative: Use helper script `./run-tests.sh` (includes build)
+
+3. **If tests fail due to your changes**: You MUST fix them before committing
+
+4. **If build fails**: You MUST fix compilation errors before committing
+
+**Test Commands:**
+- Full build: `dotnet build BareMetalWeb.sln`
+- Full test suite: `dotnet test BareMetalWeb.sln --no-build -v quiet`
+- Specific project: `dotnet test BareMetalWeb.Core.Tests/ --no-build -v quiet`
+- Helper script: `./run-tests.sh` (builds and tests in one step)
+
+**Why This Matters:**
+- Prevents broken code from being committed
+- Maintains code quality and stability
+- Protects the CI/CD pipeline from preventable failures
+- Ensures all changes are validated before integration
