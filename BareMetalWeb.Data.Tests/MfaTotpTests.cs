@@ -140,20 +140,16 @@ public class MfaTotpTests
     [Fact]
     public void ValidateCode_ValidCodeNoDrift_ReturnsTrue()
     {
-        // Arrange
-        var secret = "JBSWY3DPEHPK3PXP"; // Known test secret
-        // Generate a code for testing - this is a simplified test
-        // In a real scenario, you'd need to generate the code based on current time
+        // Arrange - compute the current TOTP code for a known secret
+        var secret = "JBSWY3DPEHPK3PXP";
+        var currentCode = ComputeCurrentCode(secret);
 
-        // Note: This test validates the structure works, but the actual code validation
-        // would require precise timing or mocking DateTime
+        // Act
+        var result = MfaTotp.ValidateCode(secret, currentCode, out var matchedStep);
 
-        // Act & Assert
-        // Test with invalid code to ensure false works
-        var result = MfaTotp.ValidateCode(secret, "000000", out var matchedStep);
-        
-        // This might be true or false depending on timing, but should not throw
-        Assert.True(result || !result);
+        // Assert
+        Assert.True(result);
+        Assert.NotEqual(0, matchedStep);
     }
 
     [Theory]
@@ -219,17 +215,87 @@ public class MfaTotpTests
     [Fact]
     public void ValidateCode_WithDriftSteps_AcceptsRange()
     {
-        // Arrange
+        // Arrange - compute the current TOTP code for a known secret
         var secret = "JBSWY3DPEHPK3PXP";
         var allowedDriftSteps = 2;
+        var currentCode = ComputeCurrentCode(secret);
 
         // Act
-        var result = MfaTotp.ValidateCode(secret, "123456", out var matchedStep, allowedDriftSteps);
+        var result = MfaTotp.ValidateCode(secret, currentCode, out var matchedStep, allowedDriftSteps);
 
         // Assert
-        // This is checking that the drift parameter is accepted without error
-        Assert.True(result || !result);
-        // Matched step should be 0 if invalid, or within drift range if valid
+        Assert.True(result);
+        Assert.NotEqual(0, matchedStep);
+    }
+
+    [Fact]
+    public void ValidateCode_WrongCode_ReturnsFalse()
+    {
+        // Arrange - use a code that is extremely unlikely to match any drift window
+        var secret = "JBSWY3DPEHPK3PXP";
+        var currentCode = ComputeCurrentCode(secret);
+        // Compute a definitely-wrong code by incrementing each digit
+        var wrongCode = string.Create(6, currentCode, (span, code) =>
+        {
+            for (int i = 0; i < span.Length; i++)
+                span[i] = (char)('0' + ((code[i] - '0' + 5) % 10));
+        });
+
+        // Act
+        var result = MfaTotp.ValidateCode(secret, wrongCode, out var matchedStep);
+
+        // Assert — wrong code should be rejected (with only 1 drift step, 3 windows, collision is near-impossible)
+        Assert.False(result);
+        Assert.Equal(0, matchedStep);
+    }
+
+    /// <summary>
+    /// Computes the current TOTP code using the same algorithm as MfaTotp (HMAC-SHA1, 6 digits, 30s period).
+    /// </summary>
+    private static string ComputeCurrentCode(string secretBase32)
+    {
+        var key = FromBase32(secretBase32);
+        var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var step = now / 30;
+
+        Span<byte> counter = stackalloc byte[8];
+        for (int i = 7; i >= 0; i--)
+        {
+            counter[i] = (byte)(step & 0xff);
+            step >>= 8;
+        }
+
+        using var hmac = new System.Security.Cryptography.HMACSHA1(key);
+        var hash = hmac.ComputeHash(counter.ToArray());
+
+        int offset = hash[^1] & 0x0f;
+        int binary = ((hash[offset] & 0x7f) << 24)
+                     | ((hash[offset + 1] & 0xff) << 16)
+                     | ((hash[offset + 2] & 0xff) << 8)
+                     | (hash[offset + 3] & 0xff);
+
+        int otp = binary % 1000000;
+        return otp.ToString("D6");
+    }
+
+    private static byte[] FromBase32(string input)
+    {
+        const string alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+        var normalized = input.Trim().ToUpperInvariant();
+        var output = new byte[normalized.Length * 5 / 8];
+        int buffer = 0, bitsLeft = 0, index = 0;
+        foreach (var c in normalized)
+        {
+            buffer <<= 5;
+            buffer |= alphabet.IndexOf(c) & 0x1f;
+            bitsLeft += 5;
+            if (bitsLeft >= 8)
+            {
+                output[index++] = (byte)((buffer >> (bitsLeft - 8)) & 0xff);
+                bitsLeft -= 8;
+            }
+        }
+        return output[..index];
     }
 
     [Fact]
