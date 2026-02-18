@@ -624,8 +624,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         // Arrange & Act
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
-        // Assert — 17 data routes total
-        Assert.Equal(17, _server.routes.Count);
+        // Assert — 19 data routes total (including export routes)
+        Assert.Equal(19, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -921,7 +921,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterAdmin > afterMonitoring);
         Assert.True(afterData > afterAdmin);
         Assert.True(total > afterData);
-        Assert.Equal(staticCount + 16 + 4 + 7 + 17 + 7, total); // 3+16+4+7+17+7=54
+        Assert.Equal(staticCount + 16 + 4 + 7 + 19 + 7, total); // 3+16+4+7+19+7=56
     }
 
     [Fact]
@@ -1100,6 +1100,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask DataApiPatchHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiDeleteHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataCommandHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask DataListExportHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask DataViewExportHandler(HttpContext context) => ValueTask.CompletedTask;
     }
 
     private class InMemoryDataStore : IDataObjectStore
