@@ -4424,7 +4424,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var btnClass = cmd.Destructive ? "btn-outline-danger" : "btn-outline-secondary";
             var icon = string.IsNullOrEmpty(cmd.Icon) ? "" : $"<i class=\"bi {WebUtility.HtmlEncode(cmd.Icon)}\" aria-hidden=\"true\"></i> ";
             var confirm = string.IsNullOrEmpty(cmd.ConfirmMessage) ? "" : $" data-confirm=\"{WebUtility.HtmlEncode(cmd.ConfirmMessage)}\"";
-            sb.Append($"<button class=\"btn btn-sm {btnClass} ms-2\" data-command-url=\"/api/{typeSlug}/{safeId}/_command/{WebUtility.UrlEncode(cmd.Name)}\"{confirm} onclick=\"executeRemoteCommand(this)\">{icon}{WebUtility.HtmlEncode(cmd.Label)}</button>");
+            sb.Append($"<button class=\"btn btn-sm {btnClass} ms-2\" data-command-url=\"/api/{typeSlug}/{safeId}/_command/{WebUtility.UrlEncode(cmd.Name)}\"{confirm}>{icon}{WebUtility.HtmlEncode(cmd.Label)}</button>");
         }
         return sb.ToString();
     }
@@ -4463,7 +4463,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!string.IsNullOrEmpty(cmd.Permission))
         {
             var user = await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-            if (user == null || !user.Permissions.Split(',', StringSplitOptions.TrimEntries).Contains(cmd.Permission, StringComparer.OrdinalIgnoreCase))
+            if (user == null || !user.Permissions.Contains(cmd.Permission, StringComparer.OrdinalIgnoreCase))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
                 await WriteJsonResponseAsync(context, new { success = false, message = "Insufficient permissions." });
