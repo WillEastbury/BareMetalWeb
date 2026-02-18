@@ -4,6 +4,7 @@ using Xunit;
 
 namespace BareMetalWeb.Host.Tests;
 
+[Collection("CookieProtection")]
 public class CookieProtectionTests : IDisposable
 {
     private readonly string _tempDirectory;
