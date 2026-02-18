@@ -1,0 +1,86 @@
+name: Deploy and Test CI Reset Site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test --no-build --configuration Release --verbosity normal
+
+      - name: Publish
+        run: dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj --configuration Release --output ./publish
+
+      - name: Include reset-data flag
+        run: touch ./publish/reset-data.flag
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_CIRESET }}
+
+      - name: Deploy to Azure Web App (CI Reset)
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: baremetalweb-cireset
+          package: ./publish
+
+      - name: Wait for deployment to stabilize
+        run: |
+          echo "Waiting 30 seconds for deployment to complete and app to start..."
+          sleep 30
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright dependencies
+        working-directory: tests/playwright
+        run: |
+          npm install
+          npx playwright install chromium --with-deps
+
+      - name: Run Playwright tests
+        working-directory: tests/playwright
+        env:
+          BASE_URL: https://baremetalweb-cireset.azurewebsites.net
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: tests/playwright/playwright-report/
+          retention-days: 30
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: tests/playwright/test-results.json
+          retention-days: 30
