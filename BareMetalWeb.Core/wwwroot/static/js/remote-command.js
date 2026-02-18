@@ -2,7 +2,7 @@
 (function() {
     'use strict';
 
-    window.executeRemoteCommand = function(button) {
+    function executeRemoteCommand(button) {
         var url = button.getAttribute('data-command-url');
         var confirmMsg = button.getAttribute('data-confirm');
 
@@ -10,7 +10,7 @@
 
         button.disabled = true;
         var originalHtml = button.innerHTML;
-        button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Running…';
+        button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Running\u2026';
 
         fetch(url, { method: 'POST', headers: { 'Accept': 'application/json' } })
             .then(function(response) { return response.json(); })
@@ -29,7 +29,7 @@
                 button.innerHTML = originalHtml;
                 showCommandToast(false, 'Request failed: ' + err.message);
             });
-    };
+    }
 
     function showCommandToast(success, message) {
         var container = document.getElementById('bm-toast-container');
@@ -44,10 +44,27 @@
         var toast = document.createElement('div');
         toast.className = 'toast align-items-center text-white ' + cls + ' border-0 show';
         toast.setAttribute('role', 'alert');
-        toast.innerHTML = '<div class="d-flex"><div class="toast-body">' +
-            message.replace(/</g, '&lt;') +
-            '</div><button type="button" class="btn-close btn-close-white me-2 m-auto" onclick="this.closest(\'.toast\').remove()"></button></div>';
+        var body = document.createElement('div');
+        body.className = 'd-flex';
+        var text = document.createElement('div');
+        text.className = 'toast-body';
+        text.textContent = message;
+        var closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        closeBtn.className = 'btn-close btn-close-white me-2 m-auto';
+        closeBtn.addEventListener('click', function() { toast.remove(); });
+        body.appendChild(text);
+        body.appendChild(closeBtn);
+        toast.appendChild(body);
         container.appendChild(toast);
         setTimeout(function() { toast.remove(); }, 5000);
     }
+
+    // Bind via event delegation
+    document.addEventListener('click', function(e) {
+        var cmdBtn = e.target.closest('[data-command-url]');
+        if (cmdBtn) {
+            executeRemoteCommand(cmdBtn);
+        }
+    });
 })();
