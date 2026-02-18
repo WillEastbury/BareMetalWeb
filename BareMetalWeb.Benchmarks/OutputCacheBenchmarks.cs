@@ -17,7 +17,7 @@ public class OutputCacheBenchmarks
     public void Setup()
     {
         _cache = new OutputCache();
-        _cache.Store("warm-key", _payload, TimeSpan.FromMinutes(5));
+        _cache.Store("warm-key", _payload, "text/plain", 200, 300);
     }
 
     [Benchmark]
@@ -35,6 +35,6 @@ public class OutputCacheBenchmarks
     [Benchmark]
     public void CacheStore()
     {
-        _cache.Store("bench-key", _payload, TimeSpan.FromMinutes(5));
+        _cache.Store("bench-key", _payload, "text/plain", 200, 300);
     }
 }

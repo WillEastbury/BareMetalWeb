@@ -12,7 +12,7 @@ public class RouteInfoHelpersTests
         var pageInfo = new PageInfo(
             new PageMetaData(null!, 200),
             new PageContext(keys, values));
-        return new RouteHandlerData(pageInfo, _ => System.Threading.Tasks.Task.CompletedTask);
+        return new RouteHandlerData(pageInfo, _ => ValueTask.CompletedTask);
     }
 
     [Fact]
