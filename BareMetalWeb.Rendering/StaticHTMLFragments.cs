@@ -142,6 +142,16 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                 new[] { id, name, value, placeholder, strategy }
             );
     }
+
+    private byte[] InputCalculatedTemplate(string id, string name, string value, string placeholder, string expression, string rawExpression, string format)
+    {
+        return _fragmentStore
+            .ZeroAllocationReplaceCopyAndEncode(
+                _fragmentStore.ReturnTemplateFragment("InputCalculated"),
+                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{expression}}", "{{rawexpression}}", "{{format}}" },
+                new[] { id, name, value, placeholder, expression, rawExpression, format }
+            );
+    }
     private byte[] InputTextAreaTemplate(string id, string name, string value, string placeholder, string required)
     {
         return _fragmentStore
@@ -501,6 +511,15 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
             case FormFieldType.Hidden:
                 return InputHiddenTemplate(name, name, value);
             case FormFieldType.ReadOnly:
+                // Check if this is a calculated field and render with expression
+                if (field.IsCalculated && !string.IsNullOrEmpty(field.CalculatedExpression))
+                {
+                    // The CalculatedExpression from FormField is already the JavaScript expression
+                    var jsExpression = field.CalculatedExpression;
+                    var format = field.DisplayFormat ?? string.Empty;
+                    // Also pass raw expression for tooltip (we'll use the same for now)
+                    return InputCalculatedTemplate(name, name, value, placeholder, jsExpression, jsExpression, format);
+                }
                 // Check if this is a computed field and render with indicator
                 if (field.IsComputed && !string.IsNullOrEmpty(field.ComputedStrategy))
                 {

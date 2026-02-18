@@ -8,6 +8,7 @@ using System.Text.Json;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Rendering.Models;
+using BareMetalWeb.Data.ExpressionEngine;
 
 namespace BareMetalWeb.Core;
 
@@ -386,6 +387,21 @@ public static class DataScaffold
                 var calculatedValue = instance != null ? field.Property.GetValue(instance) : null;
                 var calculatedStringValue = ToInputString(calculatedValue, field.Property.PropertyType, field.FieldType);
 
+                // Generate JavaScript expression from the AST
+                string jsExpression;
+                try
+                {
+                    var parser = new ExpressionParser();
+                    var ast = parser.Parse(calculated.Expression);
+                    jsExpression = ast.ToJavaScript();
+                }
+                catch (Exception ex)
+                {
+                    // If parsing fails, log and use a safe default
+                    System.Diagnostics.Debug.WriteLine($"Failed to parse calculated field expression '{calculated.Expression}': {ex.Message}");
+                    jsExpression = "0";
+                }
+
                 // Render as readonly with calculated indicator
                 fields.Add(new FormField(
                     FormFieldType.ReadOnly,
@@ -394,7 +410,7 @@ public static class DataScaffold
                     Required: false,
                     Value: calculatedStringValue ?? string.Empty,
                     IsCalculated: true,
-                    CalculatedExpression: calculated.Expression,
+                    CalculatedExpression: jsExpression, // Pass the JS expression, not the original
                     DisplayFormat: calculated.DisplayFormat
                 ));
                 continue;
