@@ -849,6 +849,8 @@ public class BareMetalWebServerTests : IDisposable
         Assert.True(context.Response.Headers.ContainsKey("Content-Security-Policy"));
         var csp = context.Response.Headers["Content-Security-Policy"].ToString();
         Assert.Contains("default-src 'self'", csp);
+        Assert.Contains("https://fonts.googleapis.com", csp);
+        Assert.Contains("https://fonts.gstatic.com", csp);
         Assert.Contains("nonce-", csp);
     }
 

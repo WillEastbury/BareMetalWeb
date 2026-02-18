@@ -12,7 +12,7 @@ public class BareMetalWebServer : IBareWebHost
 {
     // Content Security Policy: Uses nonces for inline scripts/styles to provide strong XSS protection.
     // The {0} placeholder is replaced with the request-specific nonce at runtime.
-    private const string ContentSecurityPolicyTemplate = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'nonce-{0}'; style-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com 'nonce-{0}'; img-src 'self' data: blob:; font-src 'self' https://cdn.jsdelivr.net; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
+    private const string ContentSecurityPolicyTemplate = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'nonce-{0}'; style-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://fonts.googleapis.com 'nonce-{0}'; img-src 'self' data: blob:; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
     private static readonly TimeSpan MenuCacheTtl = TimeSpan.FromSeconds(30);
     private static readonly QueryDefinition RootUserQuery = new()
     {
