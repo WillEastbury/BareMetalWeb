@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Client-Side Rendering POC - BareMetalWeb</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        .comparison-panel {
+            border: 2px solid #dee2e6;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .server-side { border-color: #0d6efd; }
+        .client-side { border-color: #198754; }
+        .loading { opacity: 0.5; }
+        .metric-badge {
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        .warning-banner {
+            background-color: #fff3cd;
+            border: 2px solid #ffc107;
+            padding: 1rem;
+            margin-bottom: 2rem;
+            border-radius: 0.5rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container my-4">
+        <!-- Warning Banner -->
+        <div class="warning-banner">
+            <h4><i class="bi bi-exclamation-triangle-fill text-warning"></i> Exploration Only - Do Not Merge</h4>
+            <p class="mb-0">
+                This is a proof-of-concept demo for client-side rendering exploration.
+                This code is <strong>experimental</strong> and not intended for production use.
+                Using mock data to demonstrate the concept.
+            </p>
+        </div>
+
+        <h1>Client-Side Rendering POC</h1>
+        <p class="lead">
+            Comparison of server-side vs client-side rendering for BareMetalWeb entity lists and forms.
+        </p>
+
+        <!-- POC #1: Entity List Rendering -->
+        <div class="card mb-4">
+            <div class="card-header bg-success text-white">
+                <h5>POC #1: Client-Rendered Entity List</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <span class="badge bg-info metric-badge" id="listPayloadSize">Payload: --</span>
+                        <span class="badge bg-primary metric-badge ms-2" id="listRenderTime">Render: --</span>
+                    </div>
+                    <div>
+                        <button id="loadList" class="btn btn-primary">Load User List (Mock Data)</button>
+                    </div>
+                </div>
+                <div id="clientListContainer" class="comparison-panel client-side">
+                    <p class="text-muted">Click "Load User List" to render a table client-side from JSON data.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- POC #2: Form Rendering -->
+        <div class="card mb-4">
+            <div class="card-header bg-success text-white">
+                <h5>POC #2: Client-Rendered Form</h5>
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <span class="badge bg-info metric-badge" id="formPayloadSize">Payload: --</span>
+                        <span class="badge bg-primary metric-badge ms-2" id="formRenderTime">Render: --</span>
+                    </div>
+                    <div>
+                        <button id="loadForm" class="btn btn-primary">Load User Form (Mock Schema)</button>
+                    </div>
+                </div>
+                <div id="clientFormContainer" class="comparison-panel client-side">
+                    <p class="text-muted">Click "Load User Form" to render a form client-side from JSON schema.</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Performance Comparison -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>Performance Metrics</h5>
+            </div>
+            <div class="card-body">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Metric</th>
+                            <th>Server-Side (Typical)</th>
+                            <th>Client-Side (POC)</th>
+                            <th>Difference</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>HTML Payload Size</td>
+                            <td>~8-15 KB (full page)</td>
+                            <td id="clientPayloadSize">--</td>
+                            <td id="payloadDiff">--</td>
+                        </tr>
+                        <tr>
+                            <td>Time to Interactive</td>
+                            <td>~0.1-0.15ms (render) + network</td>
+                            <td id="clientTTI">--</td>
+                            <td id="ttiDiff">--</td>
+                        </tr>
+                        <tr>
+                            <td>JS Bundle Size</td>
+                            <td>~5-8 KB (theme + helpers)</td>
+                            <td id="jsBundle">~14.7 KB (+ client renderer)</td>
+                            <td>+6-9 KB</td>
+                        </tr>
+                        <tr>
+                            <td>Subsequent Interactions</td>
+                            <td>Full page reload</td>
+                            <td>No reload (client-side)</td>
+                            <td class="text-success">✓ Better UX</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Architecture Notes -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>Architecture Decision Summary</h5>
+            </div>
+            <div class="card-body">
+                <h6>Pros of Client-Side Rendering:</h6>
+                <ul>
+                    <li>✓ No full page reload for sorting/filtering/pagination</li>
+                    <li>✓ Smaller JSON payloads vs full HTML (typically 60-70% smaller)</li>
+                    <li>✓ Better UX for interactive features (calculated fields, live validation)</li>
+                    <li>✓ Enables client-side sorting/filtering without round-trips</li>
+                </ul>
+
+                <h6>Cons of Client-Side Rendering:</h6>
+                <ul>
+                    <li>✗ Requires JavaScript (breaks without it unless progressive enhancement)</li>
+                    <li>✗ Adds ~6-9 KB to initial JS bundle</li>
+                    <li>✗ Slower first paint (JS must parse/execute before content)</li>
+                    <li>✗ More complexity in codebase (two rendering paths)</li>
+                    <li>✗ Conflicts with "bare metal" simplicity philosophy</li>
+                </ul>
+
+                <h6>Recommendation:</h6>
+                <p>
+                    <strong>DEFER for now.</strong> BareMetalWeb's philosophy prioritizes simplicity, 
+                    understanding, and server-side speed. The current server-side rendering is already 
+                    brutally fast (0.1-0.15ms). Client-side rendering would add complexity and conflict 
+                    with the zero-magic ethos. 
+                </p>
+                <p>
+                    <strong>Reconsider if:</strong> Interactive features like calculated fields (#66), 
+                    bulk operations (#64), or live lookups (#58) become primary use cases and users 
+                    demand richer interactivity beyond what progressive enhancement can provide.
+                </p>
+                <p>
+                    See <code>docs/ADR-CLIENT-SIDE-RENDERING.md</code> for the full architecture decision record.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load the client-side renderer -->
+    <script src="/static/js/client-renderer.js"></script>
+    <script>
+        // Mock data for demonstration
+        const mockUserListData = {
+            data: [
+                { UserName: "admin", DisplayName: "Administrator", Email: "admin@example.com", IsActive: "Yes", CreatedAt: "2024-01-15" },
+                { UserName: "jdoe", DisplayName: "John Doe", Email: "john.doe@example.com", IsActive: "Yes", CreatedAt: "2024-02-20" },
+                { UserName: "jsmith", DisplayName: "Jane Smith", Email: "jane.smith@example.com", IsActive: "Yes", CreatedAt: "2024-03-10" },
+                { UserName: "bwilson", DisplayName: "Bob Wilson", Email: "bob.wilson@example.com", IsActive: "No", CreatedAt: "2024-01-05" },
+                { UserName: "achang", DisplayName: "Alice Chang", Email: "alice.chang@example.com", IsActive: "Yes", CreatedAt: "2024-04-01" }
+            ],
+            pagination: {
+                page: 1,
+                pageSize: 50,
+                totalCount: 5,
+                totalPages: 1
+            },
+            columns: [
+                { key: "UserName", label: "Username", type: "String", sortable: true },
+                { key: "DisplayName", label: "Display Name", type: "String", sortable: true },
+                { key: "Email", label: "Email", type: "Email", sortable: true },
+                { key: "IsActive", label: "Active", type: "YesNo", sortable: true },
+                { key: "CreatedAt", label: "Created", type: "DateOnly", sortable: true }
+            ]
+        };
+
+        const mockFormSchema = {
+            entityType: "User",
+            mode: "create",
+            fields: [
+                { name: "UserName", label: "Username", type: "text", required: true, readonly: false },
+                { name: "DisplayName", label: "Display Name", type: "text", required: true, readonly: false },
+                { name: "Email", label: "Email Address", type: "email", required: true, readonly: false },
+                { name: "Password", label: "Password", type: "password", required: true, readonly: false },
+                { name: "IsActive", label: "Is Active", type: "checkbox", required: false, readonly: false }
+            ],
+            submitUrl: "/admin/data/user/create"
+        };
+
+        // POC Demo Code
+        const { TemplateEngine, FormRenderer, TableRenderer } = window.BareMetalWeb;
+
+        document.getElementById('loadList').addEventListener('click', () => {
+            const container = document.getElementById('clientListContainer');
+            container.innerHTML = '<p class="text-muted">Rendering...</p>';
+
+            const startTime = performance.now();
+
+            // Simulate network delay
+            setTimeout(() => {
+                const json = mockUserListData;
+                
+                const payloadSize = new Blob([JSON.stringify(json)]).size;
+                document.getElementById('listPayloadSize').textContent = `Payload: ${(payloadSize / 1024).toFixed(2)} KB`;
+
+                // Render table using client-side renderer
+                const tableHtml = TableRenderer.render(json.data, json.columns, { sortable: true });
+                container.innerHTML = tableHtml;
+
+                // Enable client-side sorting
+                const table = container.querySelector('table');
+                TableRenderer.enableSorting(table);
+
+                const renderTime = performance.now() - startTime;
+                document.getElementById('listRenderTime').textContent = `Render: ${renderTime.toFixed(2)}ms`;
+                document.getElementById('clientPayloadSize').textContent = `${(payloadSize / 1024).toFixed(2)} KB (JSON only)`;
+                document.getElementById('clientTTI').textContent = `${renderTime.toFixed(2)}ms (parse + render)`;
+                
+                // Calculate difference
+                const serverSize = 12; // Typical KB for full HTML page
+                const savings = ((serverSize - payloadSize / 1024) / serverSize * 100).toFixed(0);
+                document.getElementById('payloadDiff').textContent = `-${savings}% smaller`;
+            }, 50); // Simulate 50ms network delay
+        });
+
+        document.getElementById('loadForm').addEventListener('click', () => {
+            const container = document.getElementById('clientFormContainer');
+            container.innerHTML = '<p class="text-muted">Rendering...</p>';
+
+            const startTime = performance.now();
+
+            // Simulate network delay
+            setTimeout(() => {
+                const schema = mockFormSchema;
+                
+                const payloadSize = new Blob([JSON.stringify(schema)]).size;
+                document.getElementById('formPayloadSize').textContent = `Payload: ${(payloadSize / 1024).toFixed(2)} KB`;
+
+                // Render form using client-side renderer
+                const formHtml = FormRenderer.render(schema);
+                container.innerHTML = formHtml + '<p class="text-muted mt-3"><small>This is a demonstration form. Submission is not implemented.</small></p>';
+
+                const renderTime = performance.now() - startTime;
+                document.getElementById('formRenderTime').textContent = `Render: ${renderTime.toFixed(2)}ms`;
+            }, 50); // Simulate 50ms network delay
+        });
+
+        // Calculate and display JS bundle size
+        fetch('/static/js/client-renderer.js')
+            .then(r => r.text())
+            .then(text => {
+                const size = new Blob([text]).size;
+                document.getElementById('jsBundle').textContent = `${(size / 1024).toFixed(1)} KB (client renderer)`;
+            })
+            .catch(() => {
+                document.getElementById('jsBundle').textContent = '~14.7 KB (client renderer)';
+            });
+    </script>
+</body>
+</html>
