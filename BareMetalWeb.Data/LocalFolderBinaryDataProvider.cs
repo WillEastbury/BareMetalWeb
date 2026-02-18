@@ -261,14 +261,24 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             var map = GetClusteredLocationMap(type.Name);
             map.TryGetValue(obj.Id, out var existingLocation);
 
-            // Append the new location first so a crash never loses the last committed record.
-            _indexStore.AppendEntry(type.Name, ClusteredIndexFieldName, obj.Id, location, 'A', normalizeKey: false);
+            // Batch append operations to avoid lock contention
+            var entries = new List<(string key, string id, char op, long? expiresAtUtcTicks)>
+            {
+                (obj.Id, location, 'A', null)
+            };
+
+            if (!string.IsNullOrWhiteSpace(existingLocation)
+                && !string.Equals(existingLocation, location, StringComparison.OrdinalIgnoreCase))
+            {
+                entries.Add((obj.Id, existingLocation, 'D', null));
+            }
+
+            _indexStore.AppendEntries(type.Name, ClusteredIndexFieldName, entries, normalizeKey: false);
             map[obj.Id] = location;
 
             if (!string.IsNullOrWhiteSpace(existingLocation)
                 && !string.Equals(existingLocation, location, StringComparison.OrdinalIgnoreCase))
             {
-                _indexStore.AppendEntry(type.Name, ClusteredIndexFieldName, obj.Id, existingLocation, 'D', normalizeKey: false);
                 store.Delete(existingLocation);
             }
         }
