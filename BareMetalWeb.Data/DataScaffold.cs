@@ -187,6 +187,7 @@ public static class DataScaffold
     {
         var definition = new QueryDefinition();
 
+        // Global search across all list fields
         if (query.TryGetValue("q", out var queryText) && !string.IsNullOrWhiteSpace(queryText))
         {
             var group = new QueryGroup { Logic = QueryGroupLogic.Or };
@@ -202,29 +203,41 @@ public static class DataScaffold
             definition.Groups.Add(group);
         }
 
+        // Per-field filters using f_{fieldname}=value pattern
+        foreach (var field in metadata.Fields)
+        {
+            var filterKey = $"f_{field.Name}";
+            if (query.TryGetValue(filterKey, out var filterValue) && !string.IsNullOrWhiteSpace(filterValue))
+            {
+                var opKey = $"op_{field.Name}";
+                var op = QueryOperator.Contains; // Default operator
+                
+                if (query.TryGetValue(opKey, out var opValue) && !string.IsNullOrWhiteSpace(opValue))
+                {
+                    op = ParseOperator(opValue);
+                }
+                else
+                {
+                    // Auto-select operator based on field type
+                    op = GetDefaultOperatorForField(field);
+                }
+
+                definition.Clauses.Add(new QueryClause
+                {
+                    Field = field.Name,
+                    Operator = op,
+                    Value = filterValue
+                });
+            }
+        }
+
+        // Legacy single field filter support (backward compatibility)
         if (query.TryGetValue("field", out var fieldName) && query.TryGetValue("value", out var value) && !string.IsNullOrWhiteSpace(fieldName))
         {
             var op = QueryOperator.Equals;
             if (query.TryGetValue("op", out var opValue) && !string.IsNullOrWhiteSpace(opValue))
             {
-                op = opValue.Trim().ToLowerInvariant() switch
-                {
-                    "contains" => QueryOperator.Contains,
-                    "startswith" => QueryOperator.StartsWith,
-                    "endswith" => QueryOperator.EndsWith,
-                    "in" => QueryOperator.In,
-                    "notin" => QueryOperator.NotIn,
-                    "nin" => QueryOperator.NotIn,
-                    "gt" => QueryOperator.GreaterThan,
-                    "lt" => QueryOperator.LessThan,
-                    "gte" => QueryOperator.GreaterThanOrEqual,
-                    "lte" => QueryOperator.LessThanOrEqual,
-                    "ne" => QueryOperator.NotEquals,
-                    "neq" => QueryOperator.NotEquals,
-                    "notequals" => QueryOperator.NotEquals,
-                    "eq" => QueryOperator.Equals,
-                    _ => QueryOperator.Equals
-                };
+                op = ParseOperator(opValue);
             }
 
             definition.Clauses.Add(new QueryClause
@@ -255,6 +268,49 @@ public static class DataScaffold
             definition.Top = topVal;
 
         return definition;
+    }
+
+    private static QueryOperator ParseOperator(string opValue)
+    {
+        return opValue.Trim().ToLowerInvariant() switch
+        {
+            "contains" => QueryOperator.Contains,
+            "startswith" => QueryOperator.StartsWith,
+            "endswith" => QueryOperator.EndsWith,
+            "in" => QueryOperator.In,
+            "notin" => QueryOperator.NotIn,
+            "nin" => QueryOperator.NotIn,
+            "gt" => QueryOperator.GreaterThan,
+            "lt" => QueryOperator.LessThan,
+            "gte" => QueryOperator.GreaterThanOrEqual,
+            "lte" => QueryOperator.LessThanOrEqual,
+            "ne" => QueryOperator.NotEquals,
+            "neq" => QueryOperator.NotEquals,
+            "notequals" => QueryOperator.NotEquals,
+            "eq" => QueryOperator.Equals,
+            "=" => QueryOperator.Equals,
+            "equals" => QueryOperator.Equals,
+            _ => QueryOperator.Equals
+        };
+    }
+
+    private static QueryOperator GetDefaultOperatorForField(DataFieldMetadata field)
+    {
+        // For numeric and date fields, default to equals
+        var fieldType = field.Property.PropertyType;
+        var underlyingType = Nullable.GetUnderlyingType(fieldType) ?? fieldType;
+        
+        if (underlyingType == typeof(int) || underlyingType == typeof(long) || 
+            underlyingType == typeof(decimal) || underlyingType == typeof(double) ||
+            underlyingType == typeof(float) || underlyingType == typeof(DateTime) ||
+            underlyingType == typeof(DateTimeOffset) || underlyingType == typeof(DateOnly) ||
+            underlyingType == typeof(TimeOnly))
+        {
+            return QueryOperator.Equals;
+        }
+
+        // For strings and everything else, default to Contains for partial matching
+        return QueryOperator.Contains;
     }
 
     public static IReadOnlyList<FormField> BuildFormFields(DataEntityMetadata metadata, object? instance, bool forCreate)
