@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test';
 
+// Get credentials from environment variables for OOBE setup
+const SETUP_USERNAME = process.env.SETUP_USERNAME || 'admin';
+const SETUP_DISPLAYNAME = process.env.SETUP_DISPLAYNAME || 'Admin User';
+const SETUP_PASSWORD = process.env.SETUP_PASSWORD || 'Admin123!';
+
 test.describe('Initial Setup and Login Flow', () => {
   test('should complete initial setup and login successfully', async ({ page }) => {
     // Navigate to home page - should redirect to setup if no users exist
@@ -11,20 +16,16 @@ test.describe('Initial Setup and Login Flow', () => {
     // Verify setup page elements
     await expect(page.locator('h1, h2, h3').filter({ hasText: /setup/i }).first()).toBeVisible();
     
-    // Fill out setup form
-    const username = 'admin';
-    const displayName = 'Admin User';
-    const password = 'Admin123!';
-    
+    // Fill out setup form using credentials from environment
     // Find and fill username field
-    await page.fill('input[name="username"], input[id="username"]', username);
+    await page.fill('input[name="username"], input[id="username"]', SETUP_USERNAME);
     
     // Find and fill display name field
-    await page.fill('input[name="displayname"], input[name="displayName"], input[id="displayname"], input[id="displayName"]', displayName);
+    await page.fill('input[name="displayname"], input[name="displayName"], input[id="displayname"], input[id="displayName"]', SETUP_DISPLAYNAME);
     
     // Fill password fields
-    await page.fill('input[name="password"][type="password"]', password);
-    await page.fill('input[name="confirmpassword"], input[name="confirmPassword"], input[name="confirm_password"]', password);
+    await page.fill('input[name="password"][type="password"]', SETUP_PASSWORD);
+    await page.fill('input[name="confirmpassword"], input[name="confirmPassword"], input[name="confirm_password"]', SETUP_PASSWORD);
     
     // Submit the form
     await page.click('button[type="submit"], input[type="submit"]');
@@ -46,12 +47,9 @@ test.describe('Initial Setup and Login Flow', () => {
     // Verify login page loaded
     await expect(page.locator('h1, h2, h3').filter({ hasText: /login/i }).first()).toBeVisible();
     
-    // Fill login form
-    const username = 'admin';
-    const password = 'Admin123!';
-    
-    await page.fill('input[name="username"], input[id="username"]', username);
-    await page.fill('input[name="password"][type="password"]', password);
+    // Fill login form using credentials from environment
+    await page.fill('input[name="username"], input[id="username"]', SETUP_USERNAME);
+    await page.fill('input[name="password"][type="password"]', SETUP_PASSWORD);
     
     // Submit login form
     await page.click('button[type="submit"], input[type="submit"]');
@@ -69,8 +67,8 @@ test.describe('Initial Setup and Login Flow', () => {
   test('should logout successfully', async ({ page }) => {
     // First login
     await page.goto('/login');
-    await page.fill('input[name="username"], input[id="username"]', 'admin');
-    await page.fill('input[name="password"][type="password"]', 'Admin123!');
+    await page.fill('input[name="username"], input[id="username"]', SETUP_USERNAME);
+    await page.fill('input[name="password"][type="password"]', SETUP_PASSWORD);
     await page.click('button[type="submit"], input[type="submit"]');
     await page.waitForURL(/^(?!.*\/login).*$/, { timeout: 10000 });
     

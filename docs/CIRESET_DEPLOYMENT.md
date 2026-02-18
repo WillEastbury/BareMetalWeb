@@ -52,23 +52,22 @@ The `reset-data.flag` tells the application to delete all data on startup (see `
 
 ## Required Secrets
 
-The workflow requires the following GitHub secret:
+The workflow requires the following GitHub secrets:
 
-- **`AZURE_CREDENTIALS_CIRESET`** - Azure service principal credentials for the cireset site
+- **`AZURE_CREDENTIALS_CIRESET`** - Azure service principal credentials for the cireset site (already configured)
+- **`CIRESET_SETUP_USERNAME`** - Username for the OOBE (Out-Of-Box Experience) setup account
+- **`CIRESET_SETUP_DISPLAYNAME`** - Display name for the OOBE setup account  
+- **`CIRESET_SETUP_PASSWORD`** - Password for the OOBE setup account
 
-This should be configured in the repository settings under Settings → Secrets and variables → Actions.
+These should be configured in the repository settings under Settings → Secrets and variables → Actions.
 
-### Creating the Azure Credentials Secret
+### Setup Account Credentials
 
-```bash
-# Create a service principal with contributor access to the web app
-az ad sp create-for-rbac --name "baremetalweb-cireset-deploy" \
-  --role contributor \
-  --scopes /subscriptions/{subscription-id}/resourceGroups/{resource-group}/providers/Microsoft.Web/sites/baremetalweb-cireset \
-  --sdk-auth
-```
+The OOBE setup credentials are used by the Playwright tests to create the initial admin account during the setup flow. These credentials should be:
 
-The output JSON should be stored as the `AZURE_CREDENTIALS_CIRESET` secret.
+- **Secure** - Use a strong password that meets complexity requirements
+- **Documented** - Keep a secure record of these credentials for manual testing if needed
+- **Consistent** - Use the same credentials across test runs for predictable behavior
 
 ## Test Coverage
 
@@ -147,6 +146,20 @@ BASE_URL=http://localhost:5000 npm test
 The workflow waits 30 seconds after deployment. If the site takes longer to start:
 - Increase the sleep duration in the workflow
 - Check Azure App Service logs for startup issues
+
+## Required Setup Actions
+
+To enable the workflow, add the following GitHub secrets (Settings → Secrets and variables → Actions):
+
+### OOBE Setup Credentials
+- **`CIRESET_SETUP_USERNAME`** - Username for initial admin account (e.g., `admin`)
+- **`CIRESET_SETUP_DISPLAYNAME`** - Display name for admin account (e.g., `Admin User`)
+- **`CIRESET_SETUP_PASSWORD`** - Secure password meeting complexity requirements
+
+These credentials are used by Playwright tests during the OOBE setup flow.
+
+### Azure Deployment
+- **`AZURE_CREDENTIALS_CIRESET`** - Already configured
 
 ## Future Enhancements
 

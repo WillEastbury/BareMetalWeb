@@ -67,6 +67,9 @@ jobs:
         working-directory: tests/playwright
         env:
           BASE_URL: https://baremetalweb-cireset.azurewebsites.net
+          SETUP_USERNAME: ${{ secrets.CIRESET_SETUP_USERNAME }}
+          SETUP_DISPLAYNAME: ${{ secrets.CIRESET_SETUP_DISPLAYNAME }}
+          SETUP_PASSWORD: ${{ secrets.CIRESET_SETUP_PASSWORD }}
         run: npx playwright test
 
       - name: Upload Playwright report
