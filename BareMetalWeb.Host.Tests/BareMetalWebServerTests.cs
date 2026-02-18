@@ -852,6 +852,9 @@ public class BareMetalWebServerTests : IDisposable
         Assert.Contains("https://fonts.googleapis.com", csp);
         Assert.Contains("https://fonts.gstatic.com", csp);
         Assert.Contains("nonce-", csp);
+        Assert.DoesNotContain("style-src 'self' https://cdn.jsdelivr.net", csp);
+        Assert.DoesNotContain("style-src 'self' https://cdnjs.cloudflare.com", csp);
+        Assert.Contains("font-src 'self'", csp);
     }
 
     #endregion
