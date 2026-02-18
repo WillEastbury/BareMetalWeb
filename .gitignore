@@ -7,3 +7,4 @@ minikube-linux-arm64
 openapi-todo.yaml
 terraform
 terraform_1.7.5_linux_arm64.zip
+BareMetalWeb.Host/Data/
