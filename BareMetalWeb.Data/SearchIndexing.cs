@@ -14,6 +14,33 @@ using BareMetalWeb.Data.Interfaces;
 
 namespace BareMetalWeb.Data;
 
+/// <summary>
+/// Specifies the type of index to use for a property.
+/// </summary>
+/// <remarks>
+/// <para><b>Inverted Index:</b> (Default) Fast full-text search with prefix matching. Best for general text search.
+/// Uses token-to-IDs mapping with prefix tree optimization for efficient substring matching. Excellent for text fields.</para>
+/// 
+/// <para><b>BTree Index:</b> Sorted index optimized for range queries and prefix searches. Uses SortedDictionary
+/// internally which provides O(log n) lookups and maintains sorted order. Good for fields that need sorted access
+/// or prefix-based searching (e.g., categories, codes).</para>
+/// 
+/// <para><b>Treap Index:</b> Randomized Binary Search Tree (BST) with heap property. Combines BST structure with
+/// random priorities to maintain balanced tree without explicit rebalancing. Good for fields requiring frequent
+/// insertions/deletions while maintaining search performance. Provides expected O(log n) operations.</para>
+/// 
+/// <para><b>Bloom Filter:</b> Probabilistic data structure for fast membership testing. Uses multiple hash functions
+/// and bit array. Extremely space-efficient but can have false positives (never false negatives). Best for
+/// "definitely not present" checks on large datasets where occasional false positives are acceptable.</para>
+/// 
+/// <para><b>Performance Characteristics:</b></para>
+/// <list type="bullet">
+/// <item><description>Inverted: Insert O(k) where k=tokens, Search O(m*k) where m=matches, Space O(n*k)</description></item>
+/// <item><description>BTree: Insert O(log n), Search O(log n + m), Space O(n)</description></item>
+/// <item><description>Treap: Insert O(log n) expected, Search O(log n) expected, Space O(n)</description></item>
+/// <item><description>Bloom: Insert O(k) where k=hash functions, Search O(k), Space O(1) very compact</description></item>
+/// </list>
+/// </remarks>
 public enum IndexKind
 {
     Inverted,
@@ -22,6 +49,33 @@ public enum IndexKind
     Bloom
 }
 
+/// <summary>
+/// Marks a property for indexing with the specified index type.
+/// </summary>
+/// <remarks>
+/// <para>Apply this attribute to properties that should be searchable via the SearchIndexManager.
+/// Multiple properties on the same type can have different index types.</para>
+/// 
+/// <para><b>Usage Example:</b></para>
+/// <code>
+/// public class Product : BaseDataObject
+/// {
+///     [DataIndex(IndexKind.Inverted)]  // Full-text search
+///     public string Name { get; set; }
+///     
+///     [DataIndex(IndexKind.BTree)]     // Sorted/prefix search
+///     public string Category { get; set; }
+///     
+///     [DataIndex(IndexKind.Bloom)]     // Fast membership check
+///     public string Tags { get; set; }
+/// }
+/// </code>
+/// 
+/// <para>To search with a specific index type, use the Search method overload:</para>
+/// <code>
+/// var results = searchManager.Search(typeof(Product), "Electronics", loadAll, IndexKind.BTree);
+/// </code>
+/// </remarks>
 [AttributeUsage(AttributeTargets.Property, Inherited = true, AllowMultiple = false)]
 public sealed class DataIndexAttribute : Attribute
 {
