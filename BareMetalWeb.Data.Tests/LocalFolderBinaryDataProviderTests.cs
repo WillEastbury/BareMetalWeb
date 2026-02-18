@@ -161,7 +161,7 @@ public class LocalFolderBinaryDataProviderTests : IDisposable
         using (var lockHandle = provider.AcquireIndexLock("TestEntity", "TestField"))
         {
             // Assert - Lock file should exist while held
-            var expectedLockPath = Path.Combine(_testRoot, "Index", "TestEntity", "_clustered.log.lock");
+            var expectedLockPath = Path.Combine(_testRoot, "Index", "TestEntity", "TestField.log.lock");
             Assert.True(File.Exists(expectedLockPath), $"Lock file should exist at {expectedLockPath}");
         }
     }
