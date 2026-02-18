@@ -1,8 +1,9 @@
 name: Deploy and Test CI Reset Site
 
 on:
-  push:
-    branches: [main]
+  # push trigger disabled - workflow is broken
+  # push:
+  #   branches: [main]
   workflow_dispatch:
 
 permissions:
