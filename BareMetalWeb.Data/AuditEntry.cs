@@ -59,10 +59,24 @@ public sealed class AuditEntry : BaseDataObject
     public string UserName { get; set; } = string.Empty;
 
     /// <summary>
-    /// List of field changes (for Update operations)
+    /// JSON-serialized list of field changes (for Update operations)
     /// </summary>
     [DataField(Label = "Field Changes", Order = 6)]
-    public List<FieldChange> FieldChanges { get; set; } = new();
+    public string FieldChangesJson { get; set; } = "[]";
+
+    /// <summary>
+    /// Gets or sets field changes, serialized as JSON for binary storage compatibility
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public List<FieldChange> FieldChanges
+    {
+        get
+        {
+            try { return string.IsNullOrEmpty(FieldChangesJson) ? new() : System.Text.Json.JsonSerializer.Deserialize<List<FieldChange>>(FieldChangesJson) ?? new(); }
+            catch { return new(); }
+        }
+        set { FieldChangesJson = System.Text.Json.JsonSerializer.Serialize(value ?? new List<FieldChange>()); }
+    }
 
     /// <summary>
     /// For RemoteCommand operations: the command name

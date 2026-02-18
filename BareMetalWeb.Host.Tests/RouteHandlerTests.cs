@@ -46,7 +46,8 @@ public class RouteHandlerTests : IDisposable
             new MockHtmlRenderer(),
             new MockTemplateStore(),
             allowAccountCreation: true,
-            mfaKeyRootFolder: _keyRootDirectory);
+            mfaKeyRootFolder: _keyRootDirectory,
+            auditService: new AuditService(_testStore));
     }
 
     public void Dispose()
@@ -465,7 +466,8 @@ public class RouteHandlerTests : IDisposable
             new MockHtmlRenderer(),
             new MockTemplateStore(),
             allowAccountCreation: false,
-            mfaKeyRootFolder: _keyRootDirectory);
+            mfaKeyRootFolder: _keyRootDirectory,
+            auditService: new AuditService(_testStore));
 
         var context = CreateHttpContext("POST", "/register");
 
@@ -872,7 +874,8 @@ public class RouteHandlerTests : IDisposable
             new MockHtmlRenderer(),
             new MockTemplateStore(),
             allowAccountCreation: false,
-            mfaKeyRootFolder: _keyRootDirectory);
+            mfaKeyRootFolder: _keyRootDirectory,
+            auditService: new AuditService(_testStore));
 
         var context = CreateHttpContext("GET", "/register");
 

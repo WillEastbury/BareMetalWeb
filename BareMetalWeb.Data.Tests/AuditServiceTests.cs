@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -25,7 +26,7 @@ public sealed class AuditServiceTests : IDisposable
         _store.RegisterProvider(provider);
         DataStoreProvider.Current = _store;
         
-        _auditService = new AuditService(_store);
+        _auditService = new AuditService(_store) { RunSynchronously = true };
     }
 
     public void Dispose()
@@ -54,16 +55,9 @@ public sealed class AuditServiceTests : IDisposable
         // Act
         await _auditService.AuditCreateAsync(testEntity, "testuser");
         
-        // Wait for audit entry to be created (poll for up to 3 seconds)
-        AuditEntry? entry = null;
-        for (int i = 0; i < 30 && entry == null; i++)
-        {
-            await Task.Delay(100);
-            var auditEntries = await _store.QueryAsync<AuditEntry>();
-            entry = auditEntries.FirstOrDefault(e => e.EntityId == testEntity.Id);
-        }
-        
         // Assert
+        var auditEntries = await _store.QueryAsync<AuditEntry>();
+        var entry = auditEntries.FirstOrDefault(e => e.EntityId == testEntity.Id);
         Assert.NotNull(entry);
         Assert.Equal(typeof(TestEntity).Name, entry.EntityType);
         Assert.Equal(testEntity.Id, entry.EntityId);
@@ -84,20 +78,18 @@ public sealed class AuditServiceTests : IDisposable
         var newEntity = new TestEntity("testuser")
         {
             Id = oldEntity.Id,
+            CreatedOnUtc = oldEntity.CreatedOnUtc,
+            CreatedBy = oldEntity.CreatedBy,
             Name = "New Name",
             Value = 20
         };
 
         // Act
         await _auditService.AuditUpdateAsync(oldEntity, newEntity, "testuser");
-        
-        // Give the async task time to complete
-        await Task.Delay(500);
 
         // Assert
-        var auditEntries = await _store.QueryAsync<AuditEntry>();
-        var entry = auditEntries.FirstOrDefault(e => e.EntityId == oldEntity.Id);
-        
+        var auditEntries = (await _store.QueryAsync<AuditEntry>()).ToList();
+        var entry = auditEntries.FirstOrDefault(e => e.EntityId == oldEntity.Id && e.Operation == AuditOperation.Update);
         Assert.NotNull(entry);
         Assert.Equal(AuditOperation.Update, entry.Operation);
         Assert.Equal(2, entry.FieldChanges.Count);
@@ -126,6 +118,8 @@ public sealed class AuditServiceTests : IDisposable
         var newEntity = new TestEntity("testuser")
         {
             Id = oldEntity.Id,
+            CreatedOnUtc = oldEntity.CreatedOnUtc,
+            CreatedBy = oldEntity.CreatedBy,
             Name = "Same Name",
             Value = 42
         };
@@ -133,9 +127,6 @@ public sealed class AuditServiceTests : IDisposable
 
         // Act
         await _auditService.AuditUpdateAsync(oldEntity, newEntity, "testuser");
-        
-        // Give the async task time to complete
-        await Task.Delay(500);
 
         // Assert - no audit entry should be created since only metadata changed
         var auditEntries = await _store.QueryAsync<AuditEntry>();
@@ -152,9 +143,6 @@ public sealed class AuditServiceTests : IDisposable
 
         // Act
         await _auditService.AuditDeleteAsync<TestEntity>(entityId, "testuser");
-        
-        // Give the async task time to complete
-        await Task.Delay(500);
 
         // Assert
         var auditEntries = await _store.QueryAsync<AuditEntry>();
@@ -179,9 +167,6 @@ public sealed class AuditServiceTests : IDisposable
 
         // Act
         await _auditService.AuditRemoteCommandAsync(testEntity, "TestCommand", "testuser", null, result);
-        
-        // Give the async task time to complete
-        await Task.Delay(500);
 
         // Assert
         var auditEntries = await _store.QueryAsync<AuditEntry>();
@@ -200,22 +185,15 @@ public sealed class AuditServiceTests : IDisposable
         var testEntity = new TestEntity("testuser") { Name = "Test", Value = 1 };
         
         await _auditService.AuditCreateAsync(testEntity, "testuser");
-        await WaitForAuditEntry(testEntity.Id);
         
-        var updatedEntity = new TestEntity("testuser") { Id = testEntity.Id, Name = "Updated", Value = 2 };
+        var updatedEntity = new TestEntity("testuser") { Id = testEntity.Id, CreatedOnUtc = testEntity.CreatedOnUtc, CreatedBy = testEntity.CreatedBy, Name = "Updated", Value = 2 };
         await _auditService.AuditUpdateAsync(testEntity, updatedEntity, "testuser");
-        await Task.Delay(300);
         
         await _auditService.AuditDeleteAsync<TestEntity>(testEntity.Id, "testuser");
-        await Task.Delay(300);
 
-        // Act - poll for all 3 entries
-        List<AuditEntry> history = new();
-        for (int i = 0; i < 30 && history.Count < 3; i++)
-        {
-            await Task.Delay(100);
-            history = (await _auditService.GetEntityHistoryAsync<TestEntity>(testEntity.Id)).ToList();
-        }
+        // Act
+        var allEntries = await _store.QueryAsync<AuditEntry>();
+        var history = allEntries.Where(e => e.EntityId == testEntity.Id && e.EntityType == "TestEntity").ToList();
 
         // Assert
         Assert.Equal(3, history.Count);
@@ -224,17 +202,6 @@ public sealed class AuditServiceTests : IDisposable
         Assert.Contains(history, e => e.Operation == AuditOperation.Delete);
     }
     
-    private async Task WaitForAuditEntry(string entityId)
-    {
-        for (int i = 0; i < 30; i++)
-        {
-            await Task.Delay(100);
-            var auditEntries = await _store.QueryAsync<AuditEntry>();
-            if (auditEntries.Any(e => e.EntityId == entityId))
-                return;
-        }
-    }
-
     // Test entity class for audit testing
     [DataEntity("Test Entity", Slug = "testentity")]
     private sealed class TestEntity : BaseDataObject

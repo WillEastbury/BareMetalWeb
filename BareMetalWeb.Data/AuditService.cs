@@ -19,6 +19,12 @@ public sealed class AuditService
     private readonly IBufferedLogger? _logger;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 
+    /// <summary>
+    /// When true, audit saves are awaited directly instead of fire-and-forget.
+    /// Intended for unit testing only.
+    /// </summary>
+    internal bool RunSynchronously { get; set; }
+
     public AuditService(IDataObjectStore store, IBufferedLogger? logger = null)
     {
         _store = store ?? throw new ArgumentNullException(nameof(store));
@@ -43,18 +49,7 @@ public sealed class AuditService
                 Notes = "Entity created"
             };
 
-            // Fire and forget - don't block the main operation
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await _store.SaveAsync(auditEntry, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogError($"Failed to save audit entry for create: {ex.Message}", ex);
-                }
-            }, cancellationToken);
+            await SaveAuditEntryAsync(auditEntry, "create", cancellationToken);
         }
         catch (Exception ex)
         {
@@ -87,22 +82,12 @@ public sealed class AuditService
                 Notes = $"{changes.Count} field(s) changed"
             };
 
-            // Fire and forget - don't block the main operation
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await _store.SaveAsync(auditEntry, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogError($"Failed to save audit entry for update: {ex.Message}", ex);
-                }
-            }, cancellationToken);
+            await SaveAuditEntryAsync(auditEntry, "update", cancellationToken);
         }
         catch (Exception ex)
         {
             _logger?.LogError($"Failed to create audit entry for update: {ex.Message}", ex);
+            if (RunSynchronously) throw;
         }
     }
 
@@ -124,18 +109,7 @@ public sealed class AuditService
                 Notes = "Entity deleted"
             };
 
-            // Fire and forget - don't block the main operation
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await _store.SaveAsync(auditEntry, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogError($"Failed to save audit entry for delete: {ex.Message}", ex);
-                }
-            }, cancellationToken);
+            await SaveAuditEntryAsync(auditEntry, "delete", cancellationToken);
         }
         catch (Exception ex)
         {
@@ -170,18 +144,7 @@ public sealed class AuditService
                 Notes = $"Remote command '{commandName}' executed"
             };
 
-            // Fire and forget - don't block the main operation
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await _store.SaveAsync(auditEntry, cancellationToken).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogError($"Failed to save audit entry for remote command: {ex.Message}", ex);
-                }
-            }, cancellationToken);
+            await SaveAuditEntryAsync(auditEntry, "remote command", cancellationToken);
         }
         catch (Exception ex)
         {
@@ -331,6 +294,28 @@ public sealed class AuditService
         catch
         {
             return value.ToString();
+        }
+    }
+
+    private async ValueTask SaveAuditEntryAsync(AuditEntry entry, string operationName, CancellationToken cancellationToken)
+    {
+        if (RunSynchronously)
+        {
+            await _store.SaveAsync(entry, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _store.SaveAsync(entry, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError($"Failed to save audit entry for {operationName}: {ex.Message}", ex);
+                }
+            }, cancellationToken);
         }
     }
 }
