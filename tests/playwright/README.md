@@ -15,9 +15,9 @@ npx playwright install chromium
 
 The tests use environment variables for OOBE setup credentials:
 
-- **`SETUP_USERNAME`** - Username for initial setup (default: 'admin')
-- **`SETUP_DISPLAYNAME`** - Display name for initial setup (default: 'Admin User')
-- **`SETUP_PASSWORD`** - Password for initial setup (default: 'Admin123!')
+- **`CIMIGRATE_TEST_USERNAME`** - Username for initial setup (default: 'admin')
+- **`CIMIGRATE_TEST_DISPLAYNAME`** - Display name for initial setup (default: 'Admin User')
+- **`CIMIGRATE_TEST_PASSWORD`** - Password for initial setup (default: 'Admin123!')
 
 These credentials are used when creating the initial admin account during the setup flow.
 
@@ -27,8 +27,8 @@ These credentials are used when creating the initial admin account during the se
 
 ```bash
 BASE_URL=https://baremetalweb-cireset.azurewebsites.net \
-SETUP_USERNAME=admin \
-SETUP_PASSWORD=YourSecurePassword123! \
+CIMIGRATE_TEST_USERNAME=admin \
+CIMIGRATE_TEST_PASSWORD=YourSecurePassword123! \
 npm test
 ```
 
@@ -43,8 +43,8 @@ npm test
 2. Run tests in another terminal:
    ```bash
    BASE_URL=http://localhost:5000 \
-   SETUP_USERNAME=admin \
-   SETUP_PASSWORD=Admin123! \
+   CIMIGRATE_TEST_USERNAME=admin \
+   CIMIGRATE_TEST_PASSWORD=Admin123! \
    npm test
    ```
 
@@ -52,7 +52,7 @@ npm test
 
 ```bash
 BASE_URL=https://baremetalweb-cireset.azurewebsites.net \
-SETUP_PASSWORD=YourSecurePassword123! \
+CIMIGRATE_TEST_PASSWORD=YourSecurePassword123! \
 npm run test:ui
 ```
 
@@ -60,7 +60,7 @@ npm run test:ui
 
 ```bash
 BASE_URL=https://baremetalweb-cireset.azurewebsites.net \
-SETUP_PASSWORD=YourSecurePassword123! \
+CIMIGRATE_TEST_PASSWORD=YourSecurePassword123! \
 npm run test:headed
 ```
 

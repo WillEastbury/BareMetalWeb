@@ -55,19 +55,15 @@ The `reset-data.flag` tells the application to delete all data on startup (see `
 The workflow requires the following GitHub secrets:
 
 - **`AZURE_CREDENTIALS_CIRESET`** - Azure service principal credentials for the cireset site (already configured)
-- **`CIRESET_SETUP_USERNAME`** - Username for the OOBE (Out-Of-Box Experience) setup account
-- **`CIRESET_SETUP_DISPLAYNAME`** - Display name for the OOBE setup account  
-- **`CIRESET_SETUP_PASSWORD`** - Password for the OOBE setup account
+- **`CIMIGRATE_TEST_USERNAME`** - Username for the OOBE (Out-Of-Box Experience) setup account (already configured)
+- **`CIMIGRATE_TEST_DISPLAYNAME`** - Display name for the OOBE setup account (already configured)
+- **`CIMIGRATE_TEST_PASSWORD`** - Password for the OOBE setup account (already configured)
 
 These should be configured in the repository settings under Settings → Secrets and variables → Actions.
 
 ### Setup Account Credentials
 
-The OOBE setup credentials are used by the Playwright tests to create the initial admin account during the setup flow. These credentials should be:
-
-- **Secure** - Use a strong password that meets complexity requirements
-- **Documented** - Keep a secure record of these credentials for manual testing if needed
-- **Consistent** - Use the same credentials across test runs for predictable behavior
+The OOBE setup credentials are used by the Playwright tests to create the initial admin account during the setup flow. The workflow uses the existing `CIMIGRATE_TEST_*` secrets that are shared across CI environments.
 
 ## Test Coverage
 
@@ -149,17 +145,17 @@ The workflow waits 30 seconds after deployment. If the site takes longer to star
 
 ## Required Setup Actions
 
-To enable the workflow, add the following GitHub secrets (Settings → Secrets and variables → Actions):
+All required GitHub secrets are already configured:
 
-### OOBE Setup Credentials
-- **`CIRESET_SETUP_USERNAME`** - Username for initial admin account (e.g., `admin`)
-- **`CIRESET_SETUP_DISPLAYNAME`** - Display name for admin account (e.g., `Admin User`)
-- **`CIRESET_SETUP_PASSWORD`** - Secure password meeting complexity requirements
+### OOBE Setup Credentials (Already Configured)
+- **`CIMIGRATE_TEST_USERNAME`** - Username for initial admin account
+- **`CIMIGRATE_TEST_DISPLAYNAME`** - Display name for admin account
+- **`CIMIGRATE_TEST_PASSWORD`** - Password for OOBE setup
 
-These credentials are used by Playwright tests during the OOBE setup flow.
+These credentials are shared with other CI environments and used by Playwright tests during the OOBE setup flow.
 
-### Azure Deployment
-- **`AZURE_CREDENTIALS_CIRESET`** - Already configured
+### Azure Deployment (Already Configured)
+- **`AZURE_CREDENTIALS_CIRESET`** - Service principal for Azure deployment
 
 ## Future Enhancements
 

@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 
 // Get credentials from environment variables for OOBE setup
-const SETUP_USERNAME = process.env.SETUP_USERNAME || 'admin';
-const SETUP_DISPLAYNAME = process.env.SETUP_DISPLAYNAME || 'Admin User';
-const SETUP_PASSWORD = process.env.SETUP_PASSWORD || 'Admin123!';
+const SETUP_USERNAME = process.env.CIMIGRATE_TEST_USERNAME || 'admin';
+const SETUP_DISPLAYNAME = process.env.CIMIGRATE_TEST_DISPLAYNAME || 'Admin User';
+const SETUP_PASSWORD = process.env.CIMIGRATE_TEST_PASSWORD || 'Admin123!';
 
 test.describe('Initial Setup and Login Flow', () => {
   test('should complete initial setup and login successfully', async ({ page }) => {
