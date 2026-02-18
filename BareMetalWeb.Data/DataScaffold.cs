@@ -1037,6 +1037,164 @@ public static class DataScaffold
         }
     }
 
+    public static bool CanShowTimetableView(DataEntityMetadata metadata)
+    {
+        // Check for DayOfWeek enum field
+        var dayField = metadata.Fields.FirstOrDefault(f =>
+            f.FieldType == FormFieldType.Enum &&
+            f.Property.PropertyType == typeof(DayOfWeek));
+
+        // Check for TimeOnly or DateTime field
+        var timeField = metadata.Fields.FirstOrDefault(f =>
+            f.FieldType == FormFieldType.TimeOnly ||
+            f.FieldType == FormFieldType.DateTime);
+
+        return dayField != null && timeField != null;
+    }
+
+    public static string BuildTimetableHtml(
+        DataEntityMetadata metadata,
+        IEnumerable<BaseDataObject> allItems,
+        string basePath,
+        Func<DataEntityMetadata, bool>? canRenderLookupLink = null,
+        string? cloneToken = null,
+        string? cloneReturnUrl = null)
+    {
+        // Find the day and time fields
+        var dayField = metadata.Fields.FirstOrDefault(f =>
+            f.FieldType == FormFieldType.Enum &&
+            f.Property.PropertyType == typeof(DayOfWeek));
+
+        var timeField = metadata.Fields.FirstOrDefault(f =>
+            f.FieldType == FormFieldType.TimeOnly ||
+            f.FieldType == FormFieldType.DateTime);
+
+        if (dayField == null || timeField == null)
+            return "<p class=\"text-warning\">Timetable view requires a Day (DayOfWeek) field and a Time field.</p>";
+
+        var html = new StringBuilder();
+        var itemsList = allItems.ToList();
+
+        // Group by day
+        var groupedByDay = itemsList
+            .GroupBy(item => (DayOfWeek)(dayField.Property.GetValue(item) ?? DayOfWeek.Sunday))
+            .OrderBy(g => g.Key)
+            .ToList();
+
+        if (groupedByDay.Count == 0)
+        {
+            html.Append("<p class=\"text-muted mb-0\">No items found.</p>");
+            return html.ToString();
+        }
+
+        html.Append("<div class=\"bm-timetable-container\">");
+
+        foreach (var dayGroup in groupedByDay)
+        {
+            var dayName = dayGroup.Key.ToString();
+            html.Append($"<div class=\"bm-timetable-day-section mb-4\">");
+            html.Append($"<h3 class=\"bm-timetable-day-header\">{WebUtility.HtmlEncode(dayName)}</h3>");
+
+            // Sort items by time within this day
+            var sortedItems = timeField.FieldType == FormFieldType.TimeOnly
+                ? dayGroup.OrderBy(item => (TimeOnly)(timeField.Property.GetValue(item) ?? TimeOnly.MinValue)).ToList()
+                : dayGroup.OrderBy(item => (DateTime)(timeField.Property.GetValue(item) ?? DateTime.MinValue)).ToList();
+
+            html.Append("<table class=\"table table-striped table-hover\">");
+            html.Append("<thead><tr>");
+            
+            // Add action column
+            html.Append("<th scope=\"col\">Actions</th>");
+            
+            // Add time column
+            html.Append($"<th scope=\"col\">{WebUtility.HtmlEncode(timeField.Label)}</th>");
+            
+            // Add other list fields
+            foreach (var field in metadata.Fields.Where(f => f.List && f != dayField && f != timeField))
+            {
+                html.Append($"<th scope=\"col\">{WebUtility.HtmlEncode(field.Label)}</th>");
+            }
+            
+            html.Append("</tr></thead><tbody>");
+
+            foreach (var item in sortedItems)
+            {
+                var itemId = GetIdValue(item) ?? string.Empty;
+                var safeId = Uri.EscapeDataString(itemId);
+
+                html.Append("<tr>");
+
+                // Actions column
+                html.Append("<td>");
+                html.Append($"<a href=\"{basePath}/{safeId}\" class=\"btn btn-sm btn-outline-primary me-1\" title=\"View\" aria-label=\"View\"><i class=\"bi bi-eye\" aria-hidden=\"true\"></i></a>");
+                html.Append($"<a href=\"{basePath}/{safeId}/edit\" class=\"btn btn-sm btn-outline-secondary me-1\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>");
+                
+                if (!string.IsNullOrWhiteSpace(cloneToken))
+                {
+                    var cloneUrl = $"{basePath}/clone/{safeId}";
+                    if (!string.IsNullOrWhiteSpace(cloneReturnUrl))
+                    {
+                        cloneUrl += $"?returnUrl={Uri.EscapeDataString(cloneReturnUrl)}";
+                    }
+                    html.Append($"<a href=\"{cloneUrl}\" class=\"btn btn-sm btn-outline-info me-1\" title=\"Clone\" aria-label=\"Clone\"><i class=\"bi bi-files\" aria-hidden=\"true\"></i></a>");
+                }
+                
+                html.Append($"<button type=\"button\" class=\"btn btn-sm btn-outline-danger\" onclick=\"deleteItem('{WebUtility.HtmlEncode(itemId).Replace("'", "\\'")}')\" title=\"Delete\" aria-label=\"Delete\"><i class=\"bi bi-trash\" aria-hidden=\"true\"></i></button>");
+                html.Append("</td>");
+
+                // Time column
+                var timeValue = timeField.Property.GetValue(item);
+                var timeDisplay = timeValue != null
+                    ? (timeField.FieldType == FormFieldType.TimeOnly
+                        ? ((TimeOnly)timeValue).ToString("HH:mm")
+                        : ((DateTime)timeValue).ToString("HH:mm"))
+                    : string.Empty;
+                html.Append($"<td>{WebUtility.HtmlEncode(timeDisplay)}</td>");
+
+                // Other list fields
+                foreach (var field in metadata.Fields.Where(f => f.List && f != dayField && f != timeField))
+                {
+                    var rawValue = field.Property.GetValue(item);
+                    string displayValue;
+
+                    if (field.Lookup != null)
+                    {
+                        var lookupOptions = GetLookupOptions(field.Lookup);
+                        var lookupMap = lookupOptions.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                        var key = rawValue?.ToString() ?? string.Empty;
+                        var display = lookupMap.TryGetValue(key, out var resolved) ? resolved : key;
+                        var relatedUrl = TryBuildLookupUrl(field.Lookup, key, canRenderLookupLink);
+                        displayValue = BuildLookupHtml(key, display, relatedUrl);
+                    }
+                    else if (rawValue is bool boolValue)
+                    {
+                        displayValue = BuildBooleanCheckboxHtml(boolValue);
+                    }
+                    else
+                    {
+                        displayValue = WebUtility.HtmlEncode(ToDisplayString(rawValue, field.Property.PropertyType));
+                    }
+
+                    html.Append($"<td>{displayValue}</td>");
+                }
+
+                html.Append("</tr>");
+            }
+
+            html.Append("</tbody></table>");
+            html.Append("</div>");
+        }
+
+        html.Append("</div>");
+
+        // Add delete confirmation script
+        html.Append("<script>");
+        html.Append($"function deleteItem(id) {{ if (confirm('Are you sure you want to delete this item?')) {{ window.location.href = '{basePath}/' + encodeURIComponent(id) + '/delete'; }} }}");
+        html.Append("</script>");
+
+        return html.ToString();
+    }
+
     private static string GetDisplayValue(DataEntityMetadata metadata, BaseDataObject item)
     {
         // Try to find a Name field
