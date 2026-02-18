@@ -1,0 +1,44 @@
+name: Performance Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'BareMetalWeb.PerformanceTests/**'
+      - 'BareMetalWeb.Core/**'
+      - 'BareMetalWeb.Data/**'
+      - '.github/workflows/performance-tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'BareMetalWeb.PerformanceTests/**'
+      - 'BareMetalWeb.Core/**'
+      - 'BareMetalWeb.Data/**'
+      - '.github/workflows/performance-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  performance-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj
+
+      - name: Build performance tests
+        run: dotnet build BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj --configuration Release --no-restore
+
+      - name: Run performance tests
+        run: |
+          echo "Running performance tests with reduced sample size for CI..."
+          dotnet run --project BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj --configuration Release --no-build -- --addresses 100 --customers 50 --products 25 --units 10

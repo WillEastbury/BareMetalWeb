@@ -1,0 +1,40 @@
+name: Unit Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '.github/workflows/unit-tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.cs'
+      - '**.csproj'
+      - '.github/workflows/unit-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore BareMetalWeb.sln
+
+      - name: Build solution
+        run: dotnet build BareMetalWeb.sln --configuration Release --no-restore
+
+      - name: Run unit tests
+        run: dotnet test BareMetalWeb.sln --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests"
