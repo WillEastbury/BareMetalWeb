@@ -11,10 +11,10 @@ public static class CookieProtection
     private const int HmacKeySize = 32;
     private static string KeyRootFolder = AppContext.BaseDirectory;
 
-    private static readonly Lazy<SynchronousEncryption> Encryption = new(() =>
+    private static Lazy<SynchronousEncryption> Encryption = new(() =>
         SynchronousEncryption.CreateFromKeyFile(Path.Combine(KeyRootFolder, ".keys", "cookie.enc.key")));
 
-    private static readonly Lazy<byte[]> HmacKey = new(() =>
+    private static Lazy<byte[]> HmacKey = new(() =>
         LoadOrCreateKey(Path.Combine(KeyRootFolder, ".keys", "cookie.hmac.key"), HmacKeySize));
 
     public static void ConfigureKeyRoot(string rootFolder)
@@ -23,6 +23,11 @@ public static class CookieProtection
             throw new ArgumentException("Key root folder cannot be null or whitespace.", nameof(rootFolder));
 
         KeyRootFolder = rootFolder;
+        // Reset lazy initializers so they pick up the new root folder
+        Encryption = new(() =>
+            SynchronousEncryption.CreateFromKeyFile(Path.Combine(KeyRootFolder, ".keys", "cookie.enc.key")));
+        HmacKey = new(() =>
+            LoadOrCreateKey(Path.Combine(KeyRootFolder, ".keys", "cookie.hmac.key"), HmacKeySize));
     }
 
     public static string Protect(string value)

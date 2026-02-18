@@ -26,6 +26,7 @@ namespace BareMetalWeb.Host.Tests;
 /// Tests for BareMetalWebServer request pipeline including routing, error handling,
 /// CORS, HTTPS redirect, proxy headers, menu building, and setup flow.
 /// </summary>
+[Collection("CookieProtection")]
 public class BareMetalWebServerTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
@@ -37,9 +38,14 @@ public class BareMetalWebServerTests : IDisposable
     private readonly MockClientRequestTracker _clientRequests;
     private readonly CancellationTokenSource _cts;
     private readonly WebApplication _app;
+    private readonly string _keyRootDirectory;
 
     public BareMetalWebServerTests()
     {
+        _keyRootDirectory = Path.Combine(Path.GetTempPath(), $"bmw-server-tests-{Guid.NewGuid()}");
+        Directory.CreateDirectory(_keyRootDirectory);
+        CookieProtection.ConfigureKeyRoot(_keyRootDirectory);
+
         _originalStore = DataStoreProvider.Current;
         _testStore = new InMemoryDataStore();
         DataStoreProvider.Current = _testStore;
@@ -81,6 +87,8 @@ public class BareMetalWebServerTests : IDisposable
         DataStoreProvider.Current = _originalStore;
         _cts.Cancel();
         _cts.Dispose();
+        if (Directory.Exists(_keyRootDirectory))
+            Directory.Delete(_keyRootDirectory, true);
     }
 
     private void EnsureStore()
