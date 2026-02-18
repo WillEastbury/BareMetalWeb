@@ -6,6 +6,24 @@
     const STORAGE_KEY = 'bm-selected-theme';
     const DEFAULT_THEME = 'vapor';
 
+    function setStoredTheme(themeName) {
+        document.cookie = `${STORAGE_KEY}=${encodeURIComponent(themeName)}; path=/; max-age=31536000; samesite=lax`;
+    }
+
+    function getStoredTheme() {
+        const cookies = document.cookie ? document.cookie.split(';') : [];
+        const key = `${STORAGE_KEY}=`;
+
+        for (let i = 0; i < cookies.length; i++) {
+            const cookie = cookies[i].trim();
+            if (cookie.startsWith(key)) {
+                return decodeURIComponent(cookie.substring(key.length)) || DEFAULT_THEME;
+            }
+        }
+
+        return DEFAULT_THEME;
+    }
+
     // Get or create the theme stylesheet link element
     function getThemeLink() {
         let link = document.getElementById('bootswatch-theme');
@@ -42,7 +60,7 @@
         document.body.removeAttribute('data-bs-theme');
         themeLink.href = `${BOOTSWATCH_CDN_BASE}/${encodeURIComponent(themeName)}/bootstrap.min.css`;
 
-        localStorage.setItem(STORAGE_KEY, themeName);
+        setStoredTheme(themeName);
     }
 
     // Initialize theme switcher
@@ -50,7 +68,7 @@
         const select = document.getElementById('bm-theme-select');
         if (!select) return;
 
-        const savedTheme = localStorage.getItem(STORAGE_KEY) || DEFAULT_THEME;
+        const savedTheme = getStoredTheme();
         select.value = savedTheme;
         applyTheme(savedTheme);
 
