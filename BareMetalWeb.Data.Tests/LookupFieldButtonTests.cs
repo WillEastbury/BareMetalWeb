@@ -13,6 +13,7 @@ using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
 
+[Collection("DataStoreProvider")]
 public class LookupFieldButtonTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
