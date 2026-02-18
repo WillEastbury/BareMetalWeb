@@ -96,6 +96,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         if (!context.Request.HasFormContentType)
         {
+            context.Response.StatusCode = StatusCodes.Status415UnsupportedMediaType;
             RenderLoginForm(context, "Invalid login request.", null);
             await _renderer.RenderPage(context);
             return;
@@ -212,6 +213,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         if (!context.Request.HasFormContentType)
         {
+            context.Response.StatusCode = StatusCodes.Status415UnsupportedMediaType;
             RenderMfaChallengeForm(context, "Invalid MFA request.");
             await _renderer.RenderPage(context);
             return;
@@ -2272,6 +2274,10 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string SanitizeCloneReturnUrl(string? returnUrl, string fallbackUrl)
     {
         if (string.IsNullOrWhiteSpace(returnUrl))
+            return fallbackUrl;
+
+        // Block absolute URLs, protocol-relative URLs, and non-local paths
+        if (returnUrl.Contains("://") || returnUrl.StartsWith("//", StringComparison.Ordinal))
             return fallbackUrl;
 
         if (!returnUrl.StartsWith("/admin/data/", StringComparison.OrdinalIgnoreCase))
