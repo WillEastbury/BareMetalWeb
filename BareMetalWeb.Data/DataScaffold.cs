@@ -444,6 +444,13 @@ public static class DataScaffold
                 continue;
             }
 
+            // Render boolean values as checkboxes
+            if (value is bool boolValue)
+            {
+                rows.Add((field.Label, BuildBooleanCheckboxHtml(boolValue), true));
+                continue;
+            }
+
             rows.Add((field.Label, ToDisplayString(value, field.Property.PropertyType), false));
         }
 
@@ -512,6 +519,13 @@ public static class DataScaffold
                     var safeDisplay = WebUtility.HtmlEncode(FormatLookupDisplay(key, display));
                     var linkHtml = BuildLookupLinkHtml(relatedUrl);
                     values.Add($"<span title=\"{safeKey}\">{safeDisplay}</span>{linkHtml}");
+                    continue;
+                }
+
+                // Render boolean values as checkboxes
+                if (rawValue is bool boolValue)
+                {
+                    values.Add(BuildBooleanCheckboxHtml(boolValue));
                     continue;
                 }
 
@@ -1031,6 +1045,18 @@ public static class DataScaffold
         }
 
         return value.ToString() ?? string.Empty;
+    }
+
+    private static string BuildBooleanCheckboxHtml(bool value)
+    {
+        if (value)
+        {
+            return "<span class=\"text-success\" title=\"True\" aria-label=\"True\"><i class=\"bi bi-check-square-fill\" aria-hidden=\"true\"></i></span>";
+        }
+        else
+        {
+            return "<span class=\"text-danger\" title=\"False\" aria-label=\"False\"><i class=\"bi bi-square\" aria-hidden=\"true\"></i></span>";
+        }
     }
 
     private static string ToInputString(object? value, Type type, FormFieldType fieldType)
