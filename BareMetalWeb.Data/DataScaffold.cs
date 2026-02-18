@@ -826,7 +826,7 @@ public static class DataScaffold
         if (string.IsNullOrWhiteSpace(display) || string.Equals(key, display, StringComparison.OrdinalIgnoreCase))
             return key;
 
-        return $"{display} ({key})";
+        return display;
     }
 
     private static string BuildLookupHtml(string key, string display, string? relatedUrl)
