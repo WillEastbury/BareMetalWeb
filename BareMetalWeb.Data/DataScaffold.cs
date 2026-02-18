@@ -8,6 +8,7 @@ using System.Text.Json;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Rendering.Models;
+using BareMetalWeb.Data.ExpressionEngine;
 
 namespace BareMetalWeb.Core;
 
@@ -26,7 +27,8 @@ public sealed record DataFieldMetadata(
     string? Placeholder,
     DataLookupConfig? Lookup,
     IdGenerationStrategy IdGeneration,
-    ComputedFieldConfig? Computed
+    ComputedFieldConfig? Computed,
+    CalculatedFieldAttribute? Calculated
 );
 
 public sealed record DataEntityMetadata(
@@ -372,6 +374,44 @@ public static class DataScaffold
                     Value: computedStringValue ?? string.Empty,
                     IsComputed: true,
                     ComputedStrategy: computed.Strategy.ToString()
+                ));
+                continue;
+            }
+
+            // Calculated fields: always render as readonly with expression
+            if (field.Calculated != null)
+            {
+                var calculated = field.Calculated;
+                
+                // Get current value (for display, will be updated by JS)
+                var calculatedValue = instance != null ? field.Property.GetValue(instance) : null;
+                var calculatedStringValue = ToInputString(calculatedValue, field.Property.PropertyType, field.FieldType);
+
+                // Generate JavaScript expression from the AST
+                string jsExpression;
+                try
+                {
+                    var parser = new ExpressionParser();
+                    var ast = parser.Parse(calculated.Expression);
+                    jsExpression = ast.ToJavaScript();
+                }
+                catch (Exception ex)
+                {
+                    // If parsing fails, log and use a safe default
+                    System.Diagnostics.Debug.WriteLine($"Failed to parse calculated field expression '{calculated.Expression}': {ex.Message}");
+                    jsExpression = "0";
+                }
+
+                // Render as readonly with calculated indicator
+                fields.Add(new FormField(
+                    FormFieldType.ReadOnly,
+                    field.Name,
+                    field.Label,
+                    Required: false,
+                    Value: calculatedStringValue ?? string.Empty,
+                    IsCalculated: true,
+                    CalculatedExpression: jsExpression, // Pass the JS expression, not the original
+                    DisplayFormat: calculated.DisplayFormat
                 ));
                 continue;
             }
@@ -2443,6 +2483,7 @@ public static class DataScaffold
             var lookupAttribute = prop.GetCustomAttribute<DataLookupAttribute>();
             var idGenAttribute = prop.GetCustomAttribute<IdGenerationAttribute>();
             var computedAttribute = prop.GetCustomAttribute<ComputedFieldAttribute>();
+            var calculatedAttribute = prop.GetCustomAttribute<CalculatedFieldAttribute>();
             if (fieldAttribute == null && !useConvention)
                 continue;
 
@@ -2494,11 +2535,12 @@ public static class DataScaffold
                 fieldAttribute?.View ?? true,
                 fieldAttribute?.Edit ?? true,
                 fieldAttribute?.Create ?? true,
-                (fieldAttribute?.ReadOnly ?? false) || (computed != null), // Computed fields are always readonly
+                (fieldAttribute?.ReadOnly ?? false) || (computed != null) || (calculatedAttribute != null), // Computed and calculated fields are readonly
                 fieldAttribute?.Placeholder,
                 lookup,
                 idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
-                computed
+                computed,
+                calculatedAttribute
             ));
         }
 
@@ -2720,6 +2762,13 @@ public static class DataScaffold
 
     private static async ValueTask<int> CountTypedAsync<T>(QueryDefinition? query, CancellationToken cancellationToken) where T : BaseDataObject
         => await DataStoreProvider.Current.CountAsync<T>(query, cancellationToken);
+
+    /// <summary>
+    /// Evaluates all calculated fields on an entity instance server-side.
+    /// Call this before saving to ensure calculated values match server-side evaluation.
+    /// </summary>
+    public static void ApplyCalculatedFields(DataEntityMetadata metadata, BaseDataObject instance)
+    {
+        CalculatedFieldService.EvaluateCalculatedFields(instance);
+    }
 }
-
-
