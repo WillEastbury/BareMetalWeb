@@ -1415,13 +1415,15 @@ public sealed class RouteHandlers : IRouteHandlers
                 effectiveViewType = ViewType.Table;
             else if (string.Equals(viewParam, "timeline", StringComparison.OrdinalIgnoreCase))
                 effectiveViewType = ViewType.Timeline;
+            else if (string.Equals(viewParam, "timetable", StringComparison.OrdinalIgnoreCase))
+                effectiveViewType = ViewType.Timetable;
         }
 
         var cloneToken = CsrfProtection.EnsureToken(context);
         var returnUrl = $"{context.Request.Path}{context.Request.QueryString}";
 
-        // For tree/org chart/timeline views, load all items (no pagination)
-        if (effectiveViewType == ViewType.TreeView || effectiveViewType == ViewType.OrgChart || effectiveViewType == ViewType.Timeline)
+        // For tree/org chart/timeline/timetable views, load all items (no pagination)
+        if (effectiveViewType == ViewType.TreeView || effectiveViewType == ViewType.OrgChart || effectiveViewType == ViewType.Timeline || effectiveViewType == ViewType.Timetable)
         {
             var allQuery = DataScaffold.BuildQueryDefinition(queryDictionary, meta);
             var allResults = (await DataScaffold.QueryAsync(meta, allQuery)).Cast<BaseDataObject>().ToList();
@@ -1437,9 +1439,13 @@ public sealed class RouteHandlers : IRouteHandlers
             {
                 viewHtml = BuildTimelineViewHtml(meta, allResults, basePath, HasPermissionForMeta, cloneToken, returnUrl);
             }
-            else
+            else if (effectiveViewType == ViewType.OrgChart)
             {
                 viewHtml = DataScaffold.BuildOrgChartHtml(meta, allResults, selectedId, basePath, HasPermissionForMeta);
+            }
+            else // Timetable
+            {
+                viewHtml = DataScaffold.BuildTimetableHtml(meta, allResults, basePath, HasPermissionForMeta, cloneToken, returnUrl);
             }
 
             var treeToastHtml = BuildToastHtml(context, meta.Name);
@@ -4888,6 +4894,12 @@ public sealed class RouteHandlers : IRouteHandlers
             var orgActive = currentView == ViewType.OrgChart ? " active" : string.Empty;
             html.Append($"<a class=\"btn btn-outline-secondary{orgActive}\" href=\"/admin/data/{typeSlug}?view=orgchart\" title=\"Org Chart\"><i class=\"bi bi-diagram-2\" aria-hidden=\"true\"></i> Org Chart</a>");
         }
+
+        if (DataScaffold.CanShowTimetableView(meta))
+        {
+            var timetableActive = currentView == ViewType.Timetable ? " active" : string.Empty;
+            html.Append($"<a class=\"btn btn-outline-secondary{timetableActive}\" href=\"/admin/data/{typeSlug}?view=timetable\" title=\"Timetable View\"><i class=\"bi bi-calendar-week\" aria-hidden=\"true\"></i> Timetable</a>");
+        }
         
         // Check if entity has any DateOnly or DateTime fields for timeline view
         var hasDateField = meta.Fields.Any(f => 
@@ -5096,6 +5108,7 @@ public sealed class RouteHandlers : IRouteHandlers
             ViewType.TreeView => "Tree View",
             ViewType.OrgChart => "Org Chart",
             ViewType.Timeline => "Timeline",
+            ViewType.Timetable => "Timetable",
             _ => "Table View"
         };
     }
