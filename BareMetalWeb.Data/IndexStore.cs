@@ -59,6 +59,32 @@ public sealed class IndexStore
     {
         AppendEntry(entityName, fieldName, key, id, op, normalizeKey, expiresAtUtc?.Ticks);
     }
+
+    public void AppendEntries(string entityName, string fieldName, IEnumerable<(string key, string id, char op, long? expiresAtUtcTicks)> entries, bool normalizeKey = true)
+    {
+        if (string.IsNullOrWhiteSpace(entityName))
+            throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
+        if (string.IsNullOrWhiteSpace(fieldName))
+            throw new ArgumentException("Field name cannot be empty.", nameof(fieldName));
+        if (entries is null)
+            throw new ArgumentNullException(nameof(entries));
+
+        using var lockHandle = _provider.AcquireIndexLock(entityName, fieldName);
+        TrackIndex(entityName, fieldName);
+
+        foreach (var entry in entries)
+        {
+            if (string.IsNullOrWhiteSpace(entry.id))
+                throw new ArgumentException("Id cannot be empty.", nameof(entries));
+            if (entry.op != 'A' && entry.op != 'D')
+                throw new ArgumentException("Op must be 'A' or 'D'.", nameof(entries));
+
+            var normalizedKey = normalizeKey ? NormalizeKey(entry.key ?? string.Empty) : entry.key ?? string.Empty;
+            var line = FormatEntry(DateTime.UtcNow.Ticks, entry.op, normalizedKey, entry.id, entry.expiresAtUtcTicks);
+            AppendPagedLine(entityName, fieldName, line);
+        }
+    }
+
     public Dictionary<string, HashSet<string>> ReadIndex(string entityName, string fieldName, bool normalizeKey = true)
     {
         var map = new Dictionary<string, Dictionary<string, long>>(StringComparer.OrdinalIgnoreCase);
