@@ -31,4 +31,22 @@ public class Order : RenderableDataObject
 
     [DataField(Label = "Order Rows", Order = 8)]
     public List<OrderRow> OrderRows { get; set; } = new();
+
+    [RemoteCommand(Label = "Approve", Icon = "bi-check-circle", ConfirmMessage = "Approve this order?", Order = 1)]
+    public RemoteCommandResult Approve()
+    {
+        if (Status == "Approved") return RemoteCommandResult.Fail("Order is already approved.");
+        Status = "Approved";
+        IsOpen = false;
+        return RemoteCommandResult.Ok("Order approved successfully.");
+    }
+
+    [RemoteCommand(Label = "Cancel", Icon = "bi-x-circle", Destructive = true, ConfirmMessage = "Cancel this order? This cannot be undone.", Order = 2)]
+    public RemoteCommandResult Cancel()
+    {
+        if (Status == "Cancelled") return RemoteCommandResult.Fail("Order is already cancelled.");
+        Status = "Cancelled";
+        IsOpen = false;
+        return RemoteCommandResult.Ok("Order cancelled.");
+    }
 }

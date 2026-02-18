@@ -60,4 +60,5 @@ public interface IRouteHandlers
     ValueTask DataApiPutHandler(HttpContext context);
     ValueTask DataApiPatchHandler(HttpContext context);
     ValueTask DataApiDeleteHandler(HttpContext context);
+    ValueTask DataCommandHandler(HttpContext context);
 }

@@ -40,7 +40,8 @@ public sealed record DataEntityMetadata(
     ViewType ViewType,
     DataFieldMetadata? ParentField,
     IReadOnlyList<DataFieldMetadata> Fields,
-    DataEntityHandlers Handlers
+    DataEntityHandlers Handlers,
+    IReadOnlyList<RemoteCommandMetadata> Commands
 );
 
 public sealed record DataEntityHandlers(
@@ -2285,6 +2286,31 @@ public static class DataScaffold
             CountTypedAsync<T>
         );
 
+        // Discover [RemoteCommand] methods
+        var commands = new List<RemoteCommandMetadata>();
+        var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
+        foreach (var method in methods)
+        {
+            var cmdAttr = method.GetCustomAttribute<RemoteCommandAttribute>();
+            if (cmdAttr == null) continue;
+            var returnType = method.ReturnType;
+            if (returnType != typeof(RemoteCommandResult)
+                && returnType != typeof(Task<RemoteCommandResult>)
+                && returnType != typeof(ValueTask<RemoteCommandResult>))
+                continue;
+            commands.Add(new RemoteCommandMetadata(
+                method,
+                method.Name,
+                cmdAttr.Label ?? DeCamelcaseWithId(method.Name),
+                cmdAttr.Icon,
+                cmdAttr.ConfirmMessage,
+                cmdAttr.Destructive,
+                cmdAttr.Permission,
+                cmdAttr.OverrideEntityPermissions,
+                cmdAttr.Order
+            ));
+        }
+
         return new DataEntityMetadata(
             type,
             name,
@@ -2297,7 +2323,8 @@ public static class DataScaffold
             viewType,
             parentField,
             fields.OrderBy(f => f.Order).ToList(),
-            handlers
+            handlers,
+            commands.OrderBy(c => c.Order).ToList()
         );
     }
 
