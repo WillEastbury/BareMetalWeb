@@ -25,5 +25,6 @@ public enum FormFieldType
     Button,
     Link,
     Hidden,
-    CustomHtml
+    CustomHtml,
+    ReadOnly
 }
