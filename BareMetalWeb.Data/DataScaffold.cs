@@ -37,6 +37,8 @@ public sealed record DataEntityMetadata(
     string? NavGroup,
     int NavOrder,
     AutoIdStrategy IdGeneration,
+    ViewType ViewType,
+    DataFieldMetadata? ParentField,
     IReadOnlyList<DataFieldMetadata> Fields,
     DataEntityHandlers Handlers
 );
@@ -527,6 +529,293 @@ public static class DataScaffold
         }
 
         return rows;
+    }
+
+    public static string BuildTreeViewHtml(
+        DataEntityMetadata metadata,
+        IEnumerable<BaseDataObject> allItems,
+        string? selectedId,
+        string basePath,
+        Func<DataEntityMetadata, bool>? canRenderLookupLink = null,
+        string? cloneToken = null,
+        string? cloneReturnUrl = null)
+    {
+        if (metadata.ParentField == null)
+            return "<p class=\"text-warning\">Tree view requires a self-referencing parent field.</p>";
+
+        var html = new StringBuilder();
+        var itemsList = allItems.ToList();
+        var itemsById = itemsList.ToDictionary(i => GetIdValue(i) ?? string.Empty, i => i, StringComparer.OrdinalIgnoreCase);
+        
+        // Find root items (no parent or parent not found)
+        var rootItems = new List<BaseDataObject>();
+        foreach (var item in itemsList)
+        {
+            var parentId = metadata.ParentField.Property.GetValue(item)?.ToString();
+            if (string.IsNullOrWhiteSpace(parentId) || !itemsById.ContainsKey(parentId))
+                rootItems.Add(item);
+        }
+
+        html.Append("<div class=\"bm-data-tree-layout\">");
+        html.Append("<div class=\"bm-data-tree-panel bm-data-tree-sidebar\">");
+        html.Append($"<div class=\"bm-data-tree-header\">{WebUtility.HtmlEncode(metadata.Name)}</div>");
+
+        if (rootItems.Count == 0)
+        {
+            html.Append("<p class=\"text-muted mb-0\">No items found.</p>");
+        }
+        else
+        {
+            html.Append("<ul class=\"bm-data-tree-list\">");
+            foreach (var root in rootItems.OrderBy(i => GetDisplayValue(metadata, i)))
+            {
+                RenderTreeNode(html, metadata, root, itemsList, selectedId, basePath, 0);
+            }
+            html.Append("</ul>");
+        }
+
+        html.Append("</div>");
+        html.Append("<div class=\"bm-data-tree-panel bm-data-tree-content\">");
+
+        if (!string.IsNullOrWhiteSpace(selectedId) && itemsById.TryGetValue(selectedId, out var selectedItem))
+        {
+            html.Append($"<div class=\"bm-data-tree-header\">Details</div>");
+            var viewRows = BuildViewRowsHtml(metadata, selectedItem, canRenderLookupLink);
+            html.Append("<dl class=\"row\">");
+            foreach (var (label, value, isHtml) in viewRows)
+            {
+                html.Append($"<dt class=\"col-sm-3\">{WebUtility.HtmlEncode(label)}</dt>");
+                html.Append($"<dd class=\"col-sm-9\">{(isHtml ? value : WebUtility.HtmlEncode(value))}</dd>");
+            }
+            html.Append("</dl>");
+
+            var safeId = Uri.EscapeDataString(selectedId);
+            html.Append("<div class=\"mt-3\">");
+            html.Append($"<a class=\"btn btn-warning me-2\" href=\"{basePath}/{safeId}/edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i> Edit</a>");
+            html.Append($"<a class=\"btn btn-danger\" href=\"{basePath}/{safeId}/delete\"><i class=\"bi bi-x-lg\" aria-hidden=\"true\"></i> Delete</a>");
+            html.Append("</div>");
+        }
+        else
+        {
+            html.Append("<p class=\"text-muted mb-0\">Select an item to view details.</p>");
+        }
+
+        html.Append("</div>");
+        html.Append("</div>");
+
+        return html.ToString();
+    }
+
+    private static void RenderTreeNode(
+        StringBuilder html,
+        DataEntityMetadata metadata,
+        BaseDataObject item,
+        List<BaseDataObject> allItems,
+        string? selectedId,
+        string basePath,
+        int depth)
+    {
+        const int maxDepth = 10; // Prevent infinite recursion
+        if (depth > maxDepth)
+            return;
+
+        var itemId = GetIdValue(item) ?? string.Empty;
+        var safeId = Uri.EscapeDataString(itemId);
+        var display = WebUtility.HtmlEncode(GetDisplayValue(metadata, item));
+        var isActive = string.Equals(itemId, selectedId, StringComparison.OrdinalIgnoreCase);
+        var activeClass = isActive ? " bm-data-tree-active" : string.Empty;
+        var viewUrl = $"{basePath}?view=tree&selected={safeId}";
+
+        html.Append("<li>");
+        html.Append($"<a class=\"bm-data-tree-link{activeClass}\" href=\"{viewUrl}\">{display}</a>");
+
+        // Find children
+        if (metadata.ParentField != null)
+        {
+            var children = allItems.Where(child =>
+            {
+                var parentId = metadata.ParentField.Property.GetValue(child)?.ToString();
+                return string.Equals(parentId, itemId, StringComparison.OrdinalIgnoreCase);
+            }).OrderBy(c => GetDisplayValue(metadata, c)).ToList();
+
+            if (children.Count > 0 && (isActive || IsAncestorSelected(item, allItems, metadata.ParentField, selectedId)))
+            {
+                html.Append("<ul class=\"bm-data-tree-list\">");
+                foreach (var child in children)
+                {
+                    RenderTreeNode(html, metadata, child, allItems, selectedId, basePath, depth + 1);
+                }
+                html.Append("</ul>");
+            }
+        }
+
+        html.Append("</li>");
+    }
+
+    private static bool IsAncestorSelected(BaseDataObject item, List<BaseDataObject> allItems, DataFieldMetadata parentField, string? selectedId)
+    {
+        if (string.IsNullOrWhiteSpace(selectedId))
+            return false;
+
+        var itemsById = allItems.ToDictionary(i => GetIdValue(i) ?? string.Empty, i => i, StringComparer.OrdinalIgnoreCase);
+        var itemId = GetIdValue(item) ?? string.Empty;
+
+        // Check if selectedId is a descendant of itemId
+        if (!itemsById.TryGetValue(selectedId, out var current))
+            return false;
+
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (current != null)
+        {
+            var currentId = GetIdValue(current) ?? string.Empty;
+            if (visited.Contains(currentId))
+                break; // Circular reference
+
+            visited.Add(currentId);
+
+            var parentId = parentField.Property.GetValue(current)?.ToString();
+            if (string.Equals(parentId, itemId, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (string.IsNullOrWhiteSpace(parentId) || !itemsById.TryGetValue(parentId, out current))
+                break;
+        }
+
+        return false;
+    }
+
+    public static string BuildOrgChartHtml(
+        DataEntityMetadata metadata,
+        IEnumerable<BaseDataObject> allItems,
+        string? selectedId,
+        string basePath,
+        Func<DataEntityMetadata, bool>? canRenderLookupLink = null)
+    {
+        if (metadata.ParentField == null)
+            return "<p class=\"text-warning\">Org chart view requires a self-referencing parent field.</p>";
+
+        var html = new StringBuilder();
+        var itemsList = allItems.ToList();
+        var itemsById = itemsList.ToDictionary(i => GetIdValue(i) ?? string.Empty, i => i, StringComparer.OrdinalIgnoreCase);
+
+        // Find the selected item or default to first root
+        BaseDataObject? rootItem = null;
+        if (!string.IsNullOrWhiteSpace(selectedId) && itemsById.TryGetValue(selectedId, out var selectedItem))
+        {
+            rootItem = selectedItem;
+        }
+        else
+        {
+            // Find first root item (no parent)
+            rootItem = itemsList.FirstOrDefault(i =>
+            {
+                var parentId = metadata.ParentField.Property.GetValue(i)?.ToString();
+                return string.IsNullOrWhiteSpace(parentId) || !itemsById.ContainsKey(parentId);
+            });
+        }
+
+        html.Append("<div class=\"bm-orgchart-container\">");
+
+        if (rootItem == null)
+        {
+            html.Append("<p class=\"text-muted mb-0\">No items found.</p>");
+        }
+        else
+        {
+            var rootId = GetIdValue(rootItem) ?? string.Empty;
+            html.Append($"<div class=\"bm-data-tree-header mb-3\">Organization Chart - {WebUtility.HtmlEncode(GetDisplayValue(metadata, rootItem))}</div>");
+            RenderOrgChartNode(html, metadata, rootItem, itemsList, rootId, basePath, 0);
+        }
+
+        html.Append("</div>");
+
+        return html.ToString();
+    }
+
+    private static void RenderOrgChartNode(
+        StringBuilder html,
+        DataEntityMetadata metadata,
+        BaseDataObject item,
+        List<BaseDataObject> allItems,
+        string selectedId,
+        string basePath,
+        int depth)
+    {
+        const int maxDepth = 5; // Limit depth for org chart
+        if (depth > maxDepth)
+            return;
+
+        var itemId = GetIdValue(item) ?? string.Empty;
+        var safeId = Uri.EscapeDataString(itemId);
+        var display = WebUtility.HtmlEncode(GetDisplayValue(metadata, item));
+        var isSelected = string.Equals(itemId, selectedId, StringComparison.OrdinalIgnoreCase);
+        var selectedClass = isSelected ? " bm-orgchart-card-selected" : string.Empty;
+        
+        // Find a field that might represent title/role (look for common names)
+        var titleField = metadata.Fields.FirstOrDefault(f =>
+            f.Name.Contains("Title", StringComparison.OrdinalIgnoreCase) ||
+            f.Name.Contains("Role", StringComparison.OrdinalIgnoreCase) ||
+            f.Name.Contains("Position", StringComparison.OrdinalIgnoreCase));
+        var titleValue = titleField != null ? titleField.Property.GetValue(item)?.ToString() : null;
+        
+        html.Append("<div class=\"bm-orgchart-level\">");
+        html.Append("<div class=\"bm-orgchart-node\">");
+        html.Append($"<div class=\"bm-orgchart-card{selectedClass}\">");
+        html.Append($"<div class=\"bm-orgchart-name\">{display}</div>");
+        
+        if (!string.IsNullOrWhiteSpace(titleValue))
+        {
+            html.Append($"<div class=\"bm-orgchart-title\">{WebUtility.HtmlEncode(titleValue)}</div>");
+        }
+        
+        html.Append("<div class=\"bm-orgchart-actions\">");
+        html.Append($"<a class=\"btn btn-sm btn-outline-info me-1\" href=\"{basePath}/{safeId}\" title=\"View\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i></a>");
+        html.Append($"<a class=\"btn btn-sm btn-outline-warning me-1\" href=\"{basePath}/{safeId}/edit\" title=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>");
+        html.Append($"<a class=\"btn btn-sm btn-outline-primary\" href=\"{basePath}?view=orgchart&selected={safeId}\" title=\"Focus\"><i class=\"bi bi-diagram-3\" aria-hidden=\"true\"></i></a>");
+        html.Append("</div>");
+        html.Append("</div>");
+        html.Append("</div>");
+        html.Append("</div>");
+
+        // Find children
+        if (metadata.ParentField != null)
+        {
+            var children = allItems.Where(child =>
+            {
+                var parentId = metadata.ParentField.Property.GetValue(child)?.ToString();
+                return string.Equals(parentId, itemId, StringComparison.OrdinalIgnoreCase);
+            }).OrderBy(c => GetDisplayValue(metadata, c)).ToList();
+
+            if (children.Count > 0)
+            {
+                html.Append("<div class=\"bm-orgchart-connector\"></div>");
+                html.Append("<div class=\"bm-orgchart-level\">");
+                foreach (var child in children)
+                {
+                    RenderOrgChartNode(html, metadata, child, allItems, selectedId, basePath, depth + 1);
+                }
+                html.Append("</div>");
+            }
+        }
+    }
+
+    private static string GetDisplayValue(DataEntityMetadata metadata, BaseDataObject item)
+    {
+        // Try to find a Name field
+        var nameField = metadata.Fields.FirstOrDefault(f =>
+            string.Equals(f.Name, "Name", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(f.Name, "Title", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(f.Name, "DisplayName", StringComparison.OrdinalIgnoreCase));
+
+        if (nameField != null)
+        {
+            var value = nameField.Property.GetValue(item)?.ToString();
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+        }
+
+        // Fall back to ID
+        return GetIdValue(item) ?? "Unknown";
     }
 
     private static string FormatLookupDisplay(string key, string display)
@@ -1963,6 +2252,21 @@ public static class DataScaffold
         var navOrder = entityAttribute?.NavOrder ?? 0;
         var idGeneration = entityAttribute?.IdGeneration ?? AutoIdStrategy.Guid;
 
+        // Detect view type and self-referencing parent field
+        var viewTypeAttribute = type.GetCustomAttribute<DataViewTypeAttribute>();
+        var viewType = viewTypeAttribute?.ViewType ?? ViewType.Table;
+        DataFieldMetadata? parentField = null;
+        
+        // Find self-referencing lookup field (for tree/org chart views)
+        foreach (var field in fields)
+        {
+            if (field.Lookup != null && field.Lookup.TargetType == type)
+            {
+                parentField = field;
+                break;
+            }
+        }
+
         var handlers = new DataEntityHandlers(
             static () => new T(),
             LoadTypedAsync<T>,
@@ -1981,6 +2285,8 @@ public static class DataScaffold
             navGroup,
             navOrder,
             idGeneration,
+            viewType,
+            parentField,
             fields.OrderBy(f => f.Order).ToList(),
             handlers
         );
