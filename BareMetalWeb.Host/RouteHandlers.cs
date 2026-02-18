@@ -1398,6 +1398,54 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var queryDictionary = ToQueryDictionary(context.Request.Query);
+        
+        // Check for view parameter to override entity's default view type
+        var viewParam = context.Request.Query.TryGetValue("view", out var viewValue) ? viewValue.ToString() : null;
+        var selectedId = context.Request.Query.TryGetValue("selected", out var selectedValue) ? selectedValue.ToString() : null;
+        var effectiveViewType = meta.ViewType;
+        
+        if (!string.IsNullOrWhiteSpace(viewParam))
+        {
+            if (string.Equals(viewParam, "tree", StringComparison.OrdinalIgnoreCase))
+                effectiveViewType = ViewType.TreeView;
+            else if (string.Equals(viewParam, "orgchart", StringComparison.OrdinalIgnoreCase))
+                effectiveViewType = ViewType.OrgChart;
+            else if (string.Equals(viewParam, "table", StringComparison.OrdinalIgnoreCase))
+                effectiveViewType = ViewType.Table;
+        }
+
+        var cloneToken = CsrfProtection.EnsureToken(context);
+        var returnUrl = $"{context.Request.Path}{context.Request.QueryString}";
+
+        // For tree/org chart views, load all items (no pagination)
+        if (effectiveViewType == ViewType.TreeView || effectiveViewType == ViewType.OrgChart)
+        {
+            var allQuery = DataScaffold.BuildQueryDefinition(queryDictionary, meta);
+            var allResults = (await DataScaffold.QueryAsync(meta, allQuery)).Cast<BaseDataObject>().ToList();
+            
+            var basePath = $"/admin/data/{typeSlug}";
+
+            string viewHtml;
+            if (effectiveViewType == ViewType.TreeView)
+            {
+                viewHtml = DataScaffold.BuildTreeViewHtml(meta, allResults, selectedId, basePath, HasPermissionForMeta, cloneToken, returnUrl);
+            }
+            else
+            {
+                viewHtml = DataScaffold.BuildOrgChartHtml(meta, allResults, selectedId, basePath, HasPermissionForMeta);
+            }
+
+            var treeToastHtml = BuildToastHtml(context, meta.Name);
+            var treeViewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta.ParentField != null);
+            var treeCreateHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a></p>";
+            
+            context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} - {GetViewTypeName(effectiveViewType)}");
+            context.SetStringValue("message", treeToastHtml + treeViewSwitcher + treeCreateHtml + viewHtml);
+            await _renderer.RenderPage(context);
+            return;
+        }
+
+        // Standard table view with pagination
         var countQuery = DataScaffold.BuildQueryDefinition(queryDictionary, meta);
         var totalCount = await DataScaffold.CountAsync(meta, countQuery);
         const int pageSize = 50;
@@ -1418,8 +1466,6 @@ public sealed class RouteHandlers : IRouteHandlers
         query.Top = pageSize;
         var results = await DataScaffold.QueryAsync(meta, query);
 
-        var cloneToken = CsrfProtection.EnsureToken(context);
-        var returnUrl = $"{context.Request.Path}{context.Request.QueryString}";
         var headers = DataScaffold.BuildListHeaders(meta, includeActions: true);
         var rows = DataScaffold.BuildListRows(
             meta,
@@ -1475,9 +1521,10 @@ public sealed class RouteHandlers : IRouteHandlers
         var queryString = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : string.Empty;
         var csvHtml = $"<a class=\"btn btn-sm btn-outline-success ms-2\" href=\"/admin/data/{typeSlug}/csv{WebUtility.HtmlEncode(queryString)}\" title=\"Download CSV\" aria-label=\"Download CSV\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-spreadsheet ms-1\" aria-hidden=\"true\"></i> CSV</a>";
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/html{WebUtility.HtmlEncode(queryString)}\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
+        var viewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta.ParentField != null);
         var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a>{csvHtml}{htmlHtml}</p>";
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} List");
-        context.SetStringValue("message", toastHtml + pagerHtml + createHtml);
+        context.SetStringValue("message", toastHtml + viewSwitcher + pagerHtml + createHtml);
         context.AddTable(headers.ToArray(), rows.ToArray());
         await _renderer.RenderPage(context);
     }
@@ -4331,5 +4378,36 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var users = await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false);
         return users.Any();
+    }
+
+    private static string BuildViewSwitcher(string typeSlug, ViewType currentView, bool hasParentField)
+    {
+        var html = new StringBuilder();
+        html.Append("<div class=\"btn-group btn-group-sm mb-2\" role=\"group\" aria-label=\"View Type\">");
+        
+        var tableActive = currentView == ViewType.Table ? " active" : string.Empty;
+        html.Append($"<a class=\"btn btn-outline-secondary{tableActive}\" href=\"/admin/data/{typeSlug}?view=table\" title=\"Table View\"><i class=\"bi bi-table\" aria-hidden=\"true\"></i> Table</a>");
+        
+        if (hasParentField)
+        {
+            var treeActive = currentView == ViewType.TreeView ? " active" : string.Empty;
+            html.Append($"<a class=\"btn btn-outline-secondary{treeActive}\" href=\"/admin/data/{typeSlug}?view=tree\" title=\"Tree View\"><i class=\"bi bi-diagram-3\" aria-hidden=\"true\"></i> Tree</a>");
+            
+            var orgActive = currentView == ViewType.OrgChart ? " active" : string.Empty;
+            html.Append($"<a class=\"btn btn-outline-secondary{orgActive}\" href=\"/admin/data/{typeSlug}?view=orgchart\" title=\"Org Chart\"><i class=\"bi bi-diagram-2\" aria-hidden=\"true\"></i> Org Chart</a>");
+        }
+        
+        html.Append("</div>");
+        return html.ToString();
+    }
+
+    private static string GetViewTypeName(ViewType viewType)
+    {
+        return viewType switch
+        {
+            ViewType.TreeView => "Tree View",
+            ViewType.OrgChart => "Org Chart",
+            _ => "Table View"
+        };
     }
 }
