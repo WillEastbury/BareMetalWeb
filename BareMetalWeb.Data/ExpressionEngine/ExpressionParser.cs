@@ -24,9 +24,12 @@ public sealed class ExpressionParser
         _expression = expression;
         _position = 0;
         _currentChar = _expression[0];
+        
+        SkipWhitespace(); // Skip leading whitespace
 
         var result = ParseExpression();
 
+        SkipWhitespace(); // Skip trailing whitespace
         if (_position < _expression.Length)
             throw new InvalidOperationException($"Unexpected character '{_currentChar}' at position {_position}");
 
@@ -46,6 +49,7 @@ public sealed class ExpressionParser
         {
             var op = _currentChar.ToString();
             Advance();
+            SkipWhitespace(); // Skip whitespace after operator
             var right = ParseMultiplyDivideModulo();
             left = new BinaryOpNode(left, op, right);
         }
@@ -61,6 +65,7 @@ public sealed class ExpressionParser
         {
             var op = _currentChar.ToString();
             Advance();
+            SkipWhitespace(); // Skip whitespace after operator
             var right = ParseUnary();
             left = new BinaryOpNode(left, op, right);
         }
@@ -70,10 +75,12 @@ public sealed class ExpressionParser
 
     private ExpressionNode ParseUnary()
     {
+        SkipWhitespace(); // Skip whitespace before unary operator
         if (_currentChar == '-' || _currentChar == '+')
         {
             var op = _currentChar.ToString();
             Advance();
+            SkipWhitespace(); // Skip whitespace after unary operator
             return new UnaryOpNode(op, ParseUnary());
         }
 
@@ -90,11 +97,13 @@ public sealed class ExpressionParser
         if (_currentChar == '(')
         {
             Advance();
+            SkipWhitespace(); // Skip whitespace after opening paren
             var node = ParseExpression();
             SkipWhitespace();
             if (_currentChar != ')')
                 throw new InvalidOperationException($"Expected ')' at position {_position}");
             Advance();
+            SkipWhitespace(); // Skip whitespace after closing paren
             return node;
         }
 
