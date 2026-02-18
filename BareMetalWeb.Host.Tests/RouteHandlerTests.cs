@@ -638,7 +638,8 @@ public class RouteHandlerTests : IDisposable
     [Fact]
     public void BuildViewSwitcher_NoParentField_OnlyShowsTable()
     {
-        var result = InvokeStatic<string>("BuildViewSwitcher", "customer", ViewType.Table, false);
+        var meta = CreateMinimalMetadata(parentField: null, hasDateField: false);
+        var result = InvokeStatic<string>("BuildViewSwitcher", "customer", ViewType.Table, meta);
         Assert.Contains("Table", result);
         Assert.DoesNotContain("Tree", result);
         Assert.DoesNotContain("Org Chart", result);
@@ -647,7 +648,10 @@ public class RouteHandlerTests : IDisposable
     [Fact]
     public void BuildViewSwitcher_WithParentField_ShowsAllViews()
     {
-        var result = InvokeStatic<string>("BuildViewSwitcher", "category", ViewType.Table, true);
+        var dummyProp = typeof(Address).GetProperties().First();
+        var parentField = new DataFieldMetadata(dummyProp, "ParentId", "Parent", FormFieldType.String, 0, false, false, false, false, false, false, null, null, IdGenerationStrategy.None, null, null);
+        var meta = CreateMinimalMetadata(parentField: parentField, hasDateField: false);
+        var result = InvokeStatic<string>("BuildViewSwitcher", "category", ViewType.Table, meta);
         Assert.Contains("Table", result);
         Assert.Contains("Tree", result);
         Assert.Contains("Org Chart", result);
@@ -656,7 +660,10 @@ public class RouteHandlerTests : IDisposable
     [Fact]
     public void BuildViewSwitcher_TreeViewActive_MarksTreeActive()
     {
-        var result = InvokeStatic<string>("BuildViewSwitcher", "category", ViewType.TreeView, true);
+        var dummyProp = typeof(Address).GetProperties().First();
+        var parentField = new DataFieldMetadata(dummyProp, "ParentId", "Parent", FormFieldType.String, 0, false, false, false, false, false, false, null, null, IdGenerationStrategy.None, null, null);
+        var meta = CreateMinimalMetadata(parentField: parentField, hasDateField: false);
+        var result = InvokeStatic<string>("BuildViewSwitcher", "category", ViewType.TreeView, meta);
         // The tree button should have " active" class
         Assert.Contains("view=tree\" title=\"Tree View\"><i class=\"bi bi-diagram-3\"", result);
     }
@@ -1008,6 +1015,37 @@ public class RouteHandlerTests : IDisposable
             Fields: Array.Empty<DataFieldMetadata>(),
             Handlers: new DataEntityHandlers(
                 Create: () => (BaseDataObject)Activator.CreateInstance(type)!,
+                LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
+                SaveAsync: (_, _) => ValueTask.CompletedTask,
+                DeleteAsync: (_, _) => ValueTask.CompletedTask,
+                QueryAsync: (_, _) => ValueTask.FromResult<IEnumerable<BaseDataObject>>(Array.Empty<BaseDataObject>()),
+                CountAsync: (_, _) => ValueTask.FromResult(0)),
+            Commands: Array.Empty<RemoteCommandMetadata>());
+    }
+
+    private static DataEntityMetadata CreateMinimalMetadata(DataFieldMetadata? parentField, bool hasDateField)
+    {
+        var fields = new List<DataFieldMetadata>();
+        if (hasDateField)
+        {
+            var dummyProp = typeof(Address).GetProperties().First();
+            fields.Add(new DataFieldMetadata(dummyProp, "DateField", "Date", FormFieldType.DateOnly, 0, false, false, false, false, false, false, null, null, IdGenerationStrategy.None, null, null));
+        }
+
+        return new DataEntityMetadata(
+            Type: typeof(Address),
+            Name: "Test",
+            Slug: "test",
+            Permissions: "",
+            ShowOnNav: false,
+            NavGroup: null,
+            NavOrder: 0,
+            IdGeneration: AutoIdStrategy.None,
+            ViewType: ViewType.Table,
+            ParentField: parentField,
+            Fields: fields,
+            Handlers: new DataEntityHandlers(
+                Create: () => new Address(),
                 LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
                 SaveAsync: (_, _) => ValueTask.CompletedTask,
                 DeleteAsync: (_, _) => ValueTask.CompletedTask,
