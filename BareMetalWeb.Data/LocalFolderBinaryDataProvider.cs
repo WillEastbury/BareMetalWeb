@@ -80,6 +80,26 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         var logPath = GetIndexLogPath(entityName, fieldName);
         Directory.CreateDirectory(Path.GetDirectoryName(logPath) ?? _rootPath);
         var lockPath = logPath + ".lock";
+
+        // Retry with exponential backoff to handle transient lock contention
+        const int maxRetries = 5;
+        const int initialDelayMs = 10;
+        
+        for (int attempt = 0; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (attempt < maxRetries)
+            {
+                // Exponential backoff: 10ms, 20ms, 40ms, 80ms, 160ms
+                var delayMs = initialDelayMs * (1 << attempt);
+                Thread.Sleep(delayMs);
+            }
+        }
+
+        // Final attempt without catching - let the exception propagate
         return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
     }
 
