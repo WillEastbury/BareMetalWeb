@@ -850,6 +850,7 @@ public class BareMetalWebServerTests : IDisposable
         var csp = context.Response.Headers["Content-Security-Policy"].ToString();
         Assert.Contains("default-src 'self'", csp);
         Assert.Contains("nonce-", csp);
+        Assert.Contains("connect-src 'self' https://cdn.jsdelivr.net", csp);
     }
 
     #endregion
