@@ -1,9 +1,8 @@
-// Theme switcher for Bootswatch CDN themes
+// Theme switcher
 (function() {
     'use strict';
 
-    const BOOTSWATCH_VERSION = '5.3.3';
-    const BOOTSWATCH_CDN_BASE = `https://cdn.jsdelivr.net/npm/bootswatch@${BOOTSWATCH_VERSION}/dist`;
+    const LOCAL_THEME_PATH = '/static/css/bootstrap.min.css';
     const STORAGE_KEY = 'bm-selected-theme';
     const DEFAULT_THEME = 'vapor';
 
@@ -25,14 +24,23 @@
         return link;
     }
 
+    // Allowed Bootswatch theme names
+    const ALLOWED_THEMES = new Set([
+        'cerulean', 'cosmo', 'cyborg', 'darkly', 'flatly', 'journal',
+        'litera', 'lumen', 'lux', 'materia', 'minty', 'morph',
+        'pulse', 'quartz', 'sandstone', 'simplex', 'sketchy', 'slate',
+        'solar', 'spacelab', 'superhero', 'united', 'vapor', 'yeti', 'zephyr'
+    ]);
+
     // Apply a theme
     function applyTheme(themeName) {
+        if (!ALLOWED_THEMES.has(themeName)) {
+            themeName = DEFAULT_THEME;
+        }
         const themeLink = getThemeLink();
 
-        // Bootswatch themes define colors at :root,[data-bs-theme=light]
-        // so remove data-bs-theme to avoid Bootstrap dark-mode overrides
         document.body.removeAttribute('data-bs-theme');
-        themeLink.href = `${BOOTSWATCH_CDN_BASE}/${themeName}/bootstrap.min.css`;
+        themeLink.href = `${BOOTSWATCH_CDN_BASE}/${encodeURIComponent(themeName)}/bootstrap.min.css`;
 
         localStorage.setItem(STORAGE_KEY, themeName);
     }
