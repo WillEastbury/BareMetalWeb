@@ -314,10 +314,8 @@ public class CookieProtectionTests : IDisposable
         // Act
         var result = CookieProtection.Unprotect(invalidValue);
 
-        // Assert
-        // Should handle gracefully (might be null or might work depending on implementation)
-        // The key is it shouldn't throw
-        Assert.True(result == null || result == original);
+        // Assert — malformed token (extra dot-separated parts) must be rejected
+        Assert.Null(result);
     }
 
     [Fact]
