@@ -260,17 +260,13 @@ public static class DataScaffold
             if (!forCreate && !field.Edit)
                 continue;
 
-            // Auto-generated ID fields: show as readonly indicator
+            // Auto-generated ID fields: exclude from create forms, show as readonly in edit forms
             if (field.IdGeneration != IdGenerationStrategy.None)
             {
                 if (forCreate)
                 {
-                    fields.Add(new FormField(
-                        FormFieldType.ReadOnly,
-                        field.Name,
-                        field.Label,
-                        Required: false,
-                        Placeholder: "Auto-generated"));
+                    // Skip auto-generated ID fields in create forms
+                    continue;
                 }
                 else
                 {
