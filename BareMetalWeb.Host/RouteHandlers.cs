@@ -1492,14 +1492,18 @@ public sealed class RouteHandlers : IRouteHandlers
         var pagerHtml = BuildEnhancedPagination(page, totalCount, pageSize, $"/admin/data/{typeSlug}", queryDictionary);
         
         var queryString = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : string.Empty;
-        var csvHtml = $"<a class=\"btn btn-sm btn-outline-success ms-2\" href=\"/admin/data/{typeSlug}/csv{WebUtility.HtmlEncode(queryString)}\" title=\"Download CSV\" aria-label=\"Download CSV\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-spreadsheet ms-1\" aria-hidden=\"true\"></i> CSV</a>";
+        
+        // Check if entity has nested components
+        var nestedComponents = DataScaffold.GetNestedComponents(meta);
+        var hasNested = nestedComponents.Count > 0;
+        
+        var exportDropdown = BuildExportDropdown(typeSlug, queryString, hasNested);
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/html{WebUtility.HtmlEncode(queryString)}\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
         var viewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta.ParentField != null);
-        var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a>{csvHtml}{htmlHtml}</p>";
+        var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a>{exportDropdown}{htmlHtml}</p>";
         
         // Build custom table with sortable headers
         var tableHtml = BuildTableWithSortableHeaders(meta, rows, $"/admin/data/{typeSlug}", queryDictionary, includeActions: true);
-        
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} List");
         context.SetStringValue("message", toastHtml + viewSwitcher + searchBoxHtml + "<div class=\"d-flex justify-content-between align-items-center mb-2\">" + pagerHtml + pageSizeHtml + "</div>" + createHtml + tableHtml);
         await _renderer.RenderPage(context);
@@ -1563,11 +1567,16 @@ public sealed class RouteHandlers : IRouteHandlers
             })
             .ToArray();
 
+        // Check if entity has nested components
+        var nestedComponents = DataScaffold.GetNestedComponents(meta);
+        var hasNested = nestedComponents.Count > 0;
+        
+        var exportDropdown = BuildExportDropdown(typeSlug, string.Empty, hasNested, id);
         var rtfHtml = $"<a class=\"btn btn-sm btn-outline-info ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/rtf\" title=\"Download RTF\" aria-label=\"Download RTF\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-text ms-1\" aria-hidden=\"true\"></i> RTF</a>";
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/html\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
         var commandButtons = BuildCommandButtonsHtml(meta, typeSlug, id);
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} Details");
-        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>{rtfHtml}{htmlHtml}{commandButtons}</p>");
+        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>{exportDropdown}{rtfHtml}{htmlHtml}{commandButtons}</p>");
         context.AddTable(new[] { "Field", "Value" }, rows);
         await _renderer.RenderPage(context);
     }
@@ -4111,6 +4120,52 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         return builder.ToString();
+    }
+
+    private static string BuildExportDropdown(string typeSlug, string queryString, bool includeNested, string? id = null)
+    {
+        var baseUrl = id != null 
+            ? $"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/export"
+            : $"/admin/data/{typeSlug}/export";
+        
+        var separator = string.IsNullOrEmpty(queryString) || queryString == "?" ? "?" : "&";
+        var baseQueryString = queryString == "?" ? "" : queryString;
+        
+        var hasNested = includeNested;
+        var nestedLabel = hasNested ? " (with nested)" : "";
+        
+        var dropdownId = id != null ? $"export-dropdown-{WebUtility.UrlEncode(id)}" : "export-dropdown-list";
+        
+        var html = new StringBuilder();
+        html.Append("<div class=\"btn-group ms-2\" role=\"group\">");
+        html.Append($"<button type=\"button\" class=\"btn btn-sm btn-outline-success dropdown-toggle\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\" id=\"{dropdownId}\">");
+        html.Append("<i class=\"bi bi-download\" aria-hidden=\"true\"></i> Export");
+        html.Append("</button>");
+        html.Append($"<ul class=\"dropdown-menu\" aria-labelledby=\"{dropdownId}\">");
+        
+        // Simple CSV (no nested)
+        html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=SimpleCSV\">");
+        html.Append("<i class=\"bi bi-file-earmark-spreadsheet\"></i> CSV (simple)</a></li>");
+        
+        if (hasNested)
+        {
+            // Flat CSV (nested denormalized)
+            html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=FlatCSV\">");
+            html.Append("<i class=\"bi bi-file-earmark-spreadsheet\"></i> CSV (flat with nested)</a></li>");
+            
+            // Multi-sheet ZIP
+            html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=MultiSheetZip\">");
+            html.Append("<i class=\"bi bi-file-earmark-zip\"></i> ZIP (multi-sheet)</a></li>");
+        }
+        
+        // Hierarchical JSON
+        html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=HierarchicalJSON\">");
+        html.Append("<i class=\"bi bi-filetype-json\"></i> JSON{nestedLabel}</a></li>");
+        
+        html.Append("</ul>");
+        html.Append("</div>");
+        
+        return html.ToString();
     }
 
     private static async ValueTask<bool> HasEntityPermissionAsync(HttpContext context, DataEntityMetadata meta, CancellationToken cancellationToken = default)
