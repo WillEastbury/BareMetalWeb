@@ -2762,6 +2762,13 @@ public static class DataScaffold
 
     private static async ValueTask<int> CountTypedAsync<T>(QueryDefinition? query, CancellationToken cancellationToken) where T : BaseDataObject
         => await DataStoreProvider.Current.CountAsync<T>(query, cancellationToken);
+
+    /// <summary>
+    /// Evaluates all calculated fields on an entity instance server-side.
+    /// Call this before saving to ensure calculated values match server-side evaluation.
+    /// </summary>
+    public static void ApplyCalculatedFields(DataEntityMetadata metadata, BaseDataObject instance)
+    {
+        CalculatedFieldService.EvaluateCalculatedFields(instance);
+    }
 }
-
-

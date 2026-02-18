@@ -1981,6 +1981,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 await DataScaffold.ApplyComputedFieldsAsync(meta, instance, ComputedTrigger.OnCreate, context.RequestAborted).ConfigureAwait(false);
             else
                 await DataScaffold.ApplyComputedFieldsAsync(meta, instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+            DataScaffold.ApplyCalculatedFields(meta, instance);
             await DataScaffold.SaveAsync(meta, instance);
             if (isCreate)
                 created++;
@@ -2103,6 +2104,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ApplyAuditInfo(instance, userName, isCreate: true);
         await DataScaffold.ApplyAutoIdAsync(meta, instance, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, instance, ComputedTrigger.OnCreate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, instance);
         await DataScaffold.SaveAsync(meta, instance);
         
         // Audit the create operation
@@ -2247,6 +2249,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
         ApplyAuditInfo(instance, userName, isCreate: false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
         await DataScaffold.SaveAsync(meta, instance);
         
         // Audit the update operation
@@ -2454,6 +2457,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ApplyAuditInfo(clone, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
         await DataScaffold.ApplyAutoIdAsync(meta, clone, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, clone, ComputedTrigger.OnCreate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, clone);
         await DataScaffold.SaveAsync(meta, clone);
 
         var newId = DataScaffold.GetIdValue(clone) ?? string.Empty;
@@ -2641,6 +2645,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
         await DataScaffold.ApplyAutoIdAsync(meta, instance, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, instance, ComputedTrigger.OnCreate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, instance);
         await DataScaffold.SaveAsync(meta, instance);
         context.Response.StatusCode = StatusCodes.Status201Created;
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
@@ -2690,6 +2695,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
         await DataScaffold.SaveAsync(meta, instance);
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
     }
@@ -2738,6 +2744,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
         await DataScaffold.SaveAsync(meta, instance);
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
     }
@@ -5203,6 +5210,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
             // Save the entity in case the command modified it
             await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+            DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
             await DataScaffold.SaveAsync(meta, instance);
 
             // Audit the remote command execution
