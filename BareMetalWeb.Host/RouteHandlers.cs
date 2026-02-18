@@ -1520,8 +1520,8 @@ public sealed class RouteHandlers : IRouteHandlers
         var viewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta);
         var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a>{exportDropdown}{htmlHtml}</p>";
         
-        // Bulk actions bar
-        var bulkActionsBar = BuildBulkActionsBar(typeSlug, returnUrl, totalCount);
+        // Bulk actions bar with CSRF token
+        var bulkActionsBar = BuildBulkActionsBar(typeSlug, returnUrl, totalCount, cloneToken);
         
         // Build custom table with sortable headers
         var tableHtml = BuildTableWithSortableHeaders(meta, rows, $"/admin/data/{typeSlug}", queryDictionary, includeActions: true, includeBulkSelection: true);
@@ -5820,7 +5820,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return html.ToString();
     }
 
-    private static string BuildBulkActionsBar(string typeSlug, string returnUrl, long totalCount)
+    private static string BuildBulkActionsBar(string typeSlug, string returnUrl, long totalCount, string csrfToken)
     {
         var sb = new StringBuilder();
         sb.Append($"<div data-bulk-container data-entity-slug=\"{WebUtility.HtmlEncode(typeSlug)}\" data-return-url=\"{WebUtility.HtmlEncode(returnUrl)}\">");
@@ -5838,6 +5838,7 @@ public sealed class RouteHandlers : IRouteHandlers
         sb.Append("<button type=\"button\" class=\"btn btn-info\" data-bulk-action=\"export-html\" title=\"Export to HTML\" aria-label=\"Export to HTML\"><i class=\"bi bi-filetype-html\" aria-hidden=\"true\"></i> HTML</button>");
         sb.Append("</div>");
         sb.Append("</div>");
+        sb.Append($"<input type=\"hidden\" name=\"csrf_token\" value=\"{WebUtility.HtmlEncode(csrfToken)}\" />");
         sb.Append("</div>");
         return sb.ToString();
     }
