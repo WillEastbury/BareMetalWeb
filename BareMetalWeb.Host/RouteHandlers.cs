@@ -1492,14 +1492,18 @@ public sealed class RouteHandlers : IRouteHandlers
         var pagerHtml = BuildEnhancedPagination(page, totalCount, pageSize, $"/admin/data/{typeSlug}", queryDictionary);
         
         var queryString = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : string.Empty;
-        var csvHtml = $"<a class=\"btn btn-sm btn-outline-success ms-2\" href=\"/admin/data/{typeSlug}/csv{WebUtility.HtmlEncode(queryString)}\" title=\"Download CSV\" aria-label=\"Download CSV\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-spreadsheet ms-1\" aria-hidden=\"true\"></i> CSV</a>";
+        
+        // Check if entity has nested components
+        var nestedComponents = DataScaffold.GetNestedComponents(meta);
+        var hasNested = nestedComponents.Count > 0;
+        
+        var exportDropdown = BuildExportDropdown(typeSlug, queryString, hasNested);
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/html{WebUtility.HtmlEncode(queryString)}\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
         var viewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta.ParentField != null);
-        var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a>{csvHtml}{htmlHtml}</p>";
+        var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a>{exportDropdown}{htmlHtml}</p>";
         
         // Build custom table with sortable headers
         var tableHtml = BuildTableWithSortableHeaders(meta, rows, $"/admin/data/{typeSlug}", queryDictionary, includeActions: true);
-        
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} List");
         context.SetStringValue("message", toastHtml + viewSwitcher + searchBoxHtml + "<div class=\"d-flex justify-content-between align-items-center mb-2\">" + pagerHtml + pageSizeHtml + "</div>" + createHtml + tableHtml);
         await _renderer.RenderPage(context);
@@ -1563,11 +1567,16 @@ public sealed class RouteHandlers : IRouteHandlers
             })
             .ToArray();
 
+        // Check if entity has nested components
+        var nestedComponents = DataScaffold.GetNestedComponents(meta);
+        var hasNested = nestedComponents.Count > 0;
+        
+        var exportDropdown = BuildExportDropdown(typeSlug, string.Empty, hasNested, id);
         var rtfHtml = $"<a class=\"btn btn-sm btn-outline-info ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/rtf\" title=\"Download RTF\" aria-label=\"Download RTF\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-text ms-1\" aria-hidden=\"true\"></i> RTF</a>";
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/html\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
         var commandButtons = BuildCommandButtonsHtml(meta, typeSlug, id);
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} Details");
-        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>{rtfHtml}{htmlHtml}{commandButtons}</p>");
+        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>{exportDropdown}{rtfHtml}{htmlHtml}{commandButtons}</p>");
         context.AddTable(new[] { "Field", "Value" }, rows);
         await _renderer.RenderPage(context);
     }
@@ -1623,6 +1632,106 @@ public sealed class RouteHandlers : IRouteHandlers
         var title = $"{meta.Name} List";
         var html = BuildHtmlTableDocument(title, headers, rows);
         await WriteTextResponseAsync(context, "text/html", html, $"{typeSlug}_list.html");
+    }
+
+    public async ValueTask DataListExportHandler(HttpContext context)
+    {
+        var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
+        if (meta == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync(errorMessage ?? "Entity not found.");
+            return;
+        }
+
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.");
+            return;
+        }
+
+        var options = ExportOptions.FromQuery(context.Request.Query);
+        var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.Request.Query), meta);
+        var results = await DataScaffold.QueryAsync(meta, query);
+        var resultsList = results.Cast<object?>().ToList();
+
+        switch (options.Format)
+        {
+            case ExportFormat.HierarchicalJSON:
+                await ExportHierarchicalJson(context, meta, typeSlug, resultsList, options);
+                break;
+            case ExportFormat.FlatCSV:
+                await ExportFlatCsv(context, meta, typeSlug, resultsList, options);
+                break;
+            case ExportFormat.MultiSheetZip:
+                await ExportMultiSheetZip(context, meta, typeSlug, resultsList, options);
+                break;
+            case ExportFormat.SimpleCSV:
+            default:
+                // Fall back to simple CSV (no nested data)
+                var rows = BuildListPlainRowsWithId(meta, resultsList, out var headers);
+                var csv = BuildCsv(headers, rows);
+                await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_list.csv");
+                break;
+        }
+    }
+
+    public async ValueTask DataViewExportHandler(HttpContext context)
+    {
+        var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
+        var id = GetRouteValue(context, "id");
+        if (meta == null || string.IsNullOrWhiteSpace(id))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync(errorMessage ?? "Entity not found.");
+            return;
+        }
+
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.");
+            return;
+        }
+
+        var instance = await DataScaffold.LoadAsync(meta, id);
+        if (instance == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Item not found.");
+            return;
+        }
+
+        var options = ExportOptions.FromQuery(context.Request.Query);
+        
+        switch (options.Format)
+        {
+            case ExportFormat.HierarchicalJSON:
+                await ExportSingleHierarchicalJson(context, meta, typeSlug, id, instance, options);
+                break;
+            case ExportFormat.FlatCSV:
+                await ExportSingleFlatCsv(context, meta, typeSlug, id, instance, options);
+                break;
+            case ExportFormat.MultiSheetZip:
+                await ExportSingleMultiSheetZip(context, meta, typeSlug, id, instance, options);
+                break;
+            case ExportFormat.SimpleCSV:
+            default:
+                // Fall back to simple CSV (entity fields only, no nested)
+                var rows = DataScaffold.BuildViewRows(meta, instance)
+                    .Select(row => new[] { row.Label, row.Value })
+                    .ToArray();
+                if (instance is BaseDataObject dataObject)
+                {
+                    var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
+                    rows = new[] { new[] { "Id", recordId } }.Concat(rows).ToArray();
+                }
+                var headers = new[] { "Field", "Value" };
+                var csv = BuildCsv(headers, rows);
+                await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_{WebUtility.UrlEncode(id)}.csv");
+                break;
+        }
     }
 
     public async ValueTask DataViewRtfHandler(HttpContext context)
@@ -3628,6 +3737,279 @@ public sealed class RouteHandlers : IRouteHandlers
         return safe;
     }
 
+    // Export helper methods for nested/embedded components
+
+    private async ValueTask ExportHierarchicalJson(HttpContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
+    {
+        var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+        var json = JsonSerializer.Serialize(items, jsonOptions);
+        context.Response.ContentType = "application/json";
+        context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_export.json\"";
+        await context.Response.WriteAsync(json);
+    }
+
+    private async ValueTask ExportSingleHierarchicalJson(HttpContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
+    {
+        var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+        var json = JsonSerializer.Serialize(instance, jsonOptions);
+        context.Response.ContentType = "application/json";
+        context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_{WebUtility.UrlEncode(id)}.json\"";
+        await context.Response.WriteAsync(json);
+    }
+
+    private async ValueTask ExportFlatCsv(HttpContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
+    {
+        if (!options.IncludeNested || options.MaxDepth < 1)
+        {
+            // No nested data, fall back to simple CSV
+            var rows = BuildListPlainRowsWithId(meta, items, out var headers);
+            var csv = BuildCsv(headers, rows);
+            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_flat.csv");
+            return;
+        }
+
+        var nestedComponents = DataScaffold.GetNestedComponents(meta);
+        if (nestedComponents.Count == 0)
+        {
+            // No nested components, fall back to simple CSV
+            var rows = BuildListPlainRowsWithId(meta, items, out var headers);
+            var csv = BuildCsv(headers, rows);
+            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_flat.csv");
+            return;
+        }
+
+        // Build flat CSV with parent fields repeated for each child row
+        var flatRows = new List<string[]>();
+        var parentHeaders = new[] { "Id" }.Concat(DataScaffold.BuildListHeaders(meta, includeActions: false)).ToList();
+        var allHeaders = new List<string>(parentHeaders);
+        
+        // Add headers for first nested component (for simplicity, we'll flatten only the first one)
+        var firstNested = nestedComponents[0];
+        var nestedData = DataScaffold.ExtractNestedData(meta, items.FirstOrDefault() ?? new object());
+        if (nestedData.Count > 0)
+        {
+            var childHeaders = nestedData[0].Headers.Select(h => $"{firstNested.Field.Label}.{h}");
+            allHeaders.AddRange(childHeaders);
+        }
+
+        foreach (var item in items)
+        {
+            if (item == null)
+                continue;
+
+            var id = item is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) ?? string.Empty : string.Empty;
+            var parentRow = new[] { id }.Concat(BuildListPlainRows(meta, new[] { item })[0]).ToArray();
+            
+            var nested = DataScaffold.ExtractNestedData(meta, item);
+            if (nested.Count > 0 && nested[0].Rows.Length > 0)
+            {
+                // Repeat parent row for each child
+                foreach (var childRow in nested[0].Rows)
+                {
+                    flatRows.Add(parentRow.Concat(childRow).ToArray());
+                }
+            }
+            else
+            {
+                // No children, just add parent row with empty child fields
+                var emptyChild = nestedData.Count > 0 ? new string[nestedData[0].Headers.Length] : Array.Empty<string>();
+                flatRows.Add(parentRow.Concat(emptyChild).ToArray());
+            }
+        }
+
+        var flatCsv = BuildCsv(allHeaders.ToArray(), flatRows.ToArray());
+        await WriteTextResponseAsync(context, "text/csv", flatCsv, $"{typeSlug}_flat.csv");
+    }
+
+    private async ValueTask ExportSingleFlatCsv(HttpContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
+    {
+        if (!options.IncludeNested || options.MaxDepth < 1)
+        {
+            // No nested data, fall back to simple CSV
+            var rows = DataScaffold.BuildViewRows(meta, instance)
+                .Select(row => new[] { row.Label, row.Value })
+                .ToArray();
+            if (instance is BaseDataObject dataObject)
+            {
+                var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
+                rows = new[] { new[] { "Id", recordId } }.Concat(rows).ToArray();
+            }
+            var headers = new[] { "Field", "Value" };
+            var csv = BuildCsv(headers, rows);
+            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_{WebUtility.UrlEncode(id)}_flat.csv");
+            return;
+        }
+
+        var nestedComponents = DataScaffold.GetNestedComponents(meta);
+        if (nestedComponents.Count == 0)
+        {
+            // No nested components
+            var rows = DataScaffold.BuildViewRows(meta, instance)
+                .Select(row => new[] { row.Label, row.Value })
+                .ToArray();
+            if (instance is BaseDataObject dataObject)
+            {
+                var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
+                rows = new[] { new[] { "Id", recordId } }.Concat(rows).ToArray();
+            }
+            var headers = new[] { "Field", "Value" };
+            var csv = BuildCsv(headers, rows);
+            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_{WebUtility.UrlEncode(id)}_flat.csv");
+            return;
+        }
+
+        // Build flat CSV with parent fields repeated for each child row
+        var flatRows = new List<string[]>();
+        var parentId = instance is BaseDataObject dobj ? DataScaffold.GetIdValue(dobj) ?? string.Empty : string.Empty;
+        var parentFields = DataScaffold.BuildViewRows(meta, instance).ToList();
+        var parentHeaders = new List<string> { "Id" };
+        parentHeaders.AddRange(parentFields.Select(f => f.Label));
+
+        var allHeaders = new List<string>(parentHeaders);
+        var nested = DataScaffold.ExtractNestedData(meta, instance);
+        
+        if (nested.Count > 0)
+        {
+            var childHeaders = nested[0].Headers.Select(h => $"{nested[0].FieldName}.{h}");
+            allHeaders.AddRange(childHeaders);
+
+            var parentRow = new[] { parentId }.Concat(parentFields.Select(f => f.Value)).ToArray();
+            
+            if (nested[0].Rows.Length > 0)
+            {
+                foreach (var childRow in nested[0].Rows)
+                {
+                    flatRows.Add(parentRow.Concat(childRow).ToArray());
+                }
+            }
+            else
+            {
+                var emptyChild = new string[nested[0].Headers.Length];
+                flatRows.Add(parentRow.Concat(emptyChild).ToArray());
+            }
+        }
+        else
+        {
+            var parentRow = new[] { parentId }.Concat(parentFields.Select(f => f.Value)).ToArray();
+            flatRows.Add(parentRow);
+        }
+
+        var flatCsv = BuildCsv(allHeaders.ToArray(), flatRows.ToArray());
+        await WriteTextResponseAsync(context, "text/csv", flatCsv, $"{typeSlug}_{WebUtility.UrlEncode(id)}_flat.csv");
+    }
+
+    private async ValueTask ExportMultiSheetZip(HttpContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
+    {
+        using var memoryStream = new MemoryStream();
+        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            // Add parent CSV
+            var parentRows = BuildListPlainRowsWithId(meta, items, out var parentHeaders);
+            var parentCsv = BuildCsv(parentHeaders, parentRows);
+            var parentEntry = archive.CreateEntry($"{typeSlug}.csv");
+            using (var entryStream = parentEntry.Open())
+            using (var writer = new StreamWriter(entryStream))
+            {
+                await writer.WriteAsync(parentCsv);
+            }
+
+            if (options.IncludeNested && options.MaxDepth >= 1)
+            {
+                var nestedComponents = DataScaffold.GetNestedComponents(meta);
+                foreach (var (field, childType) in nestedComponents)
+                {
+                    var childRows = new List<string[]>();
+                    var childHeaders = new List<string> { "ParentId" };
+                    string[]? headers = null;
+
+                    foreach (var item in items)
+                    {
+                        if (item == null)
+                            continue;
+
+                        var parentId = item is BaseDataObject dobj ? DataScaffold.GetIdValue(dobj) ?? string.Empty : string.Empty;
+                        var nested = DataScaffold.ExtractNestedData(meta, item);
+                        var matchingNested = nested.FirstOrDefault(n => string.Equals(n.FieldName, field.Name, StringComparison.OrdinalIgnoreCase));
+                        
+                        if (headers == null && matchingNested.Headers != null && matchingNested.Headers.Length > 0)
+                        {
+                            headers = matchingNested.Headers;
+                            childHeaders.AddRange(headers);
+                        }
+
+                        if (matchingNested.Rows != null)
+                        {
+                            foreach (var row in matchingNested.Rows)
+                            {
+                                childRows.Add(new[] { parentId }.Concat(row).ToArray());
+                            }
+                        }
+                    }
+
+                    if (childRows.Count > 0 && headers != null)
+                    {
+                        var childCsv = BuildCsv(childHeaders.ToArray(), childRows.ToArray());
+                        var childEntry = archive.CreateEntry($"{typeSlug}_{field.Name}.csv");
+                        using var childStream = childEntry.Open();
+                        using var childWriter = new StreamWriter(childStream);
+                        await childWriter.WriteAsync(childCsv);
+                    }
+                }
+            }
+        }
+
+        memoryStream.Position = 0;
+        context.Response.ContentType = "application/zip";
+        context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_export.zip\"";
+        await memoryStream.CopyToAsync(context.Response.Body);
+    }
+
+    private async ValueTask ExportSingleMultiSheetZip(HttpContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
+    {
+        using var memoryStream = new MemoryStream();
+        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            // Add parent CSV
+            var parentRows = DataScaffold.BuildViewRows(meta, instance)
+                .Select(row => new[] { row.Label, row.Value })
+                .ToArray();
+            if (instance is BaseDataObject dataObject)
+            {
+                var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
+                parentRows = new[] { new[] { "Id", recordId } }.Concat(parentRows).ToArray();
+            }
+            var parentHeaders = new[] { "Field", "Value" };
+            var parentCsv = BuildCsv(parentHeaders, parentRows);
+            var parentEntry = archive.CreateEntry($"{typeSlug}.csv");
+            using (var entryStream = parentEntry.Open())
+            using (var writer = new StreamWriter(entryStream))
+            {
+                await writer.WriteAsync(parentCsv);
+            }
+
+            if (options.IncludeNested && options.MaxDepth >= 1)
+            {
+                var nested = DataScaffold.ExtractNestedData(meta, instance);
+                foreach (var (fieldName, headers, rows) in nested)
+                {
+                    if (rows.Length > 0)
+                    {
+                        var childCsv = BuildCsv(headers, rows);
+                        var childEntry = archive.CreateEntry($"{typeSlug}_{fieldName}.csv");
+                        using var childStream = childEntry.Open();
+                        using var childWriter = new StreamWriter(childStream);
+                        await childWriter.WriteAsync(childCsv);
+                    }
+                }
+            }
+        }
+
+        memoryStream.Position = 0;
+        context.Response.ContentType = "application/zip";
+        context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_{WebUtility.UrlEncode(id)}_export.zip\"";
+        await memoryStream.CopyToAsync(context.Response.Body);
+    }
+
     private static string BuildHtmlTableDocument(string title, string[] headers, string[][] rows)
     {
         var sb = new StringBuilder();
@@ -3738,6 +4120,52 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         return builder.ToString();
+    }
+
+    private static string BuildExportDropdown(string typeSlug, string queryString, bool includeNested, string? id = null)
+    {
+        var baseUrl = id != null 
+            ? $"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/export"
+            : $"/admin/data/{typeSlug}/export";
+        
+        var separator = string.IsNullOrEmpty(queryString) || queryString == "?" ? "?" : "&";
+        var baseQueryString = queryString == "?" ? "" : queryString;
+        
+        var hasNested = includeNested;
+        var nestedLabel = hasNested ? " (with nested)" : "";
+        
+        var dropdownId = id != null ? $"export-dropdown-{WebUtility.UrlEncode(id)}" : "export-dropdown-list";
+        
+        var html = new StringBuilder();
+        html.Append("<div class=\"btn-group ms-2\" role=\"group\">");
+        html.Append($"<button type=\"button\" class=\"btn btn-sm btn-outline-success dropdown-toggle\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\" id=\"{dropdownId}\">");
+        html.Append("<i class=\"bi bi-download\" aria-hidden=\"true\"></i> Export");
+        html.Append("</button>");
+        html.Append($"<ul class=\"dropdown-menu\" aria-labelledby=\"{dropdownId}\">");
+        
+        // Simple CSV (no nested)
+        html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=SimpleCSV\">");
+        html.Append("<i class=\"bi bi-file-earmark-spreadsheet\"></i> CSV (simple)</a></li>");
+        
+        if (hasNested)
+        {
+            // Flat CSV (nested denormalized)
+            html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=FlatCSV\">");
+            html.Append("<i class=\"bi bi-file-earmark-spreadsheet\"></i> CSV (flat with nested)</a></li>");
+            
+            // Multi-sheet ZIP
+            html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=MultiSheetZip\">");
+            html.Append("<i class=\"bi bi-file-earmark-zip\"></i> ZIP (multi-sheet)</a></li>");
+        }
+        
+        // Hierarchical JSON
+        html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=HierarchicalJSON\">");
+        html.Append("<i class=\"bi bi-filetype-json\"></i> JSON{nestedLabel}</a></li>");
+        
+        html.Append("</ul>");
+        html.Append("</div>");
+        
+        return html.ToString();
     }
 
     private static async ValueTask<bool> HasEntityPermissionAsync(HttpContext context, DataEntityMetadata meta, CancellationToken cancellationToken = default)

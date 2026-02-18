@@ -565,6 +565,66 @@ public static class DataScaffold
         return headers;
     }
 
+    /// <summary>
+    /// Gets metadata about nested/embedded child lists in an entity
+    /// </summary>
+    public static IReadOnlyList<(DataFieldMetadata Field, Type ChildType)> GetNestedComponents(DataEntityMetadata metadata)
+    {
+        var nested = new List<(DataFieldMetadata, Type)>();
+        foreach (var field in metadata.Fields.Where(f => f.View))
+        {
+            if (IsChildListType(field.Property.PropertyType, out var childType))
+            {
+                nested.Add((field, childType));
+            }
+        }
+        return nested;
+    }
+
+    /// <summary>
+    /// Extracts nested child data from an entity instance
+    /// </summary>
+    public static IReadOnlyList<(string FieldName, string[] Headers, string[][] Rows)> ExtractNestedData(DataEntityMetadata metadata, object instance)
+    {
+        var result = new List<(string, string[], string[][])>();
+        
+        foreach (var field in metadata.Fields.Where(f => f.View))
+        {
+            if (!IsChildListType(field.Property.PropertyType, out var childType))
+                continue;
+                
+            var value = field.Property.GetValue(instance);
+            if (value is not IEnumerable enumerable)
+                continue;
+                
+            var childFields = GetChildFieldMetadataSimple(childType);
+            var headers = childFields.Select(f => f.Label).ToArray();
+            var rows = new List<string[]>();
+            
+            foreach (var item in enumerable)
+            {
+                if (item == null)
+                    continue;
+                    
+                var row = new string[childFields.Count];
+                for (int i = 0; i < childFields.Count; i++)
+                {
+                    var childField = childFields[i];
+                    var prop = childType.GetProperty(childField.Name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                    var rawValue = prop?.GetValue(item);
+                    
+                    var displayText = ToDisplayString(rawValue, prop?.PropertyType ?? typeof(string));
+                    row[i] = displayText;
+                }
+                rows.Add(row);
+            }
+            
+            result.Add((field.Name, headers, rows.ToArray()));
+        }
+        
+        return result;
+    }
+
     public static TableRowActions? BuildRowActionsMetadata(BaseDataObject? dataObject, string rowBasePath, string? cloneToken = null, string? cloneReturnUrl = null)
     {
         if (dataObject == null)
@@ -1442,6 +1502,41 @@ public static class DataScaffold
 
         childType = type.GetGenericArguments()[0];
         return childType.IsClass && childType != typeof(string);
+    }
+
+    /// <summary>
+    /// Gets child field metadata without resolving lookups (for export scenarios where we don't need lookup data)
+    /// </summary>
+    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadataSimple(Type childType)
+    {
+        var fields = new List<ChildFieldMeta>();
+        var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .OrderBy(p => p.MetadataToken)
+            .ToArray();
+
+        foreach (var prop in properties)
+        {
+            if (!prop.CanRead || !prop.CanWrite)
+                continue;
+
+            var fieldAttribute = prop.GetCustomAttribute<DataFieldAttribute>();
+            if (fieldAttribute == null)
+                continue;
+
+            if (!fieldAttribute.Create && !fieldAttribute.Edit)
+                continue;
+
+            var label = fieldAttribute.Label ?? DeCamelcaseWithId(prop.Name);
+            var required = fieldAttribute.Required;
+            var effectiveFieldType = fieldAttribute.FieldType == FormFieldType.Unknown
+                ? MapFieldType(prop.PropertyType)
+                : fieldAttribute.FieldType;
+
+            // Don't resolve lookups in this simplified version
+            fields.Add(new ChildFieldMeta(prop.Name, label, prop.PropertyType, required, effectiveFieldType, null));
+        }
+
+        return fields;
     }
 
     private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadata(Type childType)
