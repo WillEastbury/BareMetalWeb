@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- Configure test output verbosity to reduce noise -->
+    <!-- Tests show minimal output by default: only failures and summary -->
+    <VSTestVerbosity>minimal</VSTestVerbosity>
+  </PropertyGroup>
+</Project>

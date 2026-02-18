@@ -93,20 +93,72 @@ Console application that benchmarks key performance metrics.
 
 ## Running Tests
 
+### Quick Start: Clean Test Output
+
+For the cleanest, most scannable output, use the provided helper script:
+
+```bash
+# Run all tests (includes build with warnings)
+./run-tests.sh
+
+# Run all tests without build warnings (cleanest output)
+./run-tests.sh --no-build
+
+# Run specific test project
+./run-tests.sh BareMetalWeb.Core.Tests/
+
+# Run specific project without build warnings
+./run-tests.sh --no-build BareMetalWeb.Core.Tests/
+```
+
+The script automatically runs tests with `-v quiet` to suppress build noise and only show failures and errors. Use `--no-build` for the cleanest output (no build warnings), but make sure to build first with `dotnet build BareMetalWeb.sln`.
+
+### Test Output Verbosity
+
+Tests are configured with **minimal verbosity** to reduce noise and make errors easier to scan:
+- Test failures and errors are shown with full details
+- Test summary statistics are displayed
+- Build output and warnings are shown (use `-v quiet` to suppress)
+
+**Recommended: Quiet mode for cleanest output**
+
+```bash
+# Run tests with minimal output (only failures and errors)
+dotnet test BareMetalWeb.sln -v quiet
+
+# Run tests without rebuilding (even cleaner output)
+dotnet build BareMetalWeb.sln
+dotnet test BareMetalWeb.sln --no-build -v quiet
+```
+
+**When you need more details for debugging:**
+
+```bash
+# Normal verbosity (show build warnings and test progress)
+dotnet test BareMetalWeb.sln -v normal
+
+# Detailed verbosity (show all build and test output)
+dotnet test BareMetalWeb.sln -v detailed
+```
+
 ### Run All Unit Tests
 
 ```bash
+# Standard run (shows build output + test results)
 dotnet test BareMetalWeb.sln
+
+# Quiet run (only shows failures and errors)  
+dotnet test BareMetalWeb.sln -v quiet
 ```
 
 ### Run Tests for a Specific Project
 
 ```bash
-dotnet test BareMetalWeb.Core.Tests/
-dotnet test BareMetalWeb.Data.Tests/
-dotnet test BareMetalWeb.Rendering.Tests/
-dotnet test BareMetalWeb.API.Tests/
-dotnet test BareMetalWeb.Host.Tests/
+dotnet test BareMetalWeb.Core.Tests/ -v quiet
+dotnet test BareMetalWeb.Data.Tests/ -v quiet
+dotnet test BareMetalWeb.Rendering.Tests/ -v quiet
+dotnet test BareMetalWeb.API.Tests/ -v quiet
+dotnet test BareMetalWeb.Host.Tests/ -v quiet
 ```
 
 ### Run Performance Tests
