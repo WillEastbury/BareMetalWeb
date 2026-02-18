@@ -97,8 +97,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!context.Request.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status415UnsupportedMediaType;
-            RenderLoginForm(context, "Invalid login request.", null);
-            await _renderer.RenderPage(context);
+            await context.Response.WriteAsync("Unsupported content type.");
             return;
         }
 
@@ -214,8 +213,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!context.Request.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status415UnsupportedMediaType;
-            RenderMfaChallengeForm(context, "Invalid MFA request.");
-            await _renderer.RenderPage(context);
+            await context.Response.WriteAsync("Unsupported content type.");
             return;
         }
 
@@ -230,6 +228,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var code = NormalizeOtpCode(form["code"].ToString());
         if (code == null)
         {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
             RenderMfaChallengeForm(context, "Please enter your authentication code.");
             await _renderer.RenderPage(context);
             return;
@@ -2307,30 +2306,26 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var returnUrl = form["returnUrl"].ToString();
-        var redirectUrl = BuildCloneRedirectUrl(returnUrl, $"/admin/data/{typeSlug}", newId);
-        context.Response.Redirect(redirectUrl);
+        if (IsValidCloneReturnUrl(returnUrl))
+        {
+            var separator = returnUrl.Contains('?') ? "&" : "?";
+            context.Response.Redirect($"{returnUrl}{separator}toast=cloned&id={WebUtility.UrlEncode(newId)}");
+        }
+        else
+        {
+            context.Response.Redirect($"/admin/data/{typeSlug}?toast=cloned&id={WebUtility.UrlEncode(newId)}");
+        }
     }
 
-    private static string BuildCloneRedirectUrl(string? returnUrl, string fallbackUrl, string newId)
-    {
-        var safeReturnUrl = SanitizeCloneReturnUrl(returnUrl, fallbackUrl);
-        var separator = safeReturnUrl.Contains('?') ? "&" : "?";
-        return $"{safeReturnUrl}{separator}toast=cloned&id={WebUtility.UrlEncode(newId)}";
-    }
-
-    private static string SanitizeCloneReturnUrl(string? returnUrl, string fallbackUrl)
+    private static bool IsValidCloneReturnUrl(string? returnUrl)
     {
         if (string.IsNullOrWhiteSpace(returnUrl))
-            return fallbackUrl;
-
-        // Block absolute URLs, protocol-relative URLs, and non-local paths
+            return false;
         if (returnUrl.Contains("://") || returnUrl.StartsWith("//", StringComparison.Ordinal))
-            return fallbackUrl;
-
+            return false;
         if (!returnUrl.StartsWith("/admin/data/", StringComparison.OrdinalIgnoreCase))
-            return fallbackUrl;
-
-        return returnUrl;
+            return false;
+        return true;
     }
 
     private static BaseDataObject CreateClone(DataEntityMetadata meta, BaseDataObject source)
