@@ -1588,8 +1588,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var rtfHtml = $"<a class=\"btn btn-sm btn-outline-info ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/rtf\" title=\"Download RTF\" aria-label=\"Download RTF\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-text ms-1\" aria-hidden=\"true\"></i> RTF</a>";
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/html\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
+        var commandButtons = BuildCommandButtonsHtml(meta, typeSlug, id);
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} Details");
-        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>{rtfHtml}{htmlHtml}</p>");
+        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>{rtfHtml}{htmlHtml}{commandButtons}</p>");
         context.AddTable(new[] { "Field", "Value" }, rows);
         await _renderer.RenderPage(context);
     }
@@ -4411,5 +4412,100 @@ public sealed class RouteHandlers : IRouteHandlers
             ViewType.OrgChart => "Org Chart",
             _ => "Table View"
         };
+    }
+
+    private static string BuildCommandButtonsHtml(DataEntityMetadata meta, string typeSlug, string id)
+    {
+        if (meta.Commands.Count == 0) return string.Empty;
+        var sb = new StringBuilder();
+        var safeId = WebUtility.UrlEncode(id);
+        foreach (var cmd in meta.Commands)
+        {
+            var btnClass = cmd.Destructive ? "btn-outline-danger" : "btn-outline-secondary";
+            var icon = string.IsNullOrEmpty(cmd.Icon) ? "" : $"<i class=\"bi {WebUtility.HtmlEncode(cmd.Icon)}\" aria-hidden=\"true\"></i> ";
+            var confirm = string.IsNullOrEmpty(cmd.ConfirmMessage) ? "" : $" data-confirm=\"{WebUtility.HtmlEncode(cmd.ConfirmMessage)}\"";
+            sb.Append($"<button class=\"btn btn-sm {btnClass} ms-2\" data-command-url=\"/api/{typeSlug}/{safeId}/_command/{WebUtility.UrlEncode(cmd.Name)}\"{confirm} onclick=\"executeRemoteCommand(this)\">{icon}{WebUtility.HtmlEncode(cmd.Label)}</button>");
+        }
+        return sb.ToString();
+    }
+
+    public async ValueTask DataCommandHandler(HttpContext context)
+    {
+        var meta = ResolveEntity(context, out _, out var errorMessage);
+        var id = GetRouteValue(context, "id");
+        var commandName = GetRouteValue(context, "command");
+        if (meta == null || string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(commandName))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await WriteJsonResponseAsync(context, new { success = false, message = errorMessage ?? "Not found." });
+            return;
+        }
+
+        var cmd = meta.Commands.FirstOrDefault(c => string.Equals(c.Name, commandName, StringComparison.OrdinalIgnoreCase));
+        if (cmd == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await WriteJsonResponseAsync(context, new { success = false, message = $"Command '{commandName}' not found." });
+            return;
+        }
+
+        // Permission check
+        if (!cmd.OverrideEntityPermissions)
+        {
+            if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await WriteJsonResponseAsync(context, new { success = false, message = "Access denied." });
+                return;
+            }
+        }
+
+        if (!string.IsNullOrEmpty(cmd.Permission))
+        {
+            var user = await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null || !user.Permissions.Split(',', StringSplitOptions.TrimEntries).Contains(cmd.Permission, StringComparer.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                await WriteJsonResponseAsync(context, new { success = false, message = "Insufficient permissions." });
+                return;
+            }
+        }
+
+        var instance = await DataScaffold.LoadAsync(meta, id);
+        if (instance == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await WriteJsonResponseAsync(context, new { success = false, message = "Item not found." });
+            return;
+        }
+
+        try
+        {
+            RemoteCommandResult result;
+            var returnType = cmd.Method.ReturnType;
+            if (returnType == typeof(RemoteCommandResult))
+            {
+                result = (RemoteCommandResult)cmd.Method.Invoke(instance, null)!;
+            }
+            else if (returnType == typeof(Task<RemoteCommandResult>))
+            {
+                result = await (Task<RemoteCommandResult>)cmd.Method.Invoke(instance, null)!;
+            }
+            else
+            {
+                result = await (ValueTask<RemoteCommandResult>)cmd.Method.Invoke(instance, null)!;
+            }
+
+            // Save the entity in case the command modified it
+            await DataScaffold.SaveAsync(meta, instance);
+
+            context.Response.StatusCode = result.Success ? StatusCodes.Status200OK : StatusCodes.Status422UnprocessableEntity;
+            await WriteJsonResponseAsync(context, new { success = result.Success, message = result.Message, redirectUrl = result.RedirectUrl });
+        }
+        catch (Exception ex)
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await WriteJsonResponseAsync(context, new { success = false, message = $"Command failed: {ex.InnerException?.Message ?? ex.Message}" });
+        }
     }
 }
