@@ -1,0 +1,14 @@
+{
+  "name": "baremetalweb-playwright-tests",
+  "version": "1.0.0",
+  "description": "Playwright end-to-end tests for BareMetalWeb",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.40.0",
+    "@types/node": "^20.10.0"
+  }
+}
