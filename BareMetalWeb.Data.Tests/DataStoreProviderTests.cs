@@ -4,6 +4,7 @@ using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
 
+[Collection("DataStoreProvider")]
 public class DataStoreProviderTests
 {
     [Fact]
