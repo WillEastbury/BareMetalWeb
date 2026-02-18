@@ -258,9 +258,30 @@ public static class DataScaffold
             if (!forCreate && !field.Edit)
                 continue;
 
-            // Skip auto-generated ID fields in create forms
-            if (forCreate && field.IdGeneration != IdGenerationStrategy.None)
+            // Auto-generated ID fields: show as readonly indicator
+            if (field.IdGeneration != IdGenerationStrategy.None)
+            {
+                if (forCreate)
+                {
+                    fields.Add(new FormField(
+                        FormFieldType.ReadOnly,
+                        field.Name,
+                        field.Label,
+                        Required: false,
+                        Placeholder: "Auto-generated"));
+                }
+                else
+                {
+                    var idValue = instance != null ? field.Property.GetValue(instance)?.ToString() : null;
+                    fields.Add(new FormField(
+                        FormFieldType.ReadOnly,
+                        field.Name,
+                        field.Label,
+                        Required: false,
+                        Value: idValue ?? string.Empty));
+                }
                 continue;
+            }
 
             var value = instance != null ? field.Property.GetValue(instance) : null;
             if (IsChildListType(field.Property.PropertyType, out var childType))

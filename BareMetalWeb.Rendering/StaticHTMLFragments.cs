@@ -120,6 +120,15 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                 new[] { id, name, value, placeholder, required }
             );
     }
+    private byte[] InputReadOnlyTemplate(string id, string name, string value, string placeholder)
+    {
+        return _fragmentStore
+            .ZeroAllocationReplaceCopyAndEncode(
+                _fragmentStore.ReturnTemplateFragment("InputReadOnly"),
+                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}" },
+                new[] { id, name, value, placeholder }
+            );
+    }
     private byte[] InputTextAreaTemplate(string id, string name, string value, string placeholder, string required)
     {
         return _fragmentStore
@@ -458,6 +467,8 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                     Encode(field.LinkClass ?? "link-primary"));
             case FormFieldType.Hidden:
                 return InputHiddenTemplate(name, name, value);
+            case FormFieldType.ReadOnly:
+                return InputReadOnlyTemplate(name, name, value, placeholder);
             default:
                 return InputTextTemplate(name, name, value, placeholder, required);
         }
