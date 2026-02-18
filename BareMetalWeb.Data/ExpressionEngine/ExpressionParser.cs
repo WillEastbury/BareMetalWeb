@@ -38,7 +38,49 @@ public sealed class ExpressionParser
 
     private ExpressionNode ParseExpression()
     {
-        return ParseAddSubtract();
+        return ParseComparison();
+    }
+
+    private ExpressionNode ParseComparison()
+    {
+        var left = ParseAddSubtract();
+
+        if (_position < _expression.Length)
+        {
+            string? op = null;
+            if (_currentChar == '>' && _position + 1 < _expression.Length && _expression[_position + 1] == '=')
+            {
+                op = ">="; Advance(); Advance(); SkipWhitespace();
+            }
+            else if (_currentChar == '<' && _position + 1 < _expression.Length && _expression[_position + 1] == '=')
+            {
+                op = "<="; Advance(); Advance(); SkipWhitespace();
+            }
+            else if (_currentChar == '!' && _position + 1 < _expression.Length && _expression[_position + 1] == '=')
+            {
+                op = "!="; Advance(); Advance(); SkipWhitespace();
+            }
+            else if (_currentChar == '=' && _position + 1 < _expression.Length && _expression[_position + 1] == '=')
+            {
+                op = "=="; Advance(); Advance(); SkipWhitespace();
+            }
+            else if (_currentChar == '>')
+            {
+                op = ">"; Advance(); SkipWhitespace();
+            }
+            else if (_currentChar == '<')
+            {
+                op = "<"; Advance(); SkipWhitespace();
+            }
+
+            if (op != null)
+            {
+                var right = ParseAddSubtract();
+                left = new BinaryOpNode(left, op, right);
+            }
+        }
+
+        return left;
     }
 
     private ExpressionNode ParseAddSubtract()
@@ -75,12 +117,12 @@ public sealed class ExpressionParser
 
     private ExpressionNode ParseUnary()
     {
-        SkipWhitespace(); // Skip whitespace before unary operator
-        if (_currentChar == '-' || _currentChar == '+')
+        SkipWhitespace();
+        if (_position < _expression.Length && (_currentChar == '-' || _currentChar == '+'))
         {
             var op = _currentChar.ToString();
             Advance();
-            SkipWhitespace(); // Skip whitespace after unary operator
+            SkipWhitespace();
             return new UnaryOpNode(op, ParseUnary());
         }
 
@@ -164,6 +206,7 @@ public sealed class ExpressionParser
             throw new InvalidOperationException($"Unterminated string literal starting at position {_position}");
 
         Advance();
+        SkipWhitespace();
         return new LiteralNode(sb.ToString());
     }
 
@@ -181,6 +224,7 @@ public sealed class ExpressionParser
         if (!decimal.TryParse(numberStr, NumberStyles.Any, CultureInfo.InvariantCulture, out var value))
             throw new InvalidOperationException($"Invalid number format: {numberStr}");
 
+        SkipWhitespace();
         return new LiteralNode(value);
     }
 
@@ -222,16 +266,14 @@ public sealed class ExpressionParser
             throw new InvalidOperationException($"Expected ')' at position {_position}");
 
         Advance();
+        SkipWhitespace();
         return new FunctionNode(functionName, arguments);
     }
 
     private void Advance()
     {
         _position++;
-        if (_position < _expression.Length)
-        {
-            _currentChar = _expression[_position];
-        }
+        _currentChar = _position < _expression.Length ? _expression[_position] : '\0';
     }
 
     private void SkipWhitespace()

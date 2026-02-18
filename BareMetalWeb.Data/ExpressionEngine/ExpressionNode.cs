@@ -105,6 +105,12 @@ public sealed class BinaryOpNode : ExpressionNode
             "*" => left * right,
             "/" => right != 0 ? left / right : throw new DivideByZeroException(),
             "%" => right != 0 ? left % right : throw new DivideByZeroException(),
+            ">" => (object)(left > right),
+            "<" => (object)(left < right),
+            ">=" => (object)(left >= right),
+            "<=" => (object)(left <= right),
+            "==" => (object)(left == right),
+            "!=" => (object)(left != right),
             _ => throw new InvalidOperationException($"Unknown operator: {Operator}")
         };
     }
