@@ -121,10 +121,11 @@ public class CookieProtectionTests : IDisposable
         var original = "test-session-id";
         var protected1 = CookieProtection.Protect(original);
         
-        // Tamper with the MAC part
+        // Tamper with the MAC by completely replacing it with a different base64 string
         var parts = protected1.Split('.');
-        var tamperedMac = parts[1].Substring(0, parts[1].Length - 1) + "X";
-        var tampered = parts[0] + "." + tamperedMac;
+        // Use a completely different MAC value (all zeros, same length as SHA256 = 32 bytes)
+        var fakeMac = Convert.ToBase64String(new byte[32]).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+        var tampered = parts[0] + "." + fakeMac;
 
         // Act
         var result = CookieProtection.Unprotect(tampered);
