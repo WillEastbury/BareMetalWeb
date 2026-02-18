@@ -229,3 +229,20 @@ dotnet publish BareMetalWeb.CLI -c Release --runtime linux-arm64 -p:PublishAot=t
 ```
 
 
+
+## Running Tests with Clean Output
+
+The repository includes a helper script for running tests with minimal, scannable output:
+
+```bash
+# Run all tests with clean output (no build noise)
+./run-tests.sh --no-build
+
+# Run all tests (includes build)
+./run-tests.sh
+
+# Run specific test project
+./run-tests.sh --no-build BareMetalWeb.Core.Tests/
+```
+
+For more details, see [TESTING.md](TESTING.md).
