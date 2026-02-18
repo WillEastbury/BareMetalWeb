@@ -1844,6 +1844,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var idValue = idIndex >= 0 && idIndex < row.Length ? row[idIndex]?.Trim() : string.Empty;
             var isCreate = true;
             BaseDataObject instance;
+            var upsertWithExplicitId = false;
             if (upsert && !string.IsNullOrWhiteSpace(idValue))
             {
                 var existing = await DataScaffold.LoadAsync(meta, idValue!);
@@ -1856,6 +1857,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 {
                     instance = meta.Handlers.Create();
                     instance.Id = idValue;
+                    upsertWithExplicitId = true;
                 }
             }
             else
@@ -1884,7 +1886,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate);
-            if (isCreate)
+            if (isCreate && !upsertWithExplicitId)
                 await DataScaffold.ApplyAutoIdAsync(meta, instance, context.RequestAborted).ConfigureAwait(false);
             await DataScaffold.SaveAsync(meta, instance);
             if (isCreate)
