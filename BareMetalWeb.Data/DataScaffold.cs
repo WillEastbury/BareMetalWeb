@@ -335,7 +335,9 @@ public static class DataScaffold
             }
             var selectedValue = effectiveFieldType == FormFieldType.YesNo
                 ? (IsTruthy(value) ? "true" : "false")
-                : effectiveFieldType == FormFieldType.Enum ? value?.ToString() : null;
+                : effectiveFieldType == FormFieldType.Enum || effectiveFieldType == FormFieldType.LookupList
+                    ? value?.ToString()
+                    : null;
 
             lookupOptions ??= effectiveFieldType == FormFieldType.Enum
                 ? BuildEnumOptions(field.Property.PropertyType)
