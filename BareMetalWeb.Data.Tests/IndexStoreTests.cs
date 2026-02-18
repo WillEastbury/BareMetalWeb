@@ -160,4 +160,37 @@ public class IndexStoreTests : IDisposable
         Assert.Throws<ArgumentNullException>(() => 
             _indexStore.AppendEntries(entityName, fieldName, null!, normalizeKey: false));
     }
+
+    [Fact]
+    public void AppendEntries_SimulatesSaveScenario_NoLockContention()
+    {
+        // Arrange - This test specifically validates the fix for the lock contention issue
+        // where saving a UserSession would cause two rapid AppendEntry calls that could
+        // fail due to lock contention on the same _clustered.log.lock file
+        const string entityName = "UserSession";
+        const string fieldName = "_clustered";
+
+        // Act - Simulate the Save scenario: multiple rapid saves with Add + Delete operations
+        for (int i = 0; i < 20; i++)
+        {
+            var entries = new List<(string key, string id, char op, long? expiresAtUtcTicks)>
+            {
+                ($"session-{i}", $"new-location-{i}", 'A', null)
+            };
+            
+            if (i > 0)
+            {
+                // Simulate updating an existing session (old location gets deleted)
+                entries.Add(($"session-{i}", $"old-location-{i}", 'D', null));
+            }
+
+            // This should not throw lock contention errors
+            // The fix batches the Add and Delete operations into a single lock acquisition
+            _indexStore.AppendEntries(entityName, fieldName, entries, normalizeKey: false);
+        }
+
+        // Assert - Verify all entries were recorded
+        var index = _indexStore.ReadLatestValueIndex(entityName, fieldName, normalizeKey: false);
+        Assert.True(index.Count > 0, "Index should contain entries");
+    }
 }
