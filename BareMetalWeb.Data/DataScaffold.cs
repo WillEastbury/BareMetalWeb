@@ -26,7 +26,8 @@ public sealed record DataFieldMetadata(
     string? Placeholder,
     DataLookupConfig? Lookup,
     IdGenerationStrategy IdGeneration,
-    ComputedFieldConfig? Computed
+    ComputedFieldConfig? Computed,
+    CalculatedFieldAttribute? Calculated
 );
 
 public sealed record DataEntityMetadata(
@@ -372,6 +373,29 @@ public static class DataScaffold
                     Value: computedStringValue ?? string.Empty,
                     IsComputed: true,
                     ComputedStrategy: computed.Strategy.ToString()
+                ));
+                continue;
+            }
+
+            // Calculated fields: always render as readonly with expression
+            if (field.Calculated != null)
+            {
+                var calculated = field.Calculated;
+                
+                // Get current value (for display, will be updated by JS)
+                var calculatedValue = instance != null ? field.Property.GetValue(instance) : null;
+                var calculatedStringValue = ToInputString(calculatedValue, field.Property.PropertyType, field.FieldType);
+
+                // Render as readonly with calculated indicator
+                fields.Add(new FormField(
+                    FormFieldType.ReadOnly,
+                    field.Name,
+                    field.Label,
+                    Required: false,
+                    Value: calculatedStringValue ?? string.Empty,
+                    IsCalculated: true,
+                    CalculatedExpression: calculated.Expression,
+                    DisplayFormat: calculated.DisplayFormat
                 ));
                 continue;
             }
@@ -2443,6 +2467,7 @@ public static class DataScaffold
             var lookupAttribute = prop.GetCustomAttribute<DataLookupAttribute>();
             var idGenAttribute = prop.GetCustomAttribute<IdGenerationAttribute>();
             var computedAttribute = prop.GetCustomAttribute<ComputedFieldAttribute>();
+            var calculatedAttribute = prop.GetCustomAttribute<CalculatedFieldAttribute>();
             if (fieldAttribute == null && !useConvention)
                 continue;
 
@@ -2494,11 +2519,12 @@ public static class DataScaffold
                 fieldAttribute?.View ?? true,
                 fieldAttribute?.Edit ?? true,
                 fieldAttribute?.Create ?? true,
-                (fieldAttribute?.ReadOnly ?? false) || (computed != null), // Computed fields are always readonly
+                (fieldAttribute?.ReadOnly ?? false) || (computed != null) || (calculatedAttribute != null), // Computed and calculated fields are readonly
                 fieldAttribute?.Placeholder,
                 lookup,
                 idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
-                computed
+                computed,
+                calculatedAttribute
             ));
         }
 
