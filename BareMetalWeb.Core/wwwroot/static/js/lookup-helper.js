@@ -2,6 +2,14 @@
 (function() {
     'use strict';
 
+    // Clean up cache-busting params from the URL after page load
+    if (window.location.search.includes('_refresh')) {
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('_refresh');
+        cleanUrl.searchParams.delete('_field');
+        window.history.replaceState(null, '', cleanUrl.toString());
+    }
+
     // Refresh lookup field values
     window.refreshLookup = function(fieldName) {
         const selectElement = document.getElementById(fieldName);
