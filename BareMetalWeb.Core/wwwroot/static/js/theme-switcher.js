@@ -58,7 +58,7 @@
         const themeLink = getThemeLink();
 
         document.body.removeAttribute('data-bs-theme');
-        themeLink.href = LOCAL_THEME_PATH;
+        themeLink.href = `https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/${themeName}/bootstrap.min.css`;
 
         setStoredTheme(themeName);
     }
