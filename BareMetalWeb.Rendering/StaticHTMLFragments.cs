@@ -36,6 +36,8 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
     private readonly byte[] MoneyGroupStart;
     private readonly byte[] MoneyGroupMid;
     private readonly byte[] MoneyGroupEnd;
+    private readonly byte[] LookupGroupStart;
+    private readonly byte[] LookupGroupEnd;
     private readonly byte[] InputPassword;
     private readonly byte[] InputTextArea;
     private readonly byte[] InputFile;
@@ -67,6 +69,8 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
         MoneyGroupStart = Encoding.UTF8.GetBytes(_fragmentStore.ReturnTemplateFragment("MoneyGroupStart"));
         MoneyGroupMid = Encoding.UTF8.GetBytes(_fragmentStore.ReturnTemplateFragment("MoneyGroupMid"));
         MoneyGroupEnd = Encoding.UTF8.GetBytes(_fragmentStore.ReturnTemplateFragment("MoneyGroupEnd"));
+        LookupGroupStart = Encoding.UTF8.GetBytes(_fragmentStore.ReturnTemplateFragment("LookupGroupStart"));
+        LookupGroupEnd = Encoding.UTF8.GetBytes(_fragmentStore.ReturnTemplateFragment("LookupGroupEnd"));
         InputPassword = Encoding.UTF8.GetBytes(_fragmentStore.ReturnTemplateFragment("InputPassword"));
         InputTextArea = Encoding.UTF8.GetBytes(_fragmentStore.ReturnTemplateFragment("InputTextArea"));
         InputFile = Encoding.UTF8.GetBytes(_fragmentStore.ReturnTemplateFragment("InputFile"));
@@ -285,6 +289,26 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
     private byte[] SelectEndTemplate()
     {
         return Encoding.UTF8.GetBytes(_fragmentStore.ReturnTemplateFragment("SelectEnd"));
+    }
+    
+    private byte[] LookupRefreshButtonTemplate(string fieldName)
+    {
+        return _fragmentStore
+            .ZeroAllocationReplaceCopyAndEncode(
+                _fragmentStore.ReturnTemplateFragment("LookupRefreshButton"),
+                new[] { "{{fieldName}}" },
+                new[] { fieldName }
+            );
+    }
+    
+    private byte[] LookupAddButtonTemplate(string targetSlug, string targetType, string fieldName)
+    {
+        return _fragmentStore
+            .ZeroAllocationReplaceCopyAndEncode(
+                _fragmentStore.ReturnTemplateFragment("LookupAddButton"),
+                new[] { "{{targetSlug}}", "{{targetType}}", "{{fieldName}}" },
+                new[] { targetSlug, targetType, fieldName }
+            );
     }
     public byte[] RenderMenuOptions(List<IMenuOption> options, bool rightAligned)
     {
@@ -517,6 +541,16 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
         var buffer = new ArrayBufferWriter<byte>();
         var options = field.LookupOptions ?? Array.Empty<KeyValuePair<string, string>>();
         var name = Encode(field.Name);
+        
+        // Check if we have lookup metadata (not for enum fields)
+        var hasLookupMetadata = !string.IsNullOrEmpty(field.LookupTargetSlug);
+        
+        // If we have lookup metadata, wrap in input-group for buttons
+        if (hasLookupMetadata)
+        {
+            Write(buffer, LookupGroupStart);
+        }
+        
         Write(buffer, SelectStartTemplate(name, name, required));
         foreach (var option in options)
         {
@@ -524,6 +558,22 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
             Write(buffer, SelectOptionTemplate(Encode(option.Key), Encode(option.Value), selected));
         }
         Write(buffer, SelectEndTemplate());
+        
+        // Add refresh and add buttons if we have lookup metadata
+        if (hasLookupMetadata)
+        {
+            Write(buffer, LookupRefreshButtonTemplate(name));
+            if (!string.IsNullOrEmpty(field.LookupTargetSlug))
+            {
+                Write(buffer, LookupAddButtonTemplate(
+                    Encode(field.LookupTargetSlug ?? string.Empty),
+                    Encode(field.LookupTargetType ?? string.Empty),
+                    name
+                ));
+            }
+            Write(buffer, LookupGroupEnd);
+        }
+        
         return buffer.WrittenSpan.ToArray();
     }
 
