@@ -1,0 +1,59 @@
+name: Apply Issue Labels
+
+# This workflow can be triggered manually to apply categorized labels to all open issues
+# Based on the categorization defined in ISSUE_CATEGORIZATION.md
+
+on:
+  workflow_dispatch:
+
+jobs:
+  apply-labels:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Apply issue labels
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Define labels (Priority | Type | Component)
+          
+          # Critical Issues
+          gh issue edit 75 --add-label "Critical" --add-label "Security" --add-label "Host" --repo ${{ github.repository }}
+          gh issue edit 76 --add-label "Critical" --add-label "Security" --add-label "Host" --repo ${{ github.repository }}
+          gh issue edit 77 --add-label "Critical" --add-label "Bug" --add-label "Scaffolder" --repo ${{ github.repository }}
+          
+          # Important Issues
+          gh issue edit 60 --add-label "Important" --add-label "New Feature Request" --add-label "Scaffolder" --repo ${{ github.repository }}
+          gh issue edit 61 --add-label "Important" --add-label "New Feature Request" --add-label "Query" --repo ${{ github.repository }}
+          gh issue edit 62 --add-label "Important" --add-label "New Feature Request" --add-label "Storage" --repo ${{ github.repository }}
+          gh issue edit 63 --add-label "Important" --add-label "New Feature Request" --add-label "Storage" --repo ${{ github.repository }}
+          gh issue edit 71 --add-label "Important" --add-label "New Feature Request" --add-label "Indexing" --repo ${{ github.repository }}
+          gh issue edit 73 --add-label "Important" --add-label "Bug" --add-label "Host" --repo ${{ github.repository }}
+          gh issue edit 74 --add-label "Important" --add-label "Bug" --add-label "HTML" --repo ${{ github.repository }}
+          gh issue edit 78 --add-label "Important" --add-label "Bug" --add-label "Host" --repo ${{ github.repository }}
+          gh issue edit 86 --add-label "Important" --add-label "Bug" --add-label "Scaffolder" --repo ${{ github.repository }}
+          
+          # Nice to Have Issues
+          gh issue edit 57 --add-label "Nice to Have" --add-label "New Feature Request" --add-label "Scaffolder" --repo ${{ github.repository }}
+          gh issue edit 58 --add-label "Nice to Have" --add-label "New Feature Request" --add-label "Scaffolder" --repo ${{ github.repository }}
+          gh issue edit 59 --add-label "Nice to Have" --add-label "New Feature Request" --add-label "API Extension" --repo ${{ github.repository }}
+          gh issue edit 64 --add-label "Nice to Have" --add-label "New Feature Request" --add-label "HTML" --repo ${{ github.repository }}
+          gh issue edit 65 --add-label "Nice to Have" --add-label "New Feature Request" --add-label "Scaffolder" --repo ${{ github.repository }}
+          gh issue edit 66 --add-label "Nice to Have" --add-label "New Feature Request" --add-label "HTML" --repo ${{ github.repository }}
+          gh issue edit 69 --add-label "Nice to Have" --add-label "New Feature Request" --add-label "Query" --repo ${{ github.repository }}
+          gh issue edit 70 --add-label "Nice to Have" --add-label "New Feature Request" --add-label "Query" --repo ${{ github.repository }}
+          gh issue edit 79 --add-label "Nice to Have" --add-label "Enrichment" --add-label "Other" --repo ${{ github.repository }}
+          gh issue edit 80 --add-label "Nice to Have" --add-label "Enrichment" --add-label "HTML" --repo ${{ github.repository }}
+          gh issue edit 84 --add-label "Nice to Have" --add-label "Enrichment" --add-label "HTML" --repo ${{ github.repository }}
+          gh issue edit 107 --add-label "Nice to Have" --add-label "New Feature Request" --add-label "HTML" --repo ${{ github.repository }}
+          
+          # Superfluous Issues (Exploration/Research)
+          gh issue edit 67 --add-label "Superfluous" --add-label "New Feature Request" --add-label "Renderer" --repo ${{ github.repository }}
+          gh issue edit 68 --add-label "Superfluous" --add-label "New Feature Request" --add-label "HTML" --repo ${{ github.repository }}
+          
+          echo "✅ Labels applied to all 26 open issues"
