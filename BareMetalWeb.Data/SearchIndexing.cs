@@ -40,6 +40,7 @@ internal sealed class SearchIndexManager
     {
         public PropertyInfo[] IndexedProperties { get; init; } = Array.Empty<PropertyInfo>();
         public DataIndexAttribute[] Attributes { get; init; } = Array.Empty<DataIndexAttribute>();
+        public HashSet<IndexKind> IndexKinds { get; init; } = new();
     }
 
     private sealed class IndexData
@@ -53,6 +54,46 @@ internal sealed class SearchIndexManager
         // Prefix tree for efficient prefix matching (token prefix -> full tokens)
         public Dictionary<string, HashSet<string>> PrefixTree { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> WarnedKinds { get; } = new(StringComparer.OrdinalIgnoreCase);
+        
+        // BTree index data (sorted tokens for range queries)
+        public SortedDictionary<string, HashSet<string>>? BTreeTokens { get; set; }
+        
+        // Treap index data (randomized BST with priorities)
+        public TreapNode? TreapRoot { get; set; }
+        public Dictionary<string, HashSet<string>>? TreapTokenToIds { get; set; }
+        
+        // Bloom filter data
+        public BloomFilterData? BloomFilter { get; set; }
+    }
+    
+    // BTree uses SortedDictionary, so no additional node class needed
+    
+    // Treap node for randomized BST
+    private sealed class TreapNode
+    {
+        public string Token { get; set; } = string.Empty;
+        public int Priority { get; set; }
+        public HashSet<string> Ids { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+        public TreapNode? Left { get; set; }
+        public TreapNode? Right { get; set; }
+    }
+    
+    // Bloom filter implementation
+    private sealed class BloomFilterData
+    {
+        public BitArray Bits { get; set; }
+        public int HashCount { get; set; }
+        public int Size { get; set; }
+        // We still need to store IDs for retrieval (Bloom only tells us "maybe present")
+        public Dictionary<string, HashSet<string>> TokenToIds { get; set; }
+        
+        public BloomFilterData(int size = 10000, int hashCount = 3)
+        {
+            Size = size;
+            HashCount = hashCount;
+            Bits = new BitArray(size);
+            TokenToIds = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     private readonly string _indexRoot;
@@ -81,6 +122,7 @@ internal sealed class SearchIndexManager
             var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance);
             var indexedProps = new List<PropertyInfo>();
             var attrs = new List<DataIndexAttribute>();
+            var kinds = new HashSet<IndexKind>();
 
             foreach (var prop in props)
             {
@@ -89,13 +131,15 @@ internal sealed class SearchIndexManager
                 {
                     indexedProps.Add(prop);
                     attrs.Add(attr);
+                    kinds.Add(attr.Kind);
                 }
             }
 
             return new TypeMetadata
             {
                 IndexedProperties = indexedProps.ToArray(),
-                Attributes = attrs.ToArray()
+                Attributes = attrs.ToArray(),
+                IndexKinds = kinds
             };
         });
     }
@@ -124,11 +168,12 @@ internal sealed class SearchIndexManager
 
         var type = obj.GetType();
         var index = _indexes.GetOrAdd(type, LoadIndex);
+        var metadata = GetOrCreateTypeMetadata(type);
         var tokens = BuildTokens(obj, index);
 
         lock (index.Sync)
         {
-            RemoveObjectInternal(index, obj.Id);
+            RemoveObjectInternal(index, obj.Id, metadata);
             if (tokens.Count == 0)
             {
                 index.IsBuilt = true;
@@ -139,15 +184,24 @@ internal sealed class SearchIndexManager
             index.IdToTokens[obj.Id] = tokens;
             foreach (var token in tokens)
             {
+                // Add to Inverted index (always present for backward compatibility)
                 if (!index.Tokens.TryGetValue(token, out var ids))
                 {
                     ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     index.Tokens[token] = ids;
                 }
                 ids.Add(obj.Id);
-
-                // Build prefix tree for efficient prefix matching
                 AddToPrefixTree(index, token);
+
+                // Add to other index types as needed
+                if (metadata.IndexKinds.Contains(IndexKind.BTree))
+                    AddToBTree(index, token, obj.Id);
+                
+                if (metadata.IndexKinds.Contains(IndexKind.Treap))
+                    AddToTreap(index, token, obj.Id);
+                
+                if (metadata.IndexKinds.Contains(IndexKind.Bloom))
+                    AddToBloomFilter(index, token, obj.Id);
             }
 
             index.IsBuilt = true;
@@ -177,21 +231,31 @@ internal sealed class SearchIndexManager
             return;
 
         var type = obj.GetType();
+        var metadata = GetOrCreateTypeMetadata(type);
         var index = _indexes.GetOrAdd(type, LoadIndex);
         lock (index.Sync)
         {
-            RemoveObjectInternal(index, obj.Id);
+            RemoveObjectInternal(index, obj.Id, metadata);
             SaveIndex(type, index);
         }
     }
 
     public IReadOnlyCollection<string> Search(Type type, string queryText, Func<IEnumerable<BaseDataObject>> loadAll)
     {
+        return Search(type, queryText, loadAll, null);
+    }
+
+    public IReadOnlyCollection<string> Search(Type type, string queryText, Func<IEnumerable<BaseDataObject>> loadAll, IndexKind? preferredKind)
+    {
         if (string.IsNullOrWhiteSpace(queryText))
             return Array.Empty<string>();
 
         EnsureBuilt(type, loadAll);
         var index = _indexes.GetOrAdd(type, LoadIndex);
+        var metadata = GetOrCreateTypeMetadata(type);
+        
+        // Determine which index to use
+        var useKind = preferredKind ?? (metadata.IndexKinds.FirstOrDefault());
         
         var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         lock (index.Sync)
@@ -201,43 +265,75 @@ internal sealed class SearchIndexManager
             if (queryTokens.Count == 0)
                 return Array.Empty<string>();
 
-            // Efficient search using inverted index with prefix optimization
+            // Search using the appropriate index type
             foreach (var queryToken in queryTokens)
             {
-                // Check for exact match first (fastest path)
-                if (index.Tokens.TryGetValue(queryToken, out var exactIds))
+                IEnumerable<string> tokenResults;
+                
+                switch (useKind)
                 {
-                    foreach (var id in exactIds)
-                        results.Add(id);
-                    continue;
+                    case IndexKind.BTree:
+                        tokenResults = SearchBTree(index, queryToken);
+                        break;
+                    
+                    case IndexKind.Treap:
+                        tokenResults = SearchTreap(index, queryToken);
+                        break;
+                    
+                    case IndexKind.Bloom:
+                        tokenResults = SearchBloomFilter(index, queryToken);
+                        break;
+                    
+                    case IndexKind.Inverted:
+                    default:
+                        tokenResults = SearchInverted(index, queryToken);
+                        break;
                 }
-
-                // Use prefix tree for substring matching if available
-                if (queryToken.Length >= 3 && index.PrefixTree.TryGetValue(queryToken, out var prefixMatches))
-                {
-                    foreach (var matchedToken in prefixMatches)
-                    {
-                        if (index.Tokens.TryGetValue(matchedToken, out var ids))
-                        {
-                            foreach (var id in ids)
-                                results.Add(id);
-                        }
-                    }
-                    continue;
-                }
-
-                // Fallback to contains search only for short query tokens
-                foreach (var entry in index.Tokens)
-                {
-                    if (entry.Key.Contains(queryToken, StringComparison.OrdinalIgnoreCase))
-                    {
-                        foreach (var id in entry.Value)
-                            results.Add(id);
-                    }
-                }
+                
+                foreach (var id in tokenResults)
+                    results.Add(id);
             }
         }
 
+        return results;
+    }
+
+    private IEnumerable<string> SearchInverted(IndexData index, string queryToken)
+    {
+        var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
+        // Check for exact match first (fastest path)
+        if (index.Tokens.TryGetValue(queryToken, out var exactIds))
+        {
+            foreach (var id in exactIds)
+                results.Add(id);
+            return results;
+        }
+
+        // Use prefix tree for substring matching if available
+        if (queryToken.Length >= 3 && index.PrefixTree.TryGetValue(queryToken, out var prefixMatches))
+        {
+            foreach (var matchedToken in prefixMatches)
+            {
+                if (index.Tokens.TryGetValue(matchedToken, out var ids))
+                {
+                    foreach (var id in ids)
+                        results.Add(id);
+                }
+            }
+            return results;
+        }
+
+        // Fallback to contains search only for short query tokens
+        foreach (var entry in index.Tokens)
+        {
+            if (entry.Key.Contains(queryToken, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var id in entry.Value)
+                    results.Add(id);
+            }
+        }
+        
         return results;
     }
 
@@ -361,6 +457,33 @@ internal sealed class SearchIndexManager
         index.IdToTokens.Clear();
         index.PrefixTree.Clear();
         
+        // Get metadata to determine which index types to build
+        var firstObj = loadAll().FirstOrDefault();
+        if (firstObj == null)
+            return;
+        
+        var metadata = GetOrCreateTypeMetadata(firstObj.GetType());
+        
+        // Clear other index types
+        if (metadata.IndexKinds.Contains(IndexKind.BTree))
+        {
+            index.BTreeTokens?.Clear();
+            InitializeBTreeIndex(index);
+        }
+        
+        if (metadata.IndexKinds.Contains(IndexKind.Treap))
+        {
+            index.TreapRoot = null;
+            index.TreapTokenToIds?.Clear();
+            InitializeTreapIndex(index);
+        }
+        
+        if (metadata.IndexKinds.Contains(IndexKind.Bloom))
+        {
+            index.BloomFilter = null;
+            InitializeBloomFilter(index);
+        }
+        
         foreach (var obj in loadAll())
         {
             if (obj == null || string.IsNullOrWhiteSpace(obj.Id))
@@ -373,15 +496,24 @@ internal sealed class SearchIndexManager
             index.IdToTokens[obj.Id] = tokens;
             foreach (var token in tokens)
             {
+                // Build inverted index
                 if (!index.Tokens.TryGetValue(token, out var ids))
                 {
                     ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     index.Tokens[token] = ids;
                 }
                 ids.Add(obj.Id);
-
-                // Build prefix tree
                 AddToPrefixTree(index, token);
+                
+                // Build other index types
+                if (metadata.IndexKinds.Contains(IndexKind.BTree))
+                    AddToBTree(index, token, obj.Id);
+                
+                if (metadata.IndexKinds.Contains(IndexKind.Treap))
+                    AddToTreap(index, token, obj.Id);
+                
+                if (metadata.IndexKinds.Contains(IndexKind.Bloom))
+                    AddToBloomFilter(index, token, obj.Id);
             }
         }
     }
@@ -396,20 +528,6 @@ internal sealed class SearchIndexManager
         {
             var prop = metadata.IndexedProperties[i];
             var attr = metadata.Attributes[i];
-
-            if (attr.Kind != IndexKind.Inverted)
-            {
-                var warningKey = $"{type.FullName}:{prop.Name}:{attr.Kind}";
-                var shouldLog = false;
-                lock (index.WarnedKinds)
-                {
-                    if (index.WarnedKinds.Add(warningKey))
-                        shouldLog = true;
-                }
-
-                if (shouldLog)
-                    _logger?.LogInfo($"Index kind {attr.Kind} not implemented; using inverted index for {type.Name}.{prop.Name}.");
-            }
 
             var value = prop.GetValue(obj);
             if (value == null)
@@ -448,34 +566,45 @@ internal sealed class SearchIndexManager
         return tokens;
     }
 
-    private static void RemoveObjectInternal(IndexData index, string id)
+    private void RemoveObjectInternal(IndexData index, string id, TypeMetadata metadata)
     {
         if (!index.IdToTokens.TryGetValue(id, out var tokens))
             return;
 
         foreach (var token in tokens)
         {
-            if (!index.Tokens.TryGetValue(token, out var ids))
-                continue;
-
-            ids.Remove(id);
-            if (ids.Count == 0)
+            // Remove from inverted index
+            if (index.Tokens.TryGetValue(token, out var ids))
             {
-                index.Tokens.Remove(token);
-                
-                // Remove from prefix tree if this was the last occurrence
-                var minPrefixLen = Math.Min(3, token.Length);
-                for (int len = minPrefixLen; len <= token.Length; len++)
+                ids.Remove(id);
+                if (ids.Count == 0)
                 {
-                    var prefix = token.Substring(0, len);
-                    if (index.PrefixTree.TryGetValue(prefix, out var fullTokens))
+                    index.Tokens.Remove(token);
+                    
+                    // Remove from prefix tree if this was the last occurrence
+                    var minPrefixLen = Math.Min(3, token.Length);
+                    for (int len = minPrefixLen; len <= token.Length; len++)
                     {
-                        fullTokens.Remove(token);
-                        if (fullTokens.Count == 0)
-                            index.PrefixTree.Remove(prefix);
+                        var prefix = token.Substring(0, len);
+                        if (index.PrefixTree.TryGetValue(prefix, out var fullTokens))
+                        {
+                            fullTokens.Remove(token);
+                            if (fullTokens.Count == 0)
+                                index.PrefixTree.Remove(prefix);
+                        }
                     }
                 }
             }
+
+            // Remove from other index types
+            if (metadata.IndexKinds.Contains(IndexKind.BTree))
+                RemoveFromBTree(index, token, id);
+            
+            if (metadata.IndexKinds.Contains(IndexKind.Treap))
+                RemoveFromTreap(index, token, id);
+            
+            if (metadata.IndexKinds.Contains(IndexKind.Bloom))
+                RemoveFromBloomFilter(index, token, id);
         }
 
         index.IdToTokens.Remove(id);
@@ -578,4 +707,327 @@ internal sealed class SearchIndexManager
 
     private string GetIndexPath(Type type)
         => Path.Combine(_indexRoot, $"{type.Name}.idx");
+
+    // ===== BTree Index Methods =====
+    private void InitializeBTreeIndex(IndexData index)
+    {
+        if (index.BTreeTokens == null)
+            index.BTreeTokens = new SortedDictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private void AddToBTree(IndexData index, string token, string id)
+    {
+        InitializeBTreeIndex(index);
+        if (!index.BTreeTokens!.TryGetValue(token, out var ids))
+        {
+            ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            index.BTreeTokens[token] = ids;
+        }
+        ids.Add(id);
+    }
+
+    private void RemoveFromBTree(IndexData index, string token, string id)
+    {
+        if (index.BTreeTokens == null)
+            return;
+        
+        if (index.BTreeTokens.TryGetValue(token, out var ids))
+        {
+            ids.Remove(id);
+            if (ids.Count == 0)
+                index.BTreeTokens.Remove(token);
+        }
+    }
+
+    private IEnumerable<string> SearchBTree(IndexData index, string queryToken)
+    {
+        if (index.BTreeTokens == null)
+            return Array.Empty<string>();
+
+        var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
+        // Exact match
+        if (index.BTreeTokens.TryGetValue(queryToken, out var exactIds))
+        {
+            foreach (var id in exactIds)
+                results.Add(id);
+        }
+        
+        // Prefix match using SortedDictionary's ordered nature
+        foreach (var entry in index.BTreeTokens)
+        {
+            if (entry.Key.StartsWith(queryToken, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var id in entry.Value)
+                    results.Add(id);
+            }
+            else if (string.Compare(entry.Key, queryToken, StringComparison.OrdinalIgnoreCase) > 0 &&
+                     !entry.Key.StartsWith(queryToken, StringComparison.OrdinalIgnoreCase))
+            {
+                // Stop early when we've passed the range of possible matches
+                break;
+            }
+        }
+        
+        return results;
+    }
+
+    // ===== Treap Index Methods =====
+    private static readonly Random _random = new Random();
+
+    private void InitializeTreapIndex(IndexData index)
+    {
+        if (index.TreapTokenToIds == null)
+            index.TreapTokenToIds = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private void AddToTreap(IndexData index, string token, string id)
+    {
+        InitializeTreapIndex(index);
+        
+        if (!index.TreapTokenToIds!.TryGetValue(token, out var ids))
+        {
+            ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            index.TreapTokenToIds[token] = ids;
+        }
+        ids.Add(id);
+        
+        // Insert into treap structure
+        index.TreapRoot = TreapInsert(index.TreapRoot, token, _random.Next());
+    }
+
+    private TreapNode? TreapInsert(TreapNode? node, string token, int priority)
+    {
+        if (node == null)
+            return new TreapNode { Token = token, Priority = priority };
+
+        var cmp = string.Compare(token, node.Token, StringComparison.OrdinalIgnoreCase);
+        
+        if (cmp == 0)
+        {
+            // Token already exists
+            return node;
+        }
+        else if (cmp < 0)
+        {
+            node.Left = TreapInsert(node.Left, token, priority);
+            if (node.Left != null && node.Left.Priority > node.Priority)
+                node = TreapRotateRight(node);
+        }
+        else
+        {
+            node.Right = TreapInsert(node.Right, token, priority);
+            if (node.Right != null && node.Right.Priority > node.Priority)
+                node = TreapRotateLeft(node);
+        }
+        
+        return node;
+    }
+
+    private TreapNode TreapRotateRight(TreapNode node)
+    {
+        var left = node.Left!;
+        node.Left = left.Right;
+        left.Right = node;
+        return left;
+    }
+
+    private TreapNode TreapRotateLeft(TreapNode node)
+    {
+        var right = node.Right!;
+        node.Right = right.Left;
+        right.Left = node;
+        return right;
+    }
+
+    private void RemoveFromTreap(IndexData index, string token, string id)
+    {
+        if (index.TreapTokenToIds == null)
+            return;
+        
+        if (index.TreapTokenToIds.TryGetValue(token, out var ids))
+        {
+            ids.Remove(id);
+            if (ids.Count == 0)
+            {
+                index.TreapTokenToIds.Remove(token);
+                index.TreapRoot = TreapDelete(index.TreapRoot, token);
+            }
+        }
+    }
+
+    private TreapNode? TreapDelete(TreapNode? node, string token)
+    {
+        if (node == null)
+            return null;
+
+        var cmp = string.Compare(token, node.Token, StringComparison.OrdinalIgnoreCase);
+        
+        if (cmp < 0)
+        {
+            node.Left = TreapDelete(node.Left, token);
+        }
+        else if (cmp > 0)
+        {
+            node.Right = TreapDelete(node.Right, token);
+        }
+        else
+        {
+            // Found the node to delete
+            if (node.Left == null)
+                return node.Right;
+            if (node.Right == null)
+                return node.Left;
+            
+            // Both children exist, rotate based on priority
+            if (node.Left.Priority > node.Right.Priority)
+            {
+                node = TreapRotateRight(node);
+                node.Right = TreapDelete(node.Right, token);
+            }
+            else
+            {
+                node = TreapRotateLeft(node);
+                node.Left = TreapDelete(node.Left, token);
+            }
+        }
+        
+        return node;
+    }
+
+    private IEnumerable<string> SearchTreap(IndexData index, string queryToken)
+    {
+        if (index.TreapTokenToIds == null)
+            return Array.Empty<string>();
+
+        var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
+        // Exact match
+        if (index.TreapTokenToIds.TryGetValue(queryToken, out var exactIds))
+        {
+            foreach (var id in exactIds)
+                results.Add(id);
+        }
+        
+        // Prefix/substring match - traverse the treap
+        TreapSearch(index.TreapRoot, queryToken, index.TreapTokenToIds, results);
+        
+        return results;
+    }
+
+    private void TreapSearch(TreapNode? node, string queryToken, Dictionary<string, HashSet<string>> tokenToIds, HashSet<string> results)
+    {
+        if (node == null)
+            return;
+
+        // Check current node
+        if (node.Token.Contains(queryToken, StringComparison.OrdinalIgnoreCase))
+        {
+            if (tokenToIds.TryGetValue(node.Token, out var ids))
+            {
+                foreach (var id in ids)
+                    results.Add(id);
+            }
+        }
+
+        // Search both subtrees (treap doesn't guarantee all matches are in one subtree for substring search)
+        TreapSearch(node.Left, queryToken, tokenToIds, results);
+        TreapSearch(node.Right, queryToken, tokenToIds, results);
+    }
+
+    // ===== Bloom Filter Methods =====
+    private void InitializeBloomFilter(IndexData index, int size = 10000, int hashCount = 3)
+    {
+        if (index.BloomFilter == null)
+            index.BloomFilter = new BloomFilterData(size, hashCount);
+    }
+
+    private void AddToBloomFilter(IndexData index, string token, string id)
+    {
+        InitializeBloomFilter(index);
+        
+        var bloom = index.BloomFilter!;
+        
+        // Add to bloom filter bits
+        for (int i = 0; i < bloom.HashCount; i++)
+        {
+            var hash = ComputeBloomHash(token, i, bloom.Size);
+            bloom.Bits[hash] = true;
+        }
+        
+        // Store in backing dictionary for retrieval
+        if (!bloom.TokenToIds.TryGetValue(token, out var ids))
+        {
+            ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            bloom.TokenToIds[token] = ids;
+        }
+        ids.Add(id);
+    }
+
+    private int ComputeBloomHash(string token, int hashIndex, int size)
+    {
+        // Use a simple but effective hash combining the token and hash index
+        var baseHash = token.ToLowerInvariant().GetHashCode();
+        var hash = ((baseHash ^ (hashIndex * 0x9e3779b9)) & 0x7FFFFFFF); // Mix with golden ratio, ensure positive
+        return (int)(hash % size);
+    }
+
+    private void RemoveFromBloomFilter(IndexData index, string token, string id)
+    {
+        // Note: Bloom filters don't support removal (bits can't be unset safely)
+        // We only remove from the backing dictionary
+        if (index.BloomFilter == null)
+            return;
+        
+        if (index.BloomFilter.TokenToIds.TryGetValue(token, out var ids))
+        {
+            ids.Remove(id);
+            if (ids.Count == 0)
+                index.BloomFilter.TokenToIds.Remove(token);
+        }
+    }
+
+    private IEnumerable<string> SearchBloomFilter(IndexData index, string queryToken)
+    {
+        if (index.BloomFilter == null)
+            return Array.Empty<string>();
+
+        var bloom = index.BloomFilter;
+        var results = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        
+        // Check if token might be in the bloom filter
+        bool mightExist = true;
+        for (int i = 0; i < bloom.HashCount; i++)
+        {
+            var hash = ComputeBloomHash(queryToken, i, bloom.Size);
+            if (!bloom.Bits[hash])
+            {
+                mightExist = false;
+                break;
+            }
+        }
+        
+        if (mightExist)
+        {
+            // Check exact match in backing dictionary
+            if (bloom.TokenToIds.TryGetValue(queryToken, out var exactIds))
+            {
+                foreach (var id in exactIds)
+                    results.Add(id);
+            }
+        }
+        
+        // For substring search, we still need to check all tokens
+        // (Bloom filter only helps with exact membership testing)
+        foreach (var entry in bloom.TokenToIds)
+        {
+            if (entry.Key.Contains(queryToken, StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var id in entry.Value)
+                    results.Add(id);
+            }
+        }
+        
+        return results;
+    }
 }
