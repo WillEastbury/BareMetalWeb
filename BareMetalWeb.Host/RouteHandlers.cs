@@ -4463,7 +4463,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!string.IsNullOrEmpty(cmd.Permission))
         {
             var user = await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-            if (user == null || !user.Permissions.Split(',', StringSplitOptions.TrimEntries).Contains(cmd.Permission, StringComparer.OrdinalIgnoreCase))
+            if (user == null || !user.Permissions.Contains(cmd.Permission, StringComparer.OrdinalIgnoreCase))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
                 await WriteJsonResponseAsync(context, new { success = false, message = "Insufficient permissions." });
