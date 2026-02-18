@@ -25,7 +25,8 @@ public sealed record DataFieldMetadata(
     bool ReadOnly,
     string? Placeholder,
     DataLookupConfig? Lookup,
-    IdGenerationStrategy IdGeneration
+    IdGenerationStrategy IdGeneration,
+    ComputedFieldConfig? Computed
 );
 
 public sealed record DataEntityMetadata(
@@ -143,6 +144,11 @@ public static class DataScaffold
                     throw new InvalidOperationException($"Entity {metadata.Name} requires a manually specified Id (IdGeneration = None).");
                 break;
         }
+    }
+
+    public static async ValueTask ApplyComputedFieldsAsync(DataEntityMetadata metadata, BaseDataObject instance, ComputedTrigger trigger, CancellationToken cancellationToken = default)
+    {
+        await ComputedFieldService.ApplyComputedValuesAsync(metadata, instance, trigger, cancellationToken);
     }
 
     public static async ValueTask DeleteAsync(DataEntityMetadata metadata, string id, CancellationToken cancellationToken = default)
@@ -279,6 +285,38 @@ public static class DataScaffold
                         Required: false,
                         Value: idValue ?? string.Empty));
                 }
+                continue;
+            }
+
+            // Computed fields: handle based on strategy
+            if (field.Computed != null)
+            {
+                var computed = field.Computed;
+                
+                // For snapshot strategy on create, skip the field (it will be auto-populated)
+                if (computed.Strategy == ComputedStrategy.Snapshot && forCreate)
+                {
+                    // Only skip if the trigger includes OnCreate
+                    if (computed.Trigger == ComputedTrigger.OnCreate || computed.Trigger == ComputedTrigger.OnCreateAndUpdate)
+                    {
+                        continue;
+                    }
+                }
+
+                // Get the computed value (for edit forms and view)
+                var computedValue = instance != null ? field.Property.GetValue(instance) : null;
+                var computedStringValue = ToInputString(computedValue, field.Property.PropertyType, field.FieldType);
+
+                // Render as readonly with computed indicator
+                fields.Add(new FormField(
+                    FormFieldType.ReadOnly,
+                    field.Name,
+                    field.Label,
+                    Required: false,
+                    Value: computedStringValue ?? string.Empty,
+                    IsComputed: true,
+                    ComputedStrategy: computed.Strategy.ToString()
+                ));
                 continue;
             }
 
@@ -2253,6 +2291,7 @@ public static class DataScaffold
             var fieldAttribute = prop.GetCustomAttribute<DataFieldAttribute>();
             var lookupAttribute = prop.GetCustomAttribute<DataLookupAttribute>();
             var idGenAttribute = prop.GetCustomAttribute<IdGenerationAttribute>();
+            var computedAttribute = prop.GetCustomAttribute<ComputedFieldAttribute>();
             if (fieldAttribute == null && !useConvention)
                 continue;
 
@@ -2278,6 +2317,21 @@ public static class DataScaffold
                 );
             }
 
+            ComputedFieldConfig? computed = null;
+            if (computedAttribute != null)
+            {
+                computed = new ComputedFieldConfig(
+                    computedAttribute.SourceEntity,
+                    computedAttribute.SourceField,
+                    computedAttribute.ForeignKeyField,
+                    computedAttribute.ChildCollectionProperty,
+                    computedAttribute.Strategy,
+                    computedAttribute.Trigger,
+                    computedAttribute.Aggregate,
+                    TimeSpan.FromSeconds(Math.Max(0, computedAttribute.CacheSeconds))
+                );
+            }
+
             fields.Add(new DataFieldMetadata(
                 prop,
                 prop.Name,
@@ -2289,10 +2343,11 @@ public static class DataScaffold
                 fieldAttribute?.View ?? true,
                 fieldAttribute?.Edit ?? true,
                 fieldAttribute?.Create ?? true,
-                fieldAttribute?.ReadOnly ?? false,
+                (fieldAttribute?.ReadOnly ?? false) || (computed != null), // Computed fields are always readonly
                 fieldAttribute?.Placeholder,
                 lookup,
-                idGenAttribute?.Strategy ?? IdGenerationStrategy.None
+                idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
+                computed
             ));
         }
 

@@ -22,5 +22,7 @@ public sealed record FormField(
     string? LinkClass = null,
     string? Html = null,
     string? LookupTargetType = null,
-    string? LookupTargetSlug = null
+    string? LookupTargetSlug = null,
+    bool IsComputed = false,
+    string? ComputedStrategy = null
 );
