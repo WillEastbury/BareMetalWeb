@@ -1413,13 +1413,15 @@ public sealed class RouteHandlers : IRouteHandlers
                 effectiveViewType = ViewType.OrgChart;
             else if (string.Equals(viewParam, "table", StringComparison.OrdinalIgnoreCase))
                 effectiveViewType = ViewType.Table;
+            else if (string.Equals(viewParam, "timeline", StringComparison.OrdinalIgnoreCase))
+                effectiveViewType = ViewType.Timeline;
         }
 
         var cloneToken = CsrfProtection.EnsureToken(context);
         var returnUrl = $"{context.Request.Path}{context.Request.QueryString}";
 
-        // For tree/org chart views, load all items (no pagination)
-        if (effectiveViewType == ViewType.TreeView || effectiveViewType == ViewType.OrgChart)
+        // For tree/org chart/timeline views, load all items (no pagination)
+        if (effectiveViewType == ViewType.TreeView || effectiveViewType == ViewType.OrgChart || effectiveViewType == ViewType.Timeline)
         {
             var allQuery = DataScaffold.BuildQueryDefinition(queryDictionary, meta);
             var allResults = (await DataScaffold.QueryAsync(meta, allQuery)).Cast<BaseDataObject>().ToList();
@@ -1431,13 +1433,17 @@ public sealed class RouteHandlers : IRouteHandlers
             {
                 viewHtml = DataScaffold.BuildTreeViewHtml(meta, allResults, selectedId, basePath, HasPermissionForMeta, cloneToken, returnUrl);
             }
+            else if (effectiveViewType == ViewType.Timeline)
+            {
+                viewHtml = BuildTimelineViewHtml(meta, allResults, basePath, HasPermissionForMeta, cloneToken, returnUrl);
+            }
             else
             {
                 viewHtml = DataScaffold.BuildOrgChartHtml(meta, allResults, selectedId, basePath, HasPermissionForMeta);
             }
 
             var treeToastHtml = BuildToastHtml(context, meta.Name);
-            var treeViewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta.ParentField != null);
+            var treeViewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta);
             var treeCreateHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a></p>";
             
             context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} - {GetViewTypeName(effectiveViewType)}");
@@ -1501,7 +1507,7 @@ public sealed class RouteHandlers : IRouteHandlers
         
         var exportDropdown = BuildExportDropdown(typeSlug, queryString, hasNested);
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/html{WebUtility.HtmlEncode(queryString)}\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
-        var viewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta.ParentField != null);
+        var viewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta);
         var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a>{exportDropdown}{htmlHtml}</p>";
         
         // Build custom table with sortable headers
@@ -4866,7 +4872,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return users.Any();
     }
 
-    private static string BuildViewSwitcher(string typeSlug, ViewType currentView, bool hasParentField)
+    private static string BuildViewSwitcher(string typeSlug, ViewType currentView, DataEntityMetadata meta)
     {
         var html = new StringBuilder();
         html.Append("<div class=\"btn-group btn-group-sm mb-2\" role=\"group\" aria-label=\"View Type\">");
@@ -4874,7 +4880,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var tableActive = currentView == ViewType.Table ? " active" : string.Empty;
         html.Append($"<a class=\"btn btn-outline-secondary{tableActive}\" href=\"/admin/data/{typeSlug}?view=table\" title=\"Table View\"><i class=\"bi bi-table\" aria-hidden=\"true\"></i> Table</a>");
         
-        if (hasParentField)
+        if (meta.ParentField != null)
         {
             var treeActive = currentView == ViewType.TreeView ? " active" : string.Empty;
             html.Append($"<a class=\"btn btn-outline-secondary{treeActive}\" href=\"/admin/data/{typeSlug}?view=tree\" title=\"Tree View\"><i class=\"bi bi-diagram-3\" aria-hidden=\"true\"></i> Tree</a>");
@@ -4883,8 +4889,204 @@ public sealed class RouteHandlers : IRouteHandlers
             html.Append($"<a class=\"btn btn-outline-secondary{orgActive}\" href=\"/admin/data/{typeSlug}?view=orgchart\" title=\"Org Chart\"><i class=\"bi bi-diagram-2\" aria-hidden=\"true\"></i> Org Chart</a>");
         }
         
+        // Check if entity has any DateOnly or DateTime fields for timeline view
+        var hasDateField = meta.Fields.Any(f => 
+            f.FieldType == FormFieldType.DateOnly || 
+            f.FieldType == FormFieldType.DateTime);
+        
+        if (hasDateField)
+        {
+            var timelineActive = currentView == ViewType.Timeline ? " active" : string.Empty;
+            html.Append($"<a class=\"btn btn-outline-secondary{timelineActive}\" href=\"/admin/data/{typeSlug}?view=timeline\" title=\"Timeline View\"><i class=\"bi bi-clock-history\" aria-hidden=\"true\"></i> Timeline</a>");
+        }
+        
         html.Append("</div>");
         return html.ToString();
+    }
+
+    private static string BuildTimelineViewHtml(
+        DataEntityMetadata meta,
+        IEnumerable<BaseDataObject> allItems,
+        string basePath,
+        Func<DataEntityMetadata, bool>? canRenderLookupLink = null,
+        string? cloneToken = null,
+        string? cloneReturnUrl = null)
+    {
+        var html = new StringBuilder();
+        
+        // Find the first DateOnly or DateTime field
+        var dateField = meta.Fields.FirstOrDefault(f => 
+            f.FieldType == FormFieldType.DateOnly || 
+            f.FieldType == FormFieldType.DateTime);
+        
+        if (dateField == null)
+        {
+            return "<p class=\"text-warning\">Timeline view requires a DateOnly or DateTime field.</p>";
+        }
+
+        var itemsList = allItems.ToList();
+        if (itemsList.Count == 0)
+        {
+            return "<p class=\"text-muted\">No items found.</p>";
+        }
+
+        // Group items by date
+        var groupedByDate = new Dictionary<DateOnly, List<BaseDataObject>>();
+        
+        foreach (var item in itemsList)
+        {
+            var fieldValue = dateField.Property.GetValue(item);
+            DateOnly dateKey;
+            
+            if (fieldValue is DateOnly dateOnly)
+            {
+                dateKey = dateOnly;
+            }
+            else if (fieldValue is DateTime dateTime)
+            {
+                dateKey = DateOnly.FromDateTime(dateTime);
+            }
+            else if (fieldValue == null)
+            {
+                // Skip items without a date value
+                continue;
+            }
+            else
+            {
+                continue;
+            }
+            
+            if (!groupedByDate.ContainsKey(dateKey))
+            {
+                groupedByDate[dateKey] = new List<BaseDataObject>();
+            }
+            groupedByDate[dateKey].Add(item);
+        }
+
+        // Sort by date descending (most recent first)
+        var sortedDates = groupedByDate.Keys.OrderByDescending(d => d).ToList();
+
+        html.Append("<div class=\"timeline-container\">");
+        html.Append("<style>");
+        html.Append(".timeline-container { max-width: 1200px; margin: 0 auto; }");
+        html.Append(".timeline-date-group { margin-bottom: 2rem; }");
+        html.Append(".timeline-date-header { font-size: 1.25rem; font-weight: bold; color: #0d6efd; margin-bottom: 1rem; padding: 0.5rem; background: #e7f3ff; border-left: 4px solid #0d6efd; }");
+        html.Append(".timeline-items { margin-left: 2rem; }");
+        html.Append(".timeline-item { margin-bottom: 1rem; padding: 1rem; background: #f8f9fa; border-left: 3px solid #6c757d; position: relative; }");
+        html.Append(".timeline-item:hover { background: #e9ecef; }");
+        html.Append(".timeline-item-header { font-weight: bold; margin-bottom: 0.5rem; }");
+        html.Append(".timeline-item-details { margin-left: 1rem; }");
+        html.Append(".timeline-item-field { margin-bottom: 0.25rem; }");
+        html.Append(".timeline-item-label { font-weight: 500; color: #495057; }");
+        html.Append(".timeline-item-value { color: #212529; }");
+        html.Append(".timeline-item-actions { margin-top: 0.5rem; }");
+        html.Append(".timeline-item-actions a { margin-right: 0.5rem; }");
+        html.Append("</style>");
+
+        foreach (var date in sortedDates)
+        {
+            var items = groupedByDate[date];
+            
+            html.Append("<div class=\"timeline-date-group\">");
+            html.Append($"<div class=\"timeline-date-header\">");
+            html.Append($"<i class=\"bi bi-calendar3\" aria-hidden=\"true\"></i> {WebUtility.HtmlEncode(date.ToString("dddd, MMMM d, yyyy"))}");
+            html.Append($" <span class=\"badge bg-secondary\">{items.Count}</span>");
+            html.Append("</div>");
+            
+            html.Append("<div class=\"timeline-items\">");
+            
+            foreach (var item in items.OrderBy(i => GetDisplayValue(meta, i)))
+            {
+                var itemId = DataScaffold.GetIdValue(item) ?? string.Empty;
+                var safeId = Uri.EscapeDataString(itemId);
+                var displayValue = WebUtility.HtmlEncode(GetDisplayValue(meta, item));
+                
+                html.Append("<div class=\"timeline-item\">");
+                html.Append($"<div class=\"timeline-item-header\">{displayValue}</div>");
+                html.Append("<div class=\"timeline-item-details\">");
+                
+                // Show key fields (limit to first 5 fields that are marked for List view, excluding the date field)
+                var fieldsToShow = meta.Fields
+                    .Where(f => f.List && f.Name != dateField.Name)
+                    .Take(5);
+                
+                foreach (var field in fieldsToShow)
+                {
+                    var value = field.Property.GetValue(item);
+                    var displayVal = FormatFieldValue(field, value, canRenderLookupLink);
+                    
+                    html.Append("<div class=\"timeline-item-field\">");
+                    html.Append($"<span class=\"timeline-item-label\">{WebUtility.HtmlEncode(field.Label)}:</span> ");
+                    html.Append($"<span class=\"timeline-item-value\">{displayVal}</span>");
+                    html.Append("</div>");
+                }
+                
+                html.Append("</div>");
+                html.Append("<div class=\"timeline-item-actions\">");
+                html.Append($"<a class=\"btn btn-sm btn-outline-primary\" href=\"{basePath}/{safeId}\" title=\"View Details\"><i class=\"bi bi-eye\" aria-hidden=\"true\"></i> View</a>");
+                html.Append($"<a class=\"btn btn-sm btn-outline-warning\" href=\"{basePath}/{safeId}/edit\" title=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i> Edit</a>");
+                
+                if (!string.IsNullOrWhiteSpace(cloneToken))
+                {
+                    var cloneUrl = $"{basePath}/{safeId}/clone?csrf={Uri.EscapeDataString(cloneToken)}";
+                    if (!string.IsNullOrWhiteSpace(cloneReturnUrl))
+                    {
+                        cloneUrl += $"&returnUrl={Uri.EscapeDataString(cloneReturnUrl)}";
+                    }
+                    html.Append($"<a class=\"btn btn-sm btn-outline-info\" href=\"{cloneUrl}\" title=\"Clone\"><i class=\"bi bi-copy\" aria-hidden=\"true\"></i> Clone</a>");
+                }
+                
+                html.Append("</div>");
+                html.Append("</div>");
+            }
+            
+            html.Append("</div>");
+            html.Append("</div>");
+        }
+        
+        html.Append("</div>");
+        return html.ToString();
+    }
+
+    private static string GetDisplayValue(DataEntityMetadata meta, BaseDataObject item)
+    {
+        // Try to get a meaningful display value from the first few string fields
+        var displayField = meta.Fields.FirstOrDefault(f => f.List && f.FieldType == FormFieldType.String);
+        if (displayField != null)
+        {
+            var value = displayField.Property.GetValue(item)?.ToString();
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+        }
+        
+        // Fall back to ID
+        return DataScaffold.GetIdValue(item) ?? "Unknown";
+    }
+
+    private static string FormatFieldValue(DataFieldMetadata field, object? value, Func<DataEntityMetadata, bool>? canRenderLookupLink)
+    {
+        if (value == null)
+            return "<em class=\"text-muted\">null</em>";
+        
+        if (field.Lookup != null)
+        {
+            // For lookup fields, show the value as-is (it would be the ID)
+            return WebUtility.HtmlEncode(value.ToString() ?? string.Empty);
+        }
+        
+        return field.FieldType switch
+        {
+            FormFieldType.DateOnly => value is DateOnly dateOnly 
+                ? WebUtility.HtmlEncode(dateOnly.ToString("yyyy-MM-dd")) 
+                : WebUtility.HtmlEncode(value.ToString() ?? string.Empty),
+            FormFieldType.DateTime => value is DateTime dateTime 
+                ? WebUtility.HtmlEncode(dateTime.ToString("yyyy-MM-dd HH:mm:ss")) 
+                : WebUtility.HtmlEncode(value.ToString() ?? string.Empty),
+            FormFieldType.YesNo => value is bool boolVal 
+                ? (boolVal ? "<i class=\"bi bi-check-circle text-success\"></i>" : "<i class=\"bi bi-x-circle text-danger\"></i>") 
+                : WebUtility.HtmlEncode(value.ToString() ?? string.Empty),
+            _ => WebUtility.HtmlEncode(value.ToString() ?? string.Empty)
+        };
     }
 
     private static string GetViewTypeName(ViewType viewType)
@@ -4893,6 +5095,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             ViewType.TreeView => "Tree View",
             ViewType.OrgChart => "Org Chart",
+            ViewType.Timeline => "Timeline",
             _ => "Table View"
         };
     }
