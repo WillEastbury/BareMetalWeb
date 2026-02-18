@@ -31,6 +31,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private readonly ITemplateStore _templateStore;
     private readonly bool _allowAccountCreation;
     private readonly MfaSecretProtector _mfaProtector;
+    private readonly AuditService _auditService;
     private const string MfaChallengeCookieName = "mfa_challenge_id";
     private static readonly TimeSpan MfaPendingLifetime = TimeSpan.FromMinutes(5);
     private const int MfaPendingMaxFailures = 5;
@@ -39,12 +40,13 @@ public sealed class RouteHandlers : IRouteHandlers
     private static readonly TimeSpan MfaBaseBlockDuration = TimeSpan.FromSeconds(10);
     private static readonly ConcurrentDictionary<string, AttemptTracker> MfaAttempts = new(StringComparer.Ordinal);
 
-    public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder)
+    public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, AuditService auditService)
     {
         _renderer = renderer;
         _templateStore = templateStore;
         _allowAccountCreation = allowAccountCreation;
         _mfaProtector = MfaSecretProtector.CreateDefault(mfaKeyRootFolder);
+        _auditService = auditService;
     }
 
     public ValueTask DefaultPageHandler(HttpContext context)
@@ -2097,10 +2099,18 @@ public sealed class RouteHandlers : IRouteHandlers
             newApiKey = createdKeys.FirstOrDefault();
         }
 
-        ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+        var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
+        ApplyAuditInfo(instance, userName, isCreate: true);
         await DataScaffold.ApplyAutoIdAsync(meta, instance, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, instance, ComputedTrigger.OnCreate, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.SaveAsync(meta, instance);
+        
+        // Audit the create operation
+        if (instance is BaseDataObject baseDataObject)
+        {
+            await _auditService.AuditCreateAsync(baseDataObject, userName, context.RequestAborted).ConfigureAwait(false);
+        }
+        
         var newId = instance is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) : null;
         var keyQuery = string.IsNullOrWhiteSpace(newApiKey) ? string.Empty : $"&apikey={WebUtility.UrlEncode(newApiKey)}";
         context.Response.Redirect($"/admin/data/{typeSlug}?toast=created&id={WebUtility.UrlEncode(newId ?? string.Empty)}{keyQuery}");
@@ -2189,6 +2199,21 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        // Capture the old state for audit trail (before any modifications)
+        BaseDataObject? oldInstance = null;
+        if (instance is BaseDataObject baseDataObjectOriginal)
+        {
+            try
+            {
+                var json = JsonSerializer.Serialize(baseDataObjectOriginal);
+                oldInstance = (BaseDataObject?)JsonSerializer.Deserialize(json, baseDataObjectOriginal.GetType());
+            }
+            catch
+            {
+                // If cloning fails, continue without audit trail for this update
+            }
+        }
+
         var form = await context.Request.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
@@ -2219,9 +2244,17 @@ public sealed class RouteHandlers : IRouteHandlers
             ApplySystemPrincipalKeys(principal, apiKeyInputs, isCreate: false);
         }
 
-        ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
+        var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
+        ApplyAuditInfo(instance, userName, isCreate: false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.SaveAsync(meta, instance);
+        
+        // Audit the update operation
+        if (instance is BaseDataObject newBaseDataObject && oldInstance != null)
+        {
+            await _auditService.AuditUpdateAsync(oldInstance, newBaseDataObject, userName, context.RequestAborted).ConfigureAwait(false);
+        }
+        
         context.Response.Redirect($"/admin/data/{typeSlug}?toast=updated&id={WebUtility.UrlEncode(id)}");
     }
 
@@ -2344,7 +2377,35 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
+        
+        // Capture entity type for audit before deletion
+        var entityTypeName = meta.Type.Name;
+        
         await DataScaffold.DeleteAsync(meta, id);
+        
+        // Audit the delete operation - create audit entry with entity type and ID
+        var auditEntry = new AuditEntry(userName)
+        {
+            EntityType = entityTypeName,
+            EntityId = id,
+            Operation = AuditOperation.Delete,
+            TimestampUtc = DateTime.UtcNow,
+            UserName = userName,
+            Notes = "Entity deleted"
+        };
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DataStoreProvider.Current.SaveAsync(auditEntry, context.RequestAborted).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Swallow audit errors - don't block the delete operation
+            }
+        }, context.RequestAborted);
+        
         context.Response.Redirect($"/admin/data/{typeSlug}?toast=deleted&id={WebUtility.UrlEncode(id)}");
     }
 
@@ -5123,6 +5184,8 @@ public sealed class RouteHandlers : IRouteHandlers
 
         try
         {
+            var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
+            
             RemoteCommandResult result;
             var returnType = cmd.Method.ReturnType;
             if (returnType == typeof(RemoteCommandResult))
@@ -5141,6 +5204,12 @@ public sealed class RouteHandlers : IRouteHandlers
             // Save the entity in case the command modified it
             await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
             await DataScaffold.SaveAsync(meta, instance);
+
+            // Audit the remote command execution
+            if (instance is BaseDataObject baseDataObject)
+            {
+                await _auditService.AuditRemoteCommandAsync(baseDataObject, commandName, userName, null, result, context.RequestAborted).ConfigureAwait(false);
+            }
 
             context.Response.StatusCode = result.Success ? StatusCodes.Status200OK : StatusCodes.Status422UnprocessableEntity;
             await WriteJsonResponseAsync(context, new { success = result.Success, message = result.Message, redirectUrl = result.RedirectUrl });
