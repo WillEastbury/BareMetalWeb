@@ -636,27 +636,47 @@ public static class DataScaffold
         var activeClass = isActive ? " bm-data-tree-active" : string.Empty;
         var viewUrl = $"{basePath}?view=tree&selected={safeId}";
 
-        html.Append("<li>");
-        html.Append($"<a class=\"bm-data-tree-link{activeClass}\" href=\"{viewUrl}\">{display}</a>");
-
         // Find children
+        var children = new List<BaseDataObject>();
         if (metadata.ParentField != null)
         {
-            var children = allItems.Where(child =>
+            children = allItems.Where(child =>
             {
                 var parentId = metadata.ParentField.Property.GetValue(child)?.ToString();
                 return string.Equals(parentId, itemId, StringComparison.OrdinalIgnoreCase);
             }).OrderBy(c => GetDisplayValue(metadata, c)).ToList();
+        }
 
-            if (children.Count > 0 && (isActive || IsAncestorSelected(item, allItems, metadata.ParentField, selectedId)))
+        var hasChildren = children.Count > 0;
+        var isExpanded = hasChildren && (isActive || IsAncestorSelected(item, allItems, metadata.ParentField, selectedId));
+        var expandClass = isExpanded ? "bm-tree-expanded" : "bm-tree-collapsed";
+
+        html.Append("<li class=\"bm-tree-item\">");
+        html.Append("<div class=\"bm-tree-node\">");
+        
+        // Add expand/collapse toggle for nodes with children
+        if (hasChildren)
+        {
+            var toggleIcon = isExpanded ? "−" : "+"; // Using minus and plus signs
+            html.Append($"<span class=\"bm-tree-toggle {expandClass}\" data-item-id=\"{WebUtility.HtmlEncode(itemId)}\">{toggleIcon}</span>");
+        }
+        else
+        {
+            html.Append("<span class=\"bm-tree-toggle bm-tree-spacer\"></span>");
+        }
+        
+        html.Append($"<a class=\"bm-data-tree-link{activeClass}\" href=\"{viewUrl}\">{display}</a>");
+        html.Append("</div>");
+
+        if (hasChildren)
+        {
+            var childrenVisibility = isExpanded ? "" : " style=\"display: none;\"";
+            html.Append($"<ul class=\"bm-data-tree-list\"{childrenVisibility}>");
+            foreach (var child in children)
             {
-                html.Append("<ul class=\"bm-data-tree-list\">");
-                foreach (var child in children)
-                {
-                    RenderTreeNode(html, metadata, child, allItems, selectedId, basePath, depth + 1);
-                }
-                html.Append("</ul>");
+                RenderTreeNode(html, metadata, child, allItems, selectedId, basePath, depth + 1);
             }
+            html.Append("</ul>");
         }
 
         html.Append("</li>");
