@@ -2675,9 +2675,23 @@ public sealed class RouteHandlers : IRouteHandlers
             html.Append("<div class=\"bm-log-panel bm-log-viewer\">");
             if (!string.IsNullOrWhiteSpace(file))
             {
-                var fullPath = Path.Combine(root, date, hour, file);
+                var fullPath = Path.GetFullPath(Path.Combine(root, date ?? string.Empty, hour ?? string.Empty, file));
+                var normalizedRoot = Path.GetFullPath(root);
                 var selectedEntry = fileEntries.FirstOrDefault(entry => string.Equals(entry.Name, file, StringComparison.OrdinalIgnoreCase));
-                html.Append(RenderLogFile(fullPath, file, selectedEntry.IsError));
+
+                var isUnderRoot = fullPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
+                    && (fullPath.Length == normalizedRoot.Length
+                        || fullPath[normalizedRoot.Length] == Path.DirectorySeparatorChar
+                        || fullPath[normalizedRoot.Length] == Path.AltDirectorySeparatorChar);
+
+                if (isUnderRoot && selectedEntry != null && File.Exists(fullPath))
+                {
+                    html.Append(RenderLogFile(fullPath, file, selectedEntry.IsError));
+                }
+                else
+                {
+                    html.Append("<p class=\"text-danger mb-0\">Invalid log file selection.</p>");
+                }
             }
             else
             {
