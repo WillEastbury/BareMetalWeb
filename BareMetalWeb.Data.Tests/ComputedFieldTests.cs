@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -14,8 +15,22 @@ namespace BareMetalWeb.Data.Tests;
 /// <summary>
 /// Tests for computed field attribute and service functionality.
 /// </summary>
-public class ComputedFieldTests
+[Collection("DataStoreProvider")]
+public class ComputedFieldTests : IDisposable
 {
+    private readonly IDataObjectStore _originalStore;
+
+    public ComputedFieldTests()
+    {
+        _originalStore = DataStoreProvider.Current;
+        DataStoreProvider.Current = new InMemoryDataStore();
+    }
+
+    public void Dispose()
+    {
+        DataStoreProvider.Current = _originalStore;
+    }
+
     // Test entities for computed field scenarios
     [DataEntity("Test Products")]
     public class TestProduct : BaseDataObject
@@ -219,6 +234,7 @@ public class ComputedFieldTests
     {
         // Arrange
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        var originalStore = DataStoreProvider.Current;
         try
         {
             Directory.CreateDirectory(tempDir);
@@ -260,6 +276,7 @@ public class ComputedFieldTests
         }
         finally
         {
+            DataStoreProvider.Current = originalStore;
             if (Directory.Exists(tempDir))
                 Directory.Delete(tempDir, true);
         }
@@ -270,6 +287,7 @@ public class ComputedFieldTests
     {
         // Arrange
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        var originalStore = DataStoreProvider.Current;
         try
         {
             Directory.CreateDirectory(tempDir);
@@ -323,6 +341,7 @@ public class ComputedFieldTests
         finally
         {
             ComputedFieldService.ClearAllCache();
+            DataStoreProvider.Current = originalStore;
             if (Directory.Exists(tempDir))
                 Directory.Delete(tempDir, true);
         }
@@ -333,6 +352,7 @@ public class ComputedFieldTests
     {
         // Arrange
         var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
+        var originalStore = DataStoreProvider.Current;
         try
         {
             Directory.CreateDirectory(tempDir);
@@ -385,6 +405,7 @@ public class ComputedFieldTests
         }
         finally
         {
+            DataStoreProvider.Current = originalStore;
             if (Directory.Exists(tempDir))
                 Directory.Delete(tempDir, true);
         }
@@ -438,5 +459,42 @@ public class ComputedFieldTests
 
         // Assert - should not throw
         Assert.True(true);
+    }
+
+    private class InMemoryDataStore : IDataObjectStore
+    {
+        private readonly Dictionary<(Type, string), BaseDataObject> _store = new();
+
+        public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
+        public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
+        public void RegisterFallbackProvider(IDataProvider provider) { }
+        public void ClearProviders() { }
+
+        public void Save<T>(T obj) where T : BaseDataObject
+            => _store[(typeof(T), obj.Id)] = obj;
+
+        public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
+        { Save(obj); return ValueTask.CompletedTask; }
+
+        public T? Load<T>(string id) where T : BaseDataObject
+            => _store.TryGetValue((typeof(T), id), out var obj) ? obj as T : null;
+
+        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult(Load<T>(id));
+
+        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
+            => _store.Values.OfType<T>();
+
+        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult(Query<T>(query));
+
+        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult(Query<T>(query).Count());
+
+        public void Delete<T>(string id) where T : BaseDataObject
+            => _store.Remove((typeof(T), id));
+
+        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        { Delete<T>(id); return ValueTask.CompletedTask; }
     }
 }
