@@ -41,11 +41,13 @@
     document.addEventListener('click', function(e) {
         var refreshBtn = e.target.closest('[data-lookup-refresh]');
         if (refreshBtn) {
+            e.preventDefault();
             refreshLookup(refreshBtn.getAttribute('data-lookup-refresh'));
             return;
         }
         var addBtn = e.target.closest('[data-lookup-add]');
         if (addBtn) {
+            e.preventDefault();
             addLookupItem(addBtn.getAttribute('data-lookup-add'), addBtn.getAttribute('data-lookup-field'));
         }
     });

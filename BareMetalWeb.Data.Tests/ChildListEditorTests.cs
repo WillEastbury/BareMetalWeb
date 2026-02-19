@@ -76,6 +76,48 @@ public class ChildListEditorTests : IDisposable
         Assert.Contains("Save</button>", orderRowsField.Html);
     }
 
+    [Fact]
+    public void BuildFormFields_WithChildListLookupField_IncludesRefreshAndAddButtons()
+    {
+        // Arrange - Create an Order (OrderRow has a lookup field for Product)
+        var order = new Order
+        {
+            Id = "order-1",
+            OrderNumber = "ORD-001",
+            CustomerId = "cust-1",
+            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = "Open",
+            CurrencyId = "USD",
+            IsOpen = true
+        };
+
+        var meta = DataScaffold.GetEntityByType(typeof(Order));
+        Assert.NotNull(meta);
+
+        // Act - Build the form fields (which includes child list editor HTML)
+        var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
+
+        // Assert - Find the OrderRows field
+        var orderRowsField = formFields.FirstOrDefault(f => f.Name == "OrderRows");
+        Assert.NotNull(orderRowsField);
+        
+        // Verify lookup buttons are rendered for ProductId field in the modal
+        // The ProductId field should have refresh and add buttons
+        Assert.Contains("data-lookup-refresh=\"modal_OrderRows_ProductId\"", orderRowsField.Html);
+        Assert.Contains("data-lookup-add=\"products\"", orderRowsField.Html);
+        Assert.Contains("data-lookup-field=\"modal_OrderRows_ProductId\"", orderRowsField.Html);
+        
+        // Verify the input-group wrapper is present
+        Assert.Contains("input-group", orderRowsField.Html);
+        
+        // Verify button symbols
+        Assert.Contains("↻</button>", orderRowsField.Html); // Refresh button
+        Assert.Contains("+</button>", orderRowsField.Html); // Add button
+        
+        // Verify the select has the correct ID for the JavaScript to work
+        Assert.Contains("id=\"modal_OrderRows_ProductId\"", orderRowsField.Html);
+    }
+
     /// <summary>
     /// Minimal in-memory IDataObjectStore for testing.
     /// </summary>
