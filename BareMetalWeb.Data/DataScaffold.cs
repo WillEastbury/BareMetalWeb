@@ -911,7 +911,7 @@ public static class DataScaffold
         // Add expand/collapse toggle for nodes with children
         if (hasChildren)
         {
-            var toggleIcon = isExpanded ? "−" : "+"; // Using minus and plus signs
+            var toggleIcon = isExpanded ? "▾" : "▸"; // Using triangle arrows
             html.Append($"<span class=\"bm-tree-toggle {expandClass}\" data-item-id=\"{WebUtility.HtmlEncode(itemId)}\">{toggleIcon}</span>");
         }
         else
