@@ -93,7 +93,8 @@ public static class BareMetalWebExtensions
         appInfo.RegisterStaticRoutes(routeHandlers, pageInfoFactory, mainTemplate);
         appInfo.RegisterAuthRoutes(routeHandlers, pageInfoFactory, mainTemplate, allowAccountCreation);
         appInfo.RegisterMonitoringRoutes(routeHandlers, pageInfoFactory, mainTemplate);
-        appInfo.RegisterAdminRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+        appInfo.RegisterAdminRoutes(routeHandlers, pageInfoFactory, mainTemplate,
+            app.Configuration.GetValue("Admin:EnableWipeData", false));
         appInfo.RegisterDataRoutes(routeHandlers, pageInfoFactory, mainTemplate);
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
 

@@ -481,6 +481,49 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.Equal(7, _server.routes.Count);
     }
 
+    [Fact]
+    public void RegisterAdminRoutes_WipeDataDisabledByDefault_DoesNotRegisterWipeRoutes()
+    {
+        // Arrange & Act
+        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
+
+        // Assert
+        Assert.False(_server.routes.ContainsKey("GET /admin/wipe-data"));
+        Assert.False(_server.routes.ContainsKey("POST /admin/wipe-data"));
+    }
+
+    [Fact]
+    public void RegisterAdminRoutes_WipeDataEnabled_RegistersWipeRoutes()
+    {
+        // Arrange & Act
+        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, enableWipeData: true);
+
+        // Assert
+        Assert.True(_server.routes.ContainsKey("GET /admin/wipe-data"));
+        Assert.True(_server.routes.ContainsKey("POST /admin/wipe-data"));
+    }
+
+    [Fact]
+    public void RegisterAdminRoutes_WipeDataEnabled_RegistersExactlyNineRoutes()
+    {
+        // Arrange & Act
+        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, enableWipeData: true);
+
+        // Assert
+        Assert.Equal(9, _server.routes.Count);
+    }
+
+    [Fact]
+    public void RegisterAdminRoutes_WipeDataRoute_HasAdminPermission()
+    {
+        // Arrange & Act
+        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, enableWipeData: true);
+
+        // Assert
+        var route = _server.routes["GET /admin/wipe-data"];
+        Assert.Equal("admin", route.PageInfo!.PageMetaData.PermissionsNeeded);
+    }
+
     // ──────────────────────────────────────────────────────────────
     //  Data Routes (CRUD scaffold)
     // ──────────────────────────────────────────────────────────────
@@ -1091,6 +1134,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask LogsDownloadHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask SampleDataHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask SampleDataPostHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask WipeDataHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask WipeDataPostHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiListHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiGetHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiPostHandler(HttpContext context) => ValueTask.CompletedTask;

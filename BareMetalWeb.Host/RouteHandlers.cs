@@ -3548,6 +3548,84 @@ public sealed class RouteHandlers : IRouteHandlers
         await _renderer.RenderPage(context);
     }
 
+    public async ValueTask WipeDataHandler(HttpContext context)
+    {
+        await BuildPageHandler(ctx => RenderWipeDataForm(ctx, null))(context);
+    }
+
+    public async ValueTask WipeDataPostHandler(HttpContext context)
+    {
+        if (!context.Request.HasFormContentType)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.SetStringValue("title", "Wipe All Data");
+            context.SetStringValue("message", "<p>Invalid form submission.</p>");
+            await _renderer.RenderPage(context);
+            return;
+        }
+
+        var form = await context.Request.ReadFormAsync();
+        if (!CsrfProtection.ValidateFormToken(context, form))
+        {
+            RenderWipeDataForm(context, "<div class=\"alert alert-danger\">Invalid security token. Please try again.</div>");
+            await _renderer.RenderPage(context);
+            return;
+        }
+
+        var confirmText = form["confirm_wipe"].ToString().Trim();
+        if (!string.Equals(confirmText, "WIPE ALL DATA", StringComparison.Ordinal))
+        {
+            RenderWipeDataForm(context, "<div class=\"alert alert-danger\">Confirmation text did not match. Type <strong>WIPE ALL DATA</strong> exactly to proceed.</div>");
+            await _renderer.RenderPage(context);
+            return;
+        }
+
+        var entities = DataScaffold.Entities;
+        var wiped = new List<string>();
+        foreach (var entity in entities)
+        {
+            var items = (await entity.Handlers.QueryAsync(null, context.RequestAborted).ConfigureAwait(false)).ToList();
+            foreach (var item in items)
+            {
+                if (item == null || string.IsNullOrWhiteSpace(item.Id))
+                    continue;
+                await entity.Handlers.DeleteAsync(item.Id, context.RequestAborted).ConfigureAwait(false);
+            }
+            wiped.Add(WebUtility.HtmlEncode(entity.Name));
+        }
+
+        var message = $"<div class=\"alert alert-success\"><strong>All data has been wiped.</strong> The following entity stores were cleared: {string.Join(", ", wiped)}.</div>";
+        RenderWipeDataForm(context, message);
+        await _renderer.RenderPage(context);
+    }
+
+    private void RenderWipeDataForm(HttpContext context, string? message)
+    {
+        var csrfToken = CsrfProtection.EnsureToken(context);
+        context.SetStringValue("title", "Wipe All Data");
+
+        var warningHtml = new StringBuilder();
+        warningHtml.Append("<div class=\"alert alert-danger\">");
+        warningHtml.Append("<h4 class=\"alert-heading\">&#9888; DANGER ZONE &#9888;</h4>");
+        warningHtml.Append("<p><strong>This action will permanently delete ALL data in every entity store.</strong></p>");
+        warningHtml.Append("<p>This operation is <strong>irreversible</strong>. All records across every entity type will be removed immediately.</p>");
+        warningHtml.Append("<p>This endpoint is intended for <strong>staging and test environments only</strong>. It should be disabled in production via <code>Admin:EnableWipeData=false</code> in appsettings.json.</p>");
+        warningHtml.Append("</div>");
+
+        if (!string.IsNullOrWhiteSpace(message))
+            warningHtml.Append(message);
+
+        context.SetStringValue("message", warningHtml.ToString());
+
+        var fields = new List<FormField>
+        {
+            new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken),
+            new FormField(FormFieldType.String, "confirm_wipe", "Type WIPE ALL DATA to confirm", Required: true, Value: string.Empty)
+        };
+
+        context.AddFormDefinition(new FormDefinition("/admin/wipe-data", "post", "WIPE ALL DATA", fields));
+    }
+
     private async ValueTask ApplyUploadFieldsFromFormAsync(HttpContext context, DataEntityMetadata meta, BaseDataObject instance, IFormCollection form, List<string> errors)
     {
         foreach (var field in meta.Fields.Where(f => f.FieldType == FormFieldType.File || f.FieldType == FormFieldType.Image))
