@@ -22,7 +22,7 @@
 
     function addLookupItem(targetSlug, fieldName) {
         if (!targetSlug) return;
-        var createUrl = '/admin/data/' + targetSlug + '/create';
+        var createUrl = '/admin/data/' + targetSlug + '/create?popup=1';
         var newWindow = window.open(createUrl, '_blank', 'width=800,height=600');
         if (!newWindow) {
             alert('Please allow popups for this site, or the create form will open in the same window.');
