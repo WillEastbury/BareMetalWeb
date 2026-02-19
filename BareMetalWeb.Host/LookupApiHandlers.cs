@@ -50,7 +50,7 @@ public static class LookupApiHandlers
         }
         catch (Exception ex)
         {
-            await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, $"Error loading entity: {ex.Message}");
+            await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, "Error loading entity.");
         }
     }
 
@@ -80,9 +80,9 @@ public static class LookupApiHandlers
                 ["count"] = results.Count
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, $"Error querying entities: {ex.Message}");
+            await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, "Error querying entities.");
         }
     }
 
@@ -139,9 +139,9 @@ public static class LookupApiHandlers
                 ["value"] = value
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, $"Error loading field: {ex.Message}");
+            await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, "Error loading field.");
         }
     }
 
@@ -224,9 +224,9 @@ public static class LookupApiHandlers
                 ["count"] = values.Count
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, $"Error computing aggregate: {ex.Message}");
+            await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, "Error computing aggregate.");
         }
     }
 
