@@ -10,12 +10,23 @@ public class DataStoreProviderTests
     [Fact]
     public void Current_DefaultValue_IsDataObjectStore()
     {
-        // Arrange & Act
-        var current = DataStoreProvider.Current;
+        // Arrange – reset to a known default in case other tests polluted
+        // the static DataStoreProvider.Current
+        var previous = DataStoreProvider.Current;
+        DataStoreProvider.Current = new DataObjectStore();
+        try
+        {
+            // Act
+            var current = DataStoreProvider.Current;
 
-        // Assert
-        Assert.NotNull(current);
-        Assert.IsType<DataObjectStore>(current);
+            // Assert
+            Assert.NotNull(current);
+            Assert.IsType<DataObjectStore>(current);
+        }
+        finally
+        {
+            DataStoreProvider.Current = previous;
+        }
     }
 
     [Fact]
