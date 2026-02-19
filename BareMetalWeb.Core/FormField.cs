@@ -28,7 +28,7 @@ public sealed record FormField(
     string? Accept = null,
     long? MaxFileSizeBytes = null,
     string? ExistingFileName = null,
-    string? ExistingFileUrl = null
+    string? ExistingFileUrl = null,
     bool IsCalculated = false,
     string? CalculatedExpression = null,
     string? DisplayFormat = null

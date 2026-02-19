@@ -28,7 +28,7 @@ public sealed record DataFieldMetadata(
     DataLookupConfig? Lookup,
     IdGenerationStrategy IdGeneration,
     ComputedFieldConfig? Computed,
-    UploadFieldConfig? Upload
+    UploadFieldConfig? Upload,
     CalculatedFieldAttribute? Calculated
 );
 
@@ -2687,7 +2687,7 @@ public static class DataScaffold
             var idGenAttribute = prop.GetCustomAttribute<IdGenerationAttribute>();
             var computedAttribute = prop.GetCustomAttribute<ComputedFieldAttribute>();
             var calculatedAttribute = prop.GetCustomAttribute<CalculatedFieldAttribute>();
-            if (fieldAttribute == null && !useConvention)
+            if (fieldAttribute == null && imageFieldAttribute == null && fileFieldAttribute == null && !useConvention)
                 continue;
 
             var fieldType = imageFieldAttribute != null
@@ -2773,21 +2773,12 @@ public static class DataScaffold
                 imageFieldAttribute?.View ?? fileFieldAttribute?.View ?? fieldAttribute?.View ?? true,
                 imageFieldAttribute?.Edit ?? fileFieldAttribute?.Edit ?? fieldAttribute?.Edit ?? true,
                 imageFieldAttribute?.Create ?? fileFieldAttribute?.Create ?? fieldAttribute?.Create ?? true,
-                (imageFieldAttribute?.ReadOnly ?? fileFieldAttribute?.ReadOnly ?? fieldAttribute?.ReadOnly ?? false) || (computed != null), // Computed fields are always readonly
+                (imageFieldAttribute?.ReadOnly ?? fileFieldAttribute?.ReadOnly ?? fieldAttribute?.ReadOnly ?? false) || (computed != null) || (calculatedAttribute != null), // Computed and calculated fields are always readonly
                 imageFieldAttribute?.Placeholder ?? fileFieldAttribute?.Placeholder ?? fieldAttribute?.Placeholder,
                 lookup,
                 idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
                 computed,
-                upload
-                fieldAttribute?.List ?? true,
-                fieldAttribute?.View ?? true,
-                fieldAttribute?.Edit ?? true,
-                fieldAttribute?.Create ?? true,
-                (fieldAttribute?.ReadOnly ?? false) || (computed != null) || (calculatedAttribute != null), // Computed and calculated fields are readonly
-                fieldAttribute?.Placeholder,
-                lookup,
-                idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
-                computed,
+                upload,
                 calculatedAttribute
             ));
         }

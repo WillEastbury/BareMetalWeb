@@ -625,7 +625,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert — 19 data routes total (including export routes)
-        Assert.Equal(19, _server.routes.Count);
+        Assert.Equal(21, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -735,11 +735,9 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
 
         // Assert
-        Assert.Equal(7, _server.routes.Count);
+        Assert.Equal(8, _server.routes.Count);
     }
 
-    // ──────────────────────────────────────────────────────────────
-    //  Route template parsing / duplicate detection
     // ──────────────────────────────────────────────────────────────
 
     [Fact]
@@ -921,7 +919,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterAdmin > afterMonitoring);
         Assert.True(afterData > afterAdmin);
         Assert.True(total > afterData);
-        Assert.Equal(staticCount + 16 + 4 + 7 + 19 + 7, total); // 3+16+4+7+19+7=56
+        Assert.Equal(staticCount + 16 + 4 + 8 + 21 + 7, total); // 3+16+4+8+21+7=59
     }
 
     [Fact]
@@ -1102,6 +1100,9 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask DataCommandHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataListExportHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataViewExportHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask DataBulkDeleteHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask DataBulkExportHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask DataApiFileGetHandler(HttpContext context) => ValueTask.CompletedTask;
     }
 
     private class InMemoryDataStore : IDataObjectStore
