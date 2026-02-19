@@ -511,12 +511,13 @@ internal sealed class SearchIndexManager
         index.IdToTokens.Clear();
         index.PrefixTree.Clear();
         
-        // Get metadata to determine which index types to build
-        var firstObj = loadAll().FirstOrDefault();
-        if (firstObj == null)
+        // Load all objects once to avoid calling loadAll multiple times
+        var allObjects = loadAll().ToList();
+        if (allObjects.Count == 0)
             return;
         
-        var metadata = GetOrCreateTypeMetadata(firstObj.GetType());
+        // Get metadata to determine which index types to build
+        var metadata = GetOrCreateTypeMetadata(allObjects[0].GetType());
         
         // Clear other index types
         if (metadata.IndexKinds.Contains(IndexKind.BTree))
@@ -538,7 +539,7 @@ internal sealed class SearchIndexManager
             InitializeBloomFilter(index);
         }
         
-        foreach (var obj in loadAll())
+        foreach (var obj in allObjects)
         {
             if (obj == null || string.IsNullOrWhiteSpace(obj.Id))
                 continue;

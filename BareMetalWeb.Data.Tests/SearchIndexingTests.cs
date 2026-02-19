@@ -29,22 +29,14 @@ public class SearchIndexingTests : IDisposable
 {
     private readonly string _testRoot;
     private readonly TestBufferedLogger _logger;
-
-    public SearchIndexingTests()
-    {
-        _testRoot = Path.Combine(Path.GetTempPath(), $"SearchIndexTests_{Guid.NewGuid()}");
-        Directory.CreateDirectory(_testRoot);
-        _logger = new TestBufferedLogger();
-public class SearchIndexingTests : IDisposable
-{
-    private readonly string _testRoot;
     private readonly SearchIndexManager _manager;
 
     public SearchIndexingTests()
     {
         _testRoot = Path.Combine(Path.GetTempPath(), "BareMetalWeb_SearchIndexing_Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testRoot);
-        _manager = new SearchIndexManager(_testRoot, logger: null);
+        _logger = new TestBufferedLogger();
+        _manager = new SearchIndexManager(_testRoot, logger: _logger);
     }
 
     public void Dispose()
@@ -275,9 +267,6 @@ public class SearchIndexingTests : IDisposable
 
         // Assert
         Assert.Equal(2, results.Count);
-            try { Directory.Delete(_testRoot, recursive: true); }
-            catch { }
-        }
     }
 
     // --- Test entities ---
@@ -1072,18 +1061,6 @@ public class SearchIndexingTests : IDisposable
         Assert.Equal(3, results.Count);
     }
 
-    [Fact]
-    public void Search_EmptyQuery_ReturnsEmpty()
-    {
-        // Arrange
-        var manager = new SearchIndexManager(_testRoot, _logger);
-        var items = new[]
-        {
-            new TestSearchableItem { Id = "1", Name = "Item One" }
-        };
-
-        // Act
-        var results = manager.Search(typeof(TestSearchableItem), "", () => items);
     // --- IndexObject after EnsureBuilt (incremental) ---
 
     [Fact]
@@ -1199,18 +1176,6 @@ public class SearchIndexingTests : IDisposable
         Assert.Empty(results);
     }
 
-    [Fact]
-    public void Search_WhitespaceQuery_ReturnsEmpty()
-    {
-        // Arrange
-        var manager = new SearchIndexManager(_testRoot, _logger);
-        var items = new[]
-        {
-            new TestSearchableItem { Id = "1", Name = "Item One" }
-        };
-
-        // Act
-        var results = manager.Search(typeof(TestSearchableItem), "   ", () => items);
     // --- Token with mixed digits and letters ---
 
     [Fact]
@@ -1306,6 +1271,8 @@ public class SearchIndexingTests : IDisposable
         public void OnApplicationStopping(CancellationTokenSource cts, Task loggerTask) { }
         
         public List<string> GetLogs() => _logs;
+    }
+
     // --- Re-index same ID via EnsureBuilt ---
 
     [Fact]
