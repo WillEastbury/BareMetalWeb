@@ -40,7 +40,7 @@ jobs:
       - name: Compute version
         id: version
         shell: bash
-        run: echo "version=V${{ vars.MAJOR_VERSION || '1' }}.$(date +%Y%m%d).${{ github.run_number }}" >> $GITHUB_OUTPUT
+        run: echo "version=${{ vars.MAJOR_VERSION || '1' }}.$(date +%Y%m%d).${{ github.run_number }}" >> $GITHUB_OUTPUT
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
