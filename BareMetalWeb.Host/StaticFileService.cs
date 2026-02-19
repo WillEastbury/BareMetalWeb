@@ -124,6 +124,13 @@ public static class StaticFileService
             if (options.AddETag && etag != null)
                 context.Response.Headers.ETag = etag;
 
+            var maxAge = options.CacheSeconds <= 0 ? 0 : options.CacheSeconds;
+            context.Response.Headers.CacheControl = $"public, max-age={maxAge}";
+            if (options.AddExpiresHeader && maxAge > 0)
+            {
+                context.Response.Headers.Expires = DateTimeOffset.UtcNow.AddSeconds(maxAge).ToString("R");
+            }
+
             var hasConditionals =
                 context.Request.Headers.IfMatch.Count > 0 ||
                 context.Request.Headers.IfUnmodifiedSince.Count > 0 ||
@@ -140,13 +147,6 @@ public static class StaticFileService
             {
                 context.Response.StatusCode = StatusCodes.Status304NotModified;
                 return true;
-            }
-
-            var maxAge = options.CacheSeconds <= 0 ? 0 : options.CacheSeconds;
-            context.Response.Headers.CacheControl = $"public, max-age={maxAge}";
-            if (options.AddExpiresHeader && maxAge > 0)
-            {
-                context.Response.Headers.Expires = DateTimeOffset.UtcNow.AddSeconds(maxAge).ToString("R");
             }
         }
         else
