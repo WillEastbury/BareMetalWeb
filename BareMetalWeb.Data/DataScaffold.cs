@@ -1884,7 +1884,7 @@ public static class DataScaffold
         sb.Append("<div class=\"modal-dialog modal-lg modal-dialog-scrollable\"><div class=\"modal-content\">");
         sb.Append("<div class=\"modal-header\"><h5 class=\"modal-title\">Edit Row</h5>");
         sb.Append("<button type=\"button\" class=\"btn-close\" data-bs-dismiss=\"modal\" aria-label=\"Close\"></button></div>");
-        sb.Append($"<div class=\"modal-body\"><form id=\"{WebUtility.HtmlEncode(formId)}\">\n");
+        sb.Append($"<div class=\"modal-body\"><form id=\"{WebUtility.HtmlEncode(formId)}\" onsubmit=\"return false;\">\n");
         sb.Append("<input type=\"hidden\" name=\"_rowIndex\" value=\"-1\" />");
 
         foreach (var child in childFields)
