@@ -5,6 +5,10 @@ run-name: "Reset Data Store (Staging) - V${{ vars.MAJOR_VERSION || '1' }}.${{ gi
 on:
   workflow_dispatch:
 
+concurrency:
+  group: reset-data-staging
+  cancel-in-progress: true
+
 permissions:
   contents: read
   id-token: write

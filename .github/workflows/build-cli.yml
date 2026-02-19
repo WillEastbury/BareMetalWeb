@@ -10,6 +10,10 @@ on:
       - '.github/workflows/build-cli.yml'
   workflow_dispatch:
 
+concurrency:
+  group: build-cli-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
