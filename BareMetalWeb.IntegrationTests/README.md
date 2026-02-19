@@ -24,6 +24,10 @@ The tests require the following environment variables:
 
 ## Running Tests Locally
 
+The integration tests will **automatically skip** if the required environment variables are not set. This allows them to run safely in any environment.
+
+To actually run the tests against a deployed instance:
+
 ```bash
 # Set environment variables
 export CIMIGRATE_TEST_USERNAME="your-test-username"
@@ -33,6 +37,8 @@ export CIMIGRATE_BASE_URL="https://baremetalweb-cimigrate.azurewebsites.net"
 # Run integration tests
 dotnet test BareMetalWeb.IntegrationTests --filter "FullyQualifiedName~IntegrationTests"
 ```
+
+**Note:** If you run the tests without setting the environment variables, all 6 tests will be skipped (not failed), which is the expected behavior.
 
 ## CI/CD Integration
 
@@ -73,7 +79,12 @@ Before running these tests for the first time:
 
 ## Troubleshooting
 
-If tests fail:
+If tests are being skipped:
+
+1. **This is expected behavior** - Integration tests skip automatically when environment variables are not set
+2. **To run the tests** - Set the required environment variables (CIMIGRATE_TEST_USERNAME and CIMIGRATE_TEST_PASSWORD)
+
+If tests fail when running with valid credentials:
 
 1. **Check the deployed site** - Manually navigate to the base URL to verify it's running
 2. **Verify credentials** - Ensure the test account exists and credentials are correct

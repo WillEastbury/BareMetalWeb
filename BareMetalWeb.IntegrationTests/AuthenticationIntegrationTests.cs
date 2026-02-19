@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using Xunit;
 
 namespace BareMetalWeb.IntegrationTests;
 
@@ -18,10 +19,8 @@ public class AuthenticationIntegrationTests : IDisposable
     {
         _baseUrl = Environment.GetEnvironmentVariable("CIMIGRATE_BASE_URL") 
             ?? "https://baremetalweb-cimigrate.azurewebsites.net";
-        _username = Environment.GetEnvironmentVariable("CIMIGRATE_TEST_USERNAME") 
-            ?? throw new InvalidOperationException("CIMIGRATE_TEST_USERNAME environment variable not set");
-        _password = Environment.GetEnvironmentVariable("CIMIGRATE_TEST_PASSWORD") 
-            ?? throw new InvalidOperationException("CIMIGRATE_TEST_PASSWORD environment variable not set");
+        _username = Environment.GetEnvironmentVariable("CIMIGRATE_TEST_USERNAME") ?? string.Empty;
+        _password = Environment.GetEnvironmentVariable("CIMIGRATE_TEST_PASSWORD") ?? string.Empty;
 
         var handler = new HttpClientHandler
         {
@@ -37,14 +36,29 @@ public class AuthenticationIntegrationTests : IDisposable
         };
     }
 
+    /// <summary>
+    /// Skips the test if required environment variables are not set.
+    /// This allows the tests to run in CI/CD pipelines with credentials,
+    /// but skip gracefully in local development or other environments without them.
+    /// </summary>
+    private void EnsureEnvironmentVariablesAreSet()
+    {
+        Skip.IfNot(
+            !string.IsNullOrEmpty(_username) && !string.IsNullOrEmpty(_password),
+            "Integration tests require CIMIGRATE_TEST_USERNAME and CIMIGRATE_TEST_PASSWORD environment variables to be set. " +
+            "These tests are designed to run against a deployed instance with valid credentials.");
+    }
+
     public void Dispose()
     {
         _httpClient.Dispose();
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task HomePage_Returns_Success()
     {
+        EnsureEnvironmentVariablesAreSet();
+        
         // Act
         var response = await _httpClient.GetAsync("/");
 
@@ -53,9 +67,11 @@ public class AuthenticationIntegrationTests : IDisposable
             $"Expected success or redirect, got {response.StatusCode}");
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Login_WithValidCredentials_Succeeds()
     {
+        EnsureEnvironmentVariablesAreSet();
+        
         // Arrange - First, get the login page to obtain CSRF token if needed
         var loginPageResponse = await _httpClient.GetAsync("/login");
         
@@ -95,9 +111,11 @@ public class AuthenticationIntegrationTests : IDisposable
         }
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task Login_WithInvalidCredentials_Fails()
     {
+        EnsureEnvironmentVariablesAreSet();
+        
         // Arrange
         var loginData = new FormUrlEncodedContent(new[]
         {
@@ -123,9 +141,11 @@ public class AuthenticationIntegrationTests : IDisposable
         );
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task ProtectedPage_WithoutAuthentication_Redirects()
     {
+        EnsureEnvironmentVariablesAreSet();
+        
         // Arrange - Use a fresh client without authentication
         using var unauthClient = new HttpClient
         {
@@ -147,9 +167,11 @@ public class AuthenticationIntegrationTests : IDisposable
         );
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task StaticFiles_AreAccessible()
     {
+        EnsureEnvironmentVariablesAreSet();
+        
         // Act - Try to access a static file (CSS)
         var response = await _httpClient.GetAsync("/static/site.css");
 
@@ -160,9 +182,11 @@ public class AuthenticationIntegrationTests : IDisposable
         );
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task ApiEndpoint_RespondsCorrectly()
     {
+        EnsureEnvironmentVariablesAreSet();
+        
         // Act - Try to access API health/status endpoint if it exists
         var response = await _httpClient.GetAsync("/api/health");
 
