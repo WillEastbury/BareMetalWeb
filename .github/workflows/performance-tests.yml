@@ -5,6 +5,10 @@ run-name: "Performance Tests - V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_
 on:
   workflow_dispatch:
 
+concurrency:
+  group: performance-tests
+  cancel-in-progress: true
+
 permissions:
   contents: read
 

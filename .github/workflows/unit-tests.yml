@@ -5,6 +5,10 @@ run-name: "Unit Tests - V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number 
 on:
   workflow_dispatch:
 
+concurrency:
+  group: unit-tests-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
