@@ -11,6 +11,8 @@ These tests verify:
 - Static file serving
 - API endpoint availability
 
+**Note:** All integration tests are marked with `[Trait("Category", "Integration")]` to allow filtering them out from default test runs. They are excluded from the standard unit test workflow to prevent build failures when the CI integration server is unavailable.
+
 ## Configuration
 
 The tests support the following environment variables:
@@ -49,7 +51,10 @@ export CIMIGRATE_TEST_USERNAME="your-test-username"
 export CIMIGRATE_TEST_PASSWORD="your-test-password"
 export CIMIGRATE_BASE_URL="https://baremetalweb-cimigrate.azurewebsites.net"
 
-# Run integration tests
+# Run integration tests specifically (using trait filter)
+dotnet test BareMetalWeb.IntegrationTests --filter "Category=Integration"
+
+# Or run all tests in the integration test project
 dotnet test BareMetalWeb.IntegrationTests
 ```
 
@@ -62,10 +67,19 @@ If environment variables are **not** set, the tests will:
 
 ```bash
 # No environment variables needed - tests auto-generate credentials
-dotnet test BareMetalWeb.IntegrationTests
+dotnet test BareMetalWeb.IntegrationTests --filter "Category=Integration"
 ```
 
 **Note:** Tests will fail with network errors if no server is running at the base URL. This is expected behavior.
+
+### Excluding Integration Tests (Default Behavior)
+
+By default, integration tests are **excluded** from the standard test run to prevent blocking the CI pipeline when the integration server is unavailable:
+
+```bash
+# Run all tests EXCEPT integration tests (default CI behavior)
+dotnet test BareMetalWeb.sln --filter "Category!=Integration"
+```
 
 ## CI/CD Integration
 
