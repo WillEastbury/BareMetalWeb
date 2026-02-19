@@ -304,6 +304,9 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("DELETE /api/{type}/{id}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataApiDeleteHandler));
+        host.RegisterRoute("GET /api/{type}/{id}/files/{field}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.DataApiFileGetHandler));
 
         // Remote commands
         host.RegisterRoute("POST /api/{type}/{id}/_command/{command}", new RouteHandlerData(

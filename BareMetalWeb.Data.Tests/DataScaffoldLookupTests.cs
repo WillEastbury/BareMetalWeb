@@ -181,4 +181,55 @@ public class DataScaffoldLookupTests : IDisposable
         public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
         { Delete<T>(id); return ValueTask.CompletedTask; }
     }
+
+    [DataEntity("Upload test entities", Slug = "upload-test-entities")]
+    private sealed class UploadTestEntity : BaseDataObject
+    {
+        [ImageField(Label = "Photo", Order = 1, MaxFileSizeBytes = 1234, AllowedMimeTypes = new[] { "image/png" }, MaxWidth = 800, MaxHeight = 600)]
+        public StoredFileData? Photo { get; set; }
+    }
+
+    [Fact]
+    public void RegisterEntity_WithImageFieldAttribute_BuildsUploadMetadata()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<UploadTestEntity>();
+        var meta = DataScaffold.GetEntityByType(typeof(UploadTestEntity));
+
+        // Act
+        var photoField = meta?.Fields.FirstOrDefault(f => f.Name == nameof(UploadTestEntity.Photo));
+
+        // Assert
+        Assert.NotNull(photoField);
+        Assert.Equal(Rendering.Models.FormFieldType.Image, photoField!.FieldType);
+        Assert.NotNull(photoField.Upload);
+        Assert.Equal(1234, photoField.Upload!.MaxFileSizeBytes);
+        Assert.Equal("image/png", photoField.Upload.AllowedMimeTypes[0]);
+        Assert.Equal(800, photoField.Upload.MaxImageWidth);
+        Assert.Equal(600, photoField.Upload.MaxImageHeight);
+    }
+
+    [Fact]
+    public void BuildFormFields_WithStoredImageValue_PopulatesExistingFileMetadata()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<UploadTestEntity>();
+        var meta = DataScaffold.GetEntityByType(typeof(UploadTestEntity));
+        Assert.NotNull(meta);
+        var instance = new UploadTestEntity
+        {
+            Id = "abc123",
+            Photo = new StoredFileData { FileName = "avatar.png", StorageKey = "x/y.png", ContentType = "image/png", IsImage = true }
+        };
+
+        // Act
+        var fields = DataScaffold.BuildFormFields(meta!, instance, forCreate: false);
+        var photoField = fields.FirstOrDefault(f => f.Name == nameof(UploadTestEntity.Photo));
+
+        // Assert
+        Assert.NotNull(photoField);
+        Assert.Equal("avatar.png", photoField!.ExistingFileName);
+        Assert.Equal("/api/upload-test-entities/abc123/files/Photo", photoField.ExistingFileUrl);
+        Assert.Equal("image/png", photoField.Accept);
+    }
 }

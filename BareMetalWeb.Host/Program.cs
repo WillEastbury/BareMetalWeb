@@ -170,7 +170,15 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
                 ["view"] = f.View,
                 ["edit"] = f.Edit,
                 ["create"] = f.Create,
-                ["readOnly"] = f.ReadOnly
+                ["readOnly"] = f.ReadOnly,
+                ["upload"] = f.Upload == null ? null : new Dictionary<string, object?>
+                {
+                    ["maxFileSizeBytes"] = f.Upload.MaxFileSizeBytes,
+                    ["allowedMimeTypes"] = f.Upload.AllowedMimeTypes,
+                    ["maxImageWidth"] = f.Upload.MaxImageWidth,
+                    ["maxImageHeight"] = f.Upload.MaxImageHeight,
+                    ["generateThumbnail"] = f.Upload.GenerateThumbnail
+                }
             }).ToArray()
         }).ToArray();
         context.Response.ContentType = "application/json";
