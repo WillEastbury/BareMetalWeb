@@ -178,10 +178,11 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
     }));
     
     // Lookup API endpoints for dynamic client-side queries
-    appInfo.RegisterRoute("GET /api/_lookup/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityByIdHandler));
-    appInfo.RegisterRoute("GET /api/_lookup/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.QueryEntitiesHandler));
+    // More specific routes must be registered first to avoid {id} matching literal segments
     appInfo.RegisterRoute("GET /api/_lookup/{type}/_field/{id}/{fieldName}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityFieldHandler));
     appInfo.RegisterRoute("GET /api/_lookup/{type}/_aggregate", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.AggregateEntitiesHandler));
+    appInfo.RegisterRoute("GET /api/_lookup/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityByIdHandler));
+    appInfo.RegisterRoute("GET /api/_lookup/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.QueryEntitiesHandler));
     
     // Ideas/search page
     appInfo.RegisterRoute("GET /ideas/search", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
