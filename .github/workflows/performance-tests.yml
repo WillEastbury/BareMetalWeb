@@ -1,20 +1,6 @@
 name: Performance Tests
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'BareMetalWeb.PerformanceTests/**'
-      - 'BareMetalWeb.Core/**'
-      - 'BareMetalWeb.Data/**'
-      - '.github/workflows/performance-tests.yml'
-  pull_request:
-    branches: [main]
-    paths:
-      - 'BareMetalWeb.PerformanceTests/**'
-      - 'BareMetalWeb.Core/**'
-      - 'BareMetalWeb.Data/**'
-      - '.github/workflows/performance-tests.yml'
   workflow_dispatch:
 
 permissions:
