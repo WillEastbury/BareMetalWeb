@@ -185,7 +185,9 @@
     }
 
     function executeBulkExport(ids, format) {
-        var url = '/admin/data/' + currentEntitySlug + '/bulk-export?format=' + format + '&ids=' + ids.join(',');
+        var url = '/admin/data/' + encodeURIComponent(currentEntitySlug) +
+            '/bulk-export?format=' + encodeURIComponent(format) +
+            '&ids=' + ids.map(function (id) { return encodeURIComponent(id); }).join(',');
         window.location.href = url;
         showToast(true, 'Exporting ' + ids.length + ' record(s)...');
     }
