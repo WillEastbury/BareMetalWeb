@@ -5435,138 +5435,151 @@ public sealed class RouteHandlers : IRouteHandlers
         string? cloneReturnUrl = null)
     {
         var html = new StringBuilder();
-        
-        // Find the first DateOnly or DateTime field
-        var dateField = meta.Fields.FirstOrDefault(f => 
-            f.FieldType == FormFieldType.DateOnly || 
-            f.FieldType == FormFieldType.DateTime);
-        
-        if (dateField == null)
-        {
+
+        // Find the first two DateOnly/DateTime fields: first is start date, second (if any) is end date
+        var dateFields = meta.Fields
+            .Where(f => f.FieldType == FormFieldType.DateOnly || f.FieldType == FormFieldType.DateTime)
+            .Take(2)
+            .ToList();
+
+        if (dateFields.Count == 0)
             return "<p class=\"text-warning\">Timeline view requires a DateOnly or DateTime field.</p>";
-        }
 
         var itemsList = allItems.ToList();
         if (itemsList.Count == 0)
-        {
             return "<p class=\"text-muted\">No items found.</p>";
-        }
 
-        // Group items by date
-        var groupedByDate = new Dictionary<DateOnly, List<BaseDataObject>>();
-        
+        var startField = dateFields[0];
+        var endField = dateFields.Count > 1 ? dateFields[1] : null;
+
+        // Extract start/end dates for each item
+        var ganttItems = new List<(BaseDataObject Item, DateOnly Start, DateOnly End, string Label)>();
         foreach (var item in itemsList)
         {
-            var fieldValue = dateField.Property.GetValue(item);
-            DateOnly dateKey;
-            
-            if (fieldValue is DateOnly dateOnly)
+            var startValue = startField.Property.GetValue(item);
+            DateOnly? startDate = startValue switch
             {
-                dateKey = dateOnly;
-            }
-            else if (fieldValue is DateTime dateTime)
+                DateOnly d => d,
+                DateTime dt => DateOnly.FromDateTime(dt),
+                _ => null
+            };
+            if (startDate == null) continue;
+
+            DateOnly endDate;
+            if (endField != null)
             {
-                dateKey = DateOnly.FromDateTime(dateTime);
-            }
-            else if (fieldValue == null)
-            {
-                // Skip items without a date value
-                continue;
+                var endValue = endField.Property.GetValue(item);
+                endDate = endValue switch
+                {
+                    DateOnly d => d,
+                    DateTime dt => DateOnly.FromDateTime(dt),
+                    _ => startDate.Value
+                };
+                if (endDate < startDate.Value) endDate = startDate.Value;
             }
             else
             {
-                continue;
+                endDate = startDate.Value;
             }
-            
-            if (!groupedByDate.ContainsKey(dateKey))
-            {
-                groupedByDate[dateKey] = new List<BaseDataObject>();
-            }
-            groupedByDate[dateKey].Add(item);
+
+            ganttItems.Add((item, startDate.Value, endDate, GetDisplayValue(meta, item)));
         }
 
-        // Sort by date descending (most recent first)
-        var sortedDates = groupedByDate.Keys.OrderByDescending(d => d).ToList();
+        if (ganttItems.Count == 0)
+            return "<p class=\"text-muted\">No items with valid dates found.</p>";
 
-        html.Append("<div class=\"timeline-container\">");
-        html.Append("<style>");
-        html.Append(".timeline-container { max-width: 1200px; margin: 0 auto; }");
-        html.Append(".timeline-date-group { margin-bottom: 2rem; }");
-        html.Append(".timeline-date-header { font-size: 1.25rem; font-weight: bold; color: #0d6efd; margin-bottom: 1rem; padding: 0.5rem; background: #e7f3ff; border-left: 4px solid #0d6efd; }");
-        html.Append(".timeline-items { margin-left: 2rem; }");
-        html.Append(".timeline-item { margin-bottom: 1rem; padding: 1rem; background: #f8f9fa; border-left: 3px solid #6c757d; position: relative; }");
-        html.Append(".timeline-item:hover { background: #e9ecef; }");
-        html.Append(".timeline-item-header { font-weight: bold; margin-bottom: 0.5rem; }");
-        html.Append(".timeline-item-details { margin-left: 1rem; }");
-        html.Append(".timeline-item-field { margin-bottom: 0.25rem; }");
-        html.Append(".timeline-item-label { font-weight: 500; color: #495057; }");
-        html.Append(".timeline-item-value { color: #212529; }");
-        html.Append(".timeline-item-actions { margin-top: 0.5rem; }");
-        html.Append(".timeline-item-actions a { margin-right: 0.5rem; }");
-        html.Append("</style>");
+        // Expand date range to full month boundaries
+        var minDate = ganttItems.Min(x => x.Start);
+        var maxDate = ganttItems.Max(x => x.End);
+        var chartStart = new DateOnly(minDate.Year, minDate.Month, 1);
+        var chartEndExclusive = maxDate.Month == 12
+            ? new DateOnly(maxDate.Year + 1, 1, 1)
+            : new DateOnly(maxDate.Year, maxDate.Month + 1, 1);
+        var totalDays = Math.Max(
+            (chartEndExclusive.ToDateTime(TimeOnly.MinValue) - chartStart.ToDateTime(TimeOnly.MinValue)).TotalDays,
+            1.0);
 
-        foreach (var date in sortedDates)
+        // Build list of month columns
+        var months = new List<(int Year, int Month, double LeftPct, double WidthPct)>();
+        var cur = chartStart;
+        double runningLeft = 0.0;
+        while (cur < chartEndExclusive)
         {
-            var items = groupedByDate[date];
-            
-            html.Append("<div class=\"timeline-date-group\">");
-            html.Append($"<div class=\"timeline-date-header\">");
-            html.Append($"<i class=\"bi bi-calendar3\" aria-hidden=\"true\"></i> {WebUtility.HtmlEncode(date.ToString("dddd, MMMM d, yyyy"))}");
-            html.Append($" <span class=\"badge bg-secondary\">{items.Count}</span>");
-            html.Append("</div>");
-            
-            html.Append("<div class=\"timeline-items\">");
-            
-            foreach (var item in items.OrderBy(i => GetDisplayValue(meta, i)))
-            {
-                var itemId = DataScaffold.GetIdValue(item) ?? string.Empty;
-                var safeId = Uri.EscapeDataString(itemId);
-                var displayValue = WebUtility.HtmlEncode(GetDisplayValue(meta, item));
-                
-                html.Append("<div class=\"timeline-item\">");
-                html.Append($"<div class=\"timeline-item-header\">{displayValue}</div>");
-                html.Append("<div class=\"timeline-item-details\">");
-                
-                // Show key fields (limit to first 5 fields that are marked for List view, excluding the date field)
-                var fieldsToShow = meta.Fields
-                    .Where(f => f.List && f.Name != dateField.Name)
-                    .Take(5);
-                
-                foreach (var field in fieldsToShow)
-                {
-                    var value = field.Property.GetValue(item);
-                    var displayVal = FormatFieldValue(field, value, canRenderLookupLink);
-                    
-                    html.Append("<div class=\"timeline-item-field\">");
-                    html.Append($"<span class=\"timeline-item-label\">{WebUtility.HtmlEncode(field.Label)}:</span> ");
-                    html.Append($"<span class=\"timeline-item-value\">{displayVal}</span>");
-                    html.Append("</div>");
-                }
-                
-                html.Append("</div>");
-                html.Append("<div class=\"timeline-item-actions\">");
-                html.Append($"<a class=\"btn btn-sm btn-outline-primary\" href=\"{basePath}/{safeId}\" title=\"View Details\"><i class=\"bi bi-eye\" aria-hidden=\"true\"></i> View</a>");
-                html.Append($"<a class=\"btn btn-sm btn-outline-warning\" href=\"{basePath}/{safeId}/edit\" title=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i> Edit</a>");
-                
-                if (!string.IsNullOrWhiteSpace(cloneToken))
-                {
-                    var cloneUrl = $"{basePath}/{safeId}/clone?csrf={Uri.EscapeDataString(cloneToken)}";
-                    if (!string.IsNullOrWhiteSpace(cloneReturnUrl))
-                    {
-                        cloneUrl += $"&returnUrl={Uri.EscapeDataString(cloneReturnUrl)}";
-                    }
-                    html.Append($"<a class=\"btn btn-sm btn-outline-info\" href=\"{cloneUrl}\" title=\"Clone\"><i class=\"bi bi-copy\" aria-hidden=\"true\"></i> Clone</a>");
-                }
-                
-                html.Append("</div>");
-                html.Append("</div>");
-            }
-            
+            var daysInMonth = DateTime.DaysInMonth(cur.Year, cur.Month);
+            var widthPct = daysInMonth / totalDays * 100.0;
+            months.Add((cur.Year, cur.Month, runningLeft, widthPct));
+            runningLeft += widthPct;
+            cur = cur.Month == 12 ? new DateOnly(cur.Year + 1, 1, 1) : new DateOnly(cur.Year, cur.Month + 1, 1);
+        }
+
+        // Bar colours (cycling)
+        string[] barColors = ["#4472c4", "#c0504d", "#9bbb59", "#f79646", "#8064a2"];
+
+        html.Append("<div class=\"gantt-container\">");
+        html.Append("<style>");
+        html.Append(".gantt-container{overflow-x:auto;}");
+        html.Append(".gantt-inner{min-width:500px;}");
+        html.Append(".gantt-header-row{display:flex;border-bottom:2px solid #dee2e6;}");
+        html.Append(".gantt-label-col{flex:0 0 200px;min-width:120px;}");
+        html.Append(".gantt-months-hdr{flex:1;position:relative;height:30px;}");
+        html.Append(".gantt-month-lbl{position:absolute;top:0;text-align:center;font-size:.8rem;font-weight:600;color:#495057;line-height:30px;border-left:1px solid #dee2e6;box-sizing:border-box;overflow:hidden;white-space:nowrap;padding:0 2px;}");
+        html.Append(".gantt-row{display:flex;border-top:1px solid #dee2e6;align-items:center;min-height:34px;}");
+        html.Append(".gantt-row:hover{background:rgba(0,0,0,.04);}");
+        html.Append(".gantt-lbl{flex:0 0 200px;min-width:120px;padding:.2rem .5rem;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}");
+        html.Append(".gantt-lbl a{color:inherit;text-decoration:none;}");
+        html.Append(".gantt-lbl a:hover{text-decoration:underline;}");
+        html.Append(".gantt-bar-area{flex:1;position:relative;height:34px;}");
+        html.Append(".gantt-sep{position:absolute;top:0;bottom:0;border-left:1px solid #dee2e6;}");
+        html.Append(".gantt-bar{position:absolute;height:20px;top:50%;transform:translateY(-50%);border-radius:3px;min-width:4px;opacity:.87;box-sizing:border-box;display:flex;align-items:center;overflow:hidden;text-decoration:none;}");
+        html.Append(".gantt-bar:hover{opacity:1;filter:brightness(1.1);}");
+        html.Append(".gantt-bar-text{font-size:.7rem;color:#fff;white-space:nowrap;padding:0 5px;overflow:hidden;text-overflow:ellipsis;}");
+        html.Append("</style>");
+        html.Append("<div class=\"gantt-inner\">");
+
+        // Header row with month labels
+        html.Append("<div class=\"gantt-header-row\">");
+        html.Append("<div class=\"gantt-label-col\"></div>");
+        html.Append("<div class=\"gantt-months-hdr\">");
+        foreach (var (year, month, leftPct, widthPct) in months)
+        {
+            var monthName = new DateOnly(year, month, 1).ToString("MMM");
+            var headerLabel = month == 1 ? $"{monthName} {year}" : monthName;
+            html.Append($"<div class=\"gantt-month-lbl\" style=\"left:{leftPct:F2}%;width:{widthPct:F2}%;\">{WebUtility.HtmlEncode(headerLabel)}</div>");
+        }
+        html.Append("</div>");
+        html.Append("</div>");
+
+        // One row per item
+        for (int i = 0; i < ganttItems.Count; i++)
+        {
+            var (item, start, end, label) = ganttItems[i];
+            var itemId = DataScaffold.GetIdValue(item) ?? string.Empty;
+            var safeId = Uri.EscapeDataString(itemId);
+            var color = barColors[i % barColors.Length];
+
+            var startDays = (start.ToDateTime(TimeOnly.MinValue) - chartStart.ToDateTime(TimeOnly.MinValue)).TotalDays;
+            var endDays = (end.ToDateTime(TimeOnly.MinValue) - chartStart.ToDateTime(TimeOnly.MinValue)).TotalDays + 1;
+            var barLeft = startDays / totalDays * 100.0;
+            var barWidth = Math.Max((endDays - startDays) / totalDays * 100.0, 0.5);
+
+            var tooltip = endField != null
+                ? $"{WebUtility.HtmlEncode(label)}: {start:yyyy-MM-dd} \u2013 {end:yyyy-MM-dd}"
+                : $"{WebUtility.HtmlEncode(label)}: {start:yyyy-MM-dd}";
+
+            html.Append("<div class=\"gantt-row\">");
+            html.Append($"<div class=\"gantt-lbl\" title=\"{WebUtility.HtmlEncode(label)}\"><a href=\"{basePath}/{safeId}\">{WebUtility.HtmlEncode(label)}</a></div>");
+            html.Append("<div class=\"gantt-bar-area\">");
+            foreach (var (_, _, mLeft, _) in months)
+                html.Append($"<div class=\"gantt-sep\" style=\"left:{mLeft:F2}%;\"></div>");
+            html.Append($"<a href=\"{basePath}/{safeId}/edit\" class=\"gantt-bar\" style=\"left:{barLeft:F2}%;width:{barWidth:F2}%;background:{color};\" title=\"{tooltip}\">");
+            html.Append($"<span class=\"gantt-bar-text\">{WebUtility.HtmlEncode(label)}</span>");
+            html.Append("</a>");
             html.Append("</div>");
             html.Append("</div>");
         }
-        
-        html.Append("</div>");
+
+        html.Append("</div>"); // gantt-inner
+        html.Append("</div>"); // gantt-container
         return html.ToString();
     }
 
