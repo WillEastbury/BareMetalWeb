@@ -4,7 +4,9 @@ public enum ViewType
 {
     Table = 0,
     TreeView = 1,
-    OrgChart = 2
+    OrgChart = 2,
+    Timeline = 3,
+    Timetable = 4
 }
 
 [AttributeUsage(AttributeTargets.Class, Inherited = true, AllowMultiple = false)]

@@ -34,9 +34,11 @@ public interface IRouteHandlers
     ValueTask DataListHandler(HttpContext context);
     ValueTask DataListCsvHandler(HttpContext context);
     ValueTask DataListHtmlHandler(HttpContext context);
+    ValueTask DataListExportHandler(HttpContext context);
     ValueTask DataViewHandler(HttpContext context);
     ValueTask DataViewRtfHandler(HttpContext context);
     ValueTask DataViewHtmlHandler(HttpContext context);
+    ValueTask DataViewExportHandler(HttpContext context);
     ValueTask DataImportHandler(HttpContext context);
     ValueTask DataImportPostHandler(HttpContext context);
     ValueTask DataCreateHandler(HttpContext context);
@@ -60,5 +62,6 @@ public interface IRouteHandlers
     ValueTask DataApiPutHandler(HttpContext context);
     ValueTask DataApiPatchHandler(HttpContext context);
     ValueTask DataApiDeleteHandler(HttpContext context);
+    ValueTask DataApiFileGetHandler(HttpContext context);
     ValueTask DataCommandHandler(HttpContext context);
 }

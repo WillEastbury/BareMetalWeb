@@ -4,18 +4,18 @@ namespace BareMetalWeb.Data.DataObjects;
 public class TimeTablePlan : RenderableDataObject
 {
     [DataLookup(typeof(Subject), DisplayField = "Name", SortField = "Name", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
-    [DataField(Label = "Subject Id", Order = 1, Required = true)]
+    [DataField(Label = "Subject Id", Order = 1, Required = true, List = true)]
     public string SubjectId { get; set; } = string.Empty;
 
-    [DataField(Label = "Notes", Order = 2)]
+    [DataField(Label = "Notes", Order = 2, List = true)]
     public string Notes { get; set; } = string.Empty;
 
-    [DataField(Label = "Day", Order = 3, Required = true)]
+    [DataField(Label = "Day", Order = 3, Required = true, List = true)]
     public DayOfWeek Day { get; set; }
 
-    [DataField(Label = "Start Time", Order = 4, Required = true)]
+    [DataField(Label = "Start Time", Order = 4, Required = true, List = true)]
     public TimeOnly StartTime { get; set; }
 
-    [DataField(Label = "Minutes", Order = 5)]
+    [DataField(Label = "Minutes", Order = 5, List = true)]
     public int Minutes { get; set; } = 30;
 }
