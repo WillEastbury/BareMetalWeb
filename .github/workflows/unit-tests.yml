@@ -1,5 +1,7 @@
 name: Unit Tests
 
+run-name: "Unit Tests - V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+
 on:
   workflow_dispatch:
 
@@ -13,6 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compute version
+        id: version
+        run: echo "version=V${{ vars.MAJOR_VERSION || '1' }}.$(date +%Y%m%d).${{ github.run_number }}" >> $GITHUB_OUTPUT
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -22,7 +28,7 @@ jobs:
         run: dotnet restore BareMetalWeb.sln
 
       - name: Build solution
-        run: dotnet build BareMetalWeb.sln --configuration Release --no-restore
+        run: dotnet build BareMetalWeb.sln --configuration Release --no-restore -p:Version=${{ steps.version.outputs.version }}
 
       - name: Run unit tests
         run: dotnet test BareMetalWeb.sln --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"

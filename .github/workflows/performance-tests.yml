@@ -1,5 +1,7 @@
 name: Performance Tests
 
+run-name: "Performance Tests - V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+
 on:
   workflow_dispatch:
 

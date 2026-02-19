@@ -1,5 +1,7 @@
 name: Build CLI Binaries
 
+run-name: "Build CLI Binaries - V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+
 on:
   push:
     branches: [main]
@@ -35,6 +37,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compute version
+        id: version
+        shell: bash
+        run: echo "version=V${{ vars.MAJOR_VERSION || '1' }}.$(date +%Y%m%d).${{ github.run_number }}" >> $GITHUB_OUTPUT
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -47,6 +54,7 @@ jobs:
           --runtime ${{ matrix.rid }}
           --self-contained true
           --output ./cli-out/${{ matrix.rid }}
+          -p:Version=${{ steps.version.outputs.version }}
 
       - name: Rename binary
         shell: bash
