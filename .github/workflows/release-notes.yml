@@ -1,0 +1,186 @@
+name: Generate Release Notes
+
+run-name: "Release Notes - V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_label:
+        description: 'Optional label for this release (e.g. "beta", "rc1"). Leave blank for standard release.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release-notes:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        id: version
+        run: |
+          MAJOR="${{ vars.MAJOR_VERSION || '1' }}"
+          DATE="$(date +%Y%m%d)"
+          BUILD="${{ github.run_number }}"
+          LABEL="${{ inputs.release_label }}"
+          if [ -n "$LABEL" ]; then
+            VERSION="V${MAJOR}.${DATE}.${BUILD}-${LABEL}"
+          else
+            VERSION="V${MAJOR}.${DATE}.${BUILD}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v${MAJOR}.${DATE}.${BUILD}" >> $GITHUB_OUTPUT
+
+      - name: Find previous release tag
+        id: prev
+        run: |
+          # Get the most recent tag matching our version pattern
+          PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -n 1)
+          if [ -z "$PREV_TAG" ]; then
+            # No previous tag — use the first commit
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+            echo "No previous release tag found; using initial commit."
+          fi
+          echo "ref=$PREV_TAG" >> $GITHUB_OUTPUT
+          echo "Previous release ref: $PREV_TAG"
+
+      - name: Collect merged PR titles
+        id: prs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get merge commits since the previous release
+          COMMITS=$(git log "${{ steps.prev.outputs.ref }}..HEAD" --merges --pretty=format:"%H" 2>/dev/null || true)
+
+          NOTES_FILE=$(mktemp)
+          FEATURE_FILE=$(mktemp)
+          FIX_FILE=$(mktemp)
+          OTHER_FILE=$(mktemp)
+
+          for SHA in $COMMITS; do
+            # Extract PR number from merge commit message "Merge pull request #NNN ..."
+            PR_NUM=$(git log -1 --format="%s" "$SHA" | grep -oP '#\K[0-9]+' | head -1)
+            [ -z "$PR_NUM" ] && continue
+
+            # Fetch PR title via gh CLI
+            TITLE=$(gh pr view "$PR_NUM" --json title --jq '.title' 2>/dev/null || echo "")
+            [ -z "$TITLE" ] && continue
+
+            # Categorise by conventional-commit-style prefix in the title
+            case "$TITLE" in
+              fix:*|Fix:*|fix\(*|Fix\(*)
+                echo "- $TITLE (#$PR_NUM)" >> "$FIX_FILE" ;;
+              feat:*|Feat:*|feat\(*|Feat\(*|Add*|add*)
+                echo "- $TITLE (#$PR_NUM)" >> "$FEATURE_FILE" ;;
+              *)
+                echo "- $TITLE (#$PR_NUM)" >> "$OTHER_FILE" ;;
+            esac
+          done
+
+          # Build the combined notes
+          {
+            if [ -s "$FEATURE_FILE" ]; then
+              echo "### 🚀 Features"
+              echo ""
+              cat "$FEATURE_FILE"
+              echo ""
+            fi
+            if [ -s "$FIX_FILE" ]; then
+              echo "### 🐛 Bug Fixes"
+              echo ""
+              cat "$FIX_FILE"
+              echo ""
+            fi
+            if [ -s "$OTHER_FILE" ]; then
+              echo "### 📦 Other Changes"
+              echo ""
+              cat "$OTHER_FILE"
+              echo ""
+            fi
+          } > "$NOTES_FILE"
+
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "No merged PRs found since last release." > "$NOTES_FILE"
+          fi
+
+          # Store for later steps (handle multi-line)
+          {
+            echo "notes<<NOTES_EOF"
+            cat "$NOTES_FILE"
+            echo "NOTES_EOF"
+          } >> $GITHUB_OUTPUT
+
+          cat "$NOTES_FILE"
+          rm -f "$FEATURE_FILE" "$FIX_FILE" "$OTHER_FILE" "$NOTES_FILE"
+
+      - name: Write release notes markdown
+        run: |
+          mkdir -p docs/releases
+          VERSION="${{ steps.version.outputs.version }}"
+          FILENAME="docs/releases/${VERSION}.md"
+          cat > "$FILENAME" <<'HEADER'
+          # Release ${{ steps.version.outputs.version }}
+
+          **Date:** $(date +%Y-%m-%d)
+          **Build:** ${{ github.run_number }}
+          **Commit:** ${{ github.sha }}
+
+          ---
+
+          HEADER
+
+          # Rewrite without the heredoc quoting issue
+          cat > "$FILENAME" <<EOF
+          # Release ${VERSION}
+
+          **Date:** $(date +%Y-%m-%d)
+          **Build:** ${{ github.run_number }}
+          **Commit:** \`${GITHUB_SHA::8}\`
+
+          ---
+
+          ${{ steps.prs.outputs.notes }}
+
+          ---
+
+          *Generated automatically by the release-notes workflow.*
+          EOF
+
+          # Strip leading whitespace from heredoc indentation
+          sed -i 's/^          //' "$FILENAME"
+
+          echo "## Release notes written to $FILENAME"
+          cat "$FILENAME"
+
+      - name: Commit release notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/releases/
+          git commit -m "docs: release notes for ${VERSION}" || echo "No changes to commit"
+          git push
+
+      - name: Create Git tag
+        run: |
+          TAG="${{ steps.version.outputs.tag }}"
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          FILENAME="docs/releases/${VERSION}.md"
+          gh release create "$TAG" \
+            --title "$VERSION" \
+            --notes-file "$FILENAME" \
+            --latest
