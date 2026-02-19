@@ -76,7 +76,7 @@ public class LocalFolderBinaryDataProviderTests : IDisposable
     }
 
     [Fact]
-    public void AcquireIndexLock_ConcurrentAccess_OneSucceedsOthersRetry()
+    public async Task AcquireIndexLock_ConcurrentAccess_OneSucceedsOthersRetry()
     {
         // Arrange
         var provider = new LocalFolderBinaryDataProvider(_testRoot);
@@ -123,7 +123,7 @@ public class LocalFolderBinaryDataProviderTests : IDisposable
         startSignal.Set();
         
         // Wait for all tasks to complete
-        Task.WaitAll(tasks);
+        await Task.WhenAll(tasks);
         
         // Assert - All threads should eventually succeed or handle contention gracefully
         // With retry logic, all should eventually acquire the lock

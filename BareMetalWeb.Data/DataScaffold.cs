@@ -902,7 +902,7 @@ public static class DataScaffold
         }
 
         var hasChildren = children.Count > 0;
-        var isExpanded = hasChildren && (isActive || IsAncestorSelected(item, allItems, metadata.ParentField, selectedId));
+        var isExpanded = hasChildren && (isActive || (metadata.ParentField != null && IsAncestorSelected(item, allItems, metadata.ParentField, selectedId)));
         var expandClass = isExpanded ? "bm-tree-expanded" : "bm-tree-collapsed";
 
         html.Append("<li class=\"bm-tree-item\">");

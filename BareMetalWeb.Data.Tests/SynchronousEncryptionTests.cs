@@ -46,10 +46,10 @@ public class SynchronousEncryptionTests : IDisposable
     [InlineData("")]
     [InlineData(" ")]
     [InlineData(null)]
-    public void CreateDefault_InvalidRootFolder_ThrowsArgumentException(string rootFolder)
+    public void CreateDefault_InvalidRootFolder_ThrowsArgumentException(string? rootFolder)
     {
         // Act & Assert
-        var exception = Assert.Throws<ArgumentException>(() => SynchronousEncryption.CreateDefault(rootFolder));
+        var exception = Assert.Throws<ArgumentException>(() => SynchronousEncryption.CreateDefault(rootFolder!));
         Assert.Equal("rootFolder", exception.ParamName);
     }
 
