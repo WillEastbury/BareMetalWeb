@@ -2546,6 +2546,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var form = await context.Request.ReadFormAsync();
             var values = form.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
             errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
+            errors = FilterMissingRequiredErrorsForPatchForm(meta, values, errors);
             await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
         }
         else
@@ -4552,6 +4553,39 @@ public sealed class RouteHandlers : IRouteHandlers
 
             user.SetPassword(password!);
         }
+    }
+
+    private static List<string> FilterMissingRequiredErrorsForPatchForm(DataEntityMetadata meta, IDictionary<string, string?> values, List<string> errors)
+    {
+        if (errors.Count == 0)
+            return errors;
+
+        const string requiredSuffix = " is required.";
+        var fieldByLabel = meta.Fields.ToDictionary(f => f.Label, f => f, StringComparer.OrdinalIgnoreCase);
+        var filtered = new List<string>(errors.Count);
+        foreach (var error in errors)
+        {
+            if (!error.EndsWith(requiredSuffix, StringComparison.Ordinal))
+            {
+                filtered.Add(error);
+                continue;
+            }
+
+            var label = error[..^requiredSuffix.Length];
+            if (!fieldByLabel.TryGetValue(label, out var field))
+            {
+                filtered.Add(error);
+                continue;
+            }
+
+            if (values.ContainsKey(field.Name))
+            {
+                filtered.Add(error);
+                continue;
+            }
+        }
+
+        return filtered;
     }
 
     private void RenderMfaResetForm(HttpContext context, string? message)
