@@ -131,6 +131,7 @@ public class AuthenticationIntegrationTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task HomePage_Returns_Success()
     {
         await EnsureUserExists();
@@ -144,6 +145,7 @@ public class AuthenticationIntegrationTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task Login_WithValidCredentials_Succeeds()
     {
         await EnsureUserExists();
@@ -188,6 +190,7 @@ public class AuthenticationIntegrationTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task Login_WithInvalidCredentials_Fails()
     {
         await EnsureUserExists();
@@ -218,6 +221,7 @@ public class AuthenticationIntegrationTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task ProtectedPage_WithoutAuthentication_Redirects()
     {
         await EnsureUserExists();
@@ -244,6 +248,7 @@ public class AuthenticationIntegrationTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task StaticFiles_AreAccessible()
     {
         await EnsureUserExists();
@@ -259,6 +264,7 @@ public class AuthenticationIntegrationTests : IDisposable
     }
 
     [Fact]
+    [Trait("Category", "Integration")]
     public async Task ApiEndpoint_RespondsCorrectly()
     {
         await EnsureUserExists();

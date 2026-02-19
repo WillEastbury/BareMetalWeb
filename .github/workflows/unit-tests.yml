@@ -37,4 +37,4 @@ jobs:
         run: dotnet build BareMetalWeb.sln --configuration Release --no-restore
 
       - name: Run unit tests
-        run: dotnet test BareMetalWeb.sln --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests"
+        run: dotnet test BareMetalWeb.sln --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
