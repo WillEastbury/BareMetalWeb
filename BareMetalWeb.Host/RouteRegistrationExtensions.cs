@@ -222,6 +222,9 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /admin/data/{type}/html", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataListHtmlHandler));
+        host.RegisterRoute("GET /admin/data/{type}/export", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.DataListExportHandler));
 
         // Import
         host.RegisterRoute("GET /admin/data/{type}/import", new RouteHandlerData(
@@ -249,6 +252,9 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /admin/data/{type}/{id}/html", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataViewHtmlHandler));
+        host.RegisterRoute("GET /admin/data/{type}/{id}/export", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.DataViewExportHandler));
 
         // Edit
         host.RegisterRoute("GET /admin/data/{type}/{id}/edit", new RouteHandlerData(

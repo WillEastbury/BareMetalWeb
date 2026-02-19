@@ -8,6 +8,7 @@ using System.Text.Json;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Rendering.Models;
+using BareMetalWeb.Data.ExpressionEngine;
 
 namespace BareMetalWeb.Core;
 
@@ -28,6 +29,7 @@ public sealed record DataFieldMetadata(
     IdGenerationStrategy IdGeneration,
     ComputedFieldConfig? Computed,
     UploadFieldConfig? Upload
+    CalculatedFieldAttribute? Calculated
 );
 
 public sealed record DataEntityMetadata(
@@ -188,6 +190,7 @@ public static class DataScaffold
     {
         var definition = new QueryDefinition();
 
+        // Global search across all list fields
         if (query.TryGetValue("q", out var queryText) && !string.IsNullOrWhiteSpace(queryText))
         {
             var group = new QueryGroup { Logic = QueryGroupLogic.Or };
@@ -203,29 +206,41 @@ public static class DataScaffold
             definition.Groups.Add(group);
         }
 
+        // Per-field filters using f_{fieldname}=value pattern
+        foreach (var field in metadata.Fields)
+        {
+            var filterKey = $"f_{field.Name}";
+            if (query.TryGetValue(filterKey, out var filterValue) && !string.IsNullOrWhiteSpace(filterValue))
+            {
+                var opKey = $"op_{field.Name}";
+                var op = QueryOperator.Contains; // Default operator
+                
+                if (query.TryGetValue(opKey, out var opValue) && !string.IsNullOrWhiteSpace(opValue))
+                {
+                    op = ParseOperator(opValue);
+                }
+                else
+                {
+                    // Auto-select operator based on field type
+                    op = GetDefaultOperatorForField(field);
+                }
+
+                definition.Clauses.Add(new QueryClause
+                {
+                    Field = field.Name,
+                    Operator = op,
+                    Value = filterValue
+                });
+            }
+        }
+
+        // Legacy single field filter support (backward compatibility)
         if (query.TryGetValue("field", out var fieldName) && query.TryGetValue("value", out var value) && !string.IsNullOrWhiteSpace(fieldName))
         {
             var op = QueryOperator.Equals;
             if (query.TryGetValue("op", out var opValue) && !string.IsNullOrWhiteSpace(opValue))
             {
-                op = opValue.Trim().ToLowerInvariant() switch
-                {
-                    "contains" => QueryOperator.Contains,
-                    "startswith" => QueryOperator.StartsWith,
-                    "endswith" => QueryOperator.EndsWith,
-                    "in" => QueryOperator.In,
-                    "notin" => QueryOperator.NotIn,
-                    "nin" => QueryOperator.NotIn,
-                    "gt" => QueryOperator.GreaterThan,
-                    "lt" => QueryOperator.LessThan,
-                    "gte" => QueryOperator.GreaterThanOrEqual,
-                    "lte" => QueryOperator.LessThanOrEqual,
-                    "ne" => QueryOperator.NotEquals,
-                    "neq" => QueryOperator.NotEquals,
-                    "notequals" => QueryOperator.NotEquals,
-                    "eq" => QueryOperator.Equals,
-                    _ => QueryOperator.Equals
-                };
+                op = ParseOperator(opValue);
             }
 
             definition.Clauses.Add(new QueryClause
@@ -256,6 +271,49 @@ public static class DataScaffold
             definition.Top = topVal;
 
         return definition;
+    }
+
+    private static QueryOperator ParseOperator(string opValue)
+    {
+        return opValue.Trim().ToLowerInvariant() switch
+        {
+            "contains" => QueryOperator.Contains,
+            "startswith" => QueryOperator.StartsWith,
+            "endswith" => QueryOperator.EndsWith,
+            "in" => QueryOperator.In,
+            "notin" => QueryOperator.NotIn,
+            "nin" => QueryOperator.NotIn,
+            "gt" => QueryOperator.GreaterThan,
+            "lt" => QueryOperator.LessThan,
+            "gte" => QueryOperator.GreaterThanOrEqual,
+            "lte" => QueryOperator.LessThanOrEqual,
+            "ne" => QueryOperator.NotEquals,
+            "neq" => QueryOperator.NotEquals,
+            "notequals" => QueryOperator.NotEquals,
+            "eq" => QueryOperator.Equals,
+            "=" => QueryOperator.Equals,
+            "equals" => QueryOperator.Equals,
+            _ => QueryOperator.Equals
+        };
+    }
+
+    private static QueryOperator GetDefaultOperatorForField(DataFieldMetadata field)
+    {
+        // For numeric and date fields, default to equals
+        var fieldType = field.Property.PropertyType;
+        var underlyingType = Nullable.GetUnderlyingType(fieldType) ?? fieldType;
+        
+        if (underlyingType == typeof(int) || underlyingType == typeof(long) || 
+            underlyingType == typeof(decimal) || underlyingType == typeof(double) ||
+            underlyingType == typeof(float) || underlyingType == typeof(DateTime) ||
+            underlyingType == typeof(DateTimeOffset) || underlyingType == typeof(DateOnly) ||
+            underlyingType == typeof(TimeOnly))
+        {
+            return QueryOperator.Equals;
+        }
+
+        // For strings and everything else, default to Contains for partial matching
+        return QueryOperator.Contains;
     }
 
     public static IReadOnlyList<FormField> BuildFormFields(DataEntityMetadata metadata, object? instance, bool forCreate)
@@ -317,6 +375,44 @@ public static class DataScaffold
                     Value: computedStringValue ?? string.Empty,
                     IsComputed: true,
                     ComputedStrategy: computed.Strategy.ToString()
+                ));
+                continue;
+            }
+
+            // Calculated fields: always render as readonly with expression
+            if (field.Calculated != null)
+            {
+                var calculated = field.Calculated;
+                
+                // Get current value (for display, will be updated by JS)
+                var calculatedValue = instance != null ? field.Property.GetValue(instance) : null;
+                var calculatedStringValue = ToInputString(calculatedValue, field.Property.PropertyType, field.FieldType);
+
+                // Generate JavaScript expression from the AST
+                string jsExpression;
+                try
+                {
+                    var parser = new ExpressionParser();
+                    var ast = parser.Parse(calculated.Expression);
+                    jsExpression = ast.ToJavaScript();
+                }
+                catch (Exception ex)
+                {
+                    // If parsing fails, log and use a safe default
+                    System.Diagnostics.Debug.WriteLine($"Failed to parse calculated field expression '{calculated.Expression}': {ex.Message}");
+                    jsExpression = "0";
+                }
+
+                // Render as readonly with calculated indicator
+                fields.Add(new FormField(
+                    FormFieldType.ReadOnly,
+                    field.Name,
+                    field.Label,
+                    Required: false,
+                    Value: calculatedStringValue ?? string.Empty,
+                    IsCalculated: true,
+                    CalculatedExpression: jsExpression, // Pass the JS expression, not the original
+                    DisplayFormat: calculated.DisplayFormat
                 ));
                 continue;
             }
@@ -537,6 +633,66 @@ public static class DataScaffold
             headers.Insert(0, "Actions");
 
         return headers;
+    }
+
+    /// <summary>
+    /// Gets metadata about nested/embedded child lists in an entity
+    /// </summary>
+    public static IReadOnlyList<(DataFieldMetadata Field, Type ChildType)> GetNestedComponents(DataEntityMetadata metadata)
+    {
+        var nested = new List<(DataFieldMetadata, Type)>();
+        foreach (var field in metadata.Fields.Where(f => f.View))
+        {
+            if (IsChildListType(field.Property.PropertyType, out var childType))
+            {
+                nested.Add((field, childType));
+            }
+        }
+        return nested;
+    }
+
+    /// <summary>
+    /// Extracts nested child data from an entity instance
+    /// </summary>
+    public static IReadOnlyList<(string FieldName, string[] Headers, string[][] Rows)> ExtractNestedData(DataEntityMetadata metadata, object instance)
+    {
+        var result = new List<(string, string[], string[][])>();
+        
+        foreach (var field in metadata.Fields.Where(f => f.View))
+        {
+            if (!IsChildListType(field.Property.PropertyType, out var childType))
+                continue;
+                
+            var value = field.Property.GetValue(instance);
+            if (value is not IEnumerable enumerable)
+                continue;
+                
+            var childFields = GetChildFieldMetadataSimple(childType);
+            var headers = childFields.Select(f => f.Label).ToArray();
+            var rows = new List<string[]>();
+            
+            foreach (var item in enumerable)
+            {
+                if (item == null)
+                    continue;
+                    
+                var row = new string[childFields.Count];
+                for (int i = 0; i < childFields.Count; i++)
+                {
+                    var childField = childFields[i];
+                    var prop = childType.GetProperty(childField.Name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                    var rawValue = prop?.GetValue(item);
+                    
+                    var displayText = ToDisplayString(rawValue, prop?.PropertyType ?? typeof(string));
+                    row[i] = displayText;
+                }
+                rows.Add(row);
+            }
+            
+            result.Add((field.Name, headers, rows.ToArray()));
+        }
+        
+        return result;
     }
 
     public static TableRowActions? BuildRowActionsMetadata(BaseDataObject? dataObject, string rowBasePath, string? cloneToken = null, string? cloneReturnUrl = null)
@@ -909,6 +1065,164 @@ public static class DataScaffold
                 html.Append("</div>");
             }
         }
+    }
+
+    public static bool CanShowTimetableView(DataEntityMetadata metadata)
+    {
+        // Check for DayOfWeek enum field
+        var dayField = metadata.Fields.FirstOrDefault(f =>
+            f.FieldType == FormFieldType.Enum &&
+            f.Property.PropertyType == typeof(DayOfWeek));
+
+        // Check for TimeOnly or DateTime field
+        var timeField = metadata.Fields.FirstOrDefault(f =>
+            f.FieldType == FormFieldType.TimeOnly ||
+            f.FieldType == FormFieldType.DateTime);
+
+        return dayField != null && timeField != null;
+    }
+
+    public static string BuildTimetableHtml(
+        DataEntityMetadata metadata,
+        IEnumerable<BaseDataObject> allItems,
+        string basePath,
+        Func<DataEntityMetadata, bool>? canRenderLookupLink = null,
+        string? cloneToken = null,
+        string? cloneReturnUrl = null)
+    {
+        // Find the day and time fields
+        var dayField = metadata.Fields.FirstOrDefault(f =>
+            f.FieldType == FormFieldType.Enum &&
+            f.Property.PropertyType == typeof(DayOfWeek));
+
+        var timeField = metadata.Fields.FirstOrDefault(f =>
+            f.FieldType == FormFieldType.TimeOnly ||
+            f.FieldType == FormFieldType.DateTime);
+
+        if (dayField == null || timeField == null)
+            return "<p class=\"text-warning\">Timetable view requires a Day (DayOfWeek) field and a Time field.</p>";
+
+        var html = new StringBuilder();
+        var itemsList = allItems.ToList();
+
+        // Group by day
+        var groupedByDay = itemsList
+            .GroupBy(item => (DayOfWeek)(dayField.Property.GetValue(item) ?? DayOfWeek.Sunday))
+            .OrderBy(g => g.Key)
+            .ToList();
+
+        if (groupedByDay.Count == 0)
+        {
+            html.Append("<p class=\"text-muted mb-0\">No items found.</p>");
+            return html.ToString();
+        }
+
+        html.Append("<div class=\"bm-timetable-container\">");
+
+        foreach (var dayGroup in groupedByDay)
+        {
+            var dayName = dayGroup.Key.ToString();
+            html.Append($"<div class=\"bm-timetable-day-section mb-4\">");
+            html.Append($"<h3 class=\"bm-timetable-day-header\">{WebUtility.HtmlEncode(dayName)}</h3>");
+
+            // Sort items by time within this day
+            var sortedItems = timeField.FieldType == FormFieldType.TimeOnly
+                ? dayGroup.OrderBy(item => (TimeOnly)(timeField.Property.GetValue(item) ?? TimeOnly.MinValue)).ToList()
+                : dayGroup.OrderBy(item => (DateTime)(timeField.Property.GetValue(item) ?? DateTime.MinValue)).ToList();
+
+            html.Append("<table class=\"table table-striped table-hover\">");
+            html.Append("<thead><tr>");
+            
+            // Add action column
+            html.Append("<th scope=\"col\">Actions</th>");
+            
+            // Add time column
+            html.Append($"<th scope=\"col\">{WebUtility.HtmlEncode(timeField.Label)}</th>");
+            
+            // Add other list fields
+            foreach (var field in metadata.Fields.Where(f => f.List && f != dayField && f != timeField))
+            {
+                html.Append($"<th scope=\"col\">{WebUtility.HtmlEncode(field.Label)}</th>");
+            }
+            
+            html.Append("</tr></thead><tbody>");
+
+            foreach (var item in sortedItems)
+            {
+                var itemId = GetIdValue(item) ?? string.Empty;
+                var safeId = Uri.EscapeDataString(itemId);
+
+                html.Append("<tr>");
+
+                // Actions column
+                html.Append("<td>");
+                html.Append($"<a href=\"{basePath}/{safeId}\" class=\"btn btn-sm btn-outline-primary me-1\" title=\"View\" aria-label=\"View\"><i class=\"bi bi-eye\" aria-hidden=\"true\"></i></a>");
+                html.Append($"<a href=\"{basePath}/{safeId}/edit\" class=\"btn btn-sm btn-outline-secondary me-1\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>");
+                
+                if (!string.IsNullOrWhiteSpace(cloneToken))
+                {
+                    var cloneUrl = $"{basePath}/clone/{safeId}";
+                    if (!string.IsNullOrWhiteSpace(cloneReturnUrl))
+                    {
+                        cloneUrl += $"?returnUrl={Uri.EscapeDataString(cloneReturnUrl)}";
+                    }
+                    html.Append($"<a href=\"{cloneUrl}\" class=\"btn btn-sm btn-outline-info me-1\" title=\"Clone\" aria-label=\"Clone\"><i class=\"bi bi-files\" aria-hidden=\"true\"></i></a>");
+                }
+                
+                html.Append($"<button type=\"button\" class=\"btn btn-sm btn-outline-danger\" onclick=\"deleteItem('{WebUtility.HtmlEncode(itemId).Replace("'", "\\'")}')\" title=\"Delete\" aria-label=\"Delete\"><i class=\"bi bi-trash\" aria-hidden=\"true\"></i></button>");
+                html.Append("</td>");
+
+                // Time column
+                var timeValue = timeField.Property.GetValue(item);
+                var timeDisplay = timeValue != null
+                    ? (timeField.FieldType == FormFieldType.TimeOnly
+                        ? ((TimeOnly)timeValue).ToString("HH:mm")
+                        : ((DateTime)timeValue).ToString("HH:mm"))
+                    : string.Empty;
+                html.Append($"<td>{WebUtility.HtmlEncode(timeDisplay)}</td>");
+
+                // Other list fields
+                foreach (var field in metadata.Fields.Where(f => f.List && f != dayField && f != timeField))
+                {
+                    var rawValue = field.Property.GetValue(item);
+                    string displayValue;
+
+                    if (field.Lookup != null)
+                    {
+                        var lookupOptions = GetLookupOptions(field.Lookup);
+                        var lookupMap = lookupOptions.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                        var key = rawValue?.ToString() ?? string.Empty;
+                        var display = lookupMap.TryGetValue(key, out var resolved) ? resolved : key;
+                        var relatedUrl = TryBuildLookupUrl(field.Lookup, key, canRenderLookupLink);
+                        displayValue = BuildLookupHtml(key, display, relatedUrl);
+                    }
+                    else if (rawValue is bool boolValue)
+                    {
+                        displayValue = BuildBooleanCheckboxHtml(boolValue);
+                    }
+                    else
+                    {
+                        displayValue = WebUtility.HtmlEncode(ToDisplayString(rawValue, field.Property.PropertyType));
+                    }
+
+                    html.Append($"<td>{displayValue}</td>");
+                }
+
+                html.Append("</tr>");
+            }
+
+            html.Append("</tbody></table>");
+            html.Append("</div>");
+        }
+
+        html.Append("</div>");
+
+        // Add delete confirmation script
+        html.Append("<script>");
+        html.Append($"function deleteItem(id) {{ if (confirm('Are you sure you want to delete this item?')) {{ window.location.href = '{basePath}/' + encodeURIComponent(id) + '/delete'; }} }}");
+        html.Append("</script>");
+
+        return html.ToString();
     }
 
     private static string GetDisplayValue(DataEntityMetadata metadata, BaseDataObject item)
@@ -1419,6 +1733,41 @@ public static class DataScaffold
 
         childType = type.GetGenericArguments()[0];
         return childType.IsClass && childType != typeof(string);
+    }
+
+    /// <summary>
+    /// Gets child field metadata without resolving lookups (for export scenarios where we don't need lookup data)
+    /// </summary>
+    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadataSimple(Type childType)
+    {
+        var fields = new List<ChildFieldMeta>();
+        var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .OrderBy(p => p.MetadataToken)
+            .ToArray();
+
+        foreach (var prop in properties)
+        {
+            if (!prop.CanRead || !prop.CanWrite)
+                continue;
+
+            var fieldAttribute = prop.GetCustomAttribute<DataFieldAttribute>();
+            if (fieldAttribute == null)
+                continue;
+
+            if (!fieldAttribute.Create && !fieldAttribute.Edit)
+                continue;
+
+            var label = fieldAttribute.Label ?? DeCamelcaseWithId(prop.Name);
+            var required = fieldAttribute.Required;
+            var effectiveFieldType = fieldAttribute.FieldType == FormFieldType.Unknown
+                ? MapFieldType(prop.PropertyType)
+                : fieldAttribute.FieldType;
+
+            // Don't resolve lookups in this simplified version
+            fields.Add(new ChildFieldMeta(prop.Name, label, prop.PropertyType, required, effectiveFieldType, null));
+        }
+
+        return fields;
     }
 
     private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadata(Type childType)
@@ -2327,7 +2676,8 @@ public static class DataScaffold
             var lookupAttribute = prop.GetCustomAttribute<DataLookupAttribute>();
             var idGenAttribute = prop.GetCustomAttribute<IdGenerationAttribute>();
             var computedAttribute = prop.GetCustomAttribute<ComputedFieldAttribute>();
-            if (fieldAttribute == null && fileFieldAttribute == null && imageFieldAttribute == null && !useConvention)
+            var calculatedAttribute = prop.GetCustomAttribute<CalculatedFieldAttribute>();
+            if (fieldAttribute == null && !useConvention)
                 continue;
 
             var fieldType = imageFieldAttribute != null
@@ -2419,6 +2769,16 @@ public static class DataScaffold
                 idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
                 computed,
                 upload
+                fieldAttribute?.List ?? true,
+                fieldAttribute?.View ?? true,
+                fieldAttribute?.Edit ?? true,
+                fieldAttribute?.Create ?? true,
+                (fieldAttribute?.ReadOnly ?? false) || (computed != null) || (calculatedAttribute != null), // Computed and calculated fields are readonly
+                fieldAttribute?.Placeholder,
+                lookup,
+                idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
+                computed,
+                calculatedAttribute
             ));
         }
 
@@ -2640,4 +3000,13 @@ public static class DataScaffold
 
     private static async ValueTask<int> CountTypedAsync<T>(QueryDefinition? query, CancellationToken cancellationToken) where T : BaseDataObject
         => await DataStoreProvider.Current.CountAsync<T>(query, cancellationToken);
+
+    /// <summary>
+    /// Evaluates all calculated fields on an entity instance server-side.
+    /// Call this before saving to ensure calculated values match server-side evaluation.
+    /// </summary>
+    public static void ApplyCalculatedFields(DataEntityMetadata metadata, BaseDataObject instance)
+    {
+        CalculatedFieldService.EvaluateCalculatedFields(instance);
+    }
 }

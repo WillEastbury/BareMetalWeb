@@ -70,7 +70,8 @@ public static class BareMetalWebExtensions
 
         // Route handlers
         bool allowAccountCreation = app.Configuration.GetValue("Auth:AllowAccountCreation", false);
-        IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot);
+        AuditService auditService = new AuditService(DataStoreProvider.Current, logger);
+        IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot, auditService);
         IHtmlTemplate mainTemplate = templateStore.Get("Index");
         CancellationTokenSource cts = new CancellationTokenSource();
 

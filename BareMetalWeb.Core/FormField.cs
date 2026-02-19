@@ -29,4 +29,7 @@ public sealed record FormField(
     long? MaxFileSizeBytes = null,
     string? ExistingFileName = null,
     string? ExistingFileUrl = null
+    bool IsCalculated = false,
+    string? CalculatedExpression = null,
+    string? DisplayFormat = null
 );
