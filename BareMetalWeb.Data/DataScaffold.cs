@@ -1082,12 +1082,19 @@ public static class DataScaffold
         }
     }
 
+    private static DataFieldMetadata? FindDayEnumField(DataEntityMetadata metadata)
+    {
+        // Prefer enum fields whose name or label contains "day" (e.g. Day, DayOfWeek, WeekDay)
+        return metadata.Fields.FirstOrDefault(f =>
+                f.FieldType == FormFieldType.Enum &&
+                f.Name.Contains("day", StringComparison.OrdinalIgnoreCase))
+            ?? metadata.Fields.FirstOrDefault(f => f.FieldType == FormFieldType.Enum);
+    }
+
     public static bool CanShowTimetableView(DataEntityMetadata metadata)
     {
-        // Check for DayOfWeek enum field
-        var dayField = metadata.Fields.FirstOrDefault(f =>
-            f.FieldType == FormFieldType.Enum &&
-            f.Property.PropertyType == typeof(DayOfWeek));
+        // Check for an enum field, preferring one whose name contains "day"
+        var dayField = FindDayEnumField(metadata);
 
         // Check for TimeOnly or DateTime field
         var timeField = metadata.Fields.FirstOrDefault(f =>
@@ -1106,9 +1113,7 @@ public static class DataScaffold
         string? cloneReturnUrl = null)
     {
         // Find the day and time fields
-        var dayField = metadata.Fields.FirstOrDefault(f =>
-            f.FieldType == FormFieldType.Enum &&
-            f.Property.PropertyType == typeof(DayOfWeek));
+        var dayField = FindDayEnumField(metadata);
 
         var timeField = metadata.Fields.FirstOrDefault(f =>
             f.FieldType == FormFieldType.TimeOnly ||
@@ -1120,9 +1125,9 @@ public static class DataScaffold
         var html = new StringBuilder();
         var itemsList = allItems.ToList();
 
-        // Group by day
+        // Group by day using the integer value of the enum so any day-of-week enum type works
         var groupedByDay = itemsList
-            .GroupBy(item => (DayOfWeek)(dayField.Property.GetValue(item) ?? DayOfWeek.Sunday))
+            .GroupBy(item => Convert.ToInt32(dayField.Property.GetValue(item) ?? 0))
             .OrderBy(g => g.Key)
             .ToList();
 
@@ -1136,7 +1141,7 @@ public static class DataScaffold
 
         foreach (var dayGroup in groupedByDay)
         {
-            var dayName = dayGroup.Key.ToString();
+            var dayName = Enum.GetName(dayField.Property.PropertyType, dayGroup.Key) ?? dayGroup.Key.ToString();
             html.Append($"<div class=\"bm-timetable-day-section mb-4\">");
             html.Append($"<h3 class=\"bm-timetable-day-header\">{WebUtility.HtmlEncode(dayName)}</h3>");
 

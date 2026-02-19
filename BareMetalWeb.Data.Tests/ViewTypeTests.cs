@@ -16,6 +16,16 @@ public class ViewTypeTests
     }
     
     [Fact]
+    public void ViewType_HasTimetableOption()
+    {
+        // Arrange & Act
+        var timetableValue = ViewType.Timetable;
+        
+        // Assert
+        Assert.Equal(4, (int)timetableValue);
+    }
+
+    [Fact]
     public void ViewType_AllValuesAreUnique()
     {
         // Arrange
@@ -24,7 +34,8 @@ public class ViewTypeTests
             (int)ViewType.Table,
             (int)ViewType.TreeView,
             (int)ViewType.OrgChart,
-            (int)ViewType.Timeline
+            (int)ViewType.Timeline,
+            (int)ViewType.Timetable
         };
         
         // Act
