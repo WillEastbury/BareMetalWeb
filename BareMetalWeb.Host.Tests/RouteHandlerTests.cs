@@ -669,6 +669,137 @@ public class RouteHandlerTests : IDisposable
     }
 
     // ──────────────────────────────────────────────────────────────
+    //  BuildTimelineViewHtml (Gantt chart) tests
+    // ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildTimelineViewHtml_NoDateField_ReturnsWarning()
+    {
+        var meta = CreateEmptyEntityMetadata();
+        var result = InvokeStatic<string>("BuildTimelineViewHtml",
+            meta, Array.Empty<BaseDataObject>(), "/admin/data/test", null, null, null);
+        Assert.Contains("text-warning", result);
+    }
+
+    [Fact]
+    public void BuildTimelineViewHtml_NoItems_ReturnsNoItemsMessage()
+    {
+        var meta = CreateGanttMetadata();
+        var result = InvokeStatic<string>("BuildTimelineViewHtml",
+            meta, Array.Empty<BaseDataObject>(), "/admin/data/invoice", null, null, null);
+        Assert.Contains("text-muted", result);
+    }
+
+    [Fact]
+    public void BuildTimelineViewHtml_WithTwoDateFields_RendersGanttBars()
+    {
+        var meta = CreateGanttMetadata();
+        var invoice = new Invoice { InvoiceDate = new DateOnly(2025, 5, 1), DueDate = new DateOnly(2025, 6, 15) };
+        var items = new BaseDataObject[] { invoice };
+        var result = InvokeStatic<string>("BuildTimelineViewHtml",
+            meta, items, "/admin/data/invoice", null, null, null);
+        Assert.Contains("gantt-bar", result);
+        Assert.Contains("gantt-month-lbl", result);
+    }
+
+    [Fact]
+    public void BuildTimelineViewHtml_RendersMonthHeaders()
+    {
+        var meta = CreateGanttMetadata();
+        var invoice = new Invoice { InvoiceDate = new DateOnly(2025, 5, 1), DueDate = new DateOnly(2025, 7, 31) };
+        var items = new BaseDataObject[] { invoice };
+        var result = InvokeStatic<string>("BuildTimelineViewHtml",
+            meta, items, "/admin/data/invoice", null, null, null);
+        Assert.Contains("May", result);
+        Assert.Contains("Jun", result);
+        Assert.Contains("Jul", result);
+    }
+
+    [Fact]
+    public void BuildTimelineViewHtml_WithOneDateField_RendersMilestoneBars()
+    {
+        var meta = CreateSingleDateGanttMetadata();
+        var invoice = new Invoice { InvoiceDate = new DateOnly(2025, 5, 10) };
+        var items = new BaseDataObject[] { invoice };
+        var result = InvokeStatic<string>("BuildTimelineViewHtml",
+            meta, items, "/admin/data/invoice", null, null, null);
+        Assert.Contains("gantt-bar", result);
+        Assert.Contains("gantt-month-lbl", result);
+    }
+
+    [Fact]
+    public void BuildTimelineViewHtml_BarLeftPositionIsNonNegative()
+    {
+        var meta = CreateGanttMetadata();
+        var invoice = new Invoice { InvoiceDate = new DateOnly(2025, 6, 1), DueDate = new DateOnly(2025, 6, 30) };
+        var items = new BaseDataObject[] { invoice };
+        var result = InvokeStatic<string>("BuildTimelineViewHtml",
+            meta, items, "/admin/data/invoice", null, null, null);
+        // Bar must have a left% style — ensure it's not negative (i.e. "left:-" absent)
+        Assert.DoesNotContain("left:-", result);
+    }
+
+    private static DataEntityMetadata CreateGanttMetadata()
+    {
+        var invoiceDateProp = typeof(Invoice).GetProperty("InvoiceDate")!;
+        var dueDateProp = typeof(Invoice).GetProperty("DueDate")!;
+        var fields = new[]
+        {
+            new DataFieldMetadata(invoiceDateProp, "InvoiceDate", "Invoice Date", FormFieldType.DateOnly, 2, false, true, true, true, true, false, null, null, IdGenerationStrategy.None, null, null, null, null),
+            new DataFieldMetadata(dueDateProp, "DueDate", "Due Date", FormFieldType.DateOnly, 3, false, true, true, true, true, false, null, null, IdGenerationStrategy.None, null, null, null, null),
+        };
+        return new DataEntityMetadata(
+            Type: typeof(Invoice),
+            Name: "Invoices",
+            Slug: "invoices",
+            Permissions: "",
+            ShowOnNav: false,
+            NavGroup: null,
+            NavOrder: 0,
+            IdGeneration: AutoIdStrategy.None,
+            ViewType: ViewType.Timeline,
+            ParentField: null,
+            Fields: fields,
+            Handlers: new DataEntityHandlers(
+                Create: () => new Invoice(),
+                LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
+                SaveAsync: (_, _) => ValueTask.CompletedTask,
+                DeleteAsync: (_, _) => ValueTask.CompletedTask,
+                QueryAsync: (_, _) => ValueTask.FromResult<IEnumerable<BaseDataObject>>(Array.Empty<BaseDataObject>()),
+                CountAsync: (_, _) => ValueTask.FromResult(0)),
+            Commands: Array.Empty<RemoteCommandMetadata>());
+    }
+
+    private static DataEntityMetadata CreateSingleDateGanttMetadata()
+    {
+        var invoiceDateProp = typeof(Invoice).GetProperty("InvoiceDate")!;
+        var fields = new[]
+        {
+            new DataFieldMetadata(invoiceDateProp, "InvoiceDate", "Invoice Date", FormFieldType.DateOnly, 2, false, true, true, true, true, false, null, null, IdGenerationStrategy.None, null, null, null, null),
+        };
+        return new DataEntityMetadata(
+            Type: typeof(Invoice),
+            Name: "Invoices",
+            Slug: "invoices",
+            Permissions: "",
+            ShowOnNav: false,
+            NavGroup: null,
+            NavOrder: 0,
+            IdGeneration: AutoIdStrategy.None,
+            ViewType: ViewType.Timeline,
+            ParentField: null,
+            Fields: fields,
+            Handlers: new DataEntityHandlers(
+                Create: () => new Invoice(),
+                LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
+                SaveAsync: (_, _) => ValueTask.CompletedTask,
+                DeleteAsync: (_, _) => ValueTask.CompletedTask,
+                QueryAsync: (_, _) => ValueTask.FromResult<IEnumerable<BaseDataObject>>(Array.Empty<BaseDataObject>()),
+                CountAsync: (_, _) => ValueTask.FromResult(0)),
+            Commands: Array.Empty<RemoteCommandMetadata>());
+    }
+
+    // ──────────────────────────────────────────────────────────────
     //  BuildCommandButtonsHtml tests
     // ──────────────────────────────────────────────────────────────
 
