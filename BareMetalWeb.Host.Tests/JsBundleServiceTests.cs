@@ -1,0 +1,203 @@
+using System;
+using System.IO;
+using System.Text;
+using System.Threading.Tasks;
+using BareMetalWeb.Host;
+using Microsoft.AspNetCore.Http;
+using Xunit;
+
+namespace BareMetalWeb.Host.Tests;
+
+public class JsBundleServiceTests : IDisposable
+{
+    private readonly string _tempDir;
+
+    public JsBundleServiceTests()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), "bmw-bundle-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(_tempDir);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_tempDir))
+            Directory.Delete(_tempDir, true);
+    }
+
+    private HttpContext CreateContext(string method, string path)
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Method = method;
+        context.Request.Path = path;
+        context.Response.Body = new MemoryStream();
+        return context;
+    }
+
+    private void WriteJsFile(string fileName, string content)
+        => File.WriteAllText(Path.Combine(_tempDir, fileName), content, Encoding.UTF8);
+
+    private string ReadResponseBody(HttpContext context)
+    {
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        return new StreamReader(context.Response.Body, Encoding.UTF8).ReadToEnd();
+    }
+
+    [Fact]
+    public async Task BuildBundle_ConcatenatesFilesInOrder()
+    {
+        WriteJsFile("theme-switcher.js", "/* theme */");
+        WriteJsFile("timezone.js", "/* tz */");
+
+        JsBundleService.BuildBundle(_tempDir);
+
+        var context = CreateContext("GET", JsBundleService.BundlePath);
+        await JsBundleService.TryServeAsync(context);
+
+        var body = ReadResponseBody(context);
+        var themeIdx = body.IndexOf("theme-switcher.js", StringComparison.Ordinal);
+        var tzIdx = body.IndexOf("timezone.js", StringComparison.Ordinal);
+        Assert.True(themeIdx >= 0, "theme-switcher.js should appear in bundle");
+        Assert.True(tzIdx >= 0, "timezone.js should appear in bundle");
+        Assert.True(themeIdx < tzIdx, "theme-switcher.js should appear before timezone.js");
+    }
+
+    [Fact]
+    public void BuildBundle_SkipsMissingFiles()
+    {
+        // Only write one of the expected files
+        WriteJsFile("theme-switcher.js", "var x=1;");
+
+        // Should not throw even though other files are missing
+        JsBundleService.BuildBundle(_tempDir);
+    }
+
+    [Fact]
+    public async Task TryServeAsync_NonBundlePath_ReturnsFalse()
+    {
+        JsBundleService.BuildBundle(_tempDir);
+
+        var context = CreateContext("GET", "/static/js/theme-switcher.js");
+        var result = await JsBundleService.TryServeAsync(context);
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task TryServeAsync_BundlePath_ReturnsTrue()
+    {
+        WriteJsFile("theme-switcher.js", "var x=1;");
+        JsBundleService.BuildBundle(_tempDir);
+
+        var context = CreateContext("GET", JsBundleService.BundlePath);
+        var result = await JsBundleService.TryServeAsync(context);
+
+        Assert.True(result);
+        Assert.Equal(200, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TryServeAsync_SetsCorrectContentType()
+    {
+        WriteJsFile("theme-switcher.js", "var x=1;");
+        JsBundleService.BuildBundle(_tempDir);
+
+        var context = CreateContext("GET", JsBundleService.BundlePath);
+        await JsBundleService.TryServeAsync(context);
+
+        Assert.Equal("application/javascript; charset=utf-8", context.Response.ContentType);
+    }
+
+    [Fact]
+    public async Task TryServeAsync_SetsETagHeader()
+    {
+        WriteJsFile("theme-switcher.js", "var x=1;");
+        JsBundleService.BuildBundle(_tempDir);
+
+        var context = CreateContext("GET", JsBundleService.BundlePath);
+        await JsBundleService.TryServeAsync(context);
+
+        Assert.False(string.IsNullOrEmpty(context.Response.Headers.ETag.ToString()));
+    }
+
+    [Fact]
+    public async Task TryServeAsync_Returns304_WhenETagMatches()
+    {
+        WriteJsFile("theme-switcher.js", "var x=1;");
+        JsBundleService.BuildBundle(_tempDir);
+
+        // First request to get the ETag
+        var first = CreateContext("GET", JsBundleService.BundlePath);
+        await JsBundleService.TryServeAsync(first);
+        var etag = first.Response.Headers.ETag.ToString();
+
+        // Second request with matching ETag
+        var context = CreateContext("GET", JsBundleService.BundlePath);
+        context.Request.Headers.IfNoneMatch = etag;
+        var result = await JsBundleService.TryServeAsync(context);
+
+        Assert.True(result);
+        Assert.Equal(304, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TryServeAsync_PostMethod_Returns405()
+    {
+        WriteJsFile("theme-switcher.js", "var x=1;");
+        JsBundleService.BuildBundle(_tempDir);
+
+        var context = CreateContext("POST", JsBundleService.BundlePath);
+        var result = await JsBundleService.TryServeAsync(context);
+
+        Assert.True(result);
+        Assert.Equal(405, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task TryServeAsync_HeadMethod_ReturnsNoBody()
+    {
+        WriteJsFile("theme-switcher.js", "var x=1;");
+        JsBundleService.BuildBundle(_tempDir);
+
+        var context = CreateContext("HEAD", JsBundleService.BundlePath);
+        await JsBundleService.TryServeAsync(context);
+
+        Assert.Equal(200, context.Response.StatusCode);
+        Assert.Equal(0, context.Response.Body.Length);
+    }
+
+    [Fact]
+    public async Task TryServeAsync_SetsCacheControlHeader()
+    {
+        WriteJsFile("theme-switcher.js", "var x=1;");
+        JsBundleService.BuildBundle(_tempDir);
+
+        var context = CreateContext("GET", JsBundleService.BundlePath);
+        await JsBundleService.TryServeAsync(context);
+
+        Assert.Contains("public", context.Response.Headers.CacheControl.ToString());
+        Assert.Contains("max-age=86400", context.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
+    public async Task TryServeAsync_BundleContainsFileContent()
+    {
+        WriteJsFile("theme-switcher.js", "function myThemeFunc(){}");
+        JsBundleService.BuildBundle(_tempDir);
+
+        var context = CreateContext("GET", JsBundleService.BundlePath);
+        await JsBundleService.TryServeAsync(context);
+
+        var body = ReadResponseBody(context);
+        Assert.Contains("myThemeFunc", body);
+    }
+
+    [Fact]
+    public void BundleFileOrder_ContainsExpectedFiles()
+    {
+        Assert.Contains("theme-switcher.js", JsBundleService.BundleFileOrder);
+        Assert.Contains("timezone.js", JsBundleService.BundleFileOrder);
+        Assert.Contains("bmw-lookup.js", JsBundleService.BundleFileOrder);
+        Assert.Contains("toast.js", JsBundleService.BundleFileOrder);
+        Assert.Contains("otp.js", JsBundleService.BundleFileOrder);
+    }
+}

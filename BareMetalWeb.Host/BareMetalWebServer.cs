@@ -313,6 +313,12 @@ public class BareMetalWebServer : IBareWebHost
                 return;
             }
 
+            if (await JsBundleService.TryServeAsync(context))
+            {
+                BufferedLogger.LogInfo($"{path}|{context.Response.StatusCode}|{sourceIp}|bundle");
+                return;
+            }
+
             if (await StaticFileService.TryServeAsync(context, StaticFiles))
             {
                 BufferedLogger.LogInfo($"{path}|{context.Response.StatusCode}|{sourceIp}|static");

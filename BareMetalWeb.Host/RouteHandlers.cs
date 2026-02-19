@@ -1200,10 +1200,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static string BuildOtpClientScript(HttpContext context, string formAction)
     {
-        // JavaScript escape the action for safe embedding in script
         var action = formAction.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\"", "\\\"");
         var nonce = context.GetCspNonce();
-        return $"<script src=\"/static/js/otp.js\" nonce=\"{nonce}\"></script><script nonce=\"{nonce}\">setupOtpValidation('{action}');</script>";
+        return $"<script nonce=\"{nonce}\">setupOtpValidation('{action}');</script>";
     }
 
     private static async ValueTask NotImplementedHandler(HttpContext context, string message)
@@ -2792,12 +2791,10 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.IsNullOrWhiteSpace(message))
             return string.Empty;
 
-        var nonce = context.GetCspNonce();
         return $"<div class=\"toast-container position-fixed bottom-0 end-0 p-3 toast-z-index\">" +
              $"<div id=\"scaffold-toast\" class=\"toast text-bg-success border-0\" role=\"alert\" aria-live=\"assertive\" aria-atomic=\"true\" data-bs-delay=\"2500\">" +
              $"<div class=\"d-flex\"><div class=\"toast-body\">{message}</div>" +
-             $"<button type=\"button\" class=\"btn-close btn-close-white me-2 m-auto\" data-bs-dismiss=\"toast\" aria-label=\"Close\"></button></div></div></div>" +
-             $"<script src=\"/static/js/toast.js\" nonce=\"{nonce}\"></script>";
+             $"<button type=\"button\" class=\"btn-close btn-close-white me-2 m-auto\" data-bs-dismiss=\"toast\" aria-label=\"Close\"></button></div></div></div>";
     }
 
     public async ValueTask DataApiListHandler(HttpContext context)
