@@ -104,9 +104,10 @@ public class CookieProtectionTests : IDisposable
         var original = "test-session-id";
         var protected1 = CookieProtection.Protect(original);
         
-        // Tamper with the protected value by changing one character
+        // Tamper with the protected value by replacing the payload with all-zeros (guarantees MAC failure)
         var parts = protected1.Split('.');
-        var tampered = parts[0].Substring(0, parts[0].Length - 1) + "X." + parts[1];
+        var tamperedPayload = Convert.ToBase64String(new byte[parts[0].Length]).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+        var tampered = tamperedPayload + "." + parts[1];
 
         // Act
         var result = CookieProtection.Unprotect(tampered);
