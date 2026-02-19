@@ -472,7 +472,7 @@ public static class DataScaffold
             }
             var selectedValue = effectiveFieldType == FormFieldType.YesNo
                 ? (IsTruthy(value) ? "true" : "false")
-                : effectiveFieldType == FormFieldType.Enum || effectiveFieldType == FormFieldType.LookupList
+                : effectiveFieldType == FormFieldType.Enum || effectiveFieldType == FormFieldType.LookupList || effectiveFieldType == FormFieldType.Country
                     ? value?.ToString()
                     : null;
 

@@ -232,4 +232,30 @@ public class DataScaffoldLookupTests : IDisposable
         Assert.Equal("/api/upload-test-entities/abc123/files/Photo", photoField.ExistingFileUrl);
         Assert.Equal("image/png", photoField.Accept);
     }
+
+    [Fact]
+    public void BuildFormFields_ForEdit_WithCountryField_SetsSelectedValue()
+    {
+        // Arrange
+        var address = new Address
+        {
+            Id = "addr-1",
+            Label = "Main",
+            Line1 = "123 Example Street",
+            City = "London",
+            Country = "GB" // United Kingdom
+        };
+
+        var meta = DataScaffold.GetEntityByType(typeof(Address));
+        Assert.NotNull(meta);
+
+        // Act
+        var fields = DataScaffold.BuildFormFields(meta, address, forCreate: false);
+        var countryField = fields.FirstOrDefault(f => f.Name == nameof(Address.Country));
+
+        // Assert
+        Assert.NotNull(countryField);
+        Assert.Equal(Rendering.Models.FormFieldType.Country, countryField!.FieldType);
+        Assert.Equal("GB", countryField.SelectedValue); // This should be set for proper dropdown binding
+    }
 }
