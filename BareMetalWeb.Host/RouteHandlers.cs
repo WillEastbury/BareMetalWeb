@@ -31,6 +31,8 @@ public sealed class RouteHandlers : IRouteHandlers
     private readonly ITemplateStore _templateStore;
     private readonly bool _allowAccountCreation;
     private readonly MfaSecretProtector _mfaProtector;
+    private readonly string _dataRootFolder;
+    private readonly AuditService _auditService;
     private const string MfaChallengeCookieName = "mfa_challenge_id";
     private static readonly TimeSpan MfaPendingLifetime = TimeSpan.FromMinutes(5);
     private const int MfaPendingMaxFailures = 5;
@@ -39,12 +41,14 @@ public sealed class RouteHandlers : IRouteHandlers
     private static readonly TimeSpan MfaBaseBlockDuration = TimeSpan.FromSeconds(10);
     private static readonly ConcurrentDictionary<string, AttemptTracker> MfaAttempts = new(StringComparer.Ordinal);
 
-    public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder)
+    public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, AuditService auditService)
     {
         _renderer = renderer;
         _templateStore = templateStore;
         _allowAccountCreation = allowAccountCreation;
         _mfaProtector = MfaSecretProtector.CreateDefault(mfaKeyRootFolder);
+        _dataRootFolder = mfaKeyRootFolder;
+        _auditService = auditService;
     }
 
     public ValueTask DefaultPageHandler(HttpContext context)
@@ -1411,13 +1415,17 @@ public sealed class RouteHandlers : IRouteHandlers
                 effectiveViewType = ViewType.OrgChart;
             else if (string.Equals(viewParam, "table", StringComparison.OrdinalIgnoreCase))
                 effectiveViewType = ViewType.Table;
+            else if (string.Equals(viewParam, "timeline", StringComparison.OrdinalIgnoreCase))
+                effectiveViewType = ViewType.Timeline;
+            else if (string.Equals(viewParam, "timetable", StringComparison.OrdinalIgnoreCase))
+                effectiveViewType = ViewType.Timetable;
         }
 
         var cloneToken = CsrfProtection.EnsureToken(context);
         var returnUrl = $"{context.Request.Path}{context.Request.QueryString}";
 
-        // For tree/org chart views, load all items (no pagination)
-        if (effectiveViewType == ViewType.TreeView || effectiveViewType == ViewType.OrgChart)
+        // For tree/org chart/timeline/timetable views, load all items (no pagination)
+        if (effectiveViewType == ViewType.TreeView || effectiveViewType == ViewType.OrgChart || effectiveViewType == ViewType.Timeline || effectiveViewType == ViewType.Timetable)
         {
             var allQuery = DataScaffold.BuildQueryDefinition(queryDictionary, meta);
             var allResults = (await DataScaffold.QueryAsync(meta, allQuery)).Cast<BaseDataObject>().ToList();
@@ -1429,13 +1437,21 @@ public sealed class RouteHandlers : IRouteHandlers
             {
                 viewHtml = DataScaffold.BuildTreeViewHtml(meta, allResults, selectedId, basePath, HasPermissionForMeta, cloneToken, returnUrl);
             }
-            else
+            else if (effectiveViewType == ViewType.Timeline)
+            {
+                viewHtml = BuildTimelineViewHtml(meta, allResults, basePath, HasPermissionForMeta, cloneToken, returnUrl);
+            }
+            else if (effectiveViewType == ViewType.OrgChart)
             {
                 viewHtml = DataScaffold.BuildOrgChartHtml(meta, allResults, selectedId, basePath, HasPermissionForMeta);
             }
+            else // Timetable
+            {
+                viewHtml = DataScaffold.BuildTimetableHtml(meta, allResults, basePath, HasPermissionForMeta, cloneToken, returnUrl);
+            }
 
             var treeToastHtml = BuildToastHtml(context, meta.Name);
-            var treeViewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta.ParentField != null);
+            var treeViewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta);
             var treeCreateHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a></p>";
             
             context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} - {GetViewTypeName(effectiveViewType)}");
@@ -1447,7 +1463,16 @@ public sealed class RouteHandlers : IRouteHandlers
         // Standard table view with pagination
         var countQuery = DataScaffold.BuildQueryDefinition(queryDictionary, meta);
         var totalCount = await DataScaffold.CountAsync(meta, countQuery);
-        const int pageSize = 50;
+        
+        // Configurable page size (default 25)
+        var pageSize = 25;
+        if (queryDictionary.TryGetValue("size", out var sizeValue) 
+            && int.TryParse(sizeValue, out var parsedSize) 
+            && parsedSize > 0 && parsedSize <= 100)
+        {
+            pageSize = parsedSize;
+        }
+        
         var page = 1;
         if (context.Request.Query.TryGetValue("page", out var pageValue)
             && int.TryParse(pageValue.ToString(), out var parsedPage)
@@ -1465,7 +1490,7 @@ public sealed class RouteHandlers : IRouteHandlers
         query.Top = pageSize;
         var results = await DataScaffold.QueryAsync(meta, query);
 
-        var headers = DataScaffold.BuildListHeaders(meta, includeActions: true);
+        var headers = DataScaffold.BuildListHeaders(meta, includeActions: true, includeBulkSelection: true);
         var rows = DataScaffold.BuildListRows(
             meta,
             results,
@@ -1473,58 +1498,35 @@ public sealed class RouteHandlers : IRouteHandlers
             includeActions: true,
             canRenderLookupLink: HasPermissionForMeta,
             cloneToken: cloneToken,
-            cloneReturnUrl: returnUrl);
+            cloneReturnUrl: returnUrl,
+            includeBulkSelection: true);
 
         var toastHtml = BuildToastHtml(context, meta.Name);
-        var startRecord = totalCount == 0 ? 0 : (page - 1) * pageSize + 1;
-        var endRecord = Math.Min(page * pageSize, totalCount);
-
-        string BuildPageUrl(int targetPage)
-        {
-            if (targetPage < 1)
-                targetPage = 1;
-
-            var parts = new List<string>();
-            foreach (var pair in context.Request.Query)
-            {
-                if (string.Equals(pair.Key, "page", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                foreach (var value in pair.Value)
-                {
-                    parts.Add($"{WebUtility.UrlEncode(pair.Key)}={WebUtility.UrlEncode(value)}");
-                }
-            }
-
-            if (targetPage > 1)
-                parts.Add($"page={targetPage}");
-
-            var queryString = parts.Count > 0 ? "?" + string.Join("&", parts) : string.Empty;
-            return $"{context.Request.Path}{queryString}";
-        }
-
-        var prevUrl = BuildPageUrl(page - 1);
-        var nextUrl = BuildPageUrl(page + 1);
-        var prevDisabled = page <= 1;
-        var nextDisabled = endRecord >= totalCount;
-        var pagerHtml = $"<div class=\"d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2\">"
-            + $"<div class=\"small text-muted\">Records {startRecord} to {endRecord} of {totalCount} total</div>"
-            + "<div class=\"btn-group btn-group-sm\" role=\"group\" aria-label=\"Pagination\">"
-            + (prevDisabled
-                ? "<span class=\"btn btn-outline-secondary disabled\" aria-disabled=\"true\" title=\"Previous\"><i class=\"bi bi-arrow-left\" aria-hidden=\"true\"></i></span>"
-                : $"<a class=\"btn btn-outline-secondary\" href=\"{WebUtility.HtmlEncode(prevUrl)}\" title=\"Previous\" aria-label=\"Previous\"><i class=\"bi bi-arrow-left\" aria-hidden=\"true\"></i></a>")
-            + (nextDisabled
-                ? "<span class=\"btn btn-outline-secondary disabled\" aria-disabled=\"true\" title=\"Next\"><i class=\"bi bi-arrow-right\" aria-hidden=\"true\"></i></span>"
-                : $"<a class=\"btn btn-outline-secondary\" href=\"{WebUtility.HtmlEncode(nextUrl)}\" title=\"Next\" aria-label=\"Next\"><i class=\"bi bi-arrow-right\" aria-hidden=\"true\"></i></a>")
-            + "</div></div>";
+        
+        // Build UI components
+        var currentSearchText = queryDictionary.TryGetValue("q", out var searchVal) ? searchVal : null;
+        var searchBoxHtml = BuildSearchBox(currentSearchText, $"/admin/data/{typeSlug}");
+        var pageSizeHtml = BuildPageSizeSelector(pageSize, $"/admin/data/{typeSlug}", queryDictionary);
+        var pagerHtml = BuildEnhancedPagination(page, totalCount, pageSize, $"/admin/data/{typeSlug}", queryDictionary);
+        
         var queryString = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : string.Empty;
-        var csvHtml = $"<a class=\"btn btn-sm btn-outline-success ms-2\" href=\"/admin/data/{typeSlug}/csv{WebUtility.HtmlEncode(queryString)}\" title=\"Download CSV\" aria-label=\"Download CSV\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-spreadsheet ms-1\" aria-hidden=\"true\"></i> CSV</a>";
+        
+        // Check if entity has nested components
+        var nestedComponents = DataScaffold.GetNestedComponents(meta);
+        var hasNested = nestedComponents.Count > 0;
+        
+        var exportDropdown = BuildExportDropdown(typeSlug, queryString, hasNested);
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/html{WebUtility.HtmlEncode(queryString)}\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
-        var viewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta.ParentField != null);
-        var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a>{csvHtml}{htmlHtml}</p>";
+        var viewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta);
+        var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a>{exportDropdown}{htmlHtml}</p>";
+        
+        // Bulk actions bar with CSRF token
+        var bulkActionsBar = BuildBulkActionsBar(typeSlug, returnUrl, totalCount, cloneToken);
+        
+        // Build custom table with sortable headers
+        var tableHtml = BuildTableWithSortableHeaders(meta, rows, $"/admin/data/{typeSlug}", queryDictionary, includeActions: true, includeBulkSelection: true);
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} List");
-        context.SetStringValue("message", toastHtml + viewSwitcher + pagerHtml + createHtml);
-        context.AddTable(headers.ToArray(), rows.ToArray());
+        context.SetStringValue("message", toastHtml + viewSwitcher + searchBoxHtml + "<div class=\"d-flex justify-content-between align-items-center mb-2\">" + pagerHtml + pageSizeHtml + "</div>" + bulkActionsBar + createHtml + tableHtml);
         await _renderer.RenderPage(context);
     }
 
@@ -1586,11 +1588,16 @@ public sealed class RouteHandlers : IRouteHandlers
             })
             .ToArray();
 
+        // Check if entity has nested components
+        var nestedComponents = DataScaffold.GetNestedComponents(meta);
+        var hasNested = nestedComponents.Count > 0;
+        
+        var exportDropdown = BuildExportDropdown(typeSlug, string.Empty, hasNested, id);
         var rtfHtml = $"<a class=\"btn btn-sm btn-outline-info ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/rtf\" title=\"Download RTF\" aria-label=\"Download RTF\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-text ms-1\" aria-hidden=\"true\"></i> RTF</a>";
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/html\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
         var commandButtons = BuildCommandButtonsHtml(meta, typeSlug, id);
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} Details");
-        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>{rtfHtml}{htmlHtml}{commandButtons}</p>");
+        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>{exportDropdown}{rtfHtml}{htmlHtml}{commandButtons}</p>");
         context.AddTable(new[] { "Field", "Value" }, rows);
         await _renderer.RenderPage(context);
     }
@@ -1646,6 +1653,106 @@ public sealed class RouteHandlers : IRouteHandlers
         var title = $"{meta.Name} List";
         var html = BuildHtmlTableDocument(title, headers, rows);
         await WriteTextResponseAsync(context, "text/html", html, $"{typeSlug}_list.html");
+    }
+
+    public async ValueTask DataListExportHandler(HttpContext context)
+    {
+        var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
+        if (meta == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync(errorMessage ?? "Entity not found.");
+            return;
+        }
+
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.");
+            return;
+        }
+
+        var options = ExportOptions.FromQuery(context.Request.Query);
+        var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.Request.Query), meta);
+        var results = await DataScaffold.QueryAsync(meta, query);
+        var resultsList = results.Cast<object?>().ToList();
+
+        switch (options.Format)
+        {
+            case ExportFormat.HierarchicalJSON:
+                await ExportHierarchicalJson(context, meta, typeSlug, resultsList, options);
+                break;
+            case ExportFormat.FlatCSV:
+                await ExportFlatCsv(context, meta, typeSlug, resultsList, options);
+                break;
+            case ExportFormat.MultiSheetZip:
+                await ExportMultiSheetZip(context, meta, typeSlug, resultsList, options);
+                break;
+            case ExportFormat.SimpleCSV:
+            default:
+                // Fall back to simple CSV (no nested data)
+                var rows = BuildListPlainRowsWithId(meta, resultsList, out var headers);
+                var csv = BuildCsv(headers, rows);
+                await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_list.csv");
+                break;
+        }
+    }
+
+    public async ValueTask DataViewExportHandler(HttpContext context)
+    {
+        var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
+        var id = GetRouteValue(context, "id");
+        if (meta == null || string.IsNullOrWhiteSpace(id))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync(errorMessage ?? "Entity not found.");
+            return;
+        }
+
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.");
+            return;
+        }
+
+        var instance = await DataScaffold.LoadAsync(meta, id);
+        if (instance == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Item not found.");
+            return;
+        }
+
+        var options = ExportOptions.FromQuery(context.Request.Query);
+        
+        switch (options.Format)
+        {
+            case ExportFormat.HierarchicalJSON:
+                await ExportSingleHierarchicalJson(context, meta, typeSlug, id, instance, options);
+                break;
+            case ExportFormat.FlatCSV:
+                await ExportSingleFlatCsv(context, meta, typeSlug, id, instance, options);
+                break;
+            case ExportFormat.MultiSheetZip:
+                await ExportSingleMultiSheetZip(context, meta, typeSlug, id, instance, options);
+                break;
+            case ExportFormat.SimpleCSV:
+            default:
+                // Fall back to simple CSV (entity fields only, no nested)
+                var rows = DataScaffold.BuildViewRows(meta, instance)
+                    .Select(row => new[] { row.Label, row.Value })
+                    .ToArray();
+                if (instance is BaseDataObject dataObject)
+                {
+                    var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
+                    rows = new[] { new[] { "Id", recordId } }.Concat(rows).ToArray();
+                }
+                var headers = new[] { "Field", "Value" };
+                var csv = BuildCsv(headers, rows);
+                await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_{WebUtility.UrlEncode(id)}.csv");
+                break;
+        }
     }
 
     public async ValueTask DataViewRtfHandler(HttpContext context)
@@ -1893,6 +2000,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 await DataScaffold.ApplyComputedFieldsAsync(meta, instance, ComputedTrigger.OnCreate, context.RequestAborted).ConfigureAwait(false);
             else
                 await DataScaffold.ApplyComputedFieldsAsync(meta, instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+            DataScaffold.ApplyCalculatedFields(meta, instance);
             await DataScaffold.SaveAsync(meta, instance);
             if (isCreate)
                 created++;
@@ -1991,12 +2099,18 @@ public sealed class RouteHandlers : IRouteHandlers
         var values = form.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
         var apiKeyInputs = ExtractSystemPrincipalKeys(values);
         var errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: true);
+        await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
         ApplyUserPasswordIfNeeded(meta, instance, values, errors, isCreate: true);
+
+        // Run entity-level expression validation (cross-field rules)
+        var validationResult = DataScaffold.ValidateEntity(meta, instance);
+        errors.AddRange(validationResult.AllErrors());
+
         if (errors.Count > 0)
         {
             context.SetStringValue("title", $"Create {WebUtility.HtmlEncode(meta.Name)}");
             context.SetStringValue("message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
-            var fields = DataScaffold.BuildFormFields(meta, instance, forCreate: true).ToList();
+            var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: true, validationResult);
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: true);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
             context.AddFormDefinition(new FormDefinition($"/admin/data/{typeSlug}/create", "post", $"Create {meta.Name}", fields));
@@ -2011,10 +2125,19 @@ public sealed class RouteHandlers : IRouteHandlers
             newApiKey = createdKeys.FirstOrDefault();
         }
 
-        ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+        var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
+        ApplyAuditInfo(instance, userName, isCreate: true);
         await DataScaffold.ApplyAutoIdAsync(meta, instance, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, instance, ComputedTrigger.OnCreate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, instance);
         await DataScaffold.SaveAsync(meta, instance);
+        
+        // Audit the create operation
+        if (instance is BaseDataObject baseDataObject)
+        {
+            await _auditService.AuditCreateAsync(baseDataObject, userName, context.RequestAborted).ConfigureAwait(false);
+        }
+        
         var newId = instance is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) : null;
         var keyQuery = string.IsNullOrWhiteSpace(newApiKey) ? string.Empty : $"&apikey={WebUtility.UrlEncode(newApiKey)}";
         context.Response.Redirect($"/admin/data/{typeSlug}?toast=created&id={WebUtility.UrlEncode(newId ?? string.Empty)}{keyQuery}");
@@ -2103,6 +2226,21 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        // Capture the old state for audit trail (before any modifications)
+        BaseDataObject? oldInstance = null;
+        if (instance is BaseDataObject baseDataObjectOriginal)
+        {
+            try
+            {
+                var json = JsonSerializer.Serialize(baseDataObjectOriginal);
+                oldInstance = (BaseDataObject?)JsonSerializer.Deserialize(json, baseDataObjectOriginal.GetType());
+            }
+            catch
+            {
+                // If cloning fails, continue without audit trail for this update
+            }
+        }
+
         var form = await context.Request.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
@@ -2115,12 +2253,18 @@ public sealed class RouteHandlers : IRouteHandlers
         var values = form.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
         var apiKeyInputs = ExtractSystemPrincipalKeys(values);
         var errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
+        await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
         ApplyUserPasswordIfNeeded(meta, instance, values, errors, isCreate: false);
+
+        // Run entity-level expression validation (cross-field rules)
+        var validationResult = DataScaffold.ValidateEntity(meta, instance);
+        errors.AddRange(validationResult.AllErrors());
+
         if (errors.Count > 0)
         {
             context.SetStringValue("title", $"Edit {WebUtility.HtmlEncode(meta.Name)}");
             context.SetStringValue("message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
-            var fields = DataScaffold.BuildFormFields(meta, instance, forCreate: false).ToList();
+            var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: false, validationResult);
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: false);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
             context.AddFormDefinition(new FormDefinition($"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit", "post", $"Save {meta.Name}", fields));
@@ -2133,9 +2277,18 @@ public sealed class RouteHandlers : IRouteHandlers
             ApplySystemPrincipalKeys(principal, apiKeyInputs, isCreate: false);
         }
 
-        ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
+        var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
+        ApplyAuditInfo(instance, userName, isCreate: false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
         await DataScaffold.SaveAsync(meta, instance);
+        
+        // Audit the update operation
+        if (instance is BaseDataObject newBaseDataObject && oldInstance != null)
+        {
+            await _auditService.AuditUpdateAsync(oldInstance, newBaseDataObject, userName, context.RequestAborted).ConfigureAwait(false);
+        }
+        
         context.Response.Redirect($"/admin/data/{typeSlug}?toast=updated&id={WebUtility.UrlEncode(id)}");
     }
 
@@ -2258,8 +2411,254 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
+        
+        // Capture entity type for audit before deletion
+        var entityTypeName = meta.Type.Name;
+        
         await DataScaffold.DeleteAsync(meta, id);
+        
+        // Audit the delete operation - create audit entry with entity type and ID
+        var auditEntry = new AuditEntry(userName)
+        {
+            EntityType = entityTypeName,
+            EntityId = id,
+            Operation = AuditOperation.Delete,
+            TimestampUtc = DateTime.UtcNow,
+            UserName = userName,
+            Notes = "Entity deleted"
+        };
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await DataStoreProvider.Current.SaveAsync(auditEntry, context.RequestAborted).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Swallow audit errors - don't block the delete operation
+            }
+        }, context.RequestAborted);
+        
         context.Response.Redirect($"/admin/data/{typeSlug}?toast=deleted&id={WebUtility.UrlEncode(id)}");
+    }
+
+    public async ValueTask DataBulkDeleteHandler(HttpContext context)
+    {
+        var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
+        if (meta == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await WriteJsonResponseAsync(context, new { success = false, message = errorMessage ?? "Entity not found." });
+            return;
+        }
+
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await WriteJsonResponseAsync(context, new { success = false, message = "Access denied." });
+            return;
+        }
+
+        if (!context.Request.HasFormContentType)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await WriteJsonResponseAsync(context, new { success = false, message = "Invalid form submission." });
+            return;
+        }
+
+        var form = await context.Request.ReadFormAsync();
+        if (!CsrfProtection.ValidateFormToken(context, form))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await WriteJsonResponseAsync(context, new { success = false, message = "Invalid security token." });
+            return;
+        }
+
+        var ids = form["ids"].ToArray();
+        if (ids.Length == 0)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await WriteJsonResponseAsync(context, new { success = false, message = "No records selected." });
+            return;
+        }
+
+        var successCount = 0;
+        var failureCount = 0;
+        var errors = new List<string>();
+
+        foreach (var id in ids)
+        {
+            try
+            {
+                await DataScaffold.DeleteAsync(meta, id);
+                successCount++;
+            }
+            catch (Exception ex)
+            {
+                failureCount++;
+                errors.Add($"Failed to delete {id}: {ex.Message}");
+            }
+        }
+
+        var message = successCount > 0
+            ? $"{successCount} record(s) deleted successfully" + (failureCount > 0 ? $", {failureCount} failed" : "")
+            : $"All {failureCount} delete operations failed";
+
+        await WriteJsonResponseAsync(context, new
+        {
+            success = successCount > 0,
+            message,
+            successCount,
+            failureCount,
+            errors = errors.Count > 0 ? errors.ToArray() : null
+        });
+    }
+
+    public async ValueTask DataBulkExportHandler(HttpContext context)
+    {
+        var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
+        if (meta == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync(errorMessage ?? "Entity not found.");
+            return;
+        }
+
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.");
+            return;
+        }
+
+        var idsParam = context.Request.Query["ids"].ToString();
+        if (string.IsNullOrWhiteSpace(idsParam))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("No records selected.");
+            return;
+        }
+
+        var ids = idsParam.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (ids.Length == 0)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("No records selected.");
+            return;
+        }
+
+        // Load the selected items
+        var items = new List<object>();
+        foreach (var id in ids)
+        {
+            var item = await DataScaffold.LoadAsync(meta, id);
+            if (item != null)
+                items.Add(item);
+        }
+
+        if (items.Count == 0)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("No matching records found.");
+            return;
+        }
+
+        // Determine export format
+        var format = context.Request.Query["format"].ToString()?.ToLowerInvariant() ?? "csv";
+        
+        if (format == "json")
+        {
+            context.Response.ContentType = "application/json";
+            context.Response.Headers.Append("Content-Disposition", $"attachment; filename=\"{typeSlug}-bulk-export.json\"");
+            await using var writer = new Utf8JsonWriter(context.Response.Body, new JsonWriterOptions { Indented = true });
+            writer.WriteStartArray();
+            foreach (var item in items)
+            {
+                WriteJsonValue(writer, item);
+            }
+            writer.WriteEndArray();
+            await writer.FlushAsync();
+        }
+        else if (format == "html")
+        {
+            var headers = DataScaffold.BuildListHeaders(meta, includeActions: false);
+            var rows = DataScaffold.BuildListRows(meta, items, string.Empty, includeActions: false);
+            
+            context.Response.ContentType = "text/html";
+            context.Response.Headers.Append("Content-Disposition", $"attachment; filename=\"{typeSlug}-bulk-export.html\"");
+            
+            var html = new StringBuilder();
+            html.Append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>");
+            html.Append(WebUtility.HtmlEncode(meta.Name));
+            html.Append(" Bulk Export</title></head><body><h1>");
+            html.Append(WebUtility.HtmlEncode(meta.Name));
+            html.Append("</h1><table border=\"1\"><thead><tr>");
+            
+            foreach (var header in headers)
+            {
+                html.Append("<th>");
+                html.Append(WebUtility.HtmlEncode(header));
+                html.Append("</th>");
+            }
+            
+            html.Append("</tr></thead><tbody>");
+            
+            foreach (var row in rows)
+            {
+                html.Append("<tr>");
+                foreach (var cell in row)
+                {
+                    html.Append("<td>");
+                    html.Append(cell); // Already HTML-encoded by BuildListRows
+                    html.Append("</td>");
+                }
+                html.Append("</tr>");
+            }
+            
+            html.Append("</tbody></table></body></html>");
+            await context.Response.WriteAsync(html.ToString());
+        }
+        else // Default to CSV
+        {
+            var headers = DataScaffold.BuildListHeaders(meta, includeActions: false);
+            var rows = DataScaffold.BuildListRows(meta, items, string.Empty, includeActions: false);
+            
+            context.Response.ContentType = "text/csv";
+            context.Response.Headers.Append("Content-Disposition", $"attachment; filename=\"{typeSlug}-bulk-export.csv\"");
+            
+            using var writer = new StreamWriter(context.Response.Body);
+            await writer.WriteLineAsync(string.Join(",", headers.Select(EscapeCsvValue)));
+            
+            foreach (var row in rows)
+            {
+                var cleanRow = row.Select(cell => StripHtmlTags(cell)).ToArray();
+                await writer.WriteLineAsync(string.Join(",", cleanRow.Select(EscapeCsvValue)));
+            }
+        }
+    }
+
+    private static string StripHtmlTags(string html)
+    {
+        if (string.IsNullOrWhiteSpace(html))
+            return string.Empty;
+        
+        // Simple HTML tag removal (for checkbox and link elements in list rows)
+        var text = System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", string.Empty);
+        return WebUtility.HtmlDecode(text);
+    }
+
+    private static string EscapeCsvValue(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+            return "\"\"";
+        
+        if (value.Contains('"') || value.Contains(',') || value.Contains('\n') || value.Contains('\r'))
+        {
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+        
+        return value;
     }
 
     private async ValueTask HandleClonePost(HttpContext context, bool redirectToEdit)
@@ -2307,6 +2706,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ApplyAuditInfo(clone, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
         await DataScaffold.ApplyAutoIdAsync(meta, clone, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, clone, ComputedTrigger.OnCreate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, clone);
         await DataScaffold.SaveAsync(meta, clone);
 
         var newId = DataScaffold.GetIdValue(clone) ?? string.Empty;
@@ -2470,20 +2870,31 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var payload = await ReadJsonBodyAsync(context);
-        if (payload == null)
-        {
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await context.Response.WriteAsync("Invalid JSON body.");
-            return;
-        }
-
         var instance = meta.Handlers.Create();
 
         // Apply auto-generated IDs before binding JSON values
         DataScaffold.ApplyAutoGeneratedIds(meta, instance);
 
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, payload, forCreate: true, allowMissing: false);
+        List<string> errors;
+        if (context.Request.HasFormContentType)
+        {
+            var form = await context.Request.ReadFormAsync();
+            var values = form.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+            errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: true);
+            await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
+        }
+        else
+        {
+            var payload = await ReadJsonBodyAsync(context);
+            if (payload == null)
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await context.Response.WriteAsync("Invalid JSON body.");
+                return;
+            }
+            errors = DataScaffold.ApplyValuesFromJson(meta, instance, payload, forCreate: true, allowMissing: false);
+        }
+
         if (errors.Count > 0)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -2491,9 +2902,19 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        // Run entity-level expression validation
+        var validationResult = DataScaffold.ValidateEntity(meta, instance);
+        if (!validationResult.IsValid)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(string.Join(" | ", validationResult.AllErrors()));
+            return;
+        }
+
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
         await DataScaffold.ApplyAutoIdAsync(meta, instance, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, instance, ComputedTrigger.OnCreate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, instance);
         await DataScaffold.SaveAsync(meta, instance);
         context.Response.StatusCode = StatusCodes.Status201Created;
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
@@ -2517,14 +2938,6 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var payload = await ReadJsonBodyAsync(context);
-        if (payload == null)
-        {
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await context.Response.WriteAsync("Invalid JSON body.");
-            return;
-        }
-
         var instance = await DataScaffold.LoadAsync(meta, id);
         if (instance == null)
         {
@@ -2533,7 +2946,27 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, payload, forCreate: false, allowMissing: false);
+        List<string> errors;
+        if (context.Request.HasFormContentType)
+        {
+            var form = await context.Request.ReadFormAsync();
+            var values = form.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+            errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
+            errors = FilterMissingRequiredErrorsForPatchForm(meta, values, errors);
+            await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
+        }
+        else
+        {
+            var payload = await ReadJsonBodyAsync(context);
+            if (payload == null)
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await context.Response.WriteAsync("Invalid JSON body.");
+                return;
+            }
+            errors = DataScaffold.ApplyValuesFromJson(meta, instance, payload, forCreate: false, allowMissing: false);
+        }
+
         if (errors.Count > 0)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -2541,8 +2974,18 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        // Run entity-level expression validation
+        var validationResult = DataScaffold.ValidateEntity(meta, instance);
+        if (!validationResult.IsValid)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(string.Join(" | ", validationResult.AllErrors()));
+            return;
+        }
+
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
         await DataScaffold.SaveAsync(meta, instance);
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
     }
@@ -2565,14 +3008,6 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var payload = await ReadJsonBodyAsync(context);
-        if (payload == null)
-        {
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await context.Response.WriteAsync("Invalid JSON body.");
-            return;
-        }
-
         var instance = await DataScaffold.LoadAsync(meta, id);
         if (instance == null)
         {
@@ -2581,7 +3016,26 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, payload, forCreate: false, allowMissing: true);
+        List<string> errors;
+        if (context.Request.HasFormContentType)
+        {
+            var form = await context.Request.ReadFormAsync();
+            var values = form.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+            errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
+            await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
+        }
+        else
+        {
+            var payload = await ReadJsonBodyAsync(context);
+            if (payload == null)
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                await context.Response.WriteAsync("Invalid JSON body.");
+                return;
+            }
+            errors = DataScaffold.ApplyValuesFromJson(meta, instance, payload, forCreate: false, allowMissing: true);
+        }
+
         if (errors.Count > 0)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -2589,8 +3043,18 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        // Run entity-level expression validation
+        var validationResult = DataScaffold.ValidateEntity(meta, instance);
+        if (!validationResult.IsValid)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(string.Join(" | ", validationResult.AllErrors()));
+            return;
+        }
+
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+        DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
         await DataScaffold.SaveAsync(meta, instance);
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
     }
@@ -2615,6 +3079,62 @@ public sealed class RouteHandlers : IRouteHandlers
 
         await DataScaffold.DeleteAsync(meta, id);
         context.Response.StatusCode = StatusCodes.Status204NoContent;
+    }
+
+    public async ValueTask DataApiFileGetHandler(HttpContext context)
+    {
+        var meta = ResolveEntity(context, out _, out var errorMessage);
+        var id = GetRouteValue(context, "id");
+        var fieldName = GetRouteValue(context, "field");
+        if (meta == null || string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(fieldName))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync(errorMessage ?? "Entity not found.");
+            return;
+        }
+
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.");
+            return;
+        }
+
+        var instance = await DataScaffold.LoadAsync(meta, id);
+        if (instance is not BaseDataObject)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Item not found.");
+            return;
+        }
+
+        var field = meta.Fields.FirstOrDefault(f => string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        if (field == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Field not found.");
+            return;
+        }
+
+        if (field.Property.GetValue(instance) is not StoredFileData fileData || string.IsNullOrWhiteSpace(fileData.StorageKey))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("File not found.");
+            return;
+        }
+
+        var fullPath = ResolveUploadPath(context, fileData.StorageKey);
+        if (!File.Exists(fullPath))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("File not found.");
+            return;
+        }
+
+        context.Response.ContentType = string.IsNullOrWhiteSpace(fileData.ContentType) ? "application/octet-stream" : fileData.ContentType;
+        context.Response.Headers.ContentDisposition = $"inline; filename=\"{SanitizeFileName(fileData.FileName)}\"";
+        await using var source = File.OpenRead(fullPath);
+        await source.CopyToAsync(context.Response.Body, context.RequestAborted).ConfigureAwait(false);
     }
 
     public async ValueTask MetricsJsonHandler(HttpContext context)
@@ -3002,6 +3522,112 @@ public sealed class RouteHandlers : IRouteHandlers
         await _renderer.RenderPage(context);
     }
 
+    private async ValueTask ApplyUploadFieldsFromFormAsync(HttpContext context, DataEntityMetadata meta, BaseDataObject instance, IFormCollection form, List<string> errors)
+    {
+        foreach (var field in meta.Fields.Where(f => f.FieldType == FormFieldType.File || f.FieldType == FormFieldType.Image))
+        {
+            var deleteKey = $"{field.Name}__delete";
+            var deleteRequested = form.TryGetValue(deleteKey, out var deleteValue) && DataScaffold.IsTruthy(deleteValue.ToString());
+            var uploadedFile = form.Files.GetFile(field.Name);
+            var existingFile = field.Property.GetValue(instance) as StoredFileData;
+
+            if (deleteRequested && uploadedFile == null)
+            {
+                if (existingFile != null)
+                    DeleteStoredFile(context, existingFile);
+                field.Property.SetValue(instance, null);
+                continue;
+            }
+
+            if (uploadedFile == null || uploadedFile.Length <= 0)
+            {
+                if (field.Required && existingFile == null)
+                    errors.Add($"{field.Label} is required.");
+                continue;
+            }
+
+            var config = field.Upload;
+            if (config != null)
+            {
+                if (config.MaxFileSizeBytes > 0 && uploadedFile.Length > config.MaxFileSizeBytes)
+                {
+                    errors.Add($"{field.Label} exceeds maximum file size.");
+                    continue;
+                }
+
+                if (config.AllowedMimeTypes.Length > 0 && !config.AllowedMimeTypes.Contains(uploadedFile.ContentType, StringComparer.OrdinalIgnoreCase))
+                {
+                    errors.Add($"{field.Label} has an invalid file type.");
+                    continue;
+                }
+            }
+
+            var safeName = SanitizeFileName(uploadedFile.FileName);
+            var extension = Path.GetExtension(safeName);
+            var storageKey = $"{meta.Slug}/{instance.Id}/{field.Name}/{Guid.NewGuid():N}{extension}";
+            var fullPath = ResolveUploadPath(context, storageKey);
+            var folder = Path.GetDirectoryName(fullPath);
+            if (!string.IsNullOrWhiteSpace(folder))
+                Directory.CreateDirectory(folder);
+
+            await using (var source = uploadedFile.OpenReadStream())
+            await using (var destination = File.Create(fullPath))
+            {
+                await source.CopyToAsync(destination, context.RequestAborted).ConfigureAwait(false);
+            }
+
+            if (existingFile != null && !string.IsNullOrWhiteSpace(existingFile.StorageKey))
+                DeleteStoredFile(context, existingFile);
+
+            var storedFile = new StoredFileData
+            {
+                FileName = safeName,
+                ContentType = string.IsNullOrWhiteSpace(uploadedFile.ContentType) ? "application/octet-stream" : uploadedFile.ContentType,
+                SizeBytes = uploadedFile.Length,
+                StorageKey = storageKey,
+                IsImage = field.FieldType == FormFieldType.Image
+            };
+
+            field.Property.SetValue(instance, storedFile);
+        }
+    }
+
+    private static string SanitizeFileName(string? fileName)
+    {
+        var safeName = Path.GetFileName(fileName ?? string.Empty);
+        return string.IsNullOrWhiteSpace(safeName) ? "upload.bin" : safeName;
+    }
+
+    private string ResolveUploadPath(HttpContext context, string storageKey)
+    {
+        var rootPath = GetUploadRootPath(context);
+        var sanitizedKey = storageKey.Replace('\\', '/').TrimStart('/');
+        var combined = Path.Combine(rootPath, sanitizedKey.Replace('/', Path.DirectorySeparatorChar));
+        var full = Path.GetFullPath(combined);
+        if (!full.StartsWith(Path.GetFullPath(rootPath), StringComparison.Ordinal))
+            throw new InvalidOperationException("Invalid upload storage key.");
+        return full;
+    }
+
+    private string GetUploadRootPath(HttpContext context)
+    {
+        var configuration = context.RequestServices.GetService(typeof(IConfiguration)) as IConfiguration;
+        var configured = configuration?.GetValue("Uploads:RootDirectory", "uploads") ?? "uploads";
+        if (Path.IsPathRooted(configured))
+            return configured;
+        return Path.Combine(_dataRootFolder, configured);
+    }
+
+    private void DeleteStoredFile(HttpContext context, StoredFileData storedFile)
+    {
+        if (string.IsNullOrWhiteSpace(storedFile.StorageKey))
+            return;
+
+        var fullPath = ResolveUploadPath(context, storedFile.StorageKey);
+        if (File.Exists(fullPath))
+            File.Delete(fullPath);
+    }
+
     private static Dictionary<string, object?> BuildApiModel(DataEntityMetadata meta, object instance)
     {
         var data = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
@@ -3011,7 +3637,24 @@ public sealed class RouteHandlers : IRouteHandlers
 
         foreach (var field in meta.Fields.Where(f => f.View))
         {
-            data[field.Name] = field.Property.GetValue(instance);
+            var value = field.Property.GetValue(instance);
+            if (value is StoredFileData fileData && instance is BaseDataObject obj)
+            {
+                data[field.Name] = new Dictionary<string, object?>
+                {
+                    ["fileName"] = fileData.FileName,
+                    ["contentType"] = fileData.ContentType,
+                    ["sizeBytes"] = fileData.SizeBytes,
+                    ["storageKey"] = fileData.StorageKey,
+                    ["isImage"] = fileData.IsImage,
+                    ["width"] = fileData.Width,
+                    ["height"] = fileData.Height,
+                    ["url"] = $"/api/{meta.Slug}/{Uri.EscapeDataString(obj.Id)}/files/{Uri.EscapeDataString(field.Name)}"
+                };
+                continue;
+            }
+
+            data[field.Name] = value;
         }
 
         return data;
@@ -3651,6 +4294,279 @@ public sealed class RouteHandlers : IRouteHandlers
         return safe;
     }
 
+    // Export helper methods for nested/embedded components
+
+    private async ValueTask ExportHierarchicalJson(HttpContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
+    {
+        var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+        var json = JsonSerializer.Serialize(items, jsonOptions);
+        context.Response.ContentType = "application/json";
+        context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_export.json\"";
+        await context.Response.WriteAsync(json);
+    }
+
+    private async ValueTask ExportSingleHierarchicalJson(HttpContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
+    {
+        var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+        var json = JsonSerializer.Serialize(instance, jsonOptions);
+        context.Response.ContentType = "application/json";
+        context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_{WebUtility.UrlEncode(id)}.json\"";
+        await context.Response.WriteAsync(json);
+    }
+
+    private async ValueTask ExportFlatCsv(HttpContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
+    {
+        if (!options.IncludeNested || options.MaxDepth < 1)
+        {
+            // No nested data, fall back to simple CSV
+            var rows = BuildListPlainRowsWithId(meta, items, out var headers);
+            var csv = BuildCsv(headers, rows);
+            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_flat.csv");
+            return;
+        }
+
+        var nestedComponents = DataScaffold.GetNestedComponents(meta);
+        if (nestedComponents.Count == 0)
+        {
+            // No nested components, fall back to simple CSV
+            var rows = BuildListPlainRowsWithId(meta, items, out var headers);
+            var csv = BuildCsv(headers, rows);
+            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_flat.csv");
+            return;
+        }
+
+        // Build flat CSV with parent fields repeated for each child row
+        var flatRows = new List<string[]>();
+        var parentHeaders = new[] { "Id" }.Concat(DataScaffold.BuildListHeaders(meta, includeActions: false)).ToList();
+        var allHeaders = new List<string>(parentHeaders);
+        
+        // Add headers for first nested component (for simplicity, we'll flatten only the first one)
+        var firstNested = nestedComponents[0];
+        var nestedData = DataScaffold.ExtractNestedData(meta, items.FirstOrDefault() ?? new object());
+        if (nestedData.Count > 0)
+        {
+            var childHeaders = nestedData[0].Headers.Select(h => $"{firstNested.Field.Label}.{h}");
+            allHeaders.AddRange(childHeaders);
+        }
+
+        foreach (var item in items)
+        {
+            if (item == null)
+                continue;
+
+            var id = item is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) ?? string.Empty : string.Empty;
+            var parentRow = new[] { id }.Concat(BuildListPlainRows(meta, new[] { item })[0]).ToArray();
+            
+            var nested = DataScaffold.ExtractNestedData(meta, item);
+            if (nested.Count > 0 && nested[0].Rows.Length > 0)
+            {
+                // Repeat parent row for each child
+                foreach (var childRow in nested[0].Rows)
+                {
+                    flatRows.Add(parentRow.Concat(childRow).ToArray());
+                }
+            }
+            else
+            {
+                // No children, just add parent row with empty child fields
+                var emptyChild = nestedData.Count > 0 ? new string[nestedData[0].Headers.Length] : Array.Empty<string>();
+                flatRows.Add(parentRow.Concat(emptyChild).ToArray());
+            }
+        }
+
+        var flatCsv = BuildCsv(allHeaders.ToArray(), flatRows.ToArray());
+        await WriteTextResponseAsync(context, "text/csv", flatCsv, $"{typeSlug}_flat.csv");
+    }
+
+    private async ValueTask ExportSingleFlatCsv(HttpContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
+    {
+        if (!options.IncludeNested || options.MaxDepth < 1)
+        {
+            // No nested data, fall back to simple CSV
+            var rows = DataScaffold.BuildViewRows(meta, instance)
+                .Select(row => new[] { row.Label, row.Value })
+                .ToArray();
+            if (instance is BaseDataObject dataObject)
+            {
+                var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
+                rows = new[] { new[] { "Id", recordId } }.Concat(rows).ToArray();
+            }
+            var headers = new[] { "Field", "Value" };
+            var csv = BuildCsv(headers, rows);
+            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_{WebUtility.UrlEncode(id)}_flat.csv");
+            return;
+        }
+
+        var nestedComponents = DataScaffold.GetNestedComponents(meta);
+        if (nestedComponents.Count == 0)
+        {
+            // No nested components
+            var rows = DataScaffold.BuildViewRows(meta, instance)
+                .Select(row => new[] { row.Label, row.Value })
+                .ToArray();
+            if (instance is BaseDataObject dataObject)
+            {
+                var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
+                rows = new[] { new[] { "Id", recordId } }.Concat(rows).ToArray();
+            }
+            var headers = new[] { "Field", "Value" };
+            var csv = BuildCsv(headers, rows);
+            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_{WebUtility.UrlEncode(id)}_flat.csv");
+            return;
+        }
+
+        // Build flat CSV with parent fields repeated for each child row
+        var flatRows = new List<string[]>();
+        var parentId = instance is BaseDataObject dobj ? DataScaffold.GetIdValue(dobj) ?? string.Empty : string.Empty;
+        var parentFields = DataScaffold.BuildViewRows(meta, instance).ToList();
+        var parentHeaders = new List<string> { "Id" };
+        parentHeaders.AddRange(parentFields.Select(f => f.Label));
+
+        var allHeaders = new List<string>(parentHeaders);
+        var nested = DataScaffold.ExtractNestedData(meta, instance);
+        
+        if (nested.Count > 0)
+        {
+            var childHeaders = nested[0].Headers.Select(h => $"{nested[0].FieldName}.{h}");
+            allHeaders.AddRange(childHeaders);
+
+            var parentRow = new[] { parentId }.Concat(parentFields.Select(f => f.Value)).ToArray();
+            
+            if (nested[0].Rows.Length > 0)
+            {
+                foreach (var childRow in nested[0].Rows)
+                {
+                    flatRows.Add(parentRow.Concat(childRow).ToArray());
+                }
+            }
+            else
+            {
+                var emptyChild = new string[nested[0].Headers.Length];
+                flatRows.Add(parentRow.Concat(emptyChild).ToArray());
+            }
+        }
+        else
+        {
+            var parentRow = new[] { parentId }.Concat(parentFields.Select(f => f.Value)).ToArray();
+            flatRows.Add(parentRow);
+        }
+
+        var flatCsv = BuildCsv(allHeaders.ToArray(), flatRows.ToArray());
+        await WriteTextResponseAsync(context, "text/csv", flatCsv, $"{typeSlug}_{WebUtility.UrlEncode(id)}_flat.csv");
+    }
+
+    private async ValueTask ExportMultiSheetZip(HttpContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
+    {
+        using var memoryStream = new MemoryStream();
+        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            // Add parent CSV
+            var parentRows = BuildListPlainRowsWithId(meta, items, out var parentHeaders);
+            var parentCsv = BuildCsv(parentHeaders, parentRows);
+            var parentEntry = archive.CreateEntry($"{typeSlug}.csv");
+            using (var entryStream = parentEntry.Open())
+            using (var writer = new StreamWriter(entryStream))
+            {
+                await writer.WriteAsync(parentCsv);
+            }
+
+            if (options.IncludeNested && options.MaxDepth >= 1)
+            {
+                var nestedComponents = DataScaffold.GetNestedComponents(meta);
+                foreach (var (field, childType) in nestedComponents)
+                {
+                    var childRows = new List<string[]>();
+                    var childHeaders = new List<string> { "ParentId" };
+                    string[]? headers = null;
+
+                    foreach (var item in items)
+                    {
+                        if (item == null)
+                            continue;
+
+                        var parentId = item is BaseDataObject dobj ? DataScaffold.GetIdValue(dobj) ?? string.Empty : string.Empty;
+                        var nested = DataScaffold.ExtractNestedData(meta, item);
+                        var matchingNested = nested.FirstOrDefault(n => string.Equals(n.FieldName, field.Name, StringComparison.OrdinalIgnoreCase));
+                        
+                        if (headers == null && matchingNested.Headers != null && matchingNested.Headers.Length > 0)
+                        {
+                            headers = matchingNested.Headers;
+                            childHeaders.AddRange(headers);
+                        }
+
+                        if (matchingNested.Rows != null)
+                        {
+                            foreach (var row in matchingNested.Rows)
+                            {
+                                childRows.Add(new[] { parentId }.Concat(row).ToArray());
+                            }
+                        }
+                    }
+
+                    if (childRows.Count > 0 && headers != null)
+                    {
+                        var childCsv = BuildCsv(childHeaders.ToArray(), childRows.ToArray());
+                        var childEntry = archive.CreateEntry($"{typeSlug}_{field.Name}.csv");
+                        using var childStream = childEntry.Open();
+                        using var childWriter = new StreamWriter(childStream);
+                        await childWriter.WriteAsync(childCsv);
+                    }
+                }
+            }
+        }
+
+        memoryStream.Position = 0;
+        context.Response.ContentType = "application/zip";
+        context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_export.zip\"";
+        await memoryStream.CopyToAsync(context.Response.Body);
+    }
+
+    private async ValueTask ExportSingleMultiSheetZip(HttpContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
+    {
+        using var memoryStream = new MemoryStream();
+        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            // Add parent CSV
+            var parentRows = DataScaffold.BuildViewRows(meta, instance)
+                .Select(row => new[] { row.Label, row.Value })
+                .ToArray();
+            if (instance is BaseDataObject dataObject)
+            {
+                var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
+                parentRows = new[] { new[] { "Id", recordId } }.Concat(parentRows).ToArray();
+            }
+            var parentHeaders = new[] { "Field", "Value" };
+            var parentCsv = BuildCsv(parentHeaders, parentRows);
+            var parentEntry = archive.CreateEntry($"{typeSlug}.csv");
+            using (var entryStream = parentEntry.Open())
+            using (var writer = new StreamWriter(entryStream))
+            {
+                await writer.WriteAsync(parentCsv);
+            }
+
+            if (options.IncludeNested && options.MaxDepth >= 1)
+            {
+                var nested = DataScaffold.ExtractNestedData(meta, instance);
+                foreach (var (fieldName, headers, rows) in nested)
+                {
+                    if (rows.Length > 0)
+                    {
+                        var childCsv = BuildCsv(headers, rows);
+                        var childEntry = archive.CreateEntry($"{typeSlug}_{fieldName}.csv");
+                        using var childStream = childEntry.Open();
+                        using var childWriter = new StreamWriter(childStream);
+                        await childWriter.WriteAsync(childCsv);
+                    }
+                }
+            }
+        }
+
+        memoryStream.Position = 0;
+        context.Response.ContentType = "application/zip";
+        context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_{WebUtility.UrlEncode(id)}_export.zip\"";
+        await memoryStream.CopyToAsync(context.Response.Body);
+    }
+
     private static string BuildHtmlTableDocument(string title, string[] headers, string[][] rows)
     {
         var sb = new StringBuilder();
@@ -3761,6 +4677,52 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         return builder.ToString();
+    }
+
+    private static string BuildExportDropdown(string typeSlug, string queryString, bool includeNested, string? id = null)
+    {
+        var baseUrl = id != null 
+            ? $"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/export"
+            : $"/admin/data/{typeSlug}/export";
+        
+        var separator = string.IsNullOrEmpty(queryString) || queryString == "?" ? "?" : "&";
+        var baseQueryString = queryString == "?" ? "" : queryString;
+        
+        var hasNested = includeNested;
+        var nestedLabel = hasNested ? " (with nested)" : "";
+        
+        var dropdownId = id != null ? $"export-dropdown-{WebUtility.UrlEncode(id)}" : "export-dropdown-list";
+        
+        var html = new StringBuilder();
+        html.Append("<div class=\"btn-group ms-2\" role=\"group\">");
+        html.Append($"<button type=\"button\" class=\"btn btn-sm btn-outline-success dropdown-toggle\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\" id=\"{dropdownId}\">");
+        html.Append("<i class=\"bi bi-download\" aria-hidden=\"true\"></i> Export");
+        html.Append("</button>");
+        html.Append($"<ul class=\"dropdown-menu\" aria-labelledby=\"{dropdownId}\">");
+        
+        // Simple CSV (no nested)
+        html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=SimpleCSV\">");
+        html.Append("<i class=\"bi bi-file-earmark-spreadsheet\"></i> CSV (simple)</a></li>");
+        
+        if (hasNested)
+        {
+            // Flat CSV (nested denormalized)
+            html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=FlatCSV\">");
+            html.Append("<i class=\"bi bi-file-earmark-spreadsheet\"></i> CSV (flat with nested)</a></li>");
+            
+            // Multi-sheet ZIP
+            html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=MultiSheetZip\">");
+            html.Append("<i class=\"bi bi-file-earmark-zip\"></i> ZIP (multi-sheet)</a></li>");
+        }
+        
+        // Hierarchical JSON
+        html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=HierarchicalJSON\">");
+        html.Append("<i class=\"bi bi-filetype-json\"></i> JSON{nestedLabel}</a></li>");
+        
+        html.Append("</ul>");
+        html.Append("</div>");
+        
+        return html.ToString();
     }
 
     private static async ValueTask<bool> HasEntityPermissionAsync(HttpContext context, DataEntityMetadata meta, CancellationToken cancellationToken = default)
@@ -4338,6 +5300,39 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
+    private static List<string> FilterMissingRequiredErrorsForPatchForm(DataEntityMetadata meta, IDictionary<string, string?> values, List<string> errors)
+    {
+        if (errors.Count == 0)
+            return errors;
+
+        const string requiredSuffix = " is required.";
+        var fieldByLabel = meta.Fields.ToDictionary(f => f.Label, f => f, StringComparer.OrdinalIgnoreCase);
+        var filtered = new List<string>(errors.Count);
+        foreach (var error in errors)
+        {
+            if (!error.EndsWith(requiredSuffix, StringComparison.Ordinal))
+            {
+                filtered.Add(error);
+                continue;
+            }
+
+            var label = error[..^requiredSuffix.Length];
+            if (!fieldByLabel.TryGetValue(label, out var field))
+            {
+                filtered.Add(error);
+                continue;
+            }
+
+            if (values.ContainsKey(field.Name))
+            {
+                filtered.Add(error);
+                continue;
+            }
+        }
+
+        return filtered;
+    }
+
     private void RenderMfaResetForm(HttpContext context, string? message)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
@@ -4393,7 +5388,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return users.Any();
     }
 
-    private static string BuildViewSwitcher(string typeSlug, ViewType currentView, bool hasParentField)
+    private static string BuildViewSwitcher(string typeSlug, ViewType currentView, DataEntityMetadata meta)
     {
         var html = new StringBuilder();
         html.Append("<div class=\"btn-group btn-group-sm mb-2\" role=\"group\" aria-label=\"View Type\">");
@@ -4401,7 +5396,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var tableActive = currentView == ViewType.Table ? " active" : string.Empty;
         html.Append($"<a class=\"btn btn-outline-secondary{tableActive}\" href=\"/admin/data/{typeSlug}?view=table\" title=\"Table View\"><i class=\"bi bi-table\" aria-hidden=\"true\"></i> Table</a>");
         
-        if (hasParentField)
+        if (meta.ParentField != null)
         {
             var treeActive = currentView == ViewType.TreeView ? " active" : string.Empty;
             html.Append($"<a class=\"btn btn-outline-secondary{treeActive}\" href=\"/admin/data/{typeSlug}?view=tree\" title=\"Tree View\"><i class=\"bi bi-diagram-3\" aria-hidden=\"true\"></i> Tree</a>");
@@ -4409,9 +5404,211 @@ public sealed class RouteHandlers : IRouteHandlers
             var orgActive = currentView == ViewType.OrgChart ? " active" : string.Empty;
             html.Append($"<a class=\"btn btn-outline-secondary{orgActive}\" href=\"/admin/data/{typeSlug}?view=orgchart\" title=\"Org Chart\"><i class=\"bi bi-diagram-2\" aria-hidden=\"true\"></i> Org Chart</a>");
         }
+
+        if (DataScaffold.CanShowTimetableView(meta))
+        {
+            var timetableActive = currentView == ViewType.Timetable ? " active" : string.Empty;
+            html.Append($"<a class=\"btn btn-outline-secondary{timetableActive}\" href=\"/admin/data/{typeSlug}?view=timetable\" title=\"Timetable View\"><i class=\"bi bi-calendar-week\" aria-hidden=\"true\"></i> Timetable</a>");
+        }
+        
+        // Check if entity has any DateOnly or DateTime fields for timeline view
+        var hasDateField = meta.Fields.Any(f => 
+            f.FieldType == FormFieldType.DateOnly || 
+            f.FieldType == FormFieldType.DateTime);
+        
+        if (hasDateField)
+        {
+            var timelineActive = currentView == ViewType.Timeline ? " active" : string.Empty;
+            html.Append($"<a class=\"btn btn-outline-secondary{timelineActive}\" href=\"/admin/data/{typeSlug}?view=timeline\" title=\"Timeline View\"><i class=\"bi bi-clock-history\" aria-hidden=\"true\"></i> Timeline</a>");
+        }
         
         html.Append("</div>");
         return html.ToString();
+    }
+
+    private static string BuildTimelineViewHtml(
+        DataEntityMetadata meta,
+        IEnumerable<BaseDataObject> allItems,
+        string basePath,
+        Func<DataEntityMetadata, bool>? canRenderLookupLink = null,
+        string? cloneToken = null,
+        string? cloneReturnUrl = null)
+    {
+        var html = new StringBuilder();
+        
+        // Find the first DateOnly or DateTime field
+        var dateField = meta.Fields.FirstOrDefault(f => 
+            f.FieldType == FormFieldType.DateOnly || 
+            f.FieldType == FormFieldType.DateTime);
+        
+        if (dateField == null)
+        {
+            return "<p class=\"text-warning\">Timeline view requires a DateOnly or DateTime field.</p>";
+        }
+
+        var itemsList = allItems.ToList();
+        if (itemsList.Count == 0)
+        {
+            return "<p class=\"text-muted\">No items found.</p>";
+        }
+
+        // Group items by date
+        var groupedByDate = new Dictionary<DateOnly, List<BaseDataObject>>();
+        
+        foreach (var item in itemsList)
+        {
+            var fieldValue = dateField.Property.GetValue(item);
+            DateOnly dateKey;
+            
+            if (fieldValue is DateOnly dateOnly)
+            {
+                dateKey = dateOnly;
+            }
+            else if (fieldValue is DateTime dateTime)
+            {
+                dateKey = DateOnly.FromDateTime(dateTime);
+            }
+            else if (fieldValue == null)
+            {
+                // Skip items without a date value
+                continue;
+            }
+            else
+            {
+                continue;
+            }
+            
+            if (!groupedByDate.ContainsKey(dateKey))
+            {
+                groupedByDate[dateKey] = new List<BaseDataObject>();
+            }
+            groupedByDate[dateKey].Add(item);
+        }
+
+        // Sort by date descending (most recent first)
+        var sortedDates = groupedByDate.Keys.OrderByDescending(d => d).ToList();
+
+        html.Append("<div class=\"timeline-container\">");
+        html.Append("<style>");
+        html.Append(".timeline-container { max-width: 1200px; margin: 0 auto; }");
+        html.Append(".timeline-date-group { margin-bottom: 2rem; }");
+        html.Append(".timeline-date-header { font-size: 1.25rem; font-weight: bold; color: #0d6efd; margin-bottom: 1rem; padding: 0.5rem; background: #e7f3ff; border-left: 4px solid #0d6efd; }");
+        html.Append(".timeline-items { margin-left: 2rem; }");
+        html.Append(".timeline-item { margin-bottom: 1rem; padding: 1rem; background: #f8f9fa; border-left: 3px solid #6c757d; position: relative; }");
+        html.Append(".timeline-item:hover { background: #e9ecef; }");
+        html.Append(".timeline-item-header { font-weight: bold; margin-bottom: 0.5rem; }");
+        html.Append(".timeline-item-details { margin-left: 1rem; }");
+        html.Append(".timeline-item-field { margin-bottom: 0.25rem; }");
+        html.Append(".timeline-item-label { font-weight: 500; color: #495057; }");
+        html.Append(".timeline-item-value { color: #212529; }");
+        html.Append(".timeline-item-actions { margin-top: 0.5rem; }");
+        html.Append(".timeline-item-actions a { margin-right: 0.5rem; }");
+        html.Append("</style>");
+
+        foreach (var date in sortedDates)
+        {
+            var items = groupedByDate[date];
+            
+            html.Append("<div class=\"timeline-date-group\">");
+            html.Append($"<div class=\"timeline-date-header\">");
+            html.Append($"<i class=\"bi bi-calendar3\" aria-hidden=\"true\"></i> {WebUtility.HtmlEncode(date.ToString("dddd, MMMM d, yyyy"))}");
+            html.Append($" <span class=\"badge bg-secondary\">{items.Count}</span>");
+            html.Append("</div>");
+            
+            html.Append("<div class=\"timeline-items\">");
+            
+            foreach (var item in items.OrderBy(i => GetDisplayValue(meta, i)))
+            {
+                var itemId = DataScaffold.GetIdValue(item) ?? string.Empty;
+                var safeId = Uri.EscapeDataString(itemId);
+                var displayValue = WebUtility.HtmlEncode(GetDisplayValue(meta, item));
+                
+                html.Append("<div class=\"timeline-item\">");
+                html.Append($"<div class=\"timeline-item-header\">{displayValue}</div>");
+                html.Append("<div class=\"timeline-item-details\">");
+                
+                // Show key fields (limit to first 5 fields that are marked for List view, excluding the date field)
+                var fieldsToShow = meta.Fields
+                    .Where(f => f.List && f.Name != dateField.Name)
+                    .Take(5);
+                
+                foreach (var field in fieldsToShow)
+                {
+                    var value = field.Property.GetValue(item);
+                    var displayVal = FormatFieldValue(field, value, canRenderLookupLink);
+                    
+                    html.Append("<div class=\"timeline-item-field\">");
+                    html.Append($"<span class=\"timeline-item-label\">{WebUtility.HtmlEncode(field.Label)}:</span> ");
+                    html.Append($"<span class=\"timeline-item-value\">{displayVal}</span>");
+                    html.Append("</div>");
+                }
+                
+                html.Append("</div>");
+                html.Append("<div class=\"timeline-item-actions\">");
+                html.Append($"<a class=\"btn btn-sm btn-outline-primary\" href=\"{basePath}/{safeId}\" title=\"View Details\"><i class=\"bi bi-eye\" aria-hidden=\"true\"></i> View</a>");
+                html.Append($"<a class=\"btn btn-sm btn-outline-warning\" href=\"{basePath}/{safeId}/edit\" title=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i> Edit</a>");
+                
+                if (!string.IsNullOrWhiteSpace(cloneToken))
+                {
+                    var cloneUrl = $"{basePath}/{safeId}/clone?csrf={Uri.EscapeDataString(cloneToken)}";
+                    if (!string.IsNullOrWhiteSpace(cloneReturnUrl))
+                    {
+                        cloneUrl += $"&returnUrl={Uri.EscapeDataString(cloneReturnUrl)}";
+                    }
+                    html.Append($"<a class=\"btn btn-sm btn-outline-info\" href=\"{cloneUrl}\" title=\"Clone\"><i class=\"bi bi-copy\" aria-hidden=\"true\"></i> Clone</a>");
+                }
+                
+                html.Append("</div>");
+                html.Append("</div>");
+            }
+            
+            html.Append("</div>");
+            html.Append("</div>");
+        }
+        
+        html.Append("</div>");
+        return html.ToString();
+    }
+
+    private static string GetDisplayValue(DataEntityMetadata meta, BaseDataObject item)
+    {
+        // Try to get a meaningful display value from the first few string fields
+        var displayField = meta.Fields.FirstOrDefault(f => f.List && f.FieldType == FormFieldType.String);
+        if (displayField != null)
+        {
+            var value = displayField.Property.GetValue(item)?.ToString();
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+        }
+        
+        // Fall back to ID
+        return DataScaffold.GetIdValue(item) ?? "Unknown";
+    }
+
+    private static string FormatFieldValue(DataFieldMetadata field, object? value, Func<DataEntityMetadata, bool>? canRenderLookupLink)
+    {
+        if (value == null)
+            return "<em class=\"text-muted\">null</em>";
+        
+        if (field.Lookup != null)
+        {
+            // For lookup fields, show the value as-is (it would be the ID)
+            return WebUtility.HtmlEncode(value.ToString() ?? string.Empty);
+        }
+        
+        return field.FieldType switch
+        {
+            FormFieldType.DateOnly => value is DateOnly dateOnly 
+                ? WebUtility.HtmlEncode(dateOnly.ToString("yyyy-MM-dd")) 
+                : WebUtility.HtmlEncode(value.ToString() ?? string.Empty),
+            FormFieldType.DateTime => value is DateTime dateTime 
+                ? WebUtility.HtmlEncode(dateTime.ToString("yyyy-MM-dd HH:mm:ss")) 
+                : WebUtility.HtmlEncode(value.ToString() ?? string.Empty),
+            FormFieldType.YesNo => value is bool boolVal 
+                ? (boolVal ? "<i class=\"bi bi-check-circle text-success\"></i>" : "<i class=\"bi bi-x-circle text-danger\"></i>") 
+                : WebUtility.HtmlEncode(value.ToString() ?? string.Empty),
+            _ => WebUtility.HtmlEncode(value.ToString() ?? string.Empty)
+        };
     }
 
     private static string GetViewTypeName(ViewType viewType)
@@ -4420,8 +5617,287 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             ViewType.TreeView => "Tree View",
             ViewType.OrgChart => "Org Chart",
+            ViewType.Timeline => "Timeline",
+            ViewType.Timetable => "Timetable",
             _ => "Table View"
         };
+    }
+
+    private static string BuildSearchBox(string? currentSearchText, string actionUrl)
+    {
+        var safeSearchText = WebUtility.HtmlEncode(currentSearchText ?? string.Empty);
+        return $@"<div class=""mb-3"">
+    <form method=""get"" action=""{WebUtility.HtmlEncode(actionUrl)}"" class=""row g-2"">
+        <div class=""col-auto flex-grow-1"">
+            <input type=""search"" class=""form-control"" name=""q"" placeholder=""Search..."" value=""{safeSearchText}"" aria-label=""Search"" />
+        </div>
+        <div class=""col-auto"">
+            <button type=""submit"" class=""btn btn-primary""><i class=""bi bi-search"" aria-hidden=""true""></i> Search</button>
+        </div>
+    </form>
+</div>";
+    }
+
+    private static string BuildPageSizeSelector(int currentPageSize, string basePath, IDictionary<string, string?> queryParams)
+    {
+        var sizes = new[] { 10, 25, 50, 100 };
+        var html = new StringBuilder();
+        html.Append(@"<div class=""d-flex align-items-center gap-2"">
+    <label class=""form-label mb-0 small text-nowrap"">Page size:</label>
+    <select class=""form-select form-select-sm"" style=""width: auto;"" onchange=""window.location.href=this.value;"" aria-label=""Page size"">");
+
+        foreach (var size in sizes)
+        {
+            var selected = size == currentPageSize ? " selected" : string.Empty;
+            var url = BuildUrlWithParam(basePath, queryParams, "size", size.ToString(), excludeParams: new[] { "page" });
+            html.Append($@"<option value=""{WebUtility.HtmlEncode(url)}""{selected}>{size}</option>");
+        }
+
+        html.Append("</select></div>");
+        return html.ToString();
+    }
+
+    private static string BuildEnhancedPagination(int currentPage, int totalRecords, int pageSize, string basePath, IDictionary<string, string?> queryParams)
+    {
+        var maxPage = totalRecords == 0 ? 1 : (int)Math.Ceiling(totalRecords / (double)pageSize);
+        var startRecord = totalRecords == 0 ? 0 : (currentPage - 1) * pageSize + 1;
+        var endRecord = Math.Min(currentPage * pageSize, totalRecords);
+
+        var html = new StringBuilder();
+        html.Append(@"<div class=""d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2"">");
+        
+        // Record count
+        html.Append($@"<div class=""small text-muted"">Records {startRecord} to {endRecord} of {totalRecords} total</div>");
+        
+        // Pagination controls
+        html.Append(@"<nav aria-label=""Page navigation""><ul class=""pagination pagination-sm mb-0"">");
+        
+        // Previous button
+        if (currentPage > 1)
+        {
+            var prevUrl = BuildUrlWithParam(basePath, queryParams, "page", (currentPage - 1).ToString());
+            html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(prevUrl)}"" aria-label=""Previous""><i class=""bi bi-arrow-left"" aria-hidden=""true""></i></a></li>");
+        }
+        else
+        {
+            html.Append(@"<li class=""page-item disabled""><span class=""page-link"" aria-disabled=""true""><i class=""bi bi-arrow-left"" aria-hidden=""true""></i></span></li>");
+        }
+
+        // Page numbers (show current +/- 2 pages)
+        var startPage = Math.Max(1, currentPage - 2);
+        var endPage = Math.Min(maxPage, currentPage + 2);
+        
+        if (startPage > 1)
+        {
+            var firstUrl = BuildUrlWithParam(basePath, queryParams, "page", "1");
+            html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(firstUrl)}"">1</a></li>");
+            if (startPage > 2)
+            {
+                html.Append(@"<li class=""page-item disabled""><span class=""page-link"">...</span></li>");
+            }
+        }
+
+        for (var i = startPage; i <= endPage; i++)
+        {
+            if (i == currentPage)
+            {
+                html.Append($@"<li class=""page-item active"" aria-current=""page""><span class=""page-link"">{i}</span></li>");
+            }
+            else
+            {
+                var pageUrl = BuildUrlWithParam(basePath, queryParams, "page", i.ToString());
+                html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(pageUrl)}"">{i}</a></li>");
+            }
+        }
+
+        if (endPage < maxPage)
+        {
+            if (endPage < maxPage - 1)
+            {
+                html.Append(@"<li class=""page-item disabled""><span class=""page-link"">...</span></li>");
+            }
+            var lastUrl = BuildUrlWithParam(basePath, queryParams, "page", maxPage.ToString());
+            html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(lastUrl)}"">{maxPage}</a></li>");
+        }
+
+        // Next button
+        if (currentPage < maxPage)
+        {
+            var nextUrl = BuildUrlWithParam(basePath, queryParams, "page", (currentPage + 1).ToString());
+            html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(nextUrl)}"" aria-label=""Next""><i class=""bi bi-arrow-right"" aria-hidden=""true""></i></a></li>");
+        }
+        else
+        {
+            html.Append(@"<li class=""page-item disabled""><span class=""page-link"" aria-disabled=""true""><i class=""bi bi-arrow-right"" aria-hidden=""true""></i></span></li>");
+        }
+
+        html.Append("</ul></nav></div>");
+        return html.ToString();
+    }
+
+    private static string BuildUrlWithParam(string basePath, IDictionary<string, string?> queryParams, string key, string value, string[]? excludeParams = null)
+    {
+        var parts = new List<string>();
+        var exclude = new HashSet<string>(excludeParams ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        exclude.Add(key); // Always exclude the key we're setting
+
+        foreach (var pair in queryParams)
+        {
+            if (exclude.Contains(pair.Key))
+                continue;
+
+            var pairValue = pair.Value ?? string.Empty;
+            if (!string.IsNullOrWhiteSpace(pairValue))
+            {
+                parts.Add($"{WebUtility.UrlEncode(pair.Key)}={WebUtility.UrlEncode(pairValue)}");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            parts.Add($"{WebUtility.UrlEncode(key)}={WebUtility.UrlEncode(value)}");
+        }
+
+        var queryString = parts.Count > 0 ? "?" + string.Join("&", parts) : string.Empty;
+        return $"{basePath}{queryString}";
+    }
+
+    private static string BuildSortableColumnHeaders(DataEntityMetadata metadata, string basePath, IDictionary<string, string?> queryParams, bool includeActions, bool includeBulkSelection = false)
+    {
+        var currentSort = queryParams.TryGetValue("sort", out var sortValue) ? sortValue : null;
+        var currentDir = queryParams.TryGetValue("dir", out var dirValue) ? dirValue : "asc";
+        
+        var html = new StringBuilder();
+        html.Append("<thead><tr>");
+
+        if (includeBulkSelection)
+        {
+            html.Append(@"<th scope=""col"" style=""width:2rem;""><input type=""checkbox"" data-bulk-select-all aria-label=""Select all"" /></th>");
+        }
+
+        if (includeActions)
+        {
+            html.Append(@"<th scope=""col"">Actions</th>");
+        }
+
+        foreach (var field in metadata.Fields.Where(f => f.List).OrderBy(f => f.Order))
+        {
+            var isSorted = string.Equals(field.Name, currentSort, StringComparison.OrdinalIgnoreCase);
+            var nextDir = isSorted && string.Equals(currentDir, "asc", StringComparison.OrdinalIgnoreCase) ? "desc" : "asc";
+            
+            // Build sort URL - need to update both sort and dir parameters
+            var parts = new List<string>();
+            foreach (var pair in queryParams)
+            {
+                if (string.Equals(pair.Key, "sort", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pair.Key, "dir", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(pair.Key, "page", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                var pairValue = pair.Value ?? string.Empty;
+                if (!string.IsNullOrWhiteSpace(pairValue))
+                {
+                    parts.Add($"{WebUtility.UrlEncode(pair.Key)}={WebUtility.UrlEncode(pairValue)}");
+                }
+            }
+            parts.Add($"sort={WebUtility.UrlEncode(field.Name)}");
+            parts.Add($"dir={nextDir}");
+            var queryString = parts.Count > 0 ? "?" + string.Join("&", parts) : string.Empty;
+            var sortUrl = $"{basePath}{queryString}";
+            
+            var sortIcon = string.Empty;
+            if (isSorted)
+            {
+                sortIcon = string.Equals(currentDir, "desc", StringComparison.OrdinalIgnoreCase)
+                    ? @" <i class=""bi bi-arrow-down"" aria-hidden=""true""></i>"
+                    : @" <i class=""bi bi-arrow-up"" aria-hidden=""true""></i>";
+            }
+            else
+            {
+                sortIcon = @" <i class=""bi bi-arrow-down-up text-muted"" aria-hidden=""true"" style=""opacity: 0.3;""></i>";
+            }
+
+            html.Append($@"<th scope=""col""><a href=""{WebUtility.HtmlEncode(sortUrl)}"" class=""text-decoration-none text-reset"" title=""Sort by {WebUtility.HtmlEncode(field.Label)}"">{WebUtility.HtmlEncode(field.Label)}{sortIcon}</a></th>");
+        }
+
+        html.Append("</tr></thead>");
+        return html.ToString();
+    }
+
+    private static string BuildTableWithSortableHeaders(DataEntityMetadata metadata, IReadOnlyList<string[]> rows, string basePath, IDictionary<string, string?> queryParams, bool includeActions, bool includeBulkSelection = false)
+    {
+        var html = new StringBuilder();
+        html.Append(@"<table class=""table table-striped table-sm align-middle mb-0 bm-table"">");
+        
+        // Add sortable headers
+        html.Append(BuildSortableColumnHeaders(metadata, basePath, queryParams, includeActions, includeBulkSelection));
+        
+        // Add body rows
+        html.Append("<tbody>");
+        
+        var columnTitles = new List<string>();
+        if (includeBulkSelection)
+            columnTitles.Add("");
+        if (includeActions)
+            columnTitles.Add("Actions");
+        columnTitles.AddRange(metadata.Fields.Where(f => f.List).OrderBy(f => f.Order).Select(f => f.Label));
+        
+        foreach (var row in rows)
+        {
+            html.Append("<tr>");
+            for (int i = 0; i < row.Length; i++)
+            {
+                var label = i < columnTitles.Count ? columnTitles[i] : string.Empty;
+                html.Append($@"<td data-label=""{WebUtility.HtmlEncode(label)}"">{row[i]}</td>");
+            }
+            html.Append("</tr>");
+        }
+        
+        html.Append("</tbody></table>");
+        return html.ToString();
+    }
+
+    private static string BuildBulkActionsBar(string typeSlug, string returnUrl, long totalCount, string csrfToken)
+    {
+        var sb = new StringBuilder();
+        sb.Append($"<div data-bulk-container data-entity-slug=\"{WebUtility.HtmlEncode(typeSlug)}\" data-return-url=\"{WebUtility.HtmlEncode(returnUrl)}\">");
+        sb.Append("<div data-bulk-actions-bar class=\"alert alert-info d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2\" style=\"display:none;\" role=\"status\">");
+        sb.Append("<div class=\"d-flex align-items-center gap-2\">");
+        sb.Append("<strong><span data-selected-count>0</span> of <span data-total-count>");
+        sb.Append(totalCount);
+        sb.Append("</span> selected</strong>");
+        sb.Append("<button type=\"button\" class=\"btn btn-sm btn-outline-secondary\" data-bulk-clear aria-label=\"Clear selection\"><i class=\"bi bi-x-lg\" aria-hidden=\"true\"></i> Clear</button>");
+        sb.Append("</div>");
+        sb.Append("<div class=\"btn-group btn-group-sm\" role=\"group\" aria-label=\"Bulk actions\">");
+        sb.Append("<button type=\"button\" class=\"btn btn-danger\" data-bulk-action=\"delete\" title=\"Delete selected\" aria-label=\"Delete selected\"><i class=\"bi bi-trash\" aria-hidden=\"true\"></i> Delete</button>");
+        sb.Append("<button type=\"button\" class=\"btn btn-success\" data-bulk-action=\"export-csv\" title=\"Export to CSV\" aria-label=\"Export to CSV\"><i class=\"bi bi-file-earmark-spreadsheet\" aria-hidden=\"true\"></i> CSV</button>");
+        sb.Append("<button type=\"button\" class=\"btn btn-primary\" data-bulk-action=\"export-json\" title=\"Export to JSON\" aria-label=\"Export to JSON\"><i class=\"bi bi-filetype-json\" aria-hidden=\"true\"></i> JSON</button>");
+        sb.Append("<button type=\"button\" class=\"btn btn-info\" data-bulk-action=\"export-html\" title=\"Export to HTML\" aria-label=\"Export to HTML\"><i class=\"bi bi-filetype-html\" aria-hidden=\"true\"></i> HTML</button>");
+        sb.Append("</div>");
+        sb.Append("</div>");
+        sb.Append($"<input type=\"hidden\" name=\"csrf_token\" value=\"{WebUtility.HtmlEncode(csrfToken)}\" />");
+        sb.Append("</div>");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Build form fields with per-field validation error messages attached.
+    /// </summary>
+    private static List<FormField> BuildFormFieldsWithErrors(
+        DataEntityMetadata meta, object instance, bool forCreate, ValidationResult validationResult)
+    {
+        var fields = DataScaffold.BuildFormFields(meta, instance, forCreate).ToList();
+        if (!validationResult.IsValid)
+        {
+            for (int i = 0; i < fields.Count; i++)
+            {
+                if (validationResult.FieldErrors.TryGetValue(fields[i].Name, out var fieldErrors) && fieldErrors.Count > 0)
+                {
+                    fields[i] = fields[i] with { ValidationError = string.Join("; ", fieldErrors) };
+                }
+            }
+        }
+        return fields;
     }
 
     private static string BuildCommandButtonsHtml(DataEntityMetadata meta, string typeSlug, string id)
@@ -4491,6 +5967,8 @@ public sealed class RouteHandlers : IRouteHandlers
 
         try
         {
+            var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
+            
             RemoteCommandResult result;
             var returnType = cmd.Method.ReturnType;
             if (returnType == typeof(RemoteCommandResult))
@@ -4508,7 +5986,14 @@ public sealed class RouteHandlers : IRouteHandlers
 
             // Save the entity in case the command modified it
             await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
+            DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
             await DataScaffold.SaveAsync(meta, instance);
+
+            // Audit the remote command execution
+            if (instance is BaseDataObject baseDataObject)
+            {
+                await _auditService.AuditRemoteCommandAsync(baseDataObject, commandName, userName, null, result, context.RequestAborted).ConfigureAwait(false);
+            }
 
             context.Response.StatusCode = result.Success ? StatusCodes.Status200OK : StatusCodes.Status422UnprocessableEntity;
             await WriteJsonResponseAsync(context, new { success = result.Success, message = result.Message, redirectUrl = result.RedirectUrl });

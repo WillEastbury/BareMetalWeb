@@ -15,7 +15,7 @@ This workflow serves as a continuous integration test environment that:
 
 ## Workflow Triggers
 
-- **Automatic**: Runs on every push to `main` branch
+- **Automatic**: Currently disabled (push trigger is commented out)
 - **Manual**: Can be triggered via workflow_dispatch in GitHub Actions UI
 
 ## Workflow Steps

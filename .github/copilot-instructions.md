@@ -139,6 +139,33 @@ dotnet run --project BareMetalWeb.PerformanceTests
 - Specific project: `dotnet test BareMetalWeb.Core.Tests/ --no-build -v quiet`
 - Helper script: `./run-tests.sh` (builds and tests in one step)
 
+**ARM64 / proot Test Runner Fix:**
+This environment runs under proot on ARM64 (Termux). The vstest runner's `DotnetHostHelper` fails to detect the dotnet muxer because the process appears as `libproot-loader.so` instead of `dotnet`. This causes `"Could not find 'dotnet' host for the 'ARM64' architecture"` errors.
+
+**Fix:** Always pass a `.runsettings` file with `DotNetHostPath` set:
+
+```bash
+# Create the runsettings file (one-time)
+cat > /tmp/test.runsettings << 'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <EnvironmentVariables>
+      <DOTNET_ROOT>/usr/lib/dotnet</DOTNET_ROOT>
+    </EnvironmentVariables>
+    <TargetPlatform>ARM64</TargetPlatform>
+    <DotNetHostPath>/usr/lib/dotnet/dotnet</DotNetHostPath>
+  </RunConfiguration>
+</RunSettings>
+EOF
+
+# Then run tests with:
+dotnet test BareMetalWeb.sln --no-build -s /tmp/test.runsettings -v quiet
+dotnet test BareMetalWeb.Data.Tests/BareMetalWeb.Data.Tests.csproj --no-build -s /tmp/test.runsettings
+```
+
+Without this, `dotnet test` will abort with `"Test Run Aborted"` on every test project. Setting `DOTNET_ROOT` or `DOTNET_ROOT_ARM64` alone is **not** sufficient — `DotNetHostPath` in runsettings is required.
+
 **Why This Matters:**
 - Prevents broken code from being committed
 - Maintains code quality and stability
