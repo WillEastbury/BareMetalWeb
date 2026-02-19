@@ -28,6 +28,7 @@ public sealed record DataFieldMetadata(
     DataLookupConfig? Lookup,
     IdGenerationStrategy IdGeneration,
     ComputedFieldConfig? Computed,
+    UploadFieldConfig? Upload
     CalculatedFieldAttribute? Calculated
 );
 
@@ -497,7 +498,15 @@ public static class DataScaffold
                 SelectedValue: selectedValue,
                 LookupOptions: lookupOptions,
                 LookupTargetType: lookupTargetType,
-                LookupTargetSlug: lookupTargetSlug
+                LookupTargetSlug: lookupTargetSlug,
+                Accept: field.Upload != null && field.Upload.AllowedMimeTypes.Length > 0
+                    ? string.Join(",", field.Upload.AllowedMimeTypes)
+                    : (effectiveFieldType == FormFieldType.Image ? "image/*" : null),
+                MaxFileSizeBytes: field.Upload?.MaxFileSizeBytes,
+                ExistingFileName: value is StoredFileData fileData ? fileData.FileName : null,
+                ExistingFileUrl: value is StoredFileData && instance is BaseDataObject dataObject
+                    ? $"/api/{metadata.Slug}/{Uri.EscapeDataString(dataObject.Id)}/files/{Uri.EscapeDataString(field.Name)}"
+                    : null
             ));
         }
 
@@ -538,6 +547,12 @@ public static class DataScaffold
                 var key = value?.ToString() ?? string.Empty;
                 var display = lookupMap.TryGetValue(key, out var resolved) ? resolved : key;
                 rows.Add((field.Label, FormatLookupDisplay(key, display)));
+                continue;
+            }
+
+            if (value is StoredFileData storedFile)
+            {
+                rows.Add((field.Label, storedFile.FileName));
                 continue;
             }
 
@@ -582,6 +597,21 @@ public static class DataScaffold
             if (value is bool boolValue)
             {
                 rows.Add((field.Label, BuildBooleanCheckboxHtml(boolValue), true));
+                continue;
+            }
+
+            if (value is StoredFileData storedFile && instance is BaseDataObject dataObject)
+            {
+                var safeUrl = $"/api/{metadata.Slug}/{Uri.EscapeDataString(dataObject.Id)}/files/{Uri.EscapeDataString(field.Name)}";
+                var safeName = WebUtility.HtmlEncode(storedFile.FileName);
+                if (storedFile.IsImage)
+                {
+                    rows.Add((field.Label, $"<a href=\"{safeUrl}\" target=\"_blank\" rel=\"noopener\"><img src=\"{safeUrl}\" alt=\"{safeName}\" class=\"img-thumbnail\" style=\"max-width:200px;max-height:200px;\"/></a>", true));
+                }
+                else
+                {
+                    rows.Add((field.Label, $"<a href=\"{safeUrl}\" target=\"_blank\" rel=\"noopener\">{safeName}</a>", true));
+                }
                 continue;
             }
 
@@ -1318,6 +1348,9 @@ public static class DataScaffold
 
             if (!TryGetFormValue(values, field.Name, out var rawValue) || rawValue == null)
             {
+                if (field.FieldType == FormFieldType.File || field.FieldType == FormFieldType.Image)
+                    continue;
+
                 if (IsBooleanField(field, field.Property.PropertyType))
                 {
                     field.Property.SetValue(instance, false);
@@ -2638,6 +2671,8 @@ public static class DataScaffold
             }
 
             var fieldAttribute = prop.GetCustomAttribute<DataFieldAttribute>();
+            var fileFieldAttribute = prop.GetCustomAttribute<FileFieldAttribute>();
+            var imageFieldAttribute = prop.GetCustomAttribute<ImageFieldAttribute>();
             var lookupAttribute = prop.GetCustomAttribute<DataLookupAttribute>();
             var idGenAttribute = prop.GetCustomAttribute<IdGenerationAttribute>();
             var computedAttribute = prop.GetCustomAttribute<ComputedFieldAttribute>();
@@ -2645,12 +2680,25 @@ public static class DataScaffold
             if (fieldAttribute == null && !useConvention)
                 continue;
 
-            var fieldType = fieldAttribute?.FieldType == FormFieldType.Unknown || fieldAttribute == null
-                ? MapFieldType(prop.PropertyType)
-                : fieldAttribute.FieldType;
-            var label = fieldAttribute?.Label ?? DeCamelcaseWithId(prop.Name);
-            var required = fieldAttribute?.Required ?? (!IsNullable(prop) || !HasDefaultValue(type, prop));
-            var order = fieldAttribute?.Order ?? (i + 1);
+            var fieldType = imageFieldAttribute != null
+                ? FormFieldType.Image
+                : fileFieldAttribute != null
+                    ? FormFieldType.File
+                    : fieldAttribute?.FieldType == FormFieldType.Unknown || fieldAttribute == null
+                        ? MapFieldType(prop.PropertyType)
+                        : fieldAttribute.FieldType;
+            var label = imageFieldAttribute?.Label
+                ?? fileFieldAttribute?.Label
+                ?? fieldAttribute?.Label
+                ?? DeCamelcaseWithId(prop.Name);
+            var required = imageFieldAttribute?.Required
+                ?? fileFieldAttribute?.Required
+                ?? fieldAttribute?.Required
+                ?? (!IsNullable(prop) || !HasDefaultValue(type, prop));
+            var order = imageFieldAttribute?.Order
+                ?? fileFieldAttribute?.Order
+                ?? fieldAttribute?.Order
+                ?? (i + 1);
             DataLookupConfig? lookup = null;
             if (lookupAttribute != null)
             {
@@ -2682,6 +2730,28 @@ public static class DataScaffold
                 );
             }
 
+            UploadFieldConfig? upload = null;
+            if (imageFieldAttribute != null)
+            {
+                upload = new UploadFieldConfig(
+                    imageFieldAttribute.MaxFileSizeBytes,
+                    imageFieldAttribute.AllowedMimeTypes,
+                    imageFieldAttribute.MaxWidth > 0 ? imageFieldAttribute.MaxWidth : null,
+                    imageFieldAttribute.MaxHeight > 0 ? imageFieldAttribute.MaxHeight : null,
+                    imageFieldAttribute.GenerateThumbnail
+                );
+            }
+            else if (fileFieldAttribute != null)
+            {
+                upload = new UploadFieldConfig(
+                    fileFieldAttribute.MaxFileSizeBytes,
+                    fileFieldAttribute.AllowedMimeTypes,
+                    null,
+                    null,
+                    false
+                );
+            }
+
             fields.Add(new DataFieldMetadata(
                 prop,
                 prop.Name,
@@ -2689,6 +2759,16 @@ public static class DataScaffold
                 fieldType,
                 order,
                 required,
+                imageFieldAttribute?.List ?? fileFieldAttribute?.List ?? fieldAttribute?.List ?? true,
+                imageFieldAttribute?.View ?? fileFieldAttribute?.View ?? fieldAttribute?.View ?? true,
+                imageFieldAttribute?.Edit ?? fileFieldAttribute?.Edit ?? fieldAttribute?.Edit ?? true,
+                imageFieldAttribute?.Create ?? fileFieldAttribute?.Create ?? fieldAttribute?.Create ?? true,
+                (imageFieldAttribute?.ReadOnly ?? fileFieldAttribute?.ReadOnly ?? fieldAttribute?.ReadOnly ?? false) || (computed != null), // Computed fields are always readonly
+                imageFieldAttribute?.Placeholder ?? fileFieldAttribute?.Placeholder ?? fieldAttribute?.Placeholder,
+                lookup,
+                idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
+                computed,
+                upload
                 fieldAttribute?.List ?? true,
                 fieldAttribute?.View ?? true,
                 fieldAttribute?.Edit ?? true,

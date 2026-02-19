@@ -25,6 +25,10 @@ public sealed record FormField(
     string? LookupTargetSlug = null,
     bool IsComputed = false,
     string? ComputedStrategy = null,
+    string? Accept = null,
+    long? MaxFileSizeBytes = null,
+    string? ExistingFileName = null,
+    string? ExistingFileUrl = null
     bool IsCalculated = false,
     string? CalculatedExpression = null,
     string? DisplayFormat = null
