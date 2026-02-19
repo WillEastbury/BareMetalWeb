@@ -163,4 +163,92 @@ public class StaticFileServiceTests : IDisposable
         Assert.True(result);
         Assert.Equal(404, context.Response.StatusCode);
     }
+
+    [Fact]
+    public async Task TryServeAsync_CachingEnabled_SetsCacheControlOn200()
+    {
+        CreateFile("cached.css", "body{}");
+        var options = new StaticFileConfigOptions
+        {
+            Enabled = true,
+            RequestPathPrefix = "/static",
+            RootDirectory = _tempDir,
+            EnableCaching = true,
+            CacheSeconds = 3600,
+            AddETag = true,
+            AddLastModified = true,
+        };
+        options.Normalize();
+
+        var context = CreateContext("GET", "/static/cached.css");
+        var result = await StaticFileService.TryServeAsync(context, options);
+        Assert.True(result);
+        Assert.Equal(200, context.Response.StatusCode);
+        Assert.Equal("public, max-age=3600", context.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
+    public async Task TryServeAsync_CachingEnabled_SetsCacheControlOn304()
+    {
+        CreateFile("revalidate.css", "body{}");
+        var options = new StaticFileConfigOptions
+        {
+            Enabled = true,
+            RequestPathPrefix = "/static",
+            RootDirectory = _tempDir,
+            EnableCaching = true,
+            CacheSeconds = 3600,
+            AddETag = true,
+            AddLastModified = true,
+        };
+        options.Normalize();
+
+        // First request to get ETag
+        var firstContext = CreateContext("GET", "/static/revalidate.css");
+        await StaticFileService.TryServeAsync(context: firstContext, options: options);
+        var etag = firstContext.Response.Headers.ETag.ToString();
+        Assert.False(string.IsNullOrWhiteSpace(etag));
+
+        // Second request with If-None-Match (simulating browser revalidation)
+        var secondContext = CreateContext("GET", "/static/revalidate.css");
+        secondContext.Request.Headers.IfNoneMatch = etag;
+        var result = await StaticFileService.TryServeAsync(secondContext, options);
+
+        Assert.True(result);
+        Assert.Equal(304, secondContext.Response.StatusCode);
+        // Cache-Control must be present on 304 so the browser updates its cache TTL
+        Assert.Equal("public, max-age=3600", secondContext.Response.Headers.CacheControl.ToString());
+    }
+
+    [Fact]
+    public async Task TryServeAsync_CachingEnabled_SetsCacheControlOn304_IfModifiedSince()
+    {
+        CreateFile("revalidate2.css", "body{}");
+        var options = new StaticFileConfigOptions
+        {
+            Enabled = true,
+            RequestPathPrefix = "/static",
+            RootDirectory = _tempDir,
+            EnableCaching = true,
+            CacheSeconds = 86400,
+            AddETag = false,
+            AddLastModified = true,
+        };
+        options.Normalize();
+
+        // First request to get Last-Modified
+        var firstContext = CreateContext("GET", "/static/revalidate2.css");
+        await StaticFileService.TryServeAsync(firstContext, options);
+        var lastModified = firstContext.Response.Headers.LastModified.ToString();
+        Assert.False(string.IsNullOrWhiteSpace(lastModified));
+
+        // Second request using a future date to simulate "file hasn't changed"
+        var secondContext = CreateContext("GET", "/static/revalidate2.css");
+        secondContext.Request.Headers.IfModifiedSince = DateTimeOffset.UtcNow.AddHours(1).ToString("R");
+        var result = await StaticFileService.TryServeAsync(secondContext, options);
+
+        Assert.True(result);
+        Assert.Equal(304, secondContext.Response.StatusCode);
+        Assert.Equal("public, max-age=86400", secondContext.Response.Headers.CacheControl.ToString());
+    }
 }
