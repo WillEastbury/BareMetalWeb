@@ -1283,7 +1283,7 @@ public static class DataScaffold
         if (string.IsNullOrWhiteSpace(relatedUrl))
             return string.Empty;
 
-        return $"<a class=\"btn btn-sm btn-outline-info ms-1\" href=\"{relatedUrl}\" title=\"Open related\" aria-label=\"Open related\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i></a>";
+        return $"<a class=\"btn btn-sm btn-outline-info ms-1\" href=\"{relatedUrl}\" title=\"Open related\" aria-label=\"Open related\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i> View</a>";
     }
 
     private static string? TryBuildLookupUrl(DataLookupConfig lookup, string key, Func<DataEntityMetadata, bool>? canRenderLookupLink)
