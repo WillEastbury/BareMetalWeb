@@ -81,6 +81,10 @@ public static class BareMetalWebExtensions
 
         // Infrastructure configuration
         ProgramSetup.ConfigureStaticFiles(app, appInfo);
+
+        // Build JS bundle from static JS files (runtime bundler - no build-time changes needed)
+        JsBundleService.BuildBundle(Path.Combine(appInfo.StaticFiles.RootPathFull, "js"));
+
         ProgramSetup.ConfigureCors(app, appInfo);
         ProgramSetup.ConfigureHttps(app, appInfo);
         ProgramSetup.ConfigureProxyRoutes(app, appInfo, logger, pageInfoFactory);
