@@ -295,17 +295,31 @@ public class DiskBufferedLoggerTests : IDisposable
     // ── File I/O error resilience ────────────────────────────────────
 
     [Fact]
-    public void LogError_WhenDiskFails_DoesNotThrow()
+    public async Task LogError_WhenDiskFails_DoesNotThrow()
     {
         // Arrange – use an invalid path that will cause I/O failure
         var invalidPath = Path.Combine(_tempDir, new string('x', 300), "impossibly_long");
         var logger = new DiskBufferedLogger(invalidPath);
 
-        // Act & Assert – fire-and-forget error logging must never throw
-        var exception = Record.Exception(() =>
-            logger.LogError("should not throw", new Exception("test")));
+        // Capture Console.Error so the expected "Failed to log" message doesn't pollute CI output
+        var originalError = Console.Error;
+        using var captured = new StringWriter();
+        Console.SetError(captured);
+        try
+        {
+            // Act & Assert – fire-and-forget error logging must never throw
+            var exception = Record.Exception(() =>
+                logger.LogError("should not throw", new Exception("test")));
 
-        Assert.Null(exception);
+            Assert.Null(exception);
+
+            // Wait for the fire-and-forget async task to complete
+            await Task.Delay(500);
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
     }
 
     [Fact]
