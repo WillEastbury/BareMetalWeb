@@ -14,6 +14,7 @@ namespace BareMetalWeb.Data.Tests;
 /// <summary>
 /// Tests for child list editor functionality in DataScaffold.
 /// </summary>
+[Collection("DataStoreProvider")]
 public class ChildListEditorTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
