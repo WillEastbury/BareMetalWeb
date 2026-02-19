@@ -64,14 +64,20 @@ public sealed class DiskBufferedLogger : IBufferedLogger
     // If diagnosing why your logging is not working, remove this attribute
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-  
-        while (!cancellationToken.IsCancellationRequested)
+        try
         {
-            await FlushOnceAsync(cancellationToken);
-            await Task.Delay(200, cancellationToken);
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                await FlushOnceAsync(cancellationToken);
+                await Task.Delay(200, cancellationToken);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected during shutdown — fall through to final flush
         }
 
-        // Final flush on shutdown
+        // Final flush on shutdown — always runs even after cancellation
         await FlushOnceAsync(CancellationToken.None, isShutdown: true);
     }
 

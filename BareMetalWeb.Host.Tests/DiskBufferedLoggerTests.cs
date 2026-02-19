@@ -355,23 +355,21 @@ public class DiskBufferedLoggerTests : IDisposable
     // ── Empty buffer flush ───────────────────────────────────────────
 
     [Fact]
-    public async Task RunAsync_EmptyBuffer_DoesNotCreateFile()
+    public async Task RunAsync_EmptyBuffer_StillWritesShutdownMessage()
     {
         // Arrange
         var logger = new DiskBufferedLogger(_tempDir);
 
-        // Act – run briefly with nothing buffered; Task.Delay throws before
-        // the final flush can execute, so no file is created
+        // Act – run briefly with nothing buffered
         using var cts = new CancellationTokenSource();
         cts.CancelAfter(TimeSpan.FromMilliseconds(100));
-        try { await logger.RunAsync(cts.Token); }
-        catch (OperationCanceledException) { }
+        await logger.RunAsync(cts.Token);
 
-        // Assert – no log file is created because the empty-buffer early-return
-        // in FlushOnceAsync prevents writing, and cancellation prevents
-        // the shutdown flush from being reached
+        // Assert – final shutdown flush always runs, writing the shutdown marker
         var infoFiles = Directory.GetFiles(_tempDir, "info_*.log", SearchOption.AllDirectories);
-        Assert.Empty(infoFiles);
+        Assert.Single(infoFiles);
+        var content = await File.ReadAllTextAsync(infoFiles[0]);
+        Assert.Contains("Clean shutdown completed", content);
     }
 
     // ── Shutdown flush with empty buffer ─────────────────────────────
