@@ -1452,7 +1452,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
             var treeToastHtml = BuildToastHtml(context, meta.Name);
             var treeViewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta);
-            var treeCreateHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a></p>";
+            var treeCreateHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i> Add</a></p>";
             
             context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} - {GetViewTypeName(effectiveViewType)}");
             context.SetStringValue("message", treeToastHtml + treeViewSwitcher + treeCreateHtml + viewHtml);
@@ -1518,7 +1518,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var exportDropdown = BuildExportDropdown(typeSlug, queryString, hasNested);
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/html{WebUtility.HtmlEncode(queryString)}\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
         var viewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta);
-        var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i></a>{exportDropdown}{htmlHtml}</p>";
+        var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i> Add</a>{exportDropdown}{htmlHtml}</p>";
         
         // Bulk actions bar with CSRF token
         var bulkActionsBar = BuildBulkActionsBar(typeSlug, returnUrl, totalCount, cloneToken);
@@ -1597,7 +1597,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/html\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
         var commandButtons = BuildCommandButtonsHtml(meta, typeSlug, id);
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} Details");
-        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>{exportDropdown}{rtfHtml}{htmlHtml}{commandButtons}</p>");
+        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i> Edit</a>{exportDropdown}{rtfHtml}{htmlHtml}{commandButtons}</p>");
         context.AddTable(new[] { "Field", "Value" }, rows);
         await _renderer.RenderPage(context);
     }
