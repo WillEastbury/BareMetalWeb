@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text.RegularExpressions;
 using Xunit;
 
 namespace BareMetalWeb.IntegrationTests;
@@ -7,6 +8,10 @@ namespace BareMetalWeb.IntegrationTests;
 /// <summary>
 /// Integration tests that run against a deployed BareMetalWeb instance.
 /// These tests verify authentication and basic functionality.
+/// <para>
+/// For CI/CD: Set CIMIGRATE_TEST_USERNAME and CIMIGRATE_TEST_PASSWORD environment variables.
+/// For local testing: Credentials are randomly generated and the setup endpoint is used if needed.
+/// </para>
 /// </summary>
 public class AuthenticationIntegrationTests : IDisposable
 {
@@ -14,13 +19,33 @@ public class AuthenticationIntegrationTests : IDisposable
     private readonly string _baseUrl;
     private readonly string _username;
     private readonly string _password;
+    private readonly string _email;
+    private bool _setupAttempted;
 
     public AuthenticationIntegrationTests()
     {
         _baseUrl = Environment.GetEnvironmentVariable("CIMIGRATE_BASE_URL") 
             ?? "https://baremetalweb-cimigrate.azurewebsites.net";
-        _username = Environment.GetEnvironmentVariable("CIMIGRATE_TEST_USERNAME") ?? string.Empty;
-        _password = Environment.GetEnvironmentVariable("CIMIGRATE_TEST_PASSWORD") ?? string.Empty;
+        
+        // For CI/CD: Use environment variables for consistent credentials across runs
+        // For local: Generate random credentials (consistent within this test run)
+        var envUsername = Environment.GetEnvironmentVariable("CIMIGRATE_TEST_USERNAME");
+        var envPassword = Environment.GetEnvironmentVariable("CIMIGRATE_TEST_PASSWORD");
+        
+        if (!string.IsNullOrEmpty(envUsername) && !string.IsNullOrEmpty(envPassword))
+        {
+            _username = envUsername;
+            _password = envPassword;
+            _email = $"{envUsername}@example.com";
+        }
+        else
+        {
+            // Generate random but consistent credentials for this test run
+            var guid = Guid.NewGuid().ToString("N").Substring(0, 8);
+            _username = $"testuser_{guid}";
+            _password = $"TestPass_{guid}_!1aA";
+            _email = $"test_{guid}@example.com";
+        }
 
         var handler = new HttpClientHandler
         {
@@ -37,16 +62,67 @@ public class AuthenticationIntegrationTests : IDisposable
     }
 
     /// <summary>
-    /// Skips the test if required environment variables are not set.
-    /// This allows the tests to run in CI/CD pipelines with credentials,
-    /// but skip gracefully in local development or other environments without them.
+    /// Ensures the test user exists by checking if setup is needed and creating the user if necessary.
+    /// This allows tests to run against a fresh BareMetalWeb instance without manual setup.
     /// </summary>
-    private void EnsureEnvironmentVariablesAreSet()
+    private async Task EnsureUserExists()
     {
-        Skip.IfNot(
-            !string.IsNullOrEmpty(_username) && !string.IsNullOrEmpty(_password),
-            "Integration tests require CIMIGRATE_TEST_USERNAME and CIMIGRATE_TEST_PASSWORD environment variables to be set. " +
-            "These tests are designed to run against a deployed instance with valid credentials.");
+        if (_setupAttempted)
+            return;
+
+        _setupAttempted = true;
+
+        try
+        {
+            // Check if setup is needed by trying to access the setup page
+            var setupResponse = await _httpClient.GetAsync("/setup");
+            
+            if (setupResponse.StatusCode == HttpStatusCode.OK)
+            {
+                // Setup is available, extract CSRF token and create the user
+                var setupHtml = await setupResponse.Content.ReadAsStringAsync();
+                var csrfToken = ExtractCsrfToken(setupHtml);
+                
+                if (!string.IsNullOrEmpty(csrfToken))
+                {
+                    var setupData = new FormUrlEncodedContent(new[]
+                    {
+                        new KeyValuePair<string, string>("__csrf", csrfToken),
+                        new KeyValuePair<string, string>("username", _username),
+                        new KeyValuePair<string, string>("email", _email),
+                        new KeyValuePair<string, string>("password", _password),
+                    });
+
+                    await _httpClient.PostAsync("/setup", setupData);
+                    // Note: We don't check the response here as the user might already exist
+                    // or the setup might succeed. Either way, we'll try to login with the credentials.
+                }
+            }
+            // If setup is not available (e.g., returns redirect or not found), the user should already exist
+        }
+        catch
+        {
+            // If setup fails, we'll try to proceed with login anyway
+            // The credentials might already exist from a previous test run
+        }
+    }
+
+    /// <summary>
+    /// Extracts the CSRF token from an HTML form response.
+    /// </summary>
+    private static string? ExtractCsrfToken(string html)
+    {
+        // Look for: <input type="hidden" name="__csrf" value="..." />
+        var match = Regex.Match(html, @"name=[""']__csrf[""']\s+value=[""']([^""']+)[""']", RegexOptions.IgnoreCase);
+        if (match.Success)
+            return match.Groups[1].Value;
+
+        // Try alternate pattern: value="..." name="__csrf"
+        match = Regex.Match(html, @"value=[""']([^""']+)[""']\s+name=[""']__csrf[""']", RegexOptions.IgnoreCase);
+        if (match.Success)
+            return match.Groups[1].Value;
+
+        return null;
     }
 
     public void Dispose()
@@ -54,10 +130,10 @@ public class AuthenticationIntegrationTests : IDisposable
         _httpClient.Dispose();
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task HomePage_Returns_Success()
     {
-        EnsureEnvironmentVariablesAreSet();
+        await EnsureUserExists();
         
         // Act
         var response = await _httpClient.GetAsync("/");
@@ -67,10 +143,10 @@ public class AuthenticationIntegrationTests : IDisposable
             $"Expected success or redirect, got {response.StatusCode}");
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Login_WithValidCredentials_Succeeds()
     {
-        EnsureEnvironmentVariablesAreSet();
+        await EnsureUserExists();
         
         // Arrange - First, get the login page to obtain CSRF token if needed
         var loginPageResponse = await _httpClient.GetAsync("/login");
@@ -111,10 +187,10 @@ public class AuthenticationIntegrationTests : IDisposable
         }
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task Login_WithInvalidCredentials_Fails()
     {
-        EnsureEnvironmentVariablesAreSet();
+        await EnsureUserExists();
         
         // Arrange
         var loginData = new FormUrlEncodedContent(new[]
@@ -141,10 +217,10 @@ public class AuthenticationIntegrationTests : IDisposable
         );
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task ProtectedPage_WithoutAuthentication_Redirects()
     {
-        EnsureEnvironmentVariablesAreSet();
+        await EnsureUserExists();
         
         // Arrange - Use a fresh client without authentication
         using var unauthClient = new HttpClient
@@ -167,10 +243,10 @@ public class AuthenticationIntegrationTests : IDisposable
         );
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task StaticFiles_AreAccessible()
     {
-        EnsureEnvironmentVariablesAreSet();
+        await EnsureUserExists();
         
         // Act - Try to access a static file (CSS)
         var response = await _httpClient.GetAsync("/static/site.css");
@@ -182,10 +258,10 @@ public class AuthenticationIntegrationTests : IDisposable
         );
     }
 
-    [SkippableFact]
+    [Fact]
     public async Task ApiEndpoint_RespondsCorrectly()
     {
-        EnsureEnvironmentVariablesAreSet();
+        await EnsureUserExists();
         
         // Act - Try to access API health/status endpoint if it exists
         var response = await _httpClient.GetAsync("/api/health");
