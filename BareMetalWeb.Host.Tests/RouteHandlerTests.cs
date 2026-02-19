@@ -649,7 +649,7 @@ public class RouteHandlerTests : IDisposable
     public void BuildViewSwitcher_WithParentField_ShowsAllViews()
     {
         var dummyProp = typeof(Address).GetProperties().First();
-        var parentField = new DataFieldMetadata(dummyProp, "ParentId", "Parent", FormFieldType.String, 0, false, false, false, false, false, false, null, null, IdGenerationStrategy.None, null, null, null);
+        var parentField = new DataFieldMetadata(dummyProp, "ParentId", "Parent", FormFieldType.String, 0, false, false, false, false, false, false, null, null, IdGenerationStrategy.None, null, null, null, null);
         var meta = CreateMinimalMetadata(parentField: parentField, hasDateField: false);
         var result = InvokeStatic<string>("BuildViewSwitcher", "category", ViewType.Table, meta);
         Assert.Contains("Table", result);
@@ -661,7 +661,7 @@ public class RouteHandlerTests : IDisposable
     public void BuildViewSwitcher_TreeViewActive_MarksTreeActive()
     {
         var dummyProp = typeof(Address).GetProperties().First();
-        var parentField = new DataFieldMetadata(dummyProp, "ParentId", "Parent", FormFieldType.String, 0, false, false, false, false, false, false, null, null, IdGenerationStrategy.None, null, null, null);
+        var parentField = new DataFieldMetadata(dummyProp, "ParentId", "Parent", FormFieldType.String, 0, false, false, false, false, false, false, null, null, IdGenerationStrategy.None, null, null, null, null);
         var meta = CreateMinimalMetadata(parentField: parentField, hasDateField: false);
         var result = InvokeStatic<string>("BuildViewSwitcher", "category", ViewType.TreeView, meta);
         // The tree button should have " active" class
@@ -1029,7 +1029,7 @@ public class RouteHandlerTests : IDisposable
         if (hasDateField)
         {
             var dummyProp = typeof(Address).GetProperties().First();
-            fields.Add(new DataFieldMetadata(dummyProp, "DateField", "Date", FormFieldType.DateOnly, 0, false, false, false, false, false, false, null, null, IdGenerationStrategy.None, null, null, null));
+            fields.Add(new DataFieldMetadata(dummyProp, "DateField", "Date", FormFieldType.DateOnly, 0, false, false, false, false, false, false, null, null, IdGenerationStrategy.None, null, null, null, null));
         }
 
         return new DataEntityMetadata(

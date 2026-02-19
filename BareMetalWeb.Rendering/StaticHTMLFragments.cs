@@ -115,13 +115,14 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                 new[] { id, label }
             );
     }
-    private byte[] InputTextTemplate(string id, string name, string value, string placeholder, string required)
+    private byte[] InputTextTemplate(string id, string name, string value, string placeholder, string required,
+        string minlength = "", string maxlength = "", string pattern = "", string invalidClass = "", string validationFeedback = "")
     {
         return _fragmentStore
             .ZeroAllocationReplaceCopyAndEncode(
                 _fragmentStore.ReturnTemplateFragment("InputText"),
-                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{required}}" },
-                new[] { id, name, value, placeholder, required }
+                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{required}}", "{{minlength}}", "{{maxlength}}", "{{pattern}}", "{{invalidClass}}", "{{validationFeedback}}" },
+                new[] { id, name, value, placeholder, required, minlength, maxlength, pattern, invalidClass, validationFeedback }
             );
     }
     private byte[] InputReadOnlyTemplate(string id, string name, string value, string placeholder)
@@ -152,13 +153,14 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                 new[] { id, name, value, placeholder, expression, rawExpression, format }
             );
     }
-    private byte[] InputTextAreaTemplate(string id, string name, string value, string placeholder, string required)
+    private byte[] InputTextAreaTemplate(string id, string name, string value, string placeholder, string required,
+        string minlength = "", string maxlength = "", string invalidClass = "", string validationFeedback = "")
     {
         return _fragmentStore
             .ZeroAllocationReplaceCopyAndEncode(
                 _fragmentStore.ReturnTemplateFragment("InputTextArea"),
-                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{required}}" },
-                new[] { id, name, value, placeholder, required }
+                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{required}}", "{{minlength}}", "{{maxlength}}", "{{invalidClass}}", "{{validationFeedback}}" },
+                new[] { id, name, value, placeholder, required, minlength, maxlength, invalidClass, validationFeedback }
             );
     }
     private byte[] InputFileTemplate(string id, string name, string required, string accept, string maxFileSizeBytes, string existingFileName, string existingFileUrl)
@@ -197,13 +199,14 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                 new[] { id, name, value, placeholder, required }
             );
     }
-    private byte[] InputNumberTemplate(string id, string name, string value, string placeholder, string required)
+    private byte[] InputNumberTemplate(string id, string name, string value, string placeholder, string required,
+        string min = "", string max = "", string invalidClass = "", string validationFeedback = "")
     {
         return _fragmentStore
             .ZeroAllocationReplaceCopyAndEncode(
                 _fragmentStore.ReturnTemplateFragment("InputNumber"),
-                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{required}}" },
-                new[] { id, name, value, placeholder, required }
+                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{required}}", "{{min}}", "{{max}}", "{{invalidClass}}", "{{validationFeedback}}" },
+                new[] { id, name, value, placeholder, required, min, max, invalidClass, validationFeedback }
             );
     }
     private byte[] InputOtpTemplate(string id, string name, string value, string placeholder, string required)
@@ -215,22 +218,24 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                 new[] { id, name, value, placeholder, required }
             );
     }
-    private byte[] InputDecimalTemplate(string id, string name, string value, string placeholder, string step, string required)
+    private byte[] InputDecimalTemplate(string id, string name, string value, string placeholder, string step, string required,
+        string min = "", string max = "", string invalidClass = "", string validationFeedback = "")
     {
         return _fragmentStore
             .ZeroAllocationReplaceCopyAndEncode(
                 _fragmentStore.ReturnTemplateFragment("InputDecimal"),
-                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{step}}", "{{required}}" },
-                new[] { id, name, value, placeholder, step, required }
+                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{step}}", "{{required}}", "{{min}}", "{{max}}", "{{invalidClass}}", "{{validationFeedback}}" },
+                new[] { id, name, value, placeholder, step, required, min, max, invalidClass, validationFeedback }
             );
     }
-    private byte[] InputEmailTemplate(string id, string name, string value, string placeholder, string pattern, string required)
+    private byte[] InputEmailTemplate(string id, string name, string value, string placeholder, string pattern, string required,
+        string invalidClass = "", string validationFeedback = "")
     {
         return _fragmentStore
             .ZeroAllocationReplaceCopyAndEncode(
                 _fragmentStore.ReturnTemplateFragment("InputEmail"),
-                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{pattern}}", "{{required}}" },
-                new[] { id, name, value, placeholder, pattern, required }
+                new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{pattern}}", "{{required}}", "{{invalidClass}}", "{{validationFeedback}}" },
+                new[] { id, name, value, placeholder, pattern, required, invalidClass, validationFeedback }
             );
     }
     private byte[] InputPasswordTemplate(string id, string name, string value, string placeholder, string required)
@@ -457,10 +462,21 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
         var label = Encode(field.Label);
         var emailPattern = Encode(field.EmailPattern ?? ".+@.+\\..+");
 
+        // Validation HTML5 attributes
+        var minlength = field.MinLength.HasValue ? $"minlength=\"{field.MinLength.Value}\"" : string.Empty;
+        var maxlength = field.MaxLength.HasValue ? $"maxlength=\"{field.MaxLength.Value}\"" : string.Empty;
+        var min = field.RangeMin.HasValue ? $"min=\"{field.RangeMin.Value}\"" : string.Empty;
+        var max = field.RangeMax.HasValue ? $"max=\"{field.RangeMax.Value}\"" : string.Empty;
+        var pattern = !string.IsNullOrEmpty(field.Pattern) ? $"pattern=\"{Encode(field.Pattern)}\"" : string.Empty;
+        var invalidClass = !string.IsNullOrEmpty(field.ValidationError) ? "is-invalid" : string.Empty;
+        var validationFeedback = !string.IsNullOrEmpty(field.ValidationError)
+            ? $"<div class=\"invalid-feedback\">{Encode(field.ValidationError)}</div>"
+            : string.Empty;
+
         switch (field.FieldType)
         {
             case FormFieldType.String:
-                return InputTextTemplate(name, name, value, placeholder, required);
+                return InputTextTemplate(name, name, value, placeholder, required, minlength, maxlength, pattern, invalidClass, validationFeedback);
             case FormFieldType.CustomHtml:
                 return Encoding.UTF8.GetBytes(field.Html ?? string.Empty);
             case FormFieldType.Enum:
@@ -472,13 +488,13 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
             case FormFieldType.DateTime:
                 return InputDateTimeTemplate(name, name, value, placeholder, required);
             case FormFieldType.Integer:
-                return InputNumberTemplate(name, name, value, placeholder, required);
+                return InputNumberTemplate(name, name, value, placeholder, required, min, max, invalidClass, validationFeedback);
             case FormFieldType.Otp:
                 return InputOtpTemplate(name, name, value, placeholder, required);
             case FormFieldType.TextArea:
-                return InputTextAreaTemplate(name, name, value, placeholder, required);
+                return InputTextAreaTemplate(name, name, value, placeholder, required, minlength, maxlength, invalidClass, validationFeedback);
             case FormFieldType.Decimal:
-                return InputDecimalTemplate(name, name, value, placeholder, StepFromDp(field.DecimalPlaces), required);
+                return InputDecimalTemplate(name, name, value, placeholder, StepFromDp(field.DecimalPlaces), required, min, max, invalidClass, validationFeedback);
             case FormFieldType.Money:
                 return RenderMoneyField(field, required);
             case FormFieldType.Image:
@@ -501,7 +517,7 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
             case FormFieldType.Password:
                 return InputPasswordTemplate(name, name, value, placeholder, required);
             case FormFieldType.Email:
-                return InputEmailTemplate(name, name, value, placeholder, emailPattern, required);
+                return InputEmailTemplate(name, name, value, placeholder, emailPattern, required, invalidClass, validationFeedback);
             case FormFieldType.Country:
                 return RenderCountrySelect(field, required, selectedValue);
             case FormFieldType.YesNo:

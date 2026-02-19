@@ -128,6 +128,10 @@ public sealed class BinaryOpNode : ExpressionNode
         if (value is long l) return l;
         if (value is double dbl) return (decimal)dbl;
         if (value is float f) return (decimal)f;
+        if (value is DateTime dt) return dt.Ticks;
+        if (value is DateTimeOffset dto) return dto.Ticks;
+        if (value is DateOnly dateOnly) return dateOnly.DayNumber;
+        if (value is TimeOnly timeOnly) return timeOnly.Ticks;
         if (value is string s && decimal.TryParse(s, out var result)) return result;
         return 0m;
     }

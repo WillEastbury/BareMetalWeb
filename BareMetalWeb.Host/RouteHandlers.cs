@@ -2101,11 +2101,16 @@ public sealed class RouteHandlers : IRouteHandlers
         var errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: true);
         await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
         ApplyUserPasswordIfNeeded(meta, instance, values, errors, isCreate: true);
+
+        // Run entity-level expression validation (cross-field rules)
+        var validationResult = DataScaffold.ValidateEntity(meta, instance);
+        errors.AddRange(validationResult.AllErrors());
+
         if (errors.Count > 0)
         {
             context.SetStringValue("title", $"Create {WebUtility.HtmlEncode(meta.Name)}");
             context.SetStringValue("message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
-            var fields = DataScaffold.BuildFormFields(meta, instance, forCreate: true).ToList();
+            var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: true, validationResult);
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: true);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
             context.AddFormDefinition(new FormDefinition($"/admin/data/{typeSlug}/create", "post", $"Create {meta.Name}", fields));
@@ -2250,11 +2255,16 @@ public sealed class RouteHandlers : IRouteHandlers
         var errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
         await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
         ApplyUserPasswordIfNeeded(meta, instance, values, errors, isCreate: false);
+
+        // Run entity-level expression validation (cross-field rules)
+        var validationResult = DataScaffold.ValidateEntity(meta, instance);
+        errors.AddRange(validationResult.AllErrors());
+
         if (errors.Count > 0)
         {
             context.SetStringValue("title", $"Edit {WebUtility.HtmlEncode(meta.Name)}");
             context.SetStringValue("message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
-            var fields = DataScaffold.BuildFormFields(meta, instance, forCreate: false).ToList();
+            var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: false, validationResult);
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: false);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
             context.AddFormDefinition(new FormDefinition($"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit", "post", $"Save {meta.Name}", fields));
@@ -2892,6 +2902,15 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        // Run entity-level expression validation
+        var validationResult = DataScaffold.ValidateEntity(meta, instance);
+        if (!validationResult.IsValid)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(string.Join(" | ", validationResult.AllErrors()));
+            return;
+        }
+
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
         await DataScaffold.ApplyAutoIdAsync(meta, instance, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, instance, ComputedTrigger.OnCreate, context.RequestAborted).ConfigureAwait(false);
@@ -2955,6 +2974,15 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        // Run entity-level expression validation
+        var validationResult = DataScaffold.ValidateEntity(meta, instance);
+        if (!validationResult.IsValid)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(string.Join(" | ", validationResult.AllErrors()));
+            return;
+        }
+
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
         DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
@@ -3012,6 +3040,15 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await context.Response.WriteAsync(string.Join(" | ", errors));
+            return;
+        }
+
+        // Run entity-level expression validation
+        var validationResult = DataScaffold.ValidateEntity(meta, instance);
+        if (!validationResult.IsValid)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(string.Join(" | ", validationResult.AllErrors()));
             return;
         }
 
@@ -5841,6 +5878,26 @@ public sealed class RouteHandlers : IRouteHandlers
         sb.Append($"<input type=\"hidden\" name=\"csrf_token\" value=\"{WebUtility.HtmlEncode(csrfToken)}\" />");
         sb.Append("</div>");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Build form fields with per-field validation error messages attached.
+    /// </summary>
+    private static List<FormField> BuildFormFieldsWithErrors(
+        DataEntityMetadata meta, object instance, bool forCreate, ValidationResult validationResult)
+    {
+        var fields = DataScaffold.BuildFormFields(meta, instance, forCreate).ToList();
+        if (!validationResult.IsValid)
+        {
+            for (int i = 0; i < fields.Count; i++)
+            {
+                if (validationResult.FieldErrors.TryGetValue(fields[i].Name, out var fieldErrors) && fieldErrors.Count > 0)
+                {
+                    fields[i] = fields[i] with { ValidationError = string.Join("; ", fieldErrors) };
+                }
+            }
+        }
+        return fields;
     }
 
     private static string BuildCommandButtonsHtml(DataEntityMetadata meta, string typeSlug, string id)

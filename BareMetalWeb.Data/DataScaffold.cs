@@ -29,7 +29,8 @@ public sealed record DataFieldMetadata(
     IdGenerationStrategy IdGeneration,
     ComputedFieldConfig? Computed,
     UploadFieldConfig? Upload,
-    CalculatedFieldAttribute? Calculated
+    CalculatedFieldAttribute? Calculated,
+    ValidationConfig? Validation
 );
 
 public sealed record DataEntityMetadata(
@@ -506,7 +507,12 @@ public static class DataScaffold
                 ExistingFileName: value is StoredFileData fileData ? fileData.FileName : null,
                 ExistingFileUrl: value is StoredFileData && instance is BaseDataObject dataObject
                     ? $"/api/{metadata.Slug}/{Uri.EscapeDataString(dataObject.Id)}/files/{Uri.EscapeDataString(field.Name)}"
-                    : null
+                    : null,
+                MinLength: field.Validation?.MinLength,
+                MaxLength: field.Validation?.MaxLength,
+                RangeMin: field.Validation?.RangeMin,
+                RangeMax: field.Validation?.RangeMax,
+                Pattern: field.Validation?.RegexPattern
             ));
         }
 
@@ -1390,6 +1396,10 @@ public static class DataScaffold
             }
 
             field.Property.SetValue(instance, converted);
+
+            // Run field-level validators
+            var fieldErrors = ValidationService.ValidateField(field, converted);
+            errors.AddRange(fieldErrors);
         }
 
         return errors;
@@ -1425,6 +1435,10 @@ public static class DataScaffold
             }
 
             field.Property.SetValue(instance, converted);
+
+            // Run field-level validators
+            var fieldErrors = ValidationService.ValidateField(field, converted);
+            errors.AddRange(fieldErrors);
         }
 
         return errors;
@@ -2779,7 +2793,8 @@ public static class DataScaffold
                 idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
                 computed,
                 upload,
-                calculatedAttribute
+                calculatedAttribute,
+                ValidationService.BuildValidationConfig(prop)
             ));
         }
 
@@ -3009,5 +3024,14 @@ public static class DataScaffold
     public static void ApplyCalculatedFields(DataEntityMetadata metadata, BaseDataObject instance)
     {
         CalculatedFieldService.EvaluateCalculatedFields(instance);
+    }
+
+    /// <summary>
+    /// Validate an entity instance using attribute-based and expression-based validation rules.
+    /// Call after ApplyValuesFromForm/ApplyValuesFromJson and before SaveAsync.
+    /// </summary>
+    public static ValidationResult ValidateEntity(DataEntityMetadata metadata, object instance)
+    {
+        return ValidationService.ValidateEntity(metadata, instance);
     }
 }
