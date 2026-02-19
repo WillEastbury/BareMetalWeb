@@ -1451,10 +1451,11 @@ public sealed class RouteHandlers : IRouteHandlers
 
             var treeToastHtml = BuildToastHtml(context, meta.Name);
             var treeViewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta);
-            var treeCreateHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i> Add</a></p>";
+            var treeAddButtonHtml = $"<a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i> Add</a>";
             
             context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} - {GetViewTypeName(effectiveViewType)}");
-            context.SetStringValue("message", treeToastHtml + treeViewSwitcher + treeCreateHtml + viewHtml);
+            context.SetStringValue("header_controls", "<div class=\"d-flex align-items-center gap-2 flex-wrap\">" + treeViewSwitcher + treeAddButtonHtml + "</div>");
+            context.SetStringValue("message", treeToastHtml + viewHtml);
             await _renderer.RenderPage(context);
             return;
         }
@@ -1504,7 +1505,6 @@ public sealed class RouteHandlers : IRouteHandlers
         
         // Build UI components
         var currentSearchText = queryDictionary.TryGetValue("q", out var searchVal) ? searchVal : null;
-        var searchBoxHtml = BuildSearchBox(currentSearchText, $"/admin/data/{typeSlug}");
         var pageSizeHtml = BuildPageSizeSelector(pageSize, $"/admin/data/{typeSlug}", queryDictionary);
         var pagerHtml = BuildEnhancedPagination(page, totalCount, pageSize, $"/admin/data/{typeSlug}", queryDictionary);
         
@@ -1515,17 +1515,33 @@ public sealed class RouteHandlers : IRouteHandlers
         var hasNested = nestedComponents.Count > 0;
         
         var exportDropdown = BuildExportDropdown(typeSlug, queryString, hasNested);
-        var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/html{WebUtility.HtmlEncode(queryString)}\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
+        var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary\" href=\"/admin/data/{typeSlug}/html{WebUtility.HtmlEncode(queryString)}\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
         var viewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta);
-        var createHtml = $"<p><a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i> Add</a>{exportDropdown}{htmlHtml}</p>";
+        var addButtonHtml = $"<a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i> Add</a>";
+        
+        // Compact inline search form for the card header
+        var safeSearchText = WebUtility.HtmlEncode(currentSearchText ?? string.Empty);
+        var safeActionUrl = WebUtility.HtmlEncode($"/admin/data/{typeSlug}");
+        var compactSearchHtml = $"<form method=\"get\" action=\"{safeActionUrl}\" class=\"d-flex align-items-center gap-1\">" +
+            $"<input type=\"search\" class=\"form-control form-control-sm bm-list-search\" name=\"q\" placeholder=\"Search...\" value=\"{safeSearchText}\" aria-label=\"Search\" />" +
+            "<button type=\"submit\" class=\"btn btn-sm btn-primary\" aria-label=\"Submit search\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i></button>" +
+            "</form>";
+        
+        // Header controls: view switcher + search + add + export (right-aligned in card header)
+        var headerControlsHtml = "<div class=\"d-flex align-items-center gap-2 flex-wrap\">" + viewSwitcher + compactSearchHtml + addButtonHtml + exportDropdown + htmlHtml + "</div>";
         
         // Bulk actions bar with CSRF token
         var bulkActionsBar = BuildBulkActionsBar(typeSlug, returnUrl, totalCount, cloneToken);
         
         // Build custom table with sortable headers
         var tableHtml = BuildTableWithSortableHeaders(meta, rows, $"/admin/data/{typeSlug}", queryDictionary, includeActions: true, includeBulkSelection: true);
+        
+        // Pagination row below the table
+        var paginationRowHtml = "<div class=\"d-flex justify-content-between align-items-center mt-2 mb-2\">" + pagerHtml + pageSizeHtml + "</div>";
+        
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} List");
-        context.SetStringValue("message", toastHtml + viewSwitcher + searchBoxHtml + "<div class=\"d-flex justify-content-between align-items-center mb-2\">" + pagerHtml + pageSizeHtml + "</div>" + bulkActionsBar + createHtml + tableHtml);
+        context.SetStringValue("header_controls", headerControlsHtml);
+        context.SetStringValue("message", toastHtml + tableHtml + paginationRowHtml + bulkActionsBar);
         await _renderer.RenderPage(context);
     }
 
@@ -5401,7 +5417,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string BuildViewSwitcher(string typeSlug, ViewType currentView, DataEntityMetadata meta)
     {
         var html = new StringBuilder();
-        html.Append("<div class=\"btn-group btn-group-sm mb-2\" role=\"group\" aria-label=\"View Type\">");
+        html.Append("<div class=\"btn-group btn-group-sm\" role=\"group\" aria-label=\"View Type\">");
         
         var tableActive = currentView == ViewType.Table ? " active" : string.Empty;
         html.Append($"<a class=\"btn btn-outline-secondary{tableActive}\" href=\"/admin/data/{typeSlug}?view=table\" title=\"Table View\"><i class=\"bi bi-table\" aria-hidden=\"true\"></i> Table</a>");
