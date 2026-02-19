@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Reflection;
 using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
@@ -66,7 +67,8 @@ public class BareMetalWebServer : IBareWebHost
         AppName = appName;
         CompanyDescription = companyDescription;
         CopyrightYear = copyrightYear;
-        var version = typeof(BareMetalWebServer).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        var version = typeof(BareMetalWebServer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? typeof(BareMetalWebServer).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
         AppMetaDataValues = new[] { AppName, CompanyDescription, CopyrightYear, version };
         app = application;
         BufferedLogger = logger;
