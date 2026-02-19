@@ -28,7 +28,7 @@ public sealed record DataFieldMetadata(
     DataLookupConfig? Lookup,
     IdGenerationStrategy IdGeneration,
     ComputedFieldConfig? Computed,
-    UploadFieldConfig? Upload
+    UploadFieldConfig? Upload,
     CalculatedFieldAttribute? Calculated
 );
 
@@ -621,7 +621,7 @@ public static class DataScaffold
         return rows;
     }
 
-    public static IReadOnlyList<string> BuildListHeaders(DataEntityMetadata metadata, bool includeActions)
+    public static IReadOnlyList<string> BuildListHeaders(DataEntityMetadata metadata, bool includeActions, bool includeBulkSelection = false)
     {
         var headers = metadata.Fields
             .Where(f => f.List)
@@ -631,6 +631,9 @@ public static class DataScaffold
 
         if (includeActions)
             headers.Insert(0, "Actions");
+        
+        if (includeBulkSelection)
+            headers.Insert(0, "<input type=\"checkbox\" data-select-all-checkbox aria-label=\"Select all\" />");
 
         return headers;
     }
@@ -720,7 +723,7 @@ public static class DataScaffold
         return new TableRowActions(actions);
     }
 
-    public static IReadOnlyList<string[]> BuildListRows(DataEntityMetadata metadata, IEnumerable items, string basePath, bool includeActions, Func<DataEntityMetadata, bool>? canRenderLookupLink = null, string? cloneToken = null, string? cloneReturnUrl = null)
+    public static IReadOnlyList<string[]> BuildListRows(DataEntityMetadata metadata, IEnumerable items, string basePath, bool includeActions, Func<DataEntityMetadata, bool>? canRenderLookupLink = null, string? cloneToken = null, string? cloneReturnUrl = null, bool includeBulkSelection = false)
     {
         var rows = new List<string[]>();
         foreach (var item in items)
@@ -771,6 +774,13 @@ public static class DataScaffold
                 }
 
                 values.Insert(0, $"<a class=\"btn btn-sm btn-outline-info me-1\" href=\"{viewUrl}\" title=\"Open\" aria-label=\"Open\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i></a><a class=\"btn btn-sm btn-outline-warning me-1\" href=\"{editUrl}\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>{cloneHtml}<a class=\"btn btn-sm btn-outline-danger\" href=\"{deleteUrl}\" title=\"Delete\" aria-label=\"Delete\"><i class=\"bi bi-x-lg\" aria-hidden=\"true\"></i></a>");
+            }
+            
+            if (includeBulkSelection && item is BaseDataObject selectionDataObject)
+            {
+                var id = GetIdValue(selectionDataObject);
+                var safeId = WebUtility.HtmlEncode(id ?? string.Empty);
+                values.Insert(0, $"<input type=\"checkbox\" data-row-checkbox data-row-id=\"{safeId}\" aria-label=\"Select row\" />");
             }
 
             rows.Add(values.ToArray());
@@ -2677,7 +2687,7 @@ public static class DataScaffold
             var idGenAttribute = prop.GetCustomAttribute<IdGenerationAttribute>();
             var computedAttribute = prop.GetCustomAttribute<ComputedFieldAttribute>();
             var calculatedAttribute = prop.GetCustomAttribute<CalculatedFieldAttribute>();
-            if (fieldAttribute == null && !useConvention)
+            if (fieldAttribute == null && imageFieldAttribute == null && fileFieldAttribute == null && !useConvention)
                 continue;
 
             var fieldType = imageFieldAttribute != null
@@ -2763,21 +2773,12 @@ public static class DataScaffold
                 imageFieldAttribute?.View ?? fileFieldAttribute?.View ?? fieldAttribute?.View ?? true,
                 imageFieldAttribute?.Edit ?? fileFieldAttribute?.Edit ?? fieldAttribute?.Edit ?? true,
                 imageFieldAttribute?.Create ?? fileFieldAttribute?.Create ?? fieldAttribute?.Create ?? true,
-                (imageFieldAttribute?.ReadOnly ?? fileFieldAttribute?.ReadOnly ?? fieldAttribute?.ReadOnly ?? false) || (computed != null), // Computed fields are always readonly
+                (imageFieldAttribute?.ReadOnly ?? fileFieldAttribute?.ReadOnly ?? fieldAttribute?.ReadOnly ?? false) || (computed != null) || (calculatedAttribute != null), // Computed and calculated fields are always readonly
                 imageFieldAttribute?.Placeholder ?? fileFieldAttribute?.Placeholder ?? fieldAttribute?.Placeholder,
                 lookup,
                 idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
                 computed,
-                upload
-                fieldAttribute?.List ?? true,
-                fieldAttribute?.View ?? true,
-                fieldAttribute?.Edit ?? true,
-                fieldAttribute?.Create ?? true,
-                (fieldAttribute?.ReadOnly ?? false) || (computed != null) || (calculatedAttribute != null), // Computed and calculated fields are readonly
-                fieldAttribute?.Placeholder,
-                lookup,
-                idGenAttribute?.Strategy ?? IdGenerationStrategy.None,
-                computed,
+                upload,
                 calculatedAttribute
             ));
         }

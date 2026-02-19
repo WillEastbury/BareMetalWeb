@@ -566,6 +566,7 @@ body {
     max-height: 120px;
 }
 
+<<<<<<< HEAD
 /* Timetable View Styles */
 .bm-timetable-container {
     padding: 1rem;
@@ -599,3 +600,19 @@ body {
     font-size: 0.75rem;
 }
 
+=======
+/* Bulk operations */
+[data-bulk-actions-bar] {
+    position: sticky;
+    top: calc(var(--bm-nav-height) + 0.5rem);
+    z-index: 1020;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+
+[data-bulk-container] [data-row-checkbox],
+[data-bulk-container] [data-select-all-checkbox] {
+    cursor: pointer;
+    width: 1.2em;
+    height: 1.2em;
+}
+>>>>>>> 40eb629 (Add CSS styling and unit tests for bulk operations)
