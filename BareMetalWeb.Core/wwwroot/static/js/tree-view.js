@@ -26,13 +26,13 @@
                 if (isCurrentlyExpanded) {
                     // Collapse
                     childList.style.display = 'none';
-                    this.textContent = '+';
+                    this.textContent = '▸';
                     this.classList.remove('bm-tree-expanded');
                     this.classList.add('bm-tree-collapsed');
                 } else {
                     // Expand
                     childList.style.display = '';
-                    this.textContent = '−';
+                    this.textContent = '▾';
                     this.classList.remove('bm-tree-collapsed');
                     this.classList.add('bm-tree-expanded');
                 }
