@@ -22,7 +22,12 @@ jobs:
 
       - name: Compute version
         id: version
-        run: echo "version=${{ vars.MAJOR_VERSION || '1' }}.$(date +%Y%m%d).${{ github.run_number }}" >> $GITHUB_OUTPUT
+        run: |
+          MAJOR="${{ vars.MAJOR_VERSION || '1' }}"
+          DATE="$(date +%Y%m%d)"
+          BUILD="${{ github.run_number }}"
+          echo "info_version=V${MAJOR}.${DATE}.${BUILD}" >> $GITHUB_OUTPUT
+          echo "assembly_version=${MAJOR}.0.0.${BUILD}" >> $GITHUB_OUTPUT
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -33,13 +38,13 @@ jobs:
         run: dotnet restore
 
       - name: Build
-        run: dotnet build --no-restore --configuration Release -p:Version=${{ steps.version.outputs.version }}
+        run: dotnet build --no-restore --configuration Release -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} -p:FileVersion=${{ steps.version.outputs.assembly_version }} -p:InformationalVersion=${{ steps.version.outputs.info_version }}
 
       - name: Run Unit Tests
         run: dotnet test --no-build --configuration Release --verbosity normal --filter "FullyQualifiedName!~IntegrationTests"
 
       - name: Publish
-        run: dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj --configuration Release --output ./publish -p:Version=${{ steps.version.outputs.version }}
+        run: dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj --configuration Release --output ./publish -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} -p:FileVersion=${{ steps.version.outputs.assembly_version }} -p:InformationalVersion=${{ steps.version.outputs.info_version }}
 
       - name: Login to Azure
         uses: azure/login@v2
