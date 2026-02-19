@@ -532,7 +532,6 @@ body {
     max-height: 120px;
 }
 
-<<<<<<< HEAD
 /* Timetable View Styles */
 .bm-timetable-container {
     padding: 1rem;
@@ -566,7 +565,6 @@ body {
     font-size: 0.75rem;
 }
 
-=======
 /* Bulk operations */
 [data-bulk-actions-bar] {
     position: sticky;
@@ -581,4 +579,8 @@ body {
     width: 1.2em;
     height: 1.2em;
 }
->>>>>>> 40eb629 (Add CSS styling and unit tests for bulk operations)
+
+/* Compact search input in card header */
+.bm-list-search {
+    min-width: 120px;
+}
