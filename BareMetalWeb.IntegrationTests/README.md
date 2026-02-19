@@ -13,16 +13,35 @@ These tests verify:
 
 ## Configuration
 
-The tests require the following environment variables:
+The tests support the following environment variables:
 
-### Required
-- `CIMIGRATE_TEST_USERNAME` - Username for test account
-- `CIMIGRATE_TEST_PASSWORD` - Password for test account
+### Optional (Auto-generated if not set)
+- `CIMIGRATE_TEST_USERNAME` - Username for test account (auto-generated: `testuser_<random>`)
+- `CIMIGRATE_TEST_PASSWORD` - Password for test account (auto-generated: `TestPass_<random>_!1aA`)
 
-### Optional
+### Optional (Has default)
 - `CIMIGRATE_BASE_URL` - Base URL of the deployed instance (defaults to `https://baremetalweb-cimigrate.azurewebsites.net`)
 
+## Credential Management
+
+**For CI/CD (Consistent Across Runs):**
+- Set CIMIGRATE_TEST_USERNAME and CIMIGRATE_TEST_PASSWORD as GitHub secrets
+- Tests will use these consistent credentials
+- Required for testing against long-lived deployments
+
+**For Local/Integration Testing (Random per Run):**
+- Omit environment variables
+- Tests auto-generate random credentials for each test run
+- Credentials are consistent within a single test run
+- Tests automatically use `/setup` endpoint on fresh instances
+
 ## Running Tests Locally
+
+The integration tests can run in two modes:
+
+### 1. Against a Deployed Instance (CI/CD or Manual Testing)
+
+Set environment variables to use specific credentials:
 
 ```bash
 # Set environment variables
@@ -31,8 +50,22 @@ export CIMIGRATE_TEST_PASSWORD="your-test-password"
 export CIMIGRATE_BASE_URL="https://baremetalweb-cimigrate.azurewebsites.net"
 
 # Run integration tests
-dotnet test BareMetalWeb.IntegrationTests --filter "FullyQualifiedName~IntegrationTests"
+dotnet test BareMetalWeb.IntegrationTests
 ```
+
+### 2. Against a Local or Fresh Instance
+
+If environment variables are **not** set, the tests will:
+- Generate random credentials (consistent within the test run)
+- Automatically attempt to use the `/setup` endpoint if available
+- Create the test user on a fresh BareMetalWeb instance
+
+```bash
+# No environment variables needed - tests auto-generate credentials
+dotnet test BareMetalWeb.IntegrationTests
+```
+
+**Note:** Tests will fail with network errors if no server is running at the base URL. This is expected behavior.
 
 ## CI/CD Integration
 
@@ -51,11 +84,15 @@ The workflow:
 
 ## Test Account Setup
 
-Before running these tests for the first time:
+**For CI/CD:**
+- Tests use credentials from GitHub Secrets (CIMIGRATE_TEST_USERNAME and CIMIGRATE_TEST_PASSWORD)
+- Account must exist on the deployed instance
+- Create the account manually or ensure it exists from a previous test run
 
-1. Deploy the application to the target environment
-2. Create a test user account with appropriate permissions
-3. Store the credentials in GitHub Secrets (for CI) or environment variables (for local testing)
+**For Local/Fresh Instance:**
+- Tests automatically create the account via `/setup` endpoint if needed
+- No manual setup required
+- Works with brand new BareMetalWeb instances
 
 ## Test Categories
 
@@ -73,7 +110,33 @@ Before running these tests for the first time:
 
 ## Troubleshooting
 
-If tests fail:
+### Tests Fail with Network Errors
+
+This is **expected** when running locally without a server:
+- The tests attempt to connect to the base URL
+- If no server is running, they fail with connection errors
+- This confirms the tests are working correctly
+
+### To Actually Run Tests Successfully
+
+1. **Option A: Test against deployed instance**
+   - Set CIMIGRATE_BASE_URL to a running instance
+   - Set credentials (or let them auto-generate)
+   - Run tests
+
+2. **Option B: Run local server first**
+   ```bash
+   # Terminal 1: Start the server
+   dotnet run --project BareMetalWeb.Host
+   
+   # Terminal 2: Run tests against local server
+   export CIMIGRATE_BASE_URL="https://localhost:5001"
+   dotnet test BareMetalWeb.IntegrationTests
+   ```
+
+### Tests Fail with Credential Issues
+
+If tests run but fail with authentication errors:
 
 1. **Check the deployed site** - Manually navigate to the base URL to verify it's running
 2. **Verify credentials** - Ensure the test account exists and credentials are correct
@@ -83,14 +146,21 @@ If tests fail:
 
 ## Local Development
 
-For local testing against a local instance:
+For local testing with a locally running BareMetalWeb instance:
 
 ```bash
-export CIMIGRATE_BASE_URL="https://localhost:5001"
-export CIMIGRATE_TEST_USERNAME="testuser"
-export CIMIGRATE_TEST_PASSWORD="testpass"
+# Terminal 1: Start the BareMetalWeb server
+cd BareMetalWeb.Host
+dotnet run
 
+# Terminal 2: Run integration tests
+export CIMIGRATE_BASE_URL="https://localhost:5001"
 dotnet test BareMetalWeb.IntegrationTests
 ```
 
-Note: You may need to handle SSL certificate validation for local HTTPS testing.
+The tests will:
+1. Auto-generate random credentials
+2. Use the `/setup` endpoint to create the test user (if it's a fresh instance)
+3. Run all authentication and integration tests
+
+Note: You may need to handle SSL certificate validation for local HTTPS testing. Consider using `export NODE_TLS_REJECT_UNAUTHORIZED=0` or similar for development.
