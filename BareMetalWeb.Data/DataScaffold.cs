@@ -1042,7 +1042,7 @@ public static class DataScaffold
             f.Name.Contains("Position", StringComparison.OrdinalIgnoreCase));
         var titleValue = titleField != null ? titleField.Property.GetValue(item)?.ToString() : null;
         
-        html.Append("<div class=\"bm-orgchart-level\">");
+        // Render the current node
         html.Append("<div class=\"bm-orgchart-node\">");
         html.Append($"<div class=\"bm-orgchart-card{selectedClass}\">");
         html.Append($"<div class=\"bm-orgchart-name\">{display}</div>");
@@ -1056,7 +1056,6 @@ public static class DataScaffold
         html.Append($"<a class=\"btn btn-sm btn-outline-info me-1\" href=\"{basePath}/{safeId}\" title=\"View\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i></a>");
         html.Append($"<a class=\"btn btn-sm btn-outline-warning me-1\" href=\"{basePath}/{safeId}/edit\" title=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i></a>");
         html.Append($"<a class=\"btn btn-sm btn-outline-primary\" href=\"{basePath}?view=orgchart&selected={safeId}\" title=\"Focus\"><i class=\"bi bi-diagram-3\" aria-hidden=\"true\"></i></a>");
-        html.Append("</div>");
         html.Append("</div>");
         html.Append("</div>");
         html.Append("</div>");
