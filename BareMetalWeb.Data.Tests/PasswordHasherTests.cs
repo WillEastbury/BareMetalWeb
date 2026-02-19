@@ -146,13 +146,13 @@ public class PasswordHasherTests
     [InlineData("")]
     [InlineData(" ")]
     [InlineData(null)]
-    public void Verify_InvalidPassword_ReturnsFalse(string password)
+    public void Verify_InvalidPassword_ReturnsFalse(string? password)
     {
         // Arrange
         var (hash, salt, iterations) = PasswordHasher.CreateHash("ValidPassword");
 
         // Act
-        var result = PasswordHasher.Verify(password, hash, salt, iterations);
+        var result = PasswordHasher.Verify(password!, hash, salt, iterations);
 
         // Assert
         Assert.False(result);
@@ -162,13 +162,13 @@ public class PasswordHasherTests
     [InlineData("")]
     [InlineData(" ")]
     [InlineData(null)]
-    public void Verify_InvalidHash_ReturnsFalse(string invalidHash)
+    public void Verify_InvalidHash_ReturnsFalse(string? invalidHash)
     {
         // Arrange
         var (_, salt, iterations) = PasswordHasher.CreateHash("ValidPassword");
 
         // Act
-        var result = PasswordHasher.Verify("ValidPassword", invalidHash, salt, iterations);
+        var result = PasswordHasher.Verify("ValidPassword", invalidHash!, salt, iterations);
 
         // Assert
         Assert.False(result);

@@ -108,10 +108,10 @@ public class MfaTotpTests
     [InlineData("", "user", "secret")]
     [InlineData(" ", "user", "secret")]
     [InlineData(null, "user", "secret")]
-    public void GetOtpAuthUri_InvalidIssuer_ThrowsArgumentException(string issuer, string accountName, string secret)
+    public void GetOtpAuthUri_InvalidIssuer_ThrowsArgumentException(string? issuer, string accountName, string secret)
     {
         // Act & Assert
-        var exception = Assert.Throws<ArgumentException>(() => MfaTotp.GetOtpAuthUri(issuer, accountName, secret));
+        var exception = Assert.Throws<ArgumentException>(() => MfaTotp.GetOtpAuthUri(issuer!, accountName, secret));
         Assert.Equal("issuer", exception.ParamName);
     }
 
@@ -119,10 +119,10 @@ public class MfaTotpTests
     [InlineData("issuer", "", "secret")]
     [InlineData("issuer", " ", "secret")]
     [InlineData("issuer", null, "secret")]
-    public void GetOtpAuthUri_InvalidAccountName_ThrowsArgumentException(string issuer, string accountName, string secret)
+    public void GetOtpAuthUri_InvalidAccountName_ThrowsArgumentException(string issuer, string? accountName, string secret)
     {
         // Act & Assert
-        var exception = Assert.Throws<ArgumentException>(() => MfaTotp.GetOtpAuthUri(issuer, accountName, secret));
+        var exception = Assert.Throws<ArgumentException>(() => MfaTotp.GetOtpAuthUri(issuer, accountName!, secret));
         Assert.Equal("accountName", exception.ParamName);
     }
 
@@ -130,10 +130,10 @@ public class MfaTotpTests
     [InlineData("issuer", "user", "")]
     [InlineData("issuer", "user", " ")]
     [InlineData("issuer", "user", null)]
-    public void GetOtpAuthUri_InvalidSecret_ThrowsArgumentException(string issuer, string accountName, string secret)
+    public void GetOtpAuthUri_InvalidSecret_ThrowsArgumentException(string issuer, string accountName, string? secret)
     {
         // Act & Assert
-        var exception = Assert.Throws<ArgumentException>(() => MfaTotp.GetOtpAuthUri(issuer, accountName, secret));
+        var exception = Assert.Throws<ArgumentException>(() => MfaTotp.GetOtpAuthUri(issuer, accountName, secret!));
         Assert.Equal("secret", exception.ParamName);
     }
 
@@ -156,10 +156,10 @@ public class MfaTotpTests
     [InlineData("", "123456")]
     [InlineData(" ", "123456")]
     [InlineData(null, "123456")]
-    public void ValidateCode_InvalidSecret_ReturnsFalse(string secret, string code)
+    public void ValidateCode_InvalidSecret_ReturnsFalse(string? secret, string code)
     {
         // Act
-        var result = MfaTotp.ValidateCode(secret, code, out var matchedStep);
+        var result = MfaTotp.ValidateCode(secret!, code, out var matchedStep);
 
         // Assert
         Assert.False(result);
@@ -170,10 +170,10 @@ public class MfaTotpTests
     [InlineData("JBSWY3DPEHPK3PXP", "")]
     [InlineData("JBSWY3DPEHPK3PXP", " ")]
     [InlineData("JBSWY3DPEHPK3PXP", null)]
-    public void ValidateCode_InvalidCode_ReturnsFalse(string secret, string code)
+    public void ValidateCode_InvalidCode_ReturnsFalse(string secret, string? code)
     {
         // Act
-        var result = MfaTotp.ValidateCode(secret, code, out var matchedStep);
+        var result = MfaTotp.ValidateCode(secret, code!, out var matchedStep);
 
         // Assert
         Assert.False(result);
