@@ -13,7 +13,7 @@ public class DiskBufferedLoggerTests : IDisposable
 
     public DiskBufferedLoggerTests()
     {
-        _tempDir = Path.Combine(Path.GetTempPath(), $"DiskBufferedLoggerTests_{Guid.NewGuid():N}");
+        _tempDir = Path.Combine(Path.GetTempPath(), $"bmw_log_{Guid.NewGuid().ToString("N")[..8]}");
         Directory.CreateDirectory(_tempDir);
     }
 
