@@ -1908,7 +1908,28 @@ public static class DataScaffold
             sb.Append($"<label class=\"form-label\">{WebUtility.HtmlEncode(child.Label)}</label>");
             if (child.LookupOptions != null)
             {
-                sb.Append($"<select class=\"form-select\" data-field=\"{WebUtility.HtmlEncode(child.Name)}\">");
+                // Check if this is a lookup field (not just an enum) to add refresh/add buttons
+                // Re-extract the lookup attribute from the child type's property
+                var prop = childType.GetProperty(child.Name, BindingFlags.Public | BindingFlags.Instance);
+                var lookupAttr = prop?.GetCustomAttribute<DataLookupAttribute>();
+                string? targetSlug = null;
+                string? targetTypeName = null;
+                
+                if (lookupAttr != null)
+                {
+                    var targetMeta = GetEntityByType(lookupAttr.TargetType);
+                    targetSlug = targetMeta?.Slug;
+                    targetTypeName = lookupAttr.TargetType.Name;
+                }
+
+                // If we have lookup metadata, wrap in input-group for buttons
+                if (!string.IsNullOrEmpty(targetSlug))
+                {
+                    sb.Append("<div class=\"input-group\">");
+                }
+                
+                var modalFieldId = $"modal_{WebUtility.HtmlEncode(field.Name)}_{WebUtility.HtmlEncode(child.Name)}";
+                sb.Append($"<select class=\"form-select\" data-field=\"{WebUtility.HtmlEncode(child.Name)}\" id=\"{modalFieldId}\">");
                 sb.Append("<option value=\"\"></option>");
                 foreach (var option in child.LookupOptions)
                 {
@@ -1917,6 +1938,14 @@ public static class DataScaffold
                     sb.Append($"<option value=\"{optKey}\">{optLabel}</option>");
                 }
                 sb.Append("</select>");
+                
+                // Add refresh and add buttons if we have lookup metadata
+                if (!string.IsNullOrEmpty(targetSlug))
+                {
+                    sb.Append($"<button class=\"btn btn-outline-secondary btn-sm\" type=\"button\" data-lookup-refresh=\"{modalFieldId}\" title=\"Refresh lookup values\">↻</button>");
+                    sb.Append($"<button class=\"btn btn-outline-primary btn-sm\" type=\"button\" data-lookup-add=\"{WebUtility.HtmlEncode(targetSlug)}\" data-lookup-field=\"{modalFieldId}\" title=\"Add new {WebUtility.HtmlEncode(targetTypeName ?? string.Empty)}\">+</button>");
+                    sb.Append("</div>");
+                }
             }
             else if (inputType == "checkbox")
             {
