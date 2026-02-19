@@ -4,6 +4,7 @@ using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Interfaces;
@@ -636,7 +637,23 @@ public sealed class IndexStore
         var lockPath = registryPath + ".lock";
         var encoding = new UTF8Encoding(false);
 
-        using var lockStream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        const int maxRetries = 5;
+        const int initialDelayMs = 10;
+        FileStream? lockStream = null;
+        for (int attempt = 0; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                lockStream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                break;
+            }
+            catch (IOException) when (attempt < maxRetries)
+            {
+                var delayMs = initialDelayMs * (1 << attempt);
+                Thread.Sleep(delayMs);
+            }
+        }
+        using var registryLock = lockStream!;
         using var stream = new FileStream(registryPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
         using (var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true))
         {

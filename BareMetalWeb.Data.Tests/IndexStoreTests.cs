@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
@@ -192,5 +194,39 @@ public class IndexStoreTests : IDisposable
         // Assert - Verify all entries were recorded
         var index = _indexStore.ReadLatestValueIndex(entityName, fieldName, normalizeKey: false);
         Assert.True(index.Count > 0, "Index should contain entries");
+    }
+
+    [Fact]
+    public async Task AppendEntry_ConcurrentCallsDifferentFields_NoRegistryLockContention()
+    {
+        // Arrange - Multiple threads writing different fields concurrently all share the same
+        // index.registry.lock file; this validates the retry logic in TrackIndex
+        var exceptions = new System.Collections.Concurrent.ConcurrentBag<Exception>();
+        var ready = new ManualResetEventSlim(false);
+
+        var tasks = new Task[10];
+        for (int i = 0; i < tasks.Length; i++)
+        {
+            var field = $"Field{i}";
+            tasks[i] = Task.Run(() =>
+            {
+                ready.Wait();
+                try
+                {
+                    _indexStore.AppendEntry("ConcurrentEntity", field, "key", $"id-{field}", 'A', normalizeKey: false);
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Add(ex);
+                }
+            });
+        }
+
+        // Release all threads simultaneously to maximise contention
+        ready.Set();
+        await Task.WhenAll(tasks);
+
+        // Assert - no IOException from registry lock contention
+        Assert.Empty(exceptions);
     }
 }
