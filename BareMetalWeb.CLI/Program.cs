@@ -1,4 +1,5 @@
 ﻿using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -91,6 +92,7 @@ internal static class Program
                 "first" => await FirstEntity(rest),
                 "config" => ShowConfig(),
                 "help" or "--help" or "-h" => Help(0),
+                "--version" or "-v" or "version" => ShowVersion(),
                 _ => Help(1, $"Unknown command: {cmd}")
             };
         }
@@ -377,6 +379,17 @@ internal static class Program
         return 0;
     }
 
+    // --- version ---
+    static int ShowVersion()
+    {
+        var version = typeof(Program).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            ?? typeof(Program).Assembly.GetName().Version?.ToString()
+            ?? "unknown";
+        Console.WriteLine($"metal version {version}");
+        return 0;
+    }
+
     // --- config ---
     static int ShowConfig()
     {
@@ -577,6 +590,7 @@ internal static class Program
               login --outofband           Login via device code (no browser)
               login <user> <pass>         Login with username/password directly
               config                      Show current configuration
+              --version, -v               Show CLI version
 
             Entity Operations:
               types                       List available entity types

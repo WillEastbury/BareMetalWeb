@@ -13,6 +13,8 @@
     <InvariantGlobalization>false</InvariantGlobalization>
     <AssemblyName>metal</AssemblyName>
     <RootNamespace>BareMetalWeb.CLI</RootNamespace>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
     <ServerGarbageCollection>false</ServerGarbageCollection>
     <GarbageCollectionAdaptationMode>0</GarbageCollectionAdaptationMode>
     <IlcDisableRegionGC>true</IlcDisableRegionGC>
