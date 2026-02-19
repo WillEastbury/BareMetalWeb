@@ -1,5 +1,7 @@
 name: Deploy to CI Migration Environment
 
+run-name: "Deploy to CI Migration - V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+
 on:
   # push:
   #   branches: [main]
@@ -18,6 +20,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Compute version
+        id: version
+        run: echo "version=V${{ vars.MAJOR_VERSION || '1' }}.$(date +%Y%m%d).${{ github.run_number }}" >> $GITHUB_OUTPUT
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
@@ -27,13 +33,13 @@ jobs:
         run: dotnet restore
 
       - name: Build
-        run: dotnet build --no-restore --configuration Release
+        run: dotnet build --no-restore --configuration Release -p:Version=${{ steps.version.outputs.version }}
 
       - name: Run Unit Tests
         run: dotnet test --no-build --configuration Release --verbosity normal --filter "FullyQualifiedName!~IntegrationTests"
 
       - name: Publish
-        run: dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj --configuration Release --output ./publish
+        run: dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj --configuration Release --output ./publish -p:Version=${{ steps.version.outputs.version }}
 
       - name: Login to Azure
         uses: azure/login@v2
