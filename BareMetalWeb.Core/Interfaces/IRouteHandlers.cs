@@ -58,6 +58,8 @@ public interface IRouteHandlers
     ValueTask LogsDownloadHandler(HttpContext context);
     ValueTask SampleDataHandler(HttpContext context);
     ValueTask SampleDataPostHandler(HttpContext context);
+    ValueTask WipeDataHandler(HttpContext context);
+    ValueTask WipeDataPostHandler(HttpContext context);
     ValueTask DataApiListHandler(HttpContext context);
     ValueTask DataApiGetHandler(HttpContext context);
     ValueTask DataApiPostHandler(HttpContext context);
