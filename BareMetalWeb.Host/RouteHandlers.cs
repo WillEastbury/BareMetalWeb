@@ -2046,8 +2046,10 @@ public sealed class RouteHandlers : IRouteHandlers
         AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: true);
         fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken));
 
+        var isPopup = context.Request.Query.ContainsKey("popup");
+        var createAction = isPopup ? $"/admin/data/{typeSlug}/create?popup=1" : $"/admin/data/{typeSlug}/create";
         context.SetStringValue("title", $"Create {WebUtility.HtmlEncode(meta.Name)}");
-        context.AddFormDefinition(new FormDefinition($"/admin/data/{typeSlug}/create", "post", $"Create {meta.Name}", fields));
+        context.AddFormDefinition(new FormDefinition(createAction, "post", $"Create {meta.Name}", fields));
         await _renderer.RenderPage(context);
     }
 
@@ -2105,6 +2107,8 @@ public sealed class RouteHandlers : IRouteHandlers
         var validationResult = DataScaffold.ValidateEntity(meta, instance);
         errors.AddRange(validationResult.AllErrors());
 
+        var isPopup = context.Request.Query.ContainsKey("popup");
+
         if (errors.Count > 0)
         {
             context.SetStringValue("title", $"Create {WebUtility.HtmlEncode(meta.Name)}");
@@ -2112,7 +2116,8 @@ public sealed class RouteHandlers : IRouteHandlers
             var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: true, validationResult);
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: true);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
-            context.AddFormDefinition(new FormDefinition($"/admin/data/{typeSlug}/create", "post", $"Create {meta.Name}", fields));
+            var createAction = isPopup ? $"/admin/data/{typeSlug}/create?popup=1" : $"/admin/data/{typeSlug}/create";
+            context.AddFormDefinition(new FormDefinition(createAction, "post", $"Create {meta.Name}", fields));
             await _renderer.RenderPage(context);
             return;
         }
@@ -2139,6 +2144,14 @@ public sealed class RouteHandlers : IRouteHandlers
         
         var newId = instance is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) : null;
         var keyQuery = string.IsNullOrWhiteSpace(newApiKey) ? string.Empty : $"&apikey={WebUtility.UrlEncode(newApiKey)}";
+
+        if (isPopup)
+        {
+            context.Response.ContentType = "text/html";
+            await context.Response.WriteAsync("<!DOCTYPE html><html><head><title>Saved</title></head><body><script>window.close();</script><p>Saved. You may close this window.</p></body></html>").ConfigureAwait(false);
+            return;
+        }
+
         context.Response.Redirect($"/admin/data/{typeSlug}?toast=created&id={WebUtility.UrlEncode(newId ?? string.Empty)}{keyQuery}");
     }
 
