@@ -303,6 +303,49 @@ public static class RouteRegistrationExtensions
     }
 
     /// <summary>
+    /// Register VNext JavaScript SPA routes at /vnext/{*path}.
+    /// The VNext renderer is a client-side JS application that calls /api/_meta and /api/* 
+    /// to render entity views entirely in the browser with Bootstrap theming.
+    /// </summary>
+    public static void RegisterVNextRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        host.RegisterRoute("GET /vnext/{*path}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context =>
+            {
+                // Detect selected Bootstrap theme from cookie (mirrors main app theme logic)
+                var themeCookie = context.Request.Cookies["bm-selected-theme"];
+                var safeThemes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "cerulean","cosmo","cyborg","darkly","flatly","journal","litera","lumen","lux",
+                    "materia","minty","morph","pulse","quartz","sandstone","simplex","sketchy",
+                    "slate","solar","spacelab","superhero","united","vapor","yeti","zephyr"
+                };
+                string themeHref = safeThemes.Contains(themeCookie ?? "")
+                    ? $"https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/{Uri.EscapeDataString(themeCookie!)}/bootstrap.min.css"
+                    : "/static/css/bootstrap.min.css";
+
+                context.Response.ContentType = "text/html; charset=utf-8";
+                context.Response.StatusCode = 200;
+                await context.Response.WriteAsync(
+                    "<!DOCTYPE html><html lang=\"en\"><head>" +
+                    "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+                    "<title>BareMetalWeb VNext</title>" +
+                    $"<link id=\"bootswatch-theme\" rel=\"stylesheet\" href=\"{themeHref}\">" +
+                    "<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css\" integrity=\"sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+\" crossorigin=\"anonymous\">" +
+                    "<link rel=\"stylesheet\" href=\"/static/css/site.css\">" +
+                    "</head><body>" +
+                    "<div id=\"vnext-root\"><div class=\"d-flex justify-content-center align-items-center\" style=\"height:80vh\">" +
+                    "<div class=\"spinner-border\" role=\"status\"><span class=\"visually-hidden\">Loading...</span></div>" +
+                    "</div></div>" +
+                    "<script src=\"/static/js/vnext-app.js\" defer></script>" +
+                    "</body></html>");
+            }));
+    }
+
+    /// <summary>
     /// Register RESTful API routes for entity operations.
     /// </summary>
     public static void RegisterApiRoutes(
