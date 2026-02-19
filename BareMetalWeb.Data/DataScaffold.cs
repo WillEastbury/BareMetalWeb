@@ -1628,6 +1628,7 @@ public static class DataScaffold
     private static IReadOnlyList<KeyValuePair<string, string>> BuildLookupOptions(IEnumerable items, string valueField, string displayField)
     {
         var options = new List<KeyValuePair<string, string>>();
+        var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var item in items)
         {
             if (item == null)
@@ -1642,12 +1643,16 @@ public static class DataScaffold
             if (value == null)
                 continue;
 
+            var valueStr = value.ToString() ?? string.Empty;
+            if (!seenKeys.Add(valueStr))
+                continue;
+
             var display = displayProp.GetValue(item);
             var displayText = display != null
                 ? ToDisplayString(display, displayProp.PropertyType)
-                : value.ToString() ?? string.Empty;
+                : valueStr;
 
-            options.Add(new KeyValuePair<string, string>(value.ToString() ?? string.Empty, displayText));
+            options.Add(new KeyValuePair<string, string>(valueStr, displayText));
         }
 
         return options;

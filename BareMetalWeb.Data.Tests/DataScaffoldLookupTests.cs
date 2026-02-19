@@ -258,4 +258,79 @@ public class DataScaffoldLookupTests : IDisposable
         Assert.Equal(Rendering.Models.FormFieldType.Country, countryField!.FieldType);
         Assert.Equal("GB", countryField.SelectedValue); // This should be set for proper dropdown binding
     }
+
+    /// <summary>
+    /// Regression test: BuildListRows must not throw when the lookup data store contains
+    /// items with duplicate IDs (e.g. after repeated sample-data generation without clear).
+    /// </summary>
+    [Fact]
+    public void BuildListRows_WithDuplicateLookupIds_DoesNotThrow()
+    {
+        // Arrange: two Address objects with the same Id (simulates corrupted/duplicated store data)
+        DataStoreProvider.Current = new DuplicateIdDataStore();
+        ClearLookupCache();
+
+        var meta = DataScaffold.GetEntityByType(typeof(Customer));
+        Assert.NotNull(meta);
+
+        var customer = new Customer
+        {
+            Id = "cust-1",
+            Name = "Test Customer",
+            Email = "test@example.com",
+            AddressId = "addr-dup"
+        };
+
+        // Act – must not throw ArgumentException ("An item with the same key has already been added")
+        var rows = DataScaffold.BuildListRows(meta!, new[] { customer }, "/admin/data/customers", includeActions: false);
+
+        // Assert
+        Assert.NotNull(rows);
+        Assert.Single(rows);
+    }
+
+    /// <summary>
+    /// A data store that deliberately returns two Address items with the same Id,
+    /// replicating what can happen after repeated sample-data generation.
+    /// </summary>
+    private sealed class DuplicateIdDataStore : IDataObjectStore
+    {
+        public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
+        public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
+        public void RegisterFallbackProvider(IDataProvider provider) { }
+        public void ClearProviders() { }
+
+        public void Save<T>(T obj) where T : BaseDataObject { }
+        public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.CompletedTask;
+
+        public T? Load<T>(string id) where T : BaseDataObject => null;
+        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult((T?)null);
+
+        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
+        {
+            if (typeof(T) == typeof(Address))
+            {
+                // Return two Address objects sharing the same Id – the duplicated-data scenario
+                return (IEnumerable<T>)(IEnumerable<Address>)new[]
+                {
+                    new Address { Id = "addr-dup", Label = "First copy",  Line1 = "1 Main St", City = "Springfield", Country = "US" },
+                    new Address { Id = "addr-dup", Label = "Second copy", Line1 = "2 Main St", City = "Springfield", Country = "US" }
+                };
+            }
+
+            return Enumerable.Empty<T>();
+        }
+
+        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult(Query<T>(query));
+
+        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult(0);
+
+        public void Delete<T>(string id) where T : BaseDataObject { }
+        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.CompletedTask;
+    }
 }
