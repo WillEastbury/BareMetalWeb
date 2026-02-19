@@ -67,8 +67,14 @@ public class BareMetalWebServer : IBareWebHost
         AppName = appName;
         CompanyDescription = companyDescription;
         CopyrightYear = copyrightYear;
-        var version = typeof(BareMetalWebServer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        var rawVersion = typeof(BareMetalWebServer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
             ?? typeof(BareMetalWebServer).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        // Strip leading 'v'/'V' (template already adds 'v') and shorten full commit SHA after '+' to 7 chars
+        var trimmed = rawVersion.TrimStart('v').TrimStart('V');
+        var plusIdx = trimmed.IndexOf('+');
+        var version = plusIdx >= 0 && trimmed.Length - plusIdx - 1 > 7
+            ? trimmed[..plusIdx] + "+" + trimmed[(plusIdx + 1)..(plusIdx + 8)]
+            : trimmed;
         AppMetaDataValues = new[] { AppName, CompanyDescription, CopyrightYear, version };
         app = application;
         BufferedLogger = logger;
