@@ -31,5 +31,12 @@ public sealed record FormField(
     string? ExistingFileUrl = null,
     bool IsCalculated = false,
     string? CalculatedExpression = null,
-    string? DisplayFormat = null
+    string? DisplayFormat = null,
+    int? MinLength = null,
+    int? MaxLength = null,
+    double? RangeMin = null,
+    double? RangeMax = null,
+    string? Pattern = null,
+    string? ValidationError = null,
+    string? ValidationRulesJson = null
 );

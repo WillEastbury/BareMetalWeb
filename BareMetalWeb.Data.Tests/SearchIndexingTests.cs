@@ -28,15 +28,15 @@ public class TestSearchableItem : BaseDataObject
 public class SearchIndexingTests : IDisposable
 {
     private readonly string _testRoot;
-    private readonly TestBufferedLogger _logger;
     private readonly SearchIndexManager _manager;
+    private readonly TestBufferedLogger _logger;
 
     public SearchIndexingTests()
     {
         _testRoot = Path.Combine(Path.GetTempPath(), "BareMetalWeb_SearchIndexing_Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testRoot);
         _logger = new TestBufferedLogger();
-        _manager = new SearchIndexManager(_testRoot, logger: _logger);
+        _manager = new SearchIndexManager(_testRoot, logger: null);
     }
 
     public void Dispose()
@@ -1295,3 +1295,4 @@ public class SearchIndexingTests : IDisposable
         Assert.Contains("1", secondResults);
     }
 }
+
