@@ -335,9 +335,11 @@ public static class RouteRegistrationExtensions
 
                 context.Response.ContentType = "text/html; charset=utf-8";
                 context.Response.StatusCode = 200;
+                var csrfToken = CsrfProtection.EnsureToken(context);
                 await context.Response.WriteAsync(
                     "<!DOCTYPE html><html lang=\"en\"><head>" +
                     "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+                    $"<meta name=\"csrf-token\" content=\"{System.Net.WebUtility.HtmlEncode(csrfToken)}\">" +
                     "<title>BareMetalWeb VNext</title>" +
                     $"<link id=\"bootswatch-theme\" rel=\"stylesheet\" href=\"{themeHref}\">" +
                     "<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css\" integrity=\"sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+\" crossorigin=\"anonymous\">" +

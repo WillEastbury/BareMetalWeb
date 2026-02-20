@@ -19,6 +19,8 @@ const BareMetalRest = (() => {
     // server's CORS policy blocks, preventing cross-site request forgery.
     if (method !== 'GET' && method !== 'HEAD') {
       opts.headers['X-Requested-With'] = 'BareMetalWeb';
+      const csrfMeta = document.querySelector('meta[name="csrf-token"]');
+      if (csrfMeta) opts.headers['X-CSRF-Token'] = csrfMeta.content;
     }
     const r = await fetch(url, opts);
     if (r.status === 401) {
