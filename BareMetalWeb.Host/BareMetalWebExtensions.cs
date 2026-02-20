@@ -97,6 +97,7 @@ public static class BareMetalWebExtensions
             app.Configuration.GetValue("Admin:EnableWipeData", false));
         appInfo.RegisterDataRoutes(routeHandlers, pageInfoFactory, mainTemplate);
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
+        appInfo.RegisterVNextRoutes(pageInfoFactory);
 
         // Custom routes from caller
         configureRoutes?.Invoke(appInfo, routeHandlers, pageInfoFactory, mainTemplate);
