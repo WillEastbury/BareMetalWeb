@@ -49,6 +49,27 @@ public static class CsrfProtection
         return FixedTimeEquals(cookieToken, formToken);
     }
 
+    public const string ApiTokenHeaderName = "X-CSRF-Token";
+
+    /// <summary>
+    /// Validates CSRF for API requests using double-submit cookie pattern.
+    /// Token is read from the X-CSRF-Token header instead of a form field.
+    /// </summary>
+    public static bool ValidateApiToken(HttpContext context)
+    {
+        if (context == null) throw new ArgumentNullException(nameof(context));
+
+        var cookieToken = context.GetCookie(CookieName);
+        if (string.IsNullOrWhiteSpace(cookieToken))
+            return false;
+
+        var headerToken = context.Request.Headers[ApiTokenHeaderName].ToString();
+        if (string.IsNullOrWhiteSpace(headerToken))
+            return false;
+
+        return FixedTimeEquals(cookieToken, headerToken);
+    }
+
     private static string GenerateToken()
     {
         Span<byte> buffer = stackalloc byte[32];

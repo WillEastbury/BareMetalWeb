@@ -2896,6 +2896,13 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        if (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("CSRF validation failed.");
+            return;
+        }
+
         var instance = meta.Handlers.Create();
 
         // Apply auto-generated IDs before binding JSON values
@@ -2961,6 +2968,13 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
+            return;
+        }
+
+        if (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("CSRF validation failed.");
             return;
         }
 
@@ -3034,6 +3048,13 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        if (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("CSRF validation failed.");
+            return;
+        }
+
         var instance = await DataScaffold.LoadAsync(meta, id);
         if (instance == null)
         {
@@ -3100,6 +3121,13 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied.");
+            return;
+        }
+
+        if (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("CSRF validation failed.");
             return;
         }
 
@@ -4828,6 +4856,12 @@ public sealed class RouteHandlers : IRouteHandlers
         
         return html.ToString();
     }
+
+    private const string ApiCsrfHeaderName = "X-Requested-With";
+    private const string ApiCsrfHeaderValue = "BareMetalWeb";
+
+    private static bool ValidateApiCsrfHeader(HttpContext context)
+        => string.Equals(context.Request.Headers[ApiCsrfHeaderName], ApiCsrfHeaderValue, StringComparison.Ordinal);
 
     private static async ValueTask<bool> HasEntityPermissionAsync(HttpContext context, DataEntityMetadata meta, CancellationToken cancellationToken = default)
     {
