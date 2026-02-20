@@ -5567,7 +5567,8 @@ public sealed class RouteHandlers : IRouteHandlers
                 DateTime dt => DateOnly.FromDateTime(dt),
                 _ => null
             };
-            if (startDate == null) continue;
+            // Skip items with unset/default dates (DateOnly.MinValue = 0001-01-01)
+            if (startDate == null || startDate.Value == DateOnly.MinValue) continue;
 
             DateOnly endDate;
             if (endField != null)
@@ -5619,36 +5620,18 @@ public sealed class RouteHandlers : IRouteHandlers
         // Bar colours (cycling)
         string[] barColors = ["#4472c4", "#c0504d", "#9bbb59", "#f79646", "#8064a2"];
 
-        html.Append("<div class=\"gantt-container\">");
-        html.Append("<style>");
-        html.Append(".gantt-container{overflow-x:auto;}");
-        html.Append(".gantt-inner{min-width:500px;}");
-        html.Append(".gantt-header-row{display:flex;border-bottom:2px solid #dee2e6;}");
-        html.Append(".gantt-label-col{flex:0 0 200px;min-width:120px;}");
-        html.Append(".gantt-months-hdr{flex:1;position:relative;height:30px;}");
-        html.Append(".gantt-month-lbl{position:absolute;top:0;text-align:center;font-size:.8rem;font-weight:600;color:#495057;line-height:30px;border-left:1px solid #dee2e6;box-sizing:border-box;overflow:hidden;white-space:nowrap;padding:0 2px;}");
-        html.Append(".gantt-row{display:flex;border-top:1px solid #dee2e6;align-items:center;min-height:34px;}");
-        html.Append(".gantt-row:hover{background:rgba(0,0,0,.04);}");
-        html.Append(".gantt-lbl{flex:0 0 200px;min-width:120px;padding:.2rem .5rem;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}");
-        html.Append(".gantt-lbl a{color:inherit;text-decoration:none;}");
-        html.Append(".gantt-lbl a:hover{text-decoration:underline;}");
-        html.Append(".gantt-bar-area{flex:1;position:relative;height:34px;}");
-        html.Append(".gantt-sep{position:absolute;top:0;bottom:0;border-left:1px solid #dee2e6;}");
-        html.Append(".gantt-bar{position:absolute;height:20px;top:50%;transform:translateY(-50%);border-radius:3px;min-width:4px;opacity:.87;box-sizing:border-box;display:flex;align-items:center;overflow:hidden;text-decoration:none;}");
-        html.Append(".gantt-bar:hover{opacity:1;filter:brightness(1.1);}");
-        html.Append(".gantt-bar-text{font-size:.7rem;color:#fff;white-space:nowrap;padding:0 5px;overflow:hidden;text-overflow:ellipsis;}");
-        html.Append("</style>");
-        html.Append("<div class=\"gantt-inner\">");
+        html.Append("<div class=\"bm-gantt-container\">");
+        html.Append("<div class=\"bm-gantt-inner\">");
 
         // Header row with month labels
-        html.Append("<div class=\"gantt-header-row\">");
-        html.Append("<div class=\"gantt-label-col\"></div>");
-        html.Append("<div class=\"gantt-months-hdr\">");
+        html.Append("<div class=\"bm-gantt-header-row\">");
+        html.Append("<div class=\"bm-gantt-label-col\"></div>");
+        html.Append("<div class=\"bm-gantt-months-hdr\">");
         foreach (var (year, month, leftPct, widthPct) in months)
         {
             var monthName = new DateOnly(year, month, 1).ToString("MMM");
             var headerLabel = month == 1 ? $"{monthName} {year}" : monthName;
-            html.Append($"<div class=\"gantt-month-lbl\" style=\"left:{leftPct:F2}%;width:{widthPct:F2}%;\">{WebUtility.HtmlEncode(headerLabel)}</div>");
+            html.Append($"<div class=\"bm-gantt-month-lbl\" style=\"left:{leftPct:F2}%;width:{widthPct:F2}%;\">{WebUtility.HtmlEncode(headerLabel)}</div>");
         }
         html.Append("</div>");
         html.Append("</div>");
@@ -5670,26 +5653,38 @@ public sealed class RouteHandlers : IRouteHandlers
                 ? $"{WebUtility.HtmlEncode(label)}: {start:yyyy-MM-dd} \u2013 {end:yyyy-MM-dd}"
                 : $"{WebUtility.HtmlEncode(label)}: {start:yyyy-MM-dd}";
 
-            html.Append("<div class=\"gantt-row\">");
-            html.Append($"<div class=\"gantt-lbl\" title=\"{WebUtility.HtmlEncode(label)}\"><a href=\"{basePath}/{safeId}\">{WebUtility.HtmlEncode(label)}</a></div>");
-            html.Append("<div class=\"gantt-bar-area\">");
+            html.Append("<div class=\"bm-gantt-row\">");
+            html.Append($"<div class=\"bm-gantt-lbl\" title=\"{WebUtility.HtmlEncode(label)}\"><a href=\"{basePath}/{safeId}\">{WebUtility.HtmlEncode(label)}</a></div>");
+            html.Append("<div class=\"bm-gantt-bar-area\">");
             foreach (var (_, _, mLeft, _) in months)
-                html.Append($"<div class=\"gantt-sep\" style=\"left:{mLeft:F2}%;\"></div>");
-            html.Append($"<a href=\"{basePath}/{safeId}/edit\" class=\"gantt-bar\" style=\"left:{barLeft:F2}%;width:{barWidth:F2}%;background:{color};\" title=\"{tooltip}\">");
-            html.Append($"<span class=\"gantt-bar-text\">{WebUtility.HtmlEncode(label)}</span>");
+                html.Append($"<div class=\"bm-gantt-sep\" style=\"left:{mLeft:F2}%;\"></div>");
+            html.Append($"<a href=\"{basePath}/{safeId}/edit\" class=\"bm-gantt-bar\" style=\"left:{barLeft:F2}%;width:{barWidth:F2}%;background:{color};\" title=\"{tooltip}\">");
+            html.Append($"<span class=\"bm-gantt-bar-text\">{WebUtility.HtmlEncode(label)}</span>");
             html.Append("</a>");
             html.Append("</div>");
             html.Append("</div>");
         }
 
-        html.Append("</div>"); // gantt-inner
-        html.Append("</div>"); // gantt-container
+        html.Append("</div>"); // bm-gantt-inner
+        html.Append("</div>"); // bm-gantt-container
         return html.ToString();
     }
 
     private static string GetDisplayValue(DataEntityMetadata meta, BaseDataObject item)
     {
-        // Try to get a meaningful display value from the first few string fields
+        // Try common name fields first (same heuristic as DataScaffold.GetDisplayValue)
+        var nameField = meta.Fields.FirstOrDefault(f =>
+            string.Equals(f.Name, "Name", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(f.Name, "Title", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(f.Name, "DisplayName", StringComparison.OrdinalIgnoreCase));
+        if (nameField != null)
+        {
+            var value = nameField.Property.GetValue(item)?.ToString();
+            if (!string.IsNullOrWhiteSpace(value))
+                return value;
+        }
+
+        // Fall back to first List string field
         var displayField = meta.Fields.FirstOrDefault(f => f.List && f.FieldType == FormFieldType.String);
         if (displayField != null)
         {
@@ -5697,8 +5692,8 @@ public sealed class RouteHandlers : IRouteHandlers
             if (!string.IsNullOrWhiteSpace(value))
                 return value;
         }
-        
-        // Fall back to ID
+
+        // Last resort: ID
         return DataScaffold.GetIdValue(item) ?? "Unknown";
     }
 
