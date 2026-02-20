@@ -18,7 +18,14 @@ const BareMetalTemplate = (() => {
 
     (layout.fields || Object.keys(fields)).forEach(name => {
       const f = fields[name] || {};
-      if (f.readonly || f.type === 'hidden') return;
+
+      // Hidden fields: carry the value without a visible widget
+      if (f.type === 'hidden') {
+        const inp = mk('input', { type: 'hidden' });
+        inp.setAttribute('rv-value', name);
+        row.appendChild(inp);
+        return;
+      }
 
       const col = mk('div', { className: 'col-md-' + Math.floor(12 / cols) });
       const lbl = mk('label', {
@@ -47,6 +54,8 @@ const BareMetalTemplate = (() => {
       inp.setAttribute('rv-value', name);
       if (f.required) inp.required = true;
       if (f.placeholder) inp.placeholder = f.placeholder;
+      // Readonly/computed fields are shown with their value but cannot be edited
+      if (f.readonly) { inp.disabled = true; inp.className += ' bg-light'; }
 
       col.append(lbl, inp);
       row.appendChild(col);
@@ -78,8 +87,12 @@ const BareMetalTemplate = (() => {
         b.onclick = () => cb.onView(id, item); td.appendChild(b);
       }
       if (cb.onEdit) {
-        const b = mk('button', { className: 'btn btn-sm btn-outline-secondary', textContent: '\u270F' });
+        const b = mk('button', { className: 'btn btn-sm btn-outline-secondary me-1', textContent: '\u270F' });
         b.onclick = () => cb.onEdit(id, item); td.appendChild(b);
+      }
+      if (cb.onDelete) {
+        const b = mk('button', { className: 'btn btn-sm btn-outline-danger', textContent: '\uD83D\uDDD1' });
+        b.onclick = () => cb.onDelete(id, item); td.appendChild(b);
       }
     });
     wrap.appendChild(tbl);

@@ -8,9 +8,28 @@
 const BareMetalRendering = (() => {
   'use strict';
 
+  let _cache = null;  // entity list cache (populated by listEntities)
+
   async function createEntity(slug) {
     const api  = BareMetalRest.entity(slug);
     const meta = await api.metadata();
+
+    // Hydrate lookup options for select fields before rendering
+    const schemaFields = meta.schema?.fields || {};
+    await Promise.all(
+      Object.entries(schemaFields).map(async ([, f]) => {
+        if (f && f.lookupUrl) {
+          try {
+            const items = await BareMetalRest.call('GET', f.lookupUrl);
+            f.options = (Array.isArray(items) ? items : []).map(i => ({
+              value: String(i[f.lookupValueField] ?? i.Id ?? i.id ?? ''),
+              label: String(i[f.lookupDisplayField] ?? i.Name ?? i.name ?? '')
+            }));
+          } catch { f.options = []; }
+        }
+      })
+    );
+
     const { state, watch, data } = BareMetalBind.reactive(meta.initialData || {});
 
     const save = async () => {
@@ -18,17 +37,19 @@ const BareMetalRendering = (() => {
       const saved = id
         ? await api.update(id, { ...data })
         : await api.create({ ...data });
-      Object.assign(state, saved);
+      if (saved) Object.assign(state, saved);
     };
 
-    const load = async id => Object.assign(state, await api.get(id));
+    const load = async id => {
+      const loaded = await api.get(id);
+      if (loaded) Object.assign(state, loaded);
+    };
 
     const renderUI = el => {
       const c = typeof el === 'string' ? document.getElementById(el) : el;
       if (!c) return;
-      c.innerHTML = '';
+      c.replaceChildren();
       state.save = save;
-      const schemaFields = meta.schema?.fields || {};
       const layout = meta.layout || { fields: Object.keys(schemaFields) };
       c.appendChild(BareMetalTemplate.buildForm(layout, schemaFields));
       BareMetalBind.bind(c, state, watch);
@@ -38,7 +59,8 @@ const BareMetalRendering = (() => {
   }
 
   async function listEntities() {
-    return BareMetalRest.call('GET', BareMetalRest.getRoot() + '_meta');
+    if (!_cache) _cache = await BareMetalRest.call('GET', BareMetalRest.getRoot() + '_meta');
+    return _cache;
   }
 
   // Expose minibind-compatible surface as window.minibind

@@ -409,7 +409,7 @@ public static class RouteRegistrationExtensions
                     schemaFields[f.Name] = fieldDef;
                     initialData[f.Name]  = GetFieldDefault(f.FieldType);
 
-                    if (!f.ReadOnly && !isId && f.Edit)
+                    if (f.Edit)
                         layoutFields.Add(f.Name);
                 }
 
