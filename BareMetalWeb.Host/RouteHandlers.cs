@@ -1610,7 +1610,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var exportDropdown = BuildExportDropdown(typeSlug, string.Empty, hasNested, id);
         var rtfHtml = $"<a class=\"btn btn-sm btn-outline-info ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/rtf\" title=\"Download RTF\" aria-label=\"Download RTF\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-text ms-1\" aria-hidden=\"true\"></i> RTF</a>";
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/html\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
-        var commandButtons = BuildCommandButtonsHtml(meta, typeSlug, id);
+        var commandButtons = BuildCommandButtonsHtml(meta, typeSlug, id, CsrfProtection.EnsureToken(context));
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} Details");
         context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i> Edit</a>{exportDropdown}{rtfHtml}{htmlHtml}{commandButtons}</p>");
         context.AddTable(new[] { "Field", "Value" }, rows);
@@ -6046,17 +6046,18 @@ public sealed class RouteHandlers : IRouteHandlers
         return fields;
     }
 
-    private static string BuildCommandButtonsHtml(DataEntityMetadata meta, string typeSlug, string id)
+    private static string BuildCommandButtonsHtml(DataEntityMetadata meta, string typeSlug, string id, string csrfToken)
     {
         if (meta.Commands.Count == 0) return string.Empty;
         var sb = new StringBuilder();
         var safeId = WebUtility.UrlEncode(id);
+        var safeToken = WebUtility.HtmlEncode(csrfToken);
         foreach (var cmd in meta.Commands)
         {
             var btnClass = cmd.Destructive ? "btn-outline-danger" : "btn-outline-secondary";
             var icon = string.IsNullOrEmpty(cmd.Icon) ? "" : $"<i class=\"bi {WebUtility.HtmlEncode(cmd.Icon)}\" aria-hidden=\"true\"></i> ";
             var confirm = string.IsNullOrEmpty(cmd.ConfirmMessage) ? "" : $" data-confirm=\"{WebUtility.HtmlEncode(cmd.ConfirmMessage)}\"";
-            sb.Append($"<button class=\"btn btn-sm {btnClass} ms-2\" data-command-url=\"/api/{typeSlug}/{safeId}/_command/{WebUtility.UrlEncode(cmd.Name)}\"{confirm}>{icon}{WebUtility.HtmlEncode(cmd.Label)}</button>");
+            sb.Append($"<button class=\"btn btn-sm {btnClass} ms-2\" data-command-url=\"/api/{typeSlug}/{safeId}/_command/{WebUtility.UrlEncode(cmd.Name)}\" data-csrf-token=\"{safeToken}\"{confirm}>{icon}{WebUtility.HtmlEncode(cmd.Label)}</button>");
         }
         return sb.ToString();
     }
@@ -6090,6 +6091,13 @@ public sealed class RouteHandlers : IRouteHandlers
                 await WriteJsonResponseAsync(context, new { success = false, message = "Access denied." });
                 return;
             }
+        }
+
+        if (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await WriteJsonResponseAsync(context, new { success = false, message = "CSRF validation failed." });
+            return;
         }
 
         if (!string.IsNullOrEmpty(cmd.Permission))

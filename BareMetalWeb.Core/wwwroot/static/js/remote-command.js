@@ -5,6 +5,7 @@
     function executeRemoteCommand(button) {
         var url = button.getAttribute('data-command-url');
         var confirmMsg = button.getAttribute('data-confirm');
+        var csrfToken = button.getAttribute('data-csrf-token') || '';
 
         if (confirmMsg && !confirm(confirmMsg)) return;
 
@@ -12,7 +13,11 @@
         var originalHtml = button.innerHTML;
         button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Running\u2026';
 
-        fetch(url, { method: 'POST', headers: { 'Accept': 'application/json' } })
+        fetch(url, { method: 'POST', headers: {
+            'Accept': 'application/json',
+            'X-Requested-With': 'BareMetalWeb',
+            'X-CSRF-Token': csrfToken
+        } })
             .then(function(response) { return response.json(); })
             .then(function(data) {
                 button.disabled = false;
