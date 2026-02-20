@@ -1,8 +1,13 @@
+using System.Linq;
+using System.Net;
+using System.Text.Json;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
+using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
+using BareMetalWeb.Rendering.Models;
 
 namespace BareMetalWeb.Host;
 
@@ -301,6 +306,177 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataBulkExportHandler));
     }
+
+    /// <summary>
+    /// Register VNext JavaScript SPA routes at /vnext/{*path}.
+    /// Serves the shell HTML that loads the four BareMetalWeb JS libraries
+    /// (BareMetalRest, BareMetalBind, BareMetalTemplate, BareMetalRendering)
+    /// plus the thin VNext router (vnext-app.js).
+    /// </summary>
+    public static void RegisterVNextRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        host.RegisterRoute("GET /vnext/{*path}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context =>
+            {
+                // Detect selected Bootstrap theme from cookie (mirrors main app theme logic)
+                var themeCookie = context.Request.Cookies["bm-selected-theme"];
+                var safeThemes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    "cerulean","cosmo","cyborg","darkly","flatly","journal","litera","lumen","lux",
+                    "materia","minty","morph","pulse","quartz","sandstone","simplex","sketchy",
+                    "slate","solar","spacelab","superhero","united","vapor","yeti","zephyr"
+                };
+                string themeHref = safeThemes.Contains(themeCookie ?? "")
+                    ? $"https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/{Uri.EscapeDataString(themeCookie!)}/bootstrap.min.css"
+                    : "/static/css/bootstrap.min.css";
+
+                context.Response.ContentType = "text/html; charset=utf-8";
+                context.Response.StatusCode = 200;
+                var csrfToken = CsrfProtection.EnsureToken(context);
+                await context.Response.WriteAsync(
+                    "<!DOCTYPE html><html lang=\"en\"><head>" +
+                    "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+                    $"<meta name=\"csrf-token\" content=\"{System.Net.WebUtility.HtmlEncode(csrfToken)}\">" +
+                    "<title>BareMetalWeb VNext</title>" +
+                    $"<link id=\"bootswatch-theme\" rel=\"stylesheet\" href=\"{themeHref}\">" +
+                    "<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css\" integrity=\"sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+\" crossorigin=\"anonymous\">" +
+                    "<link rel=\"stylesheet\" href=\"/static/css/site.css\">" +
+                    "</head><body>" +
+                    "<div id=\"vnext-root\"><div class=\"d-flex justify-content-center align-items-center\" style=\"height:80vh\">" +
+                    "<div class=\"spinner-border\" role=\"status\"><span class=\"visually-hidden\">Loading...</span></div>" +
+                    "</div></div>" +
+                    "<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js\" integrity=\"sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz\" crossorigin=\"anonymous\" defer></script>" +
+                    "<script src=\"/static/js/BareMetalRest.js\" defer></script>" +
+                    "<script src=\"/static/js/BareMetalBind.js\" defer></script>" +
+                    "<script src=\"/static/js/BareMetalTemplate.js\" defer></script>" +
+                    "<script src=\"/static/js/BareMetalRendering.js\" defer></script>" +
+                    "<script src=\"/static/js/vnext-app.js\" defer></script>" +
+                    "</body></html>");
+            }));
+    }
+
+    /// <summary>
+    /// Register GET /api/metadata/{entity} — returns schema, layout and initial data
+    /// for use by the BareMetalRendering client library.
+    /// Must be registered BEFORE RegisterApiRoutes to ensure it matches before
+    /// the parameterised GET /api/{type}/{id} route.
+    /// </summary>
+    public static void RegisterEntityMetadataRoute(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        host.RegisterRoute("GET /api/metadata/{entity}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context =>
+            {
+                var entitySlug = GetRouteParam(context, "entity");
+                if (string.IsNullOrWhiteSpace(entitySlug) || !DataScaffold.TryGetEntity(entitySlug, out var meta))
+                {
+                    context.Response.StatusCode = 404;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Entity not found\"}");
+                    return;
+                }
+
+                var schemaFields = new Dictionary<string, object?>();
+                var initialData  = new Dictionary<string, object?>();
+                var layoutFields = new List<string>();
+
+                foreach (var f in meta.Fields.OrderBy(x => x.Order))
+                {
+                    var isId = f.Name.Equals("Id", StringComparison.OrdinalIgnoreCase);
+                    var fieldDef = new Dictionary<string, object?>
+                    {
+                        ["type"]  = MapFieldType(f.FieldType),
+                        ["label"] = f.Label
+                    };
+                    if (f.ReadOnly || isId)
+                        fieldDef["readonly"] = true;
+                    if (f.Required)
+                        fieldDef["required"] = true;
+                    if (!string.IsNullOrEmpty(f.Placeholder))
+                        fieldDef["placeholder"] = f.Placeholder;
+                    if (f.Lookup != null)
+                    {
+                        var target = DataScaffold.GetEntityByType(f.Lookup.TargetType);
+                        if (target != null)
+                            fieldDef["lookupUrl"] = $"/api/_lookup/{target.Slug}";
+                        fieldDef["lookupValueField"]   = f.Lookup.ValueField;
+                        fieldDef["lookupDisplayField"] = f.Lookup.DisplayField;
+                    }
+
+                    schemaFields[f.Name] = fieldDef;
+                    initialData[f.Name]  = GetFieldDefault(f.FieldType);
+
+                    if (f.Edit)
+                        layoutFields.Add(f.Name);
+                }
+
+                var result = new Dictionary<string, object?>
+                {
+                    ["name"]        = meta.Name,
+                    ["endpoint"]    = $"/api/{meta.Slug}",
+                    ["schema"]      = new Dictionary<string, object?> { ["fields"] = schemaFields },
+                    ["layout"]      = new Dictionary<string, object?>
+                    {
+                        ["type"]    = "form",
+                        ["columns"] = 1,
+                        ["fields"]  = layoutFields
+                    },
+                    ["initialData"] = initialData
+                };
+
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(
+                    JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = false }));
+            }));
+    }
+
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    private static string? GetRouteParam(Microsoft.AspNetCore.Http.HttpContext context, string key)
+    {
+        var pageContext = context.GetPageContext();
+        if (pageContext == null) return null;
+        for (int i = 0; i < pageContext.PageMetaDataKeys.Length; i++)
+        {
+            if (string.Equals(pageContext.PageMetaDataKeys[i], key, StringComparison.OrdinalIgnoreCase))
+                return WebUtility.HtmlDecode(pageContext.PageMetaDataValues[i]);
+        }
+        return null;
+    }
+
+    private static string MapFieldType(FormFieldType ft) => ft switch
+    {
+        FormFieldType.TextArea   => "textarea",
+        FormFieldType.Integer
+        or FormFieldType.Decimal
+        or FormFieldType.Money   => "number",
+        FormFieldType.Email      => "email",
+        FormFieldType.Password   => "password",
+        FormFieldType.DateOnly   => "date",
+        FormFieldType.DateTime   => "datetime-local",
+        FormFieldType.TimeOnly   => "time",
+        FormFieldType.YesNo      => "boolean",
+        FormFieldType.LookupList
+        or FormFieldType.Enum
+        or FormFieldType.Country => "select",
+        FormFieldType.Hidden     => "hidden",
+        FormFieldType.ReadOnly
+        or FormFieldType.CustomHtml => "readonly",
+        _                        => "string"
+    };
+
+    private static object? GetFieldDefault(FormFieldType ft) => ft switch
+    {
+        FormFieldType.Integer                    => 0,
+        FormFieldType.Decimal or FormFieldType.Money => 0.0,
+        FormFieldType.YesNo                      => false,
+        _                                        => null
+    };
 
     /// <summary>
     /// Register RESTful API routes for entity operations.

@@ -159,6 +159,18 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
             ["permissions"] = e.Permissions,
             ["showOnNav"] = e.ShowOnNav,
             ["navGroup"] = e.NavGroup,
+            ["navOrder"] = e.NavOrder,
+            ["viewType"] = e.ViewType.ToString(),
+            ["parentField"] = e.ParentField?.Name,
+            ["commands"] = e.Commands.Select(c => new Dictionary<string, object?>
+            {
+                ["name"] = c.Name,
+                ["label"] = c.Label,
+                ["icon"] = c.Icon,
+                ["confirmMessage"] = c.ConfirmMessage,
+                ["destructive"] = c.Destructive,
+                ["order"] = c.Order
+            }).ToArray(),
             ["fields"] = e.Fields.Select(f => new Dictionary<string, object?>
             {
                 ["name"] = f.Name,
@@ -171,6 +183,14 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
                 ["edit"] = f.Edit,
                 ["create"] = f.Create,
                 ["readOnly"] = f.ReadOnly,
+                ["placeholder"] = f.Placeholder,
+                ["isComputed"] = f.Computed != null,
+                ["isCalculated"] = f.Calculated != null,
+                ["lookupTargetSlug"] = f.Lookup != null ? DataScaffold.GetEntityByType(f.Lookup.TargetType)?.Slug : null,
+                ["lookupValueField"] = f.Lookup?.ValueField,
+                ["lookupDisplayField"] = f.Lookup?.DisplayField,
+                ["lookupFilterField"] = f.Lookup?.QueryField,
+                ["lookupFilterValue"] = f.Lookup?.QueryValue,
                 ["upload"] = f.Upload == null ? null : new Dictionary<string, object?>
                 {
                     ["maxFileSizeBytes"] = f.Upload.MaxFileSizeBytes,
