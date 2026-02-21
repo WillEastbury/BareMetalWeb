@@ -69,7 +69,19 @@ const BareMetalRendering = (() => {
       BareMetalBind.bind(c, state, watch);
     };
 
-    return { state, save, load, renderUI, meta, api };
+    // Build a lookup resolver: fieldName → (rawValue → displayLabel)
+    const _lookupMaps = {};
+    Object.entries(schemaFields).forEach(([name, f]) => {
+      if (f && f.options && f.options.length) {
+        const m = new Map();
+        f.options.forEach(o => m.set(String(o.value), String(o.label)));
+        _lookupMaps[name] = v => m.get(String(v ?? '')) ?? String(v ?? '');
+      }
+    });
+    const resolve = (fieldName, rawValue) =>
+      _lookupMaps[fieldName] ? _lookupMaps[fieldName](rawValue) : String(rawValue ?? '');
+
+    return { state, save, load, renderUI, meta, api, resolve };
   }
 
   async function listEntities() {

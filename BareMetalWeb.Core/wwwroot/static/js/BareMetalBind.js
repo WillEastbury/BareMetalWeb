@@ -18,9 +18,16 @@ const BareMetalBind = (() => {
   function bind(root, state, watch) {
     root.querySelectorAll('[rv-value]').forEach(n => {
       const k = n.getAttribute('rv-value'), chk = n.type === 'checkbox';
+      const isDate = n.type === 'date', isDtLocal = n.type === 'datetime-local';
+      const fmt = v => {
+        if (v == null || v === '') return '';
+        if (isDate) return String(v).slice(0, 10);          // YYYY-MM-DD
+        if (isDtLocal) return String(v).slice(0, 16);        // YYYY-MM-DDTHH:MM
+        return String(v);
+      };
       const sync = () => {
         if (chk) { n.checked = !!state[k]; }
-        else { const v = String(state[k] ?? ''); if (n.value !== v) n.value = v; }
+        else { const v = fmt(state[k]); if (n.value !== v) n.value = v; }
       };
       sync(); watch(k, sync);
       n.addEventListener(chk ? 'change' : 'input', () => state[k] = chk ? n.checked : n.value);
