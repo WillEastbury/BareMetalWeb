@@ -11,8 +11,12 @@ const BareMetalRest = (() => {
   async function call(method, url, body) {
     const opts = { method, headers: {} };
     if (body !== undefined) {
-      opts.body = JSON.stringify(body);
-      opts.headers['Content-Type'] = 'application/json';
+      if (body instanceof FormData) {
+        opts.body = body; // Let browser set Content-Type with boundary
+      } else {
+        opts.body = JSON.stringify(body);
+        opts.headers['Content-Type'] = 'application/json';
+      }
     }
     // Custom header on mutating requests — CSRF mitigation for cookie-auth APIs.
     // Cross-origin requests with custom headers trigger CORS preflight, which the

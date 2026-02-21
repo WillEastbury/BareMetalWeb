@@ -32,11 +32,24 @@ const BareMetalRendering = (() => {
 
     const { state, watch, data } = BareMetalBind.reactive(meta.initialData || {});
 
-    const save = async () => {
-      const id    = data.id || data.Id;
+    const save = async (formEl) => {
+      const id = data.id || data.Id;
+      // Use FormData when the form contains file inputs with selected files
+      const hasFiles = formEl && formEl.querySelector('input[type="file"]') &&
+        Array.from(formEl.querySelectorAll('input[type="file"]')).some(i => i.files.length > 0);
+      let payload;
+      if (hasFiles) {
+        payload = new FormData();
+        Object.entries(data).forEach(([k, v]) => { if (v != null) payload.append(k, v); });
+        formEl.querySelectorAll('input[type="file"]').forEach(i => {
+          if (i.files.length > 0) payload.append(i.getAttribute('rv-value') || i.name, i.files[0]);
+        });
+      } else {
+        payload = { ...data };
+      }
       const saved = id
-        ? await api.update(id, { ...data })
-        : await api.create({ ...data });
+        ? await api.update(id, payload)
+        : await api.create(payload);
       if (saved) Object.assign(state, saved);
     };
 
@@ -49,9 +62,10 @@ const BareMetalRendering = (() => {
       const c = typeof el === 'string' ? document.getElementById(el) : el;
       if (!c) return;
       c.replaceChildren();
-      state.save = save;
       const layout = meta.layout || { fields: Object.keys(schemaFields) };
-      c.appendChild(BareMetalTemplate.buildForm(layout, schemaFields));
+      const form = BareMetalTemplate.buildForm(layout, schemaFields);
+      state.save = () => save(form);
+      c.appendChild(form);
       BareMetalBind.bind(c, state, watch);
     };
 
