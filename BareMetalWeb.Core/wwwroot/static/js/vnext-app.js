@@ -32,13 +32,48 @@
     brand.setAttribute('data-go', '');
     nav.appendChild(brand);
     const ul = el('ul', { className: 'navbar-nav me-auto' });
+
+    // Group entities by navGroup for dropdown menus
+    const groups = new Map();
     all.filter(e => e.showOnNav).forEach(e => {
-      const li = el('li', { className: 'nav-item' });
-      const a  = el('a', { className: 'nav-link' + (e.slug === activeSlug ? ' active' : ''), href: '/vnext/' + e.slug, textContent: e.name });
-      a.setAttribute('data-go', '');
-      li.appendChild(a);
-      ul.appendChild(li);
+      const g = e.navGroup || '';
+      if (!groups.has(g)) groups.set(g, []);
+      groups.get(g).push(e);
     });
+
+    groups.forEach((entities, groupName) => {
+      if (!groupName || entities.length === 1) {
+        // No group or single item — render as flat nav links
+        entities.forEach(e => {
+          const li = el('li', { className: 'nav-item' });
+          const a  = el('a', { className: 'nav-link' + (e.slug === activeSlug ? ' active' : ''), href: '/vnext/' + e.slug, textContent: e.name });
+          a.setAttribute('data-go', '');
+          li.appendChild(a);
+          ul.appendChild(li);
+        });
+      } else {
+        // Multiple items in a group — Bootstrap dropdown
+        const li = el('li', { className: 'nav-item dropdown' });
+        const toggle = el('a', {
+          className: 'nav-link dropdown-toggle' + (entities.some(e => e.slug === activeSlug) ? ' active' : ''),
+          href: '#', textContent: groupName, role: 'button'
+        });
+        toggle.setAttribute('data-bs-toggle', 'dropdown');
+        toggle.setAttribute('aria-expanded', 'false');
+        li.appendChild(toggle);
+        const menu = el('ul', { className: 'dropdown-menu' });
+        entities.forEach(e => {
+          const mli = el('li');
+          const a = el('a', { className: 'dropdown-item' + (e.slug === activeSlug ? ' active' : ''), href: '/vnext/' + e.slug, textContent: e.name });
+          a.setAttribute('data-go', '');
+          mli.appendChild(a);
+          menu.appendChild(mli);
+        });
+        li.appendChild(menu);
+        ul.appendChild(li);
+      }
+    });
+
     nav.appendChild(ul);
     nav.appendChild(el('a', { className: 'btn btn-sm btn-outline-light', href: '/admin/data', textContent: 'Classic UI' }));
     return nav;
@@ -95,6 +130,7 @@
           entity.meta.schema?.fields || {},
           Array.isArray(items) ? items : [],
           {
+            resolve:  (name, v) => entity.resolve(name, v),
             onView:   i => go(`/vnext/${slug}/${i}`),
             onEdit:   i => go(`/vnext/${slug}/${i}/edit`),
             onDelete: async i => {
@@ -141,7 +177,8 @@
             if (!f || f.type === 'hidden') return;
             const dt = el('dt', { className: 'col-sm-3 fw-semibold', textContent: f.label || name });
             const v  = entity.state[name];
-            const dd = el('dd', { className: 'col-sm-9', textContent: (v == null || v === '') ? '\u2014' : String(v) });
+            const display = entity.resolve(name, v);
+            const dd = el('dd', { className: 'col-sm-9', textContent: (v == null || v === '') ? '\u2014' : display });
             dl.append(dt, dd);
           });
           main.appendChild(dl);

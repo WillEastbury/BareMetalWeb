@@ -73,6 +73,7 @@ const BareMetalTemplate = (() => {
 
   function buildTable(fields, items, callbacks) {
     const cb    = callbacks || {};
+    const resolve = cb.resolve || ((name, v) => String(v ?? ''));
     const names = Object.keys(fields).filter(n => !fields[n].readonly).slice(0, 6);
     const wrap  = mk('div', { className: 'table-responsive' });
     const tbl   = mk('table', { className: 'table table-hover table-sm align-middle' });
@@ -82,7 +83,7 @@ const BareMetalTemplate = (() => {
     const tbody = tbl.createTBody();
     items.forEach(item => {
       const tr = tbody.insertRow();
-      names.forEach(n => { tr.insertCell().textContent = item[n] ?? ''; });
+      names.forEach(n => { tr.insertCell().textContent = resolve(n, item[n]); });
       const td = tr.insertCell(); td.className = 'text-end';
       const id = item.id || item.Id || '';
       if (cb.onView) {
