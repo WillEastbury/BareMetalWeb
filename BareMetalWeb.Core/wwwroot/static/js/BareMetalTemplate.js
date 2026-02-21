@@ -47,6 +47,9 @@ const BareMetalTemplate = (() => {
             textContent: isObj ? String(o.label ?? o.value ?? o) : String(o)
           }));
         });
+      } else if (f.type === 'file') {
+        inp = mk('input', { type: 'file', className: 'form-control' });
+        if (f.accept) inp.accept = f.accept;
       } else {
         inp = mk('input', { className: 'form-control', type: INPUT_TYPES[f.type] || 'text' });
       }
