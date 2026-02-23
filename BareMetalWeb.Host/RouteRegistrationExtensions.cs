@@ -433,6 +433,21 @@ public static class RouteRegistrationExtensions
     };
 
     /// <summary>
+    /// Register lookup API routes before generic /api/{type} routes to avoid pattern conflicts.
+    /// Must be called before <see cref="RegisterApiRoutes"/>.
+    /// </summary>
+    public static void RegisterLookupApiRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        // More specific routes must be registered first to avoid {id} matching literal segments
+        host.RegisterRoute("GET /api/_lookup/{type}/_field/{id}/{fieldName}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityFieldHandler));
+        host.RegisterRoute("GET /api/_lookup/{type}/_aggregate", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.AggregateEntitiesHandler));
+        host.RegisterRoute("GET /api/_lookup/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityByIdHandler));
+        host.RegisterRoute("GET /api/_lookup/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.QueryEntitiesHandler));
+    }
+
+    /// <summary>
     /// Register RESTful API routes for entity operations.
     /// </summary>
     public static void RegisterApiRoutes(

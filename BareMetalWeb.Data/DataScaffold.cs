@@ -1539,7 +1539,7 @@ public static class DataScaffold
         return ToDisplayString(value, type);
     }
 
-    private static IReadOnlyList<KeyValuePair<string, string>> BuildEnumOptions(Type type)
+    public static IReadOnlyList<KeyValuePair<string, string>> BuildEnumOptions(Type type)
     {
         var effectiveType = Nullable.GetUnderlyingType(type) ?? type;
         if (!effectiveType.IsEnum)
