@@ -926,16 +926,17 @@
     }
 
     function loadEnumOptions(field, currentValue) {
-        // For enum fields, try to get enum values from metadata (type name)
         var sel = document.querySelector('select#f_' + field.name);
         if (!sel) return;
-        // Server includes enum options via lookup in meta; if not, use type name fallback
-        // We'll rely on the server's LookupList type instead. If type is Enum, the schema
-        // should contain enumValues (future extension). For now show a placeholder.
-        sel.innerHTML = '<option value="">— (Enum values require schema extension) —</option>';
-        if (currentValue != null) {
-            sel.insertAdjacentHTML('afterbegin', '<option value="' + escHtml(String(currentValue)) + '" selected>' + escHtml(String(currentValue)) + '</option>');
-        }
+        var options = Array.isArray(field.enumValues) ? field.enumValues : [];
+        var html = '<option value="">— Select —</option>';
+        options.forEach(function (o) {
+            var val = o.value != null ? o.value : o;
+            var lbl = o.label != null ? o.label : String(val);
+            var selected = currentValue != null && String(currentValue) === String(val) ? ' selected' : '';
+            html += '<option value="' + escHtml(String(val)) + '"' + selected + '>' + escHtml(String(lbl)) + '</option>';
+        });
+        sel.innerHTML = html;
     }
 
     function collectFormValues(form, fields) {
