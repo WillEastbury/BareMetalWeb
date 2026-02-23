@@ -726,6 +726,216 @@ public static class RouteRegistrationExtensions
         };
     }
 
+    /// <summary>
+    /// Register report listing, execution, and API export routes.
+    /// GET  /reports             → list all report definitions
+    /// GET  /reports/{id}        → run report, render HTML
+    /// GET  /api/reports/{id}    → JSON results
+    /// GET  /api/reports/{id}?format=csv  → CSV export
+    /// </summary>
+    public static void RegisterReportRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        // List all reports
+        host.RegisterRoute("GET /reports", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", true),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.Redirect("/login"); return; }
+
+                var reports = DataStoreProvider.Current.Query<ReportDefinition>(null).OrderBy(r => r.Name).ToList();
+
+                var sb = new StringBuilder(2048);
+                sb.Append("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">");
+                sb.Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+                sb.Append("<title>Reports</title>");
+                sb.Append("<style>*{box-sizing:border-box;margin:0;padding:0}");
+                sb.Append("body{font-family:system-ui,-apple-system,sans-serif;background:#f4f6f9;color:#333;padding:24px}");
+                sb.Append(".card{background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.12);padding:24px;max-width:900px;margin:0 auto}");
+                sb.Append("h1{font-size:1.6em;font-weight:700;color:#1a1a2e;margin-bottom:20px;border-bottom:2px solid #e8eaf6;padding-bottom:12px}");
+                sb.Append("table{width:100%;border-collapse:collapse}.th{background:#e8eaf6;text-align:left;padding:10px 12px;font-weight:600;font-size:.9em;color:#444;border-bottom:2px solid #c5cae9}");
+                sb.Append("td{padding:10px 12px;border-bottom:1px solid #eee;font-size:.9em}tr:hover{background:#f5f7ff}");
+                sb.Append("a.run{display:inline-block;padding:4px 12px;background:#4361ee;color:#fff;border-radius:4px;text-decoration:none;font-size:.85em;font-weight:600}");
+                sb.Append("a.run:hover{background:#3a56d4}.empty{padding:40px;text-align:center;color:#999}</style></head>");
+                sb.Append("<body><div class=\"card\"><h1>&#128202; Reports</h1>");
+
+                if (reports.Count == 0)
+                {
+                    sb.Append("<div class=\"empty\">No reports defined yet. Create one via <a href=\"/admin/data/report-definitions/create\">Admin &rarr; Report Definitions</a>.</div>");
+                }
+                else
+                {
+                    sb.Append("<table><thead><tr><th class=\"th\">Name</th><th class=\"th\">Description</th><th class=\"th\">Root Entity</th><th class=\"th\"></th></tr></thead><tbody>");
+                    foreach (var r in reports)
+                    {
+                        sb.Append("<tr><td><strong>");
+                        sb.Append(WebUtility.HtmlEncode(r.Name));
+                        sb.Append("</strong></td><td>");
+                        sb.Append(WebUtility.HtmlEncode(r.Description));
+                        sb.Append("</td><td>");
+                        sb.Append(WebUtility.HtmlEncode(r.RootEntity));
+                        sb.Append("</td><td><a class=\"run\" href=\"/reports/");
+                        sb.Append(WebUtility.UrlEncode(r.Id));
+                        sb.Append("\">Run</a></td></tr>");
+                    }
+                    sb.Append("</tbody></table>");
+                }
+
+                sb.Append("</div></body></html>");
+                context.Response.ContentType = "text/html; charset=utf-8";
+                await context.Response.WriteAsync(sb.ToString());
+            }));
+
+        // Run a report → HTML
+        host.RegisterRoute("GET /reports/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.Redirect("/login"); return; }
+
+                var id = GetRouteParam(context, "id");
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    context.Response.StatusCode = 400;
+                    await context.Response.WriteAsync("Missing report id.");
+                    return;
+                }
+
+                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(id, context.RequestAborted).ConfigureAwait(false);
+                if (def == null)
+                {
+                    context.Response.StatusCode = 404;
+                    await context.Response.WriteAsync("Report not found.");
+                    return;
+                }
+
+                var parameters = def.Parameters;
+                var runtimeParams = parameters.Count > 0
+                    ? parameters
+                        .Select(p => new KeyValuePair<string, string>(
+                            p.Name,
+                            context.Request.Query.TryGetValue(p.Name, out var qv) ? qv.ToString() : p.DefaultValue))
+                        .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase)
+                    : null;
+
+                var executor = new ReportExecutor(DataStoreProvider.Current);
+                ReportResult result;
+                try
+                {
+                    result = await executor.ExecuteAsync(def, runtimeParams, context.RequestAborted).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    context.Response.StatusCode = 500;
+                    context.Response.ContentType = "text/plain";
+                    await context.Response.WriteAsync($"Error executing report: {WebUtility.HtmlEncode(ex.Message)}");
+                    return;
+                }
+
+                context.Response.ContentType = "text/html; charset=utf-8";
+                var pipeWriter = System.IO.Pipelines.PipeWriter.Create(context.Response.Body);
+                await ReportHtmlRenderer.RenderAsync(
+                    pipeWriter,
+                    result,
+                    def.Name,
+                    def.Description,
+                    parameters.Count > 0 ? parameters : null,
+                    runtimeParams,
+                    id);
+                await pipeWriter.CompleteAsync();
+            }));
+
+        // JSON results via API
+        host.RegisterRoute("GET /api/reports/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.StatusCode = 401; return; }
+
+                var id = GetRouteParam(context, "id");
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    context.Response.StatusCode = 400;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Missing report id\"}");
+                    return;
+                }
+
+                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(id, context.RequestAborted).ConfigureAwait(false);
+                if (def == null)
+                {
+                    context.Response.StatusCode = 404;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Report not found\"}");
+                    return;
+                }
+
+                var parameters = def.Parameters;
+                var runtimeParams = parameters.Count > 0
+                    ? parameters
+                        .Select(p => new KeyValuePair<string, string>(
+                            p.Name,
+                            context.Request.Query.TryGetValue(p.Name, out var qv) ? qv.ToString() : p.DefaultValue))
+                        .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase)
+                    : null;
+
+                var executor = new ReportExecutor(DataStoreProvider.Current);
+                ReportResult result;
+                try
+                {
+                    result = await executor.ExecuteAsync(def, runtimeParams, context.RequestAborted).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    context.Response.StatusCode = 500;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }));
+                    return;
+                }
+
+                var format = context.Request.Query.TryGetValue("format", out var fmt) ? fmt.ToString() : "json";
+
+                if (string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.ContentType = "text/csv";
+                    context.Response.Headers.ContentDisposition = $"attachment; filename=\"{Uri.EscapeDataString(def.Name)}.csv\"";
+                    var csvSb = new StringBuilder();
+                    csvSb.AppendLine(string.Join(",", result.ColumnLabels.Select(CsvCell)));
+                    foreach (var row in result.Rows)
+                        csvSb.AppendLine(string.Join(",", row.Select(c => CsvCell(c ?? string.Empty))));
+                    await context.Response.WriteAsync(csvSb.ToString());
+                    return;
+                }
+
+                // Default: JSON
+                var json = new
+                {
+                    name = def.Name,
+                    generatedAt = result.GeneratedAt,
+                    totalRows = result.TotalRows,
+                    isTruncated = result.IsTruncated,
+                    columns = result.ColumnLabels,
+                    rows = result.Rows.Select(r => r.Select((v, i) => new KeyValuePair<string, string?>(
+                        i < result.ColumnLabels.Length ? result.ColumnLabels[i] : $"col{i}", v))
+                        .ToDictionary(kv => kv.Key, kv => kv.Value))
+                        .ToArray()
+                };
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = false }));
+            }));
+    }
+
+    private static string CsvCell(string value)
+    {
+        if (value.Contains(',') || value.Contains('"') || value.Contains('\n'))
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        return value;
+    }
+
     private static async ValueTask ServeVNextShell(HttpContext context)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
