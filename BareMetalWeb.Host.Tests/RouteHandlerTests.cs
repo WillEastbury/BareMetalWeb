@@ -807,7 +807,7 @@ public class RouteHandlerTests : IDisposable
     public void BuildCommandButtonsHtml_NoCommands_ReturnsEmpty()
     {
         var meta = CreateEmptyEntityMetadata();
-        var result = InvokeStatic<string>("BuildCommandButtonsHtml", meta, "product", "id1");
+        var result = InvokeStatic<string>("BuildCommandButtonsHtml", meta, "product", "id1", "test-csrf-token");
         Assert.Equal(string.Empty, result);
     }
 
