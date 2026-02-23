@@ -294,6 +294,20 @@ internal sealed class SearchIndexManager
         }
     }
 
+    public void RemoveObject(Type type, string id)
+    {
+        if (type == null || string.IsNullOrWhiteSpace(id))
+            return;
+
+        var metadata = GetOrCreateTypeMetadata(type);
+        var index = _indexes.GetOrAdd(type, LoadIndex);
+        lock (index.Sync)
+        {
+            RemoveObjectInternal(index, id, metadata);
+            SaveIndex(type, index);
+        }
+    }
+
     public IReadOnlyCollection<string> Search(Type type, string queryText, Func<IEnumerable<BaseDataObject>> loadAll)
     {
         return Search(type, queryText, loadAll, null);
