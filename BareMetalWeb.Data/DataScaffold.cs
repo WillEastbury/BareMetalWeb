@@ -107,6 +107,24 @@ public static class DataScaffold
         return true;
     }
 
+    /// <summary>
+    /// Registers a pre-built <see cref="DataEntityMetadata"/> directly.
+    /// Used for virtual entities whose metadata is constructed from JSON rather than
+    /// compiled C# attributes. The entity is indexed by slug only (not by CLR type).
+    /// </summary>
+    public static bool RegisterVirtualEntity(DataEntityMetadata metadata)
+    {
+        if (metadata == null)
+            return false;
+
+        lock (Sync)
+        {
+            EntitiesBySlug[metadata.Slug] = metadata;
+        }
+
+        return true;
+    }
+
     public static async ValueTask<object?> LoadAsync(DataEntityMetadata metadata, string id, CancellationToken cancellationToken = default)
     {
         return await metadata.Handlers.LoadAsync(id, cancellationToken);
@@ -3049,6 +3067,8 @@ public static class DataScaffold
         return !Equals(value, defaultValue);
     }
 
+    internal static string DeCamelcase(string name) => DeCamelcaseWithId(name);
+
     private static string DeCamelcaseWithId(string name)
     {
         if (string.IsNullOrWhiteSpace(name))
@@ -3082,7 +3102,7 @@ public static class DataScaffold
         return string.Join(" ", words);
     }
 
-    private static string Pluralize(string name)
+    internal static string Pluralize(string name)
     {
         if (string.IsNullOrWhiteSpace(name))
             return string.Empty;
@@ -3106,7 +3126,7 @@ public static class DataScaffold
         return name + "s";
     }
 
-    private static string ToSlug(string name)
+    internal static string ToSlug(string name)
     {
         if (string.IsNullOrWhiteSpace(name))
             return string.Empty;

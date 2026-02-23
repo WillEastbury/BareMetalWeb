@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="BareMetalWeb.Data.Tests" />
+    <InternalsVisibleTo Include="BareMetalWeb.Runtime" />
   </ItemGroup>
 
   <ItemGroup>

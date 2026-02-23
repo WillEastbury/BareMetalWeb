@@ -12,6 +12,17 @@ public static class DataEntityRegistry
             RegisterEntity(type);
     }
 
+    /// <summary>
+    /// Loads virtual entity definitions from <paramref name="filePath"/> and registers
+    /// them with <see cref="DataScaffold"/>. If the file does not exist, the call is a no-op.
+    /// </summary>
+    /// <param name="filePath">Path to the JSON virtual-entities definition file.</param>
+    /// <param name="dataRootPath">Root path for JSON data storage.</param>
+    public static void RegisterVirtualEntitiesFromFile(string filePath, string dataRootPath)
+    {
+        VirtualEntityLoader.LoadFromFile(filePath, dataRootPath);
+    }
+
     private static IEnumerable<Type> GetDataEntityTypes()
     {
         var assemblies = AppDomain.CurrentDomain.GetAssemblies();
@@ -26,6 +37,10 @@ public static class DataEntityRegistry
                     continue;
 
                 if (type == typeof(RenderableDataObject))
+                    continue;
+
+                // Exclude DynamicDataObject — virtual entities are registered separately
+                if (type == typeof(DynamicDataObject))
                     continue;
 
                 if (type.GetCustomAttribute<DataEntityAttribute>(inherit: false) is null
