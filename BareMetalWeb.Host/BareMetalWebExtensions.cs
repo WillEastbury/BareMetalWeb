@@ -44,6 +44,9 @@ public static class BareMetalWebExtensions
         IDataQueryEvaluator queryEvaluator = new DataQueryEvaluator();
         try { _ = Assembly.Load("BareMetalWeb.UserClasses"); } catch { }
         DataEntityRegistry.RegisterAllEntities();
+        DataEntityRegistry.RegisterVirtualEntitiesFromFile(
+            Path.Combine(contentRoot, "virtualEntities.json"),
+            dataRoot);
         IDataObjectStore dataStore = ProgramSetup.CreateDataStore(app, serializer, queryEvaluator, logger);
 
         // Permissions

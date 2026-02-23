@@ -1,0 +1,158 @@
+using System.Collections.Generic;
+using System.Text.Json.Serialization;
+
+namespace BareMetalWeb.Data;
+
+/// <summary>
+/// Root container for virtual entity definitions loaded from JSON metadata.
+/// </summary>
+public sealed class VirtualEntitiesRoot
+{
+    [JsonPropertyName("virtualEntities")]
+    public List<VirtualEntityDef> VirtualEntities { get; set; } = new();
+}
+
+/// <summary>
+/// Defines a virtual entity — a runtime-defined data entity type backed by JSON metadata
+/// rather than a compiled C# class.
+/// </summary>
+public sealed class VirtualEntityDef
+{
+    /// <summary>Stable GUID for this entity. Used for migration tracking. Generate once and keep.</summary>
+    [JsonPropertyName("entityId")]
+    public string EntityId { get; set; } = Guid.NewGuid().ToString("D");
+
+    /// <summary>Display name (e.g. "Ticket").</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>URL slug override. If omitted, derived from Name.</summary>
+    [JsonPropertyName("slug")]
+    public string? Slug { get; set; }
+
+    /// <summary>Show this entity in the navigation menu.</summary>
+    [JsonPropertyName("showOnNav")]
+    public bool ShowOnNav { get; set; } = false;
+
+    /// <summary>Permissions string (comma-separated roles). Defaults to entity name.</summary>
+    [JsonPropertyName("permissions")]
+    public string? Permissions { get; set; }
+
+    /// <summary>ID generation strategy: "guid" (default), "sequential", or "none".</summary>
+    [JsonPropertyName("idStrategy")]
+    public string IdStrategy { get; set; } = "guid";
+
+    /// <summary>Navigation group (default: "Admin").</summary>
+    [JsonPropertyName("navGroup")]
+    public string NavGroup { get; set; } = "Admin";
+
+    /// <summary>Navigation order within the group.</summary>
+    [JsonPropertyName("navOrder")]
+    public int NavOrder { get; set; } = 0;
+
+    /// <summary>Field definitions for this entity.</summary>
+    [JsonPropertyName("fields")]
+    public List<VirtualFieldDef> Fields { get; set; } = new();
+}
+
+/// <summary>
+/// Defines a single field on a virtual entity.
+/// </summary>
+public sealed class VirtualFieldDef
+{
+    /// <summary>Stable GUID for this field. Used for migration/rename tracking. Generate once and keep.</summary>
+    [JsonPropertyName("fieldId")]
+    public string FieldId { get; set; } = Guid.NewGuid().ToString("D");
+
+    /// <summary>Field name (used as property name and form field name).</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>Display label override. Derived from Name if omitted.</summary>
+    [JsonPropertyName("label")]
+    public string? Label { get; set; }
+
+    /// <summary>
+    /// Field data type. Supported values: "string", "multiline", "textarea", "bool", "boolean", "yesno",
+    /// "int", "integer", "decimal", "number", "datetime", "date", "time", "enum", "lookup",
+    /// "email", "phone", "url".
+    /// </summary>
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = "string";
+
+    /// <summary>Whether the field is required.</summary>
+    [JsonPropertyName("required")]
+    public bool Required { get; set; } = false;
+
+    /// <summary>Render as multi-line textarea (only applies to "string" type).</summary>
+    [JsonPropertyName("multiline")]
+    public bool Multiline { get; set; } = false;
+
+    /// <summary>Whether the field allows null values (affects CLR type).</summary>
+    [JsonPropertyName("nullable")]
+    public bool Nullable { get; set; } = true;
+
+    /// <summary>Enum values (required when type = "enum").</summary>
+    [JsonPropertyName("values")]
+    public List<string>? Values { get; set; }
+
+    /// <summary>Target entity slug for lookup fields (required when type = "lookup").</summary>
+    [JsonPropertyName("lookupEntity")]
+    public string? LookupEntity { get; set; }
+
+    /// <summary>Value field on the target entity (default: "Id").</summary>
+    [JsonPropertyName("lookupValueField")]
+    public string? LookupValueField { get; set; }
+
+    /// <summary>Display field on the target entity (default: "Id").</summary>
+    [JsonPropertyName("lookupDisplayField")]
+    public string? LookupDisplayField { get; set; }
+
+    /// <summary>Display order in forms and list views.</summary>
+    [JsonPropertyName("order")]
+    public int Order { get; set; } = 0;
+
+    /// <summary>Show in list (table) views.</summary>
+    [JsonPropertyName("list")]
+    public bool List { get; set; } = true;
+
+    /// <summary>Show in detail/view pages.</summary>
+    [JsonPropertyName("view")]
+    public bool View { get; set; } = true;
+
+    /// <summary>Show in edit forms.</summary>
+    [JsonPropertyName("edit")]
+    public bool Edit { get; set; } = true;
+
+    /// <summary>Show in create forms.</summary>
+    [JsonPropertyName("create")]
+    public bool Create { get; set; } = true;
+
+    /// <summary>Render as read-only.</summary>
+    [JsonPropertyName("readOnly")]
+    public bool ReadOnly { get; set; } = false;
+
+    /// <summary>Placeholder text for the input.</summary>
+    [JsonPropertyName("placeholder")]
+    public string? Placeholder { get; set; }
+
+    /// <summary>Minimum string length validation.</summary>
+    [JsonPropertyName("minLength")]
+    public int? MinLength { get; set; }
+
+    /// <summary>Maximum string length validation.</summary>
+    [JsonPropertyName("maxLength")]
+    public int? MaxLength { get; set; }
+
+    /// <summary>Minimum numeric range validation.</summary>
+    [JsonPropertyName("rangeMin")]
+    public double? RangeMin { get; set; }
+
+    /// <summary>Maximum numeric range validation.</summary>
+    [JsonPropertyName("rangeMax")]
+    public double? RangeMax { get; set; }
+
+    /// <summary>Regex pattern validation.</summary>
+    [JsonPropertyName("pattern")]
+    public string? Pattern { get; set; }
+}
