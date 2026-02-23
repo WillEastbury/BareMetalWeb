@@ -78,6 +78,66 @@ public class ChildListEditorTests : IDisposable
     }
 
     [Fact]
+    public void BuildFormFields_WithCspNonce_IncludesNonceOnScriptTag()
+    {
+        // Arrange
+        var order = new Order
+        {
+            Id = "order-1",
+            OrderNumber = "ORD-001",
+            CustomerId = "cust-1",
+            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = "Open",
+            CurrencyId = "USD",
+            IsOpen = true
+        };
+
+        var meta = DataScaffold.GetEntityByType(typeof(Order));
+        Assert.NotNull(meta);
+
+        // Act - Build with a CSP nonce
+        var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false, cspNonce: "test-nonce-123");
+
+        // Assert - Find the OrderRows field
+        var orderRowsField = formFields.FirstOrDefault(f => f.Name == "OrderRows");
+        Assert.NotNull(orderRowsField);
+
+        // Verify the script tag includes the nonce attribute
+        Assert.Contains("<script nonce=\"test-nonce-123\">", orderRowsField.Html);
+    }
+
+    [Fact]
+    public void BuildFormFields_WithoutCspNonce_ScriptTagHasNoNonce()
+    {
+        // Arrange
+        var order = new Order
+        {
+            Id = "order-1",
+            OrderNumber = "ORD-001",
+            CustomerId = "cust-1",
+            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = "Open",
+            CurrencyId = "USD",
+            IsOpen = true
+        };
+
+        var meta = DataScaffold.GetEntityByType(typeof(Order));
+        Assert.NotNull(meta);
+
+        // Act - Build without a CSP nonce
+        var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
+
+        // Assert - Find the OrderRows field
+        var orderRowsField = formFields.FirstOrDefault(f => f.Name == "OrderRows");
+        Assert.NotNull(orderRowsField);
+
+        // Verify the script tag has no nonce attribute when none is provided
+        Assert.Contains("<script>", orderRowsField.Html);
+        Assert.DoesNotContain("nonce=", orderRowsField.Html);
+    }
+
+
+    [Fact]
     public void BuildFormFields_WithChildListLookupField_IncludesRefreshAndAddButtons()
     {
         // Arrange - Create an Order (OrderRow has a lookup field for Product)

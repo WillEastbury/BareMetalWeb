@@ -317,7 +317,7 @@ public static class DataScaffold
         return QueryOperator.Contains;
     }
 
-    public static IReadOnlyList<FormField> BuildFormFields(DataEntityMetadata metadata, object? instance, bool forCreate)
+    public static IReadOnlyList<FormField> BuildFormFields(DataEntityMetadata metadata, object? instance, bool forCreate, string? cspNonce = null)
     {
         var fields = new List<FormField>();
         foreach (var field in metadata.Fields.OrderBy(f => f.Order))
@@ -421,7 +421,7 @@ public static class DataScaffold
             var value = instance != null ? field.Property.GetValue(instance) : null;
             if (IsChildListType(field.Property.PropertyType, out var childType))
             {
-                var html = BuildChildListEditorHtml(field, childType, value as IEnumerable);
+                var html = BuildChildListEditorHtml(field, childType, value as IEnumerable, cspNonce);
                 fields.Add(new FormField(
                     FormFieldType.CustomHtml,
                     field.Name,
@@ -433,7 +433,7 @@ public static class DataScaffold
 
             if (IsDictionaryType(field.Property.PropertyType, out var valueType))
             {
-                var html = BuildDictionaryEditorHtml(field, valueType, value as IEnumerable);
+                var html = BuildDictionaryEditorHtml(field, valueType, value as IEnumerable, cspNonce);
                 fields.Add(new FormField(
                     FormFieldType.CustomHtml,
                     field.Name,
@@ -1857,7 +1857,7 @@ public static class DataScaffold
         return fields;
     }
 
-    private static string BuildChildListEditorHtml(DataFieldMetadata field, Type childType, IEnumerable? listValue)
+    private static string BuildChildListEditorHtml(DataFieldMetadata field, Type childType, IEnumerable? listValue, string? cspNonce = null)
     {
         var fieldId = WebUtility.HtmlEncode(field.Name);
         var rows = new List<Dictionary<string, string>>();
@@ -1974,7 +1974,8 @@ public static class DataScaffold
         sb.Append("<button type=\"button\" class=\"btn btn-primary\" data-action=\"save\">Save</button>");
         sb.Append("</div></div></div></div>");
 
-        sb.Append("<script>");
+        var nonceAttr = string.IsNullOrEmpty(cspNonce) ? string.Empty : $" nonce=\"{WebUtility.HtmlEncode(cspNonce)}\"";
+        sb.Append($"<script{nonceAttr}>");
         sb.Append("document.addEventListener('DOMContentLoaded',function(){");
         sb.Append($"var input=document.getElementById('{EscapeJs(field.Name)}');");
         sb.Append($"var table=document.getElementById('{EscapeJs(tableId)}');");
@@ -2187,7 +2188,7 @@ public static class DataScaffold
         return false;
     }
 
-    private static string BuildDictionaryEditorHtml(DataFieldMetadata field, Type valueType, IEnumerable? dictValue)
+    private static string BuildDictionaryEditorHtml(DataFieldMetadata field, Type valueType, IEnumerable? dictValue, string? cspNonce = null)
     {
         var rows = new List<Dictionary<string, string>>();
         if (dictValue is IDictionary dictionary)
@@ -2231,7 +2232,8 @@ public static class DataScaffold
         sb.Append("<div class=\"modal-footer\"><button type=\"button\" class=\"btn btn-secondary\" data-bs-dismiss=\"modal\">Cancel</button><button type=\"button\" class=\"btn btn-primary\" data-action=\"save\">Save</button></div>");
         sb.Append("</div></div></div>");
 
-        sb.Append("<script>");
+        var nonceAttr = string.IsNullOrEmpty(cspNonce) ? string.Empty : $" nonce=\"{WebUtility.HtmlEncode(cspNonce)}\"";
+        sb.Append($"<script{nonceAttr}>");
         sb.Append("document.addEventListener('DOMContentLoaded',function(){");
         sb.Append($"var input=document.getElementById('{EscapeJs(field.Name)}');");
         sb.Append($"var table=document.getElementById('{EscapeJs(tableId)}');");
