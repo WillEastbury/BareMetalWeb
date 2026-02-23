@@ -1008,7 +1008,7 @@ public static class DataScaffold
         {
             var rootId = GetIdValue(rootItem) ?? string.Empty;
             html.Append($"<div class=\"bm-data-tree-header mb-3\">Organization Chart - {WebUtility.HtmlEncode(GetDisplayValue(metadata, rootItem))}</div>");
-            RenderOrgChartNode(html, metadata, rootItem, itemsList, rootId, basePath, 0);
+            RenderOrgChartNode(html, metadata, rootItem, itemsList, selectedId ?? string.Empty, basePath, 0);
         }
 
         html.Append("</div>");

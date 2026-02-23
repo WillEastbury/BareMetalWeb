@@ -313,57 +313,6 @@ public static class RouteRegistrationExtensions
     }
 
     /// <summary>
-    /// Register VNext JavaScript SPA routes at /vnext/{*path}.
-    /// Serves the shell HTML that loads the four BareMetalWeb JS libraries
-    /// (BareMetalRest, BareMetalBind, BareMetalTemplate, BareMetalRendering)
-    /// plus the thin VNext router (vnext-app.js).
-    /// </summary>
-    public static void RegisterVNextRoutes(
-        this IBareWebHost host,
-        IPageInfoFactory pageInfoFactory)
-    {
-        host.RegisterRoute("GET /vnext/{*path}", new RouteHandlerData(
-            pageInfoFactory.RawPage("Authenticated", false),
-            async context =>
-            {
-                // Detect selected Bootstrap theme from cookie (mirrors main app theme logic)
-                var themeCookie = context.Request.Cookies["bm-selected-theme"];
-                var safeThemes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                {
-                    "cerulean","cosmo","cyborg","darkly","flatly","journal","litera","lumen","lux",
-                    "materia","minty","morph","pulse","quartz","sandstone","simplex","sketchy",
-                    "slate","solar","spacelab","superhero","united","vapor","yeti","zephyr"
-                };
-                string themeHref = safeThemes.Contains(themeCookie ?? "")
-                    ? $"https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/{Uri.EscapeDataString(themeCookie!)}/bootstrap.min.css"
-                    : "/static/css/bootstrap.min.css";
-
-                context.Response.ContentType = "text/html; charset=utf-8";
-                context.Response.StatusCode = 200;
-                var csrfToken = CsrfProtection.EnsureToken(context);
-                await context.Response.WriteAsync(
-                    "<!DOCTYPE html><html lang=\"en\"><head>" +
-                    "<meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
-                    $"<meta name=\"csrf-token\" content=\"{System.Net.WebUtility.HtmlEncode(csrfToken)}\">" +
-                    "<title>BareMetalWeb VNext</title>" +
-                    $"<link id=\"bootswatch-theme\" rel=\"stylesheet\" href=\"{themeHref}\">" +
-                    "<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css\" integrity=\"sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+\" crossorigin=\"anonymous\">" +
-                    "<link rel=\"stylesheet\" href=\"/static/css/site.css\">" +
-                    "</head><body>" +
-                    "<div id=\"vnext-root\"><div class=\"d-flex justify-content-center align-items-center\" style=\"height:80vh\">" +
-                    "<div class=\"spinner-border\" role=\"status\"><span class=\"visually-hidden\">Loading...</span></div>" +
-                    "</div></div>" +
-                    "<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js\" integrity=\"sha384-YvpcrYf0tY3lHB60NNkmXc5s9fDVZLESaAA55NDzOxhy9GkcIdslK1eN7N6jIeHz\" crossorigin=\"anonymous\" defer></script>" +
-                    "<script src=\"/static/js/BareMetalRest.js\" defer></script>" +
-                    "<script src=\"/static/js/BareMetalBind.js\" defer></script>" +
-                    "<script src=\"/static/js/BareMetalTemplate.js\" defer></script>" +
-                    "<script src=\"/static/js/BareMetalRendering.js\" defer></script>" +
-                    "<script src=\"/static/js/vnext-app.js\" defer></script>" +
-                    "</body></html>");
-            }));
-    }
-
-    /// <summary>
     /// Register GET /api/metadata/{entity} — returns schema, layout and initial data
     /// for use by the BareMetalRendering client library.
     /// Must be registered BEFORE RegisterApiRoutes to ensure it matches before
