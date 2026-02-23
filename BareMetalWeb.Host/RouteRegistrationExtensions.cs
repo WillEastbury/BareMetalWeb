@@ -1,3 +1,7 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
 using System.Linq;
 using System.Net;
 using System.Text.Json;
@@ -8,6 +12,7 @@ using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Models;
+using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Host;
 
@@ -515,5 +520,287 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("POST /api/{type}/{id}/_command/{command}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataCommandHandler));
+    }
+
+    /// <summary>
+    /// Register the VNext JS SPA shell and metadata API endpoints.
+    /// Metadata routes at /meta/objects and /meta/{object} provide schema info to the client.
+    /// The SPA shell at /vnext and /vnext/{*path} serves the client-side application.
+    /// </summary>
+    public static void RegisterVNextRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        // List accessible entities for the current user
+        host.RegisterRoute("GET /meta/objects", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                var userPermissions = user?.Permissions ?? Array.Empty<string>();
+
+                var entities = DataScaffold.Entities
+                    .Where(e => IsEntityAccessible(e, user, userPermissions))
+                    .Select(e => (object)new Dictionary<string, object?>
+                    {
+                        ["slug"] = e.Slug,
+                        ["name"] = e.Name,
+                        ["navGroup"] = e.NavGroup,
+                        ["showOnNav"] = e.ShowOnNav,
+                        ["navOrder"] = e.NavOrder,
+                        ["viewType"] = e.ViewType.ToString()
+                    })
+                    .ToArray();
+
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(
+                    JsonSerializer.Serialize(entities, new JsonSerializerOptions { WriteIndented = false }));
+            }));
+
+        // Full schema for a single entity, including fields, lookups, computed, and commands
+        host.RegisterRoute("GET /meta/{object}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context =>
+            {
+                var slug = GetMetaRouteParam(context, "object") ?? string.Empty;
+                if (!DataScaffold.TryGetEntity(slug, out var metadata))
+                {
+                    context.Response.StatusCode = 404;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Entity not found\"}");
+                    return;
+                }
+
+                var result = BuildEntitySchema(metadata);
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(
+                    JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = false }));
+            }));
+
+        // VNext SPA shell — serve for all /vnext and /vnext/{*path} routes
+        host.RegisterRoute("GET /vnext", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            context => ServeVNextShell(context)));
+
+        host.RegisterRoute("GET /vnext/{*path}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            context => ServeVNextShell(context)));
+    }
+
+    // ─── Private helpers ────────────────────────────────────────────────────────
+
+    private static bool IsEntityAccessible(DataEntityMetadata entity, User? user, string[] userPermissions)
+    {
+        var perms = entity.Permissions ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(perms) || string.Equals(perms, "Public", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (string.Equals(perms, "Authenticated", StringComparison.OrdinalIgnoreCase))
+            return user != null;
+
+        var required = perms.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return required.Any(r => userPermissions.Any(p => string.Equals(p, r, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static string? GetMetaRouteParam(HttpContext context, string key)
+    {
+        var pageContext = context.GetPageContext();
+        if (pageContext == null)
+            return null;
+        for (int i = 0; i < pageContext.PageMetaDataKeys.Length; i++)
+        {
+            if (string.Equals(pageContext.PageMetaDataKeys[i], key, StringComparison.OrdinalIgnoreCase))
+                return WebUtility.HtmlDecode(pageContext.PageMetaDataValues[i]);
+        }
+        return null;
+    }
+
+    private static Dictionary<string, object?> BuildEntitySchema(DataEntityMetadata meta)
+    {
+        var fields = meta.Fields.OrderBy(f => f.Order).Select(f =>
+        {
+            var fd = new Dictionary<string, object?>
+            {
+                ["name"] = f.Name,
+                ["label"] = f.Label,
+                ["type"] = f.FieldType.ToString(),
+                ["order"] = f.Order,
+                ["required"] = f.Required,
+                ["list"] = f.List,
+                ["view"] = f.View,
+                ["edit"] = f.Edit,
+                ["create"] = f.Create,
+                ["readOnly"] = f.ReadOnly,
+                ["isIdField"] = f.IdGeneration != IdGenerationStrategy.None,
+                ["idGeneration"] = f.IdGeneration.ToString(),
+                ["placeholder"] = f.Placeholder
+            };
+
+            if (f.Lookup != null)
+            {
+                var targetMeta = DataScaffold.GetEntityByType(f.Lookup.TargetType);
+                fd["lookup"] = new Dictionary<string, object?>
+                {
+                    ["targetSlug"] = targetMeta?.Slug,
+                    ["targetName"] = targetMeta?.Name,
+                    ["valueField"] = f.Lookup.ValueField,
+                    ["displayField"] = f.Lookup.DisplayField,
+                    ["queryField"] = f.Lookup.QueryField,
+                    ["queryValue"] = f.Lookup.QueryValue,
+                    ["sortField"] = f.Lookup.SortField,
+                    ["sortDirection"] = f.Lookup.SortDirection.ToString()
+                };
+            }
+            else
+            {
+                fd["lookup"] = null;
+            }
+
+            if (f.Computed != null)
+            {
+                fd["computed"] = new Dictionary<string, object?>
+                {
+                    ["strategy"] = f.Computed.Strategy.ToString(),
+                    ["trigger"] = f.Computed.Trigger.ToString(),
+                    ["aggregate"] = f.Computed.Aggregate.ToString(),
+                    ["sourceField"] = f.Computed.SourceField,
+                    ["foreignKeyField"] = f.Computed.ForeignKeyField,
+                    ["childCollectionProperty"] = f.Computed.ChildCollectionProperty
+                };
+            }
+            else
+            {
+                fd["computed"] = null;
+            }
+
+            if (f.Calculated != null)
+            {
+                string jsExpr;
+                try
+                {
+                    var parser = new BareMetalWeb.Data.ExpressionEngine.ExpressionParser();
+                    var ast = parser.Parse(f.Calculated.Expression);
+                    jsExpr = ast.ToJavaScript();
+                }
+                catch
+                {
+                    jsExpr = "0";
+                }
+                fd["calculated"] = new Dictionary<string, object?>
+                {
+                    ["expression"] = jsExpr,
+                    ["displayFormat"] = f.Calculated.DisplayFormat
+                };
+            }
+            else
+            {
+                fd["calculated"] = null;
+            }
+
+            if (f.Validation != null)
+            {
+                fd["validation"] = new Dictionary<string, object?>
+                {
+                    ["minLength"] = f.Validation.MinLength,
+                    ["maxLength"] = f.Validation.MaxLength,
+                    ["rangeMin"] = f.Validation.RangeMin,
+                    ["rangeMax"] = f.Validation.RangeMax,
+                    ["pattern"] = f.Validation.RegexPattern,
+                    ["isEmail"] = f.Validation.IsEmail,
+                    ["isUrl"] = f.Validation.IsUrl
+                };
+            }
+            else
+            {
+                fd["validation"] = null;
+            }
+
+            if (f.Upload != null)
+            {
+                fd["upload"] = new Dictionary<string, object?>
+                {
+                    ["maxFileSizeBytes"] = f.Upload.MaxFileSizeBytes,
+                    ["allowedMimeTypes"] = f.Upload.AllowedMimeTypes,
+                    ["generateThumbnail"] = f.Upload.GenerateThumbnail
+                };
+            }
+            else
+            {
+                fd["upload"] = null;
+            }
+
+            return (object)fd;
+        }).ToArray();
+
+        var commands = meta.Commands.OrderBy(c => c.Order).Select(c => (object)new Dictionary<string, object?>
+        {
+            ["name"] = c.Name,
+            ["label"] = c.Label,
+            ["icon"] = c.Icon,
+            ["confirmMessage"] = c.ConfirmMessage,
+            ["destructive"] = c.Destructive,
+            ["permission"] = c.Permission,
+            ["order"] = c.Order
+        }).ToArray();
+
+        return new Dictionary<string, object?>
+        {
+            ["slug"] = meta.Slug,
+            ["name"] = meta.Name,
+            ["permissions"] = meta.Permissions,
+            ["showOnNav"] = meta.ShowOnNav,
+            ["navGroup"] = meta.NavGroup,
+            ["navOrder"] = meta.NavOrder,
+            ["viewType"] = meta.ViewType.ToString(),
+            ["idGeneration"] = meta.IdGeneration.ToString(),
+            ["parentField"] = meta.ParentField != null ? (object)new Dictionary<string, object?>
+            {
+                ["name"] = meta.ParentField.Name,
+                ["label"] = meta.ParentField.Label
+            } : null,
+            ["fields"] = fields,
+            ["commands"] = commands
+        };
+    }
+
+    private static async ValueTask ServeVNextShell(HttpContext context)
+    {
+        var csrfToken = CsrfProtection.EnsureToken(context);
+        var safeToken = WebUtility.HtmlEncode(csrfToken);
+
+        var sb = new StringBuilder(4096);
+        sb.Append("<!DOCTYPE html><html lang=\"en\">");
+        sb.Append("<head>");
+        sb.Append("<meta charset=\"utf-8\">");
+        sb.Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+        sb.Append("<title>BareMetalWeb — VNext</title>");
+        sb.Append("<link id=\"bootswatch-theme\" rel=\"stylesheet\" href=\"/static/css/bootstrap.min.css\">");
+        sb.Append("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css\" crossorigin=\"anonymous\">");
+        sb.Append("<link rel=\"stylesheet\" href=\"/static/css/site.css\">");
+        sb.Append($"<meta name=\"csrf-token\" content=\"{safeToken}\">");
+        sb.Append("<meta name=\"vnext-base\" content=\"/vnext\">");
+        sb.Append("</head>");
+        sb.Append("<body>");
+        sb.Append("<nav id=\"vnext-navbar\" class=\"navbar navbar-expand-lg navbar-dark bg-dark\">");
+        sb.Append("<div class=\"container-fluid\">");
+        sb.Append("<a class=\"navbar-brand\" href=\"/vnext\"><i class=\"bi bi-lightning-charge-fill\"></i> BareMetalWeb</a>");
+        sb.Append("<button class=\"navbar-toggler\" type=\"button\" data-bs-toggle=\"collapse\" data-bs-target=\"#vnext-nav-content\" aria-controls=\"vnext-nav-content\" aria-expanded=\"false\" aria-label=\"Toggle navigation\">");
+        sb.Append("<span class=\"navbar-toggler-icon\"></span></button>");
+        sb.Append("<div class=\"collapse navbar-collapse\" id=\"vnext-nav-content\">");
+        sb.Append("<ul id=\"vnext-nav-items\" class=\"navbar-nav me-auto mb-2 mb-lg-0\"></ul>");
+        sb.Append("<ul class=\"navbar-nav ms-auto\">");
+        sb.Append("<li class=\"nav-item\"><a class=\"nav-link\" href=\"/account\"><i class=\"bi bi-person-circle\"></i> Account</a></li>");
+        sb.Append("<li class=\"nav-item\"><a class=\"nav-link\" href=\"/logout\"><i class=\"bi bi-box-arrow-right\"></i> Logout</a></li>");
+        sb.Append("</ul></div></div></nav>");
+        sb.Append("<div class=\"container-fluid py-3\" id=\"vnext-content\"><div class=\"text-center py-5\"><div class=\"spinner-border\" role=\"status\"><span class=\"visually-hidden\">Loading...</span></div></div></div>");
+        sb.Append("<div id=\"vnext-modal-container\"></div>");
+        sb.Append("<div id=\"vnext-toast-container\" class=\"position-fixed top-0 end-0 p-3\" style=\"z-index:1100\"></div>");
+        sb.Append("<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js\" crossorigin=\"anonymous\"></script>");
+        sb.Append("<script src=\"/static/js/BareMetalRouting.js\"></script>");
+        sb.Append("<script src=\"/static/js/vnext-app.js\"></script>");
+        sb.Append("</body></html>");
+
+        context.Response.ContentType = "text/html; charset=utf-8";
+        context.Response.Headers.CacheControl = "no-store";
+        await context.Response.WriteAsync(sb.ToString());
     }
 }
