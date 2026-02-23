@@ -1249,6 +1249,8 @@
     return e;
   };
   const go  = url => { history.pushState({}, '', url); route(); };
+  const isBoolTrue = v => v === true || v === 'true' || v === 1;
+  const lookupSlug = url => url.replace(/[?#].*$/, '').replace(/\/$/, '').split('/').pop();
   window.addEventListener('popstate', route);
 
   // Module-local entity list cache (separate from BareMetalRendering's internal cache)
@@ -1355,28 +1357,89 @@
       if (!rawId) {
         // ── List view ───────────────────────────────────────────────────────
         const items  = await BareMetalRest.entity(slug).list();
-        const hdr    = el('div', { className: 'd-flex justify-content-between align-items-center mb-3' });
-        hdr.appendChild(el('h2', { textContent: entity.meta.name || slug }));
-        const addBtn  = el('a', { href: '/vnext/' + slug + '/create', className: 'btn btn-success btn-sm', textContent: '+ Add' });
+        const allItems = Array.isArray(items) ? items : [];
+        const schemaFields = entity.meta.schema?.fields || {};
+
+        const hdr = el('div', { className: 'd-flex gap-2 align-items-center mb-3 flex-wrap' });
+        hdr.appendChild(el('h2', { className: 'mb-0 me-2', textContent: entity.meta.name || slug }));
+        const addBtn = el('a', { href: '/vnext/' + slug + '/create', className: 'btn btn-success btn-sm', textContent: '+ Add' });
         addBtn.setAttribute('data-go', '');
         hdr.appendChild(addBtn);
-        main.appendChild(hdr);
-        main.appendChild(BareMetalTemplate.buildTable(
-          entity.meta.schema?.fields || {},
-          Array.isArray(items) ? items : [],
-          {
-            resolve:  (name, v) => entity.resolve(name, v),
-            onView:   i => go(`/vnext/${slug}/${i}`),
-            onEdit:   i => go(`/vnext/${slug}/${i}/edit`),
-            onDelete: async i => {
-              if (!confirm('Delete this record? This cannot be undone.')) return;
-              try {
-                await BareMetalRest.entity(slug).remove(i);
-                go(`/vnext/${slug}`);
-              } catch (err) { alert('Delete failed: ' + err.message); }
-            }
+
+        // Edit mode toggle
+        let editModeActive = false;
+        const editModeBtn = el('button', { className: 'btn btn-outline-secondary btn-sm', textContent: '\u270F Edit Mode' });
+
+        const buildReadTable = () => BareMetalTemplate.buildTable(schemaFields, allItems, {
+          resolve:  (name, v) => entity.resolve(name, v),
+          onView:   i => go(`/vnext/${slug}/${i}`),
+          onEdit:   i => go(`/vnext/${slug}/${i}/edit`),
+          onDelete: async i => {
+            if (!confirm('Delete this record? This cannot be undone.')) return;
+            try { await BareMetalRest.entity(slug).remove(i); go(`/vnext/${slug}`); }
+            catch (err) { alert('Delete failed: ' + err.message); }
           }
-        ));
+        });
+
+        const buildEditTable = () => {
+          const mkEl = (tag, props) => Object.assign(document.createElement(tag), props);
+          const names = Object.keys(schemaFields).filter(n => {
+            const f = schemaFields[n]; return f && !f.readonly && f.type !== 'hidden';
+          }).slice(0, 6);
+          const wrap = mkEl('div', { className: 'table-responsive' });
+          const tbl  = mkEl('table', { className: 'table table-hover table-sm align-middle' });
+          const hrow = tbl.createTHead().insertRow();
+          names.forEach(n => hrow.appendChild(mkEl('th', { textContent: schemaFields[n]?.label || n })));
+          hrow.appendChild(mkEl('th', { className: 'text-end' }));
+          const tbody = tbl.createTBody();
+          allItems.forEach(item => {
+            const tr = tbody.insertRow();
+            const rowData = Object.assign({}, item);
+            names.forEach(n => {
+              const td = tr.insertCell();
+              const f = schemaFields[n];
+              let inp;
+              if (f?.type === 'boolean') {
+                inp = mkEl('input', { type: 'checkbox', className: 'form-check-input' });
+                inp.checked = !!rowData[n];
+                inp.addEventListener('change', () => { rowData[n] = inp.checked; });
+              } else {
+                inp = mkEl('input', { type: 'text', className: 'form-control form-control-sm', value: String(rowData[n] ?? '') });
+                inp.addEventListener('input', () => { rowData[n] = inp.value; });
+              }
+              td.appendChild(inp);
+            });
+            const td = tr.insertCell(); td.className = 'text-end text-nowrap';
+            const rowId = item.id || item.Id || '';
+            const saveBtn = mkEl('button', { className: 'btn btn-sm btn-success', title: 'Save row' });
+            saveBtn.innerHTML = '<i class="bi bi-check-lg"></i>';
+            saveBtn.onclick = async () => {
+              try {
+                saveBtn.disabled = true;
+                await BareMetalRest.entity(slug).update(rowId, rowData);
+                saveBtn.className = 'btn btn-sm btn-success';
+              } catch (err) { alert('Save failed: ' + err.message); }
+              finally { saveBtn.disabled = false; }
+            };
+            td.appendChild(saveBtn);
+          });
+          wrap.appendChild(tbl);
+          return wrap;
+        };
+
+        let tableWrap = buildReadTable();
+        editModeBtn.addEventListener('click', () => {
+          editModeActive = !editModeActive;
+          editModeBtn.textContent = editModeActive ? '\u2715 View Mode' : '\u270F Edit Mode';
+          editModeBtn.className = 'btn btn-sm ' + (editModeActive ? 'btn-secondary' : 'btn-outline-secondary');
+          const newTable = editModeActive ? buildEditTable() : buildReadTable();
+          tableWrap.replaceWith(newTable);
+          tableWrap = newTable;
+        });
+        hdr.appendChild(editModeBtn);
+
+        main.appendChild(hdr);
+        main.appendChild(tableWrap);
 
       } else {
         // ── Create / Edit / View ─────────────────────────────────────────────
@@ -1402,6 +1465,24 @@
           const editBtn = el('a', { href: `/vnext/${slug}/${id}/edit`, className: 'btn btn-primary btn-sm', textContent: '\u270F Edit' });
           editBtn.setAttribute('data-go', '');
           hdr.appendChild(editBtn);
+
+          // Clone and Clone & Edit buttons
+          const cloneRecord = async (andEdit) => {
+            try {
+              const rec = await BareMetalRest.entity(slug).get(id);
+              if (!rec) return;
+              delete rec.id; delete rec.Id;
+              const created = await BareMetalRest.entity(slug).create(rec);
+              const newId = created?.id || created?.Id;
+              go(newId ? `/vnext/${slug}/${newId}${andEdit ? '/edit' : ''}` : `/vnext/${slug}`);
+            } catch (err) { alert('Clone failed: ' + err.message); }
+          };
+          const cloneBtn = el('button', { className: 'btn btn-outline-secondary btn-sm', textContent: '\u29C9 Clone' });
+          cloneBtn.addEventListener('click', () => cloneRecord(false));
+          hdr.appendChild(cloneBtn);
+          const cloneEditBtn = el('button', { className: 'btn btn-outline-secondary btn-sm', textContent: '\u29C9 Clone & Edit' });
+          cloneEditBtn.addEventListener('click', () => cloneRecord(true));
+          hdr.appendChild(cloneEditBtn);
         }
 
         main.appendChild(hdr);
@@ -1413,13 +1494,54 @@
             const dt = el('dt', { className: 'col-sm-3 fw-semibold', textContent: f.label || name });
             const v  = entity.state[name];
             const display = entity.resolve(name, v);
-            const dd = el('dd', { className: 'col-sm-9', textContent: (v == null || v === '') ? '\u2014' : display });
+            const dd = el('dd', { className: 'col-sm-9' });
+            if (v == null || v === '') {
+              dd.textContent = '\u2014';
+            } else if (f.lookupUrl) {
+              const targetSlug = lookupSlug(f.lookupUrl);
+              const a = el('a', { href: `/vnext/${targetSlug}/${encodeURIComponent(String(v))}`, textContent: display });
+              a.setAttribute('data-go', '');
+              dd.appendChild(a);
+            } else if (f.type === 'boolean') {
+              dd.innerHTML = isBoolTrue(v)
+                ? '<span class="badge bg-success">Yes</span>'
+                : '<span class="badge bg-secondary">No</span>';
+            } else {
+              dd.textContent = display;
+            }
             dl.append(dt, dd);
           });
           main.appendChild(dl);
 
         } else {
           entity.renderUI(main);
+          // Wire lookup Refresh buttons added by BareMetalTemplate for select fields
+          main.addEventListener('click', async e => {
+            const refBtn = e.target.closest('[data-lookup-refresh]');
+            if (!refBtn) return;
+            e.preventDefault();
+            const fieldName = refBtn.dataset.lookupRefresh;
+            const lookupUrl = refBtn.dataset.lookupUrl;
+            const valueField = refBtn.dataset.lookupValueField;
+            const displayField = refBtn.dataset.lookupDisplayField;
+            const sel = main.querySelector(`select[rv-value="${fieldName}"]`);
+            if (!sel) return;
+            refBtn.disabled = true;
+            try {
+              const raw = await BareMetalRest.call('GET', lookupUrl);
+              const list = Array.isArray(raw) ? raw : (raw?.data || []);
+              const cur = sel.value;
+              sel.innerHTML = '<option value="">— Select —</option>';
+              list.forEach(i => {
+                const o = document.createElement('option');
+                o.value = String(i[valueField] ?? i.id ?? i.Id ?? '');
+                o.textContent = String(i[displayField] ?? i.Name ?? i.name ?? '');
+                if (o.value === cur) o.selected = true;
+                sel.appendChild(o);
+              });
+            } catch (err) { alert('Refresh failed: ' + err.message); }
+            finally { refBtn.disabled = false; }
+          });
           entity.state.save = async () => {
             try {
               await entity.save();
