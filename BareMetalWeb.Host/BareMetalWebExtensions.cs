@@ -7,6 +7,7 @@ using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Interfaces;
+using BareMetalWeb.Runtime;
 using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 
@@ -48,6 +49,13 @@ public static class BareMetalWebExtensions
             Path.Combine(contentRoot, "virtualEntities.json"),
             dataRoot);
         IDataObjectStore dataStore = ProgramSetup.CreateDataStore(app, serializer, queryEvaluator, logger);
+
+        // Runtime entity registry — load persisted EntityDefinitions from storage and compile
+        await RuntimeEntityRegistry.BuildAsync(
+            dataStore,
+            new RuntimeEntityCompiler(),
+            dataRoot,
+            msg => logger.LogInfo($"[RuntimeEntityRegistry] {msg}")).ConfigureAwait(false);
 
         // Permissions
         var entityPermissions = DataScaffold.Entities
@@ -100,6 +108,7 @@ public static class BareMetalWebExtensions
             app.Configuration.GetValue("Admin:EnableWipeData", false));
         appInfo.RegisterDataRoutes(routeHandlers, pageInfoFactory, mainTemplate);
         appInfo.RegisterEntityMetadataRoute(pageInfoFactory);  // must be before RegisterApiRoutes
+        appInfo.RegisterRuntimeApiRoutes(pageInfoFactory);       // /meta/entity/{name}, POST /query, POST /intent
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
         appInfo.RegisterVNextRoutes(pageInfoFactory);
 

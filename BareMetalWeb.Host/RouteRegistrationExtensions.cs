@@ -12,6 +12,7 @@ using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Models;
+using BareMetalWeb.Runtime;
 using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Host;
@@ -536,6 +537,173 @@ public static class RouteRegistrationExtensions
             context => ServeVNextShell(context)));
     }
 
+    /// <summary>
+    /// Registers the metadata-driven Runtime API endpoints:
+    /// <list type="bullet">
+    ///   <item><description>GET /meta/entity/{name} — returns a <see cref="RuntimeEntityModel"/> as JSON, including EntityId, schemaHash, indexes, and actions.</description></item>
+    ///   <item><description>POST /query — accepts { entity, clauses, sorts, skip, top } and returns matching records.</description></item>
+    ///   <item><description>POST /intent — accepts a <see cref="BareMetalWeb.Runtime.CommandIntent"/> and executes create/update/delete/action.</description></item>
+    /// </list>
+    /// Must be registered BEFORE <see cref="RegisterApiRoutes"/> to avoid slug conflicts.
+    /// </summary>
+    public static void RegisterRuntimeApiRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        var queryService = new BareMetalWeb.Runtime.QueryService();
+        var commandService = new BareMetalWeb.Runtime.CommandService();
+        var jsonOptions = new JsonSerializerOptions { WriteIndented = false };
+
+        // GET /meta/entity/{name} — RuntimeEntityModel schema + DataEntityMetadata fields
+        host.RegisterRoute("GET /meta/entity/{name}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context =>
+            {
+                var slug = GetRouteParam(context, "name") ?? string.Empty;
+
+                if (!BareMetalWeb.Runtime.RuntimeEntityRegistry.Current.TryGet(slug, out var runtimeModel))
+                {
+                    context.Response.StatusCode = 404;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Runtime entity not found\"}");
+                    return;
+                }
+
+                var result = new Dictionary<string, object?>
+                {
+                    ["entityId"] = runtimeModel.EntityId,
+                    ["name"] = runtimeModel.Name,
+                    ["slug"] = runtimeModel.Slug,
+                    ["permissions"] = runtimeModel.Permissions,
+                    ["showOnNav"] = runtimeModel.ShowOnNav,
+                    ["navGroup"] = runtimeModel.NavGroup,
+                    ["navOrder"] = runtimeModel.NavOrder,
+                    ["idStrategy"] = runtimeModel.IdStrategy.ToString(),
+                    ["version"] = runtimeModel.Version,
+                    ["schemaHash"] = runtimeModel.SchemaHash,
+                    ["fields"] = runtimeModel.Fields.Select(f => (object)new Dictionary<string, object?>
+                    {
+                        ["fieldId"] = f.FieldId,
+                        ["ordinal"] = f.Ordinal,
+                        ["name"] = f.Name,
+                        ["label"] = f.Label,
+                        ["type"] = f.FieldType.ToString(),
+                        ["isNullable"] = f.IsNullable,
+                        ["required"] = f.Required,
+                        ["list"] = f.List,
+                        ["view"] = f.View,
+                        ["edit"] = f.Edit,
+                        ["create"] = f.Create,
+                        ["readOnly"] = f.ReadOnly,
+                        ["defaultValue"] = f.DefaultValue,
+                        ["placeholder"] = f.Placeholder,
+                        ["enumValues"] = f.EnumValues,
+                        ["lookupEntitySlug"] = f.LookupEntitySlug,
+                        ["lookupValueField"] = f.LookupValueField,
+                        ["lookupDisplayField"] = f.LookupDisplayField,
+                        ["validation"] = (f.MinLength.HasValue || f.MaxLength.HasValue ||
+                                          f.RangeMin.HasValue || f.RangeMax.HasValue ||
+                                          !string.IsNullOrEmpty(f.Pattern))
+                            ? (object)new Dictionary<string, object?>
+                              {
+                                  ["minLength"] = f.MinLength,
+                                  ["maxLength"] = f.MaxLength,
+                                  ["rangeMin"] = f.RangeMin,
+                                  ["rangeMax"] = f.RangeMax,
+                                  ["pattern"] = f.Pattern
+                              }
+                            : null
+                    }).ToArray(),
+                    ["indexes"] = runtimeModel.Indexes.Select(i => (object)new Dictionary<string, object?>
+                    {
+                        ["indexId"] = i.IndexId,
+                        ["fields"] = i.FieldNames,
+                        ["type"] = i.Type
+                    }).ToArray(),
+                    ["actions"] = runtimeModel.Actions.Select(a => (object)new Dictionary<string, object?>
+                    {
+                        ["actionId"] = a.ActionId,
+                        ["name"] = a.Name,
+                        ["label"] = a.Label,
+                        ["icon"] = a.Icon,
+                        ["permission"] = a.Permission,
+                        ["enabledWhen"] = a.EnabledWhen
+                    }).ToArray()
+                };
+
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(result, jsonOptions));
+            }));
+
+        // POST /query — { "entity": "slug", "clauses": [...], "sorts": [...], "skip": 0, "top": 50 }
+        host.RegisterRoute("POST /query", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context =>
+            {
+                using var reader = new System.IO.StreamReader(context.Request.Body);
+                var body = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
+
+                string entitySlug;
+                QueryDefinition? query;
+                try
+                {
+                    using var doc = JsonDocument.Parse(body);
+                    var root = doc.RootElement;
+                    entitySlug = root.TryGetProperty("entity", out var ep) ? ep.GetString() ?? string.Empty : string.Empty;
+                    query = BuildQueryFromJson(root);
+                }
+                catch (Exception ex)
+                {
+                    context.Response.StatusCode = 400;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync(
+                        JsonSerializer.Serialize(new { error = ex.Message }, jsonOptions));
+                    return;
+                }
+
+                if (string.IsNullOrWhiteSpace(entitySlug))
+                {
+                    context.Response.StatusCode = 400;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"'entity' field is required\"}");
+                    return;
+                }
+
+                var results = await queryService.QueryAsync(entitySlug, query, context.RequestAborted).ConfigureAwait(false);
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(results, jsonOptions));
+            }));
+
+        // POST /intent — CommandIntent body
+        host.RegisterRoute("POST /intent", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context =>
+            {
+                using var reader = new System.IO.StreamReader(context.Request.Body);
+                var body = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
+
+                BareMetalWeb.Runtime.CommandIntent intent;
+                try
+                {
+                    intent = JsonSerializer.Deserialize<BareMetalWeb.Runtime.CommandIntent>(body, jsonOptions)
+                             ?? throw new InvalidOperationException("Request body could not be parsed as a CommandIntent.");
+                }
+                catch (Exception ex)
+                {
+                    context.Response.StatusCode = 400;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync(
+                        JsonSerializer.Serialize(new { error = ex.Message }, jsonOptions));
+                    return;
+                }
+
+                var result = await commandService.ExecuteAsync(intent, context.RequestAborted).ConfigureAwait(false);
+                context.Response.StatusCode = result.Success ? 200 : 400;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(result, jsonOptions));
+            }));
+    }
+
     // ─── Private helpers ────────────────────────────────────────────────────────
 
     private static bool IsEntityAccessible(DataEntityMetadata entity, User? user, string[] userPermissions)
@@ -751,5 +919,53 @@ public static class RouteRegistrationExtensions
         context.Response.ContentType = "text/html; charset=utf-8";
         context.Response.Headers.CacheControl = "no-store";
         await context.Response.WriteAsync(sb.ToString());
+    }
+
+    /// <summary>Parses a POST /query JSON body into a <see cref="QueryDefinition"/>.</summary>
+    private static QueryDefinition? BuildQueryFromJson(JsonElement root)
+    {
+        if (!root.TryGetProperty("clauses", out var clausesEl) &&
+            !root.TryGetProperty("sorts", out _) &&
+            !root.TryGetProperty("skip", out _) &&
+            !root.TryGetProperty("top", out _))
+            return null;
+
+        var query = new QueryDefinition();
+
+        if (root.TryGetProperty("skip", out var skipEl) && skipEl.TryGetInt32(out var skip))
+            query.Skip = skip;
+
+        if (root.TryGetProperty("top", out var topEl) && topEl.TryGetInt32(out var top))
+            query.Top = top;
+
+        if (root.TryGetProperty("clauses", out clausesEl) && clausesEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var c in clausesEl.EnumerateArray())
+            {
+                var clause = new QueryClause
+                {
+                    Field = c.TryGetProperty("field", out var fp) ? fp.GetString() ?? string.Empty : string.Empty,
+                    Operator = c.TryGetProperty("operator", out var op)
+                        ? Enum.TryParse<QueryOperator>(op.GetString(), ignoreCase: true, out var parsed) ? parsed : QueryOperator.Equals
+                        : QueryOperator.Equals,
+                    Value = c.TryGetProperty("value", out var vp) ? (object?)(vp.ValueKind == JsonValueKind.Null ? null : vp.GetString()) : null
+                };
+                query.Clauses.Add(clause);
+            }
+        }
+
+        if (root.TryGetProperty("sorts", out var sortsEl) && sortsEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var s in sortsEl.EnumerateArray())
+            {
+                var sortField = s.TryGetProperty("field", out var sf) ? sf.GetString() ?? string.Empty : string.Empty;
+                var dirStr = s.TryGetProperty("direction", out var df) ? df.GetString() ?? "asc" : "asc";
+                var dir = string.Equals(dirStr, "desc", StringComparison.OrdinalIgnoreCase)
+                    ? SortDirection.Desc : SortDirection.Asc;
+                query.Sorts.Add(new SortClause { Field = sortField, Direction = dir });
+            }
+        }
+
+        return query;
     }
 }

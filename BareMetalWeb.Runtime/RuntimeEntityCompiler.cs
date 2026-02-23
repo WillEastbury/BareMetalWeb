@@ -1,0 +1,335 @@
+using System.Text;
+using BareMetalWeb.Core;
+using BareMetalWeb.Data;
+using BareMetalWeb.Rendering.Models;
+
+namespace BareMetalWeb.Runtime;
+
+/// <summary>
+/// Default implementation of <see cref="IRuntimeEntityCompiler"/>.
+/// Assigns deterministic ordinals, validates field types and relationships,
+/// generates a schema hash, and produces an immutable <see cref="RuntimeEntityModel"/>.
+/// </summary>
+public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
+{
+    /// <inheritdoc/>
+    public RuntimeEntityModel? Compile(
+        EntityDefinition entity,
+        IReadOnlyList<FieldDefinition> fields,
+        IReadOnlyList<IndexDefinition> indexes,
+        IReadOnlyList<ActionDefinition> actions,
+        out IReadOnlyList<string> warnings)
+    {
+        var warnList = new List<string>();
+        warnings = warnList;
+
+        if (string.IsNullOrWhiteSpace(entity.Name))
+        {
+            warnList.Add($"EntityDefinition {entity.Id}: Name is empty — skipped.");
+            return null;
+        }
+
+        var slug = !string.IsNullOrWhiteSpace(entity.Slug)
+            ? entity.Slug!.Trim().ToLowerInvariant()
+            : DataScaffold.ToSlug(DataScaffold.Pluralize(entity.Name));
+
+        var idStrategy = ParseIdStrategy(entity.IdStrategy);
+        var permissions = !string.IsNullOrWhiteSpace(entity.Permissions)
+            ? entity.Permissions
+            : entity.Name;
+
+        // ── Field compilation ──────────────────────────────────────────────────
+
+        // Sort fields: first by existing Ordinal (non-zero), then alphabetically.
+        // Fields with Ordinal == 0 get assigned the next available ordinal.
+        var sortedFields = fields
+            .Where(f => !string.IsNullOrWhiteSpace(f.Name))
+            .OrderBy(f => f.Ordinal > 0 ? f.Ordinal : int.MaxValue)
+            .ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // Assign deterministic ordinals
+        int nextOrdinal = 1;
+        foreach (var f in sortedFields)
+        {
+            if (f.Ordinal <= 0)
+                f.Ordinal = nextOrdinal;
+            nextOrdinal = Math.Max(nextOrdinal, f.Ordinal) + 1;
+        }
+
+        // Re-sort by assigned ordinal
+        sortedFields = sortedFields.OrderBy(f => f.Ordinal).ToList();
+
+        var compiledFields = new List<RuntimeFieldModel>(sortedFields.Count);
+        foreach (var f in sortedFields)
+        {
+            var fieldId = !string.IsNullOrWhiteSpace(f.FieldId) ? f.FieldId : f.Id;
+            var label = !string.IsNullOrWhiteSpace(f.Label) ? f.Label! : DataScaffold.DeCamelcase(f.Name);
+            var fieldType = MapFormFieldType(f);
+            var enumValues = ParsePipeList(f.EnumValues);
+
+            // Validate lookup target
+            if (fieldType == FormFieldType.LookupList && !string.IsNullOrWhiteSpace(f.LookupEntitySlug))
+            {
+                if (!DataScaffold.TryGetEntity(f.LookupEntitySlug!, out _))
+                    warnList.Add($"Field '{f.Name}': lookup target '{f.LookupEntitySlug}' not yet registered — lookup may be unavailable.");
+            }
+
+            compiledFields.Add(new RuntimeFieldModel(
+                FieldId: fieldId,
+                Ordinal: f.Ordinal,
+                Name: f.Name,
+                Label: label,
+                FieldType: fieldType,
+                IsNullable: f.IsNullable,
+                Required: f.Required,
+                List: f.List,
+                View: f.View,
+                Edit: f.Edit,
+                Create: f.Create,
+                ReadOnly: f.ReadOnly,
+                DefaultValue: f.DefaultValue,
+                Placeholder: f.Placeholder,
+                EnumValues: enumValues,
+                LookupEntitySlug: f.LookupEntitySlug,
+                LookupValueField: f.LookupValueField,
+                LookupDisplayField: f.LookupDisplayField,
+                MinLength: f.MinLength,
+                MaxLength: f.MaxLength,
+                RangeMin: f.RangeMin,
+                RangeMax: f.RangeMax,
+                Pattern: f.Pattern
+            ));
+        }
+
+        // ── Index compilation ──────────────────────────────────────────────────
+
+        var compiledIndexes = indexes
+            .Select(idx => new RuntimeIndexModel(
+                IndexId: idx.Id,
+                EntityId: idx.EntityId,
+                FieldNames: idx.GetFieldList(),
+                Type: string.IsNullOrWhiteSpace(idx.Type) ? "secondary" : idx.Type))
+            .ToList();
+
+        // ── Action compilation ─────────────────────────────────────────────────
+
+        var compiledActions = actions
+            .Where(a => !string.IsNullOrWhiteSpace(a.Name))
+            .Select(a => new RuntimeActionModel(
+                ActionId: a.Id,
+                EntityId: a.EntityId,
+                Name: a.Name,
+                Label: a.Label ?? a.Name,
+                Icon: a.Icon,
+                Permission: a.Permission,
+                EnabledWhen: a.EnabledWhen,
+                Operations: ParsePipeList(a.Operations)
+            ))
+            .ToList();
+
+        // ── Schema hash ────────────────────────────────────────────────────────
+
+        var schemaHash = ComputeSchemaHash(compiledFields);
+
+        // ── Entity identity ────────────────────────────────────────────────────
+
+        var entityId = !string.IsNullOrWhiteSpace(entity.EntityId) ? entity.EntityId : entity.Id;
+
+        return new RuntimeEntityModel(
+            entityId: entityId,
+            name: entity.Name,
+            slug: slug,
+            permissions: permissions,
+            showOnNav: entity.ShowOnNav,
+            navGroup: entity.NavGroup,
+            navOrder: entity.NavOrder,
+            idStrategy: idStrategy,
+            version: entity.Version,
+            schemaHash: schemaHash,
+            fields: compiledFields.AsReadOnly(),
+            indexes: compiledIndexes.AsReadOnly(),
+            actions: compiledActions.AsReadOnly()
+        );
+    }
+
+    // ── Type mapping ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Maps a <see cref="FieldDefinition.Type"/> string to a <see cref="FormFieldType"/>.
+    /// </summary>
+    private static FormFieldType MapFormFieldType(FieldDefinition f)
+    {
+        var typeStr = (f.Type ?? "string").Trim().ToLowerInvariant();
+
+        if (f.Multiline || typeStr is "multiline" or "textarea")
+            return FormFieldType.TextArea;
+
+        return typeStr switch
+        {
+            "bool" or "boolean" or "yesno" => FormFieldType.YesNo,
+            "int" or "integer" => FormFieldType.Integer,
+            "decimal" or "number" or "float" or "double" => FormFieldType.Decimal,
+            "datetime" => FormFieldType.DateTime,
+            "date" or "dateonly" => FormFieldType.DateOnly,
+            "time" or "timeonly" => FormFieldType.TimeOnly,
+            "enum" => FormFieldType.Enum,
+            "lookup" => FormFieldType.LookupList,
+            "email" => FormFieldType.Email,
+            "phone" => FormFieldType.String,
+            "url" => FormFieldType.String,
+            _ => FormFieldType.String
+        };
+    }
+
+    /// <summary>
+    /// Returns the CLR <see cref="Type"/> that corresponds to a <see cref="FormFieldType"/>
+    /// and nullable flag, for use when building <see cref="DynamicPropertyInfo"/> instances.
+    /// </summary>
+    public static Type MapClrType(FormFieldType fieldType, bool isNullable, IReadOnlyList<string> enumValues)
+    {
+        return fieldType switch
+        {
+            FormFieldType.YesNo => isNullable ? typeof(bool?) : typeof(bool),
+            FormFieldType.Integer => isNullable ? typeof(int?) : typeof(int),
+            FormFieldType.Decimal or FormFieldType.Money => isNullable ? typeof(decimal?) : typeof(decimal),
+            FormFieldType.DateTime => isNullable ? typeof(DateTime?) : typeof(DateTime),
+            FormFieldType.DateOnly => isNullable ? typeof(DateOnly?) : typeof(DateOnly),
+            FormFieldType.TimeOnly => isNullable ? typeof(TimeOnly?) : typeof(TimeOnly),
+            FormFieldType.Enum => BuildEnumType(enumValues),
+            _ => typeof(string)
+        };
+    }
+
+    // ── CLR enum type cache ────────────────────────────────────────────────────
+
+    private static readonly Dictionary<string, Type> EnumTypeCache = new(StringComparer.Ordinal);
+    private static readonly object EnumTypeLock = new();
+
+    /// <summary>
+    /// Builds (and caches) a CLR enum type from the supplied member names.
+    /// Returns <see cref="string"/> if the list is empty.
+    /// </summary>
+    private static Type BuildEnumType(IReadOnlyList<string> enumValues)
+    {
+        if (enumValues.Count == 0)
+            return typeof(string);
+
+        var key = string.Join("|", enumValues);
+        lock (EnumTypeLock)
+        {
+            if (EnumTypeCache.TryGetValue(key, out var cached))
+                return cached;
+        }
+
+        Type type;
+        try
+        {
+            type = CreateRuntimeEnum(enumValues);
+        }
+        catch
+        {
+            // Enum creation failed (e.g. all values were unsanitary) — fall back to string
+            return typeof(string);
+        }
+
+        lock (EnumTypeLock)
+        {
+            EnumTypeCache.TryAdd(key, type);
+        }
+
+        return type;
+    }
+
+    private static Type CreateRuntimeEnum(IReadOnlyList<string> values)
+    {
+        var enumTypeName = $"RuntimeEnum_{Guid.NewGuid():N}";
+        var assemblyName = new System.Reflection.AssemblyName(enumTypeName);
+        var assemblyBuilder = System.Reflection.Emit.AssemblyBuilder.DefineDynamicAssembly(
+            assemblyName, System.Reflection.Emit.AssemblyBuilderAccess.Run);
+        var moduleBuilder = assemblyBuilder.DefineDynamicModule("Module");
+        var enumBuilder = moduleBuilder.DefineEnum(enumTypeName,
+            System.Reflection.TypeAttributes.Public, typeof(int));
+
+        for (int i = 0; i < values.Count; i++)
+        {
+            var sanitized = SanitizeIdentifier(values[i]);
+            if (!string.IsNullOrEmpty(sanitized))
+                enumBuilder.DefineLiteral(sanitized, i);
+        }
+
+        var created = enumBuilder.CreateType();
+        if (created == null)
+            throw new InvalidOperationException($"Failed to create enum type from values: {string.Join(", ", values)}");
+
+        return created;
+    }
+
+    private static string SanitizeIdentifier(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+            return string.Empty;
+
+        var sb = new StringBuilder();
+        foreach (var c in input)
+        {
+            if (char.IsLetterOrDigit(c) || c == '_')
+                sb.Append(c);
+        }
+
+        var result = sb.ToString();
+        if (result.Length == 0)
+            return string.Empty;
+        if (char.IsDigit(result[0]))
+            result = "_" + result;
+
+        return result;
+    }
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
+    private static AutoIdStrategy ParseIdStrategy(string? strategy)
+        => (strategy ?? "guid").ToLowerInvariant() switch
+        {
+            "sequential" => AutoIdStrategy.Sequential,
+            "none" => AutoIdStrategy.None,
+            _ => AutoIdStrategy.Guid
+        };
+
+    private static IReadOnlyList<string> ParsePipeList(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return Array.Empty<string>();
+
+        return value
+            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// FNV-1a hash of field ordinals and type names, used for migration-change detection.
+    /// </summary>
+    private static string ComputeSchemaHash(IEnumerable<RuntimeFieldModel> fields)
+    {
+        uint hash = 2166136261u;
+        foreach (var f in fields)
+        {
+            foreach (var c in f.Name)
+            {
+                hash ^= (byte)c;
+                hash *= 16777619u;
+            }
+
+            hash ^= (uint)f.Ordinal;
+            hash *= 16777619u;
+
+            foreach (var c in f.FieldType.ToString())
+            {
+                hash ^= (byte)c;
+                hash *= 16777619u;
+            }
+        }
+
+        return hash.ToString("x8");
+    }
+}
