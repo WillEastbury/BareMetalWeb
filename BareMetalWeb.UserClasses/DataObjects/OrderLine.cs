@@ -6,7 +6,7 @@ namespace BareMetalWeb.Data.DataObjects;
 public class OrderRow : RenderableDataObject
 {
     [DataField(Label = "Product", Order = 1, Required = true)]
-    [DataLookup(typeof(Product), DisplayField = "Name", SortField = "Name", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
+    [DataLookup(typeof(Product), DisplayField = "Name", SortField = "Name", SortDirection = SortDirection.Asc, CacheSeconds = 120, CopyFields = "Price->UnitPrice")]
     public string ProductId { get; set; } = string.Empty;
 
     [DataField(Label = "Quantity", Order = 2, Required = true)]
@@ -16,6 +16,7 @@ public class OrderRow : RenderableDataObject
     public decimal UnitPrice { get; set; }
 
     [DataField(Label = "Discount %", Order = 4, FieldType = Rendering.Models.FormFieldType.Decimal)]
+    [CopyFromParent("CustomerId", "customers", "DiscountPercent")]
     public decimal DiscountPercent { get; set; }
 
     [CalculatedField(Expression = "Quantity * UnitPrice")]
