@@ -11,12 +11,14 @@ public class Customer : RenderableDataObject
     public string Name { get; set; } = string.Empty;
 
     [DataField(Label = "Email", Order = 2, Required = true, FieldType = Rendering.Models.FormFieldType.Email)]
+    [DataIndex]
     public string Email { get; set; } = string.Empty;
 
     [DataField(Label = "Phone", Order = 3)]
     public string Phone { get; set; } = string.Empty;
 
     [DataField(Label = "Company", Order = 4)]
+    [DataIndex]
     public string Company { get; set; } = string.Empty;
 
     [DataField(Label = "Discount %", Order = 5, FieldType = Rendering.Models.FormFieldType.Decimal)]

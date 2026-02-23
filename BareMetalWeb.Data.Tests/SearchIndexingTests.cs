@@ -66,11 +66,11 @@ public class SearchIndexingTests : IDisposable
     {
         // Arrange
         var manager = new SearchIndexManager(_testRoot, _logger);
-        
-        // Act
-        var hasFields = manager.HasIndexedFields(typeof(User), out var fields);
-        
-        // Assert - User class doesn't have DataIndex attributes
+
+        // Use a local type that has no [DataIndex] attributes
+        var hasFields = manager.HasIndexedFields(typeof(NoIndexEntity), out var fields);
+
+        // Assert
         Assert.False(hasFields);
         Assert.Empty(fields);
     }

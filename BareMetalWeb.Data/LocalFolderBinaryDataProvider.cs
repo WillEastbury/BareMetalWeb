@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -31,6 +32,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private readonly IDataQueryEvaluator _queryEvaluator;
     private readonly IBufferedLogger? _logger;
     private readonly IndexStore _indexStore;
+    private readonly SearchIndexManager _searchIndexManager;
     private readonly ConcurrentDictionary<string, ClusteredPagedObjectStore> _clusteredStores = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _clusteredLocationMaps = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<Type, SchemaCache> _schemaCache = new();
@@ -53,6 +55,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         _queryEvaluator = queryEvaluator ?? new DataQueryEvaluator();
         _logger = logger;
         _indexStore = new IndexStore(this, logger!);
+        _searchIndexManager = new SearchIndexManager(rootPath, logger);
         Directory.CreateDirectory(_rootPath);
     }
 
@@ -257,6 +260,14 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         {
             var bytes = SerializeFor(_serializer, obj, schemaVersion);
             var store = GetClusteredStore(type.Name);
+
+            // Load existing object only on updates (existing location found) to track previous indexed field values.
+            // New inserts skip this load since there are no prior index entries to clean up.
+            T? oldObj = null;
+            List<PropertyInfo> indexedFields = new();
+            if (_searchIndexManager.HasIndexedFields(type, out indexedFields) && TryGetClusteredLocation(type.Name, obj.Id, out _))
+                oldObj = Load<T>(obj.Id);
+
             var location = store.Write(obj.Id, bytes);
             var map = GetClusteredLocationMap(type.Name);
             map.TryGetValue(obj.Id, out var existingLocation);
@@ -280,6 +291,23 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                 && !string.Equals(existingLocation, location, StringComparison.OrdinalIgnoreCase))
             {
                 store.Delete(existingLocation);
+            }
+
+            // Update secondary field indexes and full-text search index
+            if (indexedFields.Count > 0)
+            {
+                foreach (var prop in indexedFields)
+                {
+                    var newValue = prop.GetValue(obj)?.ToString() ?? string.Empty;
+                    if (oldObj != null)
+                    {
+                        var oldValue = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
+                        if (!string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
+                            _indexStore.AppendEntry(type.Name, prop.Name, oldValue, obj.Id, 'D');
+                    }
+                    _indexStore.AppendEntry(type.Name, prop.Name, newValue, obj.Id, 'A');
+                }
+                _searchIndexManager.IndexObject(obj);
             }
         }
         catch (Exception ex)
@@ -349,7 +377,6 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         if (!GetClusteredStore(type.Name).Exists())
             return Array.Empty<T>();
 
-        var locations = GetClusteredLocationMap(type.Name);
         var skip = query?.Skip ?? 0;
         var top = query?.Top ?? int.MaxValue;
         if (skip < 0)
@@ -357,6 +384,50 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         if (top <= 0)
             return Array.Empty<T>();
 
+        // Index-accelerated path: use secondary field index for simple Equals clauses
+        if (query != null && query.Clauses.Count > 0 && query.Groups.Count == 0
+            && _searchIndexManager.HasIndexedFields(type, out var indexedFields))
+        {
+            foreach (var clause in query.Clauses)
+            {
+                if (clause.Operator == QueryOperator.Equals && clause.Value != null)
+                {
+                    var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
+                    if (prop != null)
+                    {
+                        var fieldValue = clause.Value.ToString() ?? string.Empty;
+                        var fieldIndex = _indexStore.ReadIndex(type.Name, prop.Name);
+                        if (fieldIndex.Count == 0)
+                            break; // No index entries yet (empty store or index not yet populated); fall through to full scan
+
+                        IEnumerable<T> candidates;
+                        if (fieldIndex.TryGetValue(fieldValue, out var candidateIds))
+                        {
+                            var loaded = new List<T>(candidateIds.Count);
+                            foreach (var candidateId in candidateIds)
+                            {
+                                var obj = Load<T>(candidateId);
+                                if (obj != null)
+                                    loaded.Add(obj);
+                            }
+                            candidates = loaded;
+                        }
+                        else
+                        {
+                            return Array.Empty<T>();
+                        }
+
+                        var filtered = candidates.Where(item => _queryEvaluator.Matches(item, query));
+                        var sorted = _queryEvaluator.ApplySorts(filtered, query);
+                        if (skip > 0 || top != int.MaxValue)
+                            sorted = sorted.Skip(skip).Take(top);
+                        return sorted.ToList();
+                    }
+                }
+            }
+        }
+
+        var locations = GetClusteredLocationMap(type.Name);
         var canShortCircuit = query == null || query.Sorts.Count == 0;
         if (canShortCircuit)
         {
@@ -442,11 +513,11 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             }
         }
 
-        var filtered = all.Where(item => _queryEvaluator.Matches(item, query));
-        var sorted = _queryEvaluator.ApplySorts(filtered, query);
+        var filteredAll = all.Where(item => _queryEvaluator.Matches(item, query));
+        var sortedAll = _queryEvaluator.ApplySorts(filteredAll, query);
         if (skip > 0 || top != int.MaxValue)
-            sorted = sorted.Skip(skip).Take(top);
-        return sorted.ToList();
+            sortedAll = sortedAll.Skip(skip).Take(top);
+        return sortedAll.ToList();
     }
 
     public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
@@ -509,13 +580,31 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         if (string.IsNullOrWhiteSpace(id))
             throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
 
-        if (TryGetClusteredLocation(typeof(T).Name, id, out var location))
+        var type = typeof(T);
+        if (TryGetClusteredLocation(type.Name, id, out var location))
         {
-            var store = GetClusteredStore(typeof(T).Name);
+            // Load old object for field index cleanup before deleting
+            T? oldObj = null;
+            List<PropertyInfo> indexedFields = new();
+            if (_searchIndexManager.HasIndexedFields(type, out indexedFields))
+                oldObj = Load<T>(id);
+
+            var store = GetClusteredStore(type.Name);
             store.Delete(location);
-            _indexStore.AppendEntry(typeof(T).Name, ClusteredIndexFieldName, id, location, 'D', normalizeKey: false);
-            if (_clusteredLocationMaps.TryGetValue(typeof(T).Name, out var map))
+            _indexStore.AppendEntry(type.Name, ClusteredIndexFieldName, id, location, 'D', normalizeKey: false);
+            if (_clusteredLocationMaps.TryGetValue(type.Name, out var map))
                 map.TryRemove(id, out _);
+
+            // Remove from secondary field indexes and full-text search index
+            if (indexedFields.Count > 0 && oldObj != null)
+            {
+                foreach (var prop in indexedFields)
+                {
+                    var value = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
+                    _indexStore.AppendEntry(type.Name, prop.Name, value, id, 'D');
+                }
+                _searchIndexManager.RemoveObject(type, id);
+            }
         }
     }
 

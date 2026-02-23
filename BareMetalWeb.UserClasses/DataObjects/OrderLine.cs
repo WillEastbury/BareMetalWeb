@@ -7,6 +7,7 @@ public class OrderRow : RenderableDataObject
 {
     [DataField(Label = "Product", Order = 1, Required = true)]
     [DataLookup(typeof(Product), DisplayField = "Name", SortField = "Name", SortDirection = SortDirection.Asc, CacheSeconds = 120, CopyFields = "Price->UnitPrice")]
+    [DataIndex]
     public string ProductId { get; set; } = string.Empty;
 
     [DataField(Label = "Quantity", Order = 2, Required = true)]

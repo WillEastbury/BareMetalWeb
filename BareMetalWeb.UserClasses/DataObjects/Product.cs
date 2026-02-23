@@ -4,12 +4,14 @@ namespace BareMetalWeb.Data.DataObjects;
 public class Product : RenderableDataObject
 {
     [DataField(Label = "Name", Order = 1, Required = true)]
+    [DataIndex]
     public string Name { get; set; } = string.Empty;
 
     [DataField(Label = "SKU", Order = 2, Required = true)]
     public string Sku { get; set; } = string.Empty;
 
     [DataField(Label = "Category", Order = 3)]
+    [DataIndex]
     public string Category { get; set; } = string.Empty;
 
     [DataField(Label = "Unit Of Measure", Order = 4, Required = true)]
