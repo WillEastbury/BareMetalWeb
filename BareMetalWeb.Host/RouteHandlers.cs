@@ -2058,7 +2058,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var csrfToken = CsrfProtection.EnsureToken(context);
-        var fields = DataScaffold.BuildFormFields(meta, null, forCreate: true).ToList();
+        var fields = DataScaffold.BuildFormFields(meta, null, forCreate: true, cspNonce: context.GetCspNonce()).ToList();
         AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: true);
         fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken));
 
@@ -2129,7 +2129,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.SetStringValue("title", $"Create {WebUtility.HtmlEncode(meta.Name)}");
             context.SetStringValue("message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
-            var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: true, validationResult);
+            var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: true, validationResult, cspNonce: context.GetCspNonce());
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: true);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
             var createAction = isPopup ? $"/admin/data/{typeSlug}/create?popup=1" : $"/admin/data/{typeSlug}/create";
@@ -2204,7 +2204,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var csrfToken = CsrfProtection.EnsureToken(context);
-        var fields = DataScaffold.BuildFormFields(meta, instance, forCreate: false).ToList();
+        var fields = DataScaffold.BuildFormFields(meta, instance, forCreate: false, cspNonce: context.GetCspNonce()).ToList();
         AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: false);
         fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken));
 
@@ -2292,7 +2292,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.SetStringValue("title", $"Edit {WebUtility.HtmlEncode(meta.Name)}");
             context.SetStringValue("message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
-            var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: false, validationResult);
+            var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: false, validationResult, cspNonce: context.GetCspNonce());
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: false);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
             context.AddFormDefinition(new FormDefinition($"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit", "post", $"Save {meta.Name}", fields));
@@ -6030,9 +6030,9 @@ public sealed class RouteHandlers : IRouteHandlers
     /// Build form fields with per-field validation error messages attached.
     /// </summary>
     private static List<FormField> BuildFormFieldsWithErrors(
-        DataEntityMetadata meta, object instance, bool forCreate, ValidationResult validationResult)
+        DataEntityMetadata meta, object instance, bool forCreate, ValidationResult validationResult, string? cspNonce = null)
     {
-        var fields = DataScaffold.BuildFormFields(meta, instance, forCreate).ToList();
+        var fields = DataScaffold.BuildFormFields(meta, instance, forCreate, cspNonce: cspNonce).ToList();
         if (!validationResult.IsValid)
         {
             for (int i = 0; i < fields.Count; i++)
