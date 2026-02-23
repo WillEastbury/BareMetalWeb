@@ -115,8 +115,17 @@ public sealed class VirtualEntityJsonStore
 
     public async ValueTask<int> CountAsync(string entityTypeName, QueryDefinition? query, CancellationToken cancellationToken = default)
     {
+        var folder = GetEntityFolder(entityTypeName);
+        if (!Directory.Exists(folder))
+            return 0;
+
+        var files = Directory.GetFiles(folder, "*.json");
+        if (query == null)
+            return files.Length;
+
+        // Apply filter to get accurate count
         var results = await QueryAsync(entityTypeName, query, cancellationToken).ConfigureAwait(false);
-        return results.Count();
+        return results is ICollection<DynamicDataObject> col ? col.Count : results.Count();
     }
 
     // ── Query helpers ─────────────────────────────────────────────────────────

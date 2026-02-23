@@ -85,12 +85,7 @@ public static class VirtualEntityLoader
 
         // Build CRUD handlers backed by the JSON store
         var handlers = new DataEntityHandlers(
-            Create: () =>
-            {
-                var obj = new DynamicDataObject { EntityTypeName = entityTypeName };
-                obj.Id = Guid.NewGuid().ToString("N");
-                return obj;
-            },
+            Create: () => new DynamicDataObject { EntityTypeName = entityTypeName },
             LoadAsync: async (id, ct) =>
             {
                 var obj = await store.LoadAsync(entityTypeName, id, ct).ConfigureAwait(false);
@@ -252,10 +247,12 @@ public static class VirtualEntityLoader
         }
 
         var result = chars.ToString();
-        if (result.Length > 0 && char.IsDigit(result[0]))
+        if (result.Length == 0)
+            return "_";
+        if (char.IsDigit(result[0]))
             result = "_" + result;
 
-        return string.IsNullOrWhiteSpace(result) ? "_" : result;
+        return result;
     }
 
     // ── Lookup config ──────────────────────────────────────────────────────────
