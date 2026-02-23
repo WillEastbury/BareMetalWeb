@@ -112,6 +112,7 @@ public static class BareMetalWebExtensions
         appInfo.RegisterLookupApiRoutes(pageInfoFactory);       // must be before RegisterApiRoutes
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
         appInfo.RegisterVNextRoutes(pageInfoFactory);
+        appInfo.RegisterReportRoutes(pageInfoFactory);
 
         // Custom routes from caller
         configureRoutes?.Invoke(appInfo, routeHandlers, pageInfoFactory, mainTemplate);
