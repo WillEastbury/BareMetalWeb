@@ -21,7 +21,8 @@ const BareMetalRendering = (() => {
         if (f && f.lookupUrl) {
           try {
             const items = await BareMetalRest.call('GET', f.lookupUrl);
-            f.options = (Array.isArray(items) ? items : []).map(i => ({
+            const _lst = Array.isArray(items) ? items : (items?.data || []);
+            f.options = _lst.map(i => ({
               value: String(i[f.lookupValueField] ?? i.Id ?? i.id ?? ''),
               label: String(i[f.lookupDisplayField] ?? i.Name ?? i.name ?? '')
             }));
