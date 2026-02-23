@@ -78,6 +78,66 @@ public class ChildListEditorTests : IDisposable
     }
 
     [Fact]
+    public void BuildFormFields_WithCspNonce_IncludesNonceOnScriptTag()
+    {
+        // Arrange
+        var order = new Order
+        {
+            Id = "order-1",
+            OrderNumber = "ORD-001",
+            CustomerId = "cust-1",
+            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = "Open",
+            CurrencyId = "USD",
+            IsOpen = true
+        };
+
+        var meta = DataScaffold.GetEntityByType(typeof(Order));
+        Assert.NotNull(meta);
+
+        // Act - Build with a CSP nonce
+        var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false, cspNonce: "test-nonce-123");
+
+        // Assert - Find the OrderRows field
+        var orderRowsField = formFields.FirstOrDefault(f => f.Name == "OrderRows");
+        Assert.NotNull(orderRowsField);
+
+        // Verify the script tag includes the nonce attribute
+        Assert.Contains("<script nonce=\"test-nonce-123\">", orderRowsField.Html);
+    }
+
+    [Fact]
+    public void BuildFormFields_WithoutCspNonce_ScriptTagHasNoNonce()
+    {
+        // Arrange
+        var order = new Order
+        {
+            Id = "order-1",
+            OrderNumber = "ORD-001",
+            CustomerId = "cust-1",
+            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = "Open",
+            CurrencyId = "USD",
+            IsOpen = true
+        };
+
+        var meta = DataScaffold.GetEntityByType(typeof(Order));
+        Assert.NotNull(meta);
+
+        // Act - Build without a CSP nonce
+        var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
+
+        // Assert - Find the OrderRows field
+        var orderRowsField = formFields.FirstOrDefault(f => f.Name == "OrderRows");
+        Assert.NotNull(orderRowsField);
+
+        // Verify the script tag has no nonce attribute when none is provided
+        Assert.Contains("<script>", orderRowsField.Html);
+        Assert.DoesNotContain("nonce=", orderRowsField.Html);
+    }
+
+
+    [Fact]
     public void BuildFormFields_WithChildListLookupField_IncludesRefreshAndAddButtons()
     {
         // Arrange - Create an Order (OrderRow has a lookup field for Product)
@@ -117,6 +177,170 @@ public class ChildListEditorTests : IDisposable
         
         // Verify the select has the correct ID for the JavaScript to work
         Assert.Contains("id=\"modal_OrderRows_ProductId\"", orderRowsField.Html);
+    }
+
+    [Fact]
+    public void BuildFormFields_WithChildListCalculatedFields_RendersAsReadonlyWithExpression()
+    {
+        // Arrange - Create an Order (OrderRow has Subtotal and LineTotal as CalculatedField)
+        var order = new Order
+        {
+            Id = "order-1",
+            OrderNumber = "ORD-001",
+            CustomerId = "cust-1",
+            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = "Open",
+            CurrencyId = "USD",
+            IsOpen = true
+        };
+
+        var meta = DataScaffold.GetEntityByType(typeof(Order));
+        Assert.NotNull(meta);
+
+        // Act
+        var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
+        var orderRowsField = formFields.FirstOrDefault(f => f.Name == "OrderRows");
+        Assert.NotNull(orderRowsField);
+        var html = orderRowsField.Html!;
+
+        // Assert - Subtotal and LineTotal calculated fields render as readonly inputs
+        // with data-calculated="true" and data-expression attributes
+        Assert.Contains("data-field=\"Subtotal\"", html);
+        Assert.Contains("data-field=\"LineTotal\"", html);
+        Assert.Contains("data-calculated=\"true\"", html);
+        Assert.Contains("data-expression=", html);
+        // The calculator icon should be present
+        Assert.Contains("bi-calculator-fill", html);
+        // The readonly attribute should be present for calculated fields
+        Assert.Contains("readonly", html);
+    }
+
+    [Fact]
+    public void BuildFormFields_WithChildListCalculatedFields_EmitsRecalcJavaScript()
+    {
+        // Arrange
+        var order = new Order
+        {
+            Id = "order-1",
+            OrderNumber = "ORD-001",
+            CustomerId = "cust-1",
+            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = "Open",
+            CurrencyId = "USD",
+            IsOpen = true
+        };
+
+        var meta = DataScaffold.GetEntityByType(typeof(Order));
+        Assert.NotNull(meta);
+
+        // Act
+        var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
+        var orderRowsField = formFields.FirstOrDefault(f => f.Name == "OrderRows");
+        Assert.NotNull(orderRowsField);
+        var html = orderRowsField.Html!;
+
+        // Assert - JavaScript recalculation helpers are emitted
+        Assert.Contains("evalModalExpr", html);
+        Assert.Contains("recalcModal", html);
+        Assert.Contains("parseFieldValue", html);
+        // Input event listener uses debounce for performance
+        Assert.Contains("debouncedRecalcModal", html);
+        Assert.Contains("addEventListener('input'", html);
+        // Change event listener
+        Assert.Contains("addEventListener('change'", html);
+    }
+
+    [Fact]
+    public void BuildFormFields_WithLookupCopyFields_RendersDataCopyAttributes()
+    {
+        // Arrange - OrderRow.ProductId has CopyFields = "Price->UnitPrice"
+        var order = new Order
+        {
+            Id = "order-1",
+            OrderNumber = "ORD-001",
+            CustomerId = "cust-1",
+            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = "Open",
+            CurrencyId = "USD",
+            IsOpen = true
+        };
+
+        var meta = DataScaffold.GetEntityByType(typeof(Order));
+        Assert.NotNull(meta);
+
+        // Act
+        var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
+        var orderRowsField = formFields.FirstOrDefault(f => f.Name == "OrderRows");
+        Assert.NotNull(orderRowsField);
+        var html = orderRowsField.Html!;
+
+        // Assert - ProductId select has data-copy-entity and data-copy-fields attributes
+        Assert.Contains("data-copy-entity=", html);
+        Assert.Contains("data-copy-fields=\"Price-&gt;UnitPrice\"", html);
+        // JS for copy-entity handling is emitted
+        Assert.Contains("data-copy-entity", html);
+        Assert.Contains("bmw.lookup", html);
+    }
+
+    [Fact]
+    public void BuildFormFields_WithCopyFromParent_EmitsParentContextJavaScript()
+    {
+        // Arrange - OrderRow.DiscountPercent has [CopyFromParent("CustomerId", "customers", "DiscountPercent")]
+        var order = new Order
+        {
+            Id = "order-1",
+            OrderNumber = "ORD-001",
+            CustomerId = "cust-1",
+            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = "Open",
+            CurrencyId = "USD",
+            IsOpen = true
+        };
+
+        var meta = DataScaffold.GetEntityByType(typeof(Order));
+        Assert.NotNull(meta);
+
+        // Act
+        var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
+        var orderRowsField = formFields.FirstOrDefault(f => f.Name == "OrderRows");
+        Assert.NotNull(orderRowsField);
+        var html = orderRowsField.Html!;
+
+        // Assert - JS for CopyFromParent is emitted: looks for parent CustomerId and calls bmw.lookup
+        Assert.Contains("CustomerId", html);
+        Assert.Contains("customers", html);
+        Assert.Contains("DiscountPercent", html);
+        // Triggered only for new rows (idx===null)
+        Assert.Contains("idx===null", html);
+    }
+
+    [Fact]
+    public void BuildFormFields_ModalShowEvent_CallsRecalcModal()
+    {
+        // Arrange
+        var order = new Order
+        {
+            Id = "order-1",
+            OrderNumber = "ORD-001",
+            CustomerId = "cust-1",
+            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
+            Status = "Open",
+            CurrencyId = "USD",
+            IsOpen = true
+        };
+
+        var meta = DataScaffold.GetEntityByType(typeof(Order));
+        Assert.NotNull(meta);
+
+        // Act
+        var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
+        var orderRowsField = formFields.FirstOrDefault(f => f.Name == "OrderRows");
+        Assert.NotNull(orderRowsField);
+        var html = orderRowsField.Html!;
+
+        // Assert - show.bs.modal event calls recalcModal() after populating fields
+        Assert.Contains("show.bs.modal", html);
+        Assert.Contains("recalcModal();", html);
     }
 
     /// <summary>

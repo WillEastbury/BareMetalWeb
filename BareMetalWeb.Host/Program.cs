@@ -9,6 +9,7 @@ using BareMetalWeb.Host;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Interfaces;
+using BareMetalWeb.Rendering.Models;
 
 WebApplication app = WebApplication.Create();
 
@@ -191,6 +192,11 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
                 ["lookupDisplayField"] = f.Lookup?.DisplayField,
                 ["lookupFilterField"] = f.Lookup?.QueryField,
                 ["lookupFilterValue"] = f.Lookup?.QueryValue,
+                ["enumValues"] = f.FieldType == FormFieldType.Enum
+                    ? DataScaffold.BuildEnumOptions(f.Property.PropertyType)
+                        .Select(kv => new { value = kv.Key, label = kv.Value })
+                        .ToArray()
+                    : null,
                 ["upload"] = f.Upload == null ? null : new Dictionary<string, object?>
                 {
                     ["maxFileSizeBytes"] = f.Upload.MaxFileSizeBytes,
@@ -205,9 +211,12 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
     }));
     
+<<<<<<< fix/vnext-lookup-metadata
     // Lookup API routes are now registered in RegisterApiRoutes (RouteRegistrationExtensions.cs)
     // before the parameterised /api/{type} routes to prevent route shadowing.
 
+=======
+>>>>>>> main
     // Ideas/search page
     appInfo.RegisterRoute("GET /ideas/search", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
     {

@@ -317,7 +317,7 @@ public static class DataScaffold
         return QueryOperator.Contains;
     }
 
-    public static IReadOnlyList<FormField> BuildFormFields(DataEntityMetadata metadata, object? instance, bool forCreate)
+    public static IReadOnlyList<FormField> BuildFormFields(DataEntityMetadata metadata, object? instance, bool forCreate, string? cspNonce = null)
     {
         var fields = new List<FormField>();
         foreach (var field in metadata.Fields.OrderBy(f => f.Order))
@@ -421,7 +421,7 @@ public static class DataScaffold
             var value = instance != null ? field.Property.GetValue(instance) : null;
             if (IsChildListType(field.Property.PropertyType, out var childType))
             {
-                var html = BuildChildListEditorHtml(field, childType, value as IEnumerable);
+                var html = BuildChildListEditorHtml(field, childType, value as IEnumerable, cspNonce);
                 fields.Add(new FormField(
                     FormFieldType.CustomHtml,
                     field.Name,
@@ -433,7 +433,7 @@ public static class DataScaffold
 
             if (IsDictionaryType(field.Property.PropertyType, out var valueType))
             {
-                var html = BuildDictionaryEditorHtml(field, valueType, value as IEnumerable);
+                var html = BuildDictionaryEditorHtml(field, valueType, value as IEnumerable, cspNonce);
                 fields.Add(new FormField(
                     FormFieldType.CustomHtml,
                     field.Name,
@@ -1008,7 +1008,7 @@ public static class DataScaffold
         {
             var rootId = GetIdValue(rootItem) ?? string.Empty;
             html.Append($"<div class=\"bm-data-tree-header mb-3\">Organization Chart - {WebUtility.HtmlEncode(GetDisplayValue(metadata, rootItem))}</div>");
-            RenderOrgChartNode(html, metadata, rootItem, itemsList, rootId, basePath, 0);
+            RenderOrgChartNode(html, metadata, rootItem, itemsList, selectedId ?? string.Empty, basePath, 0);
         }
 
         html.Append("</div>");
@@ -1539,7 +1539,7 @@ public static class DataScaffold
         return ToDisplayString(value, type);
     }
 
-    private static IReadOnlyList<KeyValuePair<string, string>> BuildEnumOptions(Type type)
+    public static IReadOnlyList<KeyValuePair<string, string>> BuildEnumOptions(Type type)
     {
         var effectiveType = Nullable.GetUnderlyingType(type) ?? type;
         if (!effectiveType.IsEnum)
@@ -1755,7 +1755,13 @@ public static class DataScaffold
         Type FieldType,
         bool Required,
         FormFieldType FormFieldType,
-        IReadOnlyList<KeyValuePair<string, string>>? LookupOptions
+        IReadOnlyList<KeyValuePair<string, string>>? LookupOptions,
+        CalculatedFieldAttribute? Calculated,
+        string? LookupTargetSlug,
+        string? LookupCopyFields,
+        string? CopyFromParentField,
+        string? CopyFromParentSlug,
+        string? CopyFromParentSourceField
     );
 
     private static bool IsChildListType(Type type, out Type childType)
@@ -1797,7 +1803,7 @@ public static class DataScaffold
                 : fieldAttribute.FieldType;
 
             // Don't resolve lookups in this simplified version
-            fields.Add(new ChildFieldMeta(prop.Name, label, prop.PropertyType, required, effectiveFieldType, null));
+            fields.Add(new ChildFieldMeta(prop.Name, label, prop.PropertyType, required, effectiveFieldType, null, null, null, null, null, null, null));
         }
 
         return fields;
@@ -1830,6 +1836,8 @@ public static class DataScaffold
                 : fieldAttribute.FieldType;
 
             IReadOnlyList<KeyValuePair<string, string>>? lookupOptions = null;
+            string? lookupTargetSlug = null;
+            string? lookupCopyFields = null;
             if (lookupAttribute != null)
             {
                 var lookup = new DataLookupConfig(
@@ -1845,19 +1853,41 @@ public static class DataScaffold
                 );
                 lookupOptions = GetLookupOptions(lookup);
                 effectiveFieldType = FormFieldType.LookupList;
+                if (!string.IsNullOrEmpty(lookupAttribute.CopyFields))
+                {
+                    var targetMeta = GetEntityByType(lookupAttribute.TargetType);
+                    lookupTargetSlug = targetMeta?.Slug;
+                    lookupCopyFields = lookupAttribute.CopyFields;
+                }
             }
             else if (effectiveFieldType == FormFieldType.Enum)
             {
                 lookupOptions = BuildEnumOptions(prop.PropertyType);
             }
 
-            fields.Add(new ChildFieldMeta(prop.Name, label, prop.PropertyType, required, effectiveFieldType, lookupOptions));
+            var calculatedAttr = prop.GetCustomAttribute<CalculatedFieldAttribute>();
+
+            var copyFromParentAttr = prop.GetCustomAttribute<CopyFromParentAttribute>();
+
+            fields.Add(new ChildFieldMeta(
+                Name: prop.Name,
+                Label: label,
+                FieldType: prop.PropertyType,
+                Required: required,
+                FormFieldType: effectiveFieldType,
+                LookupOptions: lookupOptions,
+                Calculated: calculatedAttr,
+                LookupTargetSlug: lookupTargetSlug,
+                LookupCopyFields: lookupCopyFields,
+                CopyFromParentField: copyFromParentAttr?.ParentFieldName,
+                CopyFromParentSlug: copyFromParentAttr?.EntitySlug,
+                CopyFromParentSourceField: copyFromParentAttr?.SourceFieldName));
         }
 
         return fields;
     }
 
-    private static string BuildChildListEditorHtml(DataFieldMetadata field, Type childType, IEnumerable? listValue)
+    private static string BuildChildListEditorHtml(DataFieldMetadata field, Type childType, IEnumerable? listValue, string? cspNonce = null)
     {
         var fieldId = WebUtility.HtmlEncode(field.Name);
         var rows = new List<Dictionary<string, string>>();
@@ -1915,7 +1945,23 @@ public static class DataScaffold
             var inputType = MapChildInputType(child.FieldType, out var step);
             sb.Append("<div class=\"mb-3\">");
             sb.Append($"<label class=\"form-label\">{WebUtility.HtmlEncode(child.Label)}</label>");
-            if (child.LookupOptions != null)
+            if (child.Calculated != null)
+            {
+                // Calculated fields: render as readonly with expression for JS recalculation
+                string jsExpression;
+                try
+                {
+                    var parser = new ExpressionParser();
+                    var ast = parser.Parse(child.Calculated.Expression);
+                    jsExpression = ast.ToJavaScript();
+                }
+                catch
+                {
+                    jsExpression = "0";
+                }
+                sb.Append($"<div class=\"input-group\"><input class=\"form-control\" type=\"text\" readonly data-field=\"{WebUtility.HtmlEncode(child.Name)}\" data-calculated=\"true\" data-expression=\"{WebUtility.HtmlEncode(jsExpression)}\" /><span class=\"input-group-text\" title=\"Calculated field\"><i class=\"bi bi-calculator-fill\"></i></span></div>");
+            }
+            else if (child.LookupOptions != null)
             {
                 // Check if this is a lookup field (not just an enum) to add refresh/add buttons
                 // Re-extract the lookup attribute from the child type's property
@@ -1938,7 +1984,11 @@ public static class DataScaffold
                 }
                 
                 var modalFieldId = $"modal_{WebUtility.HtmlEncode(field.Name)}_{WebUtility.HtmlEncode(child.Name)}";
-                sb.Append($"<select class=\"form-select\" data-field=\"{WebUtility.HtmlEncode(child.Name)}\" id=\"{modalFieldId}\">");
+                // Add data-copy-entity and data-copy-fields attributes if CopyFields is configured
+                var copyEntityAttr = !string.IsNullOrEmpty(child.LookupTargetSlug) && !string.IsNullOrEmpty(child.LookupCopyFields)
+                    ? $" data-copy-entity=\"{WebUtility.HtmlEncode(child.LookupTargetSlug!)}\" data-copy-fields=\"{WebUtility.HtmlEncode(child.LookupCopyFields!)}\""
+                    : string.Empty;
+                sb.Append($"<select class=\"form-select\" data-field=\"{WebUtility.HtmlEncode(child.Name)}\" id=\"{modalFieldId}\"{copyEntityAttr}>");
                 sb.Append("<option value=\"\"></option>");
                 foreach (var option in child.LookupOptions)
                 {
@@ -1974,7 +2024,8 @@ public static class DataScaffold
         sb.Append("<button type=\"button\" class=\"btn btn-primary\" data-action=\"save\">Save</button>");
         sb.Append("</div></div></div></div>");
 
-        sb.Append("<script>");
+        var nonceAttr = string.IsNullOrEmpty(cspNonce) ? string.Empty : $" nonce=\"{WebUtility.HtmlEncode(cspNonce)}\"";
+        sb.Append($"<script{nonceAttr}>");
         sb.Append("document.addEventListener('DOMContentLoaded',function(){");
         sb.Append($"var input=document.getElementById('{EscapeJs(field.Name)}');");
         sb.Append($"var table=document.getElementById('{EscapeJs(tableId)}');");
@@ -1999,6 +2050,15 @@ public static class DataScaffold
         sb.Append(JsonSerializer.Serialize(lookupMaps));
         sb.Append(";" );
 
+        // Modal-scoped calculated field helpers.
+        // Note: eval() is used to evaluate expressions from CalculatedFieldAttribute, which are
+        // developer-defined compile-time attributes, not user input. The local parseFieldValue
+        // variable shadows any global definition, scoping reads to this modal form.
+        sb.Append("var recalcTimer=null;");
+        sb.Append("function evalModalExpr(expr){var parseFieldValue=function(n){var f=form.querySelector('[data-field=\"'+n+'\"]');if(!f)return 0;if(f.type==='checkbox')return f.checked?1:0;var v=parseFloat(f.value);return isNaN(v)?0:v;};try{return eval(expr);}catch(e){return 0;}}");
+        sb.Append("function recalcModal(){form.querySelectorAll('[data-calculated=\"true\"]').forEach(function(c){var expr=c.getAttribute('data-expression');if(!expr)return;var result=evalModalExpr(expr);c.value=(typeof result==='number'&&!isNaN(result))?parseFloat(result).toFixed(2):'';});}");
+        sb.Append("function debouncedRecalcModal(){if(recalcTimer)clearTimeout(recalcTimer);recalcTimer=setTimeout(recalcModal,100);}");
+
         sb.Append("function render(){tbody.innerHTML='';data.forEach(function(row,idx){var tr=document.createElement('tr');" );
         sb.Append("var actions=document.createElement('td');actions.setAttribute('data-label','Actions');" );
         sb.Append("actions.innerHTML='<button type=\\\"button\\\" class=\\\"btn btn-sm btn-outline-info me-1\\\" data-action=\\\"edit\\\" data-index=\\\"'+idx+'\\\"><i class=\\\"bi bi-pencil\\\" aria-hidden=\\\"true\\\"></i></button>'+");
@@ -2012,10 +2072,39 @@ public static class DataScaffold
         }
         sb.Append("tbody.appendChild(tr);});input.value=JSON.stringify(data);}" );
         sb.Append("render();" );
+
+        // Modal show event: populate fields, recalculate, and apply parent-context copies for new rows
         sb.Append("modal.addEventListener('show.bs.modal',function(ev){var btn=ev.relatedTarget;" );
         sb.Append("if(!btn){return;}var idx=btn.getAttribute('data-index');" );
         sb.Append("form.querySelector('[name=_rowIndex]').value=(idx===null?'-1':idx);" );
-        sb.Append("var fields=form.querySelectorAll('[data-field]');fields.forEach(function(f){var name=f.getAttribute('data-field');if(idx===null){if(f.type==='checkbox'){f.checked=false;}else{f.value='';}}else{var row=data[parseInt(idx,10)]||{};if(f.type==='checkbox'){f.checked=(row[name]==='true');}else{f.value=(row[name]||'');}}});});" );
+        sb.Append("var fields=form.querySelectorAll('[data-field]');fields.forEach(function(f){var name=f.getAttribute('data-field');if(idx===null){if(f.type==='checkbox'){f.checked=false;}else{f.value='';}}else{var row=data[parseInt(idx,10)]||{};if(f.type==='checkbox'){f.checked=(row[name]==='true');}else{f.value=(row[name]||'');}}});");
+        sb.Append("recalcModal();");
+
+        // CopyFromParent: for new rows, look up parent-form entity and pre-fill this field
+        var copyFromParentFields = childFields.Where(c => c.CopyFromParentField != null).ToList();
+        if (copyFromParentFields.Count > 0)
+        {
+            sb.Append("if(idx===null){");
+            foreach (var cpField in copyFromParentFields)
+            {
+                var parentFieldJs = EscapeJs(cpField.CopyFromParentField!);
+                var entitySlugJs = EscapeJs(cpField.CopyFromParentSlug!);
+                var srcFieldJs = EscapeJs(cpField.CopyFromParentSourceField!);
+                var targetFieldJs = EscapeJs(cpField.Name);
+                sb.Append($"(function(){{var pe=document.querySelector('[name=\"{parentFieldJs}\"]');if(pe&&pe.value&&window.bmw&&bmw.lookup){{bmw.lookup('{entitySlugJs}',pe.value).then(function(ent){{var df=form.querySelector('[data-field=\"{targetFieldJs}\"]');if(df&&df.getAttribute('data-calculated')!=='true'&&!df.value){{df.value=ent['{srcFieldJs}']!==undefined?String(ent['{srcFieldJs}']):'';df.dispatchEvent(new Event('input',{{bubbles:true}}));}}recalcModal();}}).catch(function(){{}});}}}})();");
+            }
+            sb.Append("}");
+        }
+
+        sb.Append("});" );
+
+        // Form input/change listeners for real-time recalculation and lookup field copy
+        sb.Append("form.addEventListener('input',function(ev){if(ev.target.getAttribute('data-calculated')==='true')return;debouncedRecalcModal();});");
+        sb.Append("form.addEventListener('change',function(ev){var t=ev.target;if(t.getAttribute('data-calculated')==='true')return;");
+        sb.Append("if(t.hasAttribute('data-copy-entity')&&t.value&&window.bmw&&bmw.lookup){");
+        sb.Append("var entitySlug=t.getAttribute('data-copy-entity');var spec=t.getAttribute('data-copy-fields')||'';");
+        sb.Append("bmw.lookup(entitySlug,t.value).then(function(ent){spec.split(',').forEach(function(pair){var parts=pair.split('->');if(parts.length!==2)return;var src=parts[0].trim(),dst=parts[1].trim();var val=ent[src]!==undefined?ent[src]:'';var df=form.querySelector('[data-field=\"'+dst+'\"]');if(df&&df.getAttribute('data-calculated')!=='true'){df.value=val;df.dispatchEvent(new Event('input',{bubbles:true}));}});recalcModal();}).catch(function(){});}");
+        sb.Append("recalcModal();});");
         sb.Append("modal.addEventListener('click',function(ev){var saveBtn=ev.target.closest('[data-action=save]');if(!saveBtn){return;}ev.preventDefault();" );
         sb.Append("var idx=parseInt(form.querySelector('[name=_rowIndex]').value,10);" );
         sb.Append("var row={};form.querySelectorAll('[data-field]').forEach(function(f){var name=f.getAttribute('data-field');if(f.type==='checkbox'){row[name]=f.checked?'true':'false';}else{row[name]=f.value||'';}});" );
@@ -2187,7 +2276,7 @@ public static class DataScaffold
         return false;
     }
 
-    private static string BuildDictionaryEditorHtml(DataFieldMetadata field, Type valueType, IEnumerable? dictValue)
+    private static string BuildDictionaryEditorHtml(DataFieldMetadata field, Type valueType, IEnumerable? dictValue, string? cspNonce = null)
     {
         var rows = new List<Dictionary<string, string>>();
         if (dictValue is IDictionary dictionary)
@@ -2231,7 +2320,8 @@ public static class DataScaffold
         sb.Append("<div class=\"modal-footer\"><button type=\"button\" class=\"btn btn-secondary\" data-bs-dismiss=\"modal\">Cancel</button><button type=\"button\" class=\"btn btn-primary\" data-action=\"save\">Save</button></div>");
         sb.Append("</div></div></div>");
 
-        sb.Append("<script>");
+        var nonceAttr = string.IsNullOrEmpty(cspNonce) ? string.Empty : $" nonce=\"{WebUtility.HtmlEncode(cspNonce)}\"";
+        sb.Append($"<script{nonceAttr}>");
         sb.Append("document.addEventListener('DOMContentLoaded',function(){");
         sb.Append($"var input=document.getElementById('{EscapeJs(field.Name)}');");
         sb.Append($"var table=document.getElementById('{EscapeJs(tableId)}');");

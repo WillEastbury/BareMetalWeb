@@ -13,6 +13,14 @@ public sealed class DataLookupAttribute : Attribute
     public SortDirection SortDirection { get; set; } = SortDirection.Asc;
     public int CacheSeconds { get; set; } = 60;
 
+    /// <summary>
+    /// Comma-separated field copy mappings applied when a lookup value is selected in a sub-entity modal.
+    /// Format: "SourceField->TargetField" or multiple: "Price->UnitPrice,Name->ProductName".
+    /// When the lookup selection changes, the specified fields are copied from the referenced entity
+    /// to the corresponding local fields.
+    /// </summary>
+    public string? CopyFields { get; set; }
+
     public DataLookupAttribute(Type targetType)
     {
         TargetType = targetType;
