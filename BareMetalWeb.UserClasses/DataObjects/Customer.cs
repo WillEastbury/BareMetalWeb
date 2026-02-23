@@ -11,24 +11,29 @@ public class Customer : RenderableDataObject
     public string Name { get; set; } = string.Empty;
 
     [DataField(Label = "Email", Order = 2, Required = true, FieldType = Rendering.Models.FormFieldType.Email)]
+    [DataIndex]
     public string Email { get; set; } = string.Empty;
 
     [DataField(Label = "Phone", Order = 3)]
     public string Phone { get; set; } = string.Empty;
 
     [DataField(Label = "Company", Order = 4)]
+    [DataIndex]
     public string Company { get; set; } = string.Empty;
 
-    [DataField(Label = "Address", Order = 5)]
+    [DataField(Label = "Discount %", Order = 5, FieldType = Rendering.Models.FormFieldType.Decimal)]
+    public decimal DiscountPercent { get; set; }
+
+    [DataField(Label = "Address", Order = 6)]
     [DataLookup(typeof(Address), DisplayField = "Label", SortField = "Label", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
     public string AddressId { get; set; } = string.Empty;
 
-    [DataField(Label = "Active", Order = 6)]
+    [DataField(Label = "Active", Order = 7)]
     public bool IsActive { get; set; } = true;
 
-    [DataField(Label = "Notes", Order = 7)]
+    [DataField(Label = "Notes", Order = 8)]
     public string Notes { get; set; } = string.Empty;
 
-    [DataField(Label = "Tags", Order = 8)]
+    [DataField(Label = "Tags", Order = 9)]
     public List<string> Tags { get; set; } = new();
 }

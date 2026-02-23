@@ -359,9 +359,10 @@ public class BareMetalWebServer : IBareWebHost
                 BufferedLogger.LogInfo($"{path}|ALL {requestPath}|200|{sourceIp}");
                 return;
             }
-            // Pattern match fallback
+            // Pattern match fallback — iterate most-specific routes first so that literal
+            // segments (e.g. /api/_lookup/{type}) beat generic routes (e.g. /api/{type}/{id}).
             bool methodNotAllowed = false;
-            foreach (var kvp in routes)
+            foreach (var kvp in routes.OrderByDescending(r => CountLiteralSegments(r.Key)))
             {
                 if (!TryParseRoute(kvp.Key, out var verb, out var templatePath))
                     continue;
@@ -676,6 +677,19 @@ public class BareMetalWebServer : IBareWebHost
         }
 
         return builder.Uri.ToString();
+    }
+
+    /// <summary>
+    /// Counts literal (non-parameterised) path segments in a route key such as
+    /// "GET /api/_lookup/{type}". More literal segments = higher specificity.
+    /// </summary>
+    private static int CountLiteralSegments(string routeKey)
+    {
+        var space = routeKey.IndexOf(' ');
+        if (space < 0) return 0;
+        var template = routeKey[(space + 1)..];
+        return template.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Count(s => !s.StartsWith('{') && !s.StartsWith('*'));
     }
 
     private static string BuildMenuCacheKey(BareMetalWeb.Data.User? user, int routesVersion)

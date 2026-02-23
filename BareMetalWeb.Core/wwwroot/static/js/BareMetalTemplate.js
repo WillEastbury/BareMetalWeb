@@ -35,7 +35,18 @@ const BareMetalTemplate = (() => {
 
       let inp;
       if (f.type === 'boolean') {
-        inp = mk('input', { type: 'checkbox', className: 'form-check-input' });
+        // Use Bootstrap form-check: checkbox then label (avoids label-then-checkbox odd layout)
+        const wrap = mk('div', { className: 'form-check mt-2' });
+        const chkId = 'f_' + name;
+        inp = mk('input', { type: 'checkbox', className: 'form-check-input', id: chkId });
+        inp.setAttribute('rv-value', name);
+        if (f.required) inp.required = true;
+        const chkLabel = mk('label', { className: 'form-check-label', htmlFor: chkId,
+          textContent: f.label || name.replace(/([A-Z])/g, ' $1').trim() });
+        wrap.append(inp, chkLabel);
+        col.appendChild(wrap);
+        row.appendChild(col);
+        return; // skip standard append below
       } else if (f.type === 'textarea') {
         inp = mk('textarea', { className: 'form-control', rows: f.rows || 3 });
       } else if (f.type === 'select') {
@@ -60,7 +71,27 @@ const BareMetalTemplate = (() => {
       // Readonly/computed fields are shown with their value but cannot be edited
       if (f.readonly) { inp.disabled = true; inp.className += ' bg-light'; }
 
-      col.append(lbl, inp);
+      // For lookup selects: wrap in input-group and add Add/Refresh buttons
+      if (f.type === 'select' && f.lookupUrl) {
+        const grp = mk('div', { className: 'input-group input-group-sm' });
+        grp.appendChild(inp);
+        const targetSlug = f.lookupUrl.replace(/[?#].*$/, '').replace(/\/$/, '').split('/').pop();
+        const addBtn = mk('a', {
+          href: '/vnext/' + targetSlug + '/create',
+          className: 'btn btn-outline-secondary', title: 'Add new', target: '_blank'
+        });
+        addBtn.innerHTML = '<i class="bi bi-plus"></i>';
+        const refBtn = mk('button', { type: 'button', className: 'btn btn-outline-secondary', title: 'Refresh' });
+        refBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i>';
+        refBtn.dataset.lookupRefresh = name;
+        refBtn.dataset.lookupUrl = f.lookupUrl;
+        refBtn.dataset.lookupValueField = f.lookupValueField || 'id';
+        refBtn.dataset.lookupDisplayField = f.lookupDisplayField || 'name';
+        grp.append(addBtn, refBtn);
+        col.append(lbl, grp);
+      } else {
+        col.append(lbl, inp);
+      }
       row.appendChild(col);
     });
 
@@ -83,7 +114,17 @@ const BareMetalTemplate = (() => {
     const tbody = tbl.createTBody();
     items.forEach(item => {
       const tr = tbody.insertRow();
-      names.forEach(n => { tr.insertCell().textContent = resolve(n, item[n]); });
+      names.forEach(n => {
+        const td = tr.insertCell();
+        if (fields[n]?.type === 'boolean') {
+          const v = item[n];
+          td.innerHTML = (v === true || v === 'true' || v === 1)
+            ? '<span class="badge bg-success"><i class="bi bi-check-lg"></i></span>'
+            : '<span class="badge bg-secondary"><i class="bi bi-x-lg"></i></span>';
+        } else {
+          td.textContent = resolve(n, item[n]);
+        }
+      });
       const td = tr.insertCell(); td.className = 'text-end';
       const id = item.id || item.Id || '';
       if (cb.onView) {

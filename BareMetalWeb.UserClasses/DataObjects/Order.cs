@@ -11,12 +11,14 @@ public class Order : RenderableDataObject
 
     [DataField(Label = "Customer", Order = 2, Required = true)]
     [DataLookup(typeof(Customer), DisplayField = "Name", SortField = "Name", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
+    [DataIndex]
     public string CustomerId { get; set; } = string.Empty;
 
     [DataField(Label = "Order Date", Order = 3, Required = true)]
     public DateOnly OrderDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
 
     [DataField(Label = "Status", Order = 4, Required = true)]
+    [DataIndex]
     public string Status { get; set; } = "Open";
 
     [DataField(Label = "Currency", Order = 5, Required = true)]

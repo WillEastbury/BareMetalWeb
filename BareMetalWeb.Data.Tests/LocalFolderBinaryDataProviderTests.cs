@@ -1,7 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
+using BareMetalWeb.Data;
 using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
@@ -164,5 +168,120 @@ public class LocalFolderBinaryDataProviderTests : IDisposable
             var expectedLockPath = Path.Combine(_testRoot, "Index", "TestEntity", "TestField.log.lock");
             Assert.True(File.Exists(expectedLockPath), $"Lock file should exist at {expectedLockPath}");
         }
+    }
+
+    // --- Secondary field index wiring tests (use User which has [DataIndex] on UserName and Email) ---
+
+    [Fact]
+    public void Save_WithIndexedField_BuildsFieldIndex()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<User>();
+        var provider = new LocalFolderBinaryDataProvider(_testRoot);
+        var user = new User { Id = "u1", UserName = "alice", Email = "alice@test.com" };
+
+        // Act
+        provider.Save(user);
+
+        // Assert - field index paged file should exist for UserName
+        var indexFile = Path.Combine(_testRoot, "Paged", "User", "UserName_index.page");
+        Assert.True(File.Exists(indexFile), "Field index paged file should exist after Save");
+    }
+
+    [Fact]
+    public void Query_WithIndexedFieldEquals_UsesFieldIndex()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<User>();
+        var provider = new LocalFolderBinaryDataProvider(_testRoot);
+        var u1 = new User { Id = "u1", UserName = "alice", Email = "alice@test.com" };
+        var u2 = new User { Id = "u2", UserName = "bob", Email = "bob@test.com" };
+        var u3 = new User { Id = "u3", UserName = "charlie", Email = "charlie@test.com" };
+        provider.Save(u1);
+        provider.Save(u2);
+        provider.Save(u3);
+
+        // Act - query by indexed field
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause> { new QueryClause { Field = "UserName", Operator = QueryOperator.Equals, Value = "alice" } }
+        };
+        var results = provider.Query<User>(query).ToList();
+
+        // Assert - exactly 1 result
+        Assert.Single(results);
+        Assert.Equal("alice", results[0].UserName);
+    }
+
+    [Fact]
+    public void Query_WithIndexedFieldEquals_NoResults_ReturnsEmpty()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<User>();
+        var provider = new LocalFolderBinaryDataProvider(_testRoot);
+        var u1 = new User { Id = "u1", UserName = "alice", Email = "alice@test.com" };
+        provider.Save(u1);
+
+        // Act
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause> { new QueryClause { Field = "UserName", Operator = QueryOperator.Equals, Value = "nonexistent" } }
+        };
+        var results = provider.Query<User>(query).ToList();
+
+        // Assert
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public void Delete_WithIndexedField_RemovesFromFieldIndex()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<User>();
+        var provider = new LocalFolderBinaryDataProvider(_testRoot);
+        var user = new User { Id = "del1", UserName = "todelete", Email = "del@test.com" };
+        provider.Save(user);
+
+        // Act
+        provider.Delete<User>("del1");
+
+        // Assert - entity no longer found by index query
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause> { new QueryClause { Field = "UserName", Operator = QueryOperator.Equals, Value = "todelete" } }
+        };
+        var results = provider.Query<User>(query).ToList();
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public void Save_UpdateWithChangedIndexedField_UpdatesFieldIndex()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<User>();
+        var provider = new LocalFolderBinaryDataProvider(_testRoot);
+        var user = new User { Id = "upd1", UserName = "original", Email = "orig@test.com" };
+        provider.Save(user);
+
+        // Act - change the indexed field value
+        user.UserName = "updated";
+        provider.Save(user);
+
+        // Assert - old value no longer returns this entity
+        var queryOld = new QueryDefinition
+        {
+            Clauses = new List<QueryClause> { new QueryClause { Field = "UserName", Operator = QueryOperator.Equals, Value = "original" } }
+        };
+        var oldResults = provider.Query<User>(queryOld).ToList();
+        Assert.Empty(oldResults);
+
+        // Assert - new value returns this entity
+        var queryNew = new QueryDefinition
+        {
+            Clauses = new List<QueryClause> { new QueryClause { Field = "UserName", Operator = QueryOperator.Equals, Value = "updated" } }
+        };
+        var newResults = provider.Query<User>(queryNew).ToList();
+        Assert.Single(newResults);
+        Assert.Equal("upd1", newResults[0].Id);
     }
 }

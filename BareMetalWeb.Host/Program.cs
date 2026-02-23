@@ -9,6 +9,7 @@ using BareMetalWeb.Host;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Interfaces;
+using BareMetalWeb.Rendering.Models;
 
 WebApplication app = WebApplication.Create();
 
@@ -191,6 +192,11 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
                 ["lookupDisplayField"] = f.Lookup?.DisplayField,
                 ["lookupFilterField"] = f.Lookup?.QueryField,
                 ["lookupFilterValue"] = f.Lookup?.QueryValue,
+                ["enumValues"] = f.FieldType == FormFieldType.Enum
+                    ? DataScaffold.BuildEnumOptions(f.Property.PropertyType)
+                        .Select(kv => new { value = kv.Key, label = kv.Value })
+                        .ToArray()
+                    : null,
                 ["upload"] = f.Upload == null ? null : new Dictionary<string, object?>
                 {
                     ["maxFileSizeBytes"] = f.Upload.MaxFileSizeBytes,
@@ -204,13 +210,6 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
     }));
-    
-    // Lookup API endpoints for dynamic client-side queries
-    // More specific routes must be registered first to avoid {id} matching literal segments
-    appInfo.RegisterRoute("GET /api/_lookup/{type}/_field/{id}/{fieldName}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityFieldHandler));
-    appInfo.RegisterRoute("GET /api/_lookup/{type}/_aggregate", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.AggregateEntitiesHandler));
-    appInfo.RegisterRoute("GET /api/_lookup/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityByIdHandler));
-    appInfo.RegisterRoute("GET /api/_lookup/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.QueryEntitiesHandler));
     
     // Ideas/search page
     appInfo.RegisterRoute("GET /ideas/search", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>

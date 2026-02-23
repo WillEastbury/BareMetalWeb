@@ -10,12 +10,14 @@ namespace BareMetalWeb.Data;
 public class User : BaseDataObject
 {
     [DataField(Label = "Username", Order = 1, Required = true, List = true, View = true, Edit = true, Create = true, Placeholder = "username")]
+    [DataIndex]
     public string UserName { get; set; } = string.Empty;
 
     [DataField(Label = "Display Name", Order = 2, Required = true, List = true, View = true, Edit = true, Create = true, Placeholder = "Display name")]
     public string DisplayName { get; set; } = string.Empty;
 
     [DataField(Label = "Email", Order = 3, Required = true, List = true, View = true, Edit = true, Create = true, FieldType = FormFieldType.Email, Placeholder = "you@example.com")]
+    [DataIndex]
     public string Email { get; set; } = string.Empty;
     public string PasswordHash { get; set; } = string.Empty;
     public string PasswordSalt { get; set; } = string.Empty;

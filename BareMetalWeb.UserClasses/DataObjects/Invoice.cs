@@ -21,6 +21,7 @@ public class Invoice : RenderableDataObject
 
     [DataField(Label = "Customer", Order = 1, Required = true)]
     [DataLookup(typeof(Customer), DisplayField = "Name", SortField = "Name", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
+    [DataIndex]
     public string CustomerId { get; set; } = string.Empty;
 
     [DataField(Label = "Invoice Date", Order = 2, Required = true, FieldType = Rendering.Models.FormFieldType.DateOnly)]
