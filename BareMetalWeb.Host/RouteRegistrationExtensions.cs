@@ -343,9 +343,12 @@ public static class RouteRegistrationExtensions
                 foreach (var f in meta.Fields.OrderBy(x => x.Order))
                 {
                     var isId = f.Name.Equals("Id", StringComparison.OrdinalIgnoreCase);
+                    // Override type to "select" for fields with lookup config so the
+                    // client renders a dropdown and hydrates options via lookupUrl.
+                    var clientType = f.Lookup != null ? "select" : MapFieldType(f.FieldType);
                     var fieldDef = new Dictionary<string, object?>
                     {
-                        ["type"]  = MapFieldType(f.FieldType),
+                        ["type"]  = clientType,
                         ["label"] = f.Label
                     };
                     if (f.ReadOnly || isId)
@@ -456,6 +459,17 @@ public static class RouteRegistrationExtensions
         IRouteHandlers routeHandlers,
         IPageInfoFactory pageInfoFactory)
     {
+        // Lookup API endpoints — must be registered before parameterised /api/{type}
+        // routes to prevent /api/_lookup/customers matching as {type}=_lookup {id}=customers
+        host.RegisterRoute("GET /api/_lookup/{type}/_field/{id}/{fieldName}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityFieldHandler));
+        host.RegisterRoute("GET /api/_lookup/{type}/_aggregate", new RouteHandlerData(
+            pageInfoFactory.RawPage("Public", false), LookupApiHandlers.AggregateEntitiesHandler));
+        host.RegisterRoute("GET /api/_lookup/{type}/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityByIdHandler));
+        host.RegisterRoute("GET /api/_lookup/{type}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Public", false), LookupApiHandlers.QueryEntitiesHandler));
+
         // List and create
         host.RegisterRoute("GET /api/{type}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),

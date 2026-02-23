@@ -211,6 +211,12 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
     }));
     
+<<<<<<< fix/vnext-lookup-metadata
+    // Lookup API routes are now registered in RegisterApiRoutes (RouteRegistrationExtensions.cs)
+    // before the parameterised /api/{type} routes to prevent route shadowing.
+
+=======
+>>>>>>> main
     // Ideas/search page
     appInfo.RegisterRoute("GET /ideas/search", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
     {
