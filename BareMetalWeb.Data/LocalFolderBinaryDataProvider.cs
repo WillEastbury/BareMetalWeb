@@ -414,8 +414,9 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                     if (oldObj != null)
                     {
                         var oldValue = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
-                        if (!string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
-                            _indexStore.AppendEntry(type.Name, prop.Name, oldValue, obj.Id, 'D');
+                        if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
+                            continue; // value unchanged — existing index entry is still valid
+                        _indexStore.AppendEntry(type.Name, prop.Name, oldValue, obj.Id, 'D');
                     }
                     _indexStore.AppendEntry(type.Name, prop.Name, newValue, obj.Id, 'A');
                 }
