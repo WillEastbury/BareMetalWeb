@@ -143,6 +143,7 @@ public static class BareMetalWebExtensions
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
         appInfo.RegisterVNextRoutes(pageInfoFactory, templateStore);
         appInfo.RegisterReportRoutes(pageInfoFactory);
+        appInfo.RegisterMcpRoutes(pageInfoFactory);
 
         // Custom routes from caller
         configureRoutes?.Invoke(appInfo, routeHandlers, pageInfoFactory, mainTemplate);
