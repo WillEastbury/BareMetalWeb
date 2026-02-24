@@ -4,11 +4,11 @@
 
 BareMetalWeb now supports automatic ID generation for data entities. Instead of requiring users to provide IDs manually, you can mark entity properties with the `[IdGeneration]` attribute to have IDs automatically generated when creating new instances.
 
-## ⚠️ Important Limitations
+## Limitations
 
 Before using this feature, be aware of these critical limitations:
 
-1. **Sequential IDs reset on restart**: Sequential long IDs are stored in the header of the clustered index page. This means they will persist. 
+1. **Sequential IDs are persistent**: Sequential long IDs are stored in the header of the clustered index page. This means they will persist. 
 
 2. **Read-only after generation**: Once an ID is generated, it cannot be changed. Auto-generated IDs are intended for new entity creation only.
 
