@@ -5,7 +5,7 @@
     'use strict';
 
     // ── Configuration ─────────────────────────────────────────────────────────
-    var BASE = '/admin';
+    var BASE = '/UI';
     var API  = '/api';
     var META = '/meta';
     var LOOKUP_CARDINALITY_THRESHOLD = 20; // above this count, show a search dialog
@@ -1073,7 +1073,7 @@
                         var obj = results[value];
                         if (obj) {
                             var display = nestedGet(obj, displayField) || nestedGet(obj, displayField.charAt(0).toLowerCase() + displayField.slice(1)) || value;
-                            var href = BASE + '/admin/data/' + encodeURIComponent(targetSlug) + '/' + encodeURIComponent(value);
+                            var href = BASE + '/data/' + encodeURIComponent(targetSlug) + '/' + encodeURIComponent(value);
                             el.innerHTML = '<a href="' + escHtml(href) + '">' + escHtml(String(display)) + '</a>';
                         }
                     });
@@ -2473,7 +2473,7 @@
 
 })(window);
 // VNext Router — thin SPA router powered by BareMetalRendering
-// Parses /admin/data/[{slug}[/{id}[/edit|/delete]|/create]]
+// Parses /UI/[{slug}[/{id}[/edit|/delete]|/create]]
 // Depends on: BareMetalRest, BareMetalBind, BareMetalTemplate, BareMetalRendering
 (async function () {
   'use strict';
@@ -2505,7 +2505,7 @@
   function navbar(activeSlug) {
     const all = _entityList || [];
     const nav = el('nav', { className: 'navbar navbar-expand navbar-dark bg-dark mb-3 px-3' });
-    const brand = el('a', { className: 'navbar-brand', href: '/admin', textContent: '\u26A1 VNext' });
+    const brand = el('a', { className: 'navbar-brand', href: BASE, textContent: '\u26A1 VNext' });
     brand.setAttribute('data-go', '');
     nav.appendChild(brand);
     const ul = el('ul', { className: 'navbar-nav me-auto' });
@@ -2523,7 +2523,7 @@
         // No group or single item — render as flat nav links
         entities.forEach(e => {
           const li = el('li', { className: 'nav-item' });
-          const a  = el('a', { className: 'nav-link' + (e.slug === activeSlug ? ' active' : ''), href: '/admin/' + e.slug, textContent: e.name });
+          const a  = el('a', { className: 'nav-link' + (e.slug === activeSlug ? ' active' : ''), href: BASE + '/' + e.slug, textContent: e.name });
           a.setAttribute('data-go', '');
           li.appendChild(a);
           ul.appendChild(li);
@@ -2541,7 +2541,7 @@
         const menu = el('ul', { className: 'dropdown-menu' });
         entities.forEach(e => {
           const mli = el('li');
-          const a = el('a', { className: 'dropdown-item' + (e.slug === activeSlug ? ' active' : ''), href: '/admin/' + e.slug, textContent: e.name });
+          const a = el('a', { className: 'dropdown-item' + (e.slug === activeSlug ? ' active' : ''), href: BASE + '/' + e.slug, textContent: e.name });
           a.setAttribute('data-go', '');
           mli.appendChild(a);
           menu.appendChild(mli);
@@ -2557,7 +2557,7 @@
   }
 
   async function route() {
-    const p      = location.pathname.replace(/^\/admin\/?/, '').replace(/^data\/?/, '').split('/').filter(Boolean);
+    const p      = location.pathname.replace(/^\/UI\/?/, '').replace(/^data\/?/, '').split('/').filter(Boolean);
     const slug   = p[0], rawId = p[1], action = p[2];
     const id     = (rawId && rawId !== 'create') ? rawId : null;
 
@@ -2578,7 +2578,7 @@
         const container = el('div', { className: 'container' });
         const row = el('div', { className: 'row g-3 mt-1' });
         (_entityList || []).filter(e => e.showOnNav).forEach(e => {
-          const card = el('a', { className: 'card card-body text-decoration-none', href: '/admin/' + e.slug });
+          const card = el('a', { className: 'card card-body text-decoration-none', href: BASE + '/' + e.slug });
           card.setAttribute('data-go', '');
           card.appendChild(el('strong', { textContent: e.name }));
           card.appendChild(el('p', { className: 'text-muted small mb-0', textContent: e.navGroup || '' }));
@@ -2602,7 +2602,7 @@
 
         const hdr = el('div', { className: 'd-flex gap-2 align-items-center mb-3 flex-wrap' });
         hdr.appendChild(el('h2', { className: 'mb-0 me-2', textContent: entity.meta.name || slug }));
-        const addBtn = el('a', { href: '/admin/' + slug + '/create', className: 'btn btn-success btn-sm', textContent: '+ Add' });
+        const addBtn = el('a', { href: BASE + '/' + slug + '/create', className: 'btn btn-success btn-sm', textContent: '+ Add' });
         addBtn.setAttribute('data-go', '');
         hdr.appendChild(addBtn);
 
@@ -2612,11 +2612,11 @@
 
         const buildReadTable = () => BareMetalTemplate.buildTable(schemaFields, allItems, {
           resolve:  (name, v) => entity.resolve(name, v),
-          onView:   i => go(`/admin/${slug}/${i}`),
-          onEdit:   i => go(`/admin/${slug}/${i}/edit`),
+          onView:   i => go(`${BASE}/${slug}/${i}`),
+          onEdit:   i => go(`${BASE}/${slug}/${i}/edit`),
           onDelete: async i => {
             if (!confirm('Delete this record? This cannot be undone.')) return;
-            try { await BareMetalRest.entity(slug).remove(i); go(`/admin/${slug}`); }
+            try { await BareMetalRest.entity(slug).remove(i); go(`${BASE}/${slug}`); }
             catch (err) { alert('Delete failed: ' + err.message); }
           }
         });
@@ -2694,7 +2694,7 @@
         hdr.appendChild(el('h2', { textContent: (title ? title + ' ' : '') + (entity.meta.name || slug) }));
 
         const back = el('a', {
-          href: isView ? `/admin/${slug}` : id ? `/admin/${slug}/${id}` : `/admin/${slug}`,
+          href: isView ? `${BASE}/${slug}` : id ? `${BASE}/${slug}/${id}` : `${BASE}/${slug}`,
           className: 'btn btn-secondary btn-sm',
           textContent: '\u2190 Back'
         });
@@ -2702,7 +2702,7 @@
         hdr.appendChild(back);
 
         if (isView && id) {
-          const editBtn = el('a', { href: `/admin/${slug}/${id}/edit`, className: 'btn btn-primary btn-sm', textContent: '\u270F Edit' });
+          const editBtn = el('a', { href: `${BASE}/${slug}/${id}/edit`, className: 'btn btn-primary btn-sm', textContent: '\u270F Edit' });
           editBtn.setAttribute('data-go', '');
           hdr.appendChild(editBtn);
 
@@ -2714,7 +2714,7 @@
               delete rec.id; delete rec.Id;
               const created = await BareMetalRest.entity(slug).create(rec);
               const newId = created?.id || created?.Id;
-              go(newId ? `/admin/${slug}/${newId}${andEdit ? '/edit' : ''}` : `/admin/${slug}`);
+              go(newId ? `${BASE}/${slug}/${newId}${andEdit ? '/edit' : ''}` : `${BASE}/${slug}`);
             } catch (err) { alert('Clone failed: ' + err.message); }
           };
           const cloneBtn = el('button', { className: 'btn btn-outline-secondary btn-sm', textContent: '\u29C9 Clone' });
@@ -2739,7 +2739,7 @@
               dd.textContent = '\u2014';
             } else if (f.lookupUrl) {
               const targetSlug = lookupSlug(f.lookupUrl);
-              const a = el('a', { href: `/admin/${targetSlug}/${encodeURIComponent(String(v))}`, textContent: display });
+              const a = el('a', { href: `${BASE}/${targetSlug}/${encodeURIComponent(String(v))}`, textContent: display });
               a.setAttribute('data-go', '');
               dd.appendChild(a);
             } else if (f.type === 'boolean') {
@@ -2786,7 +2786,7 @@
             try {
               await entity.save();
               const savedId = entity.state.id || entity.state.Id;
-              go(savedId ? `/admin/${slug}/${savedId}` : `/admin/${slug}`);
+              go(savedId ? `${BASE}/${slug}/${savedId}` : `${BASE}/${slug}`);
             } catch (err) {
               main.prepend(el('div', { className: 'alert alert-danger mt-2', textContent: err.message }));
             }

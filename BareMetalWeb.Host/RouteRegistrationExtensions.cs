@@ -216,7 +216,7 @@ public static class RouteRegistrationExtensions
 
     /// <summary>
     /// Register data management CRUD routes for entity browsing, editing, and export.
-    /// Routes are served at /ssr/admin/data/* (legacy SSR UI — VNext at /admin/* is the default).
+    /// Routes are served at /ssr/admin/data/* (legacy SSR UI — VNext at /UI/* is the default).
     /// </summary>
     public static void RegisterDataRoutes(
         this IBareWebHost host,
@@ -495,7 +495,7 @@ public static class RouteRegistrationExtensions
     /// <summary>
     /// Register the VNext JS SPA shell and metadata API endpoints.
     /// Metadata routes at /meta/objects and /meta/{object} provide schema info to the client.
-    /// The SPA shell at /admin and /admin/{*path} serves the client-side application (default UI).
+    /// The SPA shell at /UI and /UI/{*path} serves the client-side application (default UI).
     /// </summary>
     public static void RegisterVNextRoutes(
         this IBareWebHost host,
@@ -548,12 +548,12 @@ public static class RouteRegistrationExtensions
                     JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = false }));
             }));
 
-        // VNext SPA shell — serve for all /admin and /admin/{*path} routes (default UI)
-        host.RegisterRoute("GET /admin", new RouteHandlerData(
+        // VNext SPA shell — serve for all /UI and /UI/{*path} routes (default UI)
+        host.RegisterRoute("GET /UI", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             context => ServeVNextShell(context, host, templateStore)));
 
-        host.RegisterRoute("GET /admin/{*path}", new RouteHandlerData(
+        host.RegisterRoute("GET /UI/{*path}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             context => ServeVNextShell(context, host, templateStore)));
     }
@@ -944,12 +944,12 @@ public static class RouteRegistrationExtensions
                 sb.Append("<div class=\"card shadow-sm bm-page-card\">");
                 sb.Append("<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
                 sb.Append("<h1 class=\"h5 mb-0\"><i class=\"bi bi-bar-chart-fill\"></i> Reports</h1>");
-                sb.Append("<a href=\"/admin/data/report-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New Report</a>");
+                sb.Append("<a href=\"/UI/report-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New Report</a>");
                 sb.Append("</div><div class=\"card-body\">");
 
                 if (reports.Count == 0)
                 {
-                    sb.Append("<div class=\"text-center py-5 text-muted\">No reports defined yet. Create one via <a href=\"/admin/data/report-definitions/create\">Admin &rarr; Report Definitions</a>.</div>");
+                    sb.Append("<div class=\"text-center py-5 text-muted\">No reports defined yet. Create one via <a href=\"/UI/report-definitions/create\">Report Definitions</a>.</div>");
                 }
                 else
                 {
@@ -1162,10 +1162,10 @@ public static class RouteRegistrationExtensions
         var navbarSection = navEndIdx >= 0
             ? template.Body.Substring(0, navEndIdx + 6)
             : template.Body;
-        // Point the brand at the VNext root (default admin)
+        // Point the brand at the VNext root (default UI)
         navbarSection = navbarSection.Replace(
             "class=\"navbar-brand\" href=\"/\"",
-            "class=\"navbar-brand\" href=\"/admin\"",
+            "class=\"navbar-brand\" href=\"/UI\"",
             StringComparison.Ordinal);
 
         // Extract only the <footer>…</footer> block from the footer template
@@ -1179,7 +1179,7 @@ public static class RouteRegistrationExtensions
         sb.Append("<head>");
         sb.Append(ReplaceTemplateTokens(template.Head, tokens));
         sb.Append($"<meta name=\"csrf-token\" content=\"{safeToken}\">");
-        sb.Append("<meta name=\"vnext-base\" content=\"/admin\">");
+        sb.Append("<meta name=\"vnext-base\" content=\"/UI\">");
         sb.Append("</head>");
         sb.Append("<body>");
         sb.Append(ReplaceTemplateTokens(navbarSection, tokens));
