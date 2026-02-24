@@ -1150,6 +1150,10 @@ public static class RouteRegistrationExtensions
         sb.Append("<div id=\"vnext-toast-container\" class=\"position-fixed top-0 end-0 p-3\"></div>");
         sb.Append("<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js\" crossorigin=\"anonymous\"></script>");
         sb.Append("<script src=\"/static/js/BareMetalRouting.js\"></script>");
+        sb.Append("<script src=\"/static/js/BareMetalRest.js\"></script>");
+        sb.Append("<script src=\"/static/js/BareMetalBind.js\"></script>");
+        sb.Append("<script src=\"/static/js/BareMetalTemplate.js\"></script>");
+        sb.Append("<script src=\"/static/js/BareMetalRendering.js\"></script>");
         sb.Append("<script src=\"/static/js/vnext-app.js\"></script>");
         sb.Append("</body></html>");
 
