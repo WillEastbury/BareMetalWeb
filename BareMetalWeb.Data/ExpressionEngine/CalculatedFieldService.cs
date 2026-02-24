@@ -66,6 +66,45 @@ public static class CalculatedFieldService
     }
 
     /// <summary>
+    /// Async version of EvaluateCalculatedFields that supports relationship traversal
+    /// via <see cref="ILookupResolver"/>. Use this for expressions containing
+    /// dot-access (e.g., Customer.DiscountLevel), RelatedLookup(), or QueryLookup().
+    /// </summary>
+    public static async ValueTask EvaluateCalculatedFieldsAsync(
+        BaseDataObject instance,
+        string entitySlug,
+        ILookupResolver? resolver = null,
+        CancellationToken cancellationToken = default)
+    {
+        var type = instance.GetType();
+        var calculatedFields = GetCalculatedFields(type);
+
+        if (calculatedFields.Count == 0)
+            return;
+
+        var context = BuildContext(instance, type);
+        context["__entitySlug"] = entitySlug;
+
+        resolver ??= ServerLookupResolver.Instance;
+
+        foreach (var fieldInfo in GetCalculatedFieldsInDependencyOrder(type))
+        {
+            try
+            {
+                var result = await fieldInfo.Expression.EvaluateAsync(context, resolver, cancellationToken);
+                fieldInfo.Property.SetValue(instance, ConvertToPropertyType(result, fieldInfo.Property.PropertyType));
+                context[fieldInfo.Property.Name] = result;
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException(
+                    $"Error evaluating calculated field '{fieldInfo.Property.Name}' with expression '{fieldInfo.Attribute.Expression}': {ex.Message}",
+                    ex);
+            }
+        }
+    }
+
+    /// <summary>
     /// Generates JavaScript code for calculated field evaluation.
     /// </summary>
     public static string GenerateJavaScript(Type entityType)
