@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using BareMetalWeb.Core;
+using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Rendering;
 using Xunit;
 
@@ -8,6 +9,12 @@ namespace BareMetalWeb.Data.Tests;
 
 public class DataEntityRegistryTests
 {
+    public DataEntityRegistryTests()
+    {
+        // Force UserClasses assembly to load so [DataEntity] types like ToDo and Product are available
+        _ = typeof(Product).Assembly;
+    }
+
     [Fact]
     public void RegisterAllEntities_DiscoversDataEntityAttributeTypes()
     {

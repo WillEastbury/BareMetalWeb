@@ -566,8 +566,9 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
         Write(buffer, MoneyGroupStart);
         var amountValue = Encode(field.Value);
         var amountPlaceholder = Encode(field.Placeholder);
-        var amountName = Encode(field.Name + "_amount");
-        Write(buffer, InputDecimalTemplate(amountName, amountName, amountValue, amountPlaceholder, StepFromDp(field.DecimalPlaces), required));
+        var amountId = Encode(field.Name + "_amount");
+        var amountName = Encode(field.Name);
+        Write(buffer, InputDecimalTemplate(amountId, amountName, amountValue, amountPlaceholder, StepFromDp(field.DecimalPlaces), required));
         Write(buffer, MoneyGroupMid);
 
         var currencyOptions = field.CurrencyOptions ?? FormOptions.GetCurrencyOptions();
