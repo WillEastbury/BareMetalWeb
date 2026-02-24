@@ -535,7 +535,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.True(_server.routes.ContainsKey("GET /admin/data"));
+        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data"));
     }
 
     [Fact]
@@ -545,7 +545,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.True(_server.routes.ContainsKey("GET /admin/data/{type}"));
+        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}"));
     }
 
     [Fact]
@@ -555,8 +555,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.True(_server.routes.ContainsKey("GET /admin/data/{type}/csv"));
-        Assert.True(_server.routes.ContainsKey("GET /admin/data/{type}/html"));
+        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/csv"));
+        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/html"));
     }
 
     [Fact]
@@ -566,8 +566,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.True(_server.routes.ContainsKey("GET /admin/data/{type}/import"));
-        Assert.True(_server.routes.ContainsKey("POST /admin/data/{type}/import"));
+        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/import"));
+        Assert.True(_server.routes.ContainsKey("POST /ssr/admin/data/{type}/import"));
     }
 
     [Fact]
@@ -577,8 +577,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.True(_server.routes.ContainsKey("GET /admin/data/{type}/create"));
-        Assert.True(_server.routes.ContainsKey("POST /admin/data/{type}/create"));
+        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/create"));
+        Assert.True(_server.routes.ContainsKey("POST /ssr/admin/data/{type}/create"));
     }
 
     [Fact]
@@ -588,9 +588,9 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.True(_server.routes.ContainsKey("GET /admin/data/{type}/{id}"));
-        Assert.True(_server.routes.ContainsKey("GET /admin/data/{type}/{id}/rtf"));
-        Assert.True(_server.routes.ContainsKey("GET /admin/data/{type}/{id}/html"));
+        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/{id}"));
+        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/{id}/rtf"));
+        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/{id}/html"));
     }
 
     [Fact]
@@ -600,8 +600,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.True(_server.routes.ContainsKey("GET /admin/data/{type}/{id}/edit"));
-        Assert.True(_server.routes.ContainsKey("POST /admin/data/{type}/{id}/edit"));
+        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/{id}/edit"));
+        Assert.True(_server.routes.ContainsKey("POST /ssr/admin/data/{type}/{id}/edit"));
     }
 
     [Fact]
@@ -611,8 +611,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.True(_server.routes.ContainsKey("POST /admin/data/{type}/{id}/clone"));
-        Assert.True(_server.routes.ContainsKey("POST /admin/data/{type}/{id}/clone-edit"));
+        Assert.True(_server.routes.ContainsKey("POST /ssr/admin/data/{type}/{id}/clone"));
+        Assert.True(_server.routes.ContainsKey("POST /ssr/admin/data/{type}/{id}/clone-edit"));
     }
 
     [Fact]
@@ -622,8 +622,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.True(_server.routes.ContainsKey("GET /admin/data/{type}/{id}/delete"));
-        Assert.True(_server.routes.ContainsKey("POST /admin/data/{type}/{id}/delete"));
+        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/{id}/delete"));
+        Assert.True(_server.routes.ContainsKey("POST /ssr/admin/data/{type}/{id}/delete"));
     }
 
     [Fact]
@@ -646,7 +646,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        var route = _server.routes["GET /admin/data"];
+        var route = _server.routes["GET /ssr/admin/data"];
         Assert.True(route.PageInfo!.PageMetaData.ShowOnNavBar);
     }
 
@@ -657,7 +657,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        var route = _server.routes["GET /admin/data"];
+        var route = _server.routes["GET /ssr/admin/data"];
         Assert.Equal("Admin", route.PageInfo!.PageContext.NavGroup);
     }
 

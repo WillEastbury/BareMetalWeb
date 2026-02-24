@@ -5,7 +5,7 @@
     'use strict';
 
     // ── Configuration ─────────────────────────────────────────────────────────
-    var BASE = '/vnext';
+    var BASE = '/admin';
     var API  = '/api';
     var META = '/meta';
     var LOOKUP_CARDINALITY_THRESHOLD = 20; // above this count, show a search dialog
@@ -179,14 +179,14 @@
         Object.keys(groups).sort().forEach(function (groupName) {
             var items = groups[groupName];
             if (items.length === 1) {
-                html += '<li class="nav-item"><a class="nav-link" href="' + BASE + '/admin/data/' + escHtml(items[0].slug) + '">' + escHtml(items[0].name) + '</a></li>';
+                html += '<li class="nav-item"><a class="nav-link" href="' + BASE + '/data/' + escHtml(items[0].slug) + '">' + escHtml(items[0].name) + '</a></li>';
             } else {
                 html += '<li class="nav-item dropdown">';
                 html += '<a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">' + escHtml(groupName) + '</a>';
                 html += '<ul class="dropdown-menu dropdown-menu-dark">';
                 items.sort(function (a, b) { return (a.navOrder || 0) - (b.navOrder || 0) || a.name.localeCompare(b.name); })
                      .forEach(function (e) {
-                        html += '<li><a class="dropdown-item" href="' + BASE + '/admin/data/' + escHtml(e.slug) + '">' + escHtml(e.name) + '</a></li>';
+                        html += '<li><a class="dropdown-item" href="' + BASE + '/data/' + escHtml(e.slug) + '">' + escHtml(e.name) + '</a></li>';
                      });
                 html += '</ul></li>';
             }
@@ -207,7 +207,7 @@
                             '<p class="card-text text-muted small">' + escHtml(e.navGroup || '') + '</p>' +
                             '</div>' +
                             '<div class="card-footer">' +
-                            '<a class="btn btn-primary btn-sm" href="' + BASE + '/admin/data/' + escHtml(e.slug) + '">Open</a>' +
+                            '<a class="btn btn-primary btn-sm" href="' + BASE + '/data/' + escHtml(e.slug) + '">Open</a>' +
                             '</div></div></div>';
                     });
             html += '</div></div>';
@@ -245,7 +245,7 @@
         var total = (result && result.total != null) ? result.total : items.length;
         var listFields = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; });
 
-        var baseUrl = BASE + '/admin/data/' + encodeURIComponent(slug);
+        var baseUrl = BASE + '/data/' + encodeURIComponent(slug);
 
         function buildSortUrl(fieldName) {
             var newDir = (sort === fieldName && dir === 'asc') ? 'desc' : 'asc';
@@ -329,7 +329,7 @@
                         var val = nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1));
                         if (f.lookup && f.lookup.targetSlug && val) {
                             html += '<td data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
-                                '<a href="' + BASE + '/admin/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
+                                '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
                         } else {
                             html += '<td>' + fmtValue(val, f.type) + '</td>';
                         }
@@ -797,7 +797,7 @@
     }
 
     function renderViewResult(meta, item, slug, id) {
-        var baseUrl  = BASE + '/admin/data/' + encodeURIComponent(slug);
+        var baseUrl  = BASE + '/data/' + encodeURIComponent(slug);
         var viewFields = meta.fields.filter(function (f) { return f.view; }).sort(function (a, b) { return a.order - b.order; });
         var commands   = meta.commands || [];
 
@@ -836,7 +836,7 @@
             } else if (f.lookup && f.lookup.targetSlug) {
                 html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
                 html += '<dd class="col-sm-9" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val || '')) + '">' +
-                    '<a href="' + BASE + '/admin/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val || '') + '">' + escHtml(String(val || '')) + '</a></dd>';
+                    '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val || '') + '">' + escHtml(String(val || '')) + '</a></dd>';
             } else {
                 html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
                 html += '<dd class="col-sm-9">' + fmtValue(val, f.type) + '</dd>';
@@ -878,7 +878,7 @@
                 .then(function (obj) {
                     if (obj) {
                         var display = nestedGet(obj, displayField) || nestedGet(obj, displayField.charAt(0).toLowerCase() + displayField.slice(1)) || value;
-                        var href = BASE + '/admin/data/' + encodeURIComponent(targetSlug) + '/' + encodeURIComponent(value);
+                        var href = BASE + '/data/' + encodeURIComponent(targetSlug) + '/' + encodeURIComponent(value);
                         el.innerHTML = '<a href="' + escHtml(href) + '">' + escHtml(String(display)) + '</a>';
                     }
                 })
@@ -920,7 +920,7 @@
 
     function renderFormView(meta, item, slug, id) {
         var isCreate = id == null;
-        var baseUrl  = BASE + '/admin/data/' + encodeURIComponent(slug);
+        var baseUrl  = BASE + '/data/' + encodeURIComponent(slug);
         var formFields = meta.fields.filter(function (f) { return isCreate ? f.create : f.edit; })
                                     .sort(function (a, b) { return a.order - b.order; });
 
@@ -1539,7 +1539,7 @@
                 showToast('Saved successfully.', 'success');
                 clearLookupCache(slug);
                 var savedId = (result && (result.id || result.Id)) || id || '';
-                var dest = savedId ? BASE + '/admin/data/' + encodeURIComponent(slug) + '/' + encodeURIComponent(savedId) : BASE + '/admin/data/' + encodeURIComponent(slug);
+                var dest = savedId ? BASE + '/data/' + encodeURIComponent(slug) + '/' + encodeURIComponent(savedId) : BASE + '/data/' + encodeURIComponent(slug);
                 BMRouter.navigate(dest);
             }).catch(function (err) {
                 showToast('Save failed: ' + err.message, 'error');
@@ -1797,7 +1797,7 @@
         Promise.all([fetchMeta(slug), apiFetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id))])
             .then(function (r) {
                 var meta = r[0]; var item = r[1];
-                var baseUrl = BASE + '/admin/data/' + encodeURIComponent(slug);
+                var baseUrl = BASE + '/data/' + encodeURIComponent(slug);
                 var html = '<div class="p-3">' +
                     '<div class="alert alert-danger">' +
                     '<h4 class="alert-heading"><i class="bi bi-exclamation-triangle-fill"></i> Confirm Delete</h4>' +
@@ -2009,12 +2009,12 @@
 
         // Register routes
         BMRouter
-            .on(BASE + '/admin/data/:entity/create', function (p) { renderCreate(p.entity); })
-            .on(BASE + '/admin/data/:entity/:id/edit',   function (p) { renderEdit(p.entity, p.id); })
-            .on(BASE + '/admin/data/:entity/:id/delete', function (p) { renderDelete(p.entity, p.id); })
-            .on(BASE + '/admin/data/:entity/:id',        function (p, q) { renderView(p.entity, p.id); })
-            .on(BASE + '/admin/data/:entity',            function (p, q) { renderList(p.entity, q); })
-            .on(BASE + '/admin/data',                    function () { renderHome(); })
+            .on(BASE + '/data/:entity/create', function (p) { renderCreate(p.entity); })
+            .on(BASE + '/data/:entity/:id/edit',   function (p) { renderEdit(p.entity, p.id); })
+            .on(BASE + '/data/:entity/:id/delete', function (p) { renderDelete(p.entity, p.id); })
+            .on(BASE + '/data/:entity/:id',        function (p, q) { renderView(p.entity, p.id); })
+            .on(BASE + '/data/:entity',            function (p, q) { renderList(p.entity, q); })
+            .on(BASE + '/data',                    function () { renderHome(); })
             .on(BASE,                                    function () { renderHome(); })
             .notFound(function (path) {
                 showError('Page not found: ' + path);
@@ -2030,7 +2030,7 @@
 
 })(window);
 // VNext Router — thin SPA router powered by BareMetalRendering
-// Parses /vnext[/admin/data]/[{slug}[/{id}[/edit]|/create]]
+// Parses /admin/data/[{slug}[/{id}[/edit|/delete]|/create]]
 // Depends on: BareMetalRest, BareMetalBind, BareMetalTemplate, BareMetalRendering
 (async function () {
   'use strict';
@@ -2062,7 +2062,7 @@
   function navbar(activeSlug) {
     const all = _entityList || [];
     const nav = el('nav', { className: 'navbar navbar-expand navbar-dark bg-dark mb-3 px-3' });
-    const brand = el('a', { className: 'navbar-brand', href: '/vnext', textContent: '\u26A1 VNext' });
+    const brand = el('a', { className: 'navbar-brand', href: '/admin', textContent: '\u26A1 VNext' });
     brand.setAttribute('data-go', '');
     nav.appendChild(brand);
     const ul = el('ul', { className: 'navbar-nav me-auto' });
@@ -2080,7 +2080,7 @@
         // No group or single item — render as flat nav links
         entities.forEach(e => {
           const li = el('li', { className: 'nav-item' });
-          const a  = el('a', { className: 'nav-link' + (e.slug === activeSlug ? ' active' : ''), href: '/vnext/' + e.slug, textContent: e.name });
+          const a  = el('a', { className: 'nav-link' + (e.slug === activeSlug ? ' active' : ''), href: '/admin/' + e.slug, textContent: e.name });
           a.setAttribute('data-go', '');
           li.appendChild(a);
           ul.appendChild(li);
@@ -2098,7 +2098,7 @@
         const menu = el('ul', { className: 'dropdown-menu' });
         entities.forEach(e => {
           const mli = el('li');
-          const a = el('a', { className: 'dropdown-item' + (e.slug === activeSlug ? ' active' : ''), href: '/vnext/' + e.slug, textContent: e.name });
+          const a = el('a', { className: 'dropdown-item' + (e.slug === activeSlug ? ' active' : ''), href: '/admin/' + e.slug, textContent: e.name });
           a.setAttribute('data-go', '');
           mli.appendChild(a);
           menu.appendChild(mli);
@@ -2109,12 +2109,12 @@
     });
 
     nav.appendChild(ul);
-    nav.appendChild(el('a', { className: 'btn btn-sm btn-outline-light', href: '/admin/data', textContent: 'Classic UI' }));
+    nav.appendChild(el('a', { className: 'btn btn-sm btn-outline-light', href: '/ssr/admin/data', textContent: 'Classic UI' }));
     return nav;
   }
 
   async function route() {
-    const p      = location.pathname.replace(/^\/vnext\/?/, '').replace(/^admin\/data\/?/, '').split('/').filter(Boolean);
+    const p      = location.pathname.replace(/^\/admin\/?/, '').replace(/^data\/?/, '').split('/').filter(Boolean);
     const slug   = p[0], rawId = p[1], action = p[2];
     const id     = (rawId && rawId !== 'create') ? rawId : null;
 
@@ -2135,7 +2135,7 @@
         const container = el('div', { className: 'container' });
         const row = el('div', { className: 'row g-3 mt-1' });
         (_entityList || []).filter(e => e.showOnNav).forEach(e => {
-          const card = el('a', { className: 'card card-body text-decoration-none', href: '/vnext/' + e.slug });
+          const card = el('a', { className: 'card card-body text-decoration-none', href: '/admin/' + e.slug });
           card.setAttribute('data-go', '');
           card.appendChild(el('strong', { textContent: e.name }));
           card.appendChild(el('p', { className: 'text-muted small mb-0', textContent: e.navGroup || '' }));
@@ -2159,7 +2159,7 @@
 
         const hdr = el('div', { className: 'd-flex gap-2 align-items-center mb-3 flex-wrap' });
         hdr.appendChild(el('h2', { className: 'mb-0 me-2', textContent: entity.meta.name || slug }));
-        const addBtn = el('a', { href: '/vnext/' + slug + '/create', className: 'btn btn-success btn-sm', textContent: '+ Add' });
+        const addBtn = el('a', { href: '/admin/' + slug + '/create', className: 'btn btn-success btn-sm', textContent: '+ Add' });
         addBtn.setAttribute('data-go', '');
         hdr.appendChild(addBtn);
 
@@ -2169,11 +2169,11 @@
 
         const buildReadTable = () => BareMetalTemplate.buildTable(schemaFields, allItems, {
           resolve:  (name, v) => entity.resolve(name, v),
-          onView:   i => go(`/vnext/${slug}/${i}`),
-          onEdit:   i => go(`/vnext/${slug}/${i}/edit`),
+          onView:   i => go(`/admin/${slug}/${i}`),
+          onEdit:   i => go(`/admin/${slug}/${i}/edit`),
           onDelete: async i => {
             if (!confirm('Delete this record? This cannot be undone.')) return;
-            try { await BareMetalRest.entity(slug).remove(i); go(`/vnext/${slug}`); }
+            try { await BareMetalRest.entity(slug).remove(i); go(`/admin/${slug}`); }
             catch (err) { alert('Delete failed: ' + err.message); }
           }
         });
@@ -2251,7 +2251,7 @@
         hdr.appendChild(el('h2', { textContent: (title ? title + ' ' : '') + (entity.meta.name || slug) }));
 
         const back = el('a', {
-          href: isView ? `/vnext/${slug}` : id ? `/vnext/${slug}/${id}` : `/vnext/${slug}`,
+          href: isView ? `/admin/${slug}` : id ? `/admin/${slug}/${id}` : `/admin/${slug}`,
           className: 'btn btn-secondary btn-sm',
           textContent: '\u2190 Back'
         });
@@ -2259,7 +2259,7 @@
         hdr.appendChild(back);
 
         if (isView && id) {
-          const editBtn = el('a', { href: `/vnext/${slug}/${id}/edit`, className: 'btn btn-primary btn-sm', textContent: '\u270F Edit' });
+          const editBtn = el('a', { href: `/admin/${slug}/${id}/edit`, className: 'btn btn-primary btn-sm', textContent: '\u270F Edit' });
           editBtn.setAttribute('data-go', '');
           hdr.appendChild(editBtn);
 
@@ -2271,7 +2271,7 @@
               delete rec.id; delete rec.Id;
               const created = await BareMetalRest.entity(slug).create(rec);
               const newId = created?.id || created?.Id;
-              go(newId ? `/vnext/${slug}/${newId}${andEdit ? '/edit' : ''}` : `/vnext/${slug}`);
+              go(newId ? `/admin/${slug}/${newId}${andEdit ? '/edit' : ''}` : `/admin/${slug}`);
             } catch (err) { alert('Clone failed: ' + err.message); }
           };
           const cloneBtn = el('button', { className: 'btn btn-outline-secondary btn-sm', textContent: '\u29C9 Clone' });
@@ -2296,7 +2296,7 @@
               dd.textContent = '\u2014';
             } else if (f.lookupUrl) {
               const targetSlug = lookupSlug(f.lookupUrl);
-              const a = el('a', { href: `/vnext/${targetSlug}/${encodeURIComponent(String(v))}`, textContent: display });
+              const a = el('a', { href: `/admin/${targetSlug}/${encodeURIComponent(String(v))}`, textContent: display });
               a.setAttribute('data-go', '');
               dd.appendChild(a);
             } else if (f.type === 'boolean') {
@@ -2343,7 +2343,7 @@
             try {
               await entity.save();
               const savedId = entity.state.id || entity.state.Id;
-              go(savedId ? `/vnext/${slug}/${savedId}` : `/vnext/${slug}`);
+              go(savedId ? `/admin/${slug}/${savedId}` : `/admin/${slug}`);
             } catch (err) {
               main.prepend(el('div', { className: 'alert alert-danger mt-2', textContent: err.message }));
             }

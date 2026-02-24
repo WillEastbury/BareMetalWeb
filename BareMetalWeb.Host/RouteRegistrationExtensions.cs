@@ -222,6 +222,7 @@ public static class RouteRegistrationExtensions
 
     /// <summary>
     /// Register data management CRUD routes for entity browsing, editing, and export.
+    /// Routes are served at /ssr/admin/data/* (legacy SSR UI — VNext at /admin/* is the default).
     /// </summary>
     public static void RegisterDataRoutes(
         this IBareWebHost host,
@@ -230,85 +231,85 @@ public static class RouteRegistrationExtensions
         IHtmlTemplate mainTemplate)
     {
         // Entity browsing
-        host.RegisterRoute("GET /admin/data", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Data", "" }, "Authenticated", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
             routeHandlers.DataEntitiesHandler));
 
-        host.RegisterRoute("GET /admin/data/{type}", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data/{type}", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Data", "" }, "Authenticated", false, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
             routeHandlers.DataListHandler));
 
         // Export
-        host.RegisterRoute("GET /admin/data/{type}/csv", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data/{type}/csv", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataListCsvHandler));
-        host.RegisterRoute("GET /admin/data/{type}/html", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data/{type}/html", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataListHtmlHandler));
-        host.RegisterRoute("GET /admin/data/{type}/export", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data/{type}/export", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataListExportHandler));
 
         // Import
-        host.RegisterRoute("GET /admin/data/{type}/import", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data/{type}/import", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Import CSV", "" }, "Authenticated", false, 1),
             routeHandlers.DataImportHandler));
-        host.RegisterRoute("POST /admin/data/{type}/import", new RouteHandlerData(
+        host.RegisterRoute("POST /ssr/admin/data/{type}/import", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Import CSV", "" }, "Authenticated", false, 1),
             routeHandlers.DataImportPostHandler));
 
         // Create
-        host.RegisterRoute("GET /admin/data/{type}/create", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data/{type}/create", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Create", "" }, "Authenticated", false, 1),
             routeHandlers.DataCreateHandler));
-        host.RegisterRoute("POST /admin/data/{type}/create", new RouteHandlerData(
+        host.RegisterRoute("POST /ssr/admin/data/{type}/create", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Create", "" }, "Authenticated", false, 1),
             routeHandlers.DataCreatePostHandler));
 
         // View
-        host.RegisterRoute("GET /admin/data/{type}/{id}", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data/{type}/{id}", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "View", "" }, "Authenticated", false, 1),
             routeHandlers.DataViewHandler));
-        host.RegisterRoute("GET /admin/data/{type}/{id}/rtf", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data/{type}/{id}/rtf", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataViewRtfHandler));
-        host.RegisterRoute("GET /admin/data/{type}/{id}/html", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data/{type}/{id}/html", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataViewHtmlHandler));
-        host.RegisterRoute("GET /admin/data/{type}/{id}/export", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data/{type}/{id}/export", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataViewExportHandler));
 
         // Edit
-        host.RegisterRoute("GET /admin/data/{type}/{id}/edit", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data/{type}/{id}/edit", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Edit", "" }, "Authenticated", false, 1),
             routeHandlers.DataEditHandler));
-        host.RegisterRoute("POST /admin/data/{type}/{id}/edit", new RouteHandlerData(
+        host.RegisterRoute("POST /ssr/admin/data/{type}/{id}/edit", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Edit", "" }, "Authenticated", false, 1),
             routeHandlers.DataEditPostHandler));
 
         // Clone
-        host.RegisterRoute("POST /admin/data/{type}/{id}/clone", new RouteHandlerData(
+        host.RegisterRoute("POST /ssr/admin/data/{type}/{id}/clone", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataClonePostHandler));
-        host.RegisterRoute("POST /admin/data/{type}/{id}/clone-edit", new RouteHandlerData(
+        host.RegisterRoute("POST /ssr/admin/data/{type}/{id}/clone-edit", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataCloneEditPostHandler));
 
         // Delete
-        host.RegisterRoute("GET /admin/data/{type}/{id}/delete", new RouteHandlerData(
+        host.RegisterRoute("GET /ssr/admin/data/{type}/{id}/delete", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Delete", "" }, "Authenticated", false, 1),
             routeHandlers.DataDeleteHandler));
-        host.RegisterRoute("POST /admin/data/{type}/{id}/delete", new RouteHandlerData(
+        host.RegisterRoute("POST /ssr/admin/data/{type}/{id}/delete", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Delete", "" }, "Authenticated", false, 1),
             routeHandlers.DataDeletePostHandler));
 
         // Bulk operations
-        host.RegisterRoute("POST /admin/data/{type}/bulk-delete", new RouteHandlerData(
+        host.RegisterRoute("POST /ssr/admin/data/{type}/bulk-delete", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataBulkDeleteHandler));
-        
-        host.RegisterRoute("GET /admin/data/{type}/bulk-export", new RouteHandlerData(
+
+        host.RegisterRoute("GET /ssr/admin/data/{type}/bulk-export", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataBulkExportHandler));
     }
@@ -499,7 +500,7 @@ public static class RouteRegistrationExtensions
     /// <summary>
     /// Register the VNext JS SPA shell and metadata API endpoints.
     /// Metadata routes at /meta/objects and /meta/{object} provide schema info to the client.
-    /// The SPA shell at /vnext and /vnext/{*path} serves the client-side application.
+    /// The SPA shell at /admin and /admin/{*path} serves the client-side application (default UI).
     /// </summary>
     public static void RegisterVNextRoutes(
         this IBareWebHost host,
@@ -552,12 +553,12 @@ public static class RouteRegistrationExtensions
                     JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = false }));
             }));
 
-        // VNext SPA shell — serve for all /vnext and /vnext/{*path} routes
-        host.RegisterRoute("GET /vnext", new RouteHandlerData(
+        // VNext SPA shell — serve for all /admin and /admin/{*path} routes (default UI)
+        host.RegisterRoute("GET /admin", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             context => ServeVNextShell(context, host, templateStore)));
 
-        host.RegisterRoute("GET /vnext/{*path}", new RouteHandlerData(
+        host.RegisterRoute("GET /admin/{*path}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             context => ServeVNextShell(context, host, templateStore)));
     }
@@ -1158,10 +1159,10 @@ public static class RouteRegistrationExtensions
         var navbarSection = navEndIdx >= 0
             ? template.Body.Substring(0, navEndIdx + 6)
             : template.Body;
-        // Point the brand at the VNext root instead of the SSR home
+        // Point the brand at the VNext root (default admin)
         navbarSection = navbarSection.Replace(
             "class=\"navbar-brand\" href=\"/\"",
-            "class=\"navbar-brand\" href=\"/vnext\"",
+            "class=\"navbar-brand\" href=\"/admin\"",
             StringComparison.Ordinal);
 
         // Extract only the <footer>…</footer> block from the footer template
@@ -1175,7 +1176,7 @@ public static class RouteRegistrationExtensions
         sb.Append("<head>");
         sb.Append(ReplaceTemplateTokens(template.Head, tokens));
         sb.Append($"<meta name=\"csrf-token\" content=\"{safeToken}\">");
-        sb.Append("<meta name=\"vnext-base\" content=\"/vnext\">");
+        sb.Append("<meta name=\"vnext-base\" content=\"/admin\">");
         sb.Append("</head>");
         sb.Append("<body>");
         sb.Append(ReplaceTemplateTokens(navbarSection, tokens));
