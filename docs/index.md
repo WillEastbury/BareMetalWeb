@@ -7,6 +7,7 @@ Welcome to the BareMetalWeb documentation. This index covers all guides, referen
 ## Getting Started
 
 - [Background Usage & REST API](BackgroundUsage.md) — REST endpoints, authentication, query language, and CLI usage
+- [Setup & Clear Data](SETUP_AND_CLEAR_DATA.md) — First-time setup wizard (OOBE), data-reset at startup, admin wipe, and sample-data generation
 - [Testing Guide](TESTING.md) — Test infrastructure, how to run tests, and test project overview
 - [Security Policy](../SECURITY.md) — Supported versions and how to report vulnerabilities
 - [OWASP Security Notes](OWASP.md) — OWASP-aligned security considerations
