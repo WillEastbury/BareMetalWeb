@@ -3047,28 +3047,54 @@ public static class DataScaffold
                 return true;
             }
 
-            if (effectiveType == typeof(string[]) && element.ValueKind == JsonValueKind.Array)
+            if (effectiveType == typeof(string[]))
             {
-                var list = new List<string>();
-                foreach (var item in element.EnumerateArray())
+                if (element.ValueKind == JsonValueKind.Array)
                 {
-                    if (item.ValueKind == JsonValueKind.String)
-                        list.Add(item.GetString() ?? string.Empty);
+                    var list = new List<string>();
+                    foreach (var item in element.EnumerateArray())
+                    {
+                        if (item.ValueKind == JsonValueKind.String)
+                            list.Add(item.GetString() ?? string.Empty);
+                    }
+                    converted = list.ToArray();
+                    return true;
                 }
-                converted = list.ToArray();
-                return true;
+                if (element.ValueKind == JsonValueKind.String)
+                {
+                    converted = ParseStringList(element.GetString() ?? string.Empty);
+                    return true;
+                }
+                if (element.ValueKind == JsonValueKind.Null)
+                {
+                    converted = Array.Empty<string>();
+                    return true;
+                }
             }
 
-            if (effectiveType == typeof(List<string>) && element.ValueKind == JsonValueKind.Array)
+            if (effectiveType == typeof(List<string>))
             {
-                var list = new List<string>();
-                foreach (var item in element.EnumerateArray())
+                if (element.ValueKind == JsonValueKind.Array)
                 {
-                    if (item.ValueKind == JsonValueKind.String)
-                        list.Add(item.GetString() ?? string.Empty);
+                    var list = new List<string>();
+                    foreach (var item in element.EnumerateArray())
+                    {
+                        if (item.ValueKind == JsonValueKind.String)
+                            list.Add(item.GetString() ?? string.Empty);
+                    }
+                    converted = list;
+                    return true;
                 }
-                converted = list;
-                return true;
+                if (element.ValueKind == JsonValueKind.String)
+                {
+                    converted = new List<string>(ParseStringList(element.GetString() ?? string.Empty));
+                    return true;
+                }
+                if (element.ValueKind == JsonValueKind.Null)
+                {
+                    converted = new List<string>();
+                    return true;
+                }
             }
 
             if (effectiveType.IsEnum && element.ValueKind == JsonValueKind.String)
