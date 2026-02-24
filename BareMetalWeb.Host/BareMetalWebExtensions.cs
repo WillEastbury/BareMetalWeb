@@ -117,7 +117,7 @@ public static class BareMetalWebExtensions
         appInfo.RegisterRuntimeApiRoutes(pageInfoFactory);       // /meta/entity/{name}, POST /query, POST /intent
         appInfo.RegisterLookupApiRoutes(pageInfoFactory);       // must be before RegisterApiRoutes
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
-        appInfo.RegisterVNextRoutes(pageInfoFactory);
+        appInfo.RegisterVNextRoutes(pageInfoFactory, templateStore);
         appInfo.RegisterReportRoutes(pageInfoFactory);
 
         // Custom routes from caller
