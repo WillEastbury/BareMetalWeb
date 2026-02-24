@@ -1658,6 +1658,7 @@
   }
 
   async function route() {
+    if (!R) return;
     const p      = location.pathname.replace(/^\/vnext\/?/, '').replace(/^admin\/data\/?/, '').split('/').filter(Boolean);
     const slug   = p[0], rawId = p[1], action = p[2];
     const id     = (rawId && rawId !== 'create') ? rawId : null;
@@ -1897,7 +1898,7 @@
 
       wire();
     } catch (e) {
-      R.replaceChildren(
+      if (R) R.replaceChildren(
         el('div', { className: 'container mt-3' }, [
           el('div', { className: 'alert alert-danger', textContent: e.message })
         ])
