@@ -134,13 +134,14 @@
                 }
                 // Build a simple table from the results
                 var keys = Object.keys(rows[0]);
-                var html = '<table class="table table-sm table-hover table-striped bm-table"><thead><tr>';
+                var html = '<table class="table table-sm table-hover table-striped bm-table"><thead><tr><th></th>';
                 keys.forEach(function(k) {
                     html += '<th>' + escapeHtml(k) + '</th>';
                 });
                 html += '</tr></thead><tbody>';
                 rows.forEach(function(row) {
                     html += '<tr style="cursor:pointer" data-bm-select-row>';
+                    html += '<td><button type="button" class="btn btn-sm btn-primary">Select</button></td>';
                     keys.forEach(function(k) {
                         html += '<td data-field="' + escapeHtml(k) + '">' + escapeHtml(row[k] != null ? String(row[k]) : '') + '</td>';
                     });

@@ -1847,11 +1847,12 @@
                     return;
                 }
                 var keys = Object.keys(rows[0]);
-                var html = '<table class="table table-sm table-hover table-striped"><thead><tr>';
+                var html = '<table class="table table-sm table-hover table-striped"><thead><tr><th></th>';
                 keys.forEach(function (k) { html += '<th>' + escHtml(k) + '</th>'; });
                 html += '</tr></thead><tbody>';
                 rows.forEach(function (row) {
                     html += '<tr style="cursor:pointer" data-vnext-select-row>';
+                    html += '<td><button type="button" class="btn btn-sm btn-primary">Select</button></td>';
                     keys.forEach(function (k) {
                         html += '<td data-field="' + escHtml(k) + '">' + escHtml(row[k] != null ? String(row[k]) : '') + '</td>';
                     });
