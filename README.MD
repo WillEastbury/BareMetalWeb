@@ -17,7 +17,7 @@ Just Kestrel, explicit routing, streaming HTML templates, a custom binary serial
 
 ## What is this?
 
-BareMetalWeb is a lean, mean web server that uses ASP.NET Core **only** for HTTP/SSL — everything else is built from scratch for minimalism, performance, and clarity. Think classic-era `.ashx` handlers and `HttpModules` reborn in modern .NET 9.
+BareMetalWeb is a lean, mean web server that uses ASP.NET Core **only** for HTTP/SSL — everything else is built from scratch for minimalism, performance, and clarity. Think classic-era `.ashx` handlers and `HttpModules` reborn in modern .NET 10.
 
 ### Key Features
 
@@ -40,6 +40,41 @@ BareMetalWeb is a lean, mean web server that uses ASP.NET Core **only** for HTTP
 |-------------|-----|
 | Development | https://baremetalweb.azurewebsites.net |
 | Production  | https://baremetalweb-prod.azurewebsites.net |
+
+---
+
+## Quick Start
+
+```bash
+# Prerequisites: .NET 10 SDK
+dotnet --version   # should be 10.x
+
+# Build
+dotnet build
+
+# Run tests
+dotnet test --no-build
+
+# Run the server
+cd BareMetalWeb.Host
+dotnet run
+# → BareMetalWeb server is ready — PID 12345 — listening for requests on http://localhost:5232
+```
+
+The first run triggers the **Out-of-Box Experience (OOBE)** setup wizard at `http://localhost:5232/setup` where you create the admin account and seed sample data.
+
+### Project Structure
+
+| Project | Purpose |
+|---------|---------|
+| `BareMetalWeb.Host` | Kestrel server, routes, request handlers |
+| `BareMetalWeb.Core` | Shared models, enums, static assets (JS/CSS/templates) |
+| `BareMetalWeb.Data` | Storage, serialization, scaffolding, settings, auth |
+| `BareMetalWeb.Rendering` | SSR HTML fragment rendering |
+| `BareMetalWeb.Runtime` | Runtime/virtual entity definitions |
+| `BareMetalWeb.API` | REST API controller layer |
+| `BareMetalWeb.CLI` | Native AOT `metal` command-line tool |
+| `BareMetalWeb.UserClasses` | User-defined entity model classes |
 
 ---
 
@@ -224,7 +259,7 @@ The CLI uses `GET /api/_meta` to discover entity types at runtime. This means **
 The CLI is in `BareMetalWeb.CLI/` and can be built locally:
 
 ```bash
-# Standard build (requires .NET 9 SDK)
+# Standard build (requires .NET 10 SDK)
 dotnet build BareMetalWeb.CLI
 
 # Native AOT publish for your current platform
