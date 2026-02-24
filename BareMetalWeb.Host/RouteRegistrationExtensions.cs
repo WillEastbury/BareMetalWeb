@@ -554,11 +554,11 @@ public static class RouteRegistrationExtensions
         // VNext SPA shell — serve for all /vnext and /vnext/{*path} routes
         host.RegisterRoute("GET /vnext", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
-            context => ServeVNextShell(context)));
+            context => ServeVNextShell(context, host)));
 
         host.RegisterRoute("GET /vnext/{*path}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
-            context => ServeVNextShell(context)));
+            context => ServeVNextShell(context, host)));
     }
 
     /// <summary>
@@ -1113,10 +1113,12 @@ public static class RouteRegistrationExtensions
         return value;
     }
 
-    private static async ValueTask ServeVNextShell(HttpContext context)
+    private static async ValueTask ServeVNextShell(HttpContext context, IBareWebHost host)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         var safeToken = WebUtility.HtmlEncode(csrfToken);
+        var nonce = context.GetCspNonce();
+        var safeNonce = WebUtility.HtmlEncode(nonce);
 
         var sb = new StringBuilder(4096);
         sb.Append("<!DOCTYPE html><html lang=\"en\">");
@@ -1124,23 +1126,24 @@ public static class RouteRegistrationExtensions
         sb.Append("<meta charset=\"utf-8\">");
         sb.Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
         sb.Append("<title>BareMetalWeb — VNext</title>");
+        sb.Append("<link rel=\"icon\" type=\"image/x-icon\" href=\"/static/favicon.ico\">");
         sb.Append("<link id=\"bootswatch-theme\" rel=\"stylesheet\" href=\"/static/css/bootstrap.min.css\">");
+        sb.Append($"<script nonce=\"{safeNonce}\">(function(){{var m=document.cookie.match(/(?:^|;\\s*)bm-selected-theme=([^;]+)/);if(m){{var t=decodeURIComponent(m[1]),a=['cerulean','cosmo','cyborg','darkly','flatly','journal','litera','lumen','lux','materia','minty','morph','pulse','quartz','sandstone','simplex','sketchy','slate','solar','spacelab','superhero','united','vapor','yeti','zephyr'];if(a.indexOf(t)>=0)document.getElementById('bootswatch-theme').href='https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/'+encodeURIComponent(t)+'/bootstrap.min.css';}}}})()</script>");
         sb.Append("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css\" crossorigin=\"anonymous\">");
         sb.Append("<link rel=\"stylesheet\" href=\"/static/css/site.css\">");
         sb.Append($"<meta name=\"csrf-token\" content=\"{safeToken}\">");
         sb.Append("<meta name=\"vnext-base\" content=\"/vnext\">");
         sb.Append("</head>");
         sb.Append("<body>");
-        sb.Append("<nav id=\"vnext-navbar\" class=\"navbar navbar-expand-lg navbar-dark bg-dark\">");
+        sb.Append("<nav id=\"vnext-navbar\" class=\"navbar navbar-expand-lg bg-primary navbar-dark fixed-top bm-navbar\">");
         sb.Append("<div class=\"container-fluid\">");
         sb.Append("<a class=\"navbar-brand\" href=\"/vnext\"><i class=\"bi bi-lightning-charge-fill\"></i> BareMetalWeb</a>");
         sb.Append("<button class=\"navbar-toggler\" type=\"button\" data-bs-toggle=\"collapse\" data-bs-target=\"#vnext-nav-content\" aria-controls=\"vnext-nav-content\" aria-expanded=\"false\" aria-label=\"Toggle navigation\">");
         sb.Append("<span class=\"navbar-toggler-icon\"></span></button>");
         sb.Append("<div class=\"collapse navbar-collapse\" id=\"vnext-nav-content\">");
         sb.Append("<ul id=\"vnext-nav-items\" class=\"navbar-nav me-auto mb-2 mb-lg-0\"></ul>");
-        sb.Append("<ul class=\"navbar-nav ms-auto\">");
-        sb.Append("<li class=\"nav-item\"><a class=\"nav-link\" href=\"/account\"><i class=\"bi bi-person-circle\"></i> Account</a></li>");
-        sb.Append("<li class=\"nav-item\"><a class=\"nav-link\" href=\"/logout\"><i class=\"bi bi-box-arrow-right\"></i> Logout</a></li>");
+        sb.Append("<ul class=\"navbar-nav ms-auto mb-2 mb-lg-0\">");
+        AppendVNextRightNavItems(sb, host.MenuOptionsList);
         sb.Append("</ul></div></div></nav>");
         sb.Append("<div class=\"container-fluid py-3\" id=\"vnext-content\"><div class=\"text-center py-5\"><div class=\"spinner-border\" role=\"status\"><span class=\"visually-hidden\">Loading...</span></div></div></div>");
         sb.Append("<div id=\"vnext-modal-container\"></div>");
@@ -1153,6 +1156,40 @@ public static class RouteRegistrationExtensions
         context.Response.ContentType = "text/html; charset=utf-8";
         context.Response.Headers.CacheControl = "no-store";
         await context.Response.WriteAsync(sb.ToString());
+    }
+
+    private static void AppendVNextRightNavItems(StringBuilder sb, List<IMenuOption> options)
+    {
+        var rightAligned = options.Where(o => o.RightAligned && o.ShowOnNavBar).ToList();
+        var renderedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var option in rightAligned)
+        {
+            if (string.IsNullOrWhiteSpace(option.Group))
+            {
+                var cssClass = option.HighlightAsButton
+                    ? $"btn {(string.IsNullOrWhiteSpace(option.ColorClass) ? "btn-outline-light" : option.ColorClass)} btn-sm ms-2"
+                    : string.IsNullOrWhiteSpace(option.ColorClass) ? "nav-link" : $"nav-link {option.ColorClass}";
+                sb.Append($"<li class=\"nav-item\"><a class=\"{WebUtility.HtmlEncode(cssClass)}\" href=\"{WebUtility.HtmlEncode(option.Href)}\">{WebUtility.HtmlEncode(option.Label)}</a></li>");
+                continue;
+            }
+
+            if (renderedGroups.Contains(option.Group))
+                continue;
+
+            renderedGroups.Add(option.Group);
+            var groupItems = rightAligned
+                .Where(o => string.Equals(o.Group, option.Group, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            sb.Append($"<li class=\"nav-item dropdown\"><a class=\"nav-link dropdown-toggle\" href=\"#\" role=\"button\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\">{WebUtility.HtmlEncode(option.Group)}</a>");
+            sb.Append("<ul class=\"dropdown-menu dropdown-menu-end\">");
+            foreach (var item in groupItems)
+            {
+                sb.Append($"<li><a class=\"dropdown-item\" href=\"{WebUtility.HtmlEncode(item.Href)}\">{WebUtility.HtmlEncode(item.Label)}</a></li>");
+            }
+            sb.Append("</ul></li>");
+        }
     }
 
     /// <summary>Parses a POST /query JSON body into a <see cref="QueryDefinition"/>.</summary>
