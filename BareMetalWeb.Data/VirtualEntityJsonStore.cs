@@ -120,12 +120,27 @@ public sealed class VirtualEntityJsonStore
             return 0;
 
         var files = Directory.GetFiles(folder, "*.json");
-        if (query == null)
+        if (query == null || (query.Clauses.Count == 0 && query.Groups.Count == 0))
             return files.Length;
 
-        // Apply filter to get accurate count
-        var results = await QueryAsync(entityTypeName, query, cancellationToken).ConfigureAwait(false);
-        return results is ICollection<DynamicDataObject> col ? col.Count : results.Count();
+        // Count matching items directly, without applying Skip/Top so we get the total count.
+        var count = 0;
+        foreach (var file in files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var json = await File.ReadAllTextAsync(file, cancellationToken).ConfigureAwait(false);
+                var obj = JsonSerializer.Deserialize<DynamicDataObject>(json);
+                if (obj != null && Matches(obj, query))
+                    count++;
+            }
+            catch
+            {
+                // Skip corrupt or unreadable files
+            }
+        }
+        return count;
     }
 
     // ── Query helpers ─────────────────────────────────────────────────────────

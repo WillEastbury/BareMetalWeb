@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -537,5 +538,78 @@ public class VirtualEntityTests : IDisposable
 
         Assert.Empty(errors);
         Assert.Equal("My Title", instance.GetField("Title"));
+    }
+
+    // ── VirtualEntityJsonStore.CountAsync ────────────────────────────────────
+
+    [Fact]
+    public async Task CountAsync_WithNullQuery_ReturnsAllItems()
+    {
+        var store = new VirtualEntityJsonStore(_tempDir);
+        const string entityType = "count-test-null";
+        for (var i = 1; i <= 5; i++)
+        {
+            var obj = new DynamicDataObject { Id = $"item-{i}" };
+            await store.SaveAsync(entityType, obj);
+        }
+
+        var count = await store.CountAsync(entityType, null);
+
+        Assert.Equal(5, count);
+    }
+
+    [Fact]
+    public async Task CountAsync_WithSkipAndTop_ReturnsTotalNotPageCount()
+    {
+        // Regression test: CountAsync must NOT apply Skip/Top — it should always
+        // return the total matching count, not the count of items on a single page.
+        var store = new VirtualEntityJsonStore(_tempDir);
+        const string entityType = "count-test-paginated";
+        for (var i = 1; i <= 5; i++)
+        {
+            var obj = new DynamicDataObject { Id = $"item-{i}" };
+            await store.SaveAsync(entityType, obj);
+        }
+
+        // A paginated query: skip=3, top=1 – CountAsync must still return 5 (total), not 1 (page size)
+        var query = new QueryDefinition { Skip = 3, Top = 1 };
+        var count = await store.CountAsync(entityType, query);
+
+        Assert.Equal(5, count);
+    }
+
+    [Fact]
+    public async Task CountAsync_WithFilterAndSkipTop_ReturnsFilteredTotalNotPageCount()
+    {
+        // Regression test: when filtering AND paginating, CountAsync returns the total
+        // number of matching items, not the items visible on the current page.
+        var store = new VirtualEntityJsonStore(_tempDir);
+        const string entityType = "count-test-filter-paginated";
+        for (var i = 1; i <= 4; i++)
+        {
+            var obj = new DynamicDataObject { Id = $"match-{i}" };
+            obj.SetField("Status", "active");
+            await store.SaveAsync(entityType, obj);
+        }
+        for (var i = 1; i <= 2; i++)
+        {
+            var obj = new DynamicDataObject { Id = $"other-{i}" };
+            obj.SetField("Status", "inactive");
+            await store.SaveAsync(entityType, obj);
+        }
+
+        // Skip=2, Top=1 on items matching Status=active: count should be 4 (total matching), not 1 (page size)
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new QueryClause { Field = "Status", Operator = QueryOperator.Equals, Value = "active" }
+            },
+            Skip = 2,
+            Top = 1
+        };
+        var count = await store.CountAsync(entityType, query);
+
+        Assert.Equal(4, count);
     }
 }

@@ -2843,11 +2843,20 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.Request.Query), meta);
-        var results = await DataScaffold.QueryAsync(meta, query);
-        var payload = results.Cast<object>().Select(item => BuildApiModel(meta, item)).ToArray();
+        var queryDict = ToQueryDictionary(context.Request.Query);
+        var query = DataScaffold.BuildQueryDefinition(queryDict, meta);
 
-        await WriteJsonResponseAsync(context, payload);
+        // Build a separate count query without skip/top to get the total record count.
+        // This allows clients to implement correct pagination even when skip/top are applied.
+        var countQuery = DataScaffold.BuildQueryDefinition(queryDict, meta);
+        countQuery.Skip = null;
+        countQuery.Top = null;
+        var totalCount = await DataScaffold.CountAsync(meta, countQuery);
+
+        var results = await DataScaffold.QueryAsync(meta, query);
+        var items = results.Cast<object>().Select(item => BuildApiModel(meta, item)).ToArray();
+
+        await WriteJsonResponseAsync(context, new Dictionary<string, object> { ["items"] = items, ["total"] = totalCount });
     }
 
     public async ValueTask DataApiGetHandler(HttpContext context)

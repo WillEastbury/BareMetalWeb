@@ -1358,7 +1358,7 @@
       if (!rawId) {
         // ── List view ───────────────────────────────────────────────────────
         const items  = await BareMetalRest.entity(slug).list();
-        const allItems = Array.isArray(items) ? items : [];
+        const allItems = Array.isArray(items) ? items : (items?.items || []);
         const schemaFields = entity.meta.schema?.fields || {};
 
         const hdr = el('div', { className: 'd-flex gap-2 align-items-center mb-3 flex-wrap' });
