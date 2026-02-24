@@ -1,19 +1,23 @@
 using System.IO.Pipelines;
 using System.Net;
 using System.Text;
+using BareMetalWeb.Core.Host;
 using BareMetalWeb.Data;
+using BareMetalWeb.Interfaces;
 
 namespace BareMetalWeb.Host;
 
 /// <summary>
-/// Renders a <see cref="ReportResult"/> as a self-contained HTML document, writing
-/// directly to a <see cref="PipeWriter"/> for low-allocation streaming output.
+/// Renders a <see cref="ReportResult"/> as an HTML document using the standard
+/// site chrome (Bootstrap navbar, Bootstrap CSS, site.css), writing directly to
+/// a <see cref="PipeWriter"/> for low-allocation streaming output.
 /// </summary>
 public static class ReportHtmlRenderer
 {
 
     /// <summary>
-    /// Renders the report result to the PipeWriter as a complete HTML document.
+    /// Renders the report result to the PipeWriter as a complete HTML document
+    /// using the standard VNext-style Bootstrap chrome.
     /// </summary>
     public static async ValueTask RenderAsync(
         PipeWriter writer,
@@ -22,54 +26,68 @@ public static class ReportHtmlRenderer
         string description = "",
         IReadOnlyList<ReportParameter>? parameters = null,
         IReadOnlyDictionary<string, string>? parameterValues = null,
-        string reportId = "")
+        string reportId = "",
+        IBareWebHost? host = null,
+        string? nonce = null,
+        string? csrfToken = null)
     {
-        Write(writer, "<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">");
-        Write(writer, "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
-        Write(writer, "<title>");
-        WriteEncoded(writer, title);
-        Write(writer, "</title>");
-        Write(writer, ReportCss);
-        Write(writer, "</head><body><div class=\"bm-page-card\">");
+        var safeNonce = WebUtility.HtmlEncode(nonce ?? string.Empty);
+        var safeToken = WebUtility.HtmlEncode(csrfToken ?? string.Empty);
 
-        // Header
-        Write(writer, "<div class=\"report-header\"><h1 class=\"report-title\">");
+        // Chrome head
+        var headSb = new StringBuilder(2048);
+        AppendChromeHead(headSb, title, safeNonce, safeToken);
+        Write(writer, headSb.ToString());
+
+        // Chrome navbar
+        if (host != null)
+        {
+            var navSb = new StringBuilder(1024);
+            AppendChromeNavbar(navSb, host, safeNonce);
+            Write(writer, navSb.ToString());
+        }
+
+        Write(writer, "<div class=\"container-fluid py-4 px-4 bm-content\">");
+        Write(writer, "<div class=\"card shadow-sm bm-page-card\">");
+        Write(writer, "<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
+        Write(writer, "<h1 class=\"h5 mb-0\"><i class=\"bi bi-bar-chart-fill\"></i> ");
         WriteEncoded(writer, title);
         Write(writer, "</h1>");
+        Write(writer, "<a href=\"/reports\" class=\"btn btn-sm btn-outline-secondary\"><i class=\"bi bi-arrow-left\"></i> All Reports</a>");
+        Write(writer, "</div><div class=\"card-body\">");
+
+        // Description
         if (!string.IsNullOrWhiteSpace(description))
         {
-            Write(writer, "<p class=\"report-description\">");
+            Write(writer, "<p class=\"text-muted mb-3\">");
             WriteEncoded(writer, description);
             Write(writer, "</p>");
         }
-        Write(writer, "</div>");
 
         // Parameter form (if any)
         if (parameters != null && parameters.Count > 0)
         {
-            Write(writer, "<form class=\"report-params\" method=\"get\">");
-            Write(writer, "<div class=\"params-grid\">");
+            Write(writer, "<form class=\"row g-3 mb-4\" method=\"get\">");
             foreach (var p in parameters)
             {
-                Write(writer, "<div class=\"param-group\"><label>");
+                Write(writer, "<div class=\"col-auto\"><label class=\"form-label fw-semibold\">");
                 WriteEncoded(writer, p.Label);
-                Write(writer, "</label><input type=\"text\" name=\"");
+                Write(writer, "</label><input type=\"text\" class=\"form-control\" name=\"");
                 WriteEncoded(writer, p.Name);
                 Write(writer, "\" value=\"");
                 var val = parameterValues != null && parameterValues.TryGetValue(p.Name, out var pv) ? pv : p.DefaultValue;
                 WriteEncoded(writer, val);
                 Write(writer, "\"></div>");
             }
-            Write(writer, "</div>");
-            Write(writer, "<button type=\"submit\" class=\"btn-run\">Run Report</button>");
+            Write(writer, "<div class=\"col-auto align-self-end\"><button type=\"submit\" class=\"btn btn-primary\"><i class=\"bi bi-play-fill\"></i> Run Report</button></div>");
             Write(writer, "</form>");
         }
 
         // Results table
-        Write(writer, "<div class=\"table-wrapper\"><table class=\"bm-table\">");
+        Write(writer, "<div class=\"table-responsive\"><table class=\"table table-hover table-bordered align-middle mb-0\">");
 
         // Column headers
-        Write(writer, "<thead><tr>");
+        Write(writer, "<thead class=\"table-light\"><tr>");
         foreach (var col in result.ColumnLabels)
         {
             Write(writer, "<th>");
@@ -93,24 +111,73 @@ public static class ReportHtmlRenderer
         }
         Write(writer, "</tbody></table></div>");
 
-        // Footer
-        Write(writer, "<div class=\"report-footer\">");
-        Write(writer, $"<span class=\"row-count\">{result.TotalRows:N0} row(s)</span>");
+        // Footer info
+        Write(writer, "<div class=\"mt-3 small text-muted\">");
+        Write(writer, $"<span class=\"fw-semibold text-body\">{result.TotalRows:N0} row(s)</span>");
         if (result.IsTruncated)
-            Write(writer, $" <span class=\"truncated-warning\">(results capped at {ReportExecutor.DefaultRowLimit:N0} rows)</span>");
+            Write(writer, $" <span class=\"text-warning fw-semibold\">(results capped at {ReportExecutor.DefaultRowLimit:N0} rows)</span>");
         Write(writer, $" &mdash; Generated at {WebUtility.HtmlEncode(result.GeneratedAt.ToString("yyyy-MM-dd HH:mm:ss"))} UTC");
 
-        // Export links
+        // Export link
         if (!string.IsNullOrWhiteSpace(reportId))
         {
             Write(writer, " &mdash; <a href=\"/api/reports/");
             WriteEncoded(writer, reportId);
-            Write(writer, "?format=csv\" class=\"export-link\">Export CSV</a>");
+            Write(writer, "?format=csv\" class=\"link-primary fw-semibold\"><i class=\"bi bi-download\"></i> Export CSV</a>");
         }
 
-        Write(writer, "</div></div></body></html>");
+        Write(writer, "</div></div></div></div>");
+
+        // Chrome footer scripts
+        var footerSb = new StringBuilder(512);
+        AppendChromeFooter(footerSb, safeNonce);
+        Write(writer, footerSb.ToString());
 
         await writer.FlushAsync();
+    }
+
+    // ── Chrome helpers (shared with RegisterReportRoutes listing page) ────────
+
+    /// <summary>Appends the standard Bootstrap head section to <paramref name="sb"/>.</summary>
+    internal static void AppendChromeHead(StringBuilder sb, string title, string safeNonce, string safeToken)
+    {
+        sb.Append("<!DOCTYPE html><html lang=\"en\"><head>");
+        sb.Append("<meta charset=\"utf-8\">");
+        sb.Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
+        sb.Append("<title>");
+        sb.Append(WebUtility.HtmlEncode(title));
+        sb.Append("</title>");
+        sb.Append("<link rel=\"icon\" type=\"image/x-icon\" href=\"/static/favicon.ico\">");
+        sb.Append("<link id=\"bootswatch-theme\" rel=\"stylesheet\" href=\"/static/css/bootstrap.min.css\">");
+        sb.Append($"<script nonce=\"{safeNonce}\">(function(){{var m=document.cookie.match(/(?:^|;\\s*)bm-selected-theme=([^;]+)/);if(m){{var t=decodeURIComponent(m[1]),a=['cerulean','cosmo','cyborg','darkly','flatly','journal','litera','lumen','lux','materia','minty','morph','pulse','quartz','sandstone','simplex','sketchy','slate','solar','spacelab','superhero','united','vapor','yeti','zephyr'];if(a.indexOf(t)>=0)document.getElementById('bootswatch-theme').href='https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/'+encodeURIComponent(t)+'/bootstrap.min.css';}}}})()</script>");
+        sb.Append("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css\" crossorigin=\"anonymous\">");
+        sb.Append("<link rel=\"stylesheet\" href=\"/static/css/site.css\">");
+        if (!string.IsNullOrEmpty(safeToken))
+            sb.Append($"<meta name=\"csrf-token\" content=\"{safeToken}\">");
+        sb.Append("</head>");
+        sb.Append("<body>");
+    }
+
+    /// <summary>Appends the standard Bootstrap navbar to <paramref name="sb"/>.</summary>
+    internal static void AppendChromeNavbar(StringBuilder sb, IBareWebHost host, string safeNonce)
+    {
+        sb.Append("<nav class=\"navbar navbar-expand-lg bg-primary navbar-dark fixed-top bm-navbar\">");
+        sb.Append("<div class=\"container-fluid\">");
+        sb.Append($"<a class=\"navbar-brand\" href=\"/\"><i class=\"bi bi-lightning-charge-fill\"></i> {WebUtility.HtmlEncode(host.AppName)}</a>");
+        sb.Append("<button class=\"navbar-toggler\" type=\"button\" data-bs-toggle=\"collapse\" data-bs-target=\"#report-nav-content\" aria-controls=\"report-nav-content\" aria-expanded=\"false\" aria-label=\"Toggle navigation\">");
+        sb.Append("<span class=\"navbar-toggler-icon\"></span></button>");
+        sb.Append("<div class=\"collapse navbar-collapse\" id=\"report-nav-content\">");
+        sb.Append("<ul class=\"navbar-nav ms-auto mb-2 mb-lg-0\">");
+        RouteRegistrationExtensions.AppendVNextRightNavItems(sb, host.MenuOptionsList);
+        sb.Append("</ul></div></div></nav>");
+    }
+
+    /// <summary>Appends the closing Bootstrap scripts and body/html tags to <paramref name="sb"/>.</summary>
+    internal static void AppendChromeFooter(StringBuilder sb, string safeNonce)
+    {
+        sb.Append("<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js\" crossorigin=\"anonymous\"></script>");
+        sb.Append($"<script src=\"/static/js/bundle.js\" nonce=\"{safeNonce}\" defer></script>");
+        sb.Append("</body></html>");
     }
 
     // ── Low-allocation write helpers ─────────────────────────────────────────
@@ -129,36 +196,4 @@ public static class ReportHtmlRenderer
         if (string.IsNullOrEmpty(text)) return;
         Write(writer, WebUtility.HtmlEncode(text));
     }
-
-    // ── Embedded CSS ─────────────────────────────────────────────────────────
-
-    private const string ReportCss = """
-        <style>
-        *{box-sizing:border-box;margin:0;padding:0}
-        body{font-family:system-ui,-apple-system,sans-serif;background:#f4f6f9;color:#333;padding:24px}
-        .bm-page-card{background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.12);padding:24px;max-width:1400px;margin:0 auto}
-        .report-header{margin-bottom:20px;border-bottom:2px solid #e8eaf6;padding-bottom:16px}
-        .report-title{font-size:1.6em;font-weight:700;color:#1a1a2e}
-        .report-description{color:#666;margin-top:8px;font-size:.95em}
-        .report-params{background:#f8f9fc;border:1px solid #e0e0e0;border-radius:6px;padding:16px;margin-bottom:20px}
-        .params-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:12px}
-        .param-group label{display:block;font-size:.85em;font-weight:600;color:#555;margin-bottom:4px}
-        .param-group input{width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:4px;font-size:.9em}
-        .btn-run{padding:8px 20px;background:#4361ee;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:.95em;font-weight:600}
-        .btn-run:hover{background:#3a56d4}
-        .table-wrapper{overflow-x:auto;margin-bottom:16px}
-        .bm-table{width:100%;border-collapse:collapse;font-size:.9em}
-        .bm-table th{background:#e8eaf6;text-align:left;padding:10px 12px;font-weight:600;color:#444;border-bottom:2px solid #c5cae9;white-space:nowrap}
-        .bm-table td{padding:8px 12px;border-bottom:1px solid #eee;vertical-align:top}
-        .bm-table tbody tr:hover{background:#f5f7ff}
-        .bm-table tbody tr:nth-child(even){background:#fafbff}
-        .bm-table tbody tr:nth-child(even):hover{background:#f0f3ff}
-        .report-footer{font-size:.85em;color:#777;padding-top:12px;border-top:1px solid #eee}
-        .row-count{font-weight:600;color:#333}
-        .truncated-warning{color:#e65100;font-weight:600}
-        .export-link{color:#4361ee;text-decoration:none;font-weight:600}
-        .export-link:hover{text-decoration:underline}
-        @media print{body{background:#fff;padding:0}.btn-run,.export-link{display:none}.bm-page-card{box-shadow:none;padding:8px}}
-        </style>
-        """;
 }
