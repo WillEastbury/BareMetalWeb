@@ -1191,6 +1191,7 @@ public static class RouteRegistrationExtensions
         sb.Append("<script src=\"/static/js/BareMetalBind.js\"></script>");
         sb.Append("<script src=\"/static/js/BareMetalTemplate.js\"></script>");
         sb.Append("<script src=\"/static/js/BareMetalRendering.js\"></script>");
+        sb.Append("<script src=\"/static/js/theme-switcher.js\"></script>");
         sb.Append("<script src=\"/static/js/vnext-app.js\"></script>");
         sb.Append("</body></html>");
 
