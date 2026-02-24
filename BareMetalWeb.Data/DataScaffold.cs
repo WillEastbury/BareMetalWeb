@@ -3124,6 +3124,8 @@ public static class DataScaffold
 
         if (IsStringListType(effectiveType))
             return FormFieldType.TextArea;
+        if (IsChildListType(effectiveType, out _))
+            return FormFieldType.CustomHtml;
         if (effectiveType == typeof(bool))
             return FormFieldType.YesNo;
         if (effectiveType.IsEnum)
