@@ -176,8 +176,7 @@ public static class RouteRegistrationExtensions
         this IBareWebHost host,
         IRouteHandlers routeHandlers,
         IPageInfoFactory pageInfoFactory,
-        IHtmlTemplate mainTemplate,
-        bool enableWipeData = false)
+        IHtmlTemplate mainTemplate)
     {
         // Log management
         host.RegisterRoute("GET /admin/logs", new RouteHandlerData(
@@ -206,16 +205,13 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "System", navAlignment: NavAlignment.Right),
             routeHandlers.ReloadTemplatesHandler));
 
-        // Wipe all data — staging/dev only, disabled by default in production
-        if (enableWipeData)
-        {
-            host.RegisterRoute("GET /admin/wipe-data", new RouteHandlerData(
-                pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", true, 0, navGroup: "System", navAlignment: NavAlignment.Right),
-                routeHandlers.WipeDataHandler));
-            host.RegisterRoute("POST /admin/wipe-data", new RouteHandlerData(
-                pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", false, 0),
-                routeHandlers.WipeDataPostHandler));
-        }
+        // Wipe all data — always registered; returns 419 if admin.allowWipeData setting is not configured
+        host.RegisterRoute("GET /admin/wipe-data", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", true, 0, navGroup: "System", navAlignment: NavAlignment.Right),
+            routeHandlers.WipeDataHandler));
+        host.RegisterRoute("POST /admin/wipe-data", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", false, 0),
+            routeHandlers.WipeDataPostHandler));
     }
 
     /// <summary>
@@ -927,11 +923,13 @@ public static class RouteRegistrationExtensions
     {
         // List all reports
         host.RegisterRoute("GET /reports", new RouteHandlerData(
-            pageInfoFactory.RawPage("Authenticated", true),
+            pageInfoFactory.RawPage("admin", false),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.Redirect("/login"); return; }
+                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
 
                 var reports = DataStoreProvider.Current.Query<ReportDefinition>(null).OrderBy(r => r.Name).ToList();
                 var csrfToken = CsrfProtection.EnsureToken(context);
@@ -980,11 +978,13 @@ public static class RouteRegistrationExtensions
 
         // Run a report → HTML
         host.RegisterRoute("GET /reports/{id}", new RouteHandlerData(
-            pageInfoFactory.RawPage("Authenticated", false),
+            pageInfoFactory.RawPage("admin", false),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.Redirect("/login"); return; }
+                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
 
                 var id = GetRouteParam(context, "id");
                 if (string.IsNullOrWhiteSpace(id))
@@ -1043,11 +1043,13 @@ public static class RouteRegistrationExtensions
 
         // JSON results via API
         host.RegisterRoute("GET /api/reports/{id}", new RouteHandlerData(
-            pageInfoFactory.RawPage("Authenticated", false),
+            pageInfoFactory.RawPage("admin", false),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.StatusCode = 401; return; }
+                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
                 var id = GetRouteParam(context, "id");
                 if (string.IsNullOrWhiteSpace(id))
@@ -1191,6 +1193,7 @@ public static class RouteRegistrationExtensions
         sb.Append("<script src=\"/static/js/BareMetalBind.js\"></script>");
         sb.Append("<script src=\"/static/js/BareMetalTemplate.js\"></script>");
         sb.Append("<script src=\"/static/js/BareMetalRendering.js\"></script>");
+        sb.Append("<script src=\"/static/js/theme-switcher.js\"></script>");
         sb.Append("<script src=\"/static/js/vnext-app.js\"></script>");
         sb.Append("</body></html>");
 

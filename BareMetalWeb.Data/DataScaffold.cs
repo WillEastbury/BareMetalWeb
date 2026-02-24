@@ -3124,6 +3124,8 @@ public static class DataScaffold
 
         if (IsStringListType(effectiveType))
             return FormFieldType.TextArea;
+        if (IsChildListType(effectiveType, out _))
+            return FormFieldType.CustomHtml;
         if (effectiveType == typeof(bool))
             return FormFieldType.YesNo;
         if (effectiveType.IsEnum)
@@ -3285,7 +3287,7 @@ public static class DataScaffold
         var permissions = string.IsNullOrWhiteSpace(entityAttribute?.Permissions)
             ? name
             : entityAttribute!.Permissions;
-        var showOnNav = entityAttribute?.ShowOnNav ?? true;
+        var showOnNav = entityAttribute?.ShowOnNav ?? false;
         var navGroup = entityAttribute?.NavGroup ?? "Admin";
         var navOrder = entityAttribute?.NavOrder ?? 0;
         var idGeneration = entityAttribute?.IdGeneration ?? AutoIdStrategy.Guid;

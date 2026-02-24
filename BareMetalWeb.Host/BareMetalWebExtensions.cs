@@ -104,6 +104,9 @@ public static class BareMetalWebExtensions
 
             // GC
             (WellKnownSettings.GCServerMode, app.Configuration.GetValue("GC:ServerMode", true).ToString(), "Enable server GC mode (true/false)"),
+
+            // Admin
+            (WellKnownSettings.AllowWipeData, app.Configuration.GetValue("Admin:AllowWipeData", string.Empty), "Secret token required to trigger wipe-all-data. Leave empty to disable the endpoint."),
         };
         IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot, auditService, settingDefaults);
         IHtmlTemplate mainTemplate = templateStore.Get("Index");
@@ -127,8 +130,7 @@ public static class BareMetalWebExtensions
         appInfo.RegisterStaticRoutes(routeHandlers, pageInfoFactory, mainTemplate);
         appInfo.RegisterAuthRoutes(routeHandlers, pageInfoFactory, mainTemplate, allowAccountCreation);
         appInfo.RegisterMonitoringRoutes(routeHandlers, pageInfoFactory, mainTemplate);
-        appInfo.RegisterAdminRoutes(routeHandlers, pageInfoFactory, mainTemplate,
-            app.Configuration.GetValue("Admin:EnableWipeData", false));
+        appInfo.RegisterAdminRoutes(routeHandlers, pageInfoFactory, mainTemplate);
         appInfo.RegisterDataRoutes(routeHandlers, pageInfoFactory, mainTemplate);
         appInfo.RegisterEntityMetadataRoute(pageInfoFactory);  // must be before RegisterApiRoutes
         appInfo.RegisterRuntimeApiRoutes(pageInfoFactory);       // /meta/entity/{name}, POST /query, POST /intent

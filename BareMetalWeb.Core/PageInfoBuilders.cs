@@ -12,11 +12,13 @@ public sealed class PageInfoFactory : IPageInfoFactory
             new PageContext(pageMetaDataKeys, pageMetaDataValues, NavGroup: navGroup, NavAlignment: navAlignment, NavRenderStyle: navRenderStyle, NavColorClass: navColorClass)
         );
     }
-    public PageInfo RawPage(string permissionsNeeded, bool showOnNavBar, string? navGroup = null, NavAlignment navAlignment = NavAlignment.Left, NavRenderStyle navRenderStyle = NavRenderStyle.Link, string? navColorClass = null)
+    public PageInfo RawPage(string permissionsNeeded, bool showOnNavBar, string? navGroup = null, NavAlignment navAlignment = NavAlignment.Left, NavRenderStyle navRenderStyle = NavRenderStyle.Link, string? navColorClass = null, string? navLabel = null)
     {
+        var labelKeys = navLabel != null ? new[] { "title" } : Array.Empty<string>();
+        var labelValues = navLabel != null ? new[] { navLabel } : Array.Empty<string>();
         return new PageInfo(
             new PageMetaData(null!, 200, permissionsNeeded, showOnNavBar, 0),
-            new PageContext(Array.Empty<string>(), Array.Empty<string>(), NavGroup: navGroup, NavAlignment: navAlignment, NavRenderStyle: navRenderStyle, NavColorClass: navColorClass)
+            new PageContext(labelKeys, labelValues, NavGroup: navGroup, NavAlignment: navAlignment, NavRenderStyle: navRenderStyle, NavColorClass: navColorClass)
         );
     }
 }
