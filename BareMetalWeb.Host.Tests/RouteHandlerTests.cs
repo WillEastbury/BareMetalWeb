@@ -5,6 +5,7 @@ using System.IO.Pipelines;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -1106,6 +1107,118 @@ public class RouteHandlerTests : IDisposable
         Assert.NotNull(result);
         Assert.Equal("2", result["page"]);
         Assert.Equal("active", result["filter"]);
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    //  DataApiListHandler – pagination
+    // ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DataApiListHandler_WithPaginationParams_ReturnsPaginatedResponse()
+    {
+        // Arrange
+        EnsureStore();
+        const string slug = "pagination-test-items";
+        var items = Enumerable.Range(1, 5)
+            .Select(i => (BaseDataObject)new Address { Id = $"item-{i}" })
+            .ToArray();
+
+        var meta = new DataEntityMetadata(
+            Type: typeof(Address),
+            Name: "PaginationTestItems",
+            Slug: slug,
+            Permissions: "",
+            ShowOnNav: false,
+            NavGroup: null,
+            NavOrder: 0,
+            IdGeneration: AutoIdStrategy.None,
+            ViewType: ViewType.Table,
+            ParentField: null,
+            Fields: Array.Empty<DataFieldMetadata>(),
+            Handlers: new DataEntityHandlers(
+                Create: () => new Address(),
+                LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
+                SaveAsync: (_, _) => ValueTask.CompletedTask,
+                DeleteAsync: (_, _) => ValueTask.CompletedTask,
+                QueryAsync: (q, _) =>
+                {
+                    var skip = q?.Skip ?? 0;
+                    var top  = q?.Top  ?? items.Length;
+                    IEnumerable<BaseDataObject> page = items.Skip(skip).Take(top);
+                    return ValueTask.FromResult(page);
+                },
+                CountAsync: (_, _) => ValueTask.FromResult(items.Length)),
+            Commands: Array.Empty<RemoteCommandMetadata>());
+
+        DataScaffold.RegisterVirtualEntity(meta);
+
+        var context = CreateHttpContext("GET", "/api/" + slug);
+        context.SetPageContext(new PageContext(
+            PageMetaDataKeys: new[] { "type" },
+            PageMetaDataValues: new[] { slug }));
+        context.Request.QueryString = new QueryString("?skip=0&top=2");
+
+        // Act
+        await _handlers.DataApiListHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var doc = await JsonDocument.ParseAsync(context.Response.Body);
+        var root = doc.RootElement;
+        Assert.Equal(JsonValueKind.Object, root.ValueKind);
+        Assert.Equal(5, root.GetProperty("total").GetInt32());
+        Assert.Equal(2, root.GetProperty("items").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task DataApiListHandler_WithoutPaginationParams_ReturnsPlainArray()
+    {
+        // Arrange
+        EnsureStore();
+        const string slug = "plain-array-test-items";
+        var items = Enumerable.Range(1, 3)
+            .Select(i => (BaseDataObject)new Address { Id = $"item-{i}" })
+            .ToArray();
+
+        var meta = new DataEntityMetadata(
+            Type: typeof(Address),
+            Name: "PlainArrayTestItems",
+            Slug: slug,
+            Permissions: "",
+            ShowOnNav: false,
+            NavGroup: null,
+            NavOrder: 0,
+            IdGeneration: AutoIdStrategy.None,
+            ViewType: ViewType.Table,
+            ParentField: null,
+            Fields: Array.Empty<DataFieldMetadata>(),
+            Handlers: new DataEntityHandlers(
+                Create: () => new Address(),
+                LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
+                SaveAsync: (_, _) => ValueTask.CompletedTask,
+                DeleteAsync: (_, _) => ValueTask.CompletedTask,
+                QueryAsync: (_, _) => ValueTask.FromResult<IEnumerable<BaseDataObject>>(items),
+                CountAsync: (_, _) => ValueTask.FromResult(items.Length)),
+            Commands: Array.Empty<RemoteCommandMetadata>());
+
+        DataScaffold.RegisterVirtualEntity(meta);
+
+        var context = CreateHttpContext("GET", "/api/" + slug);
+        context.SetPageContext(new PageContext(
+            PageMetaDataKeys: new[] { "type" },
+            PageMetaDataValues: new[] { slug }));
+
+        // Act
+        await _handlers.DataApiListHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var doc = await JsonDocument.ParseAsync(context.Response.Body);
+        var root = doc.RootElement;
+        Assert.Equal(JsonValueKind.Array, root.ValueKind);
+        Assert.Equal(3, root.GetArrayLength());
     }
 
     // ──────────────────────────────────────────────────────────────

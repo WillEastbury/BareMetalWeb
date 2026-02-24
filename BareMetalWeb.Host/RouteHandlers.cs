@@ -2937,23 +2937,54 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.Request.Query), meta);
-        var results = await DataScaffold.QueryAsync(meta, query);
+        var queryDict = ToQueryDictionary(context.Request.Query);
+        var query = DataScaffold.BuildQueryDefinition(queryDict, meta);
 
         var format = context.Request.Query["format"].ToString().ToLowerInvariant();
         var acceptCsv = context.Request.Headers["Accept"].ToString().Contains("text/csv", StringComparison.OrdinalIgnoreCase);
 
+        // When pagination parameters are present, run the data and count queries concurrently
+        // and return { items, total } so the VNext UI can render page controls correctly.
+        if (query.Skip.HasValue || query.Top.HasValue)
+        {
+            var countQuery = DataScaffold.BuildQueryDefinition(queryDict, meta);
+            countQuery.Skip = null;
+            countQuery.Top = null;
+
+            var dataTask  = DataScaffold.QueryAsync(meta, query, context.RequestAborted).AsTask();
+            var countTask = DataScaffold.CountAsync(meta, countQuery, context.RequestAborted).AsTask();
+            await Task.WhenAll(dataTask, countTask).ConfigureAwait(false);
+
+            var results = await dataTask;
+            var total   = await countTask;
+
+            if (format == "csv" || acceptCsv)
+            {
+                var resultsList = results.Cast<object?>().ToList();
+                var rows = BuildListPlainRowsWithId(meta, resultsList, out var headers);
+                var csv = BuildCsv(headers, rows);
+                await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_list.csv");
+                return;
+            }
+
+            var payload = results.Cast<object>().Select(item => BuildApiModel(meta, item)).ToArray();
+            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["items"] = payload, ["total"] = total });
+            return;
+        }
+
+        var allResults = await DataScaffold.QueryAsync(meta, query, context.RequestAborted).ConfigureAwait(false);
+
         if (format == "csv" || acceptCsv)
         {
-            var resultsList = results.Cast<object?>().ToList();
+            var resultsList = allResults.Cast<object?>().ToList();
             var rows = BuildListPlainRowsWithId(meta, resultsList, out var headers);
             var csv = BuildCsv(headers, rows);
             await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_list.csv");
             return;
         }
 
-        var payload = results.Cast<object>().Select(item => BuildApiModel(meta, item)).ToArray();
-        await WriteJsonResponseAsync(context, payload);
+        var allPayload = allResults.Cast<object>().Select(item => BuildApiModel(meta, item)).ToArray();
+        await WriteJsonResponseAsync(context, allPayload);
     }
 
     public async ValueTask DataApiImportHandler(HttpContext context)
