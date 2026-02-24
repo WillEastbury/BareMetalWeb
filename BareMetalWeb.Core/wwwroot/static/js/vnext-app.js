@@ -225,8 +225,14 @@
         var search = query.q    || '';
 
         fetchMeta(slug).then(function (meta) {
+            var viewType = meta.viewType || 'Table';
+            var activeView = query.view || viewType;
+            // Alt views (tree, org chart, timeline, timetable) need all items — no pagination
+            var isAltView = (activeView === 'TreeView' || activeView === 'OrgChart' ||
+                             activeView === 'Timeline' || activeView === 'Timetable');
+
             // Build API query
-            var params = ['skip=' + skip, 'top=' + top];
+            var params = isAltView ? [] : ['skip=' + skip, 'top=' + top];
             if (search)  params.push('q=' + encodeURIComponent(search));
             if (sort)    params.push('sort=' + encodeURIComponent(sort), 'dir=' + encodeURIComponent(dir));
             // Per-field filters from query string
@@ -235,7 +241,9 @@
                 if (v) params.push('f_' + encodeURIComponent(f.name) + '=' + encodeURIComponent(v));
             });
 
-            return apiFetch(API + '/' + encodeURIComponent(slug) + '?' + params.join('&'))
+            var url = API + '/' + encodeURIComponent(slug);
+            if (params.length) url += '?' + params.join('&');
+            return apiFetch(url)
                 .then(function (result) { renderListResult(meta, result, slug, query, skip, top, search, sort, dir); });
         }).catch(function (err) { showError(err.message); });
     }
@@ -271,8 +279,11 @@
         if (viewType !== 'Table') {
             html += '<div class="btn-group btn-group-sm ms-2">';
             html += '<a class="btn btn-outline-secondary' + (activeView === 'Table' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Table' })) + '" title="Table View"><i class="bi bi-table"></i></a>';
-            if (viewType === 'TreeView')  html += '<a class="btn btn-outline-secondary' + (activeView === 'TreeView' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'TreeView' })) + '" title="Tree View"><i class="bi bi-diagram-3"></i></a>';
-            if (viewType === 'OrgChart') html += '<a class="btn btn-outline-secondary' + (activeView === 'OrgChart' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'OrgChart' })) + '" title="Org Chart"><i class="bi bi-people"></i></a>';
+            // Hierarchical entities show both Tree and Org Chart buttons (matching classic admin)
+            if (viewType === 'TreeView' || viewType === 'OrgChart') {
+                html += '<a class="btn btn-outline-secondary' + (activeView === 'TreeView' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'TreeView' })) + '" title="Tree View"><i class="bi bi-diagram-3"></i></a>';
+                html += '<a class="btn btn-outline-secondary' + (activeView === 'OrgChart' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'OrgChart' })) + '" title="Org Chart"><i class="bi bi-diagram-2"></i></a>';
+            }
             if (viewType === 'Timeline') html += '<a class="btn btn-outline-secondary' + (activeView === 'Timeline' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timeline' })) + '" title="Timeline"><i class="bi bi-calendar-range"></i></a>';
             if (viewType === 'Timetable') html += '<a class="btn btn-outline-secondary' + (activeView === 'Timetable' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timetable' })) + '" title="Timetable"><i class="bi bi-calendar3"></i></a>';
             html += '</div>';
@@ -288,6 +299,8 @@
             html += renderTreeView(meta, items, slug, baseUrl);
         } else if ((activeView === 'OrgChart' || (activeView === '' && viewType === 'OrgChart')) && items.length > 0) {
             html += renderOrgChart(meta, items, slug, baseUrl);
+        } else if ((activeView === 'TreeView' || activeView === 'OrgChart') && items.length === 0) {
+            html += '<p class="text-muted py-3">No ' + escHtml(meta.name) + ' yet. <a href="' + baseUrl + '/create">Create one</a>.</p>';
         } else if ((activeView === 'Timeline' || (activeView === '' && viewType === 'Timeline')) && items.length > 0) {
             html += renderTimeline(meta, items, slug, baseUrl);
         } else if ((activeView === 'Timetable' || (activeView === '' && viewType === 'Timetable')) && items.length > 0) {
