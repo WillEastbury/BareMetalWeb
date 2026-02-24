@@ -95,7 +95,7 @@ public class ClientRequestTrackerTests
         var tracker = new ClientRequestTracker(new MockLogger());
 
         // Act
-        var result1 = tracker.ShouldThrottle(null, out _, out _);
+        var result1 = tracker.ShouldThrottle(null!, out _, out _);
         var result2 = tracker.ShouldThrottle("", out _, out _);
         var result3 = tracker.ShouldThrottle("   ", out _, out _);
 

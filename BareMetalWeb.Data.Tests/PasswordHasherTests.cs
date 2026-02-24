@@ -178,13 +178,13 @@ public class PasswordHasherTests
     [InlineData("")]
     [InlineData(" ")]
     [InlineData(null)]
-    public void Verify_InvalidSalt_ReturnsFalse(string invalidSalt)
+    public void Verify_InvalidSalt_ReturnsFalse(string? invalidSalt)
     {
         // Arrange
         var (hash, _, iterations) = PasswordHasher.CreateHash("ValidPassword");
 
         // Act
-        var result = PasswordHasher.Verify("ValidPassword", hash, invalidSalt, iterations);
+        var result = PasswordHasher.Verify("ValidPassword", hash, invalidSalt!, iterations);
 
         // Assert
         Assert.False(result);
