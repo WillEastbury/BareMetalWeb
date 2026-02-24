@@ -466,6 +466,9 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/{type}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataApiListHandler));
+        host.RegisterRoute("POST /api/{type}/import", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.DataApiImportHandler));
         host.RegisterRoute("POST /api/{type}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.DataApiPostHandler));

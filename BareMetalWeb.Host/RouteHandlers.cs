@@ -2828,7 +2828,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask DataApiListHandler(HttpContext context)
     {
-        var meta = ResolveEntity(context, out _, out var errorMessage);
+        var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -2845,9 +2845,153 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.Request.Query), meta);
         var results = await DataScaffold.QueryAsync(meta, query);
-        var payload = results.Cast<object>().Select(item => BuildApiModel(meta, item)).ToArray();
 
+        var format = context.Request.Query["format"].ToString().ToLowerInvariant();
+        var acceptCsv = context.Request.Headers["Accept"].ToString().Contains("text/csv", StringComparison.OrdinalIgnoreCase);
+
+        if (format == "csv" || acceptCsv)
+        {
+            var resultsList = results.Cast<object?>().ToList();
+            var rows = BuildListPlainRowsWithId(meta, resultsList, out var headers);
+            var csv = BuildCsv(headers, rows);
+            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_list.csv");
+            return;
+        }
+
+        var payload = results.Cast<object>().Select(item => BuildApiModel(meta, item)).ToArray();
         await WriteJsonResponseAsync(context, payload);
+    }
+
+    public async ValueTask DataApiImportHandler(HttpContext context)
+    {
+        var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
+        if (meta == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(errorMessage ?? "Entity not found.");
+            return;
+        }
+
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Access denied.\"}");
+            return;
+        }
+
+        if (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"CSRF validation failed.\"}");
+            return;
+        }
+
+        if (!context.Request.HasFormContentType)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Multipart form data required.\"}");
+            return;
+        }
+
+        var form = await context.Request.ReadFormAsync();
+        var file = form.Files.GetFile("csv_file");
+        if (file == null || file.Length == 0)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"No CSV file uploaded.\"}");
+            return;
+        }
+
+        var upsert = DataScaffold.IsTruthy(form["upsert"].ToString());
+        string csvText;
+        await using (var stream = file.OpenReadStream())
+        using (var reader = new StreamReader(stream))
+        {
+            csvText = await reader.ReadToEndAsync();
+        }
+
+        var rows = ParseCsvRows(csvText);
+        if (rows.Count < 2)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"CSV file is empty or missing headers.\"}");
+            return;
+        }
+
+        var header = rows[0];
+        var mapping = BuildCsvMapping(meta, header, out var idIndex, out var passwordIndex);
+
+        int created = 0, updated = 0, skipped = 0;
+        var importErrors = new List<string>();
+
+        for (int i = 1; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            if (row.All(string.IsNullOrWhiteSpace)) continue;
+
+            var rowNumber = i + 1;
+            var idValue = idIndex >= 0 && idIndex < row.Length ? row[idIndex]?.Trim() : string.Empty;
+            var isCreate = true;
+            BaseDataObject instance;
+            var upsertWithExplicitId = false;
+            if (upsert && !string.IsNullOrWhiteSpace(idValue))
+            {
+                var existing = await DataScaffold.LoadAsync(meta, idValue!);
+                if (existing is BaseDataObject existingObject)
+                {
+                    instance = existingObject;
+                    isCreate = false;
+                }
+                else
+                {
+                    instance = meta.Handlers.Create();
+                    instance.Id = idValue;
+                    upsertWithExplicitId = true;
+                }
+            }
+            else
+            {
+                instance = meta.Handlers.Create();
+                DataScaffold.ApplyAutoGeneratedIds(meta, instance);
+            }
+
+            var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in mapping)
+            {
+                var colIdx = kvp.Value;
+                if (colIdx < row.Length)
+                    values[kvp.Key] = row[colIdx];
+            }
+
+            var fieldErrors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: isCreate || upsertWithExplicitId);
+            if (fieldErrors.Count > 0)
+            {
+                importErrors.Add($"Row {rowNumber}: {string.Join(", ", fieldErrors)}");
+                skipped++;
+                continue;
+            }
+
+            try
+            {
+                await DataScaffold.SaveAsync(meta, instance);
+                if (isCreate) created++; else updated++;
+            }
+            catch (Exception ex)
+            {
+                importErrors.Add($"Row {rowNumber}: {ex.Message}");
+                skipped++;
+            }
+        }
+
+        var result = new { created, updated, skipped, errors = importErrors };
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(result));
     }
 
     public async ValueTask DataApiGetHandler(HttpContext context)
