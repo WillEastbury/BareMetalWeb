@@ -56,6 +56,7 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Deploy infrastructure (Bicep)
+        if: github.event_name == 'workflow_dispatch'
         uses: azure/arm-deploy@v2
         with:
           scope: resourcegroup
