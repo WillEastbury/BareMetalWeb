@@ -725,6 +725,23 @@ public static class RouteRegistrationExtensions
             }));
     }
 
+    // ─── MCP routes ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Registers the MCP (Model Context Protocol) server endpoint at POST /mcp.
+    /// Exposes all registered BareMetalWeb entities as MCP tools (query, get, create,
+    /// update, delete, and named commands), enabling AI assistants to interact with
+    /// application data using the standard JSON-RPC 2.0 MCP protocol.
+    /// </summary>
+    public static void RegisterMcpRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        host.RegisterRoute("POST /mcp", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            McpRouteHandler.HandleAsync));
+    }
+
     // ─── Private helpers ────────────────────────────────────────────────────────
 
     private static bool IsEntityAccessible(DataEntityMetadata entity, User? user, string[] userPermissions)
