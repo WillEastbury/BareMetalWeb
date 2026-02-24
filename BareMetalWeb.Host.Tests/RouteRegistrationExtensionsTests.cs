@@ -472,13 +472,13 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void RegisterAdminRoutes_AlwaysRegistersNineRoutes()
+    public void RegisterAdminRoutes_AlwaysRegistersTenRoutes()
     {
         // Arrange & Act
         _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.Equal(9, _server.routes.Count);
+        Assert.Equal(10, _server.routes.Count);
     }
 
     [Fact]
@@ -945,7 +945,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterData > afterAdmin);
         Assert.True(afterLookup > afterData);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 16 + 4 + 9 + 21 + 5 + 9, total); // 3+16+4+9+21+5+9=67
+        Assert.Equal(staticCount + 16 + 4 + 10 + 21 + 5 + 9, total); // 3+16+4+10+21+5+9=68
     }
 
     [Fact]
@@ -1119,6 +1119,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask SampleDataPostHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask WipeDataHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask WipeDataPostHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask EntityDesignerHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiListHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiImportHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiGetHandler(HttpContext context) => ValueTask.CompletedTask;
