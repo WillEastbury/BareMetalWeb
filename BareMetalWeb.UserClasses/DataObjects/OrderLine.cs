@@ -2,7 +2,7 @@ using BareMetalWeb.Data;
 
 namespace BareMetalWeb.Data.DataObjects;
 
-[DataEntity("Order Lines", Slug = "order-lines", ShowOnNav = true, NavGroup = "Examples", NavOrder = 50)]
+[DataEntity("Order Lines", Slug = "order-lines", ShowOnNav = true, NavGroup = "Sales", NavOrder = 50)]
 public class OrderRow : RenderableDataObject
 {
     [DataField(Label = "Product", Order = 1, Required = true)]

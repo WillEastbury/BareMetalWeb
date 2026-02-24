@@ -195,12 +195,15 @@ public class BareMetalWebServer : IBareWebHost
 
             bool requiresLoggedIn = requiresAuthenticated || (!requiresAnonymous && requiredPermissions.Length > 0);
 
+            bool entityRightAligned = string.Equals(entity.NavGroup, "Admin", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(entity.NavGroup, "System", StringComparison.OrdinalIgnoreCase);
+
             MenuOptionsList.Add(new MenuOption(
                 href: $"/admin/data/{entity.Slug}",
                 label: entity.Name,
                 showOnNavBar: true,
                 permissionsNeeded: permissionsNeeded,
-                rightAligned: false,
+                rightAligned: entityRightAligned,
                 highlightAsButton: false,
                 requiresAnonymous: requiresAnonymous,
                 requiresLoggedIn: requiresLoggedIn,

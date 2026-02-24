@@ -8,7 +8,7 @@ namespace BareMetalWeb.UserClasses;
 /// Example entity demonstrating computed field functionality.
 /// Represents a product with base pricing and stock information.
 /// </summary>
-[DataEntity("Example Products", Slug = "example-products", ShowOnNav = true, NavGroup = "Examples", NavOrder = 100)]
+[DataEntity("Example Products", Slug = "example-products", ShowOnNav = false, NavGroup = "Examples", NavOrder = 100)]
 public class ExampleProduct : BaseDataObject
 {
     [DataField(Label = "Product Name", Order = 1, Required = true)]
@@ -34,7 +34,7 @@ public class ExampleProduct : BaseDataObject
 /// Example entity demonstrating all three computed field strategies.
 /// Represents an order with various computed price fields.
 /// </summary>
-[DataEntity("Example Orders", Slug = "example-orders", ShowOnNav = true, NavGroup = "Examples", NavOrder = 101)]
+[DataEntity("Example Orders", Slug = "example-orders", ShowOnNav = false, NavGroup = "Examples", NavOrder = 101)]
 public class ExampleOrder : BaseDataObject
 {
     [DataField(Label = "Order Number", Order = 1, Required = true)]
