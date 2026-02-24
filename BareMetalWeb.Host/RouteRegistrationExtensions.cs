@@ -901,6 +901,8 @@ public static class RouteRegistrationExtensions
             ["navGroup"] = meta.NavGroup,
             ["navOrder"] = meta.NavOrder,
             ["viewType"] = meta.ViewType.ToString(),
+            ["canShowTimetable"] = DataScaffold.CanShowTimetableView(meta),
+            ["canShowTimeline"] = DataScaffold.CanShowTimelineView(meta),
             ["idGeneration"] = meta.IdGeneration.ToString(),
             ["parentField"] = meta.ParentField != null ? (object)new Dictionary<string, object?>
             {
