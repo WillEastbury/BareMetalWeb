@@ -496,20 +496,31 @@
         var parentField = meta.parentField ? meta.parentField.name : null;
         var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
         var subtitleField = meta.fields.filter(function (f) { return f.list && f !== labelField; }).sort(function (a, b) { return a.order - b.order; })[0];
+        // Look for a title/role field like the SSR version does
+        var titleField = meta.fields.find(function (f) {
+            var n = f.name.toLowerCase();
+            return n.indexOf('title') >= 0 || n.indexOf('role') >= 0 || n.indexOf('position') >= 0;
+        });
 
         function buildCardHtml(item) {
             var id = item.id || item.Id || '';
             var label = labelField ? (nestedGet(item, labelField.name) || nestedGet(item, labelField.name.charAt(0).toLowerCase() + labelField.name.slice(1)) || id) : id;
-            var subtitle = subtitleField ? (nestedGet(item, subtitleField.name) || nestedGet(item, subtitleField.name.charAt(0).toLowerCase() + subtitleField.name.slice(1)) || '') : '';
-            return '<div class="card text-center" style="min-width:140px;display:inline-block;margin:4px;vertical-align:top">' +
-                '<div class="card-body p-2">' +
-                '<p class="card-text small mb-0"><strong>' + escHtml(String(label)) + '</strong></p>' +
-                (subtitle ? '<p class="card-text small text-muted mb-1">' + escHtml(String(subtitle)) + '</p>' : '<p class="mb-1"></p>') +
-                '<a class="btn btn-xs btn-outline-primary btn-sm" href="' + baseUrl + '/' + encodeURIComponent(id) + '" style="font-size:0.7rem">View</a>' +
+            var subtitle = '';
+            if (titleField) {
+                subtitle = nestedGet(item, titleField.name) || nestedGet(item, titleField.name.charAt(0).toLowerCase() + titleField.name.slice(1)) || '';
+            } else if (subtitleField) {
+                subtitle = nestedGet(item, subtitleField.name) || nestedGet(item, subtitleField.name.charAt(0).toLowerCase() + subtitleField.name.slice(1)) || '';
+            }
+            return '<div class="bm-orgchart-card">' +
+                '<div class="bm-orgchart-name">' + escHtml(String(label)) + '</div>' +
+                (subtitle ? '<div class="bm-orgchart-title">' + escHtml(String(subtitle)) + '</div>' : '') +
+                '<div class="bm-orgchart-actions">' +
+                '<a class="btn btn-sm btn-outline-info me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '" title="View"><i class="bi bi-search"></i></a>' +
+                '<a class="btn btn-sm btn-outline-warning me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>' +
                 '</div></div>';
         }
 
-        var html = '<div class="vnext-orgchart overflow-auto py-3">';
+        var html = '<div class="bm-orgchart-container">';
 
         if (items.length === 0) {
             html += '<p class="text-center text-muted py-4"><i class="bi bi-diagram-2 me-2"></i>No records found.</p>';
@@ -530,32 +541,29 @@
                 else roots.push(nodeMap[id]);
             });
             if (roots.length === 0) {
-                // Circular reference or all items are children — break cycle, show all as top-level
                 items.forEach(function (item) { var k = item.id || item.Id || ''; if (k && nodeMap[k]) roots.push(nodeMap[k]); });
             }
 
-            function buildLevel(nodes) {
-                var out = '<div class="d-flex flex-wrap gap-3 mb-3 justify-content-center">';
-                var nextLevel = [];
-                nodes.forEach(function (n) {
-                    out += buildCardHtml(n.item);
-                    n.children.forEach(function (c) { nextLevel.push(c); });
-                });
+            function renderNode(node, depth) {
+                if (depth > 5) return '';
+                var out = '<div class="bm-orgchart-node">';
+                out += buildCardHtml(node.item);
+                if (node.children.length > 0) {
+                    out += '<div class="bm-orgchart-connector"></div>';
+                    out += '<div class="bm-orgchart-level">';
+                    node.children.forEach(function (c) { out += renderNode(c, depth + 1); });
+                    out += '</div>';
+                }
                 out += '</div>';
-                if (nextLevel.length) out += buildLevel(nextLevel);
                 return out;
             }
-            if (roots.length > 0) {
-                html += buildLevel(roots);
-            } else {
-                // All items form cycles — fall back to flat card grid
-                html += '<div class="d-flex flex-wrap gap-3">';
-                items.forEach(function (item) { html += buildCardHtml(item); });
-                html += '</div>';
-            }
+
+            roots.forEach(function (r) { html += renderNode(r, 0); });
         } else {
-            html += '<div class="d-flex flex-wrap gap-3">';
-            items.forEach(function (item) { html += buildCardHtml(item); });
+            html += '<div class="bm-orgchart-level">';
+            items.forEach(function (item) {
+                html += '<div class="bm-orgchart-node">' + buildCardHtml(item) + '</div>';
+            });
             html += '</div>';
         }
         html += '</div>';
