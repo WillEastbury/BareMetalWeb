@@ -869,6 +869,9 @@ public static class RouteRegistrationExtensions
                 fd["upload"] = null;
             }
 
+            // Sub-field schema for List<T> child collections (CustomHtml type)
+            fd["subFields"] = DataScaffold.BuildSubFieldSchemas(f);
+
             return (object)fd;
         }).ToArray();
 

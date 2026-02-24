@@ -726,6 +726,121 @@ public static class DataScaffold
     }
 
     /// <summary>
+    /// Builds serialisable schema metadata for the child fields of a sub-list field.
+    /// Returns null when the field is not a List&lt;T&gt; child-list type.
+    /// Used by the VNext SPA metadata endpoint so the client can render proper
+    /// modal-based editors with lookup / calculated / enum support.
+    /// Does NOT load lookup options from the data store – the VNext client fetches
+    /// those at runtime via the lookup API.
+    /// </summary>
+    public static IReadOnlyList<Dictionary<string, object?>>? BuildSubFieldSchemas(DataFieldMetadata field)
+    {
+        if (!IsChildListType(field.Property.PropertyType, out var childType))
+            return null;
+
+        var result = new List<Dictionary<string, object?>>();
+
+        var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .OrderBy(p => p.MetadataToken)
+            .ToArray();
+
+        foreach (var prop in properties)
+        {
+            if (!prop.CanRead || !prop.CanWrite) continue;
+
+            var fieldAttr  = prop.GetCustomAttribute<DataFieldAttribute>();
+            if (fieldAttr == null || (!fieldAttr.Create && !fieldAttr.Edit)) continue;
+
+            var lookupAttr  = prop.GetCustomAttribute<DataLookupAttribute>();
+            var calcAttr    = prop.GetCustomAttribute<CalculatedFieldAttribute>();
+            var copyParAttr = prop.GetCustomAttribute<CopyFromParentAttribute>();
+
+            var label      = fieldAttr.Label ?? DeCamelcaseWithId(prop.Name);
+            var effectiveType = fieldAttr.FieldType == FormFieldType.Unknown
+                ? MapFieldType(prop.PropertyType)
+                : fieldAttr.FieldType;
+            if (lookupAttr != null) effectiveType = FormFieldType.LookupList;
+
+            var fd = new Dictionary<string, object?>
+            {
+                ["name"]     = prop.Name,
+                ["label"]    = label,
+                ["type"]     = effectiveType.ToString(),
+                ["required"] = fieldAttr.Required,
+                ["readOnly"] = calcAttr != null
+            };
+
+            // Lookup metadata (no DB call – just attribute data)
+            if (lookupAttr != null)
+            {
+                var targetMeta = GetEntityByType(lookupAttr.TargetType);
+                fd["lookup"] = new Dictionary<string, object?>
+                {
+                    ["targetSlug"]    = targetMeta?.Slug,
+                    ["valueField"]    = lookupAttr.ValueField,
+                    ["displayField"]  = lookupAttr.DisplayField,
+                    ["queryField"]    = lookupAttr.QueryField,
+                    ["queryValue"]    = lookupAttr.QueryValue,
+                    ["sortField"]     = lookupAttr.SortField,
+                    ["sortDirection"] = lookupAttr.SortDirection.ToString()
+                };
+                fd["enumValues"] = null;
+                // CopyFields for inline copy when lookup selection changes
+                fd["lookupCopyFields"] = string.IsNullOrEmpty(lookupAttr.CopyFields) ? null : (object)lookupAttr.CopyFields;
+                fd["lookupTargetSlug"] = targetMeta?.Slug;
+            }
+            else if (effectiveType == FormFieldType.Enum)
+            {
+                fd["lookup"]     = null;
+                fd["enumValues"] = BuildEnumOptions(prop.PropertyType)
+                    .Select(o => (object)new Dictionary<string, object?> { ["value"] = o.Key, ["label"] = o.Value })
+                    .ToList();
+                fd["lookupCopyFields"] = null;
+                fd["lookupTargetSlug"] = null;
+            }
+            else
+            {
+                fd["lookup"]          = null;
+                fd["enumValues"]      = null;
+                fd["lookupCopyFields"] = null;
+                fd["lookupTargetSlug"] = null;
+            }
+
+            // Calculated field JS expression
+            if (calcAttr != null)
+            {
+                string jsExpr;
+                try
+                {
+                    var parser = new ExpressionParser();
+                    var ast    = parser.Parse(calcAttr.Expression);
+                    jsExpr     = ast.ToJavaScript();
+                }
+                catch { jsExpr = "0"; }
+                fd["calculated"] = new Dictionary<string, object?> { ["expression"] = jsExpr };
+            }
+            else
+            {
+                fd["calculated"] = null;
+            }
+
+            // CopyFromParent support
+            fd["copyFromParent"] = copyParAttr != null
+                ? (object)new Dictionary<string, object?>
+                {
+                    ["parentField"] = copyParAttr.ParentFieldName,
+                    ["entitySlug"]  = copyParAttr.EntitySlug,
+                    ["sourceField"] = copyParAttr.SourceFieldName
+                }
+                : null;
+
+            result.Add(fd);
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Extracts nested child data from an entity instance
     /// </summary>
     public static IReadOnlyList<(string FieldName, string[] Headers, string[][] Rows)> ExtractNestedData(DataEntityMetadata metadata, object instance)
