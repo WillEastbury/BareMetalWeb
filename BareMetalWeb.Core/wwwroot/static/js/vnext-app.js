@@ -135,6 +135,16 @@
             .replace(/'/g, '&#39;');
     }
 
+    function syncTagHidden(container) {
+        var fieldName = container.dataset.field;
+        var hidden = container.parentElement.querySelector('input[name="' + fieldName + '"]');
+        var tags = [];
+        container.querySelectorAll('.vnext-tag-pill').forEach(function (pill) {
+            tags.push(pill.firstChild.textContent.trim());
+        });
+        if (hidden) hidden.value = JSON.stringify(tags);
+    }
+
     function fmtValue(val, fieldType) {
         if (val == null || val === '') return '<span class="text-muted">—</span>';
         if (fieldType === 'YesNo' || fieldType === 'Boolean') {
@@ -143,6 +153,9 @@
                 : '<span class="badge bg-secondary">No</span>';
         }
         if (fieldType === 'Password') return '<span class="text-muted">••••••••</span>';
+        if (fieldType === 'Tags' && Array.isArray(val)) {
+            return val.map(function (t) { return '<span class="badge bg-info text-dark me-1">' + escHtml(t) + '</span>'; }).join('');
+        }
         if (fieldType === 'Image') {
             if (typeof val === 'object' && val.url) return '<img src="' + escHtml(val.url) + '" class="img-thumbnail" style="max-height:48px" alt="">';
             return escHtml(String(val));
@@ -1216,6 +1229,22 @@
                 escHtml(taVal) + '</textarea>' + feedback + '</div>';
         }
 
+        // Tags (pill-based input)
+        if (f.type === 'Tags') {
+            var tags = Array.isArray(val) ? val : (val ? String(val).split(',').map(function(s){return s.trim();}).filter(Boolean) : []);
+            var pills = tags.map(function (t) {
+                return '<span class="badge bg-info text-dark me-1 vnext-tag-pill">' + escHtml(t) +
+                    ' <button type="button" class="btn-close btn-close-sm ms-1" aria-label="Remove" style="font-size:.55em;vertical-align:middle"></button></span>';
+            }).join('');
+            return '<div class="mb-3">' + label +
+                '<div class="vnext-tag-container form-control form-control-sm d-flex flex-wrap align-items-center gap-1" style="min-height:38px;cursor:text" data-field="' + escHtml(f.name) + '">' +
+                pills +
+                '<input type="text" class="vnext-tag-input border-0 flex-grow-1" style="outline:none;min-width:80px" placeholder="Type and press Enter">' +
+                '</div>' +
+                '<input type="hidden" name="' + escHtml(f.name) + '" id="' + id_ + '" value="' + escHtml(JSON.stringify(tags)) + '">' +
+                feedback + '</div>';
+        }
+
         // Password
         if (f.type === 'Password') {
             return '<div class="mb-3">' + label +
@@ -1629,6 +1658,22 @@
 
         // Lookup add/refresh buttons
         form.addEventListener('click', function (e) {
+            // Tag pill remove button
+            var closeBtn = e.target.closest('.vnext-tag-pill .btn-close');
+            if (closeBtn) {
+                e.preventDefault();
+                var pill = closeBtn.closest('.vnext-tag-pill');
+                var container = pill.closest('.vnext-tag-container');
+                pill.remove();
+                syncTagHidden(container);
+                return;
+            }
+            // Focus tag input when clicking container
+            var tagContainer = e.target.closest('.vnext-tag-container');
+            if (tagContainer && e.target === tagContainer) {
+                tagContainer.querySelector('.vnext-tag-input').focus();
+            }
+
             var addBtn = e.target.closest('.vnext-lookup-add');
             if (addBtn) {
                 e.preventDefault();
@@ -1699,6 +1744,28 @@
                     jsonInput.value = JSON.stringify(rows);
                     refreshSubListTable(subField, rows);
                 }
+            }
+        });
+
+        // Tag input: add tag on Enter or comma, remove on Backspace
+        form.addEventListener('keydown', function (e) {
+            var inp = e.target;
+            if (!inp.classList.contains('vnext-tag-input')) return;
+            var container = inp.closest('.vnext-tag-container');
+            if (e.key === 'Enter' || e.key === ',') {
+                e.preventDefault();
+                var text = inp.value.replace(/,/g, '').trim();
+                if (!text) return;
+                var pill = document.createElement('span');
+                pill.className = 'badge bg-info text-dark me-1 vnext-tag-pill';
+                pill.innerHTML = escHtml(text) + ' <button type="button" class="btn-close btn-close-sm ms-1" aria-label="Remove" style="font-size:.55em;vertical-align:middle"></button>';
+                container.insertBefore(pill, inp);
+                inp.value = '';
+                syncTagHidden(container);
+            }
+            if (e.key === 'Backspace' && !inp.value) {
+                var pills = container.querySelectorAll('.vnext-tag-pill');
+                if (pills.length) { pills[pills.length - 1].remove(); syncTagHidden(container); }
             }
         });
 
@@ -2142,6 +2209,12 @@
         fields.forEach(function (f) {
             if (f.type === 'Hidden' && f.name === '__csrf') return;
             if (f.readOnly || f.isIdField || f.computed || f.calculated) return;
+
+            if (f.type === 'Tags') {
+                var hiddenInput = form.querySelector('input[name="' + f.name + '"]');
+                try { obj[f.name] = JSON.parse(hiddenInput ? hiddenInput.value : '[]'); } catch(e) { obj[f.name] = []; }
+                return;
+            }
 
             if (f.type === 'YesNo') {
                 obj[f.name] = fd.has(f.name) && fd.get(f.name) === 'true';

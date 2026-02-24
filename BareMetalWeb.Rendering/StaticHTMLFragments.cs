@@ -511,6 +511,7 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                 return InputNumberTemplate(name, name, value, placeholder, required, min, max, invalidClass, validationFeedback);
             case FormFieldType.Otp:
                 return InputOtpTemplate(name, name, value, placeholder, required);
+            case FormFieldType.Tags:
             case FormFieldType.TextArea:
                 return InputTextAreaTemplate(name, name, value, placeholder, required, minlength, maxlength, invalidClass, validationFeedback);
             case FormFieldType.Decimal:
