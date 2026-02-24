@@ -687,7 +687,7 @@ public class RouteHandlerTests : IDisposable
     {
         var meta = CreateGanttMetadata();
         var result = InvokeStatic<string>("BuildTimelineViewHtml",
-            meta, Array.Empty<BaseDataObject>(), "/admin/data/invoice", null, null, null);
+            meta, Array.Empty<BaseDataObject>(), "/admin/data/timeline", null, null, null);
         Assert.Contains("text-muted", result);
     }
 
@@ -695,10 +695,10 @@ public class RouteHandlerTests : IDisposable
     public void BuildTimelineViewHtml_WithTwoDateFields_RendersGanttBars()
     {
         var meta = CreateGanttMetadata();
-        var invoice = new Invoice { InvoiceDate = new DateOnly(2025, 5, 1), DueDate = new DateOnly(2025, 6, 15) };
-        var items = new BaseDataObject[] { invoice };
+        var item = new TimelineTestItem { StartDate = new DateOnly(2025, 5, 1), EndDate = new DateOnly(2025, 6, 15) };
+        var items = new BaseDataObject[] { item };
         var result = InvokeStatic<string>("BuildTimelineViewHtml",
-            meta, items, "/admin/data/invoice", null, null, null);
+            meta, items, "/admin/data/timeline", null, null, null);
         Assert.Contains("gantt-bar", result);
         Assert.Contains("gantt-month-lbl", result);
     }
@@ -707,10 +707,10 @@ public class RouteHandlerTests : IDisposable
     public void BuildTimelineViewHtml_RendersMonthHeaders()
     {
         var meta = CreateGanttMetadata();
-        var invoice = new Invoice { InvoiceDate = new DateOnly(2025, 5, 1), DueDate = new DateOnly(2025, 7, 31) };
-        var items = new BaseDataObject[] { invoice };
+        var item = new TimelineTestItem { StartDate = new DateOnly(2025, 5, 1), EndDate = new DateOnly(2025, 7, 31) };
+        var items = new BaseDataObject[] { item };
         var result = InvokeStatic<string>("BuildTimelineViewHtml",
-            meta, items, "/admin/data/invoice", null, null, null);
+            meta, items, "/admin/data/timeline", null, null, null);
         Assert.Contains("May", result);
         Assert.Contains("Jun", result);
         Assert.Contains("Jul", result);
@@ -720,10 +720,10 @@ public class RouteHandlerTests : IDisposable
     public void BuildTimelineViewHtml_WithOneDateField_RendersMilestoneBars()
     {
         var meta = CreateSingleDateGanttMetadata();
-        var invoice = new Invoice { InvoiceDate = new DateOnly(2025, 5, 10) };
-        var items = new BaseDataObject[] { invoice };
+        var item = new TimelineTestItem { StartDate = new DateOnly(2025, 5, 10) };
+        var items = new BaseDataObject[] { item };
         var result = InvokeStatic<string>("BuildTimelineViewHtml",
-            meta, items, "/admin/data/invoice", null, null, null);
+            meta, items, "/admin/data/timeline", null, null, null);
         Assert.Contains("gantt-bar", result);
         Assert.Contains("gantt-month-lbl", result);
     }
@@ -732,27 +732,27 @@ public class RouteHandlerTests : IDisposable
     public void BuildTimelineViewHtml_BarLeftPositionIsNonNegative()
     {
         var meta = CreateGanttMetadata();
-        var invoice = new Invoice { InvoiceDate = new DateOnly(2025, 6, 1), DueDate = new DateOnly(2025, 6, 30) };
-        var items = new BaseDataObject[] { invoice };
+        var item = new TimelineTestItem { StartDate = new DateOnly(2025, 6, 1), EndDate = new DateOnly(2025, 6, 30) };
+        var items = new BaseDataObject[] { item };
         var result = InvokeStatic<string>("BuildTimelineViewHtml",
-            meta, items, "/admin/data/invoice", null, null, null);
+            meta, items, "/admin/data/timeline", null, null, null);
         // Bar must have a left% style — ensure it's not negative (i.e. "left:-" absent)
         Assert.DoesNotContain("left:-", result);
     }
 
     private static DataEntityMetadata CreateGanttMetadata()
     {
-        var invoiceDateProp = typeof(Invoice).GetProperty("InvoiceDate")!;
-        var dueDateProp = typeof(Invoice).GetProperty("DueDate")!;
+        var startDateProp = typeof(TimelineTestItem).GetProperty("StartDate")!;
+        var endDateProp = typeof(TimelineTestItem).GetProperty("EndDate")!;
         var fields = new[]
         {
-            new DataFieldMetadata(invoiceDateProp, "InvoiceDate", "Invoice Date", FormFieldType.DateOnly, 2, false, true, true, true, true, false, null, null, IdGenerationStrategy.None, null, null, null, null),
-            new DataFieldMetadata(dueDateProp, "DueDate", "Due Date", FormFieldType.DateOnly, 3, false, true, true, true, true, false, null, null, IdGenerationStrategy.None, null, null, null, null),
+            new DataFieldMetadata(startDateProp, "StartDate", "Start Date", FormFieldType.DateOnly, 2, false, true, true, true, true, false, null, null, IdGenerationStrategy.None, null, null, null, null),
+            new DataFieldMetadata(endDateProp, "EndDate", "End Date", FormFieldType.DateOnly, 3, false, true, true, true, true, false, null, null, IdGenerationStrategy.None, null, null, null, null),
         };
         return new DataEntityMetadata(
-            Type: typeof(Invoice),
-            Name: "Invoices",
-            Slug: "invoices",
+            Type: typeof(TimelineTestItem),
+            Name: "Timeline Items",
+            Slug: "timeline-items",
             Permissions: "",
             ShowOnNav: false,
             NavGroup: null,
@@ -762,7 +762,7 @@ public class RouteHandlerTests : IDisposable
             ParentField: null,
             Fields: fields,
             Handlers: new DataEntityHandlers(
-                Create: () => new Invoice(),
+                Create: () => new TimelineTestItem(),
                 LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
                 SaveAsync: (_, _) => ValueTask.CompletedTask,
                 DeleteAsync: (_, _) => ValueTask.CompletedTask,
@@ -773,15 +773,15 @@ public class RouteHandlerTests : IDisposable
 
     private static DataEntityMetadata CreateSingleDateGanttMetadata()
     {
-        var invoiceDateProp = typeof(Invoice).GetProperty("InvoiceDate")!;
+        var startDateProp = typeof(TimelineTestItem).GetProperty("StartDate")!;
         var fields = new[]
         {
-            new DataFieldMetadata(invoiceDateProp, "InvoiceDate", "Invoice Date", FormFieldType.DateOnly, 2, false, true, true, true, true, false, null, null, IdGenerationStrategy.None, null, null, null, null),
+            new DataFieldMetadata(startDateProp, "StartDate", "Start Date", FormFieldType.DateOnly, 2, false, true, true, true, true, false, null, null, IdGenerationStrategy.None, null, null, null, null),
         };
         return new DataEntityMetadata(
-            Type: typeof(Invoice),
-            Name: "Invoices",
-            Slug: "invoices",
+            Type: typeof(TimelineTestItem),
+            Name: "Timeline Items",
+            Slug: "timeline-items",
             Permissions: "",
             ShowOnNav: false,
             NavGroup: null,
@@ -791,7 +791,7 @@ public class RouteHandlerTests : IDisposable
             ParentField: null,
             Fields: fields,
             Handlers: new DataEntityHandlers(
-                Create: () => new Invoice(),
+                Create: () => new TimelineTestItem(),
                 LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
                 SaveAsync: (_, _) => ValueTask.CompletedTask,
                 DeleteAsync: (_, _) => ValueTask.CompletedTask,
@@ -1301,6 +1301,15 @@ public class RouteHandlerTests : IDisposable
     // ──────────────────────────────────────────────────────────────
     //  Mocks
     // ──────────────────────────────────────────────────────────────
+
+    private class TimelineTestItem : BaseDataObject
+    {
+        [DataField(Label = "Start Date", FieldType = FormFieldType.DateOnly, Order = 2, List = true, View = true)]
+        public DateOnly StartDate { get; set; }
+
+        [DataField(Label = "End Date", FieldType = FormFieldType.DateOnly, Order = 3, List = true, View = true)]
+        public DateOnly EndDate { get; set; }
+    }
 
     private class MockHtmlRenderer : IHtmlRenderer
     {

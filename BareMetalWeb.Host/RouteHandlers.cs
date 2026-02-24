@@ -985,27 +985,6 @@ public sealed class RouteHandlers : IRouteHandlers
                     new ReportColumn { Entity = "products", Field = "InventoryCount", Label = "Inventory" },
                 },
                 SortField = "products.Name"
-            },
-            new ReportDefinition(createdBy)
-            {
-                Name = "Invoice Summary",
-                Description = "Invoices joined to customer details.",
-                RootEntity = "invoices",
-                Joins = new List<ReportJoin>
-                {
-                    new ReportJoin { FromEntity = "invoices", FromField = "CustomerId", ToEntity = "customers", ToField = "Id" }
-                },
-                Columns = new List<ReportColumn>
-                {
-                    new ReportColumn { Entity = "invoices",  Field = "Id",          Label = "Invoice #" },
-                    new ReportColumn { Entity = "customers", Field = "Name",        Label = "Customer" },
-                    new ReportColumn { Entity = "invoices",  Field = "InvoiceDate", Label = "Invoice Date" },
-                    new ReportColumn { Entity = "invoices",  Field = "DueDate",     Label = "Due Date" },
-                    new ReportColumn { Entity = "invoices",  Field = "Amount",      Label = "Amount" },
-                    new ReportColumn { Entity = "invoices",  Field = "Status",      Label = "Status" },
-                },
-                SortField = "invoices.InvoiceDate",
-                SortDescending = true
             }
         };
 
