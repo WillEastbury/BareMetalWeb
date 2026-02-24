@@ -7,6 +7,7 @@ namespace BareMetalWeb.UserClasses.DataObjects;
 public class Employee : RenderableDataObject
 {
     [DataField(Order = 2, Label = "Name", List = true, View = true, Edit = true, Create = true, Required = true)]
+    [DataIndex]
     public string Name { get; set; } = string.Empty;
 
     [DataField(Order = 3, Label = "Title", List = true, View = true, Edit = true, Create = true)]
@@ -20,6 +21,7 @@ public class Employee : RenderableDataObject
     public string? ManagerId { get; set; }
 
     [DataField(Order = 6, Label = "Department", List = true, View = true, Edit = true, Create = true)]
+    [DataIndex]
     public string? Department { get; set; }
 
     [DataField(Order = 7, Label = "Hire Date", List = false, View = true, Edit = true, Create = true)]

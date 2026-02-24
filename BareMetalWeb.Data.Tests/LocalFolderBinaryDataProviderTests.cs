@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
+using BareMetalWeb.Data.DataObjects;
 using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
@@ -283,5 +284,141 @@ public class LocalFolderBinaryDataProviderTests : IDisposable
         var newResults = provider.Query<User>(queryNew).ToList();
         Assert.Single(newResults);
         Assert.Equal("upd1", newResults[0].Id);
+    }
+
+    // --- Demo object index tests (Customer, Order, Product) ---
+
+    [Fact]
+    public void Query_CustomerByCompany_UsesIndex()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<Customer>();
+        var provider = new LocalFolderBinaryDataProvider(_testRoot);
+        provider.Save(new Customer { Id = "c1", Name = "Alice", Email = "alice@acme.com", Company = "Acme Corp" });
+        provider.Save(new Customer { Id = "c2", Name = "Bob", Email = "bob@other.com", Company = "Other Ltd" });
+        provider.Save(new Customer { Id = "c3", Name = "Carol", Email = "carol@acme.com", Company = "Acme Corp" });
+
+        // Act
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause> { new QueryClause { Field = "Company", Operator = QueryOperator.Equals, Value = "Acme Corp" } }
+        };
+        var results = provider.Query<Customer>(query).ToList();
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.All(results, r => Assert.Equal("Acme Corp", r.Company));
+    }
+
+    [Fact]
+    public void Delete_Customer_RemovesFromCompanyIndex()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<Customer>();
+        var provider = new LocalFolderBinaryDataProvider(_testRoot);
+        provider.Save(new Customer { Id = "c1", Name = "Alice", Email = "alice@acme.com", Company = "Acme Corp" });
+
+        // Act
+        provider.Delete<Customer>("c1");
+
+        // Assert
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause> { new QueryClause { Field = "Company", Operator = QueryOperator.Equals, Value = "Acme Corp" } }
+        };
+        var results = provider.Query<Customer>(query).ToList();
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public void Query_OrderByStatus_UsesIndex()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<Order>();
+        var provider = new LocalFolderBinaryDataProvider(_testRoot);
+        provider.Save(new Order { Id = "o1", OrderNumber = "ORD-001", CustomerId = "c1", Status = "Open", OrderDate = DateOnly.FromDateTime(DateTime.UtcNow) });
+        provider.Save(new Order { Id = "o2", OrderNumber = "ORD-002", CustomerId = "c1", Status = "Closed", OrderDate = DateOnly.FromDateTime(DateTime.UtcNow) });
+        provider.Save(new Order { Id = "o3", OrderNumber = "ORD-003", CustomerId = "c2", Status = "Open", OrderDate = DateOnly.FromDateTime(DateTime.UtcNow) });
+
+        // Act
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause> { new QueryClause { Field = "Status", Operator = QueryOperator.Equals, Value = "Open" } }
+        };
+        var results = provider.Query<Order>(query).ToList();
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.All(results, r => Assert.Equal("Open", r.Status));
+    }
+
+    [Fact]
+    public void Query_OrderByCustomerId_UsesIndex()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<Order>();
+        var provider = new LocalFolderBinaryDataProvider(_testRoot);
+        provider.Save(new Order { Id = "o1", OrderNumber = "ORD-001", CustomerId = "cust-A", Status = "Open", OrderDate = DateOnly.FromDateTime(DateTime.UtcNow) });
+        provider.Save(new Order { Id = "o2", OrderNumber = "ORD-002", CustomerId = "cust-B", Status = "Open", OrderDate = DateOnly.FromDateTime(DateTime.UtcNow) });
+        provider.Save(new Order { Id = "o3", OrderNumber = "ORD-003", CustomerId = "cust-A", Status = "Closed", OrderDate = DateOnly.FromDateTime(DateTime.UtcNow) });
+
+        // Act
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause> { new QueryClause { Field = "CustomerId", Operator = QueryOperator.Equals, Value = "cust-A" } }
+        };
+        var results = provider.Query<Order>(query).ToList();
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.All(results, r => Assert.Equal("cust-A", r.CustomerId));
+    }
+
+    [Fact]
+    public void Query_ProductByCategory_UsesIndex()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<Product>();
+        var provider = new LocalFolderBinaryDataProvider(_testRoot);
+        provider.Save(new Product { Id = "p1", Name = "Widget A", Sku = "W-001", Category = "Electronics", IsActive = true });
+        provider.Save(new Product { Id = "p2", Name = "Gadget B", Sku = "G-001", Category = "Tools", IsActive = true });
+        provider.Save(new Product { Id = "p3", Name = "Widget C", Sku = "W-002", Category = "Electronics", IsActive = true });
+
+        // Act
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause> { new QueryClause { Field = "Category", Operator = QueryOperator.Equals, Value = "Electronics" } }
+        };
+        var results = provider.Query<Product>(query).ToList();
+
+        // Assert
+        Assert.Equal(2, results.Count);
+        Assert.All(results, r => Assert.Equal("Electronics", r.Category));
+    }
+
+    [Fact]
+    public void Save_UpdateWithUnchangedIndexedField_DoesNotWriteRedundantIndexEntry()
+    {
+        // Arrange: save a user, then re-save with the same UserName — the index log should not grow with a redundant 'A' entry.
+        DataScaffold.RegisterEntity<User>();
+        var provider = new LocalFolderBinaryDataProvider(_testRoot);
+        var user = new User { Id = "nochange1", UserName = "samevalue", Email = "same@test.com" };
+        provider.Save(user);
+
+        // Verify it is queryable before the no-op update
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause> { new QueryClause { Field = "UserName", Operator = QueryOperator.Equals, Value = "samevalue" } }
+        };
+        var before = provider.Query<User>(query).ToList();
+        Assert.Single(before);
+
+        // Act — re-save with the same indexed field value (should not write a duplicate entry)
+        provider.Save(user);
+
+        // Assert — still exactly one result after the no-op update
+        var after = provider.Query<User>(query).ToList();
+        Assert.Single(after);
+        Assert.Equal("nochange1", after[0].Id);
     }
 }
