@@ -33,6 +33,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private readonly MfaSecretProtector _mfaProtector;
     private readonly string _dataRootFolder;
     private readonly AuditService _auditService;
+    private readonly IReadOnlyList<(string SettingId, string Value, string Description)> _settingDefaults;
     private const string MfaChallengeCookieName = "mfa_challenge_id";
     private static readonly TimeSpan MfaPendingLifetime = TimeSpan.FromMinutes(5);
     private const int MfaPendingMaxFailures = 5;
@@ -41,7 +42,8 @@ public sealed class RouteHandlers : IRouteHandlers
     private static readonly TimeSpan MfaBaseBlockDuration = TimeSpan.FromSeconds(10);
     private static readonly ConcurrentDictionary<string, AttemptTracker> MfaAttempts = new(StringComparer.Ordinal);
 
-    public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, AuditService auditService)
+    public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, AuditService auditService,
+        IReadOnlyList<(string SettingId, string Value, string Description)>? settingDefaults = null)
     {
         _renderer = renderer;
         _templateStore = templateStore;
@@ -49,6 +51,7 @@ public sealed class RouteHandlers : IRouteHandlers
         _mfaProtector = MfaSecretProtector.CreateDefault(mfaKeyRootFolder);
         _dataRootFolder = mfaKeyRootFolder;
         _auditService = auditService;
+        _settingDefaults = settingDefaults ?? Array.Empty<(string, string, string)>();
     }
 
     public ValueTask DefaultPageHandler(HttpContext context)
@@ -806,6 +809,7 @@ public sealed class RouteHandlers : IRouteHandlers
         };
         user.SetPassword(password);
         await Users.SaveAsync(user);
+        await SettingsService.EnsureDefaultsAsync(DataStoreProvider.Current, _settingDefaults, userName, context.RequestAborted).ConfigureAwait(false);
         await EnsureDefaultCurrencies(userName);
         await EnsureDefaultUnitsOfMeasure(userName);
         await EnsureDefaultAddress(userName);

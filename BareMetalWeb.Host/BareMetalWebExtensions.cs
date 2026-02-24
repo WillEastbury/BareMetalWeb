@@ -82,7 +82,13 @@ public static class BareMetalWebExtensions
         // Route handlers
         bool allowAccountCreation = app.Configuration.GetValue("Auth:AllowAccountCreation", false);
         AuditService auditService = new AuditService(DataStoreProvider.Current, logger);
-        IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot, auditService);
+        var settingDefaults = new (string SettingId, string Value, string Description)[]
+        {
+            (WellKnownSettings.AppName,      app.Configuration.GetValue("AppInfo:Name",      "BareMetalWeb"),       "Application display name"),
+            (WellKnownSettings.AppCompany,   app.Configuration.GetValue("AppInfo:Company",   "BareMetalWeb Inc."),  "Company name shown in the header and footer"),
+            (WellKnownSettings.AppCopyright, app.Configuration.GetValue("AppInfo:Copyright", "2026"),              "Copyright year or statement shown in the footer"),
+        };
+        IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot, auditService, settingDefaults);
         IHtmlTemplate mainTemplate = templateStore.Get("Index");
         CancellationTokenSource cts = new CancellationTokenSource();
 
