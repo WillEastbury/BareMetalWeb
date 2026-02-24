@@ -3071,6 +3071,16 @@ public static class DataScaffold
                 return true;
             }
 
+            // Fallback: accept a comma/newline-separated string for string list types
+            if (IsStringListType(effectiveType) && element.ValueKind == JsonValueKind.String)
+            {
+                var parsed = ParseStringList(element.GetString() ?? string.Empty);
+                converted = effectiveType == typeof(string[])
+                    ? (object)parsed
+                    : new List<string>(parsed);
+                return true;
+            }
+
             if (effectiveType.IsEnum && element.ValueKind == JsonValueKind.String)
             {
                 converted = Enum.Parse(effectiveType, element.GetString() ?? string.Empty, ignoreCase: true);
@@ -3090,7 +3100,7 @@ public static class DataScaffold
         var effectiveType = Nullable.GetUnderlyingType(type) ?? type;
 
         if (IsStringListType(effectiveType))
-            return FormFieldType.TextArea;
+            return FormFieldType.Tags;
         if (effectiveType == typeof(bool))
             return FormFieldType.YesNo;
         if (effectiveType.IsEnum)

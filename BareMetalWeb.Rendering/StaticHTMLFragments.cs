@@ -559,6 +559,8 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                     Encode(field.LinkClass ?? "link-primary"));
             case FormFieldType.Hidden:
                 return InputHiddenTemplate(name, name, value);
+            case FormFieldType.Tags:
+                return InputTextAreaTemplate(name, name, value, placeholder, required, minlength, maxlength, invalidClass, validationFeedback);
             case FormFieldType.ReadOnly:
                 // Check if this is a calculated field and render with expression
                 if (field.IsCalculated && !string.IsNullOrEmpty(field.CalculatedExpression))

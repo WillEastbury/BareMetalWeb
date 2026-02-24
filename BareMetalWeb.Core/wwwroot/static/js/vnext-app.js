@@ -147,6 +147,11 @@
             if (typeof val === 'object' && val.url) return '<img src="' + escHtml(val.url) + '" class="img-thumbnail" style="max-height:48px" alt="">';
             return escHtml(String(val));
         }
+        if (fieldType === 'Tags') {
+            var tags = Array.isArray(val) ? val : (typeof val === 'string' && val ? val.split(',') : []);
+            if (!tags.length) return '<span class="text-muted">—</span>';
+            return tags.map(function (t) { return '<span class="badge bg-info text-dark me-1">' + escHtml(t.trim()) + '</span>'; }).join('');
+        }
         if (typeof val === 'object') return '<code>' + escHtml(JSON.stringify(val)) + '</code>';
         return escHtml(String(val));
     }
@@ -1186,6 +1191,23 @@
                 '</select>' + feedback + '</div>';
         }
 
+        // Tags (List<string>) — pill-based tag input
+        if (f.type === 'Tags') {
+            var tags = Array.isArray(val) ? val : (typeof val === 'string' && val ? val.split(',').map(function (t) { return t.trim(); }).filter(Boolean) : []);
+            var pillsHtml = tags.map(function (t) {
+                return '<span class="badge bg-info text-dark me-1 vnext-tag-pill" style="font-size:.85em">' +
+                    escHtml(t) + ' <button type="button" class="btn-close btn-close-sm ms-1" aria-label="Remove" style="font-size:.55em"></button></span>';
+            }).join('');
+            return '<div class="mb-3">' + label +
+                '<div class="vnext-tags-container" data-field="' + escHtml(f.name) + '">' +
+                '<input type="hidden" id="' + id_ + '" name="' + escHtml(f.name) + '" value="' + escHtml(JSON.stringify(tags)) + '">' +
+                '<div class="form-control form-control-sm d-flex flex-wrap align-items-center gap-1" style="min-height:38px;cursor:text" data-tags-wrap="1">' +
+                pillsHtml +
+                '<input type="text" class="vnext-tag-input border-0 flex-grow-1" style="outline:none;min-width:80px;background:transparent" placeholder="Type and press Enter">' +
+                '</div>' +
+                '</div>' + feedback + '</div>';
+        }
+
         // Money (value + currency side by side)
         if (f.type === 'Money') {
             var moneyObj = val && typeof val === 'object' ? val : { amount: val, currency: 'USD' };
@@ -1640,6 +1662,59 @@
             }
         });
 
+        // Tags input behaviour — add/remove tag pills
+        form.querySelectorAll('.vnext-tags-container').forEach(function (container) {
+            var fieldName = container.dataset.field;
+            var hiddenInput = container.querySelector('input[type="hidden"]');
+            var textInput = container.querySelector('.vnext-tag-input');
+            var wrap = container.querySelector('[data-tags-wrap]');
+
+            function getTags() {
+                try { return JSON.parse(hiddenInput.value || '[]'); } catch (e) { return []; }
+            }
+            function setTags(tags) {
+                hiddenInput.value = JSON.stringify(tags);
+                // Rebuild pills
+                wrap.querySelectorAll('.vnext-tag-pill').forEach(function (p) { p.remove(); });
+                tags.forEach(function (t) {
+                    var pill = document.createElement('span');
+                    pill.className = 'badge bg-info text-dark me-1 vnext-tag-pill';
+                    pill.style.fontSize = '.85em';
+                    pill.innerHTML = escHtml(t) + ' <button type="button" class="btn-close btn-close-sm ms-1" aria-label="Remove" style="font-size:.55em"></button>';
+                    wrap.insertBefore(pill, textInput);
+                });
+            }
+            function addTag(raw) {
+                var tag = raw.trim();
+                if (!tag) return;
+                var tags = getTags();
+                if (tags.indexOf(tag) === -1) { tags.push(tag); setTags(tags); }
+                textInput.value = '';
+            }
+            textInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(textInput.value); }
+                if (e.key === 'Backspace' && !textInput.value) {
+                    var tags = getTags(); if (tags.length) { tags.pop(); setTags(tags); }
+                }
+            });
+            wrap.addEventListener('click', function (e) {
+                var closeBtn = e.target.closest('.btn-close');
+                if (closeBtn) {
+                    var pill = closeBtn.parentElement;
+                    var pillText = pill.textContent.trim().replace(/\s*$/, '');
+                    // Extract tag text (everything before the close button whitespace)
+                    var tags = getTags();
+                    var idx = -1;
+                    for (var i = 0; i < tags.length; i++) {
+                        if (pillText.indexOf(tags[i]) === 0) { idx = i; break; }
+                    }
+                    if (idx >= 0) { tags.splice(idx, 1); setTags(tags); }
+                } else {
+                    textInput.focus();
+                }
+            });
+        });
+
         // Calculated field live update
         formFields.forEach(function (f) {
             if (f.calculated && f.calculated.expression) {
@@ -1971,6 +2046,11 @@
 
             if (f.type === 'YesNo') {
                 obj[f.name] = fd.has(f.name) && fd.get(f.name) === 'true';
+                return;
+            }
+            if (f.type === 'Tags') {
+                var raw = fd.get(f.name);
+                try { obj[f.name] = JSON.parse(raw || '[]'); } catch (e) { obj[f.name] = raw ? raw.split(',').map(function (t) { return t.trim(); }).filter(Boolean) : []; }
                 return;
             }
             if (f.type === 'Money') {
