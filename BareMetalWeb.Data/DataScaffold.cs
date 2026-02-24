@@ -3132,7 +3132,7 @@ public static class DataScaffold
         var effectiveType = Nullable.GetUnderlyingType(type) ?? type;
 
         if (IsStringListType(effectiveType))
-            return FormFieldType.TextArea;
+            return FormFieldType.Tags;
         if (IsChildListType(effectiveType, out _))
             return FormFieldType.CustomHtml;
         if (effectiveType == typeof(bool))
