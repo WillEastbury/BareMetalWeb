@@ -121,4 +121,44 @@ public class BinaryObjectSerializerTests
         Assert.NotNull(serialized2);
         Assert.NotEqual(serialized1, serialized2);
     }
+
+    [Fact]
+    public void Deserialize_WithSchemaHashMismatch_StrictMode_Throws()
+    {
+        // Arrange - simulates what happens when an entity class changes (new field added)
+        // and old records are read with a schema whose hash no longer matches the current type.
+        var serializer = new BinaryObjectSerializer();
+        var original = new Customer { Id = "c1", Name = "Acme Corp", Email = "acme@test.com" };
+        var bytes = serializer.Serialize(original, 1);
+
+        var currentSchema = serializer.BuildSchema(typeof(Customer));
+        // Construct a stale schema with a deliberately wrong hash (simulating old schema after entity change)
+        var staleSchema = new SchemaDefinition(1, currentSchema.Hash + 1, currentSchema.Members);
+
+        // Act & Assert - Strict mode should throw on hash mismatch
+        Assert.Throws<InvalidOperationException>(() => serializer.Deserialize<Customer>(bytes, staleSchema));
+    }
+
+    [Fact]
+    public void Deserialize_WithSchemaHashMismatch_BestEffortMode_ReturnsObject()
+    {
+        // Arrange - simulates schema evolution: entity was modified after records were saved.
+        // The stored schema's hash differs from the current type's hash, but the data is still readable.
+        var serializer = new BinaryObjectSerializer();
+        var original = new Customer { Id = "c1", Name = "Acme Corp", Email = "acme@test.com" };
+        var bytes = serializer.Serialize(original, 1);
+
+        var currentSchema = serializer.BuildSchema(typeof(Customer));
+        // Construct a stale schema with a wrong hash (old hash before entity evolution)
+        var staleSchema = new SchemaDefinition(1, currentSchema.Hash + 1, currentSchema.Members);
+
+        // Act - BestEffort mode should succeed and return the object with its available data
+        var result = serializer.Deserialize<Customer>(bytes, staleSchema, SchemaReadMode.BestEffort);
+
+        // Assert
+        Assert.NotNull(result);
+        Assert.Equal("c1", result.Id);
+        Assert.Equal("Acme Corp", result.Name);
+        Assert.Equal("acme@test.com", result.Email);
+    }
 }
