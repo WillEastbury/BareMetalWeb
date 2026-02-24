@@ -90,6 +90,20 @@ public static class BareMetalWebExtensions
             (WellKnownSettings.AppName,      app.Configuration.GetValue("AppInfo:Name",      "BareMetalWeb"),       "Application display name"),
             (WellKnownSettings.AppCompany,   app.Configuration.GetValue("AppInfo:Company",   "BareMetalWeb Inc."),  "Company name shown in the header and footer"),
             (WellKnownSettings.AppCopyright, app.Configuration.GetValue("AppInfo:Copyright", "2026"),              "Copyright year or statement shown in the footer"),
+
+            // Kestrel / transport
+            (WellKnownSettings.KestrelHttp2Enabled,                 app.Configuration.GetValue("Kestrel:Http2Enabled", true).ToString(),        "Enable HTTP/2 protocol support"),
+            (WellKnownSettings.KestrelHttp3Enabled,                 app.Configuration.GetValue("Kestrel:Http3Enabled", false).ToString(),       "Enable HTTP/3 (QUIC) protocol support"),
+            (WellKnownSettings.KestrelMaxStreamsPerConnection,      app.Configuration.GetValue("Kestrel:MaxStreamsPerConnection", 100).ToString(), "Max concurrent HTTP/2 streams per connection"),
+            (WellKnownSettings.KestrelInitialConnectionWindowSize,  app.Configuration.GetValue("Kestrel:InitialConnectionWindowSize", 131072).ToString(), "HTTP/2 initial connection-level flow-control window (bytes)"),
+            (WellKnownSettings.KestrelInitialStreamWindowSize,      app.Configuration.GetValue("Kestrel:InitialStreamWindowSize", 98304).ToString(), "HTTP/2 initial per-stream flow-control window (bytes)"),
+
+            // Thread pool
+            (WellKnownSettings.ThreadPoolMinWorkerThreads, app.Configuration.GetValue("ThreadPool:MinWorkerThreads", 0).ToString(), "Minimum worker threads (0 = runtime default)"),
+            (WellKnownSettings.ThreadPoolMinIOThreads,     app.Configuration.GetValue("ThreadPool:MinIOThreads", 0).ToString(),     "Minimum I/O completion threads (0 = runtime default)"),
+
+            // GC
+            (WellKnownSettings.GCServerMode, app.Configuration.GetValue("GC:ServerMode", true).ToString(), "Enable server GC mode (true/false)"),
         };
         IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot, auditService, settingDefaults);
         IHtmlTemplate mainTemplate = templateStore.Get("Index");

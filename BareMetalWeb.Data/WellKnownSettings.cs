@@ -15,4 +15,34 @@ public static class WellKnownSettings
 
     /// <summary>The copyright year or statement shown in the application footer.</summary>
     public const string AppCopyright = "app.copyright";
+
+    // ── Kestrel / transport tuning ──────────────────────────────────────
+
+    /// <summary>Enable HTTP/2 (true/false). Default: true.</summary>
+    public const string KestrelHttp2Enabled = "kestrel.http2.enabled";
+
+    /// <summary>Enable HTTP/3 (QUIC) (true/false). Default: false.</summary>
+    public const string KestrelHttp3Enabled = "kestrel.http3.enabled";
+
+    /// <summary>Max concurrent HTTP/2 streams per connection. Default: 100.</summary>
+    public const string KestrelMaxStreamsPerConnection = "kestrel.http2.maxStreamsPerConnection";
+
+    /// <summary>HTTP/2 initial connection window size in bytes. Default: 131072.</summary>
+    public const string KestrelInitialConnectionWindowSize = "kestrel.http2.initialConnectionWindowSize";
+
+    /// <summary>HTTP/2 initial per-stream window size in bytes. Default: 98304.</summary>
+    public const string KestrelInitialStreamWindowSize = "kestrel.http2.initialStreamWindowSize";
+
+    // ── Thread pool tuning ──────────────────────────────────────────────
+
+    /// <summary>Minimum worker threads. Default: 0 (use runtime default).</summary>
+    public const string ThreadPoolMinWorkerThreads = "threadpool.minWorkerThreads";
+
+    /// <summary>Minimum I/O completion threads. Default: 0 (use runtime default).</summary>
+    public const string ThreadPoolMinIOThreads = "threadpool.minIOThreads";
+
+    // ── GC tuning ───────────────────────────────────────────────────────
+
+    /// <summary>Enable server GC mode (true/false). Default: true.</summary>
+    public const string GCServerMode = "gc.serverMode";
 }

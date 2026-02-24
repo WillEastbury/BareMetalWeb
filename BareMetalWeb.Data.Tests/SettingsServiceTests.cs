@@ -148,6 +148,40 @@ public class SettingsServiceTests : IDisposable
         Assert.Equal("app.copyright", WellKnownSettings.AppCopyright);
     }
 
+    [Fact]
+    public void WellKnownSettings_KestrelConstants_HaveExpectedValues()
+    {
+        Assert.Equal("kestrel.http2.enabled", WellKnownSettings.KestrelHttp2Enabled);
+        Assert.Equal("kestrel.http3.enabled", WellKnownSettings.KestrelHttp3Enabled);
+        Assert.Equal("kestrel.http2.maxStreamsPerConnection", WellKnownSettings.KestrelMaxStreamsPerConnection);
+        Assert.Equal("kestrel.http2.initialConnectionWindowSize", WellKnownSettings.KestrelInitialConnectionWindowSize);
+        Assert.Equal("kestrel.http2.initialStreamWindowSize", WellKnownSettings.KestrelInitialStreamWindowSize);
+        Assert.Equal("threadpool.minWorkerThreads", WellKnownSettings.ThreadPoolMinWorkerThreads);
+        Assert.Equal("threadpool.minIOThreads", WellKnownSettings.ThreadPoolMinIOThreads);
+        Assert.Equal("gc.serverMode", WellKnownSettings.GCServerMode);
+    }
+
+    [Fact]
+    public async Task EnsureDefaultsAsync_SeedsKestrelSettings()
+    {
+        var defaults = new[]
+        {
+            (WellKnownSettings.KestrelHttp2Enabled, "True", "Enable HTTP/2"),
+            (WellKnownSettings.KestrelHttp3Enabled, "False", "Enable HTTP/3"),
+            (WellKnownSettings.KestrelMaxStreamsPerConnection, "100", "Max streams"),
+            (WellKnownSettings.ThreadPoolMinWorkerThreads, "0", "Min worker threads"),
+            (WellKnownSettings.GCServerMode, "True", "Server GC"),
+        };
+
+        await SettingsService.EnsureDefaultsAsync(_testStore, defaults, "admin");
+
+        var all = _testStore.Query<AppSetting>().ToList();
+        Assert.Equal(5, all.Count);
+        Assert.Contains(all, s => s.SettingId == WellKnownSettings.KestrelHttp2Enabled && s.Value == "True");
+        Assert.Contains(all, s => s.SettingId == WellKnownSettings.KestrelMaxStreamsPerConnection && s.Value == "100");
+        Assert.Contains(all, s => s.SettingId == WellKnownSettings.GCServerMode && s.Value == "True");
+    }
+
     // ── SettingsService.GetValue ─────────────────────────────────────────────
 
     [Fact]

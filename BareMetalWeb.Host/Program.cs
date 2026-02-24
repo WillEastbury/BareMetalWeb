@@ -11,7 +11,9 @@ using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Interfaces;
 using BareMetalWeb.Rendering.Models;
 
-WebApplication app = WebApplication.Create();
+var builder = WebApplication.CreateBuilder();
+ProgramSetup.ConfigureKestrel(builder);
+WebApplication app = builder.Build();
 
 await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFactory, mainTemplate) =>
 {
@@ -292,6 +294,50 @@ app.Run();
 
 static class ProgramSetup
 {
+    public static void ConfigureKestrel(WebApplicationBuilder builder)
+    {
+        var config = builder.Configuration;
+
+        builder.WebHost.ConfigureKestrel(serverOptions =>
+        {
+            var http2Enabled = config.GetValue("Kestrel:Http2Enabled", true);
+            var http3Enabled = config.GetValue("Kestrel:Http3Enabled", false);
+
+            serverOptions.ConfigureEndpointDefaults(listenOptions =>
+            {
+                if (http2Enabled && http3Enabled)
+                    listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2AndHttp3;
+                else if (http2Enabled)
+                    listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1AndHttp2;
+                else
+                    listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1;
+            });
+
+            var maxStreams = config.GetValue("Kestrel:MaxStreamsPerConnection", 100);
+            if (maxStreams > 0)
+                serverOptions.Limits.Http2.MaxStreamsPerConnection = maxStreams;
+
+            var connWindowSize = config.GetValue("Kestrel:InitialConnectionWindowSize", 131072);
+            if (connWindowSize > 0)
+                serverOptions.Limits.Http2.InitialConnectionWindowSize = connWindowSize;
+
+            var streamWindowSize = config.GetValue("Kestrel:InitialStreamWindowSize", 98304);
+            if (streamWindowSize > 0)
+                serverOptions.Limits.Http2.InitialStreamWindowSize = streamWindowSize;
+        });
+
+        // Thread pool tuning
+        var minWorker = config.GetValue("ThreadPool:MinWorkerThreads", 0);
+        var minIO = config.GetValue("ThreadPool:MinIOThreads", 0);
+        if (minWorker > 0 || minIO > 0)
+        {
+            ThreadPool.GetMinThreads(out int currentWorker, out int currentIO);
+            ThreadPool.SetMinThreads(
+                minWorker > 0 ? minWorker : currentWorker,
+                minIO > 0 ? minIO : currentIO);
+        }
+    }
+
     public static IBufferedLogger CreateLogger(WebApplication app)
         => new DiskBufferedLogger(app.Configuration.GetValue("Logging:LogFolder", "Logs"));
 
