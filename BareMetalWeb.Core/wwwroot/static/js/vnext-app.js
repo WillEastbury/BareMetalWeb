@@ -1069,9 +1069,9 @@
 
         // Sub-list (List<T> child collection)
         if (f.type === 'CustomHtml') {
-            var subItems = val;
-            if (Array.isArray(subItems) && subItems.length > 0 && typeof subItems[0] === 'object') {
-                return '<div class="mb-3">' + label + renderSubListEditor(f, subItems) + '</div>';
+            var subItems = Array.isArray(val) ? val : [];
+            if (f.subFields && Array.isArray(f.subFields) && f.subFields.length > 0) {
+                return renderSubListEditor(f, subItems);
             }
             return '';
         }
@@ -1083,21 +1083,322 @@
             feedback + '</div>';
     }
 
+    // ── Sub-list (child List<T>) editor ───────────────────────────────────────
     function renderSubListEditor(field, items) {
-        if (!items || items.length === 0) return '<p class="text-muted">No items.</p>';
-        var keys = Object.keys(items[0]).filter(function (k) { return k !== '__type'; });
-        var html = '<div class="table-responsive"><table class="table table-sm table-bordered" id="sub_' + escHtml(field.name) + '">';
-        html += '<thead><tr>' + keys.map(function (k) { return '<th>' + escHtml(k) + '</th>'; }).join('') + '<th></th></tr></thead>';
-        html += '<tbody>';
-        items.forEach(function (row, idx) {
-            html += '<tr data-sub-idx="' + idx + '">' + keys.map(function (k) {
-                return '<td><input type="text" class="form-control form-control-sm" name="' + escHtml(field.name) + '[' + idx + '].' + escHtml(k) + '" value="' + escHtml(String(row[k] != null ? row[k] : '')) + '"></td>';
-            }).join('') + '<td><button type="button" class="btn btn-xs btn-outline-danger btn-sm vnext-sub-del" data-idx="' + idx + '"><i class="bi bi-trash"></i></button></td></tr>';
-        });
-        html += '</tbody></table>';
-        html += '<button type="button" class="btn btn-sm btn-outline-primary mt-2 vnext-sub-add" data-field="' + escHtml(field.name) + '" data-keys="' + escHtml(keys.join(',')) + '"><i class="bi bi-plus"></i> Add Row</button>';
+        var sf   = field.subFields || [];
+        var tblId  = 'sub_tbl_' + field.name;
+        var jsonId = 'sub_json_' + field.name;
+
+        var colHeaders = sf.map(function (s) { return '<th>' + escHtml(s.label) + '</th>'; }).join('');
+        var rowsHtml   = items.map(function (row, idx) { return buildSubListTableRow(idx, row, field, sf); }).join('');
+
+        var html = '<div class="mb-3 vnext-sublist-container" data-field="' + escHtml(field.name) + '">';
+        html += '<input type="hidden" id="' + escHtml(jsonId) + '" name="' + escHtml(field.name) + '" value="' + escHtml(JSON.stringify(items)) + '">';
+        html += '<div class="d-flex align-items-center justify-content-between mb-2">';
+        html += '<label class="form-label mb-0">' + escHtml(field.label) + '</label>';
+        html += '<button type="button" class="btn btn-sm btn-outline-success vnext-sublist-add" data-field="' + escHtml(field.name) + '">';
+        html += '<i class="bi bi-plus-lg"></i> Add</button>';
+        html += '</div>';
+        html += '<div class="table-responsive"><table class="table table-sm table-striped align-middle mb-0" id="' + escHtml(tblId) + '">';
+        html += '<thead><tr><th>Actions</th>' + colHeaders + '</tr></thead>';
+        html += '<tbody>' + rowsHtml + '</tbody></table></div>';
         html += '</div>';
         return html;
+    }
+
+    function buildSubListTableRow(idx, row, field, subFields) {
+        var html = '<tr data-sub-idx="' + idx + '">';
+        html += '<td class="text-nowrap">';
+        html += '<button type="button" class="btn btn-sm btn-outline-info me-1 vnext-sublist-edit"' +
+            ' data-field="' + escHtml(field.name) + '" data-idx="' + idx + '" title="Edit"><i class="bi bi-pencil"></i></button>';
+        html += '<button type="button" class="btn btn-sm btn-outline-danger vnext-sublist-del"' +
+            ' data-field="' + escHtml(field.name) + '" data-idx="' + idx + '" title="Delete"><i class="bi bi-x-lg"></i></button>';
+        html += '</td>';
+        subFields.forEach(function (sf) {
+            var val = row[sf.name] != null ? String(row[sf.name]) : '';
+            if (sf.type === 'LookupList' && sf.lookup && sf.lookup.targetSlug && val) {
+                html += '<td data-lookup-field="' + escHtml(sf.name) + '"' +
+                    ' data-target-slug="' + escHtml(sf.lookup.targetSlug) + '"' +
+                    ' data-display-field="' + escHtml(sf.lookup.displayField) + '"' +
+                    ' data-value="' + escHtml(val) + '">' + escHtml(val) + '</td>';
+            } else if (sf.type === 'YesNo') {
+                html += '<td>' + (val === 'true' ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-circle text-muted"></i>') + '</td>';
+            } else {
+                html += '<td>' + escHtml(val) + '</td>';
+            }
+        });
+        html += '</tr>';
+        return html;
+    }
+
+    function refreshSubListTable(field, rows) {
+        var tbody = document.querySelector('#sub_tbl_' + field.name + ' tbody');
+        if (!tbody) return;
+        var sf = field.subFields || [];
+        tbody.innerHTML = rows.map(function (row, idx) { return buildSubListTableRow(idx, row, field, sf); }).join('');
+        resolveSubListLookups(field.name);
+    }
+
+    function resolveSubListLookups(fieldName) {
+        document.querySelectorAll('#sub_tbl_' + fieldName + ' [data-lookup-field]').forEach(function (el) {
+            var targetSlug  = el.dataset.targetSlug;
+            var displayField = el.dataset.displayField;
+            var value       = el.dataset.value;
+            if (!targetSlug || !value) return;
+            apiFetch(API + '/_lookup/' + encodeURIComponent(targetSlug) + '/' + encodeURIComponent(value))
+                .then(function (obj) {
+                    if (obj) {
+                        var display = nestedGet(obj, displayField) || nestedGet(obj, displayField.charAt(0).toLowerCase() + displayField.slice(1)) || value;
+                        el.textContent = String(display);
+                    }
+                }).catch(function () {});
+        });
+    }
+
+    function renderSubListFormField(sf, val) {
+        var id_  = 'sf_' + escHtml(sf.name);
+        var req  = sf.required ? ' required' : '';
+        var label = '<label for="' + id_ + '" class="form-label">' + escHtml(sf.label) +
+            (sf.required ? ' <span class="text-danger">*</span>' : '') + '</label>';
+
+        if (sf.calculated) {
+            return '<div class="mb-3">' + label +
+                '<div class="input-group input-group-sm">' +
+                '<input class="form-control" type="text" id="' + id_ + '" data-field="' + escHtml(sf.name) + '" readonly data-calculated="true"' +
+                ' data-expression="' + escHtml(sf.calculated.expression) + '" value="' + escHtml(String(val != null ? val : '')) + '">' +
+                '<span class="input-group-text" title="Calculated"><i class="bi bi-calculator-fill"></i></span></div></div>';
+        }
+
+        if (sf.type === 'LookupList' && sf.lookup && sf.lookup.targetSlug) {
+            var copyAttrs = (sf.lookupCopyFields && sf.lookupTargetSlug) ?
+                (' data-copy-entity="' + escHtml(sf.lookupTargetSlug) + '" data-copy-fields="' + escHtml(sf.lookupCopyFields) + '"') : '';
+            return '<div class="mb-3" data-sublookup-container="' + escHtml(sf.name) + '">' + label +
+                '<div class="input-group input-group-sm">' +
+                '<select class="form-select" id="' + id_ + '" data-field="' + escHtml(sf.name) + '"' + req + copyAttrs + '>' +
+                '<option value="">Loading\u2026</option></select>' +
+                '<button type="button" class="btn btn-outline-secondary vnext-sublookup-refresh"' +
+                ' data-field="' + escHtml(sf.name) + '" data-target-slug="' + escHtml(sf.lookup.targetSlug) + '" title="Refresh"><i class="bi bi-arrow-clockwise"></i></button>' +
+                '</div></div>';
+        }
+
+        if (sf.type === 'Enum') {
+            return '<div class="mb-3">' + label +
+                '<select class="form-select form-select-sm" id="' + id_ + '" data-field="' + escHtml(sf.name) + '"' + req + '>' +
+                '<option value="">— Select —</option></select></div>';
+        }
+
+        if (sf.type === 'YesNo') {
+            var checked = (val === true || val === 'true' || val === 1) ? ' checked' : '';
+            return '<div class="mb-3 form-check">' +
+                '<input type="checkbox" class="form-check-input" id="' + id_ + '" data-field="' + escHtml(sf.name) + '" value="true"' + checked + '>' +
+                '<label class="form-check-label" for="' + id_ + '">' + escHtml(sf.label) + '</label></div>';
+        }
+
+        if (sf.type === 'TextArea') {
+            return '<div class="mb-3">' + label +
+                '<textarea class="form-control form-control-sm" id="' + id_ + '" data-field="' + escHtml(sf.name) + '" rows="3"' + req + '>' +
+                escHtml(String(val != null ? val : '')) + '</textarea></div>';
+        }
+
+        var inputType = 'text';
+        var inputVal  = val != null ? String(val) : '';
+        if (sf.type === 'DateTime')     { inputType = 'datetime-local'; inputVal = toDateTimeLocalStr(val); }
+        if (sf.type === 'DateOnly')     inputType = 'date';
+        if (sf.type === 'TimeOnly')     inputType = 'time';
+        if (sf.type === 'Email')        inputType = 'email';
+        if (sf.type === 'Integer')      inputType = 'number';
+        if (sf.type === 'Decimal' || sf.type === 'Money') inputType = 'number';
+
+        return '<div class="mb-3">' + label +
+            '<input type="' + inputType + '" class="form-control form-control-sm" id="' + id_ + '"' +
+            ' data-field="' + escHtml(sf.name) + '" value="' + escHtml(inputVal) + '"' + req + '></div>';
+    }
+
+    function recalcSubListModal(form, subFields) {
+        subFields.forEach(function (sf) {
+            if (!sf.calculated) return;
+            var el = form.querySelector('[data-field="' + sf.name + '"]');
+            if (!el) return;
+            try {
+                var vals = {};
+                form.querySelectorAll('[data-field]').forEach(function (f) {
+                    var n = f.getAttribute('data-field');
+                    if (f.type === 'checkbox') vals[n] = f.checked ? 1 : 0;
+                    else vals[n] = parseFloat(f.value) || 0;
+                });
+                var keys   = Object.keys(vals);
+                var values = keys.map(function (k) { return vals[k]; });
+                // eslint-disable-next-line no-new-func
+                var result = new Function(keys, 'return ' + sf.calculated.expression).apply(null, values);
+                el.value = (typeof result === 'number' && !isNaN(result)) ? parseFloat(result).toFixed(2) : '';
+            } catch (ex) {}
+        });
+    }
+
+    function loadSubListLookupSelect(sf, currentValue, form) {
+        if (!form) return;
+        var sel = form.querySelector('select[data-field="' + sf.name + '"]');
+        if (!sel) return;
+        var lk = sf.lookup;
+        fetchLookupOptions(lk.targetSlug, lk.queryField, lk.queryValue, lk.sortField, lk.sortDirection)
+            .then(function (items) {
+                sel.innerHTML = '<option value="">— Select —</option>';
+                items.forEach(function (opt) {
+                    var optVal = nestedGet(opt, lk.valueField) || nestedGet(opt, lk.valueField.charAt(0).toLowerCase() + lk.valueField.slice(1)) || '';
+                    var optLbl = nestedGet(opt, lk.displayField) || nestedGet(opt, lk.displayField.charAt(0).toLowerCase() + lk.displayField.slice(1)) || optVal;
+                    var selected = String(optVal) === String(currentValue) ? ' selected' : '';
+                    sel.insertAdjacentHTML('beforeend', '<option value="' + escHtml(String(optVal)) + '"' + selected + '>' + escHtml(String(optLbl)) + '</option>');
+                });
+                if (currentValue && !Array.from(sel.options).find(function (o) { return o.value === String(currentValue); })) {
+                    sel.insertAdjacentHTML('afterbegin', '<option value="' + escHtml(String(currentValue)) + '" selected>' + escHtml(String(currentValue)) + '</option>');
+                }
+            }).catch(function () { sel.innerHTML = '<option value="">— ' + escHtml(sf.label) + ' load failed —</option>'; });
+    }
+
+    function loadSubListEnumOptions(sf, currentValue, form) {
+        if (!form) return;
+        var sel = form.querySelector('select[data-field="' + sf.name + '"]');
+        if (!sel) return;
+        var options = Array.isArray(sf.enumValues) ? sf.enumValues : [];
+        var html = '<option value="">— Select —</option>';
+        options.forEach(function (o) {
+            var val = o.value != null ? o.value : o;
+            var lbl = o.label != null ? o.label : String(val);
+            var selected = currentValue != null && String(currentValue) === String(val) ? ' selected' : '';
+            html += '<option value="' + escHtml(String(val)) + '"' + selected + '>' + escHtml(String(lbl)) + '</option>';
+        });
+        sel.innerHTML = html;
+    }
+
+    function openSubListRowModal(field, editEntry, parentItem) {
+        var isNew   = editEntry == null;
+        var rowIdx  = isNew ? -1 : editEntry.idx;
+        var rowData = isNew ? {} : (editEntry.row || {});
+        var sf      = field.subFields || [];
+        var modalId = 'vnext-slmodal-' + field.name + '-' + Date.now();
+        var formId  = 'vnext-slform-' + field.name;
+
+        var formHtml = '<form id="' + escHtml(formId) + '" novalidate>';
+        sf.forEach(function (subField) {
+            var val = rowData[subField.name] != null ? rowData[subField.name] : null;
+            formHtml += renderSubListFormField(subField, val);
+        });
+        formHtml += '</form>';
+
+        var container = document.getElementById('vnext-modal-container');
+        container.insertAdjacentHTML('beforeend',
+            '<div class="modal fade" id="' + modalId + '" tabindex="-1" aria-modal="true" role="dialog">' +
+            '<div class="modal-dialog modal-lg modal-dialog-scrollable"><div class="modal-content">' +
+            '<div class="modal-header"><h5 class="modal-title">' + (isNew ? 'Add' : 'Edit') + ' Row</h5>' +
+            '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>' +
+            '<div class="modal-body">' + formHtml + '</div>' +
+            '<div class="modal-footer">' +
+            '<button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>' +
+            '<button class="btn btn-primary" id="' + modalId + '-save">Save</button>' +
+            '</div></div></div></div>');
+
+        var el    = document.getElementById(modalId);
+        var modal = new bootstrap.Modal(el);
+        var form  = document.getElementById(formId);
+
+        // Load lookups and enum options for modal fields
+        sf.forEach(function (subField) {
+            var curVal = rowData[subField.name] != null ? String(rowData[subField.name]) : null;
+            if (subField.type === 'LookupList' && subField.lookup && subField.lookup.targetSlug) {
+                loadSubListLookupSelect(subField, curVal, form);
+            }
+            if (subField.type === 'Enum') {
+                loadSubListEnumOptions(subField, curVal, form);
+            }
+        });
+
+        if (form) {
+            recalcSubListModal(form, sf);
+
+            form.addEventListener('input', function (ev) {
+                if (ev.target.getAttribute('data-calculated') === 'true') return;
+                recalcSubListModal(form, sf);
+            });
+            form.addEventListener('change', function (ev) {
+                var t = ev.target;
+                if (t.getAttribute('data-calculated') === 'true') return;
+                var copyEntity = t.getAttribute('data-copy-entity');
+                var copyFields = t.getAttribute('data-copy-fields');
+                if (copyEntity && copyFields && t.value) {
+                    apiFetch(API + '/_lookup/' + encodeURIComponent(copyEntity) + '/' + encodeURIComponent(t.value))
+                        .then(function (ent) {
+                            copyFields.split(',').forEach(function (pair) {
+                                var parts = pair.split('->');
+                                if (parts.length !== 2) return;
+                                var src = parts[0].trim(), dst = parts[1].trim();
+                                var df = form.querySelector('[data-field="' + dst + '"]');
+                                if (df && df.getAttribute('data-calculated') !== 'true') {
+                                    df.value = ent[src] !== undefined ? String(ent[src]) : '';
+                                    df.dispatchEvent(new Event('input', {bubbles: true}));
+                                }
+                            });
+                            recalcSubListModal(form, sf);
+                        }).catch(function () {});
+                }
+                recalcSubListModal(form, sf);
+            });
+
+            // Lookup refresh buttons inside the sub-list modal
+            form.addEventListener('click', function (ev) {
+                var refBtn = ev.target.closest('.vnext-sublookup-refresh');
+                if (refBtn) {
+                    ev.preventDefault();
+                    var subField = sf.find(function (s) { return s.name === refBtn.dataset.field; });
+                    if (subField) {
+                        var sel = form.querySelector('select[data-field="' + subField.name + '"]');
+                        var curVal = sel ? sel.value : null;
+                        clearLookupCache(refBtn.dataset.targetSlug);
+                        loadSubListLookupSelect(subField, curVal, form);
+                    }
+                }
+            });
+        }
+
+        // CopyFromParent for new rows
+        if (isNew && form) {
+            sf.filter(function (s) { return s.copyFromParent; }).forEach(function (subField) {
+                var cpf = subField.copyFromParent;
+                var pe  = document.querySelector('[name="' + cpf.parentField + '"]');
+                if (pe && pe.value && window.bmw && bmw.lookup) {
+                    bmw.lookup(cpf.entitySlug, pe.value).then(function (ent) {
+                        var df = form.querySelector('[data-field="' + subField.name + '"]');
+                        if (df && df.getAttribute('data-calculated') !== 'true' && !df.value) {
+                            df.value = ent[cpf.sourceField] !== undefined ? String(ent[cpf.sourceField]) : '';
+                            df.dispatchEvent(new Event('input', {bubbles: true}));
+                        }
+                        recalcSubListModal(form, sf);
+                    }).catch(function () {});
+                }
+            });
+        }
+
+        document.getElementById(modalId + '-save').addEventListener('click', function () {
+            if (!form) return;
+            var row = {};
+            form.querySelectorAll('[data-field]').forEach(function (el) {
+                var name = el.getAttribute('data-field');
+                if (el.type === 'checkbox') row[name] = el.checked ? 'true' : 'false';
+                else row[name] = el.value || '';
+            });
+            var jsonInput = document.getElementById('sub_json_' + field.name);
+            if (jsonInput) {
+                var rows = [];
+                try { rows = JSON.parse(jsonInput.value || '[]'); } catch (e) {}
+                if (isNew) rows.push(row);
+                else rows[rowIdx] = row;
+                jsonInput.value = JSON.stringify(rows);
+                refreshSubListTable(field, rows);
+            }
+            modal.hide();
+        });
+
+        el.addEventListener('hidden.bs.modal', function () { el.remove(); });
+        modal.show();
     }
 
     function initFormBehaviours(meta, item, slug, id, isCreate, formFields) {
@@ -1113,6 +1414,10 @@
             // Load enum options
             if (f.type === 'Enum') {
                 loadEnumOptions(f, item ? (nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1))) : null);
+            }
+            // Resolve lookup display values in sub-list table cells
+            if (f.type === 'CustomHtml') {
+                resolveSubListLookups(f.name);
             }
         });
 
@@ -1145,27 +1450,44 @@
                 }
             }
 
-            // Sub-list row delete
-            var subDel = e.target.closest('.vnext-sub-del');
-            if (subDel) {
+            // Sub-list add row (new modal UI)
+            var subListAdd = e.target.closest('.vnext-sublist-add');
+            if (subListAdd) {
                 e.preventDefault();
-                var row = subDel.closest('tr');
-                if (row) row.remove();
+                var fieldName = subListAdd.dataset.field;
+                var subField  = formFields.find(function (f) { return f.name === fieldName; });
+                if (subField) openSubListRowModal(subField, null, item);
             }
 
-            // Sub-list add row
-            var subAdd = e.target.closest('.vnext-sub-add');
-            if (subAdd) {
+            // Sub-list edit row (new modal UI)
+            var subListEdit = e.target.closest('.vnext-sublist-edit');
+            if (subListEdit) {
                 e.preventDefault();
-                var fieldName = subAdd.dataset.field;
-                var keys = subAdd.dataset.keys.split(',');
-                var tbody = document.querySelector('#sub_' + fieldName + ' tbody');
-                if (tbody) {
-                    var idx = tbody.querySelectorAll('tr').length;
-                    var newRow = '<tr data-sub-idx="' + idx + '">' + keys.map(function (k) {
-                        return '<td><input type="text" class="form-control form-control-sm" name="' + escHtml(fieldName) + '[' + idx + '].' + escHtml(k) + '" value=""></td>';
-                    }).join('') + '<td><button type="button" class="btn btn-xs btn-outline-danger btn-sm vnext-sub-del" data-idx="' + idx + '"><i class="bi bi-trash"></i></button></td></tr>';
-                    tbody.insertAdjacentHTML('beforeend', newRow);
+                var fieldName = subListEdit.dataset.field;
+                var idx       = parseInt(subListEdit.dataset.idx, 10);
+                var subField  = formFields.find(function (f) { return f.name === fieldName; });
+                if (subField) {
+                    var jsonInput = document.getElementById('sub_json_' + fieldName);
+                    var rows = [];
+                    try { rows = JSON.parse(jsonInput ? jsonInput.value : '[]'); } catch (e) {}
+                    openSubListRowModal(subField, {idx: idx, row: rows[idx]}, item);
+                }
+            }
+
+            // Sub-list delete row (new modal UI)
+            var subListDel = e.target.closest('.vnext-sublist-del');
+            if (subListDel) {
+                e.preventDefault();
+                var fieldName = subListDel.dataset.field;
+                var idx       = parseInt(subListDel.dataset.idx, 10);
+                var subField  = formFields.find(function (f) { return f.name === fieldName; });
+                var jsonInput = document.getElementById('sub_json_' + fieldName);
+                if (jsonInput && subField) {
+                    var rows = [];
+                    try { rows = JSON.parse(jsonInput.value || '[]'); } catch (e) {}
+                    rows.splice(idx, 1);
+                    jsonInput.value = JSON.stringify(rows);
+                    refreshSubListTable(subField, rows);
                 }
             }
         });
@@ -1419,19 +1741,31 @@
                 if (amt != null) obj[f.name] = { amount: parseFloat(amt) || 0, currency: cur || 'USD' };
                 return;
             }
-            // Sub-list reconstruction
+            // Sub-list reconstruction from hidden JSON input
             if (f.type === 'CustomHtml') {
-                var subKeys = {};
-                for (var pair of fd.entries()) {
-                    var m = pair[0].match(new RegExp('^' + f.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\[(\\d+)\\]\\.(.+)$'));
-                    if (!m) continue;
-                    var idx = parseInt(m[1], 10);
-                    var key = m[2];
-                    if (!subKeys[idx]) subKeys[idx] = {};
-                    subKeys[idx][key] = pair[1];
+                var jsonInput = document.getElementById('sub_json_' + f.name);
+                if (jsonInput) {
+                    try {
+                        var rows = JSON.parse(jsonInput.value || '[]');
+                        // Coerce string values to proper types based on subField metadata
+                        if (f.subFields && Array.isArray(f.subFields)) {
+                            rows = rows.map(function (row) {
+                                var out = {};
+                                f.subFields.forEach(function (sf) {
+                                    var v = row[sf.name];
+                                    if (sf.type === 'Integer') out[sf.name] = (v === '' || v == null) ? null : parseInt(v, 10);
+                                    else if (sf.type === 'Decimal' || sf.type === 'Money') out[sf.name] = (v === '' || v == null) ? null : parseFloat(v);
+                                    else if (sf.type === 'YesNo') out[sf.name] = (v === 'true' || v === true);
+                                    else out[sf.name] = v != null ? v : '';
+                                });
+                                return out;
+                            });
+                        }
+                        obj[f.name] = rows;
+                    } catch (e) { obj[f.name] = []; }
+                } else {
+                    obj[f.name] = [];
                 }
-                var subArr = Object.keys(subKeys).sort(function (a, b) { return parseInt(a) - parseInt(b); }).map(function (i) { return subKeys[i]; });
-                if (subArr.length) obj[f.name] = subArr;
                 return;
             }
 

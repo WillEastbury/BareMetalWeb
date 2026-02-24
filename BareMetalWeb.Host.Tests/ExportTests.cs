@@ -209,4 +209,59 @@ public class ExportTests
         Assert.NotNull(orderRowsData);
         Assert.Empty(orderRowsData.Rows);
     }
+
+    [Fact]
+    public void BuildSubFieldSchemas_ForOrderRowsField_ReturnsSubFieldMetadata()
+    {
+        // Arrange - ensure Order entity is registered
+        DataScaffold.RegisterEntity<Order>();
+        var metadata = DataScaffold.TryGetEntity("orders", out var meta) ? meta : null;
+        Assert.NotNull(metadata);
+
+        var orderRowsField = metadata!.Fields.FirstOrDefault(f => f.Name == "OrderRows");
+        Assert.NotNull(orderRowsField);
+
+        // Act - BuildSubFieldSchemas reads only attribute metadata, no data store needed
+        var subFields = DataScaffold.BuildSubFieldSchemas(orderRowsField!);
+
+        // Assert - should return sub-field schemas for OrderRow
+        Assert.NotNull(subFields);
+        Assert.NotEmpty(subFields!);
+
+        // ProductId should be a LookupList field
+        var productField = subFields.FirstOrDefault(f => (string?)f["name"] == "ProductId");
+        Assert.NotNull(productField);
+        Assert.Equal("LookupList", productField!["type"]);
+        Assert.NotNull(productField["lookup"]);
+
+        // Quantity should be present
+        var quantityField = subFields.FirstOrDefault(f => (string?)f["name"] == "Quantity");
+        Assert.NotNull(quantityField);
+        Assert.Equal("Integer", quantityField!["type"]);
+
+        // LineTotal should be a calculated field
+        var lineTotalField = subFields.FirstOrDefault(f => (string?)f["name"] == "LineTotal");
+        Assert.NotNull(lineTotalField);
+        Assert.NotNull(lineTotalField!["calculated"]);
+        Assert.True((bool?)lineTotalField["readOnly"]);
+    }
+
+    [Fact]
+    public void BuildSubFieldSchemas_ForNonListField_ReturnsNull()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<Order>();
+        var metadata = DataScaffold.TryGetEntity("orders", out var meta) ? meta : null;
+        Assert.NotNull(metadata);
+
+        // Pick a non-list field (OrderNumber is a plain string field)
+        var orderNumberField = metadata!.Fields.FirstOrDefault(f => f.Name == "OrderNumber");
+        Assert.NotNull(orderNumberField);
+
+        // Act
+        var subFields = DataScaffold.BuildSubFieldSchemas(orderNumberField!);
+
+        // Assert - non-list fields return null
+        Assert.Null(subFields);
+    }
 }

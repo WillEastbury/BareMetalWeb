@@ -869,6 +869,8 @@ public static class RouteRegistrationExtensions
                 fd["upload"] = null;
             }
 
+            // Sub-field schema for List<T> child collections (CustomHtml type)
+            fd["subFields"] = DataScaffold.BuildSubFieldSchemas(f);
             fd["enumValues"] = f.FieldType == FormFieldType.Enum
                 ? DataScaffold.BuildEnumOptions(f.Property.PropertyType)
                     .Select(kv => new { value = kv.Key, label = kv.Value })
