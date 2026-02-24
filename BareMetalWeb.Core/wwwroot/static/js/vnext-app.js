@@ -67,6 +67,7 @@
         var opts = Object.assign({ credentials: 'same-origin', headers: {} }, options || {});
         opts.headers['Accept'] = 'application/json';
         if (opts.method && opts.method !== 'GET') {
+            opts.headers['X-Requested-With'] = 'BareMetalWeb';
             opts.headers['X-CSRF-Token'] = getCsrfToken();
         }
         return fetch(url, opts).then(function (r) {
@@ -1516,6 +1517,7 @@
   BareMetalRest.setRoot('/api/');
 
   const R   = document.getElementById('vnext-root');
+  if (!R) return;
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const el  = (tag, props, children) => {
