@@ -66,8 +66,17 @@ public static class SettingsService
 
         foreach (var (settingId, value, description) in defaults)
         {
-            if (existing.ContainsKey(settingId))
+            if (existing.TryGetValue(settingId, out var existingSetting))
+            {
+                // Promote an existing empty value when the configured default is non-empty
+                if (!string.IsNullOrEmpty(value) && string.IsNullOrEmpty(existingSetting.Value))
+                {
+                    existingSetting.Value = value;
+                    existingSetting.UpdatedBy = createdBy;
+                    await store.SaveAsync(existingSetting, cancellationToken).ConfigureAwait(false);
+                }
                 continue;
+            }
 
             var setting = new AppSetting
             {

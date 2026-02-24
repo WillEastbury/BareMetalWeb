@@ -390,4 +390,58 @@ public class SettingsServiceTests : IDisposable
         Assert.Equal("setup-user", setting.CreatedBy);
         Assert.Equal("setup-user", setting.UpdatedBy);
     }
+
+    [Fact]
+    public async Task EnsureDefaultsAsync_PromotesEmptyExistingValue_WhenDefaultIsNonEmpty()
+    {
+        // Arrange — setting already exists in the store with an empty value (e.g. seeded on first run
+        // before AllowWipeData was configured), then appsettings.json is updated with a real token.
+        var existing = new AppSetting
+        {
+            SettingId = WellKnownSettings.AllowWipeData,
+            Value = "",
+            Description = "Wipe token"
+        };
+        _testStore.Save(existing);
+
+        var defaults = new[]
+        {
+            (WellKnownSettings.AllowWipeData, "my-secret-token", "Wipe token"),
+        };
+
+        // Act
+        await SettingsService.EnsureDefaultsAsync(_testStore, defaults, "system");
+
+        // Assert — the empty value must have been promoted to the configured token
+        var stored = _testStore.Query<AppSetting>()
+            .First(s => s.SettingId == WellKnownSettings.AllowWipeData);
+        Assert.Equal("my-secret-token", stored.Value);
+        Assert.Equal("system", stored.UpdatedBy);
+    }
+
+    [Fact]
+    public async Task EnsureDefaultsAsync_DoesNotOverwriteNonEmptyExistingValue()
+    {
+        // Arrange — a user has intentionally set a custom token via the admin UI
+        var existing = new AppSetting
+        {
+            SettingId = WellKnownSettings.AllowWipeData,
+            Value = "admin-chosen-token",
+            Description = "Wipe token"
+        };
+        _testStore.Save(existing);
+
+        var defaults = new[]
+        {
+            (WellKnownSettings.AllowWipeData, "config-token", "Wipe token"),
+        };
+
+        // Act
+        await SettingsService.EnsureDefaultsAsync(_testStore, defaults, "system");
+
+        // Assert — the admin-chosen value must not be overwritten
+        var stored = _testStore.Query<AppSetting>()
+            .First(s => s.SettingId == WellKnownSettings.AllowWipeData);
+        Assert.Equal("admin-chosen-token", stored.Value);
+    }
 }
