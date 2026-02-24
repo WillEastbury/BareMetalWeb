@@ -251,6 +251,9 @@
             return buildUrl(baseUrl, Object.assign({}, query, { sort: fieldName, dir: newDir, skip: 0 }));
         }
 
+        var viewType = meta.viewType || 'Table';
+        var activeView = query.view || viewType;
+
         var html = '<div class="p-3">';
         // Breadcrumb
         html += '<nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="' + BASE + '">Home</a></li>';
@@ -260,58 +263,84 @@
         html += '<div class="d-flex align-items-center mb-3 flex-wrap gap-2">';
         html += '<h2 class="mb-0 me-3">' + escHtml(meta.name) + '</h2>';
         html += '<a class="btn btn-primary btn-sm" href="' + baseUrl + '/create"><i class="bi bi-plus-lg"></i> New</a>';
-        html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=csv" download><i class="bi bi-filetype-csv"></i> CSV</a>';
-        html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=json" download><i class="bi bi-filetype-json"></i> JSON</a>';
+        html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=csv" download><i class="bi bi-filetype-csv"></i> Export CSV</a>';
+        html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=json" download><i class="bi bi-filetype-json"></i> Export JSON</a>';
+        html += '<button class="btn btn-outline-secondary btn-sm" id="vnext-import-btn" data-slug="' + escHtml(slug) + '"><i class="bi bi-upload"></i> Import CSV</button>';
+        // View type switcher (when entity supports alternate views)
+        if (viewType !== 'Table') {
+            html += '<div class="btn-group btn-group-sm ms-2">';
+            html += '<a class="btn btn-outline-secondary' + (activeView === 'Table' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Table' })) + '" title="Table View"><i class="bi bi-table"></i></a>';
+            if (viewType === 'TreeView')  html += '<a class="btn btn-outline-secondary' + (activeView === 'TreeView' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'TreeView' })) + '" title="Tree View"><i class="bi bi-diagram-3"></i></a>';
+            if (viewType === 'OrgChart') html += '<a class="btn btn-outline-secondary' + (activeView === 'OrgChart' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'OrgChart' })) + '" title="Org Chart"><i class="bi bi-people"></i></a>';
+            if (viewType === 'Timeline') html += '<a class="btn btn-outline-secondary' + (activeView === 'Timeline' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timeline' })) + '" title="Timeline"><i class="bi bi-calendar-range"></i></a>';
+            if (viewType === 'Timetable') html += '<a class="btn btn-outline-secondary' + (activeView === 'Timetable' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timetable' })) + '" title="Timetable"><i class="bi bi-calendar3"></i></a>';
+            html += '</div>';
+        }
         html += '</div>';
 
-        // Search bar
-        html += '<form class="d-flex gap-2 mb-3" id="vnext-search-form">';
-        html += '<input class="form-control form-control-sm w-auto" type="search" name="q" placeholder="Search\u2026" value="' + escHtml(search) + '">';
-        html += '<button class="btn btn-sm btn-outline-primary" type="submit"><i class="bi bi-search"></i></button>';
-        html += '</form>';
-
-        // Bulk actions bar
-        html += '<div id="vnext-bulk-bar" class="d-none mb-2">' +
-            '<button class="btn btn-sm btn-danger me-2" id="vnext-bulk-delete"><i class="bi bi-trash"></i> Delete Selected</button>' +
-            '<button class="btn btn-sm btn-secondary" id="vnext-bulk-export-csv"><i class="bi bi-filetype-csv"></i> Export Selected</button>' +
-            '</div>';
-
-        // Table
-        html += '<div class="table-responsive"><table class="table table-hover table-striped table-sm align-middle">';
-        html += '<thead><tr>';
-        html += '<th scope="col"><input type="checkbox" class="form-check-input" id="vnext-select-all" title="Select all"></th>';
-        listFields.forEach(function (f) {
-            var sortIcon = '';
-            if (sort === f.name) sortIcon = dir === 'asc' ? ' <i class="bi bi-sort-up"></i>' : ' <i class="bi bi-sort-down"></i>';
-            html += '<th scope="col"><a class="text-decoration-none text-reset" href="' + escHtml(buildSortUrl(f.name)) + '">' + escHtml(f.label) + sortIcon + '</a></th>';
-        });
-        html += '<th scope="col">Actions</th></tr></thead>';
-        html += '<tbody>';
-
-        if (items.length === 0) {
-            html += '<tr><td colspan="' + (listFields.length + 2) + '" class="text-center text-muted py-4">No records found.</td></tr>';
-        } else {
-            items.forEach(function (item) {
-                var id = item.id || item.Id || '';
-                var encId = encodeURIComponent(id);
-                html += '<tr data-id="' + escHtml(id) + '">';
-                html += '<td><input type="checkbox" class="form-check-input vnext-row-select" value="' + escHtml(id) + '"></td>';
-                listFields.forEach(function (f) {
-                    var val = nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1));
-                    html += '<td>' + fmtValue(val, f.type) + '</td>';
-                });
-                html += '<td class="text-nowrap">';
-                html += '<a class="btn btn-xs btn-outline-info btn-sm me-1" href="' + baseUrl + '/' + encId + '" title="View"><i class="bi bi-eye"></i></a>';
-                html += '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encId + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>';
-                html += '<button class="btn btn-xs btn-outline-danger btn-sm vnext-row-delete" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '" title="Delete"><i class="bi bi-trash"></i></button>';
-                html += '</td></tr>';
-            });
+        // Alternate view types: only show table+bulk if in table mode
+        if (activeView !== 'Table' && activeView !== viewType && activeView !== '') {
+            // Fall through to table for unknown view names
         }
 
-        html += '</tbody></table></div>';
+        if ((activeView === 'TreeView' || (activeView === '' && viewType === 'TreeView')) && items.length > 0) {
+            html += renderTreeView(meta, items, slug, baseUrl);
+        } else if ((activeView === 'OrgChart' || (activeView === '' && viewType === 'OrgChart')) && items.length > 0) {
+            html += renderOrgChart(meta, items, slug, baseUrl);
+        } else if ((activeView === 'Timeline' || (activeView === '' && viewType === 'Timeline')) && items.length > 0) {
+            html += renderTimeline(meta, items, slug, baseUrl);
+        } else if ((activeView === 'Timetable' || (activeView === '' && viewType === 'Timetable')) && items.length > 0) {
+            html += renderTimetable(meta, items, slug, baseUrl);
+        } else {
+            // Search bar
+            html += '<form class="d-flex gap-2 mb-3" id="vnext-search-form">';
+            html += '<input class="form-control form-control-sm w-auto" type="search" name="q" placeholder="Search\u2026" value="' + escHtml(search) + '">';
+            html += '<button class="btn btn-sm btn-outline-primary" type="submit"><i class="bi bi-search"></i></button>';
+            html += '</form>';
 
-        // Pagination
-        html += renderPagination(total, skip, top, baseUrl, query);
+            // Bulk actions bar
+            html += '<div id="vnext-bulk-bar" class="d-none mb-2">' +
+                '<button class="btn btn-sm btn-danger me-2" id="vnext-bulk-delete"><i class="bi bi-trash"></i> Delete Selected</button>' +
+                '<button class="btn btn-sm btn-secondary" id="vnext-bulk-export-csv"><i class="bi bi-filetype-csv"></i> Export Selected</button>' +
+                '</div>';
+
+            // Table
+            html += '<div class="table-responsive"><table class="table table-hover table-striped table-sm align-middle">';
+            html += '<thead><tr>';
+            html += '<th scope="col"><input type="checkbox" class="form-check-input" id="vnext-select-all" title="Select all"></th>';
+            listFields.forEach(function (f) {
+                var sortIcon = '';
+                if (sort === f.name) sortIcon = dir === 'asc' ? ' <i class="bi bi-sort-up"></i>' : ' <i class="bi bi-sort-down"></i>';
+                html += '<th scope="col"><a class="text-decoration-none text-reset" href="' + escHtml(buildSortUrl(f.name)) + '">' + escHtml(f.label) + sortIcon + '</a></th>';
+            });
+            html += '<th scope="col">Actions</th></tr></thead>';
+            html += '<tbody>';
+
+            if (items.length === 0) {
+                html += '<tr><td colspan="' + (listFields.length + 2) + '" class="text-center text-muted py-4">No records found.</td></tr>';
+            } else {
+                items.forEach(function (item) {
+                    var id = item.id || item.Id || '';
+                    var encId = encodeURIComponent(id);
+                    html += '<tr data-id="' + escHtml(id) + '">';
+                    html += '<td><input type="checkbox" class="form-check-input vnext-row-select" value="' + escHtml(id) + '"></td>';
+                    listFields.forEach(function (f) {
+                        var val = nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1));
+                        html += '<td>' + fmtValue(val, f.type) + '</td>';
+                    });
+                    html += '<td class="text-nowrap">';
+                    html += '<a class="btn btn-xs btn-outline-info btn-sm me-1" href="' + baseUrl + '/' + encId + '" title="View"><i class="bi bi-eye"></i></a>';
+                    html += '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encId + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>';
+                    html += '<button class="btn btn-xs btn-outline-danger btn-sm vnext-row-delete" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '" title="Delete"><i class="bi bi-trash"></i></button>';
+                    html += '</td></tr>';
+                });
+            }
+
+            html += '</tbody></table></div>';
+
+            // Pagination
+            html += renderPagination(total, skip, top, baseUrl, query);
+        }
 
         html += '</div>';
         setContent(html);
@@ -324,7 +353,252 @@
             BMRouter.navigate(buildUrl(baseUrl, { q: q, skip: 0, top: top, sort: sort, dir: dir }));
         });
 
+        // Wire import button
+        var importBtn = document.getElementById('vnext-import-btn');
+        if (importBtn) importBtn.addEventListener('click', function () { openImportModal(slug, baseUrl, query); });
+
         wireListEvents(slug, baseUrl, query, top, sort, dir);
+    }
+
+    // ── Alternate view renderers ──────────────────────────────────────────────
+
+    function renderTreeView(meta, items, slug, baseUrl) {
+        // Find the parent field for hierarchical grouping
+        var parentField = meta.parentField ? meta.parentField.name : null;
+        var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
+        var html = '<div class="vnext-tree-view">';
+
+        function buildNodeHtml(node, depth) {
+            var id = node.item.id || node.item.Id || '';
+            var label = labelField ? (nestedGet(node.item, labelField.name) || nestedGet(node.item, labelField.name.charAt(0).toLowerCase() + labelField.name.slice(1)) || id) : id;
+            var indent = depth * 20;
+            var row = '<div class="vnext-tree-node d-flex align-items-center py-1 border-bottom" style="padding-left:' + indent + 'px" data-id="' + escHtml(id) + '">';
+            if (node.children.length > 0) row += '<i class="bi bi-chevron-down text-muted me-1" style="cursor:pointer" onclick="this.closest(\'.vnext-tree-node\').nextElementSibling.classList.toggle(\'d-none\');this.classList.toggle(\'bi-chevron-right\');this.classList.toggle(\'bi-chevron-down\')"></i>';
+            else row += '<i class="bi bi-dot text-muted me-1"></i>';
+            row += '<a class="text-decoration-none me-2" href="' + baseUrl + '/' + encodeURIComponent(id) + '">' + escHtml(String(label)) + '</a>';
+            row += '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>';
+            row += '</div>';
+            if (node.children.length > 0) {
+                row += '<div class="vnext-tree-children">';
+                node.children.forEach(function (child) { row += buildNodeHtml(child, depth + 1); });
+                row += '</div>';
+            }
+            return row;
+        }
+
+        if (parentField) {
+            var roots = [], nodeMap = {};
+            items.forEach(function (item) {
+                var id = item.id || item.Id || '';
+                nodeMap[id] = { item: item, children: [] };
+            });
+            items.forEach(function (item) {
+                var id = item.id || item.Id || '';
+                var parentId = nestedGet(item, parentField) || nestedGet(item, parentField.charAt(0).toLowerCase() + parentField.slice(1)) || '';
+                if (parentId && nodeMap[parentId]) nodeMap[parentId].children.push(nodeMap[id]);
+                else roots.push(nodeMap[id]);
+            });
+            roots.forEach(function (root) { html += buildNodeHtml(root, 0); });
+        } else {
+            items.forEach(function (item) {
+                var id = item.id || item.Id || '';
+                var label = labelField ? (nestedGet(item, labelField.name) || id) : id;
+                html += '<div class="vnext-tree-node d-flex align-items-center py-1 border-bottom">' +
+                    '<i class="bi bi-dot text-muted me-1"></i>' +
+                    '<a class="text-decoration-none me-2" href="' + baseUrl + '/' + encodeURIComponent(id) + '">' + escHtml(String(label)) + '</a>' +
+                    '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>' +
+                    '</div>';
+            });
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function renderOrgChart(meta, items, slug, baseUrl) {
+        var parentField = meta.parentField ? meta.parentField.name : null;
+        var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
+
+        function buildCardHtml(item) {
+            var id = item.id || item.Id || '';
+            var label = labelField ? (nestedGet(item, labelField.name) || nestedGet(item, labelField.name.charAt(0).toLowerCase() + labelField.name.slice(1)) || id) : id;
+            return '<div class="card text-center" style="min-width:120px;display:inline-block;margin:4px;vertical-align:top">' +
+                '<div class="card-body p-2">' +
+                '<p class="card-text small mb-1"><strong>' + escHtml(String(label)) + '</strong></p>' +
+                '<a class="btn btn-xs btn-outline-primary btn-sm" href="' + baseUrl + '/' + encodeURIComponent(id) + '" style="font-size:0.7rem">View</a>' +
+                '</div></div>';
+        }
+
+        var html = '<div class="vnext-orgchart overflow-auto">';
+        if (parentField) {
+            var nodeMap = {}, roots = [];
+            items.forEach(function (item) {
+                var id = item.id || item.Id || '';
+                nodeMap[id] = { item: item, children: [] };
+            });
+            items.forEach(function (item) {
+                var id = item.id || item.Id || '';
+                var parentId = nestedGet(item, parentField) || nestedGet(item, parentField.charAt(0).toLowerCase() + parentField.slice(1)) || '';
+                if (parentId && nodeMap[parentId]) nodeMap[parentId].children.push(nodeMap[id]);
+                else roots.push(nodeMap[id]);
+            });
+
+            function buildLevel(nodes) {
+                var out = '<div class="d-flex flex-wrap gap-3 mb-3 justify-content-center">';
+                var nextLevel = [];
+                nodes.forEach(function (n) {
+                    out += buildCardHtml(n.item);
+                    n.children.forEach(function (c) { nextLevel.push(c); });
+                });
+                out += '</div>';
+                if (nextLevel.length) out += buildLevel(nextLevel);
+                return out;
+            }
+            html += buildLevel(roots);
+        } else {
+            html += '<div class="d-flex flex-wrap gap-3">';
+            items.forEach(function (item) { html += buildCardHtml(item); });
+            html += '</div>';
+        }
+        html += '</div>';
+        return html;
+    }
+
+    function renderTimeline(meta, items, slug, baseUrl) {
+        var dateField = meta.fields.find(function (f) { return f.type === 'DateTime' || f.type === 'DateOnly'; });
+        var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
+        var sorted = items.slice().sort(function (a, b) {
+            if (!dateField) return 0;
+            var da = new Date(nestedGet(a, dateField.name) || 0).getTime();
+            var db = new Date(nestedGet(b, dateField.name) || 0).getTime();
+            return da - db;
+        });
+        var html = '<div class="vnext-timeline position-relative ps-4">' +
+            '<div class="position-absolute start-0 top-0 bottom-0" style="left:12px;width:2px;background:#dee2e6"></div>';
+        sorted.forEach(function (item) {
+            var id = item.id || item.Id || '';
+            var label = labelField ? (nestedGet(item, labelField.name) || id) : id;
+            var dateStr = dateField ? (nestedGet(item, dateField.name) || '') : '';
+            if (dateStr) { try { dateStr = new Date(dateStr).toLocaleDateString(); } catch (e) {} }
+            html += '<div class="vnext-timeline-item d-flex gap-3 mb-3 position-relative">' +
+                '<div class="position-absolute start-0 translate-middle-x" style="left:14px;top:6px;width:10px;height:10px;background:#0d6efd;border-radius:50%"></div>' +
+                '<div class="ms-3 flex-grow-1 border rounded p-2">' +
+                '<div class="d-flex justify-content-between">' +
+                '<strong><a href="' + baseUrl + '/' + encodeURIComponent(id) + '" class="text-decoration-none">' + escHtml(String(label)) + '</a></strong>' +
+                (dateStr ? '<small class="text-muted">' + escHtml(dateStr) + '</small>' : '') +
+                '</div></div></div>';
+        });
+        html += '</div>';
+        return html;
+    }
+
+    function renderTimetable(meta, items, slug, baseUrl) {
+        // Render as a weekly timetable using start/end datetime fields
+        var startField = meta.fields.find(function (f) { return f.type === 'DateTime' && (f.name.toLowerCase().indexOf('start') >= 0 || f.name.toLowerCase().indexOf('begin') >= 0 || f.name.toLowerCase().indexOf('from') >= 0); })
+            || meta.fields.find(function (f) { return f.type === 'DateTime' || f.type === 'DateOnly'; });
+        var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
+        var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+        var byDay = [[], [], [], [], [], [], []];
+        items.forEach(function (item) {
+            if (startField) {
+                var d = new Date(nestedGet(item, startField.name) || '');
+                if (!isNaN(d.getTime())) { byDay[d.getDay()].push(item); return; }
+            }
+            byDay[0].push(item);
+        });
+        var html = '<div class="table-responsive"><table class="table table-bordered table-sm vnext-timetable">';
+        html += '<thead><tr>' + days.map(function (d) { return '<th class="text-center">' + d + '</th>'; }).join('') + '</tr></thead>';
+        html += '<tbody><tr>';
+        byDay.forEach(function (dayItems) {
+            html += '<td style="min-width:100px;vertical-align:top">';
+            dayItems.forEach(function (item) {
+                var id = item.id || item.Id || '';
+                var label = labelField ? (nestedGet(item, labelField.name) || id) : id;
+                html += '<div class="badge bg-primary mb-1 d-block text-wrap text-start">' +
+                    '<a href="' + baseUrl + '/' + encodeURIComponent(id) + '" class="text-white text-decoration-none small">' + escHtml(String(label)) + '</a>' +
+                    '</div>';
+            });
+            html += '</td>';
+        });
+        html += '</tr></tbody></table></div>';
+        return html;
+    }
+
+    // ── CSV Import modal ──────────────────────────────────────────────────────
+
+    function openImportModal(slug, baseUrl, query) {
+        var id = 'import-modal-' + Date.now();
+        var container = document.getElementById('vnext-modal-container');
+        container.insertAdjacentHTML('beforeend',
+            '<div class="modal fade" id="' + id + '" tabindex="-1" aria-modal="true" role="dialog">' +
+            '<div class="modal-dialog"><div class="modal-content">' +
+            '<div class="modal-header"><h5 class="modal-title"><i class="bi bi-upload me-2"></i>Import CSV</h5>' +
+            '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>' +
+            '<div class="modal-body">' +
+            '<p class="text-muted small">Upload a CSV file to import records. The first row must contain field names as headers.</p>' +
+            '<form id="' + id + '-form" enctype="multipart/form-data">' +
+            '<div class="mb-3"><label class="form-label fw-semibold">CSV File <span class="text-danger">*</span></label>' +
+            '<input type="file" class="form-control" id="' + id + '-file" name="csv_file" accept=".csv,text/csv" required></div>' +
+            '<div class="form-check mb-2">' +
+            '<input class="form-check-input" type="checkbox" id="' + id + '-upsert" name="upsert" value="true">' +
+            '<label class="form-check-label" for="' + id + '-upsert">Upsert (update existing records matched by ID)</label>' +
+            '</div></form>' +
+            '<div id="' + id + '-result" class="mt-2"></div>' +
+            '</div>' +
+            '<div class="modal-footer">' +
+            '<button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>' +
+            '<button class="btn btn-primary" id="' + id + '-save"><i class="bi bi-upload"></i> Import</button>' +
+            '</div></div></div></div>');
+
+        var el = document.getElementById(id);
+        var modal = new bootstrap.Modal(el);
+        modal.show();
+
+        document.getElementById(id + '-save').addEventListener('click', function () {
+            var form = document.getElementById(id + '-form');
+            var fileInput = document.getElementById(id + '-file');
+            if (!fileInput.files.length) { showToast('Please select a CSV file.', 'error'); return; }
+
+            var saveBtn = document.getElementById(id + '-save');
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Importing\u2026';
+
+            var fd = new FormData(form);
+            var resultEl = document.getElementById(id + '-result');
+
+            fetch(API + '/' + encodeURIComponent(slug) + '/import', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'X-CSRF-Token': getCsrfToken() },
+                body: fd
+            }).then(function (r) {
+                return r.json().then(function (data) {
+                    if (!r.ok) throw new Error(data.error || ('HTTP ' + r.status));
+                    return data;
+                });
+            }).then(function (data) {
+                var cls = (data.errors && data.errors.length) ? 'alert-warning' : 'alert-success';
+                var msg = '<strong>Import complete:</strong> ' + data.created + ' created, ' + data.updated + ' updated, ' + data.skipped + ' skipped.';
+                if (data.errors && data.errors.length) {
+                    msg += '<ul class="mt-2 mb-0 small">' + data.errors.slice(0, 10).map(function (e) { return '<li>' + escHtml(e) + '</li>'; }).join('') + '</ul>';
+                }
+                resultEl.innerHTML = '<div class="alert ' + cls + ' py-2">' + msg + '</div>';
+                saveBtn.innerHTML = '<i class="bi bi-upload"></i> Import';
+                saveBtn.disabled = false;
+                clearLookupCache(slug);
+                showToast('Import complete: ' + data.created + ' created, ' + data.updated + ' updated.', data.skipped ? 'warning' : 'success');
+            }).catch(function (err) {
+                resultEl.innerHTML = '<div class="alert alert-danger py-2">' + escHtml(err.message) + '</div>';
+                saveBtn.innerHTML = '<i class="bi bi-upload"></i> Import';
+                saveBtn.disabled = false;
+                showToast('Import failed: ' + err.message, 'error');
+            });
+        });
+
+        el.addEventListener('hidden.bs.modal', function () {
+            // Reload list after modal closes if any imports happened
+            el.remove();
+            BMRouter.navigate(buildUrl(baseUrl, query));
+        });
     }
 
     function wireListEvents(slug, baseUrl, query, top, sort, dir) {
