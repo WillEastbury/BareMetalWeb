@@ -1438,10 +1438,7 @@
                     if (f.type === 'checkbox') vals[n] = f.checked ? 1 : 0;
                     else vals[n] = parseFloat(f.value) || 0;
                 });
-                var keys   = Object.keys(vals);
-                var values = keys.map(function (k) { return vals[k]; });
-                // eslint-disable-next-line no-new-func
-                var result = new Function(keys, 'return ' + sf.calculated.expression).apply(null, values);
+                var result = bmwEvalAst(sf.calculated.expression, function (n) { return parseFloat(vals[n]) || 0; });
                 el.value = (typeof result === 'number' && !isNaN(result)) ? parseFloat(result).toFixed(2) : '';
             } catch (ex) {}
         });
@@ -1713,8 +1710,7 @@
             if (f.calculated && f.calculated.expression) {
                 var fieldEl = form.querySelector('#f_' + f.name);
                 if (!fieldEl) return;
-                var isAsync = f.calculated.expression.indexOf('bmwRelatedLookup') >= 0 ||
-                              f.calculated.expression.indexOf('bmwQueryLookup') >= 0;
+                var isAsync = bmwAstHasAsync(f.calculated.expression);
                 form.addEventListener('input', function () {
                     try {
                         var vals = collectFormValues(form, formFields);
@@ -1952,31 +1948,143 @@
         return vals;
     }
 
-    function evalExpression(jsExpr, vals) {
-        // jsExpr originates from server-generated metadata (CalculatedFieldAttribute.Expression
-        // compiled to JavaScript by ExpressionParser.ToJavaScript). It is not user-supplied
-        // input, so using Function constructor here is acceptable.
+    /**
+     * CSP-safe JSON AST evaluator (synchronous).
+     * Walks the expression tree from ExpressionNode.ToJsonAst() without eval/new Function.
+     */
+    function bmwEvalAst(ast, getField) {
+        if (!ast) return 0;
+        switch (ast.t) {
+            case 'lit': return ast.v != null ? ast.v : 0;
+            case 'field': return getField(ast.n);
+            case 'bin': {
+                var l = bmwEvalAst(ast.l, getField), r = bmwEvalAst(ast.r, getField);
+                var ln = parseFloat(l) || 0, rn = parseFloat(r) || 0;
+                switch (ast.op) {
+                    case '+': return (typeof l === 'string' || typeof r === 'string') ? '' + l + r : ln + rn;
+                    case '-': return ln - rn;
+                    case '*': return ln * rn;
+                    case '/': return rn !== 0 ? ln / rn : 0;
+                    case '%': return rn !== 0 ? ln % rn : 0;
+                    case '>': return ln > rn;
+                    case '<': return ln < rn;
+                    case '>=': return ln >= rn;
+                    case '<=': return ln <= rn;
+                    case '==': return ln === rn;
+                    case '!=': return ln !== rn;
+                }
+                return 0;
+            }
+            case 'unary': {
+                var x = parseFloat(bmwEvalAst(ast.x, getField)) || 0;
+                return ast.op === '-' ? -x : x;
+            }
+            case 'fn': {
+                var args = ast.args.map(function (a) { return bmwEvalAst(a, getField); });
+                switch (ast.fn) {
+                    case 'round': return args.length >= 2
+                        ? Math.round(args[0] * Math.pow(10, args[1])) / Math.pow(10, args[1])
+                        : Math.round(args[0]);
+                    case 'min': return Math.min.apply(null, args);
+                    case 'max': return Math.max.apply(null, args);
+                    case 'abs': return Math.abs(args[0]);
+                    case 'if': return args[0] ? args[1] : args[2];
+                }
+                return 0;
+            }
+            default: return 0;
+        }
+    }
+
+    /**
+     * CSP-safe JSON AST evaluator (async — supports RelatedLookup, QueryLookup, dot-access).
+     */
+    function bmwEvalAstAsync(ast, getField, relLookup, qryLookup) {
+        if (!ast) return Promise.resolve(0);
+        switch (ast.t) {
+            case 'lit': return Promise.resolve(ast.v != null ? ast.v : 0);
+            case 'field': return Promise.resolve(getField(ast.n));
+            case 'bin':
+                return Promise.all([
+                    bmwEvalAstAsync(ast.l, getField, relLookup, qryLookup),
+                    bmwEvalAstAsync(ast.r, getField, relLookup, qryLookup)
+                ]).then(function (parts) {
+                    var l = parts[0], r = parts[1];
+                    var ln = parseFloat(l) || 0, rn = parseFloat(r) || 0;
+                    switch (ast.op) {
+                        case '+': return (typeof l === 'string' || typeof r === 'string') ? '' + l + r : ln + rn;
+                        case '-': return ln - rn;
+                        case '*': return ln * rn;
+                        case '/': return rn !== 0 ? ln / rn : 0;
+                        case '%': return rn !== 0 ? ln % rn : 0;
+                        case '>': return ln > rn;
+                        case '<': return ln < rn;
+                        case '>=': return ln >= rn;
+                        case '<=': return ln <= rn;
+                        case '==': return ln === rn;
+                        case '!=': return ln !== rn;
+                    }
+                    return 0;
+                });
+            case 'unary':
+                return bmwEvalAstAsync(ast.x, getField, relLookup, qryLookup)
+                    .then(function (val) { var x = parseFloat(val) || 0; return ast.op === '-' ? -x : x; });
+            case 'fn':
+                return Promise.all(ast.args.map(function (a) { return bmwEvalAstAsync(a, getField, relLookup, qryLookup); }))
+                    .then(function (args) {
+                        switch (ast.fn) {
+                            case 'round': return args.length >= 2
+                                ? Math.round(args[0] * Math.pow(10, args[1])) / Math.pow(10, args[1])
+                                : Math.round(args[0]);
+                            case 'min': return Math.min.apply(null, args);
+                            case 'max': return Math.max.apply(null, args);
+                            case 'abs': return Math.abs(args[0]);
+                            case 'if': return args[0] ? args[1] : args[2];
+                            case 'relatedlookup': return relLookup ? relLookup(args[0], args[1]) : Promise.resolve(null);
+                            case 'querylookup':
+                            case 'lookupmultilevel': return qryLookup ? qryLookup.apply(null, args) : Promise.resolve(null);
+                        }
+                        return 0;
+                    });
+            case 'dot':
+                if (!relLookup) return Promise.resolve(null);
+                // ast.fk is the FK field; ast.path is the chain of subsequent fields.
+                // For single-hop (path.length === 1), delegate to relLookup(fk, targetField).
+                // Multi-hop is not yet supported client-side; falls back to null.
+                if (ast.path.length === 1) return relLookup(ast.fk, ast.path[0]);
+                return Promise.resolve(null);
+            default: return Promise.resolve(0);
+        }
+    }
+
+    /** Returns true if the AST contains any async nodes (dot-access, relatedlookup, querylookup). */
+    function bmwAstHasAsync(ast) {
+        if (!ast) return false;
+        switch (ast.t) {
+            case 'dot': return true;
+            case 'fn':
+                if (ast.fn === 'relatedlookup' || ast.fn === 'querylookup' || ast.fn === 'lookupmultilevel') return true;
+                return ast.args.some(bmwAstHasAsync);
+            case 'bin': return bmwAstHasAsync(ast.l) || bmwAstHasAsync(ast.r);
+            case 'unary': return bmwAstHasAsync(ast.x);
+            default: return false;
+        }
+    }
+
+    function evalExpression(ast, vals) {
+        if (!ast) return null;
         try {
-            var keys   = Object.keys(vals);
-            var values = keys.map(function (k) { return parseFloat(vals[k]) || 0; });
-            // eslint-disable-next-line no-new-func
-            return new Function(keys, 'return ' + jsExpr).apply(null, values);
+            return bmwEvalAst(ast, function (n) { var v = parseFloat(vals[n]); return isNaN(v) ? 0 : v; });
         } catch (e) { return null; }
     }
 
     // Async expression evaluation for lookup-based calculated fields
-    function evalExpressionAsync(jsExpr, vals, entitySlug) {
+    function evalExpressionAsync(ast, vals, entitySlug) {
         try {
-            var keys = Object.keys(vals);
-            var values = keys.map(function (k) { return vals[k]; });
-            // eslint-disable-next-line no-new-func
-            var fn = new Function('bmwRelatedLookup', 'bmwQueryLookup', keys.join(','),
-                'return (async function() { return ' + jsExpr + '; })()');
-            var args = [
-                function (fkField, targetField) { return bmwRelatedLookup(entitySlug, fkField, targetField, vals); },
-                function () { return bmwQueryLookup.apply(null, arguments); }
-            ].concat(values);
-            return fn.apply(null, args);
+            function getField(n) { var v = parseFloat(vals[n]); return isNaN(v) ? 0 : v; }
+            var relLookup = function (fkField, targetField) { return bmwRelatedLookup(entitySlug, fkField, targetField, vals); };
+            var qryLookup = function () { return bmwQueryLookup.apply(null, arguments); };
+            return bmwEvalAstAsync(ast, getField, relLookup, qryLookup);
         } catch (e) { return Promise.resolve(null); }
     }
 

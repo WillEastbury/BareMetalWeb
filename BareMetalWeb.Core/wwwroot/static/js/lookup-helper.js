@@ -187,7 +187,10 @@
 
             // Set the hidden field value
             var hiddenInput = document.getElementById(fieldId);
-            if (hiddenInput) hiddenInput.value = idValue;
+            if (hiddenInput) {
+                hiddenInput.value = idValue;
+                hiddenInput.dispatchEvent(new Event('change', { bubbles: true }));
+            }
 
             // Set the display text
             var displayInput = document.getElementById(displayFieldId);
