@@ -13,6 +13,12 @@ public sealed class ReportExecutor
     /// <summary>Maximum rows returned per report execution to guard against runaway results.</summary>
     public const int DefaultRowLimit = 10_000;
 
+    /// <summary>Maximum records loaded per entity to prevent unbounded memory usage.</summary>
+    public const int MaxEntityLoadSize = 50_000;
+
+    /// <summary>Maximum combined rows during join processing before early termination.</summary>
+    public const int MaxIntermediateRows = 100_000;
+
     private readonly IDataObjectStore _store;
 
     public ReportExecutor(IDataObjectStore store)
@@ -65,8 +71,9 @@ public sealed class ReportExecutor
         if (!DataScaffold.TryGetEntity(rootSlug, out var rootMeta))
             throw new InvalidOperationException($"Entity '{rootSlug}' not found. Check the entity slug.");
 
-        // Load root entity rows
-        var rootRows = (await rootMeta.Handlers.QueryAsync(null, cancellationToken)).ToList();
+        // Load root entity rows (capped to prevent unbounded memory usage)
+        var rootRows = (await rootMeta.Handlers.QueryAsync(null, cancellationToken))
+            .Take(MaxEntityLoadSize).ToList();
 
         // Start: each combined row is a dict of entitySlug -> BaseDataObject
         var combined = rootRows
@@ -85,7 +92,8 @@ public sealed class ReportExecutor
             if (!DataScaffold.TryGetEntity(join.FromEntity, out var fromMeta))
                 continue;
 
-            var joinRows = (await joinMeta.Handlers.QueryAsync(null, cancellationToken)).ToList();
+            var joinRows = (await joinMeta.Handlers.QueryAsync(null, cancellationToken))
+                .Take(MaxEntityLoadSize).ToList();
 
             // Build hash map: toField value -> list of matching join rows
             var toAccessor = FindAccessor(joinMeta, join.ToField);
@@ -108,9 +116,13 @@ public sealed class ReportExecutor
 
             var newCombined = new List<Dictionary<string, BaseDataObject>>(combined.Count);
             var matchedRightKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            bool intermediateOverflow = false;
 
             foreach (var row in combined)
             {
+                if (intermediateOverflow)
+                    break;
+
                 if (!row.TryGetValue(join.FromEntity, out var fromObj))
                 {
                     // Left side missing (e.g. nulled out by prior outer join)
@@ -130,6 +142,11 @@ public sealed class ReportExecutor
                             [join.ToEntity] = match
                         };
                         newCombined.Add(newRow);
+                        if (newCombined.Count >= MaxIntermediateRows)
+                        {
+                            intermediateOverflow = true;
+                            break;
+                        }
                     }
                 }
                 else
@@ -149,7 +166,7 @@ public sealed class ReportExecutor
             }
 
             // For RIGHT and FULL OUTER: emit unmatched right-side records
-            if (join.Type == JoinType.Right || join.Type == JoinType.FullOuter)
+            if (!intermediateOverflow && (join.Type == JoinType.Right || join.Type == JoinType.FullOuter))
             {
                 foreach (var kvp in hashMap)
                 {

@@ -401,6 +401,40 @@ public class ReportQueryTests : IDisposable
         Assert.Equal(5, (int)AggregateFunction.Average);
     }
 
+    [Fact]
+    public async Task ReportExecutor_IntermediateRowsCapped()
+    {
+        DataScaffold.RegisterEntity<TestCustomer>();
+        DataScaffold.RegisterEntity<TestOrder>();
+
+        // Create one customer with many orders to test intermediate row capping
+        var c1 = new TestCustomer { Name = "Big Corp" };
+        _store.Save(c1);
+        for (int i = 0; i < 200; i++)
+            _store.Save(new TestOrder { CustomerId = c1.Id, Amount = i, Status = "Open" });
+
+        var query = new ReportQuery()
+            .From("test-customers")
+            .Join("test-customers", "Id", "test-orders", "CustomerId")
+            .SelectColumn("test-customers", "Name", "Name")
+            .Limit(50);
+
+        var executor = new ReportExecutor(_store);
+        var result = await executor.ExecuteAsync(query);
+
+        // Should return at most 50 rows (the limit), not blow up
+        Assert.True(result.TotalRows <= 50);
+        Assert.True(result.IsTruncated);
+    }
+
+    [Fact]
+    public void ReportExecutor_Constants_HaveSafeDefaults()
+    {
+        Assert.Equal(10_000, ReportExecutor.DefaultRowLimit);
+        Assert.Equal(50_000, ReportExecutor.MaxEntityLoadSize);
+        Assert.Equal(100_000, ReportExecutor.MaxIntermediateRows);
+    }
+
     // ── Outer JOIN tests ────────────────────────────────────────────────────
 
     [Fact]
