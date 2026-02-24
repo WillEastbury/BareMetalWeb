@@ -71,10 +71,10 @@ public class SynchronousEncryptionTests : IDisposable
     [InlineData("")]
     [InlineData(" ")]
     [InlineData(null)]
-    public void CreateFromKeyFile_InvalidPath_ThrowsArgumentException(string keyFilePath)
+    public void CreateFromKeyFile_InvalidPath_ThrowsArgumentException(string? keyFilePath)
     {
         // Act & Assert
-        var exception = Assert.Throws<ArgumentException>(() => SynchronousEncryption.CreateFromKeyFile(keyFilePath));
+        var exception = Assert.Throws<ArgumentException>(() => SynchronousEncryption.CreateFromKeyFile(keyFilePath!));
         Assert.Equal("keyFilePath", exception.ParamName);
     }
 

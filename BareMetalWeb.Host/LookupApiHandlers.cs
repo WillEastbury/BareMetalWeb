@@ -48,7 +48,7 @@ public static class LookupApiHandlers
             var result = EntityToJson(entity, meta);
             await WriteJsonAsync(context, result);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, "Error loading entity.");
         }

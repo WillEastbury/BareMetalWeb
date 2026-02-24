@@ -2590,6 +2590,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         foreach (var id in ids)
         {
+            if (id == null) continue;
             try
             {
                 await DataScaffold.DeleteAsync(meta, id);
@@ -3572,7 +3573,7 @@ public sealed class RouteHandlers : IRouteHandlers
                         || fullPath[normalizedRoot.Length] == Path.DirectorySeparatorChar
                         || fullPath[normalizedRoot.Length] == Path.AltDirectorySeparatorChar);
 
-                if (isUnderRoot && selectedEntry != null && File.Exists(fullPath))
+                if (isUnderRoot && selectedEntry.Name != null && File.Exists(fullPath))
                 {
                     html.Append(RenderLogFile(fullPath, file, selectedEntry.IsError));
                 }

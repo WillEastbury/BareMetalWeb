@@ -257,7 +257,7 @@ public class OutputCacheTests
     }
 
     [Fact]
-    public void Store_MultipleConcurrentStores_HandlesCorrectly()
+    public async Task Store_MultipleConcurrentStores_HandlesCorrectly()
     {
         // Arrange
         var cache = new OutputCache();
@@ -274,7 +274,7 @@ public class OutputCacheTests
                 cache.Store(path, body, "text/html", 200);
             });
         }
-        System.Threading.Tasks.Task.WaitAll(tasks);
+        await System.Threading.Tasks.Task.WhenAll(tasks);
 
         // Assert - Should have stored something without crashing
         var result = cache.TryGet(path, out var response);

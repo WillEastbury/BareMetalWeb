@@ -39,10 +39,10 @@ public class QrCodeGeneratorTests
     [Theory]
     [InlineData("")]
     [InlineData(null)]
-    public void GenerateSvgDataUri_NullOrEmptyText_ThrowsArgumentException(string text)
+    public void GenerateSvgDataUri_NullOrEmptyText_ThrowsArgumentException(string? text)
     {
         // Act & Assert
-        var exception = Assert.Throws<ArgumentException>(() => QrCodeGenerator.GenerateSvgDataUri(text));
+        var exception = Assert.Throws<ArgumentException>(() => QrCodeGenerator.GenerateSvgDataUri(text!));
         Assert.Equal("text", exception.ParamName);
     }
 
