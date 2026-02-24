@@ -472,52 +472,31 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void RegisterAdminRoutes_RegistersExactlySevenRoutes()
+    public void RegisterAdminRoutes_AlwaysRegistersNineRoutes()
     {
         // Arrange & Act
         _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.Equal(7, _server.routes.Count);
-    }
-
-    [Fact]
-    public void RegisterAdminRoutes_WipeDataDisabledByDefault_DoesNotRegisterWipeRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.False(_server.routes.ContainsKey("GET /admin/wipe-data"));
-        Assert.False(_server.routes.ContainsKey("POST /admin/wipe-data"));
-    }
-
-    [Fact]
-    public void RegisterAdminRoutes_WipeDataEnabled_RegistersWipeRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, enableWipeData: true);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("GET /admin/wipe-data"));
-        Assert.True(_server.routes.ContainsKey("POST /admin/wipe-data"));
-    }
-
-    [Fact]
-    public void RegisterAdminRoutes_WipeDataEnabled_RegistersExactlyNineRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, enableWipeData: true);
 
         // Assert
         Assert.Equal(9, _server.routes.Count);
     }
 
     [Fact]
+    public void RegisterAdminRoutes_AlwaysRegistersWipeRoutes()
+    {
+        // Arrange & Act
+        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
+
+        // Assert — routes are always registered; 419 gating is done at runtime via the settings store
+        Assert.True(_server.routes.ContainsKey("GET /admin/wipe-data"));
+        Assert.True(_server.routes.ContainsKey("POST /admin/wipe-data"));
+    }
+
+    [Fact]
     public void RegisterAdminRoutes_WipeDataRoute_HasAdminPermission()
     {
         // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, enableWipeData: true);
+        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
         var route = _server.routes["GET /admin/wipe-data"];
@@ -966,7 +945,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterData > afterAdmin);
         Assert.True(afterLookup > afterData);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 16 + 4 + 7 + 21 + 5 + 9, total); // 3+16+4+7+21+5+9=65
+        Assert.Equal(staticCount + 16 + 4 + 9 + 21 + 5 + 9, total); // 3+16+4+9+21+5+9=67
     }
 
     [Fact]

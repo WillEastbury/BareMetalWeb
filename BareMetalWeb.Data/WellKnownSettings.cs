@@ -45,4 +45,12 @@ public static class WellKnownSettings
 
     /// <summary>Enable server GC mode (true/false). Default: true.</summary>
     public const string GCServerMode = "gc.serverMode";
+
+    // ── Admin ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The secret token required to trigger the wipe-all-data operation via
+    /// <c>POST /admin/wipe-data</c>. When empty or absent the endpoint returns 419.
+    /// </summary>
+    public const string AllowWipeData = "admin.allowWipeData";
 }
