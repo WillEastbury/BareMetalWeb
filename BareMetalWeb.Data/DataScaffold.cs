@@ -146,6 +146,9 @@ public static class DataScaffold
                 break;
 
             case AutoIdStrategy.Sequential:
+            {
+                // Seed the persistent counter from existing data on first use after startup
+                // (migration path for deployments that pre-date the persistent counter).
                 if (!_sequenceSeeded.ContainsKey(metadata.Name))
                 {
                     var existing = await metadata.Handlers.QueryAsync(null, cancellationToken);
@@ -155,16 +158,60 @@ public static class DataScaffold
                         if (long.TryParse(obj.Id, out var parsed) && parsed > max)
                             max = parsed;
                     }
-                    IdSequenceProvider.SeedIfHigher(metadata.Name, max);
+                    var provider = DataStoreProvider.PrimaryProvider;
+                    if (provider != null)
+                        provider.SeedSequentialId(metadata.Type.Name, max);
+                    else
+                        IdSequenceProvider.SeedIfHigher(metadata.Name, max);
                     _sequenceSeeded[metadata.Name] = true;
                 }
-                instance.Id = IdSequenceProvider.NextId(metadata.Name);
+                var idProvider = DataStoreProvider.PrimaryProvider;
+                instance.Id = idProvider != null
+                    ? idProvider.NextSequentialId(metadata.Type.Name)
+                    : IdSequenceProvider.NextId(metadata.Name);
                 break;
+            }
 
             case AutoIdStrategy.None:
-                if (string.IsNullOrWhiteSpace(instance.Id))
+            {
+                // If any field uses field-level sequential generation, seed and assign here
+                // to ensure the ID survives application restarts without duplicates.
+                var seqField = metadata.Fields.FirstOrDefault(f =>
+                    f.IdGeneration == IdGenerationStrategy.SequentialLong &&
+                    string.Equals(f.Property.Name, nameof(BaseDataObject.Id), StringComparison.Ordinal));
+
+                if (seqField != null && !_sequenceSeeded.ContainsKey(metadata.Name))
+                {
+                    // One-time scan to seed the persistent counter from existing data
+                    // (handles the upgrade migration case where the counter file is absent).
+                    var existing = await metadata.Handlers.QueryAsync(null, cancellationToken);
+                    long max = 0;
+                    foreach (var obj in existing)
+                    {
+                        if (long.TryParse(obj.Id, out var parsed) && parsed > max)
+                            max = parsed;
+                    }
+                    var provider = DataStoreProvider.PrimaryProvider;
+                    if (provider != null)
+                    {
+                        provider.SeedSequentialId(metadata.Type.Name, max);
+                        // Re-assign the ID so the seeded counter is used (overrides the
+                        // temporary value that DefaultIdGenerator set from the un-seeded counter).
+                        instance.Id = provider.NextSequentialId(metadata.Type.Name);
+                    }
+                    else
+                    {
+                        IdSequenceProvider.SeedIfHigher(metadata.Name, max);
+                        instance.Id = IdSequenceProvider.NextId(metadata.Name);
+                    }
+                    _sequenceSeeded[metadata.Name] = true;
+                }
+                else if (string.IsNullOrWhiteSpace(instance.Id))
+                {
                     throw new InvalidOperationException($"Entity {metadata.Name} requires a manually specified Id (IdGeneration = None).");
+                }
                 break;
+            }
         }
     }
 

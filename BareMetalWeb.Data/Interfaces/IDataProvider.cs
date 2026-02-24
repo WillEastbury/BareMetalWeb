@@ -41,4 +41,17 @@ public interface IDataProvider
     bool PagedFileExists(string entityName, string fileName);
     IPagedFile OpenPagedFile(string entityName, string fileName, int pageSize, FileAccess access);
     ValueTask DeletePagedFileAsync(string entityName, string fileName, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Atomically increments and returns the next sequential ID for the given entity.
+    /// The value is persisted so it survives application restarts.
+    /// </summary>
+    string NextSequentialId(string entityName);
+
+    /// <summary>
+    /// Sets the sequential counter for the given entity to at least <paramref name="floor"/>
+    /// if the current stored value is lower.  Used to seed the counter from existing data
+    /// on first use after an upgrade or initial deployment.
+    /// </summary>
+    void SeedSequentialId(string entityName, long floor);
 }
