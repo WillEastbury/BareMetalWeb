@@ -809,6 +809,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await EnsureDefaultCurrencies(userName);
         await EnsureDefaultUnitsOfMeasure(userName);
         await EnsureDefaultAddress(userName);
+        await EnsureDefaultReports(userName);
         context.SetStringValue("title", "Setup");
         context.SetStringValue("message", "<p>Root user created successfully.</p>");
         await _renderer.RenderPage(context);
@@ -922,6 +923,95 @@ public sealed class RouteHandlers : IRouteHandlers
         };
 
         await DataStoreProvider.Current.SaveAsync(address);
+    }
+
+    private async ValueTask EnsureDefaultReports(string createdBy)
+    {
+        var existing = await DataStoreProvider.Current.QueryAsync<ReportDefinition>(null).ConfigureAwait(false);
+        var existingNames = new HashSet<string>(
+            existing.Select(r => r.Name),
+            StringComparer.OrdinalIgnoreCase);
+
+        var reports = new List<ReportDefinition>
+        {
+            new ReportDefinition(createdBy)
+            {
+                Name = "Customer List",
+                Description = "All customers with contact details.",
+                RootEntity = "customers",
+                Columns = new List<ReportColumn>
+                {
+                    new ReportColumn { Entity = "customers", Field = "Name",    Label = "Name" },
+                    new ReportColumn { Entity = "customers", Field = "Email",   Label = "Email" },
+                    new ReportColumn { Entity = "customers", Field = "Company", Label = "Company" },
+                    new ReportColumn { Entity = "customers", Field = "Phone",   Label = "Phone" },
+                },
+                SortField = "customers.Name"
+            },
+            new ReportDefinition(createdBy)
+            {
+                Name = "Orders with Customer",
+                Description = "Orders joined to customer details.",
+                RootEntity = "orders",
+                Joins = new List<ReportJoin>
+                {
+                    new ReportJoin { FromEntity = "orders", FromField = "CustomerId", ToEntity = "customers", ToField = "Id" }
+                },
+                Columns = new List<ReportColumn>
+                {
+                    new ReportColumn { Entity = "orders",    Field = "OrderNumber", Label = "Order #" },
+                    new ReportColumn { Entity = "customers", Field = "Name",        Label = "Customer" },
+                    new ReportColumn { Entity = "orders",    Field = "OrderDate",   Label = "Order Date" },
+                    new ReportColumn { Entity = "orders",    Field = "Status",      Label = "Status" },
+                },
+                SortField = "orders.OrderDate",
+                SortDescending = true
+            },
+            new ReportDefinition(createdBy)
+            {
+                Name = "Product Catalog",
+                Description = "All products with pricing and inventory information.",
+                RootEntity = "products",
+                Columns = new List<ReportColumn>
+                {
+                    new ReportColumn { Entity = "products", Field = "Name",           Label = "Name" },
+                    new ReportColumn { Entity = "products", Field = "Sku",            Label = "SKU" },
+                    new ReportColumn { Entity = "products", Field = "Category",       Label = "Category" },
+                    new ReportColumn { Entity = "products", Field = "Price",          Label = "Price" },
+                    new ReportColumn { Entity = "products", Field = "InventoryCount", Label = "Inventory" },
+                },
+                SortField = "products.Name"
+            },
+            new ReportDefinition(createdBy)
+            {
+                Name = "Invoice Summary",
+                Description = "Invoices joined to customer details.",
+                RootEntity = "invoices",
+                Joins = new List<ReportJoin>
+                {
+                    new ReportJoin { FromEntity = "invoices", FromField = "CustomerId", ToEntity = "customers", ToField = "Id" }
+                },
+                Columns = new List<ReportColumn>
+                {
+                    new ReportColumn { Entity = "invoices",  Field = "Id",          Label = "Invoice #" },
+                    new ReportColumn { Entity = "customers", Field = "Name",        Label = "Customer" },
+                    new ReportColumn { Entity = "invoices",  Field = "InvoiceDate", Label = "Invoice Date" },
+                    new ReportColumn { Entity = "invoices",  Field = "DueDate",     Label = "Due Date" },
+                    new ReportColumn { Entity = "invoices",  Field = "Amount",      Label = "Amount" },
+                    new ReportColumn { Entity = "invoices",  Field = "Status",      Label = "Status" },
+                },
+                SortField = "invoices.InvoiceDate",
+                SortDescending = true
+            }
+        };
+
+        foreach (var report in reports)
+        {
+            if (existingNames.Contains(report.Name))
+                continue;
+
+            await DataStoreProvider.Current.SaveAsync(report).ConfigureAwait(false);
+        }
     }
 
     public async ValueTask ReloadTemplatesHandler(HttpContext context)
