@@ -336,6 +336,19 @@ public static class LookupApiHandlers
         if (int.TryParse(context.Request.Query["top"].ToString(), out var top) && top > 0)
             queryDef.Top = top;
 
+        // Parse search: ?search=term&searchField=FieldName — does Contains matching on the specified field
+        var searchTerm = context.Request.Query["search"].ToString();
+        var searchField = context.Request.Query["searchField"].ToString();
+        if (!string.IsNullOrWhiteSpace(searchTerm) && !string.IsNullOrWhiteSpace(searchField))
+        {
+            queryDef.Clauses.Add(new QueryClause
+            {
+                Field = searchField,
+                Operator = QueryOperator.Contains,
+                Value = searchTerm
+            });
+        }
+
         return queryDef;
     }
 

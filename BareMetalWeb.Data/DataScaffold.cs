@@ -66,7 +66,14 @@ public static class DataScaffold
     private static readonly NullabilityInfoContext NullabilityContext = new();
     private static readonly object LookupCacheSync = new();
     private static readonly Dictionary<string, LookupCacheEntry> LookupCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly Dictionary<string, (bool IsLarge, DateTime ExpiresUtc)> LargeListCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly IIdGenerator IdGenerator = new DefaultIdGenerator();
+
+    /// <summary>
+    /// Number of lookup records above which a search dialog is used instead of a full dropdown.
+    /// Configurable via LookupSearch:LargeListThreshold in appsettings.json. Default: 20.
+    /// </summary>
+    public static int LargeListThreshold { get; set; } = 20;
 
     private sealed record LookupCacheEntry(IReadOnlyList<KeyValuePair<string, string>> Options, DateTime ExpiresUtc);
 
@@ -511,11 +518,31 @@ public static class DataScaffold
             var effectiveFieldType = effectiveType == typeof(DateOnly) && field.FieldType == FormFieldType.DateTime
                 ? FormFieldType.DateOnly
                 : field.FieldType;
-            var lookupOptions = field.Lookup != null
-                ? GetLookupOptions(field.Lookup)
-                : null;
-            if (lookupOptions != null)
-                effectiveFieldType = FormFieldType.LookupList;
+
+            IReadOnlyList<KeyValuePair<string, string>>? lookupOptions = null;
+            bool isHighCardinality = false;
+            string? lookupDisplayValue = null;
+            string? lookupSearchField = null;
+            string? lookupValueField = null;
+
+            if (field.Lookup != null)
+            {
+                if (IsHighCardinalityLookup(field.Lookup))
+                {
+                    isHighCardinality = true;
+                    effectiveFieldType = FormFieldType.LookupList;
+                    lookupSearchField = field.Lookup.DisplayField;
+                    lookupValueField = field.Lookup.ValueField;
+                    lookupDisplayValue = GetLookupDisplayValue(field.Lookup, value?.ToString());
+                }
+                else
+                {
+                    lookupOptions = GetLookupOptions(field.Lookup);
+                    if (lookupOptions != null)
+                        effectiveFieldType = FormFieldType.LookupList;
+                }
+            }
+
             var stringValue = ToInputString(value, field.Property.PropertyType, effectiveFieldType);
             if (metadata.Type == typeof(SystemPrincipal)
                 && string.Equals(field.Name, nameof(SystemPrincipal.ApiKeyHashes), StringComparison.OrdinalIgnoreCase))
@@ -565,6 +592,10 @@ public static class DataScaffold
                 LookupOptions: lookupOptions,
                 LookupTargetType: lookupTargetType,
                 LookupTargetSlug: lookupTargetSlug,
+                IsHighCardinality: isHighCardinality,
+                LookupDisplayValue: lookupDisplayValue,
+                LookupSearchField: lookupSearchField,
+                LookupValueField: lookupValueField,
                 Accept: field.Upload != null && field.Upload.AllowedMimeTypes.Length > 0
                     ? string.Join(",", field.Upload.AllowedMimeTypes)
                     : (effectiveFieldType == FormFieldType.Image ? "image/*" : null),
@@ -1712,6 +1743,95 @@ public static class DataScaffold
         // Get the Result property from the completed Task<IEnumerable<T>>
         var resultProp = task.GetType().GetProperty(nameof(Task<object>.Result))!;
         return (IEnumerable)resultProp.GetValue(task)!;
+    }
+
+    private static int CountByType(Type type, QueryDefinition? query)
+    {
+        // Note: This uses sync-over-async, consistent with QueryByType — see that method for rationale.
+        var method = typeof(IDataObjectStore).GetMethod(nameof(IDataObjectStore.CountAsync))!;
+        var generic = method.MakeGenericMethod(type);
+        var result = generic.Invoke(DataStoreProvider.Current, new object?[] { query, CancellationToken.None })!;
+        var asTaskMethod = result.GetType().GetMethod(nameof(ValueTask<int>.AsTask))!;
+        var task = (Task)asTaskMethod.Invoke(result, null)!;
+        task.GetAwaiter().GetResult();
+        var resultProp = task.GetType().GetProperty(nameof(Task<object>.Result))!;
+        return (int)resultProp.GetValue(task)!;
+    }
+
+    private static object? LoadByIdForType(Type type, string id)
+    {
+        // Note: This uses sync-over-async, consistent with QueryByType — see that method for rationale.
+        var method = typeof(IDataObjectStore).GetMethod(nameof(IDataObjectStore.LoadAsync))!;
+        var generic = method.MakeGenericMethod(type);
+        var result = generic.Invoke(DataStoreProvider.Current, new object?[] { id, CancellationToken.None })!;
+        var asTaskMethod = result.GetType().GetMethod(nameof(ValueTask<object>.AsTask))!;
+        var task = (Task)asTaskMethod.Invoke(result, null)!;
+        task.GetAwaiter().GetResult();
+        var resultProp = task.GetType().GetProperty(nameof(Task<object>.Result))!;
+        return resultProp.GetValue(task);
+    }
+
+    /// <summary>
+    /// Returns true when the number of records for a lookup exceeds <see cref="LargeListThreshold"/>.
+    /// Result is cached using the same TTL as the lookup options to avoid repeated counts.
+    /// </summary>
+    private static bool IsHighCardinalityLookup(DataLookupConfig lookup)
+    {
+        var cacheKey = BuildLookupCacheKey(lookup);
+        lock (LookupCacheSync)
+        {
+            if (LargeListCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresUtc > DateTime.UtcNow)
+                return cached.IsLarge;
+        }
+
+        var query = BuildLookupQuery(lookup);
+        var count = CountByType(lookup.TargetType, query);
+        var isLarge = count > LargeListThreshold;
+
+        lock (LookupCacheSync)
+        {
+            LargeListCache[cacheKey] = (isLarge, DateTime.UtcNow.Add(lookup.CacheTtl));
+        }
+
+        return isLarge;
+    }
+
+    /// <summary>
+    /// Resolves the display text for the current value of a high-cardinality lookup field.
+    /// Used when rendering a search dialog instead of a full dropdown.
+    /// </summary>
+    private static string? GetLookupDisplayValue(DataLookupConfig lookup, string? currentValue)
+    {
+        if (string.IsNullOrEmpty(currentValue))
+            return null;
+
+        try
+        {
+            object? entity;
+            if (string.Equals(lookup.ValueField, nameof(BaseDataObject.Id), StringComparison.OrdinalIgnoreCase))
+            {
+                entity = LoadByIdForType(lookup.TargetType, currentValue);
+            }
+            else
+            {
+                var q = new QueryDefinition();
+                q.Clauses.Add(new QueryClause { Field = lookup.ValueField, Operator = QueryOperator.Equals, Value = currentValue });
+                q.Top = 1;
+                entity = QueryByType(lookup.TargetType, q).Cast<object>().FirstOrDefault();
+            }
+
+            if (entity == null)
+                return null;
+
+            var displayProp = lookup.TargetType.GetProperty(lookup.DisplayField,
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            var displayVal = displayProp?.GetValue(entity);
+            return displayVal != null ? ToDisplayString(displayVal, displayProp!.PropertyType) : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static IReadOnlyList<KeyValuePair<string, string>> BuildLookupOptions(IEnumerable items, string valueField, string displayField)

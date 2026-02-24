@@ -50,6 +50,9 @@ public static class BareMetalWebExtensions
             dataRoot);
         IDataObjectStore dataStore = ProgramSetup.CreateDataStore(app, serializer, queryEvaluator, logger);
 
+        // Configure high-cardinality lookup threshold
+        DataScaffold.LargeListThreshold = app.Configuration.GetValue("LookupSearch:LargeListThreshold", 20);
+
         // Runtime entity registry — load persisted EntityDefinitions from storage and compile
         await RuntimeEntityRegistry.BuildAsync(
             dataStore,
