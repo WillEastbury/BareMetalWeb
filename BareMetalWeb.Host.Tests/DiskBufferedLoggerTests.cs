@@ -50,7 +50,7 @@ public class DiskBufferedLoggerTests : IDisposable
         var logFiles = Directory.GetFiles(_tempDir, "info_*.log", SearchOption.AllDirectories);
         Assert.NotEmpty(logFiles);
 
-        var content = await File.ReadAllTextAsync(logFiles[0]);
+        var content = string.Join(Environment.NewLine, logFiles.SelectMany(f => File.ReadAllLines(f)));
         Assert.Contains("Hello from test", content);
         Assert.Contains("INFO |", content);
     }
