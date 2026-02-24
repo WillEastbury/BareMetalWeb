@@ -3939,6 +3939,17 @@ public sealed class RouteHandlers : IRouteHandlers
         context.AddFormDefinition(new FormDefinition("/admin/wipe-data", "post", "WIPE ALL DATA", fields));
     }
 
+    public async ValueTask EntityDesignerHandler(HttpContext context)
+    {
+        await BuildPageHandler(ctx =>
+        {
+            ctx.SetStringValue("title", "Entity Designer");
+            ctx.SetStringValue("message",
+                "<div id=\"designer-root\"><p class=\"text-muted\">Loading designer…</p></div>" +
+                "<script src=\"/static/js/entity-designer.js\"></script>");
+        })(context);
+    }
+
     private async ValueTask ApplyUploadFieldsFromFormAsync(HttpContext context, DataEntityMetadata meta, BaseDataObject instance, IFormCollection form, List<string> errors)
     {
         foreach (var field in meta.Fields.Where(f => f.FieldType == FormFieldType.File || f.FieldType == FormFieldType.Image))

@@ -212,6 +212,11 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("POST /admin/wipe-data", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", false, 0),
             routeHandlers.WipeDataPostHandler));
+
+        // Entity designer — visual editor for creating virtual entity JSON definitions
+        host.RegisterRoute("GET /admin/entity-designer", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Entity Designer", "" }, "admin", true, 2, navGroup: "System", navAlignment: NavAlignment.Right),
+            routeHandlers.EntityDesignerHandler));
     }
 
     /// <summary>
