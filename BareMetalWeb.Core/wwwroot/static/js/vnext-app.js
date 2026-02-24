@@ -473,30 +473,119 @@
     }
 
     function renderTimeline(meta, items, slug, baseUrl) {
-        var dateField = meta.fields.find(function (f) { return f.type === 'DateTime' || f.type === 'DateOnly'; });
+        // Find first two DateOnly/DateTime fields: start date, optional end date
+        var dateFields = meta.fields.filter(function (f) { return f.type === 'DateTime' || f.type === 'DateOnly'; });
+        if (!dateFields.length) return '<p class="text-warning">Timeline view requires a DateOnly or DateTime field.</p>';
+
+        var startField = dateFields[0];
+        var endField = dateFields.length > 1 ? dateFields[1] : null;
         var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
-        var sorted = items.slice().sort(function (a, b) {
-            if (!dateField) return 0;
-            var da = new Date(nestedGet(a, dateField.name) || 0).getTime();
-            var db = new Date(nestedGet(b, dateField.name) || 0).getTime();
-            return da - db;
-        });
-        var html = '<div class="vnext-timeline position-relative ps-4">' +
-            '<div class="position-absolute start-0 top-0 bottom-0" style="left:12px;width:2px;background:#dee2e6"></div>';
-        sorted.forEach(function (item) {
+
+        // Build gantt items with parsed start/end dates
+        var barColors = ['#4472c4', '#c0504d', '#9bbb59', '#f79646', '#8064a2'];
+        var ganttItems = [];
+        items.forEach(function (item) {
+            var sv = nestedGet(item, startField.name);
+            if (!sv) return;
+            var sd = new Date(sv);
+            if (isNaN(sd.getTime())) return;
+            var startDate = { y: sd.getFullYear(), m: sd.getMonth(), d: sd.getDate() };
+
+            var endDate = startDate;
+            if (endField) {
+                var ev = nestedGet(item, endField.name);
+                if (ev) {
+                    var ed = new Date(ev);
+                    if (!isNaN(ed.getTime())) {
+                        endDate = { y: ed.getFullYear(), m: ed.getMonth(), d: ed.getDate() };
+                        if (new Date(endDate.y, endDate.m, endDate.d) < new Date(startDate.y, startDate.m, startDate.d))
+                            endDate = startDate;
+                    }
+                }
+            }
+
             var id = item.id || item.Id || '';
             var label = labelField ? (nestedGet(item, labelField.name) || id) : id;
-            var dateStr = dateField ? (nestedGet(item, dateField.name) || '') : '';
-            if (dateStr) { try { dateStr = new Date(dateStr).toLocaleDateString(); } catch (e) {} }
-            html += '<div class="vnext-timeline-item d-flex gap-3 mb-3 position-relative">' +
-                '<div class="position-absolute start-0 translate-middle-x" style="left:14px;top:6px;width:10px;height:10px;background:#0d6efd;border-radius:50%"></div>' +
-                '<div class="ms-3 flex-grow-1 border rounded p-2">' +
-                '<div class="d-flex justify-content-between">' +
-                '<strong><a href="' + baseUrl + '/' + encodeURIComponent(id) + '" class="text-decoration-none">' + escHtml(String(label)) + '</a></strong>' +
-                (dateStr ? '<small class="text-muted">' + escHtml(dateStr) + '</small>' : '') +
-                '</div></div></div>';
+            ganttItems.push({ item: item, id: id, label: String(label), start: startDate, end: endDate });
         });
-        html += '</div>';
+
+        if (!ganttItems.length) return '<p class="text-muted">No items with valid dates found.</p>';
+
+        // Compute chart date range (expand to full month boundaries)
+        var allStarts = ganttItems.map(function (g) { return new Date(g.start.y, g.start.m, g.start.d); });
+        var allEnds = ganttItems.map(function (g) { return new Date(g.end.y, g.end.m, g.end.d); });
+        var minDate = new Date(Math.min.apply(null, allStarts));
+        var maxDate = new Date(Math.max.apply(null, allEnds));
+        var chartStart = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+        var chartEndM = maxDate.getMonth() + 1;
+        var chartEndY = maxDate.getFullYear();
+        if (chartEndM > 11) { chartEndM = 0; chartEndY++; }
+        var chartEnd = new Date(chartEndY, chartEndM, 1);
+        var totalDays = Math.max((chartEnd - chartStart) / 86400000, 1);
+
+        // Build month columns
+        var months = [];
+        var cur = new Date(chartStart);
+        var runLeft = 0;
+        var monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+        while (cur < chartEnd) {
+            var dim = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate();
+            var wpct = dim / totalDays * 100;
+            var lbl = cur.getMonth() === 0 ? monthNames[cur.getMonth()] + ' ' + cur.getFullYear() : monthNames[cur.getMonth()];
+            months.push({ left: runLeft, width: wpct, label: lbl });
+            runLeft += wpct;
+            cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+        }
+
+        // Render Gantt chart HTML (matches SSR bm-gantt-* classes)
+        var html = '<div class="bm-gantt-container"><div class="bm-gantt-inner">';
+
+        // Header
+        html += '<div class="bm-gantt-header-row"><div class="bm-gantt-label-col"></div>';
+        html += '<div class="bm-gantt-months-hdr">';
+        months.forEach(function (mo) {
+            html += '<div class="bm-gantt-month-lbl" data-gantt-left="' + mo.left.toFixed(2) + '%" data-gantt-width="' + mo.width.toFixed(2) + '%">' + escHtml(mo.label) + '</div>';
+        });
+        html += '</div></div>';
+
+        // Rows
+        ganttItems.forEach(function (g, i) {
+            var sd = new Date(g.start.y, g.start.m, g.start.d);
+            var ed = new Date(g.end.y, g.end.m, g.end.d);
+            var startDays = (sd - chartStart) / 86400000;
+            var endDays = (ed - chartStart) / 86400000 + 1;
+            var barLeft = startDays / totalDays * 100;
+            var barWidth = Math.max((endDays - startDays) / totalDays * 100, 0.5);
+            var color = barColors[i % barColors.length];
+
+            var tooltip = endField
+                ? escHtml(g.label) + ': ' + sd.toISOString().slice(0,10) + ' \u2013 ' + ed.toISOString().slice(0,10)
+                : escHtml(g.label) + ': ' + sd.toISOString().slice(0,10);
+
+            html += '<div class="bm-gantt-row">';
+            html += '<div class="bm-gantt-lbl" title="' + escHtml(g.label) + '"><a href="' + baseUrl + '/' + encodeURIComponent(g.id) + '">' + escHtml(g.label) + '</a></div>';
+            html += '<div class="bm-gantt-bar-area">';
+            months.forEach(function (mo) {
+                html += '<div class="bm-gantt-sep" data-gantt-left="' + mo.left.toFixed(2) + '%"></div>';
+            });
+            html += '<a href="' + baseUrl + '/' + encodeURIComponent(g.id) + '/edit" class="bm-gantt-bar" data-gantt-left="' + barLeft.toFixed(2) + '%" data-gantt-width="' + barWidth.toFixed(2) + '%" data-gantt-bg="' + escHtml(color) + '" title="' + tooltip + '">';
+            html += '<span class="bm-gantt-bar-text">' + escHtml(g.label) + '</span>';
+            html += '</a></div></div>';
+        });
+
+        html += '</div></div>';
+
+        // Apply dynamic styles (same as gantt-view.js does for SSR)
+        setTimeout(function () {
+            var els = document.querySelectorAll('[data-gantt-left],[data-gantt-width],[data-gantt-bg]');
+            for (var j = 0; j < els.length; j++) {
+                var el = els[j];
+                if (el.dataset.ganttLeft) el.style.left = el.dataset.ganttLeft;
+                if (el.dataset.ganttWidth) el.style.width = el.dataset.ganttWidth;
+                if (el.dataset.ganttBg) el.style.background = el.dataset.ganttBg;
+            }
+        }, 0);
+
         return html;
     }
 
