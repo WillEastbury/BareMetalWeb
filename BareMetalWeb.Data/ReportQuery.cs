@@ -32,13 +32,29 @@ public sealed class ReportQuery
 
     /// <summary>Adds an INNER JOIN between two entity fields.</summary>
     public ReportQuery Join(string fromEntity, string fromField, string toEntity, string toField)
+        => AddJoin(fromEntity, fromField, toEntity, toField, JoinType.Inner);
+
+    /// <summary>Adds a LEFT JOIN — all left rows preserved, nulls for unmatched right.</summary>
+    public ReportQuery LeftJoin(string fromEntity, string fromField, string toEntity, string toField)
+        => AddJoin(fromEntity, fromField, toEntity, toField, JoinType.Left);
+
+    /// <summary>Adds a RIGHT JOIN — all right rows preserved, nulls for unmatched left.</summary>
+    public ReportQuery RightJoin(string fromEntity, string fromField, string toEntity, string toField)
+        => AddJoin(fromEntity, fromField, toEntity, toField, JoinType.Right);
+
+    /// <summary>Adds a FULL OUTER JOIN — all rows from both sides preserved.</summary>
+    public ReportQuery FullOuterJoin(string fromEntity, string fromField, string toEntity, string toField)
+        => AddJoin(fromEntity, fromField, toEntity, toField, JoinType.FullOuter);
+
+    private ReportQuery AddJoin(string fromEntity, string fromField, string toEntity, string toField, JoinType type)
     {
         _joins.Add(new ReportJoin
         {
             FromEntity = fromEntity,
             FromField = fromField,
             ToEntity = toEntity,
-            ToField = toField
+            ToField = toField,
+            Type = type
         });
         return this;
     }
@@ -57,7 +73,8 @@ public sealed class ReportQuery
             FromEntity = DataScaffold.GetEntityByType(typeof(TFrom))?.Slug ?? typeof(TFrom).Name.ToSlug(),
             FromField = fromFieldName,
             ToEntity = DataScaffold.GetEntityByType(typeof(TTo))?.Slug ?? typeof(TTo).Name.ToSlug(),
-            ToField = toFieldName
+            ToField = toFieldName,
+            Type = JoinType.Inner
         });
         return this;
     }

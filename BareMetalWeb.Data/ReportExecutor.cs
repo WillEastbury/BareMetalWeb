@@ -101,30 +101,71 @@ public sealed class ReportExecutor
                 list.Add(jr);
             }
 
-            // Perform INNER JOIN
+            // Perform join based on join type
             var fromAccessor = FindAccessor(fromMeta, join.FromField);
             if (fromAccessor == null)
                 continue;
 
             var newCombined = new List<Dictionary<string, BaseDataObject>>(combined.Count);
+            var matchedRightKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
             foreach (var row in combined)
             {
                 if (!row.TryGetValue(join.FromEntity, out var fromObj))
+                {
+                    // Left side missing (e.g. nulled out by prior outer join)
+                    if (join.Type == JoinType.Left || join.Type == JoinType.FullOuter)
+                        newCombined.Add(row); // preserve row without right side
                     continue;
+                }
 
                 var fromValue = GetStringValue(fromAccessor, fromObj);
-                if (!hashMap.TryGetValue(fromValue, out var matches))
-                    continue; // INNER JOIN: drop unmatched
-
-                foreach (var match in matches)
+                if (hashMap.TryGetValue(fromValue, out var matches))
                 {
-                    var newRow = new Dictionary<string, BaseDataObject>(row, StringComparer.OrdinalIgnoreCase)
+                    matchedRightKeys.Add(fromValue);
+                    foreach (var match in matches)
                     {
-                        [join.ToEntity] = match
-                    };
-                    newCombined.Add(newRow);
+                        var newRow = new Dictionary<string, BaseDataObject>(row, StringComparer.OrdinalIgnoreCase)
+                        {
+                            [join.ToEntity] = match
+                        };
+                        newCombined.Add(newRow);
+                    }
+                }
+                else
+                {
+                    // No match on right side
+                    switch (join.Type)
+                    {
+                        case JoinType.Left:
+                        case JoinType.FullOuter:
+                            newCombined.Add(row); // keep left row, right side absent
+                            break;
+                        case JoinType.Inner:
+                        case JoinType.Right:
+                            break; // drop unmatched left rows
+                    }
                 }
             }
+
+            // For RIGHT and FULL OUTER: emit unmatched right-side records
+            if (join.Type == JoinType.Right || join.Type == JoinType.FullOuter)
+            {
+                foreach (var kvp in hashMap)
+                {
+                    if (matchedRightKeys.Contains(kvp.Key))
+                        continue;
+                    foreach (var rightObj in kvp.Value)
+                    {
+                        var newRow = new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            [join.ToEntity] = rightObj
+                        };
+                        newCombined.Add(newRow);
+                    }
+                }
+            }
+
             combined = newCombined;
         }
 

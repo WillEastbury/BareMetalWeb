@@ -1,12 +1,13 @@
 namespace BareMetalWeb.Data;
 
-/// <summary>Describes an INNER JOIN between two entity types.</summary>
+/// <summary>Describes a join between two entity types.</summary>
 public sealed class ReportJoin
 {
     public string FromEntity { get; set; } = string.Empty;
     public string FromField { get; set; } = string.Empty;
     public string ToEntity { get; set; } = string.Empty;
     public string ToField { get; set; } = string.Empty;
+    public JoinType Type { get; set; } = JoinType.Inner;
 }
 
 /// <summary>Describes a projected output column in a report.</summary>

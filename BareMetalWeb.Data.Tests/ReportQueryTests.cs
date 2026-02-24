@@ -401,6 +401,137 @@ public class ReportQueryTests : IDisposable
         Assert.Equal(5, (int)AggregateFunction.Average);
     }
 
+    // ── Outer JOIN tests ────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ReportExecutor_LeftJoin_PreservesAllLeftRows()
+    {
+        RegisterAndSeedTestEntities();
+        // Add an order with no matching customer
+        _store.Save(new TestOrder { CustomerId = "ORPHAN", Amount = 999m, Status = "Orphan" });
+
+        var query = new ReportQuery()
+            .From("test-customers")
+            .LeftJoin("test-customers", "Id", "test-orders", "CustomerId")
+            .SelectColumn("test-customers", "Name", "Customer")
+            .SelectColumn("test-orders", "Amount", "Amount");
+
+        var executor = new ReportExecutor(_store);
+        var result = await executor.ExecuteAsync(query);
+
+        // Acme has 2 orders, Globex has 1 = 3 matched rows. Both customers preserved.
+        Assert.True(result.TotalRows >= 2, $"Expected at least 2 rows, got {result.TotalRows}");
+        Assert.Contains(result.Rows, r => r[0] == "Acme Corp");
+        Assert.Contains(result.Rows, r => r[0] == "Globex");
+    }
+
+    [Fact]
+    public async Task ReportExecutor_LeftJoin_NullsForUnmatchedRight()
+    {
+        DataScaffold.RegisterEntity<TestCustomer>();
+        DataScaffold.RegisterEntity<TestOrder>();
+
+        var c1 = new TestCustomer { Name = "Alice" };
+        var c2 = new TestCustomer { Name = "Bob" }; // no orders
+        _store.Save(c1);
+        _store.Save(c2);
+        _store.Save(new TestOrder { CustomerId = c1.Id, Amount = 100m, Status = "Open" });
+
+        var query = new ReportQuery()
+            .From("test-customers")
+            .LeftJoin("test-customers", "Id", "test-orders", "CustomerId")
+            .SelectColumn("test-customers", "Name", "Customer")
+            .SelectColumn("test-orders", "Status", "Status");
+
+        var executor = new ReportExecutor(_store);
+        var result = await executor.ExecuteAsync(query);
+
+        Assert.Equal(2, result.TotalRows);
+        var bobRow = result.Rows.FirstOrDefault(r => r[0] == "Bob");
+        Assert.NotNull(bobRow);
+        Assert.Null(bobRow![1]); // no matching order
+    }
+
+    [Fact]
+    public async Task ReportExecutor_RightJoin_PreservesAllRightRows()
+    {
+        DataScaffold.RegisterEntity<TestCustomer>();
+        DataScaffold.RegisterEntity<TestOrder>();
+
+        var c1 = new TestCustomer { Name = "Alice" };
+        _store.Save(c1);
+        _store.Save(new TestOrder { CustomerId = c1.Id, Amount = 100m, Status = "Matched" });
+        _store.Save(new TestOrder { CustomerId = "NOBODY", Amount = 50m, Status = "Orphan" });
+
+        var query = new ReportQuery()
+            .From("test-customers")
+            .RightJoin("test-customers", "Id", "test-orders", "CustomerId")
+            .SelectColumn("test-customers", "Name", "Customer")
+            .SelectColumn("test-orders", "Status", "Status");
+
+        var executor = new ReportExecutor(_store);
+        var result = await executor.ExecuteAsync(query);
+
+        Assert.Equal(2, result.TotalRows);
+        Assert.Contains(result.Rows, r => r[1] == "Matched" && r[0] == "Alice");
+        Assert.Contains(result.Rows, r => r[1] == "Orphan" && r[0] == null);
+    }
+
+    [Fact]
+    public async Task ReportExecutor_FullOuterJoin_PreservesBothSides()
+    {
+        DataScaffold.RegisterEntity<TestCustomer>();
+        DataScaffold.RegisterEntity<TestOrder>();
+
+        var c1 = new TestCustomer { Name = "Alice" };
+        var c2 = new TestCustomer { Name = "Bob" }; // no orders
+        _store.Save(c1);
+        _store.Save(c2);
+        _store.Save(new TestOrder { CustomerId = c1.Id, Amount = 100m, Status = "Matched" });
+        _store.Save(new TestOrder { CustomerId = "NOBODY", Amount = 50m, Status = "Orphan" });
+
+        var query = new ReportQuery()
+            .From("test-customers")
+            .FullOuterJoin("test-customers", "Id", "test-orders", "CustomerId")
+            .SelectColumn("test-customers", "Name", "Customer")
+            .SelectColumn("test-orders", "Status", "Status");
+
+        var executor = new ReportExecutor(_store);
+        var result = await executor.ExecuteAsync(query);
+
+        Assert.Equal(3, result.TotalRows);
+        // Alice + Matched
+        Assert.Contains(result.Rows, r => r[0] == "Alice" && r[1] == "Matched");
+        // Bob + null
+        Assert.Contains(result.Rows, r => r[0] == "Bob" && r[1] == null);
+        // null + Orphan
+        Assert.Contains(result.Rows, r => r[0] == null && r[1] == "Orphan");
+    }
+
+    [Fact]
+    public void ReportQuery_JoinType_DefaultsToInner()
+    {
+        var query = new ReportQuery()
+            .From("test-orders")
+            .Join("test-orders", "CustomerId", "test-customers", "Id");
+
+        Assert.Equal(JoinType.Inner, query.Joins[0].Type);
+    }
+
+    [Fact]
+    public void ReportQuery_OuterJoinMethods_SetCorrectType()
+    {
+        var query = new ReportQuery()
+            .From("a")
+            .LeftJoin("a", "x", "b", "y")
+            .RightJoin("b", "x", "c", "y")
+            .FullOuterJoin("c", "x", "d", "y");
+
+        Assert.Equal(JoinType.Left, query.Joins[0].Type);
+        Assert.Equal(JoinType.Right, query.Joins[1].Type);
+        Assert.Equal(JoinType.FullOuter, query.Joins[2].Type);
+    }
+
     // ── InMemory store for test isolation ────────────────────────────────────
 
     private sealed class InMemoryDataObjectStore : IDataObjectStore
