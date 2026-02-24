@@ -472,52 +472,31 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void RegisterAdminRoutes_RegistersExactlySevenRoutes()
+    public void RegisterAdminRoutes_AlwaysRegistersNineRoutes()
     {
         // Arrange & Act
         _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.Equal(7, _server.routes.Count);
-    }
-
-    [Fact]
-    public void RegisterAdminRoutes_WipeDataDisabledByDefault_DoesNotRegisterWipeRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.False(_server.routes.ContainsKey("GET /admin/wipe-data"));
-        Assert.False(_server.routes.ContainsKey("POST /admin/wipe-data"));
-    }
-
-    [Fact]
-    public void RegisterAdminRoutes_WipeDataEnabled_RegistersWipeRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, enableWipeData: true);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("GET /admin/wipe-data"));
-        Assert.True(_server.routes.ContainsKey("POST /admin/wipe-data"));
-    }
-
-    [Fact]
-    public void RegisterAdminRoutes_WipeDataEnabled_RegistersExactlyNineRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, enableWipeData: true);
 
         // Assert
         Assert.Equal(9, _server.routes.Count);
     }
 
     [Fact]
+    public void RegisterAdminRoutes_AlwaysRegistersWipeRoutes()
+    {
+        // Arrange & Act
+        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
+
+        // Assert — routes are always registered; 419 gating is done at runtime via the settings store
+        Assert.True(_server.routes.ContainsKey("GET /admin/wipe-data"));
+        Assert.True(_server.routes.ContainsKey("POST /admin/wipe-data"));
+    }
+
+    [Fact]
     public void RegisterAdminRoutes_WipeDataRoute_HasAdminPermission()
     {
         // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, enableWipeData: true);
+        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
         var route = _server.routes["GET /admin/wipe-data"];
@@ -966,7 +945,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterData > afterAdmin);
         Assert.True(afterLookup > afterData);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 16 + 4 + 7 + 21 + 5 + 9, total); // 3+16+4+7+21+5+9=65
+        Assert.Equal(staticCount + 16 + 4 + 9 + 21 + 5 + 9, total); // 3+16+4+9+21+5+9=67
     }
 
     [Fact]
@@ -1206,6 +1185,33 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.NotNull(nameField);
         Assert.Null(nameField["lookup"]);
         Assert.NotEqual("LookupList", (string?)nameField["type"]);
+    }
+
+    [Fact]
+    public void BuildEntitySchema_ChildListField_ReturnsCustomHtmlTypeWithSubFields()
+    {
+        // Arrange — register Order (has List<OrderRow> child collection) and dependencies
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.OrderRow>();
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Order>();
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
+
+        // Act — invoke the private static BuildEntitySchema via reflection
+        var method = typeof(RouteRegistrationExtensions).GetMethod(
+            "BuildEntitySchema",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+        var schema = (Dictionary<string, object?>)method.Invoke(null, new object[] { meta! })!;
+        var fields = (object[])schema["fields"]!;
+        var orderRowsField = fields
+            .Cast<Dictionary<string, object?>>()
+            .FirstOrDefault(f => string.Equals((string?)f["name"], "OrderRows", StringComparison.Ordinal));
+
+        // Assert — the List<OrderRow> field must be "CustomHtml" with populated subFields
+        Assert.NotNull(orderRowsField);
+        Assert.Equal("CustomHtml", (string?)orderRowsField["type"]);
+        var subFields = orderRowsField["subFields"] as System.Collections.IEnumerable;
+        Assert.NotNull(subFields);
+        Assert.NotEmpty(subFields!.Cast<object>());
     }
 
     private class InMemoryDataStore : IDataObjectStore

@@ -137,28 +137,32 @@ The default data root is `<content-root>/Data`. Override it in `appsettings.json
 
 The `/admin/wipe-data` route provides an in-browser way to delete all entity records without restarting the application. Unlike the startup-reset mechanisms above, it deletes data record-by-record through the registered entity handlers (indexes and any side effects are honoured) rather than deleting the data root folder.
 
+The routes `GET /admin/wipe-data` and `POST /admin/wipe-data` are **always registered**. Access is gated at runtime by the `admin.allowWipeData` setting in the `AppSetting` store — if the setting is absent or empty, both endpoints return **HTTP 419** and refuse to proceed.
+
 ### Enabling the Endpoint
 
-The endpoint is **disabled by default**. Enable it in `appsettings.json`:
+Set the `admin.allowWipeData` setting to a non-empty secret token. This can be seeded from `appsettings.json` at first startup:
 
 ```json
 {
   "Admin": {
-    "EnableWipeData": true
+    "AllowWipeData": "my-secret-wipe-token"
   }
 }
 ```
 
-> This setting should only ever be `true` on staging, development, or test instances. Set `EnableWipeData: false` (the default) in all production configurations.
+The value of this setting becomes the **confirmation token** the user must type exactly (case-sensitive) to trigger the wipe. Leave it empty (or omit it) to keep the endpoint disabled — it will return 419 for all requests.
 
-When disabled, the routes `GET /admin/wipe-data` and `POST /admin/wipe-data` are never registered and return 404.
+You can also set or update the value at runtime through the **Settings** admin page (`/ssr/admin/data/settings`) without restarting the server.
+
+> Only set this on staging, development, or test instances. Leave `AllowWipeData` empty (the default) in all production configurations.
 
 ### Using the Endpoint
 
 1. Log in as a user with the `admin` permission.
 2. Navigate to `/admin/wipe-data`.
 3. Read the danger-zone warning carefully.
-4. Type `WIPE ALL DATA` (exactly, case-sensitive) in the confirmation field.
+4. Enter the configured wipe token (the value of `admin.allowWipeData`) in the confirmation field.
 5. Click **WIPE ALL DATA**.
 
 On success, all records in every registered entity store are deleted one by one. The page shows a success banner listing the entity types that were cleared.
@@ -167,7 +171,7 @@ On success, all records in every registered entity store are deleted one by one.
 
 - The endpoint requires admin authentication — unauthenticated or non-admin requests are rejected.
 - Every POST is validated with a CSRF token to prevent cross-site request forgery.
-- The exact confirmation string (`WIPE ALL DATA`) guards against accidental clicks.
+- The configured wipe token guards against accidental clicks and unauthorized access.
 - The action is **irreversible** — there is no undo or recycle bin.
 
 ---
@@ -208,5 +212,5 @@ Enable **Clear existing data** on the form to delete all existing Address, Custo
 | **OOBE Setup** (`/setup`) | Automatically when no users exist | Creates first user + seeds reference data | No | Yes (always active when user store is empty) |
 | **reset-data.flag** | On next startup | Deletes entire data root folder | Yes | No (triggered by creating the flag file) |
 | **Data:ResetOnStartup** | On every startup while `true` | Deletes entire data root folder | Yes (repeats every restart) | No |
-| **Admin Wipe** (`/admin/wipe-data`) | On demand in browser | Deletes all records in all entity stores | No | No (`Admin:EnableWipeData=true` required) |
+| **Admin Wipe** (`/admin/wipe-data`) | On demand in browser | Deletes all records in all entity stores | No | No (returns 419 unless `admin.allowWipeData` setting is non-empty) |
 | **Sample Data** (`/admin/sample-data`) | On demand in browser | Adds (or optionally replaces) test records | No | Yes (always available to admin users) |

@@ -3827,11 +3827,25 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask WipeDataHandler(HttpContext context)
     {
-        await BuildPageHandler(ctx => RenderWipeDataForm(ctx, null))(context);
+        var wipeToken = SettingsService.GetValue(WellKnownSettings.AllowWipeData);
+        if (string.IsNullOrEmpty(wipeToken))
+        {
+            context.Response.StatusCode = 419;
+            return;
+        }
+
+        await BuildPageHandler(ctx => RenderWipeDataForm(ctx, null, wipeToken))(context);
     }
 
     public async ValueTask WipeDataPostHandler(HttpContext context)
     {
+        var wipeToken = SettingsService.GetValue(WellKnownSettings.AllowWipeData);
+        if (string.IsNullOrEmpty(wipeToken))
+        {
+            context.Response.StatusCode = 419;
+            return;
+        }
+
         if (!context.Request.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -3844,15 +3858,15 @@ public sealed class RouteHandlers : IRouteHandlers
         var form = await context.Request.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
-            RenderWipeDataForm(context, "<div class=\"alert alert-danger\">Invalid security token. Please try again.</div>");
+            RenderWipeDataForm(context, "<div class=\"alert alert-danger\">Invalid security token. Please try again.</div>", wipeToken);
             await _renderer.RenderPage(context);
             return;
         }
 
         var confirmText = form["confirm_wipe"].ToString().Trim();
-        if (!string.Equals(confirmText, "WIPE ALL DATA", StringComparison.Ordinal))
+        if (!string.Equals(confirmText, wipeToken, StringComparison.Ordinal))
         {
-            RenderWipeDataForm(context, "<div class=\"alert alert-danger\">Confirmation text did not match. Type <strong>WIPE ALL DATA</strong> exactly to proceed.</div>");
+            RenderWipeDataForm(context, "<div class=\"alert alert-danger\">Confirmation text did not match. Enter the configured wipe token exactly to proceed.</div>", wipeToken);
             await _renderer.RenderPage(context);
             return;
         }
@@ -3872,11 +3886,11 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var message = $"<div class=\"alert alert-success\"><strong>All data has been wiped.</strong> The following entity stores were cleared: {string.Join(", ", wiped)}.</div>";
-        RenderWipeDataForm(context, message);
+        RenderWipeDataForm(context, message, wipeToken);
         await _renderer.RenderPage(context);
     }
 
-    private void RenderWipeDataForm(HttpContext context, string? message)
+    private void RenderWipeDataForm(HttpContext context, string? message, string wipeToken)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Wipe All Data");
@@ -3886,7 +3900,7 @@ public sealed class RouteHandlers : IRouteHandlers
         warningHtml.Append("<h4 class=\"alert-heading\">&#9888; DANGER ZONE &#9888;</h4>");
         warningHtml.Append("<p><strong>This action will permanently delete ALL data in every entity store.</strong></p>");
         warningHtml.Append("<p>This operation is <strong>irreversible</strong>. All records across every entity type will be removed immediately.</p>");
-        warningHtml.Append("<p>This endpoint is intended for <strong>staging and test environments only</strong>. It should be disabled in production via <code>Admin:EnableWipeData=false</code> in appsettings.json.</p>");
+        warningHtml.Append($"<p>Enter the configured wipe token (the value of <code>{WellKnownSettings.AllowWipeData}</code> in Settings) to confirm.</p>");
         warningHtml.Append("</div>");
 
         if (!string.IsNullOrWhiteSpace(message))
@@ -3897,7 +3911,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var fields = new List<FormField>
         {
             new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken),
-            new FormField(FormFieldType.String, "confirm_wipe", "Type WIPE ALL DATA to confirm", Required: true, Value: string.Empty)
+            new FormField(FormFieldType.String, "confirm_wipe", "Enter wipe token to confirm", Required: true, Value: string.Empty)
         };
 
         context.AddFormDefinition(new FormDefinition("/admin/wipe-data", "post", "WIPE ALL DATA", fields));
@@ -5896,21 +5910,44 @@ public sealed class RouteHandlers : IRouteHandlers
             cur = cur.Month == 12 ? new DateOnly(cur.Year + 1, 1, 1) : new DateOnly(cur.Year, cur.Month + 1, 1);
         }
 
+        // Build year groups (contiguous runs of months sharing the same year)
+        var years = new List<(int Year, double LeftPct, double WidthPct)>();
+        foreach (var (year, _, leftPct, widthPct) in months)
+        {
+            if (years.Count > 0 && years[^1].Year == year)
+            {
+                var last = years[^1];
+                years[^1] = (last.Year, last.LeftPct, last.WidthPct + widthPct);
+            }
+            else
+            {
+                years.Add((year, leftPct, widthPct));
+            }
+        }
+
         // Bar colours (cycling)
         string[] barColors = ["#4472c4", "#c0504d", "#9bbb59", "#f79646", "#8064a2"];
 
         html.Append("<div class=\"bm-gantt-container\">");
         html.Append("<div class=\"bm-gantt-inner\">");
 
-        // Header row with month labels
+        // Year header row
+        html.Append("<div class=\"bm-gantt-header-row\">");
+        html.Append("<div class=\"bm-gantt-label-col\"></div>");
+        html.Append("<div class=\"bm-gantt-years-hdr\">");
+        foreach (var (year, leftPct, widthPct) in years)
+            html.Append($"<div class=\"bm-gantt-year-lbl\" data-gantt-left=\"{leftPct:F2}%\" data-gantt-width=\"{widthPct:F2}%\">{year}</div>");
+        html.Append("</div>");
+        html.Append("</div>");
+
+        // Month header row
         html.Append("<div class=\"bm-gantt-header-row\">");
         html.Append("<div class=\"bm-gantt-label-col\"></div>");
         html.Append("<div class=\"bm-gantt-months-hdr\">");
         foreach (var (year, month, leftPct, widthPct) in months)
         {
             var monthName = new DateOnly(year, month, 1).ToString("MMM");
-            var headerLabel = month == 1 ? $"{monthName} {year}" : monthName;
-            html.Append($"<div class=\"bm-gantt-month-lbl\" data-gantt-left=\"{leftPct:F2}%\" data-gantt-width=\"{widthPct:F2}%\">{WebUtility.HtmlEncode(headerLabel)}</div>");
+            html.Append($"<div class=\"bm-gantt-month-lbl\" data-gantt-left=\"{leftPct:F2}%\" data-gantt-width=\"{widthPct:F2}%\">{WebUtility.HtmlEncode(monthName)}</div>");
         }
         html.Append("</div>");
         html.Append("</div>");
