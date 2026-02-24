@@ -1033,8 +1033,8 @@
         var inputType = 'text';
         var inputVal  = val != null ? String(val) : '';
         if (f.type === 'DateTime')  { inputType = 'datetime-local'; inputVal = toDateTimeLocalStr(val); }
-        if (f.type === 'DateOnly')  { inputType = 'date'; }
-        if (f.type === 'TimeOnly')  { inputType = 'time'; }
+        if (f.type === 'DateOnly')  { inputType = 'date'; inputVal = toDateStr(val); }
+        if (f.type === 'TimeOnly')  { inputType = 'time'; inputVal = toTimeStr(val); }
         if (f.type === 'Email')     { inputType = 'email'; }
         if (f.type === 'Integer')   { inputType = 'number'; if (!validation) validation += ' step="1"'; }
         if (f.type === 'Decimal' || f.type === 'Money') { inputType = 'number'; validation += ' step="0.01"'; }
@@ -1203,8 +1203,8 @@
         var inputType = 'text';
         var inputVal  = val != null ? String(val) : '';
         if (sf.type === 'DateTime')     { inputType = 'datetime-local'; inputVal = toDateTimeLocalStr(val); }
-        if (sf.type === 'DateOnly')     inputType = 'date';
-        if (sf.type === 'TimeOnly')     inputType = 'time';
+        if (sf.type === 'DateOnly')     { inputType = 'date'; inputVal = toDateStr(val); }
+        if (sf.type === 'TimeOnly')     { inputType = 'time'; inputVal = toTimeStr(val); }
         if (sf.type === 'Email')        inputType = 'email';
         if (sf.type === 'Integer')      inputType = 'number';
         if (sf.type === 'Decimal' || sf.type === 'Money') inputType = 'number';
@@ -1901,6 +1901,28 @@
                 pad(d.getHours()) + ':' +
                 pad(d.getMinutes());
         } catch (e) { return String(val); }
+    }
+
+    function toDateStr(val) {
+        if (!val) return '';
+        // Already in yyyy-MM-dd format
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(val))) return String(val);
+        try {
+            var d = new Date(val);
+            if (isNaN(d.getTime())) return '';
+            return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+        } catch (e) { return ''; }
+    }
+
+    function toTimeStr(val) {
+        if (!val) return '';
+        // Already in HH:mm or HH:mm:ss format
+        if (/^\d{2}:\d{2}(:\d{2})?$/.test(String(val))) return String(val).substring(0, 5);
+        try {
+            var d = new Date(val);
+            if (isNaN(d.getTime())) return String(val);
+            return pad(d.getHours()) + ':' + pad(d.getMinutes());
+        } catch (e) { return ''; }
     }
 
     function pad(n) { return n < 10 ? '0' + n : '' + n; }
