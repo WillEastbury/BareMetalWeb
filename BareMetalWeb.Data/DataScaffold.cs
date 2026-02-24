@@ -151,6 +151,8 @@ public static class DataScaffold
     public static async ValueTask SaveAsync(DataEntityMetadata metadata, object instance, CancellationToken cancellationToken = default)
     {
         await metadata.Handlers.SaveAsync((BaseDataObject)instance, cancellationToken);
+        if (instance is AppSetting appSetting && !string.IsNullOrWhiteSpace(appSetting.SettingId))
+            SettingsService.InvalidateCache(appSetting.SettingId);
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _sequenceSeeded = new(StringComparer.OrdinalIgnoreCase);

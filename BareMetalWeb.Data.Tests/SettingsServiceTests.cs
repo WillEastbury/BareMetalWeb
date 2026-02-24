@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data.Interfaces;
 using Xunit;
@@ -443,5 +444,52 @@ public class SettingsServiceTests : IDisposable
         var stored = _testStore.Query<AppSetting>()
             .First(s => s.SettingId == WellKnownSettings.AllowWipeData);
         Assert.Equal("admin-chosen-token", stored.Value);
+    }
+
+    // ── DataScaffold.SaveAsync cache invalidation ───────────────────────────
+
+    [Fact]
+    public async Task DataScaffold_SaveAsync_InvalidatesSettingsCacheForAppSetting()
+    {
+        // Arrange — seed a setting and prime the cache
+        var setting = new AppSetting { SettingId = WellKnownSettings.AllowWipeData, Value = "old-token" };
+        _testStore.Save(setting);
+        var cached = SettingsService.GetValue(WellKnownSettings.AllowWipeData);
+        Assert.Equal("old-token", cached); // confirm cache was primed
+
+        // Update the stored value directly so the in-memory store has the new value
+        setting.Value = "new-token";
+
+        // Build a minimal metadata whose SaveAsync delegates to the test store
+        var handlers = new DataEntityHandlers(
+            Create: () => new AppSetting(),
+            LoadAsync: (id, ct) => ValueTask.FromResult((BaseDataObject?)_testStore.Query<AppSetting>().FirstOrDefault(s => s.Id == id)),
+            SaveAsync: (obj, ct) => { _testStore.Save((AppSetting)obj); return ValueTask.CompletedTask; },
+            DeleteAsync: (id, ct) => { _testStore.Delete<AppSetting>(id); return ValueTask.CompletedTask; },
+            QueryAsync: (q, ct) => ValueTask.FromResult(_testStore.Query<AppSetting>(q).Cast<BaseDataObject>()),
+            CountAsync: (q, ct) => ValueTask.FromResult(_testStore.Query<AppSetting>(q).Count())
+        );
+        var metadata = new DataEntityMetadata(
+            Type: typeof(AppSetting),
+            Name: "Settings",
+            Slug: "settings",
+            Permissions: "admin",
+            ShowOnNav: false,
+            NavGroup: null,
+            NavOrder: 0,
+            IdGeneration: AutoIdStrategy.Guid,
+            ViewType: ViewType.Table,
+            ParentField: null,
+            Fields: Array.Empty<DataFieldMetadata>(),
+            Handlers: handlers,
+            Commands: Array.Empty<RemoteCommandMetadata>()
+        );
+
+        // Act — save via DataScaffold; this should invalidate the cache
+        await DataScaffold.SaveAsync(metadata, setting);
+
+        // Assert — cache must have been cleared; next GetValue reads the updated store value
+        var result = SettingsService.GetValue(WellKnownSettings.AllowWipeData);
+        Assert.Equal("new-token", result);
     }
 }
