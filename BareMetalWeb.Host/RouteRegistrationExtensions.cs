@@ -503,7 +503,8 @@ public static class RouteRegistrationExtensions
     /// </summary>
     public static void RegisterVNextRoutes(
         this IBareWebHost host,
-        IPageInfoFactory pageInfoFactory)
+        IPageInfoFactory pageInfoFactory,
+        ITemplateStore templateStore)
     {
         // List accessible entities for the current user
         host.RegisterRoute("GET /meta/objects", new RouteHandlerData(
@@ -554,11 +555,11 @@ public static class RouteRegistrationExtensions
         // VNext SPA shell — serve for all /vnext and /vnext/{*path} routes
         host.RegisterRoute("GET /vnext", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
-            context => ServeVNextShell(context, host)));
+            context => ServeVNextShell(context, host, templateStore)));
 
         host.RegisterRoute("GET /vnext/{*path}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
-            context => ServeVNextShell(context, host)));
+            context => ServeVNextShell(context, host, templateStore)));
     }
 
     /// <summary>
@@ -1126,41 +1127,62 @@ public static class RouteRegistrationExtensions
         return value;
     }
 
-    private static async ValueTask ServeVNextShell(HttpContext context, IBareWebHost host)
+    private static async ValueTask ServeVNextShell(HttpContext context, IBareWebHost host, ITemplateStore templateStore)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         var safeToken = WebUtility.HtmlEncode(csrfToken);
         var nonce = context.GetCspNonce();
         var safeNonce = WebUtility.HtmlEncode(nonce);
 
+        var template = templateStore.Get("index");
+
+        // Build right-nav items string
+        var rightNavSb = new StringBuilder();
+        AppendVNextRightNavItems(rightNavSb, host.MenuOptionsList);
+
+        // Token map: covers all {{tokens}} in the head, navbar, and footer sections
+        var tokens = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["title"]       = "BareMetalWeb — VNext",
+            ["csp_nonce"]   = safeNonce,
+            ["links_left"]  = string.Empty,   // populated dynamically by JS via buildNav()
+            ["links_right"] = rightNavSb.ToString(),
+            ["footer_user"] = string.Empty,
+        };
+        // Add app-level metadata tokens (AppName, CompanyDescription, CopyrightYear, AppVersion)
+        for (int i = 0; i < host.AppMetaDataKeys.Length && i < host.AppMetaDataValues.Length; i++)
+            tokens[host.AppMetaDataKeys[i]] = WebUtility.HtmlEncode(host.AppMetaDataValues[i]);
+
+        // Extract only the <nav>…</nav> block from the body template
+        var navEndIdx = template.Body.IndexOf("</nav>", StringComparison.OrdinalIgnoreCase);
+        var navbarSection = navEndIdx >= 0
+            ? template.Body.Substring(0, navEndIdx + 6)
+            : template.Body;
+        // Point the brand at the VNext root instead of the SSR home
+        navbarSection = navbarSection.Replace(
+            "class=\"navbar-brand\" href=\"/\"",
+            "class=\"navbar-brand\" href=\"/vnext\"",
+            StringComparison.Ordinal);
+
+        // Extract only the <footer>…</footer> block from the footer template
+        var footerEndIdx = template.Footer.IndexOf("</footer>", StringComparison.OrdinalIgnoreCase);
+        var footerElement = footerEndIdx >= 0
+            ? template.Footer.Substring(0, footerEndIdx + 9)
+            : string.Empty;
+
         var sb = new StringBuilder(4096);
         sb.Append("<!DOCTYPE html><html lang=\"en\">");
         sb.Append("<head>");
-        sb.Append("<meta charset=\"utf-8\">");
-        sb.Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
-        sb.Append("<title>BareMetalWeb — VNext</title>");
-        sb.Append("<link rel=\"icon\" type=\"image/x-icon\" href=\"/static/favicon.ico\">");
-        sb.Append("<link id=\"bootswatch-theme\" rel=\"stylesheet\" href=\"/static/css/bootstrap.min.css\">");
-        sb.Append($"<script nonce=\"{safeNonce}\">(function(){{var m=document.cookie.match(/(?:^|;\\s*)bm-selected-theme=([^;]+)/);if(m){{var t=decodeURIComponent(m[1]),a=['cerulean','cosmo','cyborg','darkly','flatly','journal','litera','lumen','lux','materia','minty','morph','pulse','quartz','sandstone','simplex','sketchy','slate','solar','spacelab','superhero','united','vapor','yeti','zephyr'];if(a.indexOf(t)>=0)document.getElementById('bootswatch-theme').href='https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/'+encodeURIComponent(t)+'/bootstrap.min.css';}}}})()</script>");
-        sb.Append("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css\" crossorigin=\"anonymous\">");
-        sb.Append("<link rel=\"stylesheet\" href=\"/static/css/site.css\">");
+        sb.Append(ReplaceTemplateTokens(template.Head, tokens));
         sb.Append($"<meta name=\"csrf-token\" content=\"{safeToken}\">");
         sb.Append("<meta name=\"vnext-base\" content=\"/vnext\">");
         sb.Append("</head>");
         sb.Append("<body>");
-        sb.Append("<nav id=\"vnext-navbar\" class=\"navbar navbar-expand-lg bg-primary navbar-dark fixed-top bm-navbar\">");
-        sb.Append("<div class=\"container-fluid\">");
-        sb.Append("<a class=\"navbar-brand\" href=\"/vnext\"><i class=\"bi bi-lightning-charge-fill\"></i> BareMetalWeb</a>");
-        sb.Append("<button class=\"navbar-toggler\" type=\"button\" data-bs-toggle=\"collapse\" data-bs-target=\"#vnext-nav-content\" aria-controls=\"vnext-nav-content\" aria-expanded=\"false\" aria-label=\"Toggle navigation\">");
-        sb.Append("<span class=\"navbar-toggler-icon\"></span></button>");
-        sb.Append("<div class=\"collapse navbar-collapse\" id=\"vnext-nav-content\">");
-        sb.Append("<ul id=\"vnext-nav-items\" class=\"navbar-nav me-auto mb-2 mb-lg-0\"></ul>");
-        sb.Append("<ul class=\"navbar-nav ms-auto mb-2 mb-lg-0\">");
-        AppendVNextRightNavItems(sb, host.MenuOptionsList);
-        sb.Append("</ul></div></div></nav>");
+        sb.Append(ReplaceTemplateTokens(navbarSection, tokens));
         sb.Append("<div class=\"container-fluid py-3\" id=\"vnext-content\"><div class=\"text-center py-5\"><div class=\"spinner-border\" role=\"status\"><span class=\"visually-hidden\">Loading...</span></div></div></div>");
         sb.Append("<div id=\"vnext-modal-container\"></div>");
         sb.Append("<div id=\"vnext-toast-container\" class=\"position-fixed top-0 end-0 p-3\"></div>");
+        sb.Append(ReplaceTemplateTokens(footerElement, tokens));
         sb.Append("<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js\" crossorigin=\"anonymous\"></script>");
         sb.Append("<script src=\"/static/js/BareMetalRouting.js\"></script>");
         sb.Append("<script src=\"/static/js/BareMetalRest.js\"></script>");
@@ -1173,6 +1195,33 @@ public static class RouteRegistrationExtensions
         context.Response.ContentType = "text/html; charset=utf-8";
         context.Response.Headers.CacheControl = "no-store";
         await context.Response.WriteAsync(sb.ToString());
+    }
+
+    /// <summary>Replaces all <c>{{key}}</c> tokens in <paramref name="template"/> using <paramref name="tokens"/>.
+    /// Unknown tokens are silently removed (replaced with empty string).</summary>
+    private static string ReplaceTemplateTokens(string template, Dictionary<string, string> tokens)
+    {
+        var sb = new StringBuilder(template.Length);
+        int i = 0;
+        while (i < template.Length)
+        {
+            if (template[i] == '{' && i + 1 < template.Length && template[i + 1] == '{')
+            {
+                var end = template.IndexOf("}}", i + 2, StringComparison.Ordinal);
+                if (end >= 0)
+                {
+                    var key = template.Substring(i + 2, end - (i + 2));
+                    if (tokens.TryGetValue(key, out var value))
+                        sb.Append(value);
+                    // else: unknown token silently removed
+                    i = end + 2;
+                    continue;
+                }
+            }
+            sb.Append(template[i]);
+            i++;
+        }
+        return sb.ToString();
     }
 
     internal static void AppendVNextRightNavItems(StringBuilder sb, List<IMenuOption> options)
