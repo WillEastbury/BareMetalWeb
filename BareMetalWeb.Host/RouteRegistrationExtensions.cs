@@ -923,7 +923,7 @@ public static class RouteRegistrationExtensions
     {
         // List all reports
         host.RegisterRoute("GET /reports", new RouteHandlerData(
-            pageInfoFactory.RawPage("Authenticated", true),
+            pageInfoFactory.RawPage("Authenticated", true, navAlignment: NavAlignment.Right, navLabel: "Reports"),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
