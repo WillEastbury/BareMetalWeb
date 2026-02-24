@@ -661,6 +661,57 @@ public class StaticHTMLFragmentsTests
         Assert.Contains("GBP", html);
     }
 
+    [Fact]
+    public void RenderForm_MoneyField_AmountInputUsesFieldNameAsFormName()
+    {
+        // Arrange – the amount input name must match the entity property name so it binds correctly
+        var field = new FormField(FormFieldType.Money, "basePrice", "Base Price",
+            Value: "49.99", DecimalPlaces: 2);
+        var form = new FormDefinition("/save", "POST", "Save", new[] { field });
+
+        // Act
+        var html = Decode(_renderer.RenderForm(form));
+
+        // Assert – name attribute is the plain field name (no _amount suffix)
+        Assert.Contains("name=\"basePrice\"", html);
+        // id keeps the _amount suffix for HTML label association
+        Assert.Contains("id=\"basePrice_amount\"", html);
+    }
+
+    [Fact]
+    public void RenderForm_MoneyField_CurrencySelectUsesFieldNameWithCurrencySuffix()
+    {
+        // Arrange
+        var currencies = new List<string> { "USD", "EUR" };
+        var field = new FormField(FormFieldType.Money, "basePrice", "Base Price",
+            CurrencyOptions: currencies, DecimalPlaces: 2);
+        var form = new FormDefinition("/save", "POST", "Save", new[] { field });
+
+        // Act
+        var html = Decode(_renderer.RenderForm(form));
+
+        // Assert – currency select uses name="{fieldName}_currency"
+        Assert.Contains("name=\"basePrice_currency\"", html);
+    }
+
+    [Fact]
+    public void RenderForm_MoneyField_SelectedCurrencyIsMarkedSelected()
+    {
+        // Arrange
+        var currencies = new List<string> { "USD", "EUR", "GBP" };
+        var field = new FormField(FormFieldType.Money, "price", "Price",
+            Value: "10.00", CurrencyOptions: currencies, SelectedValue: "EUR", DecimalPlaces: 2);
+        var form = new FormDefinition("/save", "POST", "Save", new[] { field });
+
+        // Act
+        var html = Decode(_renderer.RenderForm(form));
+
+        // Assert – EUR option should have the "selected" attribute
+        Assert.Contains("EUR", html);
+        // The selected option contains both the value and the selected attribute
+        Assert.Matches(@"value=""EUR""[^>]*selected|selected[^>]*value=""EUR""", html);
+    }
+
     // ── RenderField via RenderForm: LookupList ──────────────────────
 
     [Fact]

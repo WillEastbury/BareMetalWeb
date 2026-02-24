@@ -1386,20 +1386,28 @@ public static class DataScaffold
 
             if (!TryGetFormValue(values, field.Name, out var rawValue) || rawValue == null)
             {
-                if (field.FieldType == FormFieldType.File || field.FieldType == FormFieldType.Image)
-                    continue;
-
-                if (IsBooleanField(field, field.Property.PropertyType))
+                // For Money fields, also try the {fieldName}_amount form key as a fallback
+                if (field.FieldType == FormFieldType.Money && TryGetFormValue(values, field.Name + "_amount", out rawValue) && rawValue != null)
                 {
-                    field.Property.SetValue(instance, false);
+                    // Found amount via _amount suffix; fall through to conversion below
+                }
+                else
+                {
+                    if (field.FieldType == FormFieldType.File || field.FieldType == FormFieldType.Image)
+                        continue;
+
+                    if (IsBooleanField(field, field.Property.PropertyType))
+                    {
+                        field.Property.SetValue(instance, false);
+                        if (field.Required)
+                            errors.Add($"{field.Label} is required.");
+                        continue;
+                    }
+
                     if (field.Required)
                         errors.Add($"{field.Label} is required.");
                     continue;
                 }
-
-                if (field.Required)
-                    errors.Add($"{field.Label} is required.");
-                continue;
             }
 
             if (field.Required && string.IsNullOrWhiteSpace(rawValue))
@@ -1452,8 +1460,19 @@ public static class DataScaffold
 
             if (!TryConvertJson(rawElement, field.Property.PropertyType, out var converted))
             {
-                errors.Add($"{field.Label} is invalid.");
-                continue;
+                // For Money fields, if the JSON is an object with an "amount" property, extract it as a decimal
+                if (field.FieldType == FormFieldType.Money
+                    && rawElement.ValueKind == JsonValueKind.Object
+                    && rawElement.TryGetProperty("amount", out var amountElement)
+                    && TryConvertJson(amountElement, field.Property.PropertyType, out converted))
+                {
+                    // Successfully extracted amount from Money JSON object; fall through to SetValue
+                }
+                else
+                {
+                    errors.Add($"{field.Label} is invalid.");
+                    continue;
+                }
             }
 
             field.Property.SetValue(instance, converted);
