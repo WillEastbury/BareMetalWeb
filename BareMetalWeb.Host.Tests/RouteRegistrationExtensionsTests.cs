@@ -966,7 +966,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterData > afterAdmin);
         Assert.True(afterLookup > afterData);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 16 + 4 + 7 + 21 + 4 + 9, total); // 3+16+4+7+21+4+9=64
+        Assert.Equal(staticCount + 16 + 4 + 7 + 21 + 5 + 9, total); // 3+16+4+7+21+5+9=65
     }
 
     [Fact]

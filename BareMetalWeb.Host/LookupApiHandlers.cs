@@ -87,6 +87,68 @@ public static class LookupApiHandlers
     }
 
     /// <summary>
+    /// POST /api/_lookup/{EntityType}/_batch
+    /// Fetches multiple entities by ID in a single request.
+    /// Request body: { "ids": ["id1", "id2", ...] }
+    /// Response: { "results": { "id1": {...}, "id2": {...} } }
+    /// </summary>
+    public static async ValueTask BatchGetEntitiesHandler(HttpContext context)
+    {
+        var (meta, typeSlug, errorResponse) = await ValidateAndResolveEntityAsync(context);
+        if (meta == null)
+        {
+            await WriteJsonErrorAsync(context, errorResponse!.StatusCode, errorResponse!.Message);
+            return;
+        }
+
+        List<string> ids;
+        try
+        {
+            using var doc = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+            if (!doc.RootElement.TryGetProperty("ids", out var idsElement) || idsElement.ValueKind != JsonValueKind.Array)
+            {
+                await WriteJsonErrorAsync(context, StatusCodes.Status400BadRequest, "Request body must contain an 'ids' array.");
+                return;
+            }
+
+            ids = idsElement.EnumerateArray()
+                .Where(e => e.ValueKind == JsonValueKind.String)
+                .Select(e => e.GetString()!)
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Distinct()
+                .ToList();
+        }
+        catch (JsonException)
+        {
+            await WriteJsonErrorAsync(context, StatusCodes.Status400BadRequest, "Invalid JSON body.");
+            return;
+        }
+
+        if (ids.Count == 0)
+        {
+            await WriteJsonAsync(context, new Dictionary<string, object> { ["results"] = new Dictionary<string, object?>() });
+            return;
+        }
+
+        try
+        {
+            var results = new Dictionary<string, object?>(ids.Count);
+            foreach (var id in ids)
+            {
+                var entity = await meta.Handlers.LoadAsync(id, context.RequestAborted);
+                if (entity != null)
+                    results[id] = EntityToJson(entity, meta);
+            }
+
+            await WriteJsonAsync(context, new Dictionary<string, object> { ["results"] = results });
+        }
+        catch (Exception)
+        {
+            await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, "Error loading entities.");
+        }
+    }
+
+    /// <summary>
     /// GET /api/_lookup/{EntityType}/_field/{Id}/{FieldName}
     /// Fetches a single field value from an entity.
     /// </summary>
