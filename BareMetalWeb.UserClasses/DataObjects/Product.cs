@@ -8,6 +8,7 @@ public class Product : RenderableDataObject
     public string Name { get; set; } = string.Empty;
 
     [DataField(Label = "SKU", Order = 2, Required = true)]
+    [DataIndex]
     public string Sku { get; set; } = string.Empty;
 
     [DataField(Label = "Category", Order = 3)]
@@ -16,10 +17,12 @@ public class Product : RenderableDataObject
 
     [DataField(Label = "Unit Of Measure", Order = 4, Required = true)]
     [DataLookup(typeof(UnitOfMeasure), DisplayField = "Name", SortField = "Name", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
+    [DataIndex]
     public string UnitOfMeasureId { get; set; } = string.Empty;
 
     [DataField(Label = "Currency", Order = 5, Required = true)]
     [DataLookup(typeof(Currency), DisplayField = "IsoCode", SortField = "IsoCode", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
+    [DataIndex]
     public string CurrencyId { get; set; } = string.Empty;
 
     [DataField(Label = "Price", Order = 6, Required = true, FieldType = Rendering.Models.FormFieldType.Decimal)]

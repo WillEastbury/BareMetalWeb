@@ -8,6 +8,7 @@ namespace BareMetalWeb.Data.DataObjects;
 public class Customer : RenderableDataObject
 {
     [DataField(Label = "Name", Order = 1, Required = true)]
+    [DataIndex]
     public string Name { get; set; } = string.Empty;
 
     [DataField(Label = "Email", Order = 2, Required = true, FieldType = Rendering.Models.FormFieldType.Email)]
@@ -26,6 +27,7 @@ public class Customer : RenderableDataObject
 
     [DataField(Label = "Address", Order = 6)]
     [DataLookup(typeof(Address), DisplayField = "Label", SortField = "Label", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
+    [DataIndex]
     public string AddressId { get; set; } = string.Empty;
 
     [DataField(Label = "Active", Order = 7)]

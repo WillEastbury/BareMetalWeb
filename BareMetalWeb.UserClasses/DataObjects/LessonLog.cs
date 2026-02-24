@@ -5,6 +5,7 @@ public class LessonLog : RenderableDataObject
 {
     [DataField(Label = "Subject Id", Order = 1, Required = true)]
     [DataLookup(typeof(Subject), DisplayField = "Name", SortField = "Name", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
+    [DataIndex]
     public string SubjectId { get; set; } = string.Empty;
 
     [DataField(Label = "Date", Order = 2, Required = true)]

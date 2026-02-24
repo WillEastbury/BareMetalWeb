@@ -10,6 +10,7 @@ namespace BareMetalWeb.Data.DataObjects;
 public class SessionLog : BaseDataObject
 {
     [DataField(Label = "User", Order = 1, Required = true)]
+    [DataIndex]
     public string UserName { get; set; } = string.Empty;
 
     [DataField(Label = "IP Address", Order = 2)]
