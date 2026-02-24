@@ -55,15 +55,6 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Deploy infrastructure (Bicep)
-        if: github.event_name == 'workflow_dispatch'
-        uses: azure/arm-deploy@v2
-        with:
-          scope: resourcegroup
-          resourceGroupName: ${{ vars.AZURE_RESOURCE_GROUP }}
-          template: ./infra/main.bicep
-          failOnStdErr: false
-
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
