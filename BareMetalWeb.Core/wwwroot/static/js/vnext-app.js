@@ -1163,7 +1163,7 @@
                 if (currentValue && !Array.from(sel.options).find(function (o) { return o.value === String(currentValue); })) {
                     sel.insertAdjacentHTML('afterbegin', '<option value="' + escHtml(String(currentValue)) + '" selected>' + escHtml(String(currentValue)) + '</option>');
                 }
-            }).catch(function () { sel.innerHTML = '<option value="">— Load failed —</option>'; });
+            }).catch(function () { sel.innerHTML = '<option value="">— ' + escHtml(sf.label) + ' load failed —</option>'; });
     }
 
     function loadSubListEnumOptions(sf, currentValue, form) {
