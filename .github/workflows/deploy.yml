@@ -56,12 +56,11 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Deploy infrastructure (Bicep)
-        uses: azure/arm-deploy@v2
-        with:
-          scope: resourcegroup
-          resourceGroupName: ${{ vars.AZURE_RESOURCE_GROUP }}
-          template: ./infra/main.bicep
-          failOnStdErr: false
+        run: |
+          az deployment group create \
+            --resource-group "${{ vars.AZURE_RESOURCE_GROUP }}" \
+            --template-file ./infra/main.bicep \
+            --mode Incremental
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
