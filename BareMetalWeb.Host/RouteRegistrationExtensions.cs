@@ -176,8 +176,7 @@ public static class RouteRegistrationExtensions
         this IBareWebHost host,
         IRouteHandlers routeHandlers,
         IPageInfoFactory pageInfoFactory,
-        IHtmlTemplate mainTemplate,
-        bool enableWipeData = false)
+        IHtmlTemplate mainTemplate)
     {
         // Log management
         host.RegisterRoute("GET /admin/logs", new RouteHandlerData(
@@ -206,16 +205,13 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "System", navAlignment: NavAlignment.Right),
             routeHandlers.ReloadTemplatesHandler));
 
-        // Wipe all data — staging/dev only, disabled by default in production
-        if (enableWipeData)
-        {
-            host.RegisterRoute("GET /admin/wipe-data", new RouteHandlerData(
-                pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", true, 0, navGroup: "System", navAlignment: NavAlignment.Right),
-                routeHandlers.WipeDataHandler));
-            host.RegisterRoute("POST /admin/wipe-data", new RouteHandlerData(
-                pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", false, 0),
-                routeHandlers.WipeDataPostHandler));
-        }
+        // Wipe all data — always registered; returns 419 if admin.allowWipeData setting is not configured
+        host.RegisterRoute("GET /admin/wipe-data", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", true, 0, navGroup: "System", navAlignment: NavAlignment.Right),
+            routeHandlers.WipeDataHandler));
+        host.RegisterRoute("POST /admin/wipe-data", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", false, 0),
+            routeHandlers.WipeDataPostHandler));
     }
 
     /// <summary>
