@@ -4,6 +4,16 @@ Welcome to the BareMetalWeb documentation. This index covers all guides, referen
 
 ---
 
+## Architecture Diagrams
+
+- [System Overview](architecture/system-overview.md) — Component diagram, project dependencies, request lifecycle, and route divergence
+- [Data Layer & Storage](architecture/data-layer.md) — DataStore stack, entity registration, CRUD lifecycle, binary serializer, virtual entities
+- [Indexing Pipeline](architecture/indexing.md) — SearchIndexManager, index creation/update/delete lifecycle, query acceleration
+- [UI Rendering](architecture/rendering.md) — SSR template pipeline, VNext SPA path, form rendering, report rendering
+- [Auth & Session](architecture/auth.md) — Login flow, session validation, permission model, CSRF lifecycle, API keys
+
+---
+
 ## Getting Started
 
 - [Background Usage & REST API](BackgroundUsage.md) — REST endpoints, authentication, query language, and CLI usage

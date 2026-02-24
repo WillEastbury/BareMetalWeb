@@ -11,7 +11,7 @@ Just Kestrel, explicit routing, streaming HTML templates, a custom binary serial
 [![Unit Tests](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/unit-tests.yml)
 [![Performance Tests](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/performance-tests.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/performance-tests.yml)
 
-📚 **[Full Documentation Index →](docs/index.md)**
+📚 **[Full Documentation Index →](docs/index.md)** | 🗺️ **[Architecture Diagrams →](docs/architecture/system-overview.md)**
 
 ---
 
