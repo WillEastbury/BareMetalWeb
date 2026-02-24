@@ -13,6 +13,9 @@ public sealed class ReportExecutor
     /// <summary>Maximum rows returned per report execution to guard against runaway results.</summary>
     public const int DefaultRowLimit = 10_000;
 
+    /// <summary>Maximum records loaded per entity to guard against unbounded memory use.</summary>
+    public int EntityLoadCap { get; set; } = 50_000;
+
     private readonly IDataObjectStore _store;
 
     public ReportExecutor(IDataObjectStore store)
@@ -65,11 +68,13 @@ public sealed class ReportExecutor
         if (!DataScaffold.TryGetEntity(rootSlug, out var rootMeta))
             throw new InvalidOperationException($"Entity '{rootSlug}' not found. Check the entity slug.");
 
-        // Load root entity rows
-        var rootRows = (await rootMeta.Handlers.QueryAsync(null, cancellationToken)).ToList();
+        var limit = query.QueryLimit ?? DefaultRowLimit;
+
+        // Load root entity rows with per-entity safety cap
+        var rootRowsRaw = LoadWithCap(await rootMeta.Handlers.QueryAsync(null, cancellationToken), out bool entityCapped);
 
         // Start: each combined row is a dict of entitySlug -> BaseDataObject
-        var combined = rootRows
+        var combined = rootRowsRaw
             .Select(r => new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase)
             {
                 [rootSlug] = r
@@ -79,13 +84,17 @@ public sealed class ReportExecutor
         // Process joins (INNER JOIN semantics)
         foreach (var join in query.Joins)
         {
+            if (combined.Count >= limit) break; // short-circuit: already have enough rows
+
             if (!DataScaffold.TryGetEntity(join.ToEntity, out var joinMeta))
                 continue; // skip unknown entity
 
             if (!DataScaffold.TryGetEntity(join.FromEntity, out var fromMeta))
                 continue;
 
-            var joinRows = (await joinMeta.Handlers.QueryAsync(null, cancellationToken)).ToList();
+            // Load join entity rows with per-entity safety cap
+            var joinRowsRaw = LoadWithCap(await joinMeta.Handlers.QueryAsync(null, cancellationToken), out bool joinCapped);
+            if (joinCapped) entityCapped = true;
 
             // Build hash map: toField value -> list of matching join rows
             var toAccessor = FindAccessor(joinMeta, join.ToField);
@@ -93,7 +102,7 @@ public sealed class ReportExecutor
                 continue;
 
             var hashMap = new Dictionary<string, List<BaseDataObject>>(StringComparer.OrdinalIgnoreCase);
-            foreach (var jr in joinRows)
+            foreach (var jr in joinRowsRaw)
             {
                 var key = GetStringValue(toAccessor, jr);
                 if (!hashMap.TryGetValue(key, out var list))
@@ -111,6 +120,8 @@ public sealed class ReportExecutor
 
             foreach (var row in combined)
             {
+                if (newCombined.Count >= limit) break; // short-circuit: combined limit reached
+
                 if (!row.TryGetValue(join.FromEntity, out var fromObj))
                 {
                     // Left side missing (e.g. nulled out by prior outer join)
@@ -130,6 +141,7 @@ public sealed class ReportExecutor
                             [join.ToEntity] = match
                         };
                         newCombined.Add(newRow);
+                        if (newCombined.Count >= limit) break; // short-circuit within fan-out
                     }
                 }
                 else
@@ -153,6 +165,7 @@ public sealed class ReportExecutor
             {
                 foreach (var kvp in hashMap)
                 {
+                    if (newCombined.Count >= limit) break; // short-circuit
                     if (matchedRightKeys.Contains(kvp.Key))
                         continue;
                     foreach (var rightObj in kvp.Value)
@@ -162,6 +175,7 @@ public sealed class ReportExecutor
                             [join.ToEntity] = rightObj
                         };
                         newCombined.Add(newRow);
+                        if (newCombined.Count >= limit) break; // short-circuit within fan-out
                     }
                 }
             }
@@ -217,7 +231,6 @@ public sealed class ReportExecutor
         }
 
         // Apply row limit
-        var limit = query.QueryLimit ?? DefaultRowLimit;
         bool truncated = projected.Count > limit;
         var finalRows = truncated ? projected.Take(limit).ToList() : projected;
 
@@ -227,11 +240,22 @@ public sealed class ReportExecutor
             Rows = finalRows,
             TotalRows = finalRows.Count,
             IsTruncated = truncated,
+            IsEntityCapped = entityCapped,
             GeneratedAt = DateTime.UtcNow
         };
     }
 
     // ── Field access helpers ─────────────────────────────────────────────────
+
+    /// <summary>Materialises at most <see cref="EntityLoadCap"/> items from <paramref name="source"/>,
+    /// setting <paramref name="wasCapped"/> to <see langword="true"/> if more records existed.</summary>
+    private List<BaseDataObject> LoadWithCap(IEnumerable<BaseDataObject> source, out bool wasCapped)
+    {
+        var list = source.Take(EntityLoadCap + 1).ToList();
+        wasCapped = list.Count > EntityLoadCap;
+        if (wasCapped) list.RemoveAt(list.Count - 1);
+        return list;
+    }
 
     private static PropertyInfo? FindAccessor(DataEntityMetadata meta, string fieldName)
     {

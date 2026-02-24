@@ -303,6 +303,88 @@ public class ReportQueryTests : IDisposable
     }
 
     [Fact]
+    public async Task ReportExecutor_EntityLoadCap_SetsIsEntityCapped()
+    {
+        DataScaffold.RegisterEntity<TestCustomer>();
+        // Save 6 customers but cap the entity load at 5
+        for (int i = 0; i < 6; i++)
+            _store.Save(new TestCustomer { Name = $"Customer {i}" });
+
+        var executor = new ReportExecutor(_store) { EntityLoadCap = 5 };
+        var query = new ReportQuery()
+            .From("test-customers")
+            .SelectColumn("test-customers", "Name", "Name");
+
+        var result = await executor.ExecuteAsync(query);
+
+        Assert.True(result.IsEntityCapped);
+        Assert.Equal(5, result.TotalRows); // capped at 5, not 6
+    }
+
+    [Fact]
+    public async Task ReportExecutor_EntityLoadCap_NotSetWhenUnderCap()
+    {
+        DataScaffold.RegisterEntity<TestCustomer>();
+        for (int i = 0; i < 3; i++)
+            _store.Save(new TestCustomer { Name = $"Customer {i}" });
+
+        var executor = new ReportExecutor(_store) { EntityLoadCap = 5 };
+        var query = new ReportQuery()
+            .From("test-customers")
+            .SelectColumn("test-customers", "Name", "Name");
+
+        var result = await executor.ExecuteAsync(query);
+
+        Assert.False(result.IsEntityCapped);
+        Assert.Equal(3, result.TotalRows);
+    }
+
+    [Fact]
+    public async Task ReportExecutor_JoinShortCircuit_CombinedRowsDoNotExceedLimit()
+    {
+        DataScaffold.RegisterEntity<TestCustomer>();
+        DataScaffold.RegisterEntity<TestOrder>();
+
+        // Create 3 customers, each with 3 orders (9 combined rows without limit)
+        for (int i = 0; i < 3; i++)
+        {
+            var c = new TestCustomer { Name = $"Customer {i}" };
+            _store.Save(c);
+            for (int j = 0; j < 3; j++)
+                _store.Save(new TestOrder { CustomerId = c.Id, Amount = j * 10m, Status = "Open" });
+        }
+
+        var executor = new ReportExecutor(_store);
+        var query = new ReportQuery()
+            .From("test-orders")
+            .Join("test-orders", "CustomerId", "test-customers", "Id")
+            .SelectColumn("test-orders", "Amount", "Amount")
+            .SelectColumn("test-customers", "Name", "Customer")
+            .Limit(4); // stop at 4 combined rows
+
+        var result = await executor.ExecuteAsync(query);
+
+        // The short-circuit must prevent building more than `limit` combined rows
+        Assert.Equal(4, result.TotalRows);
+    }
+
+    [Fact]
+    public async Task ReportExecutor_IsEntityCapped_FalseByDefault()
+    {
+        RegisterAndSeedTestEntities();
+
+        var query = new ReportQuery()
+            .From("test-customers")
+            .SelectColumn("test-customers", "Name", "Name");
+
+        var executor = new ReportExecutor(_store);
+        var result = await executor.ExecuteAsync(query);
+
+        // Small dataset — entity cap should not trigger
+        Assert.False(result.IsEntityCapped);
+    }
+
+    [Fact]
     public async Task ReportExecutor_NoColumns_DefaultsToEntityFields()
     {
         RegisterAndSeedTestEntities();

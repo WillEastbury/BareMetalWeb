@@ -53,6 +53,9 @@ public sealed class ReportResult
     /// <summary>Whether the result was capped at the row limit.</summary>
     public bool IsTruncated { get; init; }
 
+    /// <summary>Whether any entity's data was capped at <see cref="ReportExecutor.EntityLoadCap"/> records during loading.</summary>
+    public bool IsEntityCapped { get; init; }
+
     /// <summary>UTC timestamp of when the report was executed.</summary>
     public DateTime GeneratedAt { get; init; } = DateTime.UtcNow;
 }
