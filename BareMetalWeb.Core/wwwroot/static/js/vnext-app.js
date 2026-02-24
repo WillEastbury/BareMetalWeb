@@ -277,6 +277,15 @@
         html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=csv" download><i class="bi bi-filetype-csv"></i> Export CSV</a>';
         html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=json" download><i class="bi bi-filetype-json"></i> Export JSON</a>';
         html += '<button class="btn btn-outline-secondary btn-sm" id="vnext-import-btn" data-slug="' + escHtml(slug) + '"><i class="bi bi-upload"></i> Import CSV</button>';
+        // View type switcher (when entity supports alternate views or has a parent field for hierarchy)
+        var hasParentField = meta.parentField != null;
+        if (viewType !== 'Table' || hasParentField) {
+            html += '<div class="btn-group btn-group-sm ms-2">';
+            html += '<a class="btn btn-outline-secondary' + (activeView === 'Table' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Table' })) + '" title="Table View"><i class="bi bi-table"></i></a>';
+            if (viewType === 'TreeView' || hasParentField)  html += '<a class="btn btn-outline-secondary' + (activeView === 'TreeView' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'TreeView' })) + '" title="Tree View"><i class="bi bi-diagram-3"></i></a>';
+            if (viewType === 'OrgChart' || hasParentField) html += '<a class="btn btn-outline-secondary' + (activeView === 'OrgChart' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'OrgChart' })) + '" title="Org Chart"><i class="bi bi-diagram-2"></i></a>';
+            if (viewType === 'Timeline') html += '<a class="btn btn-outline-secondary' + (activeView === 'Timeline' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timeline' })) + '" title="Timeline"><i class="bi bi-calendar-range"></i></a>';
+            if (viewType === 'Timetable') html += '<a class="btn btn-outline-secondary' + (activeView === 'Timetable' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timetable' })) + '" title="Timetable"><i class="bi bi-calendar3"></i></a>';
         // View type switcher (when entity supports alternate views)
         if (viewType !== 'Table' || meta.canShowTimetable || meta.canShowTimeline) {
             html += '<div class="btn-group btn-group-sm ms-2">';
@@ -289,14 +298,9 @@
         }
         html += '</div>';
 
-        // Alternate view types: only show table+bulk if in table mode
-        if (activeView !== 'Table' && activeView !== viewType && activeView !== '') {
-            // Fall through to table for unknown view names
-        }
-
-        if ((activeView === 'TreeView' || (activeView === '' && viewType === 'TreeView')) && items.length > 0) {
+        if (activeView === 'TreeView' || (activeView === '' && viewType === 'TreeView')) {
             html += renderTreeView(meta, items, slug, baseUrl);
-        } else if ((activeView === 'OrgChart' || (activeView === '' && viewType === 'OrgChart')) && items.length > 0) {
+        } else if (activeView === 'OrgChart' || (activeView === '' && viewType === 'OrgChart')) {
             html += renderOrgChart(meta, items, slug, baseUrl);
         } else if ((activeView === 'Timeline' || (activeView === '' && viewType === 'Timeline')) && items.length > 0) {
             html += renderTimeline(meta, items, slug, baseUrl);
@@ -412,14 +416,25 @@
         var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
         var html = '<div class="vnext-tree-view">';
 
+        if (items.length === 0) {
+            html += '<p class="text-center text-muted py-4"><i class="bi bi-diagram-3 me-2"></i>No records found.</p>';
+            html += '</div>';
+            return html;
+        }
+
+        function getLabel(item) {
+            var id = item.id || item.Id || '';
+            return labelField ? (nestedGet(item, labelField.name) || nestedGet(item, labelField.name.charAt(0).toLowerCase() + labelField.name.slice(1)) || id) : id;
+        }
+
         function buildNodeHtml(node, depth) {
             var id = node.item.id || node.item.Id || '';
-            var label = labelField ? (nestedGet(node.item, labelField.name) || nestedGet(node.item, labelField.name.charAt(0).toLowerCase() + labelField.name.slice(1)) || id) : id;
+            var label = getLabel(node.item);
             var indent = depth * 20;
             var row = '<div class="vnext-tree-node d-flex align-items-center py-1 border-bottom" style="padding-left:' + indent + 'px" data-id="' + escHtml(id) + '">';
             if (node.children.length > 0) row += '<i class="bi bi-chevron-down text-muted me-1" style="cursor:pointer" onclick="this.closest(\'.vnext-tree-node\').nextElementSibling.classList.toggle(\'d-none\');this.classList.toggle(\'bi-chevron-right\');this.classList.toggle(\'bi-chevron-down\')"></i>';
             else row += '<i class="bi bi-dot text-muted me-1"></i>';
-            row += '<a class="text-decoration-none me-2" href="' + baseUrl + '/' + encodeURIComponent(id) + '">' + escHtml(String(label)) + '</a>';
+            row += '<a class="link-body-emphasis text-decoration-none me-2" href="' + baseUrl + '/' + encodeURIComponent(id) + '">' + escHtml(String(label)) + '</a>';
             row += '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>';
             row += '</div>';
             if (node.children.length > 0) {
@@ -428,6 +443,18 @@
                 row += '</div>';
             }
             return row;
+        }
+
+        function renderFlatList() {
+            items.forEach(function (item) {
+                var id = item.id || item.Id || '';
+                var label = getLabel(item);
+                html += '<div class="vnext-tree-node d-flex align-items-center py-1 border-bottom">' +
+                    '<i class="bi bi-dot text-muted me-1"></i>' +
+                    '<a class="link-body-emphasis text-decoration-none me-2" href="' + baseUrl + '/' + encodeURIComponent(id) + '">' + escHtml(String(label)) + '</a>' +
+                    '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>' +
+                    '</div>';
+            });
         }
 
         if (parentField) {
@@ -439,20 +466,17 @@
             items.forEach(function (item) {
                 var id = item.id || item.Id || '';
                 var parentId = nestedGet(item, parentField) || nestedGet(item, parentField.charAt(0).toLowerCase() + parentField.slice(1)) || '';
-                if (parentId && nodeMap[parentId]) nodeMap[parentId].children.push(nodeMap[id]);
+                if (parentId && nodeMap[parentId] && parentId !== id) nodeMap[parentId].children.push(nodeMap[id]);
                 else roots.push(nodeMap[id]);
             });
-            roots.forEach(function (root) { html += buildNodeHtml(root, 0); });
+            if (roots.length > 0) {
+                roots.forEach(function (root) { html += buildNodeHtml(root, 0); });
+            } else {
+                // All items reference parents not in the set — fall back to flat list
+                renderFlatList();
+            }
         } else {
-            items.forEach(function (item) {
-                var id = item.id || item.Id || '';
-                var label = labelField ? (nestedGet(item, labelField.name) || id) : id;
-                html += '<div class="vnext-tree-node d-flex align-items-center py-1 border-bottom">' +
-                    '<i class="bi bi-dot text-muted me-1"></i>' +
-                    '<a class="text-decoration-none me-2" href="' + baseUrl + '/' + encodeURIComponent(id) + '">' + escHtml(String(label)) + '</a>' +
-                    '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>' +
-                    '</div>';
-            });
+            renderFlatList();
         }
         html += '</div>';
         return html;
@@ -461,18 +485,28 @@
     function renderOrgChart(meta, items, slug, baseUrl) {
         var parentField = meta.parentField ? meta.parentField.name : null;
         var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
+        var subtitleField = meta.fields.filter(function (f) { return f.list && f !== labelField; }).sort(function (a, b) { return a.order - b.order; })[0];
 
         function buildCardHtml(item) {
             var id = item.id || item.Id || '';
             var label = labelField ? (nestedGet(item, labelField.name) || nestedGet(item, labelField.name.charAt(0).toLowerCase() + labelField.name.slice(1)) || id) : id;
-            return '<div class="card text-center" style="min-width:120px;display:inline-block;margin:4px;vertical-align:top">' +
+            var subtitle = subtitleField ? (nestedGet(item, subtitleField.name) || nestedGet(item, subtitleField.name.charAt(0).toLowerCase() + subtitleField.name.slice(1)) || '') : '';
+            return '<div class="card text-center" style="min-width:140px;display:inline-block;margin:4px;vertical-align:top">' +
                 '<div class="card-body p-2">' +
-                '<p class="card-text small mb-1"><strong>' + escHtml(String(label)) + '</strong></p>' +
+                '<p class="card-text small mb-0"><strong>' + escHtml(String(label)) + '</strong></p>' +
+                (subtitle ? '<p class="card-text small text-muted mb-1">' + escHtml(String(subtitle)) + '</p>' : '<p class="mb-1"></p>') +
                 '<a class="btn btn-xs btn-outline-primary btn-sm" href="' + baseUrl + '/' + encodeURIComponent(id) + '" style="font-size:0.7rem">View</a>' +
                 '</div></div>';
         }
 
-        var html = '<div class="vnext-orgchart overflow-auto">';
+        var html = '<div class="vnext-orgchart overflow-auto py-3">';
+
+        if (items.length === 0) {
+            html += '<p class="text-center text-muted py-4"><i class="bi bi-diagram-2 me-2"></i>No records found.</p>';
+            html += '</div>';
+            return html;
+        }
+
         if (parentField) {
             var nodeMap = {}, roots = [];
             items.forEach(function (item) {
@@ -482,7 +516,7 @@
             items.forEach(function (item) {
                 var id = item.id || item.Id || '';
                 var parentId = nestedGet(item, parentField) || nestedGet(item, parentField.charAt(0).toLowerCase() + parentField.slice(1)) || '';
-                if (parentId && nodeMap[parentId]) nodeMap[parentId].children.push(nodeMap[id]);
+                if (parentId && nodeMap[parentId] && parentId !== id) nodeMap[parentId].children.push(nodeMap[id]);
                 else roots.push(nodeMap[id]);
             });
 
@@ -497,7 +531,14 @@
                 if (nextLevel.length) out += buildLevel(nextLevel);
                 return out;
             }
-            html += buildLevel(roots);
+            if (roots.length > 0) {
+                html += buildLevel(roots);
+            } else {
+                // All items form cycles — fall back to flat card grid
+                html += '<div class="d-flex flex-wrap gap-3">';
+                items.forEach(function (item) { html += buildCardHtml(item); });
+                html += '</div>';
+            }
         } else {
             html += '<div class="d-flex flex-wrap gap-3">';
             items.forEach(function (item) { html += buildCardHtml(item); });
