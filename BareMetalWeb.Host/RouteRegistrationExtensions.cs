@@ -923,44 +923,46 @@ public static class RouteRegistrationExtensions
                 if (user == null) { context.Response.Redirect("/login"); return; }
 
                 var reports = DataStoreProvider.Current.Query<ReportDefinition>(null).OrderBy(r => r.Name).ToList();
+                var csrfToken = CsrfProtection.EnsureToken(context);
+                var safeToken = WebUtility.HtmlEncode(csrfToken);
+                var nonce = context.GetCspNonce();
+                var safeNonce = WebUtility.HtmlEncode(nonce);
 
-                var sb = new StringBuilder(2048);
-                sb.Append("<!DOCTYPE html><html lang=\"en\"><head><meta charset=\"utf-8\">");
-                sb.Append("<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
-                sb.Append("<title>Reports</title>");
-                sb.Append("<style>*{box-sizing:border-box;margin:0;padding:0}");
-                sb.Append("body{font-family:system-ui,-apple-system,sans-serif;background:#f4f6f9;color:#333;padding:24px}");
-                sb.Append(".card{background:#fff;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.12);padding:24px;max-width:900px;margin:0 auto}");
-                sb.Append("h1{font-size:1.6em;font-weight:700;color:#1a1a2e;margin-bottom:20px;border-bottom:2px solid #e8eaf6;padding-bottom:12px}");
-                sb.Append("table{width:100%;border-collapse:collapse}.th{background:#e8eaf6;text-align:left;padding:10px 12px;font-weight:600;font-size:.9em;color:#444;border-bottom:2px solid #c5cae9}");
-                sb.Append("td{padding:10px 12px;border-bottom:1px solid #eee;font-size:.9em}tr:hover{background:#f5f7ff}");
-                sb.Append("a.run{display:inline-block;padding:4px 12px;background:#4361ee;color:#fff;border-radius:4px;text-decoration:none;font-size:.85em;font-weight:600}");
-                sb.Append("a.run:hover{background:#3a56d4}.empty{padding:40px;text-align:center;color:#999}</style></head>");
-                sb.Append("<body><div class=\"card\"><h1>&#128202; Reports</h1>");
+                var sb = new StringBuilder(4096);
+                ReportHtmlRenderer.AppendChromeHead(sb, "Reports", safeNonce, safeToken);
+                ReportHtmlRenderer.AppendChromeNavbar(sb, host, safeNonce);
+                sb.Append("<div class=\"container-fluid py-4 px-4 bm-content\">");
+                sb.Append("<div class=\"card shadow-sm bm-page-card\">");
+                sb.Append("<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
+                sb.Append("<h1 class=\"h5 mb-0\"><i class=\"bi bi-bar-chart-fill\"></i> Reports</h1>");
+                sb.Append("<a href=\"/admin/data/report-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New Report</a>");
+                sb.Append("</div><div class=\"card-body\">");
 
                 if (reports.Count == 0)
                 {
-                    sb.Append("<div class=\"empty\">No reports defined yet. Create one via <a href=\"/admin/data/report-definitions/create\">Admin &rarr; Report Definitions</a>.</div>");
+                    sb.Append("<div class=\"text-center py-5 text-muted\">No reports defined yet. Create one via <a href=\"/admin/data/report-definitions/create\">Admin &rarr; Report Definitions</a>.</div>");
                 }
                 else
                 {
-                    sb.Append("<table><thead><tr><th class=\"th\">Name</th><th class=\"th\">Description</th><th class=\"th\">Root Entity</th><th class=\"th\"></th></tr></thead><tbody>");
+                    sb.Append("<div class=\"table-responsive\"><table class=\"table table-hover table-bordered align-middle mb-0\">");
+                    sb.Append("<thead class=\"table-light\"><tr><th>Name</th><th>Description</th><th>Root Entity</th><th></th></tr></thead><tbody>");
                     foreach (var r in reports)
                     {
                         sb.Append("<tr><td><strong>");
                         sb.Append(WebUtility.HtmlEncode(r.Name));
                         sb.Append("</strong></td><td>");
                         sb.Append(WebUtility.HtmlEncode(r.Description));
-                        sb.Append("</td><td>");
+                        sb.Append("</td><td><code>");
                         sb.Append(WebUtility.HtmlEncode(r.RootEntity));
-                        sb.Append("</td><td><a class=\"run\" href=\"/reports/");
+                        sb.Append("</code></td><td><a class=\"btn btn-sm btn-primary\" href=\"/reports/");
                         sb.Append(WebUtility.UrlEncode(r.Id));
-                        sb.Append("\">Run</a></td></tr>");
+                        sb.Append("\"><i class=\"bi bi-play-fill\"></i> Run</a></td></tr>");
                     }
-                    sb.Append("</tbody></table>");
+                    sb.Append("</tbody></table></div>");
                 }
 
-                sb.Append("</div></body></html>");
+                sb.Append("</div></div></div>");
+                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce);
                 context.Response.ContentType = "text/html; charset=utf-8";
                 await context.Response.WriteAsync(sb.ToString());
             }));
@@ -1021,7 +1023,10 @@ public static class RouteRegistrationExtensions
                     def.Description,
                     parameters.Count > 0 ? parameters : null,
                     runtimeParams,
-                    id);
+                    id,
+                    host,
+                    context.GetCspNonce(),
+                    CsrfProtection.EnsureToken(context));
                 await pipeWriter.CompleteAsync();
             }));
 
@@ -1162,7 +1167,7 @@ public static class RouteRegistrationExtensions
         await context.Response.WriteAsync(sb.ToString());
     }
 
-    private static void AppendVNextRightNavItems(StringBuilder sb, List<IMenuOption> options)
+    internal static void AppendVNextRightNavItems(StringBuilder sb, List<IMenuOption> options)
     {
         var rightAligned = options.Where(o => o.RightAligned && o.ShowOnNavBar).ToList();
         var renderedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
