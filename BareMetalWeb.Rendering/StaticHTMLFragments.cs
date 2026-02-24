@@ -334,6 +334,26 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                 new[] { targetSlug, targetType, fieldName }
             );
     }
+
+    private byte[] LookupSearchButtonTemplate(string targetSlug, string targetType, string fieldName, string displayField, string valueField)
+    {
+        return _fragmentStore
+            .ZeroAllocationReplaceCopyAndEncode(
+                _fragmentStore.ReturnTemplateFragment("LookupSearchButton"),
+                new[] { "{{targetSlug}}", "{{targetType}}", "{{fieldName}}", "{{displayField}}", "{{valueField}}" },
+                new[] { targetSlug, targetType, fieldName, displayField, valueField }
+            );
+    }
+
+    private byte[] LookupSearchDisplayTemplate(string fieldName, string displayValue)
+    {
+        return _fragmentStore
+            .ZeroAllocationReplaceCopyAndEncode(
+                _fragmentStore.ReturnTemplateFragment("LookupSearchDisplay"),
+                new[] { "{{fieldName}}", "{{displayValue}}" },
+                new[] { fieldName, displayValue }
+            );
+    }
     public byte[] RenderMenuOptions(List<IMenuOption> options, bool rightAligned)
     {
         var buffer = new ArrayBufferWriter<byte>();
@@ -602,11 +622,43 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
     private byte[] RenderLookupSelect(FormField field, string required, string selectedValue)
     {
         var buffer = new ArrayBufferWriter<byte>();
-        var options = field.LookupOptions ?? Array.Empty<KeyValuePair<string, string>>();
         var name = Encode(field.Name);
         
         // Check if we have lookup metadata (not for enum fields)
         var hasLookupMetadata = !string.IsNullOrEmpty(field.LookupTargetSlug);
+
+        // High-cardinality: render hidden value input + display text + search button instead of full dropdown
+        if (field.IsHighCardinality && hasLookupMetadata)
+        {
+            Write(buffer, LookupGroupStart);
+            // Hidden input carries the actual ID value
+            Write(buffer, Encoding.UTF8.GetBytes(
+                $"<input type=\"hidden\" id=\"{name}\" name=\"{name}\" value=\"{Encode(selectedValue)}\" />"));
+            // Readonly text input shows the human-readable display value
+            Write(buffer, LookupSearchDisplayTemplate(name, Encode(field.LookupDisplayValue ?? string.Empty)));
+            // Search button — value field name converted to camelCase to match JSON API response keys
+            var rawValueField = field.LookupValueField ?? "id";
+            var camelValueField = rawValueField.Length > 0
+                ? char.ToLowerInvariant(rawValueField[0]) + rawValueField[1..]
+                : "id";
+            Write(buffer, LookupSearchButtonTemplate(
+                Encode(field.LookupTargetSlug ?? string.Empty),
+                Encode(field.LookupTargetType ?? string.Empty),
+                name,
+                Encode(field.LookupSearchField ?? string.Empty),
+                Encode(camelValueField)
+            ));
+            // Add button
+            Write(buffer, LookupAddButtonTemplate(
+                Encode(field.LookupTargetSlug ?? string.Empty),
+                Encode(field.LookupTargetType ?? string.Empty),
+                name
+            ));
+            Write(buffer, LookupGroupEnd);
+            return buffer.WrittenSpan.ToArray();
+        }
+
+        var options = field.LookupOptions ?? Array.Empty<KeyValuePair<string, string>>();
         
         // If we have lookup metadata, wrap in input-group for buttons
         if (hasLookupMetadata)
