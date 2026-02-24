@@ -93,6 +93,8 @@ public class SettingsServiceTests : IDisposable
         public bool PagedFileExists(string entityName, string fileName) => false;
         public IPagedFile OpenPagedFile(string entityName, string fileName, int pageSize, FileAccess access) => throw new NotImplementedException();
         public ValueTask DeletePagedFileAsync(string entityName, string fileName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public string NextSequentialId(string entityName) => throw new NotImplementedException();
+        public void SeedSequentialId(string entityName, long floor) { }
 
         private sealed class DummyDisposable : IDisposable { public void Dispose() { } }
     }

@@ -41,4 +41,21 @@ public interface ILookupResolver
         IReadOnlyList<(string Field, object? Value)> filters,
         string returnField,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resolves a field value by traversing a multi-level chain of FK relationships.
+    /// Each element in <paramref name="chain"/> except the last is treated as a FK field name
+    /// that links to another entity; the last element is the field whose value is returned.
+    /// For example, ["CustomerId", "RegionId", "TaxRate"] follows:
+    ///   current entity --(CustomerId)--> Customer --(RegionId)--> Region --> TaxRate.
+    /// </summary>
+    /// <param name="startEntitySlug">Slug of the starting entity.</param>
+    /// <param name="chain">Ordered list of FK field names followed by the target field name.</param>
+    /// <param name="context">Current field values of the starting entity.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    ValueTask<object?> ResolveChainAsync(
+        string startEntitySlug,
+        IReadOnlyList<string> chain,
+        IReadOnlyDictionary<string, object?> context,
+        CancellationToken cancellationToken = default);
 }

@@ -68,12 +68,24 @@ public static class CalculatedFieldService
     /// <summary>
     /// Async version of EvaluateCalculatedFields that supports relationship traversal
     /// via <see cref="ILookupResolver"/>. Use this for expressions containing
-    /// dot-access (e.g., Customer.DiscountLevel), RelatedLookup(), or QueryLookup().
+    /// dot-access (e.g., CustomerId.DiscountLevel), RelatedLookup(), QueryLookup(),
+    /// LookupMultiLevel(), or multi-level chains (e.g., CustomerId.RegionId.TaxRate).
     /// </summary>
+    /// <param name="instance">The entity being evaluated.</param>
+    /// <param name="entitySlug">The slug of the entity type being evaluated.</param>
+    /// <param name="resolver">Optional lookup resolver; defaults to <see cref="ServerLookupResolver.Instance"/>.</param>
+    /// <param name="parentContext">
+    /// Optional field values of the parent entity. When provided, fields are accessible in
+    /// expressions via <c>Parent.FieldName</c> (e.g., <c>Parent.CustomerId</c>).
+    /// Use this when evaluating child entities (e.g., OrderLine) that need to reference
+    /// their parent entity's fields (e.g., Order.CustomerId).
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
     public static async ValueTask EvaluateCalculatedFieldsAsync(
         BaseDataObject instance,
         string entitySlug,
         ILookupResolver? resolver = null,
+        IReadOnlyDictionary<string, object?>? parentContext = null,
         CancellationToken cancellationToken = default)
     {
         var type = instance.GetType();
@@ -84,6 +96,13 @@ public static class CalculatedFieldService
 
         var context = BuildContext(instance, type);
         context["__entitySlug"] = entitySlug;
+
+        // Expose parent fields under "Parent.<FieldName>" so expressions like Parent.CustomerId work.
+        if (parentContext != null)
+        {
+            foreach (var kvp in parentContext)
+                context["Parent." + kvp.Key] = kvp.Value;
+        }
 
         resolver ??= ServerLookupResolver.Instance;
 
