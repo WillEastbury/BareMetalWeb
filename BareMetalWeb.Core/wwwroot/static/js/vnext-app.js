@@ -1515,6 +1515,14 @@
             }
         });
 
+        // Clear validation errors as user corrects fields
+        form.addEventListener('input', function (ev) {
+            var el = ev.target;
+            if (el && el.classList.contains('is-invalid') && el.checkValidity()) {
+                el.classList.remove('is-invalid');
+            }
+        });
+
         // Form submit
         form.addEventListener('submit', function (e) {
             e.preventDefault();
@@ -1710,11 +1718,14 @@
 
     function validateForm(form) {
         var valid = true;
-        form.querySelectorAll('input[required], select[required], textarea[required]').forEach(function (el) {
-            if (!el.value.trim()) {
+        form.querySelectorAll('input, select, textarea').forEach(function (el) {
+            if (el.type === 'hidden' || el.readOnly || el.disabled) return;
+            if (!el.checkValidity()) {
                 el.classList.add('is-invalid');
                 var fb = el.nextElementSibling;
-                if (fb && fb.classList.contains('invalid-feedback')) fb.textContent = el.labels && el.labels[0] ? el.labels[0].textContent.trim() + ' is required.' : 'Required.';
+                if (fb && fb.classList.contains('invalid-feedback')) {
+                    fb.textContent = el.validationMessage || 'Invalid value.';
+                }
                 valid = false;
             } else {
                 el.classList.remove('is-invalid');
