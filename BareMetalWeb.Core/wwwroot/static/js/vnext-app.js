@@ -354,7 +354,7 @@
             html += '</div>';
 
             // Table layout for wider viewports
-            html += '<div class="d-none d-md-block table-responsive"><table class="table table-hover table-striped table-sm align-middle">';
+            html += '<div class="d-none d-md-block table-responsive"><table class="table bm-table table-hover table-striped table-sm align-middle">';
             html += '<thead><tr>';
             html += '<th scope="col"><input type="checkbox" class="form-check-input" id="vnext-select-all" title="Select all"></th>';
             listFields.forEach(function (f) {
@@ -376,13 +376,13 @@
                     listFields.forEach(function (f) {
                         var val = nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1));
                         if (f.lookup && f.lookup.targetSlug && val) {
-                            html += '<td data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
+                            html += '<td data-label="' + escHtml(f.label) + '" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
                                 '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
                         } else {
-                            html += '<td>' + fmtValue(val, f.type) + '</td>';
+                            html += '<td data-label="' + escHtml(f.label) + '">' + fmtValue(val, f.type) + '</td>';
                         }
                     });
-                    html += '<td class="text-nowrap">';
+                    html += '<td data-label="Actions" class="text-nowrap">';
                     html += '<a class="btn btn-xs btn-outline-info btn-sm me-1" href="' + baseUrl + '/' + encId + '" title="View"><i class="bi bi-eye"></i></a>';
                     html += '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encId + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>';
                     html += '<button class="btn btn-xs btn-outline-primary btn-sm me-1 vnext-row-clone" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '" title="Clone"><i class="bi bi-files"></i></button>';
@@ -1025,7 +1025,7 @@
         html += '</div>';
 
         // Fields table
-        html += '<div class="card"><div class="card-body"><dl class="row mb-0">';
+        html += '<div class="card bm-page-card"><div class="card-body"><dl class="row mb-0">';
         viewFields.forEach(function (f) {
             var val = nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1));
 
