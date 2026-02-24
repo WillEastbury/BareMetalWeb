@@ -1146,9 +1146,10 @@
 
         // TextArea
         if (f.type === 'TextArea') {
+            var taVal = Array.isArray(val) ? val.join('\n') : (val != null ? String(val) : '');
             return '<div class="mb-3">' + label +
                 '<textarea class="form-control form-control-sm" id="' + id_ + '" name="' + escHtml(f.name) + '" rows="4"' + req + rdonly + placeholder + validation + '>' +
-                escHtml(String(val != null ? val : '')) + '</textarea>' + feedback + '</div>';
+                escHtml(taVal) + '</textarea>' + feedback + '</div>';
         }
 
         // Password
