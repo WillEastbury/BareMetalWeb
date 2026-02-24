@@ -592,7 +592,10 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                 {
                     var bytes = GetClusteredStore(type.Name).Read(entry.Value);
                     if (bytes == null)
+                    {
+                        locations.TryRemove(entry.Key, out _);
                         continue;
+                    }
 
                     var schemaVersion = _serializer.ReadSchemaVersion(bytes);
                     var schemaFile = GetSchemaDefinition(type, schemaVersion);
@@ -641,7 +644,10 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             {
                 var bytes = GetClusteredStore(type.Name).Read(entry.Value);
                 if (bytes == null)
+                {
+                    locations.TryRemove(entry.Key, out _);
                     continue;
+                }
 
                 var schemaVersion = _serializer.ReadSchemaVersion(bytes);
                 var schemaFile = GetSchemaDefinition(type, schemaVersion);

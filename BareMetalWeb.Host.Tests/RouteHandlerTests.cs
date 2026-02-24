@@ -1221,6 +1221,115 @@ public class RouteHandlerTests : IDisposable
         Assert.Equal(3, root.GetArrayLength());
     }
 
+    [Fact]
+    public async Task DataApiListHandler_WithStaleTotalAndEmptyPage_ClampsTotalToSkip()
+    {
+        // Arrange: query returns 0 items on page 2 but count says 50 (stale/inflated)
+        EnsureStore();
+        const string slug = "stale-count-test-items";
+        var meta = new DataEntityMetadata(
+            Type: typeof(Address),
+            Name: "StaleCountTestItems",
+            Slug: slug,
+            Permissions: "",
+            ShowOnNav: false,
+            NavGroup: null,
+            NavOrder: 0,
+            IdGeneration: AutoIdStrategy.None,
+            ViewType: ViewType.Table,
+            ParentField: null,
+            Fields: Array.Empty<DataFieldMetadata>(),
+            Handlers: new DataEntityHandlers(
+                Create: () => new Address(),
+                LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
+                SaveAsync: (_, _) => ValueTask.CompletedTask,
+                DeleteAsync: (_, _) => ValueTask.CompletedTask,
+                // Query returns empty (simulates all valid items consumed on earlier pages)
+                QueryAsync: (_, _) => ValueTask.FromResult<IEnumerable<BaseDataObject>>(Array.Empty<BaseDataObject>()),
+                // Count returns inflated value (stale location map entries)
+                CountAsync: (_, _) => ValueTask.FromResult(50)),
+            Commands: Array.Empty<RemoteCommandMetadata>());
+
+        DataScaffold.RegisterVirtualEntity(meta);
+
+        var context = CreateHttpContext("GET", "/api/" + slug);
+        context.SetPageContext(new PageContext(
+            PageMetaDataKeys: new[] { "type" },
+            PageMetaDataValues: new[] { slug }));
+        context.Request.QueryString = new QueryString("?skip=25&top=25");
+
+        // Act
+        await _handlers.DataApiListHandler(context);
+
+        // Assert: total should be clamped to skip+0=25, not the inflated 50
+        Assert.Equal(200, context.Response.StatusCode);
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var doc = await JsonDocument.ParseAsync(context.Response.Body);
+        var root = doc.RootElement;
+        Assert.Equal(JsonValueKind.Object, root.ValueKind);
+        Assert.Equal(25, root.GetProperty("total").GetInt32());   // clamped: skip(25) + 0 items
+        Assert.Equal(0, root.GetProperty("items").GetArrayLength());
+    }
+
+    [Fact]
+    public async Task DataApiListHandler_WithPartialLastPage_ClampsTotalToActualCount()
+    {
+        // Arrange: query returns 3 items when 25 were requested (partial last page)
+        EnsureStore();
+        const string slug = "partial-page-clamp-items";
+        var items = Enumerable.Range(1, 3)
+            .Select(i => (BaseDataObject)new Address { Id = $"item-{i}" })
+            .ToArray();
+
+        var meta = new DataEntityMetadata(
+            Type: typeof(Address),
+            Name: "PartialPageClampItems",
+            Slug: slug,
+            Permissions: "",
+            ShowOnNav: false,
+            NavGroup: null,
+            NavOrder: 0,
+            IdGeneration: AutoIdStrategy.None,
+            ViewType: ViewType.Table,
+            ParentField: null,
+            Fields: Array.Empty<DataFieldMetadata>(),
+            Handlers: new DataEntityHandlers(
+                Create: () => new Address(),
+                LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
+                SaveAsync: (_, _) => ValueTask.CompletedTask,
+                DeleteAsync: (_, _) => ValueTask.CompletedTask,
+                QueryAsync: (q, _) =>
+                {
+                    var skip = q?.Skip ?? 0;
+                    var top  = q?.Top  ?? items.Length;
+                    IEnumerable<BaseDataObject> page = items.Skip(skip).Take(top);
+                    return ValueTask.FromResult(page);
+                },
+                // Inflated count (simulates stale location map entries)
+                CountAsync: (_, _) => ValueTask.FromResult(100)),
+            Commands: Array.Empty<RemoteCommandMetadata>());
+
+        DataScaffold.RegisterVirtualEntity(meta);
+
+        var context = CreateHttpContext("GET", "/api/" + slug);
+        context.SetPageContext(new PageContext(
+            PageMetaDataKeys: new[] { "type" },
+            PageMetaDataValues: new[] { slug }));
+        context.Request.QueryString = new QueryString("?skip=0&top=25");
+
+        // Act
+        await _handlers.DataApiListHandler(context);
+
+        // Assert: 3 items returned < 25 requested, so total is clamped to 0+3=3
+        Assert.Equal(200, context.Response.StatusCode);
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var doc = await JsonDocument.ParseAsync(context.Response.Body);
+        var root = doc.RootElement;
+        Assert.Equal(JsonValueKind.Object, root.ValueKind);
+        Assert.Equal(3, root.GetProperty("total").GetInt32());   // clamped: skip(0) + 3 items
+        Assert.Equal(3, root.GetProperty("items").GetArrayLength());
+    }
+
     // ──────────────────────────────────────────────────────────────
     //  Helper infrastructure
     // ──────────────────────────────────────────────────────────────

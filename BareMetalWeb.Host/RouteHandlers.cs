@@ -2948,6 +2948,11 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             var payload = results.Cast<object>().Select(item => BuildApiModel(meta, item)).ToArray();
+            // Clamp total: if fewer items than requested were returned, the real total cannot exceed skip + returned count.
+            // This prevents inflated page counts when the location map has stale entries for unreadable records.
+            // Applies whether or not Top was specified: without a top limit we also know the total is at most skip + payload.Length.
+            if (!query.Top.HasValue || payload.Length < query.Top.Value)
+                total = Math.Min(total, (query.Skip ?? 0) + payload.Length);
             await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["items"] = payload, ["total"] = total });
             return;
         }
