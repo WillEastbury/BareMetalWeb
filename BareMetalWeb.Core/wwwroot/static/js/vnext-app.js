@@ -272,6 +272,7 @@
         // Title + action bar
         html += '<div class="d-flex align-items-center mb-3 flex-wrap gap-2">';
         html += '<h2 class="mb-0 me-3">' + escHtml(meta.name) + '</h2>';
+        html += '<span class="badge bg-secondary" title="Total records" aria-label="' + total + ' total records">' + total + ' records</span>';
         html += '<a class="btn btn-primary btn-sm" href="' + baseUrl + '/create"><i class="bi bi-plus-lg"></i> New</a>';
         html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=csv" download><i class="bi bi-filetype-csv"></i> Export CSV</a>';
         html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=json" download><i class="bi bi-filetype-json"></i> Export JSON</a>';
@@ -878,10 +879,13 @@
     }
 
     function renderPagination(total, skip, top, baseUrl, query) {
-        if (total <= top) return '';
+        var startRecord = total === 0 ? 0 : skip + 1;
+        var endRecord = Math.min(skip + top, total);
+        var summary = '<div class="small text-muted mt-2">Records ' + startRecord + ' to ' + endRecord + ' of ' + total + ' total</div>';
+        if (total <= top) return summary;
         var pages = Math.ceil(total / top);
         var current = Math.floor(skip / top);
-        var html = '<nav class="mt-3"><ul class="pagination pagination-sm">';
+        var html = summary + '<nav class="mt-3"><ul class="pagination pagination-sm">';
 
         function pageLink(p, label) {
             var disabled = p < 0 || p >= pages;
