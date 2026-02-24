@@ -326,7 +326,12 @@
                     html += '<td><input type="checkbox" class="form-check-input vnext-row-select" value="' + escHtml(id) + '"></td>';
                     listFields.forEach(function (f) {
                         var val = nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1));
-                        html += '<td>' + fmtValue(val, f.type) + '</td>';
+                        if (f.lookup && f.lookup.targetSlug && val) {
+                            html += '<td data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
+                                '<a href="' + BASE + '/admin/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
+                        } else {
+                            html += '<td>' + fmtValue(val, f.type) + '</td>';
+                        }
                     });
                     html += '<td class="text-nowrap">';
                     html += '<a class="btn btn-xs btn-outline-info btn-sm me-1" href="' + baseUrl + '/' + encId + '" title="View"><i class="bi bi-eye"></i></a>';
@@ -344,6 +349,9 @@
 
         html += '</div>';
         setContent(html);
+
+        // Resolve lookup display values in background
+        resolveViewLookups(slug);
 
         // Wire up events
         var form = document.getElementById('vnext-search-form');
