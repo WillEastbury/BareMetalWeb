@@ -228,7 +228,7 @@
             // Hierarchy/calendar views need all items (no pagination)
             var vt = meta.viewType || '';
             var activeView = query.view || '';
-            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' || vt === 'Timetable' ||
+            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' || meta.canShowTimetable ||
                 activeView === 'TreeView' || activeView === 'OrgChart' || activeView === 'Timeline' || activeView === 'Timetable');
 
             var effectiveSkip = isHierarchyView ? 0 : skip;
@@ -277,13 +277,13 @@
         html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=json" download><i class="bi bi-filetype-json"></i> Export JSON</a>';
         html += '<button class="btn btn-outline-secondary btn-sm" id="vnext-import-btn" data-slug="' + escHtml(slug) + '"><i class="bi bi-upload"></i> Import CSV</button>';
         // View type switcher (when entity supports alternate views)
-        if (viewType !== 'Table') {
+        if (viewType !== 'Table' || meta.canShowTimetable) {
             html += '<div class="btn-group btn-group-sm ms-2">';
             html += '<a class="btn btn-outline-secondary' + (activeView === 'Table' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Table' })) + '" title="Table View"><i class="bi bi-table"></i></a>';
             if (viewType === 'TreeView')  html += '<a class="btn btn-outline-secondary' + (activeView === 'TreeView' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'TreeView' })) + '" title="Tree View"><i class="bi bi-diagram-3"></i></a>';
             if (viewType === 'OrgChart') html += '<a class="btn btn-outline-secondary' + (activeView === 'OrgChart' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'OrgChart' })) + '" title="Org Chart"><i class="bi bi-people"></i></a>';
             if (viewType === 'Timeline') html += '<a class="btn btn-outline-secondary' + (activeView === 'Timeline' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timeline' })) + '" title="Timeline"><i class="bi bi-calendar-range"></i></a>';
-            if (viewType === 'Timetable') html += '<a class="btn btn-outline-secondary' + (activeView === 'Timetable' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timetable' })) + '" title="Timetable"><i class="bi bi-calendar3"></i></a>';
+            if (meta.canShowTimetable) html += '<a class="btn btn-outline-secondary' + (activeView === 'Timetable' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timetable' })) + '" title="Timetable"><i class="bi bi-calendar3"></i></a>';
             html += '</div>';
         }
         html += '</div>';
@@ -624,34 +624,88 @@
     }
 
     function renderTimetable(meta, items, slug, baseUrl) {
-        // Render as a weekly timetable using start/end datetime fields
-        var startField = meta.fields.find(function (f) { return f.type === 'DateTime' && (f.name.toLowerCase().indexOf('start') >= 0 || f.name.toLowerCase().indexOf('begin') >= 0 || f.name.toLowerCase().indexOf('from') >= 0); })
-            || meta.fields.find(function (f) { return f.type === 'DateTime' || f.type === 'DateOnly'; });
-        var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
-        var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        var byDay = [[], [], [], [], [], [], []];
-        items.forEach(function (item) {
-            if (startField) {
-                var d = new Date(nestedGet(item, startField.name) || '');
-                if (!isNaN(d.getTime())) { byDay[d.getDay()].push(item); return; }
-            }
-            byDay[0].push(item);
+        // Find the day enum field (prefer one whose name contains 'day')
+        var dayField = meta.fields.find(function (f) {
+            return f.type === 'Enum' && f.name.toLowerCase().indexOf('day') >= 0;
+        }) || meta.fields.find(function (f) { return f.type === 'Enum'; });
+
+        // Find the time field
+        var timeField = meta.fields.find(function (f) {
+            return f.type === 'TimeOnly' || f.type === 'DateTime';
         });
-        var html = '<div class="table-responsive"><table class="table table-bordered table-sm vnext-timetable">';
-        html += '<thead><tr>' + days.map(function (d) { return '<th class="text-center">' + d + '</th>'; }).join('') + '</tr></thead>';
-        html += '<tbody><tr>';
-        byDay.forEach(function (dayItems) {
-            html += '<td style="min-width:100px;vertical-align:top">';
+
+        if (!dayField || !timeField) {
+            return '<p class="text-warning">Timetable view requires a Day (enum) field and a Time field.</p>';
+        }
+
+        // Get list columns in display order
+        var listFields = meta.fields.filter(function (f) { return f.list; })
+            .sort(function (a, b) { return a.order - b.order; });
+
+        // Ordered day names from enumValues (or DayOfWeek fallback)
+        var dayOrder = (dayField.enumValues && dayField.enumValues.length)
+            ? dayField.enumValues.map(function (ev) { return ev.value; })
+            : ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        var dayLabels = {};
+        if (dayField.enumValues && dayField.enumValues.length) {
+            dayField.enumValues.forEach(function (ev) { dayLabels[ev.value] = ev.label; });
+        } else {
+            dayOrder.forEach(function (d) { dayLabels[d] = d; });
+        }
+
+        // Group items by day value (enum serialises to its name string)
+        var byDay = {};
+        items.forEach(function (item) {
+            var dayVal = String(nestedGet(item, dayField.name) != null ? nestedGet(item, dayField.name) : '');
+            if (!byDay[dayVal]) byDay[dayVal] = [];
+            byDay[dayVal].push(item);
+        });
+
+        // Sort items within each day by time field value
+        function parseTimeSortKey(val) {
+            if (val == null) return -1;
+            var s = String(val);
+            var d = new Date('1970-01-01 ' + s);
+            if (!isNaN(d.getTime())) return d.getTime();
+            d = new Date('1970-01-01T' + s);
+            if (!isNaN(d.getTime())) return d.getTime();
+            return 0;
+        }
+        Object.keys(byDay).forEach(function (key) {
+            byDay[key].sort(function (a, b) {
+                return parseTimeSortKey(nestedGet(a, timeField.name)) - parseTimeSortKey(nestedGet(b, timeField.name));
+            });
+        });
+
+        // Render a vertical section per day (only non-empty days, in enum order)
+        var html = '';
+        dayOrder.forEach(function (dayVal) {
+            var dayItems = byDay[dayVal];
+            if (!dayItems || !dayItems.length) return;
+            var dayName = dayLabels[dayVal] || dayVal;
+            html += '<div class="bm-timetable-day-section mb-4">';
+            html += '<h3 class="bm-timetable-day-header">' + escHtml(dayName) + '</h3>';
+            html += '<div class="table-responsive"><table class="table table-striped table-hover">';
+            html += '<thead><tr><th>Actions</th>';
+            listFields.forEach(function (f) { html += '<th>' + escHtml(f.label) + '</th>'; });
+            html += '</tr></thead><tbody>';
             dayItems.forEach(function (item) {
                 var id = item.id || item.Id || '';
-                var label = labelField ? (nestedGet(item, labelField.name) || id) : id;
-                html += '<div class="badge bg-primary mb-1 d-block text-wrap text-start">' +
-                    '<a href="' + baseUrl + '/' + encodeURIComponent(id) + '" class="text-white text-decoration-none small">' + escHtml(String(label)) + '</a>' +
-                    '</div>';
+                html += '<tr><td style="white-space:nowrap">' +
+                    '<a class="btn btn-outline-info btn-sm me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '" title="View"><i class="bi bi-eye"></i></a>' +
+                    '<a class="btn btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>' +
+                    '<a class="btn btn-outline-secondary btn-sm me-1" href="' + baseUrl + '/create?cloneFrom=' + encodeURIComponent(id) + '" title="Clone"><i class="bi bi-copy"></i></a>' +
+                    '<button class="btn btn-outline-danger btn-sm" data-delete-id="' + escHtml(id) + '" title="Delete"><i class="bi bi-trash"></i></button>' +
+                    '</td>';
+                listFields.forEach(function (f) {
+                    html += '<td>' + fmtValue(nestedGet(item, f.name), f.type) + '</td>';
+                });
+                html += '</tr>';
             });
-            html += '</td>';
+            html += '</tbody></table></div></div>';
         });
-        html += '</tr></tbody></table></div>';
+
+        if (!html) return '<p class="text-muted">No timetable items found.</p>';
         return html;
     }
 
