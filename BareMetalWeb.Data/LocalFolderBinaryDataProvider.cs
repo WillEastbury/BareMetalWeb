@@ -37,6 +37,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _clusteredLocationMaps = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<Type, SchemaCache> _schemaCache = new();
     private readonly ConcurrentDictionary<Type, object> _schemaLocks = new();
+    private readonly ConcurrentDictionary<string, object> _seqIdLocks = new(StringComparer.OrdinalIgnoreCase);
 
     private sealed class SchemaCache
     {
@@ -184,6 +185,113 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             File.Delete(path);
 
         return ValueTask.CompletedTask;
+    }
+
+    public string NextSequentialId(string entityName)
+    {
+        if (string.IsNullOrWhiteSpace(entityName))
+            throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
+
+        var path = GetSeqIdFilePath(entityName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var lockObj = _seqIdLocks.GetOrAdd(entityName, _ => new object());
+
+        lock (lockObj)
+        {
+            const int maxRetries = 4;
+            const int initialDelayMs = 10;
+
+            for (int attempt = 0; attempt < maxRetries; attempt++)
+            {
+                try
+                {
+                    return IncrementAndReadSeqIdFile(path);
+                }
+                catch (IOException)
+                {
+                    Thread.Sleep(initialDelayMs * (1 << attempt));
+                }
+            }
+
+            // Final attempt – let any IOException propagate.
+            return IncrementAndReadSeqIdFile(path);
+        }
+    }
+
+    public void SeedSequentialId(string entityName, long floor)
+    {
+        if (string.IsNullOrWhiteSpace(entityName))
+            throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
+        if (floor <= 0)
+            return;
+
+        var path = GetSeqIdFilePath(entityName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        var lockObj = _seqIdLocks.GetOrAdd(entityName, _ => new object());
+
+        lock (lockObj)
+        {
+            const int maxRetries = 4;
+            const int initialDelayMs = 10;
+
+            for (int attempt = 0; attempt < maxRetries; attempt++)
+            {
+                try
+                {
+                    SeedSeqIdFileIfLower(path, floor);
+                    return;
+                }
+                catch (IOException)
+                {
+                    Thread.Sleep(initialDelayMs * (1 << attempt));
+                }
+            }
+
+            // Final attempt – let any IOException propagate.
+            SeedSeqIdFileIfLower(path, floor);
+        }
+    }
+
+    private static string IncrementAndReadSeqIdFile(string path)
+    {
+        var buf = new byte[8];
+        using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        long current = 0;
+        if (file.Length >= 8)
+        {
+            file.ReadExactly(buf, 0, 8);
+            current = BinaryPrimitives.ReadInt64LittleEndian(buf);
+        }
+        var next = current + 1;
+        BinaryPrimitives.WriteInt64LittleEndian(buf, next);
+        file.Position = 0;
+        file.Write(buf, 0, 8);
+        file.Flush(true);
+        return next.ToString();
+    }
+
+    private static void SeedSeqIdFileIfLower(string path, long floor)
+    {
+        var buf = new byte[8];
+        using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        long current = 0;
+        if (file.Length >= 8)
+        {
+            file.ReadExactly(buf, 0, 8);
+            current = BinaryPrimitives.ReadInt64LittleEndian(buf);
+        }
+        if (current < floor)
+        {
+            BinaryPrimitives.WriteInt64LittleEndian(buf, floor);
+            file.Position = 0;
+            file.Write(buf, 0, 8);
+            file.Flush(true);
+        }
+    }
+
+    private string GetSeqIdFilePath(string entityName)
+    {
+        return Path.Combine(_rootPath, SanitizeFilePart(entityName), "_seqid.dat");
     }
 
     private string GetIndexLogPath(string entityName, string fieldName)

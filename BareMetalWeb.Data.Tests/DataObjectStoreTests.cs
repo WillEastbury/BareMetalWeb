@@ -106,6 +106,17 @@ public class DataObjectStoreTests
         public IPagedFile OpenPagedFile(string entityName, string fileName, int pageSize, FileAccess access) => throw new NotImplementedException();
         public ValueTask DeletePagedFileAsync(string entityName, string fileName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
 
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _seqCounters = new(StringComparer.OrdinalIgnoreCase);
+        public string NextSequentialId(string entityName)
+        {
+            var next = _seqCounters.AddOrUpdate(entityName, 1L, (_, cur) => cur + 1);
+            return next.ToString();
+        }
+        public void SeedSequentialId(string entityName, long floor)
+        {
+            _seqCounters.AddOrUpdate(entityName, floor, (_, cur) => Math.Max(cur, floor));
+        }
+
         private class DummyDisposable : IDisposable
         {
             public void Dispose() { }
