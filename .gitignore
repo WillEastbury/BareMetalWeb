@@ -9,3 +9,4 @@ terraform
 terraform_1.7.5_linux_arm64.zip
 BareMetalWeb.Host/Data/
 */TestResults/
+node_modules/

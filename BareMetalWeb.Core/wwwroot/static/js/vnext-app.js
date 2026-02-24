@@ -225,8 +225,17 @@
         var search = query.q    || '';
 
         fetchMeta(slug).then(function (meta) {
+            // Hierarchy/calendar views need all items (no pagination)
+            var vt = meta.viewType || '';
+            var activeView = query.view || '';
+            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' || vt === 'Timetable' ||
+                activeView === 'TreeView' || activeView === 'OrgChart' || activeView === 'Timeline' || activeView === 'Timetable');
+
+            var effectiveSkip = isHierarchyView ? 0 : skip;
+            var effectiveTop  = isHierarchyView ? 10000 : top;
+
             // Build API query
-            var params = ['skip=' + skip, 'top=' + top];
+            var params = ['skip=' + effectiveSkip, 'top=' + effectiveTop];
             if (search)  params.push('q=' + encodeURIComponent(search));
             if (sort)    params.push('sort=' + encodeURIComponent(sort), 'dir=' + encodeURIComponent(dir));
             // Per-field filters from query string
@@ -306,7 +315,31 @@
                 '</div>';
 
             // Table
-            html += '<div class="table-responsive"><table class="table table-hover table-striped table-sm align-middle">';
+            // Card layout for narrow viewports
+            html += '<div class="d-md-none vnext-card-list">';
+            if (items.length === 0) {
+                html += '<p class="text-center text-muted py-4">No records found.</p>';
+            } else {
+                items.forEach(function (item) {
+                    var id = item.id || item.Id || '';
+                    var encId = encodeURIComponent(id);
+                    html += '<div class="card mb-2"><div class="card-body p-2">';
+                    listFields.forEach(function (f) {
+                        var val = nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1));
+                        html += '<div class="d-flex justify-content-between"><small class="text-muted">' + escHtml(f.label) + '</small><span>' + fmtValue(val, f.type) + '</span></div>';
+                    });
+                    html += '<div class="mt-2 d-flex gap-1">';
+                    html += '<a class="btn btn-xs btn-outline-info btn-sm" href="' + baseUrl + '/' + encId + '"><i class="bi bi-eye"></i></a>';
+                    html += '<a class="btn btn-xs btn-outline-warning btn-sm" href="' + baseUrl + '/' + encId + '/edit"><i class="bi bi-pencil"></i></a>';
+                    html += '<button class="btn btn-xs btn-outline-primary btn-sm vnext-row-clone" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '"><i class="bi bi-files"></i></button>';
+                    html += '<button class="btn btn-xs btn-outline-danger btn-sm vnext-row-delete" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '"><i class="bi bi-trash"></i></button>';
+                    html += '</div></div></div>';
+                });
+            }
+            html += '</div>';
+
+            // Table layout for wider viewports
+            html += '<div class="d-none d-md-block table-responsive"><table class="table table-hover table-striped table-sm align-middle">';
             html += '<thead><tr>';
             html += '<th scope="col"><input type="checkbox" class="form-check-input" id="vnext-select-all" title="Select all"></th>';
             listFields.forEach(function (f) {
@@ -337,6 +370,7 @@
                     html += '<td class="text-nowrap">';
                     html += '<a class="btn btn-xs btn-outline-info btn-sm me-1" href="' + baseUrl + '/' + encId + '" title="View"><i class="bi bi-eye"></i></a>';
                     html += '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encId + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>';
+                    html += '<button class="btn btn-xs btn-outline-primary btn-sm me-1 vnext-row-clone" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '" title="Clone"><i class="bi bi-files"></i></button>';
                     html += '<button class="btn btn-xs btn-outline-danger btn-sm vnext-row-delete" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '" title="Delete"><i class="bi bi-trash"></i></button>';
                     html += '</td></tr>';
                 });
@@ -719,6 +753,32 @@
                         .then(function () { showToast('Record deleted.', 'success'); clearLookupCache(slug); BMRouter.navigate(buildUrl(baseUrl, query)); })
                         .catch(function (err) { showToast('Delete failed: ' + err.message, 'error'); });
                 });
+            });
+        });
+
+        // Clone button handler — loads item, strips ID/audit fields, POSTs as new
+        document.querySelectorAll('.vnext-row-clone').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var id = btn.dataset.id;
+                btn.disabled = true;
+                apiFetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id))
+                    .then(function (item) {
+                        var clone = JSON.parse(JSON.stringify(item));
+                        delete clone.id; delete clone.Id;
+                        delete clone.createdOnUtc; delete clone.CreatedOnUtc;
+                        delete clone.updatedOnUtc; delete clone.UpdatedOnUtc;
+                        delete clone.createdBy; delete clone.CreatedBy;
+                        delete clone.updatedBy; delete clone.UpdatedBy;
+                        delete clone.eTag; delete clone.ETag;
+                        return apiPost(API + '/' + encodeURIComponent(slug), clone);
+                    })
+                    .then(function (result) {
+                        showToast('Record cloned.', 'success');
+                        clearLookupCache(slug);
+                        BMRouter.navigate(buildUrl(baseUrl, query));
+                    })
+                    .catch(function (err) { showToast('Clone failed: ' + err.message, 'error'); })
+                    .finally(function () { btn.disabled = false; });
             });
         });
 
