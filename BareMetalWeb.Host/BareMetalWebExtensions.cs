@@ -161,8 +161,8 @@ public static class BareMetalWebExtensions
                 ? (app.Urls ?? Array.Empty<string>())
                 : addresses;
             var display = list.Any() ? string.Join(", ", list) : "unknown";
-            logger.LogInfo($"BareMetalWeb server is ready - listening for requests on {display}");
-            Console.WriteLine($"BareMetalWeb server is ready - listening for requests on {display}");
+            logger.LogInfo($"BareMetalWeb server is ready — PID {Environment.ProcessId} — listening for requests on {display}");
+            Console.WriteLine($"BareMetalWeb server is ready — PID {Environment.ProcessId} — listening for requests on {display}");
 
             var httpsConfig = $"HTTPS redirect settings: mode={appInfo.HttpsRedirectMode}, trustForwardedHeaders={appInfo.TrustForwardedHeaders}, redirectHost={(string.IsNullOrWhiteSpace(appInfo.HttpsRedirectHost) ? "(auto)" : appInfo.HttpsRedirectHost)}, redirectPort={(appInfo.HttpsRedirectPort.HasValue ? appInfo.HttpsRedirectPort.Value.ToString() : "(auto)")}";
             logger.LogInfo(httpsConfig);
