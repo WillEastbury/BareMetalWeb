@@ -290,6 +290,38 @@ public class DataScaffoldLookupTests : IDisposable
     }
 
     /// <summary>
+    /// Regression test: BuildFormFields for an entity with an Enum field must populate
+    /// LookupOptions and SelectedValue so the VNext edit form can pre-select the saved value.
+    /// </summary>
+    [Fact]
+    public void BuildFormFields_ForEdit_WithEnumField_PopulatesOptionsAndSelectedValue()
+    {
+        // Arrange: a TimeTablePlan with Day = Tuesday
+        var plan = new TimeTablePlan
+        {
+            Id = "ttp-1",
+            SubjectId = "subj-1",
+            Day = BareMetalWeb.Data.DataObjects.DayOfWeek.Tuesday,
+            StartTime = new TimeOnly(12, 0)
+        };
+
+        var meta = DataScaffold.GetEntityByType(typeof(TimeTablePlan));
+        Assert.NotNull(meta);
+
+        // Act
+        var fields = DataScaffold.BuildFormFields(meta, plan, forCreate: false);
+        var dayField = fields.FirstOrDefault(f => f.Name == nameof(TimeTablePlan.Day));
+
+        // Assert
+        Assert.NotNull(dayField);
+        Assert.Equal(Rendering.Models.FormFieldType.Enum, dayField!.FieldType);
+        Assert.NotNull(dayField.LookupOptions);
+        Assert.True(dayField.LookupOptions!.Count > 0, "Enum options must be populated");
+        Assert.Contains(dayField.LookupOptions, o => o.Key == "Tuesday");
+        Assert.Equal("Tuesday", dayField.SelectedValue);
+    }
+
+    /// <summary>
     /// A data store that deliberately returns two Address items with the same Id,
     /// replicating what can happen after repeated sample-data generation.
     /// </summary>

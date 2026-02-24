@@ -869,6 +869,12 @@ public static class RouteRegistrationExtensions
                 fd["upload"] = null;
             }
 
+            fd["enumValues"] = f.FieldType == FormFieldType.Enum
+                ? DataScaffold.BuildEnumOptions(f.Property.PropertyType)
+                    .Select(kv => new { value = kv.Key, label = kv.Value })
+                    .ToArray()
+                : null;
+
             return (object)fd;
         }).ToArray();
 
