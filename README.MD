@@ -11,6 +11,10 @@ Just Kestrel, explicit routing, streaming HTML templates, a custom binary serial
 [![Unit Tests](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/unit-tests.yml)
 [![Performance Tests](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/performance-tests.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/performance-tests.yml)
 
+📚 **[Full Documentation Index →](docs/index.md)**
+
+---
+
 ## What is this?
 
 BareMetalWeb is a lean, mean web server that uses ASP.NET Core **only** for HTTP/SSL — everything else is built from scratch for minimalism, performance, and clarity. Think classic-era `.ashx` handlers and `HttpModules` reborn in modern .NET 9.
@@ -247,4 +251,4 @@ The repository includes a helper script for running tests with minimal, scannabl
 ./run-tests.sh --no-build BareMetalWeb.Core.Tests/
 ```
 
-For more details, see [TESTING.md](TESTING.md).
+For more details, see [TESTING.md](docs/TESTING.md).
