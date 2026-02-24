@@ -1141,7 +1141,7 @@ public static class RouteRegistrationExtensions
         sb.Append("</ul></div></div></nav>");
         sb.Append("<div class=\"container-fluid py-3\" id=\"vnext-content\"><div class=\"text-center py-5\"><div class=\"spinner-border\" role=\"status\"><span class=\"visually-hidden\">Loading...</span></div></div></div>");
         sb.Append("<div id=\"vnext-modal-container\"></div>");
-        sb.Append("<div id=\"vnext-toast-container\" class=\"position-fixed top-0 end-0 p-3\" style=\"z-index:1100\"></div>");
+        sb.Append("<div id=\"vnext-toast-container\" class=\"position-fixed top-0 end-0 p-3\"></div>");
         sb.Append("<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js\" crossorigin=\"anonymous\"></script>");
         sb.Append("<script src=\"/static/js/BareMetalRouting.js\"></script>");
         sb.Append("<script src=\"/static/js/vnext-app.js\"></script>");

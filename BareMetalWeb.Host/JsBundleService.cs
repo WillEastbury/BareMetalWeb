@@ -31,7 +31,8 @@ public static class JsBundleService
         "bulk-operations.js",
         "form-validation.js",
         "toast.js",
-        "otp.js"
+        "otp.js",
+        "gantt-view.js"
     };
 
     /// <summary>The route path at which the bundle is served.</summary>

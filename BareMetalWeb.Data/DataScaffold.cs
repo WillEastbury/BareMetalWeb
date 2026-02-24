@@ -630,7 +630,7 @@ public static class DataScaffold
                 var safeName = WebUtility.HtmlEncode(storedFile.FileName);
                 if (storedFile.IsImage)
                 {
-                    rows.Add((field.Label, $"<a href=\"{safeUrl}\" target=\"_blank\" rel=\"noopener\"><img src=\"{safeUrl}\" alt=\"{safeName}\" class=\"img-thumbnail\" style=\"max-width:200px;max-height:200px;\"/></a>", true));
+                    rows.Add((field.Label, $"<a href=\"{safeUrl}\" target=\"_blank\" rel=\"noopener\"><img src=\"{safeUrl}\" alt=\"{safeName}\" class=\"img-thumbnail bm-img-preview\"/></a>", true));
                 }
                 else
                 {
@@ -942,8 +942,8 @@ public static class DataScaffold
 
         if (hasChildren)
         {
-            var childrenVisibility = isExpanded ? "" : " style=\"display: none;\"";
-            html.Append($"<ul class=\"bm-data-tree-list\"{childrenVisibility}>");
+            var childrenVisibility = isExpanded ? "" : " d-none";
+            html.Append($"<ul class=\"bm-data-tree-list{childrenVisibility}\">");
             foreach (var child in children)
             {
                 RenderTreeNode(html, metadata, child, allItems, selectedId, basePath, depth + 1);

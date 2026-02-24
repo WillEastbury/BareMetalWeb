@@ -21,17 +21,17 @@
                 if (!childList) return;
                 
                 // Toggle visibility
-                const isCurrentlyExpanded = childList.style.display !== 'none';
+                const isCurrentlyExpanded = !childList.classList.contains('d-none');
                 
                 if (isCurrentlyExpanded) {
                     // Collapse
-                    childList.style.display = 'none';
+                    childList.classList.add('d-none');
                     this.textContent = '▸';
                     this.classList.remove('bm-tree-expanded');
                     this.classList.add('bm-tree-collapsed');
                 } else {
                     // Expand
-                    childList.style.display = '';
+                    childList.classList.remove('d-none');
                     this.textContent = '▾';
                     this.classList.remove('bm-tree-collapsed');
                     this.classList.add('bm-tree-expanded');
