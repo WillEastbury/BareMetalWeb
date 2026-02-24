@@ -68,7 +68,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                await FlushOnceAsync(cancellationToken);
+                await FlushOnceAsync(CancellationToken.None);
                 await Task.Delay(200, cancellationToken);
             }
         }
