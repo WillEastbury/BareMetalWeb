@@ -108,6 +108,11 @@ public static class BareMetalWebExtensions
             // Admin
             (WellKnownSettings.AllowWipeData, app.Configuration.GetValue("Admin:AllowWipeData", string.Empty), "Secret token required to trigger wipe-all-data. Leave empty to disable the endpoint."),
         };
+        // Seed any missing settings and promote empty values when the config provides a non-empty default.
+        // This runs at every startup so that changes to appsettings.json are picked up without
+        // requiring a manual edit in the admin UI.
+        await SettingsService.EnsureDefaultsAsync(DataStoreProvider.Current, settingDefaults, "system").ConfigureAwait(false);
+
         IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot, auditService, settingDefaults);
         IHtmlTemplate mainTemplate = templateStore.Get("Index");
         CancellationTokenSource cts = new CancellationTokenSource();
