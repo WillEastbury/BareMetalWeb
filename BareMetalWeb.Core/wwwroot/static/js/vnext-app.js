@@ -929,18 +929,33 @@
     }
 
     function resolveViewLookups(slug) {
+        // Group elements by targetSlug so we can batch all IDs for the same entity in one request
+        var groups = {};
         document.querySelectorAll('[data-lookup-field]').forEach(function (el) {
             var targetSlug  = el.dataset.targetSlug;
-            var displayField = el.dataset.displayField;
             var value       = el.dataset.value;
             if (!targetSlug || !value) return;
-            apiFetch(API + '/_lookup/' + encodeURIComponent(targetSlug) + '/' + encodeURIComponent(value))
-                .then(function (obj) {
-                    if (obj) {
-                        var display = nestedGet(obj, displayField) || nestedGet(obj, displayField.charAt(0).toLowerCase() + displayField.slice(1)) || value;
-                        var href = BASE + '/data/' + encodeURIComponent(targetSlug) + '/' + encodeURIComponent(value);
-                        el.innerHTML = '<a href="' + escHtml(href) + '">' + escHtml(String(display)) + '</a>';
-                    }
+            if (!groups[targetSlug]) groups[targetSlug] = [];
+            groups[targetSlug].push(el);
+        });
+
+        Object.keys(groups).forEach(function (targetSlug) {
+            var els = groups[targetSlug];
+            var uniqueIds = els.map(function (el) { return el.dataset.value; })
+                              .filter(function (v, i, a) { return a.indexOf(v) === i; });
+            apiPost(API + '/_lookup/' + encodeURIComponent(targetSlug) + '/_batch', { ids: uniqueIds })
+                .then(function (resp) {
+                    var results = resp && resp.results ? resp.results : {};
+                    els.forEach(function (el) {
+                        var value       = el.dataset.value;
+                        var displayField = el.dataset.displayField;
+                        var obj = results[value];
+                        if (obj) {
+                            var display = nestedGet(obj, displayField) || nestedGet(obj, displayField.charAt(0).toLowerCase() + displayField.slice(1)) || value;
+                            var href = BASE + '/admin/data/' + encodeURIComponent(targetSlug) + '/' + encodeURIComponent(value);
+                            el.innerHTML = '<a href="' + escHtml(href) + '">' + escHtml(String(display)) + '</a>';
+                        }
+                    });
                 })
                 .catch(function () {});
         });
@@ -1200,17 +1215,32 @@
     }
 
     function resolveSubListLookups(fieldName) {
+        // Group elements by targetSlug for batched lookup requests
+        var groups = {};
         document.querySelectorAll('#sub_tbl_' + fieldName + ' [data-lookup-field]').forEach(function (el) {
             var targetSlug  = el.dataset.targetSlug;
-            var displayField = el.dataset.displayField;
             var value       = el.dataset.value;
             if (!targetSlug || !value) return;
-            apiFetch(API + '/_lookup/' + encodeURIComponent(targetSlug) + '/' + encodeURIComponent(value))
-                .then(function (obj) {
-                    if (obj) {
-                        var display = nestedGet(obj, displayField) || nestedGet(obj, displayField.charAt(0).toLowerCase() + displayField.slice(1)) || value;
-                        el.textContent = String(display);
-                    }
+            if (!groups[targetSlug]) groups[targetSlug] = [];
+            groups[targetSlug].push(el);
+        });
+
+        Object.keys(groups).forEach(function (targetSlug) {
+            var els = groups[targetSlug];
+            var uniqueIds = els.map(function (el) { return el.dataset.value; })
+                              .filter(function (v, i, a) { return a.indexOf(v) === i; });
+            apiPost(API + '/_lookup/' + encodeURIComponent(targetSlug) + '/_batch', { ids: uniqueIds })
+                .then(function (resp) {
+                    var results = resp && resp.results ? resp.results : {};
+                    els.forEach(function (el) {
+                        var value       = el.dataset.value;
+                        var displayField = el.dataset.displayField;
+                        var obj = results[value];
+                        if (obj) {
+                            var display = nestedGet(obj, displayField) || nestedGet(obj, displayField.charAt(0).toLowerCase() + displayField.slice(1)) || value;
+                            el.textContent = String(display);
+                        }
+                    });
                 }).catch(function () {});
         });
     }

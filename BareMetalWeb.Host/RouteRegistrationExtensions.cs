@@ -448,6 +448,7 @@ public static class RouteRegistrationExtensions
         // More specific routes must be registered first to avoid {id} matching literal segments
         host.RegisterRoute("GET /api/_lookup/{type}/_field/{id}/{fieldName}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityFieldHandler));
         host.RegisterRoute("GET /api/_lookup/{type}/_aggregate", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.AggregateEntitiesHandler));
+        host.RegisterRoute("POST /api/_lookup/{type}/_batch", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.BatchGetEntitiesHandler));
         host.RegisterRoute("GET /api/_lookup/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityByIdHandler));
         host.RegisterRoute("GET /api/_lookup/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.QueryEntitiesHandler));
     }

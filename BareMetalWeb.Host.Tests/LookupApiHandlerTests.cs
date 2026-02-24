@@ -99,6 +99,8 @@ public class LookupApiHandlerTests : IDisposable
             new RouteHandlerData(rawPageInfo, LookupApiHandlers.GetEntityFieldHandler));
         _server.RegisterRoute("GET /api/_lookup/{type}/_aggregate",
             new RouteHandlerData(rawPageInfo, LookupApiHandlers.AggregateEntitiesHandler));
+        _server.RegisterRoute("POST /api/_lookup/{type}/_batch",
+            new RouteHandlerData(rawPageInfo, LookupApiHandlers.BatchGetEntitiesHandler));
         _server.RegisterRoute("GET /api/_lookup/{type}/{id}",
             new RouteHandlerData(rawPageInfo, LookupApiHandlers.GetEntityByIdHandler));
         _server.RegisterRoute("GET /api/_lookup/{type}",
@@ -265,6 +267,104 @@ public class LookupApiHandlerTests : IDisposable
         Assert.Equal(400, context.Response.StatusCode);
     }
 
+    [Fact]
+    public async Task BatchGetEntities_ReturnsMatchedEntities_WhenAllExist()
+    {
+        // Arrange
+        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+        _testStore.Save(new Product { Id = "prod-2", Name = "Gadget" });
+
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "prod-1", "prod-2" } });
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        var json = await ReadResponseJson(context);
+        var results = json.GetProperty("results");
+        Assert.Equal("Widget", results.GetProperty("prod-1").GetProperty("Name").GetString());
+        Assert.Equal("Gadget", results.GetProperty("prod-2").GetProperty("Name").GetString());
+    }
+
+    [Fact]
+    public async Task BatchGetEntities_OmitsMissingEntities_WhenSomeNotFound()
+    {
+        // Arrange
+        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "prod-1", "nonexistent" } });
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        var json = await ReadResponseJson(context);
+        var results = json.GetProperty("results");
+        Assert.True(results.TryGetProperty("prod-1", out _));
+        Assert.False(results.TryGetProperty("nonexistent", out _));
+    }
+
+    [Fact]
+    public async Task BatchGetEntities_ReturnsEmptyResults_WhenIdsArrayIsEmpty()
+    {
+        // Arrange
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = Array.Empty<string>() });
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        var json = await ReadResponseJson(context);
+        Assert.Equal(JsonValueKind.Object, json.GetProperty("results").ValueKind);
+    }
+
+    [Fact]
+    public async Task BatchGetEntities_Returns400_WhenBodyMissingIdsProperty()
+    {
+        // Arrange
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { something = "else" });
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(400, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task BatchGetEntities_Returns404_ForUnknownEntityType()
+    {
+        // Arrange
+        var context = CreatePostHttpContext("/api/_lookup/nonexistent-type/_batch", new { ids = new[] { "id-1" } });
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(404, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task BatchGetEntities_DeduplicatesIds_WhenDuplicatesPassed()
+    {
+        // Arrange
+        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "prod-1", "prod-1", "prod-1" } });
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        var json = await ReadResponseJson(context);
+        var results = json.GetProperty("results");
+        Assert.True(results.TryGetProperty("prod-1", out _));
+    }
+
     #region Helpers
 
     private HttpContext CreateHttpContext(string method, string pathAndQuery)
@@ -282,6 +382,16 @@ public class LookupApiHandlerTests : IDisposable
         // Add session cookie for authenticated requests
         var protectedSessionId = CookieProtection.Protect(_testSessionId);
         context.Request.Headers.Cookie = $"{UserAuth.SessionCookieName}={protectedSessionId}";
+        return context;
+    }
+
+    private HttpContext CreatePostHttpContext(string path, object body)
+    {
+        var context = CreateHttpContext("POST", path);
+        var json = JsonSerializer.SerializeToUtf8Bytes(body);
+        context.Request.Body = new MemoryStream(json);
+        context.Request.ContentType = "application/json";
+        context.Request.ContentLength = json.Length;
         return context;
     }
 
