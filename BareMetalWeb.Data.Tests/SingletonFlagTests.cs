@@ -1,0 +1,196 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using BareMetalWeb.Core;
+using BareMetalWeb.Data;
+using Xunit;
+
+namespace BareMetalWeb.Data.Tests;
+
+// Test entity with a singleton flag property
+[DataEntity("Singleton Test Items", Slug = "singleton-test-items")]
+public class SingletonTestItem : BaseDataObject
+{
+    [DataField(Label = "Name")]
+    public string Name { get; set; } = string.Empty;
+
+    [DataField(Label = "Is Default")]
+    [SingletonFlag]
+    public bool IsDefault { get; set; }
+}
+
+// Test entity with multiple singleton flag properties
+[DataEntity("Multi Singleton Test Items", Slug = "multi-singleton-test-items")]
+public class MultiSingletonTestItem : BaseDataObject
+{
+    [DataField(Label = "Name")]
+    public string Name { get; set; } = string.Empty;
+
+    [DataField(Label = "Is Primary")]
+    [SingletonFlag]
+    public bool IsPrimary { get; set; }
+
+    [DataField(Label = "Is Secondary")]
+    [SingletonFlag]
+    public bool IsSecondary { get; set; }
+}
+
+public class SingletonFlagTests : IDisposable
+{
+    private readonly string _testRoot;
+    private readonly LocalFolderBinaryDataProvider _provider;
+
+    public SingletonFlagTests()
+    {
+        _testRoot = Path.Combine(Path.GetTempPath(), "BareMetalWeb_SingletonTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(_testRoot);
+        _provider = new LocalFolderBinaryDataProvider(_testRoot);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_testRoot))
+        {
+            try { Directory.Delete(_testRoot, recursive: true); }
+            catch { /* best effort cleanup */ }
+        }
+    }
+
+    [Fact]
+    public void Save_SingletonFlagTrue_ClearsOtherRecordsFlag()
+    {
+        // Arrange - save first record with the flag set
+        var first = new SingletonTestItem { Id = "s1", Name = "First", IsDefault = true };
+        _provider.Save(first);
+
+        // Act - save second record with the flag also set to true
+        var second = new SingletonTestItem { Id = "s2", Name = "Second", IsDefault = true };
+        _provider.Save(second);
+
+        // Assert - first record's flag should have been cleared
+        var reloadedFirst = _provider.Load<SingletonTestItem>("s1");
+        Assert.NotNull(reloadedFirst);
+        Assert.False(reloadedFirst!.IsDefault);
+
+        // And second record should still have the flag set
+        var reloadedSecond = _provider.Load<SingletonTestItem>("s2");
+        Assert.NotNull(reloadedSecond);
+        Assert.True(reloadedSecond!.IsDefault);
+    }
+
+    [Fact]
+    public async Task SaveAsync_SingletonFlagTrue_ClearsOtherRecordsFlag()
+    {
+        // Arrange
+        var first = new SingletonTestItem { Id = "sa1", Name = "First", IsDefault = true };
+        await _provider.SaveAsync(first);
+
+        // Act
+        var second = new SingletonTestItem { Id = "sa2", Name = "Second", IsDefault = true };
+        await _provider.SaveAsync(second);
+
+        // Assert
+        var reloadedFirst = _provider.Load<SingletonTestItem>("sa1");
+        Assert.NotNull(reloadedFirst);
+        Assert.False(reloadedFirst!.IsDefault);
+
+        var reloadedSecond = _provider.Load<SingletonTestItem>("sa2");
+        Assert.NotNull(reloadedSecond);
+        Assert.True(reloadedSecond!.IsDefault);
+    }
+
+    [Fact]
+    public void Save_SingletonFlagFalse_DoesNotAffectOtherRecords()
+    {
+        // Arrange - save a record with the flag set
+        var first = new SingletonTestItem { Id = "sf1", Name = "First", IsDefault = true };
+        _provider.Save(first);
+
+        // Act - save second record with flag NOT set
+        var second = new SingletonTestItem { Id = "sf2", Name = "Second", IsDefault = false };
+        _provider.Save(second);
+
+        // Assert - first record's flag should be unchanged
+        var reloadedFirst = _provider.Load<SingletonTestItem>("sf1");
+        Assert.NotNull(reloadedFirst);
+        Assert.True(reloadedFirst!.IsDefault);
+    }
+
+    [Fact]
+    public void Save_SingletonFlagTrue_OnlyOneActiveAtATime_MultipleRecords()
+    {
+        // Arrange - save multiple records, each one setting the flag to true
+        for (int i = 1; i <= 5; i++)
+        {
+            var item = new SingletonTestItem { Id = $"m{i}", Name = $"Item {i}", IsDefault = true };
+            _provider.Save(item);
+        }
+
+        // Assert - only the last saved record should have the flag set
+        var allItems = _provider.Query<SingletonTestItem>().ToList();
+        Assert.Equal(5, allItems.Count);
+        var flaggedItems = allItems.Where(x => x.IsDefault).ToList();
+        Assert.Single(flaggedItems);
+        Assert.Equal("m5", flaggedItems[0].Id);
+    }
+
+    [Fact]
+    public void Save_UpdateSameRecord_RetainsSingletonFlag()
+    {
+        // Arrange - save a record with the flag set
+        var item = new SingletonTestItem { Id = "upd1", Name = "Original", IsDefault = true };
+        _provider.Save(item);
+
+        // Act - update the same record (keeping the flag)
+        item.Name = "Updated";
+        _provider.Save(item);
+
+        // Assert - the record still has the flag
+        var reloaded = _provider.Load<SingletonTestItem>("upd1");
+        Assert.NotNull(reloaded);
+        Assert.True(reloaded!.IsDefault);
+        Assert.Equal("Updated", reloaded.Name);
+    }
+
+    [Fact]
+    public void Save_MultipleSingletonFlags_EachEnforcedIndependently()
+    {
+        // Arrange - save two records each with different singleton flags
+        var first = new MultiSingletonTestItem { Id = "ms1", Name = "First", IsPrimary = true, IsSecondary = false };
+        _provider.Save(first);
+
+        var second = new MultiSingletonTestItem { Id = "ms2", Name = "Second", IsPrimary = false, IsSecondary = true };
+        _provider.Save(second);
+
+        // Act - save third record with both flags set
+        var third = new MultiSingletonTestItem { Id = "ms3", Name = "Third", IsPrimary = true, IsSecondary = true };
+        _provider.Save(third);
+
+        // Assert - first record's IsPrimary should be cleared
+        var reloadedFirst = _provider.Load<MultiSingletonTestItem>("ms1");
+        Assert.NotNull(reloadedFirst);
+        Assert.False(reloadedFirst!.IsPrimary);
+
+        // Assert - second record's IsSecondary should be cleared
+        var reloadedSecond = _provider.Load<MultiSingletonTestItem>("ms2");
+        Assert.NotNull(reloadedSecond);
+        Assert.False(reloadedSecond!.IsSecondary);
+
+        // Assert - third record has both flags set
+        var reloadedThird = _provider.Load<MultiSingletonTestItem>("ms3");
+        Assert.NotNull(reloadedThird);
+        Assert.True(reloadedThird!.IsPrimary);
+        Assert.True(reloadedThird!.IsSecondary);
+    }
+
+    [Fact]
+    public void SingletonFlagAttribute_IsApplied_ToCurrencyIsBase()
+    {
+        // Verify that the Currency.IsBase property has the [SingletonFlag] attribute applied
+        var prop = typeof(BareMetalWeb.Data.DataObjects.Currency).GetProperty(nameof(BareMetalWeb.Data.DataObjects.Currency.IsBase));
+        Assert.NotNull(prop);
+        var attr = prop!.GetCustomAttributes(typeof(SingletonFlagAttribute), inherit: true);
+        Assert.NotEmpty(attr);
+    }
+}

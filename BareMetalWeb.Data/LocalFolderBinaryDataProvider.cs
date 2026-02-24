@@ -326,6 +326,10 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         if (string.IsNullOrWhiteSpace(obj.Id))
             throw new ArgumentException("DataObject must have a non-empty Id.", nameof(obj));
 
+        // Enforce singleton flag: when a boolean property marked [SingletonFlag] is true,
+        // clear that flag on all other records of this type before saving.
+        ClearSingletonFlagsOnOtherRecords(obj);
+
         var now = DateTime.UtcNow;
         if (obj.CreatedOnUtc == default)
             obj.CreatedOnUtc = now;
@@ -429,6 +433,47 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     {
         Save(obj);
         return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// For each boolean property on <paramref name="obj"/> decorated with <see cref="SingletonFlagAttribute"/>
+    /// that is currently <c>true</c>, find all other persisted records of the same type and set that
+    /// property to <c>false</c>, then persist the change. This enforces the invariant that at most one
+    /// record in the set can hold the singleton flag at a time.
+    /// </summary>
+    private void ClearSingletonFlagsOnOtherRecords<T>(T obj) where T : BaseDataObject
+    {
+        var type = typeof(T);
+        var singletonProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => p.PropertyType == typeof(bool)
+                        && p.GetCustomAttribute<SingletonFlagAttribute>() != null
+                        && p.CanRead && p.CanWrite
+                        && true.Equals(p.GetValue(obj)))
+            .ToList();
+
+        if (singletonProps.Count == 0)
+            return;
+
+        // Only load all records if there is at least one active singleton flag.
+        var allRecords = Query<T>();
+        foreach (var record in allRecords)
+        {
+            if (string.Equals(record.Id, obj.Id, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            bool changed = false;
+            foreach (var prop in singletonProps)
+            {
+                if (true.Equals(prop.GetValue(record)))
+                {
+                    prop.SetValue(record, false);
+                    changed = true;
+                }
+            }
+
+            if (changed)
+                Save(record);
+        }
     }
 
     public T? Load<T>(string id) where T : BaseDataObject
