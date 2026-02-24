@@ -133,6 +133,14 @@ public sealed class PhoneAttribute : ValidationAttribute
 }
 
 /// <summary>
+/// Marks a boolean property as a singleton flag: only one record of the entity type may have
+/// this property set to <c>true</c> at any time. When a record with this flag set to <c>true</c>
+/// is saved, the data store will automatically clear the flag on all other records of the same type.
+/// </summary>
+[AttributeUsage(AttributeTargets.Property, Inherited = true, AllowMultiple = false)]
+public sealed class SingletonFlagAttribute : Attribute { }
+
+/// <summary>
 /// Expression-based validation rule. Uses the ExpressionParser to evaluate a boolean expression.
 /// Can reference any field on the entity (cross-field validation).
 /// Apply to a property or to the class for entity-level rules.

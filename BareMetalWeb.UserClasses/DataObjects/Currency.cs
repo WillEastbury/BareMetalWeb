@@ -21,5 +21,6 @@ public class Currency : RenderableDataObject
     public bool IsEnabled { get; set; } = true;
 
     [DataField(Label = "Base Currency", Order = 6)]
+    [SingletonFlag]
     public bool IsBase { get; set; }
 }
