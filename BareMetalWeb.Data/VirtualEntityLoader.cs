@@ -43,20 +43,38 @@ public static class VirtualEntityLoader
 
         var store = new VirtualEntityJsonStore(dataRootPath);
 
+        // Pass 1: Register all entities without lookup resolution so self-referencing
+        // and cross-entity lookups can resolve in the second pass.
+        var deferredLookups = new List<(VirtualEntityDef Def, DataEntityMetadata Meta)>();
+
         foreach (var entityDef in root.VirtualEntities)
         {
             if (string.IsNullOrWhiteSpace(entityDef.Name))
                 continue;
 
-            var metadata = BuildEntityMetadata(entityDef, store);
+            var metadata = BuildEntityMetadata(entityDef, store, resolveLookups: false);
             if (metadata != null)
+            {
                 DataScaffold.RegisterVirtualEntity(metadata);
+                deferredLookups.Add((entityDef, metadata));
+            }
+        }
+
+        // Pass 2: Re-register entities that have lookup fields now that all slugs exist.
+        foreach (var (entityDef, meta) in deferredLookups)
+        {
+            if (!entityDef.Fields.Any(f => string.Equals(f.Type, "lookup", StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            var updated = BuildEntityMetadata(entityDef, store, resolveLookups: true);
+            if (updated != null)
+                DataScaffold.RegisterVirtualEntity(updated);
         }
     }
 
     // ── Entity metadata ───────────────────────────────────────────────────────
 
-    private static DataEntityMetadata? BuildEntityMetadata(VirtualEntityDef def, VirtualEntityJsonStore store)
+    private static DataEntityMetadata? BuildEntityMetadata(VirtualEntityDef def, VirtualEntityJsonStore store, bool resolveLookups = true)
     {
         var entityTypeName = def.Name;
         var slug = !string.IsNullOrWhiteSpace(def.Slug)
@@ -78,7 +96,7 @@ public static class VirtualEntityLoader
         var fields = new List<DataFieldMetadata>();
         for (int i = 0; i < def.Fields.Count; i++)
         {
-            var field = BuildFieldMetadata(def.Fields[i], defaultOrder: i + 1);
+            var field = BuildFieldMetadata(def.Fields[i], defaultOrder: i + 1, resolveLookups: resolveLookups);
             if (field != null)
                 fields.Add(field);
         }
@@ -108,6 +126,22 @@ public static class VirtualEntityLoader
             CountAsync: (query, ct) => store.CountAsync(entityTypeName, query, ct)
         );
 
+        var viewType = (def.ViewType?.ToLowerInvariant()) switch
+        {
+            "treeview" or "tree" => Data.ViewType.TreeView,
+            "orgchart" or "org" => Data.ViewType.OrgChart,
+            "timeline" => Data.ViewType.Timeline,
+            "timetable" => Data.ViewType.Timetable,
+            _ => Data.ViewType.Table
+        };
+
+        var orderedFields = fields.OrderBy(f => f.Order).ToList();
+
+        DataFieldMetadata? parentField = null;
+        if (!string.IsNullOrWhiteSpace(def.ParentField))
+            parentField = orderedFields.FirstOrDefault(f =>
+                string.Equals(f.Name, def.ParentField, StringComparison.OrdinalIgnoreCase));
+
         return new DataEntityMetadata(
             Type: typeof(DynamicDataObject),
             Name: def.Name,
@@ -117,9 +151,9 @@ public static class VirtualEntityLoader
             NavGroup: def.NavGroup,
             NavOrder: def.NavOrder,
             IdGeneration: idStrategy,
-            ViewType: ViewType.Table,
-            ParentField: null,
-            Fields: fields.OrderBy(f => f.Order).ToList(),
+            ViewType: viewType,
+            ParentField: parentField,
+            Fields: orderedFields,
             Handlers: handlers,
             Commands: Array.Empty<RemoteCommandMetadata>()
         );
@@ -127,7 +161,7 @@ public static class VirtualEntityLoader
 
     // ── Field metadata ─────────────────────────────────────────────────────────
 
-    private static DataFieldMetadata? BuildFieldMetadata(VirtualFieldDef fieldDef, int defaultOrder)
+    private static DataFieldMetadata? BuildFieldMetadata(VirtualFieldDef fieldDef, int defaultOrder, bool resolveLookups = true)
     {
         if (string.IsNullOrWhiteSpace(fieldDef.Name))
             return null;
@@ -139,7 +173,7 @@ public static class VirtualEntityLoader
         var order = fieldDef.Order > 0 ? fieldDef.Order : defaultOrder;
 
         var (clrType, fieldType) = MapFieldType(fieldDef);
-        var lookup = BuildLookupConfig(fieldDef);
+        var lookup = resolveLookups ? BuildLookupConfig(fieldDef) : null;
         var validation = BuildValidationConfig(fieldDef);
 
         return new DataFieldMetadata(
@@ -275,12 +309,25 @@ public static class VirtualEntityLoader
             ? fieldDef.LookupDisplayField!
             : valueField;
 
+        var queryField = !string.IsNullOrWhiteSpace(fieldDef.LookupQueryField)
+            ? fieldDef.LookupQueryField
+            : null;
+
+        var queryOperator = (fieldDef.LookupQueryOperator?.ToLowerInvariant()) switch
+        {
+            "notequals" or "ne" or "!=" => QueryOperator.NotEquals,
+            "equals" or "eq" or "==" => QueryOperator.Equals,
+            "greaterthan" or "gt" or ">" => QueryOperator.GreaterThan,
+            "lessthan" or "lt" or "<" => QueryOperator.LessThan,
+            _ => QueryOperator.Contains
+        };
+
         return new DataLookupConfig(
             TargetType: targetMeta.Type,
             ValueField: valueField,
             DisplayField: displayField,
-            QueryField: null,
-            QueryOperator: QueryOperator.Contains,
+            QueryField: queryField,
+            QueryOperator: queryOperator,
             QueryValue: null,
             SortField: null,
             SortDirection: SortDirection.Asc,
