@@ -16,8 +16,7 @@ public static class PasswordHasher
             throw new ArgumentOutOfRangeException(nameof(iterations), "Iterations must be greater than zero.");
 
         var salt = RandomNumberGenerator.GetBytes(SaltSize);
-        using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256);
-        var hash = pbkdf2.GetBytes(HashSize);
+        var hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, HashSize);
         return (Convert.ToBase64String(hash), Convert.ToBase64String(salt), iterations);
     }
 
@@ -40,8 +39,7 @@ public static class PasswordHasher
             return false;
         }
 
-        using var pbkdf2 = new Rfc2898DeriveBytes(password, salt, iterations, HashAlgorithmName.SHA256);
-        var actualHash = pbkdf2.GetBytes(expectedHash.Length);
+        var actualHash = Rfc2898DeriveBytes.Pbkdf2(password, salt, iterations, HashAlgorithmName.SHA256, expectedHash.Length);
         return CryptographicOperations.FixedTimeEquals(actualHash, expectedHash);
     }
 }
