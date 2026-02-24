@@ -94,6 +94,20 @@ public class SettingsServiceTests : IDisposable
         public IPagedFile OpenPagedFile(string entityName, string fileName, int pageSize, FileAccess access) => throw new NotImplementedException();
         public ValueTask DeletePagedFileAsync(string entityName, string fileName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
 
+        private readonly Dictionary<string, long> _seqIds = new();
+        public string NextSequentialId(string entityName)
+        {
+            _seqIds.TryGetValue(entityName, out long current);
+            current++;
+            _seqIds[entityName] = current;
+            return current.ToString();
+        }
+        public void SeedSequentialId(string entityName, long floor)
+        {
+            if (!_seqIds.TryGetValue(entityName, out long current) || current < floor)
+                _seqIds[entityName] = floor;
+        }
+
         private sealed class DummyDisposable : IDisposable { public void Dispose() { } }
     }
 

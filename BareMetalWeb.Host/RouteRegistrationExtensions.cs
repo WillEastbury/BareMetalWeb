@@ -763,7 +763,7 @@ public static class RouteRegistrationExtensions
             {
                 ["name"] = f.Name,
                 ["label"] = f.Label,
-                ["type"] = f.FieldType.ToString(),
+                ["type"] = f.Lookup != null ? FormFieldType.LookupList.ToString() : f.FieldType.ToString(),
                 ["order"] = f.Order,
                 ["required"] = f.Required,
                 ["list"] = f.List,
@@ -871,6 +871,11 @@ public static class RouteRegistrationExtensions
 
             // Sub-field schema for List<T> child collections (CustomHtml type)
             fd["subFields"] = DataScaffold.BuildSubFieldSchemas(f);
+            fd["enumValues"] = f.FieldType == FormFieldType.Enum
+                ? DataScaffold.BuildEnumOptions(f.Property.PropertyType)
+                    .Select(kv => new { value = kv.Key, label = kv.Value })
+                    .ToArray()
+                : null;
 
             return (object)fd;
         }).ToArray();
