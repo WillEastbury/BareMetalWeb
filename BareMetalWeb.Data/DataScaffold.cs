@@ -70,6 +70,17 @@ public static class DataScaffold
     private static readonly IIdGenerator IdGenerator = new DefaultIdGenerator();
 
     /// <summary>
+    /// Fallback JSON AST (serialized) used when expression parsing fails.
+    /// Evaluates to the literal 0, keeping the field blank rather than crashing.
+    /// </summary>
+    private const string FallbackAstJson = "{\"t\":\"lit\",\"v\":0}";
+
+    /// <summary>
+    /// Fallback JSON AST as an object for use in metadata dictionaries (avoids re-parsing the JSON string).
+    /// </summary>
+    private static readonly Dictionary<string, object?> FallbackAstObject = new() { ["t"] = "lit", ["v"] = 0 };
+
+    /// <summary>
     /// Number of lookup records above which a search dialog is used instead of a full dropdown.
     /// Configurable via LookupSearch:LargeListThreshold in appsettings.json. Default: 20.
     /// </summary>
@@ -461,19 +472,19 @@ public static class DataScaffold
                 var calculatedValue = instance != null ? field.Property.GetValue(instance) : null;
                 var calculatedStringValue = ToInputString(calculatedValue, field.Property.PropertyType, field.FieldType);
 
-                // Generate JavaScript expression from the AST
+                // Generate JSON AST from the expression for CSP-safe client evaluation
                 string jsExpression;
                 try
                 {
                     var parser = new ExpressionParser();
                     var ast = parser.Parse(calculated.Expression);
-                    jsExpression = ast.ToJavaScript();
+                    jsExpression = JsonSerializer.Serialize(ast.ToJsonAst());
                 }
                 catch (Exception ex)
                 {
                     // If parsing fails, log and use a safe default
                     System.Diagnostics.Debug.WriteLine($"Failed to parse calculated field expression '{calculated.Expression}': {ex.Message}");
-                    jsExpression = "0";
+                    jsExpression = FallbackAstJson;
                 }
 
                 // Render as readonly with calculated indicator
@@ -837,18 +848,16 @@ public static class DataScaffold
                 fd["lookupTargetSlug"] = null;
             }
 
-            // Calculated field JS expression
+            // Calculated field JSON AST (CSP-safe; no eval/new Function needed on client)
             if (calcAttr != null)
             {
-                string jsExpr;
                 try
                 {
                     var parser = new ExpressionParser();
                     var ast    = parser.Parse(calcAttr.Expression);
-                    jsExpr     = ast.ToJavaScript();
+                    fd["calculated"] = new Dictionary<string, object?> { ["expression"] = ast.ToJsonAst() };
                 }
-                catch { jsExpr = "0"; }
-                fd["calculated"] = new Dictionary<string, object?> { ["expression"] = jsExpr };
+                catch { fd["calculated"] = new Dictionary<string, object?> { ["expression"] = FallbackAstObject }; }
             }
             else
             {
@@ -2273,17 +2282,17 @@ public static class DataScaffold
             sb.Append($"<label class=\"form-label\">{WebUtility.HtmlEncode(child.Label)}</label>");
             if (child.Calculated != null)
             {
-                // Calculated fields: render as readonly with expression for JS recalculation
+                // Calculated fields: render as readonly with JSON AST for CSP-safe JS recalculation
                 string jsExpression;
                 try
                 {
                     var parser = new ExpressionParser();
                     var ast = parser.Parse(child.Calculated.Expression);
-                    jsExpression = ast.ToJavaScript();
+                    jsExpression = JsonSerializer.Serialize(ast.ToJsonAst());
                 }
                 catch
                 {
-                    jsExpression = "0";
+                    jsExpression = FallbackAstJson;
                 }
                 sb.Append($"<div class=\"input-group\"><input class=\"form-control\" type=\"text\" readonly data-field=\"{WebUtility.HtmlEncode(child.Name)}\" data-calculated=\"true\" data-expression=\"{WebUtility.HtmlEncode(jsExpression)}\" /><span class=\"input-group-text\" title=\"Calculated field\"><i class=\"bi bi-calculator-fill\"></i></span></div>");
             }
@@ -2376,12 +2385,10 @@ public static class DataScaffold
         sb.Append(JsonSerializer.Serialize(lookupMaps));
         sb.Append(";" );
 
-        // Modal-scoped calculated field helpers.
-        // Note: eval() is used to evaluate expressions from CalculatedFieldAttribute, which are
-        // developer-defined compile-time attributes, not user input. The local parseFieldValue
-        // variable shadows any global definition, scoping reads to this modal form.
+        // CSP-safe calculated field helpers — no eval/new Function used.
+        // Expressions are stored as JSON AST in data-expression; walked recursively.
         sb.Append("var recalcTimer=null;");
-        sb.Append("function evalModalExpr(expr){var parseFieldValue=function(n){var f=form.querySelector('[data-field=\"'+n+'\"]');if(!f)return 0;if(f.type==='checkbox')return f.checked?1:0;var v=parseFloat(f.value);return isNaN(v)?0:v;};try{return eval(expr);}catch(e){return 0;}}");
+        sb.Append("function evalModalExpr(json){function gf(n){var f=form.querySelector('[data-field=\"'+n+'\"]');if(!f)return 0;if(f.type==='checkbox')return f.checked?1:0;var v=parseFloat(f.value);return isNaN(v)?0:v;}function w(n){if(!n)return 0;switch(n.t){case 'lit':return n.v!=null?n.v:0;case 'field':return gf(n.n);case 'bin':{var l=w(n.l),r=w(n.r),ln=parseFloat(l)||0,rn=parseFloat(r)||0;switch(n.op){case '+':return(typeof l==='string'||typeof r==='string')?''+l+r:ln+rn;case '-':return ln-rn;case '*':return ln*rn;case '/':return rn!==0?ln/rn:0;case '%':return rn!==0?ln%rn:0;case '>':return ln>rn;case '<':return ln<rn;case '>=':return ln>=rn;case '<=':return ln<=rn;case '==':return ln===rn;case '!=':return ln!==rn;}return 0;}case 'unary':{var x=parseFloat(w(n.x))||0;return n.op==='-'?-x:x;}case 'fn':{var a=n.args.map(w);switch(n.fn){case 'round':return a.length>=2?Math.round(a[0]*Math.pow(10,a[1]))/Math.pow(10,a[1]):Math.round(a[0]);case 'min':return Math.min.apply(null,a);case 'max':return Math.max.apply(null,a);case 'abs':return Math.abs(a[0]);case 'if':return a[0]?a[1]:a[2];}}return 0;}return 0;}try{var ast=typeof json==='string'?JSON.parse(json):json;return w(ast);}catch(e){return 0;}}");
         sb.Append("function recalcModal(){form.querySelectorAll('[data-calculated=\"true\"]').forEach(function(c){var expr=c.getAttribute('data-expression');if(!expr)return;var result=evalModalExpr(expr);c.value=(typeof result==='number'&&!isNaN(result))?parseFloat(result).toFixed(2):'';});}");
         sb.Append("function debouncedRecalcModal(){if(recalcTimer)clearTimeout(recalcTimer);recalcTimer=setTimeout(recalcModal,100);}");
 

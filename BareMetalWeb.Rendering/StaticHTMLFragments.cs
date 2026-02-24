@@ -150,7 +150,7 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
             .ZeroAllocationReplaceCopyAndEncode(
                 _fragmentStore.ReturnTemplateFragment("InputCalculated"),
                 new[] { "{{id}}", "{{name}}", "{{value}}", "{{placeholder}}", "{{expression}}", "{{rawexpression}}", "{{format}}" },
-                new[] { id, name, value, placeholder, expression, rawExpression, format }
+                new[] { id, name, value, placeholder, WebUtility.HtmlEncode(expression), WebUtility.HtmlEncode(rawExpression), format }
             );
     }
     private byte[] InputTextAreaTemplate(string id, string name, string value, string placeholder, string required,

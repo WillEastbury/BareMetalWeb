@@ -242,7 +242,8 @@ public class ChildListEditorTests : IDisposable
         // Assert - JavaScript recalculation helpers are emitted
         Assert.Contains("evalModalExpr", html);
         Assert.Contains("recalcModal", html);
-        Assert.Contains("parseFieldValue", html);
+        // CSP-safe: uses JSON.parse + tree walker instead of eval/parseFieldValue
+        Assert.Contains("JSON.parse", html);
         // Input event listener uses debounce for performance
         Assert.Contains("debouncedRecalcModal", html);
         Assert.Contains("addEventListener('input'", html);

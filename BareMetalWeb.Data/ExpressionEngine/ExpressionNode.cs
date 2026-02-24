@@ -14,6 +14,13 @@ public abstract class ExpressionNode
     public abstract string ToJavaScript();
 
     /// <summary>
+    /// Serializes the AST to a plain-object tree safe for JSON serialization.
+    /// The result can be evaluated client-side by a CSP-safe tree-walker (no eval/new Function needed).
+    /// Node types: "lit", "field", "bin", "unary", "fn", "dot".
+    /// </summary>
+    public abstract Dictionary<string, object?> ToJsonAst();
+
+    /// <summary>
     /// Async evaluation supporting relationship traversal via <see cref="ILookupResolver"/>.
     /// Default implementation delegates to synchronous <see cref="Evaluate"/>.
     /// </summary>
@@ -56,6 +63,9 @@ public sealed class LiteralNode : ExpressionNode
             _ => Value.ToString() ?? "null"
         };
     }
+
+    public override Dictionary<string, object?> ToJsonAst() =>
+        new() { ["t"] = "lit", ["v"] = Value };
 }
 
 /// <summary>
@@ -81,6 +91,9 @@ public sealed class FieldNode : ExpressionNode
     {
         return $"parseFieldValue('{FieldName}')";
     }
+
+    public override Dictionary<string, object?> ToJsonAst() =>
+        new() { ["t"] = "field", ["n"] = FieldName };
 }
 
 /// <summary>
@@ -133,6 +146,9 @@ public sealed class BinaryOpNode : ExpressionNode
     {
         return $"({Left.ToJavaScript()} {Operator} {Right.ToJavaScript()})";
     }
+
+    public override Dictionary<string, object?> ToJsonAst() =>
+        new() { ["t"] = "bin", ["op"] = Operator, ["l"] = Left.ToJsonAst(), ["r"] = Right.ToJsonAst() };
 
     public override async ValueTask<object?> EvaluateAsync(
         IReadOnlyDictionary<string, object?> context,
@@ -214,6 +230,9 @@ public sealed class UnaryOpNode : ExpressionNode
         return $"{Operator}{Operand.ToJavaScript()}";
     }
 
+    public override Dictionary<string, object?> ToJsonAst() =>
+        new() { ["t"] = "unary", ["op"] = Operator, ["x"] = Operand.ToJsonAst() };
+
     private static decimal ConvertToDecimal(object? value)
     {
         if (value == null) return 0m;
@@ -293,6 +312,16 @@ public sealed class FunctionNode : ExpressionNode
             _ => throw new InvalidOperationException($"Unknown function: {FunctionName}")
         };
     }
+
+    public override Dictionary<string, object?> ToJsonAst() =>
+        new()
+        {
+            ["t"] = "fn",
+            // Function name is lowercased so the client-side tree-walker can switch on
+            // lowercase strings regardless of how the author capitalised the expression.
+            ["fn"] = FunctionName.ToLowerInvariant(),
+            ["args"] = System.Linq.Enumerable.Select(Arguments, a => a.ToJsonAst()).ToArray()
+        };
 
     private object? EvaluateRound(IReadOnlyDictionary<string, object?> context)
     {
@@ -518,4 +547,7 @@ public sealed class DotAccessNode : ExpressionNode
 
         return $"await bmwRelatedLookup('{LookupField}', '{Path[0]}')";
     }
+
+    public override Dictionary<string, object?> ToJsonAst() =>
+        new() { ["t"] = "dot", ["fk"] = LookupField, ["path"] = Path.ToArray() };
 }

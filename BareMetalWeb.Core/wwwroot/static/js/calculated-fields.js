@@ -15,6 +15,57 @@
     const DEBOUNCE_MS = 150;
 
     /**
+     * CSP-safe JSON AST evaluator. Walks the expression tree produced by
+     * ExpressionNode.ToJsonAst() without using eval() or new Function().
+     * @param {object} ast - The parsed AST node
+     * @param {function} getField - Function(fieldName) => numeric value
+     * @returns {*} The evaluated result
+     */
+    window.bmwEvalAst = function bmwEvalAst(ast, getField) {
+        if (!ast) return 0;
+        switch (ast.t) {
+            case 'lit': return ast.v != null ? ast.v : 0;
+            case 'field': return getField(ast.n);
+            case 'bin': {
+                var l = bmwEvalAst(ast.l, getField), r = bmwEvalAst(ast.r, getField);
+                var ln = parseFloat(l) || 0, rn = parseFloat(r) || 0;
+                switch (ast.op) {
+                    case '+': return (typeof l === 'string' || typeof r === 'string') ? '' + l + r : ln + rn;
+                    case '-': return ln - rn;
+                    case '*': return ln * rn;
+                    case '/': return rn !== 0 ? ln / rn : 0;
+                    case '%': return rn !== 0 ? ln % rn : 0;
+                    case '>': return ln > rn;
+                    case '<': return ln < rn;
+                    case '>=': return ln >= rn;
+                    case '<=': return ln <= rn;
+                    case '==': return ln === rn;
+                    case '!=': return ln !== rn;
+                }
+                return 0;
+            }
+            case 'unary': {
+                var x = parseFloat(bmwEvalAst(ast.x, getField)) || 0;
+                return ast.op === '-' ? -x : x;
+            }
+            case 'fn': {
+                var args = ast.args.map(function(a) { return bmwEvalAst(a, getField); });
+                switch (ast.fn) {
+                    case 'round': return args.length >= 2
+                        ? Math.round(args[0] * Math.pow(10, args[1])) / Math.pow(10, args[1])
+                        : Math.round(args[0]);
+                    case 'min': return Math.min.apply(null, args);
+                    case 'max': return Math.max.apply(null, args);
+                    case 'abs': return Math.abs(args[0]);
+                    case 'if': return args[0] ? args[1] : args[2];
+                }
+                return 0;
+            }
+            default: return 0;
+        }
+    };
+
+    /**
      * Parses a numeric field value from the DOM.
      * Handles various input types including text, number, select, etc.
      */
@@ -91,19 +142,19 @@
     }
 
     /**
-     * Recalculates all calculated fields.
+     * Recalculates all calculated fields using the CSP-safe JSON AST evaluator.
      */
     function recalculateFields() {
         // Get all calculated fields from data attributes
         const calculatedFields = document.querySelectorAll('[data-calculated="true"]');
         
         calculatedFields.forEach(field => {
-            const expression = field.dataset.expression;
-            if (!expression) return;
+            const expressionJson = field.dataset.expression;
+            if (!expressionJson) return;
 
             try {
-                // Evaluate the expression (generated JavaScript)
-                const result = eval(expression);
+                var ast = JSON.parse(expressionJson);
+                var result = window.bmwEvalAst(ast, window.parseFieldValue);
                 
                 // Update the field
                 const fieldName = field.name;
