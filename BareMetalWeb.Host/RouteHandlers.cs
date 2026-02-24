@@ -5665,7 +5665,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             var monthName = new DateOnly(year, month, 1).ToString("MMM");
             var headerLabel = month == 1 ? $"{monthName} {year}" : monthName;
-            html.Append($"<div class=\"bm-gantt-month-lbl\" style=\"left:{leftPct:F2}%;width:{widthPct:F2}%;\">{WebUtility.HtmlEncode(headerLabel)}</div>");
+            html.Append($"<div class=\"bm-gantt-month-lbl\" data-gantt-left=\"{leftPct:F2}%\" data-gantt-width=\"{widthPct:F2}%\">{WebUtility.HtmlEncode(headerLabel)}</div>");
         }
         html.Append("</div>");
         html.Append("</div>");
@@ -5691,8 +5691,8 @@ public sealed class RouteHandlers : IRouteHandlers
             html.Append($"<div class=\"bm-gantt-lbl\" title=\"{WebUtility.HtmlEncode(label)}\"><a href=\"{basePath}/{safeId}\">{WebUtility.HtmlEncode(label)}</a></div>");
             html.Append("<div class=\"bm-gantt-bar-area\">");
             foreach (var (_, _, mLeft, _) in months)
-                html.Append($"<div class=\"bm-gantt-sep\" style=\"left:{mLeft:F2}%;\"></div>");
-            html.Append($"<a href=\"{basePath}/{safeId}/edit\" class=\"bm-gantt-bar\" style=\"left:{barLeft:F2}%;width:{barWidth:F2}%;background:{color};\" title=\"{tooltip}\">");
+                html.Append($"<div class=\"bm-gantt-sep\" data-gantt-left=\"{mLeft:F2}%\"></div>");
+            html.Append($"<a href=\"{basePath}/{safeId}/edit\" class=\"bm-gantt-bar\" data-gantt-left=\"{barLeft:F2}%\" data-gantt-width=\"{barWidth:F2}%\" data-gantt-bg=\"{WebUtility.HtmlEncode(color)}\" title=\"{tooltip}\">");
             html.Append($"<span class=\"bm-gantt-bar-text\">{WebUtility.HtmlEncode(label)}</span>");
             html.Append("</a>");
             html.Append("</div>");
@@ -5790,7 +5790,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var html = new StringBuilder();
         html.Append(@"<div class=""d-flex align-items-center gap-2"">
     <label class=""form-label mb-0 small text-nowrap"">Page size:</label>
-    <select class=""form-select form-select-sm"" style=""width: auto;"" onchange=""window.location.href=this.value;"" aria-label=""Page size"">");
+    <select class=""form-select form-select-sm bm-w-auto"" onchange=""window.location.href=this.value;"" aria-label=""Page size"">");
 
         foreach (var size in sizes)
         {
@@ -5918,7 +5918,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         if (includeBulkSelection)
         {
-            html.Append(@"<th scope=""col"" style=""width:2rem;""><input type=""checkbox"" data-bulk-select-all aria-label=""Select all"" /></th>");
+            html.Append(@"<th scope=""col"" class=""bm-col-check""><input type=""checkbox"" data-bulk-select-all aria-label=""Select all"" /></th>");
         }
 
         if (includeActions)
@@ -5960,7 +5960,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
             else
             {
-                sortIcon = @" <i class=""bi bi-arrow-down-up text-muted"" aria-hidden=""true"" style=""opacity: 0.3;""></i>";
+                sortIcon = @" <i class=""bi bi-arrow-down-up text-muted bm-sort-icon-dim"" aria-hidden=""true""></i>";
             }
 
             html.Append($@"<th scope=""col""><a href=""{WebUtility.HtmlEncode(sortUrl)}"" class=""text-decoration-none text-reset"" title=""Sort by {WebUtility.HtmlEncode(field.Label)}"">{WebUtility.HtmlEncode(field.Label)}{sortIcon}</a></th>");
@@ -6007,7 +6007,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         var sb = new StringBuilder();
         sb.Append($"<div data-bulk-container data-entity-slug=\"{WebUtility.HtmlEncode(typeSlug)}\" data-return-url=\"{WebUtility.HtmlEncode(returnUrl)}\">");
-        sb.Append("<div data-bulk-actions-bar class=\"alert alert-info d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2\" style=\"display:none;\" role=\"status\">");
+        sb.Append("<div data-bulk-actions-bar class=\"alert alert-info d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2 d-none\" role=\"status\">");
         sb.Append("<div class=\"d-flex align-items-center gap-2\">");
         sb.Append("<strong><span data-selected-count>0</span> of <span data-total-count>");
         sb.Append(totalCount);

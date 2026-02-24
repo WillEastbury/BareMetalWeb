@@ -701,3 +701,10 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+
+/* Utility classes to replace inline styles (CSP compliance) */
+.bm-w-auto { width: auto; }
+.bm-col-check { width: 2rem; }
+.bm-sort-icon-dim { opacity: 0.3; }
+.bm-img-preview { max-width: 200px; max-height: 200px; }
+#vnext-toast-container { z-index: 1100; }

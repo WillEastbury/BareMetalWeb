@@ -70,9 +70,9 @@
         
         var count = selectedIds.size;
         if (count === 0) {
-            actionsBar.style.display = 'none';
+            actionsBar.classList.add('d-none');
         } else {
-            actionsBar.style.display = 'block';
+            actionsBar.classList.remove('d-none');
             if (countSpan) {
                 countSpan.textContent = count;
             }
