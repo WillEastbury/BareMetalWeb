@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core.Interfaces;
@@ -112,6 +113,17 @@ public class SettingsServiceTests : IDisposable
     }
 
     // ── AppSetting entity ───────────────────────────────────────────────────
+
+    [Fact]
+    public void AppSetting_EntityAttribute_RequiresAdminPermission()
+    {
+        var attr = typeof(AppSetting)
+            .GetCustomAttributes(typeof(DataEntityAttribute), inherit: false)
+            .Cast<DataEntityAttribute>()
+            .Single();
+
+        Assert.Equal("admin", attr.Permissions);
+    }
 
     [Fact]
     public void AppSetting_DefaultsAreCorrect()
