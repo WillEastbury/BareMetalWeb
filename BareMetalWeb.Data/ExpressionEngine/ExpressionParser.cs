@@ -176,6 +176,20 @@ public sealed class ExpressionParser
             if (identifier.Equals("null", StringComparison.OrdinalIgnoreCase))
                 return new LiteralNode(null);
 
+            // Dot-notation: Entity.Field or Entity.SubEntity.Field
+            if (_position < _expression.Length && _currentChar == '.')
+            {
+                var pathSegments = new List<string>();
+                while (_position < _expression.Length && _currentChar == '.')
+                {
+                    Advance(); // skip '.'
+                    var segment = ParseIdentifier();
+                    pathSegments.Add(segment);
+                }
+                SkipWhitespace();
+                return new DotAccessNode(identifier, pathSegments);
+            }
+
             return new FieldNode(identifier);
         }
 

@@ -1077,11 +1077,19 @@
             if (f.calculated && f.calculated.expression) {
                 var fieldEl = form.querySelector('#f_' + f.name);
                 if (!fieldEl) return;
+                var isAsync = f.calculated.expression.indexOf('bmwRelatedLookup') >= 0 ||
+                              f.calculated.expression.indexOf('bmwQueryLookup') >= 0;
                 form.addEventListener('input', function () {
                     try {
                         var vals = collectFormValues(form, formFields);
-                        var result = evalExpression(f.calculated.expression, vals);
-                        fieldEl.value = result != null ? String(result) : '';
+                        if (isAsync) {
+                            evalExpressionAsync(f.calculated.expression, vals, slug)
+                                .then(function (result) { fieldEl.value = result != null ? String(result) : ''; })
+                                .catch(function () {});
+                        } else {
+                            var result = evalExpression(f.calculated.expression, vals);
+                            fieldEl.value = result != null ? String(result) : '';
+                        }
                     } catch (ex) {}
                 });
             }
@@ -1230,6 +1238,54 @@
             // eslint-disable-next-line no-new-func
             return new Function(keys, 'return ' + jsExpr).apply(null, values);
         } catch (e) { return null; }
+    }
+
+    // Async expression evaluation for lookup-based calculated fields
+    function evalExpressionAsync(jsExpr, vals, entitySlug) {
+        try {
+            var keys = Object.keys(vals);
+            var values = keys.map(function (k) { return vals[k]; });
+            // eslint-disable-next-line no-new-func
+            var fn = new Function('bmwRelatedLookup', 'bmwQueryLookup', keys.join(','),
+                'return (async function() { return ' + jsExpr + '; })()');
+            var args = [
+                function (fkField, targetField) { return bmwRelatedLookup(entitySlug, fkField, targetField, vals); },
+                function () { return bmwQueryLookup.apply(null, arguments); }
+            ].concat(values);
+            return fn.apply(null, args);
+        } catch (e) { return Promise.resolve(null); }
+    }
+
+    // Resolve a field value from a related entity via a lookup FK field
+    function bmwRelatedLookup(entitySlug, fkField, targetField, vals) {
+        var fkValue = vals && vals[fkField];
+        if (!fkValue) return Promise.resolve(null);
+        // Use the lookup API to load the related entity
+        return apiGet(API + '/_lookup/' + encodeURIComponent(entitySlug) + '/' + encodeURIComponent(fkField) + '/' + encodeURIComponent(fkValue))
+            .then(function (entity) {
+                if (!entity) return null;
+                return entity[targetField] || entity[targetField.charAt(0).toLowerCase() + targetField.slice(1)] || null;
+            })
+            .catch(function () { return null; });
+    }
+
+    // Query an entity with filter conditions and return a field value
+    function bmwQueryLookup(targetEntitySlug /*, filterField1, filterVal1, ..., returnField */) {
+        var args = Array.prototype.slice.call(arguments);
+        if (args.length < 4 || args.length % 2 !== 0) return Promise.resolve(null);
+        var slug = args[0];
+        var returnField = args[args.length - 1];
+        var filterPairs = [];
+        for (var i = 1; i < args.length - 1; i += 2) {
+            filterPairs.push(encodeURIComponent(args[i]) + '=' + encodeURIComponent(args[i + 1] || ''));
+        }
+        return apiGet(API + '/_lookup/' + encodeURIComponent(slug) + '?filter=' + filterPairs.join('&'))
+            .then(function (items) {
+                if (!items || !items.length) return null;
+                var first = items[0];
+                return first[returnField] || first[returnField.charAt(0).toLowerCase() + returnField.slice(1)] || null;
+            })
+            .catch(function () { return null; });
     }
 
     function validateForm(form) {
