@@ -1523,8 +1523,12 @@
                     formFields.forEach(function (f) {
                         if (f.lookup && f.lookup.targetSlug === addBtn.dataset.targetSlug) {
                             var sel = form.querySelector('select#f_' + f.name);
-                            var curVal = sel ? sel.value : null;
-                            loadLookupSelect(f, curVal);
+                            if (sel) {
+                                // Standard dropdown: reload options
+                                loadLookupSelect(f, sel.value);
+                            }
+                            // High-cardinality fields use a hidden input + search modal;
+                            // cache was already cleared above, no reload needed.
                         }
                     });
                 });
@@ -1670,7 +1674,7 @@
         var container = selectEl.closest('[data-lookup-container]');
         if (!container) return;
 
-        // Build initial display value
+        // Resolve display value from pre-loaded items
         var currentDisplay = '';
         if (currentValue) {
             var curItem = allItems.find(function (o) {
@@ -1680,49 +1684,128 @@
             if (curItem) currentDisplay = nestedGet(curItem, lk.displayField) || nestedGet(curItem, lk.displayField.charAt(0).toLowerCase() + lk.displayField.slice(1)) || currentValue;
         }
 
+        var n = escHtml(field.name);
+        var tName = escHtml(lk.targetName || lk.targetSlug || '');
         container.querySelector('.input-group').innerHTML =
-            '<input type="text" class="form-control form-control-sm" id="f_' + escHtml(field.name) + '_search" placeholder="Search\u2026" value="' + escHtml(String(currentDisplay)) + '" autocomplete="off">' +
-            '<input type="hidden" name="' + escHtml(field.name) + '" id="f_' + escHtml(field.name) + '" value="' + escHtml(String(currentValue || '')) + '">' +
-            '<div class="dropdown-menu" id="lu_' + escHtml(field.name) + '" style="position:absolute;z-index:1055;max-height:200px;overflow-y:auto"></div>' +
-            '<button type="button" class="btn btn-outline-secondary vnext-lookup-add" data-target-slug="' + escHtml(lk.targetSlug) + '" title="Add new"><i class="bi bi-plus"></i></button>';
+            '<input type="text" class="form-control form-control-sm" id="f_' + n + '_display"' +
+                ' placeholder="Click \uD83D\uDD0D to search\u2026"' +
+                ' value="' + escHtml(String(currentDisplay)) + '" readonly>' +
+            '<input type="hidden" name="' + n + '" id="f_' + n + '" value="' + escHtml(String(currentValue || '')) + '">' +
+            '<button type="button" class="btn btn-outline-info btn-sm"' +
+                ' data-vnext-lookup-search="' + escHtml(lk.targetSlug) + '"' +
+                ' data-lookup-field="f_' + n + '"' +
+                ' data-lookup-display="f_' + n + '_display"' +
+                ' data-lookup-display-field="' + escHtml(lk.displayField) + '"' +
+                ' data-lookup-value-field="' + escHtml(lk.valueField || 'id') + '"' +
+                ' data-lookup-target-name="' + tName + '"' +
+                ' title="Search ' + tName + '">' +
+                '<i class="bi bi-search" aria-hidden="true"></i></button>' +
+            '<button type="button" class="btn btn-outline-secondary vnext-lookup-add"' +
+                ' data-target-slug="' + escHtml(lk.targetSlug) + '"' +
+                ' title="Add new"><i class="bi bi-plus"></i></button>';
+    }
 
-        var searchInput = container.querySelector('input[type=text]');
-        var hiddenInput = container.querySelector('input[type=hidden]');
-        var dropdown    = container.querySelector('[id^="lu_"]');
+    // --- VNext high-cardinality lookup search modal ---
 
-        function filterItems(q) {
-            var lower = q.toLowerCase();
-            return allItems.filter(function (o) {
-                var d = nestedGet(o, lk.displayField) || nestedGet(o, lk.displayField.charAt(0).toLowerCase() + lk.displayField.slice(1)) || '';
-                return String(d).toLowerCase().indexOf(lower) >= 0;
-            }).slice(0, 30);
+    var _vnextSearchModal = null;
+    var _vnextSearchDebounce = null;
+
+    function getOrCreateVNextSearchModal() {
+        if (_vnextSearchModal) return _vnextSearchModal;
+        var el = document.createElement('div');
+        el.className = 'modal fade';
+        el.id = 'vnext-lookup-search-modal';
+        el.setAttribute('tabindex', '-1');
+        el.setAttribute('aria-hidden', 'true');
+        el.innerHTML =
+            '<div class="modal-dialog modal-lg modal-dialog-scrollable">' +
+              '<div class="modal-content">' +
+                '<div class="modal-header">' +
+                  '<h5 class="modal-title" id="vnext-lookup-search-title">Search</h5>' +
+                  '<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>' +
+                '</div>' +
+                '<div class="modal-body">' +
+                  '<div class="mb-3">' +
+                    '<input type="text" class="form-control" id="vnext-lookup-search-input" placeholder="Type to search..." autocomplete="off" />' +
+                  '</div>' +
+                  '<div id="vnext-lookup-search-results"><p class="text-muted small">Enter search terms above to find matching records.</p></div>' +
+                '</div>' +
+                '<div class="modal-footer">' +
+                  '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>' +
+                '</div>' +
+              '</div>' +
+            '</div>';
+        document.body.appendChild(el);
+        _vnextSearchModal = el;
+        document.getElementById('vnext-lookup-search-input').addEventListener('input', function () {
+            clearTimeout(_vnextSearchDebounce);
+            _vnextSearchDebounce = setTimeout(doVNextLookupSearch, 300);
+        });
+        return _vnextSearchModal;
+    }
+
+    function openVNextLookupSearch(targetSlug, fieldId, displayFieldId, displayField, valueField, targetTypeName) {
+        var modal = getOrCreateVNextSearchModal();
+        modal.dataset.targetSlug = targetSlug;
+        modal.dataset.fieldId = fieldId;
+        modal.dataset.displayFieldId = displayFieldId;
+        modal.dataset.displayField = displayField;
+        modal.dataset.valueField = valueField || 'id';
+        var title = document.getElementById('vnext-lookup-search-title');
+        if (title) title.textContent = 'Search ' + (targetTypeName || '');
+        var input = document.getElementById('vnext-lookup-search-input');
+        if (input) input.value = '';
+        var results = document.getElementById('vnext-lookup-search-results');
+        if (results) results.innerHTML = '<p class="text-muted small">Enter search terms above to find matching records.</p>';
+        var bsModal = new bootstrap.Modal(modal);
+        bsModal.show();
+        if (input) setTimeout(function () { input.focus(); }, 300); // wait for Bootstrap modal animation
+    }
+
+    function doVNextLookupSearch() {
+        var modal = document.getElementById('vnext-lookup-search-modal');
+        if (!modal) return;
+        var targetSlug = modal.dataset.targetSlug;
+        var displayField = modal.dataset.displayField;
+        var searchInput = document.getElementById('vnext-lookup-search-input');
+        var resultsEl = document.getElementById('vnext-lookup-search-results');
+        if (!targetSlug || !resultsEl) return;
+        var term = searchInput ? searchInput.value.trim() : '';
+        if (term.length === 0) {
+            resultsEl.innerHTML = '<p class="text-muted small">Enter search terms above to find matching records.</p>';
+            return;
         }
-
-        searchInput.addEventListener('input', function () {
-            var q = searchInput.value;
-            var matches = filterItems(q);
-            dropdown.innerHTML = '';
-            if (matches.length === 0) { dropdown.classList.remove('show'); return; }
-            matches.forEach(function (o) {
-                var v = nestedGet(o, lk.valueField) || nestedGet(o, lk.valueField.charAt(0).toLowerCase() + lk.valueField.slice(1)) || '';
-                var d = nestedGet(o, lk.displayField) || nestedGet(o, lk.displayField.charAt(0).toLowerCase() + lk.displayField.slice(1)) || v;
-                dropdown.insertAdjacentHTML('beforeend', '<a class="dropdown-item" href="#" data-val="' + escHtml(String(v)) + '" data-display="' + escHtml(String(d)) + '">' + escHtml(String(d)) + '</a>');
+        resultsEl.innerHTML = '<p class="text-muted small">Searching...</p>';
+        var url = '/api/_lookup/' + encodeURIComponent(targetSlug) +
+            '?search=' + encodeURIComponent(term) +
+            '&searchField=' + encodeURIComponent(displayField) +
+            '&top=30';
+        fetch(url, { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                var rows = (data && data.data) ? data.data : [];
+                if (rows.length === 0) {
+                    resultsEl.innerHTML = '<p class="text-muted small">No results found.</p>';
+                    return;
+                }
+                var keys = Object.keys(rows[0]);
+                var html = '<table class="table table-sm table-hover table-striped"><thead><tr>';
+                keys.forEach(function (k) { html += '<th>' + escHtml(k) + '</th>'; });
+                html += '</tr></thead><tbody>';
+                rows.forEach(function (row) {
+                    html += '<tr style="cursor:pointer" data-vnext-select-row>';
+                    keys.forEach(function (k) {
+                        html += '<td data-field="' + escHtml(k) + '">' + escHtml(row[k] != null ? String(row[k]) : '') + '</td>';
+                    });
+                    html += '</tr>';
+                });
+                html += '</tbody></table>';
+                resultsEl.innerHTML = html;
+            })
+            .catch(function (err) {
+                console.error('Lookup search failed:', err);
+                resultsEl.innerHTML = '<p class="text-danger small">Error fetching results.</p>';
             });
-            dropdown.classList.add('show');
-        });
-
-        dropdown.addEventListener('click', function (e) {
-            var a = e.target.closest('a[data-val]');
-            if (!a) return;
-            e.preventDefault();
-            hiddenInput.value = a.dataset.val;
-            searchInput.value = a.dataset.display;
-            dropdown.classList.remove('show');
-        });
-
-        document.addEventListener('click', function (e) {
-            if (!container.contains(e.target)) dropdown.classList.remove('show');
-        });
     }
 
     function loadEnumOptions(field, currentValue) {
@@ -2117,6 +2200,45 @@
     } else {
         init();
     }
+
+    // Event delegation for high-cardinality lookup search button and row selection
+    document.addEventListener('click', function (e) {
+        var searchBtn = e.target.closest('[data-vnext-lookup-search]');
+        if (searchBtn) {
+            e.preventDefault();
+            openVNextLookupSearch(
+                searchBtn.dataset.vnextLookupSearch,
+                searchBtn.dataset.lookupField,
+                searchBtn.dataset.lookupDisplay,
+                searchBtn.dataset.lookupDisplayField,
+                searchBtn.dataset.lookupValueField || 'id',
+                searchBtn.dataset.lookupTargetName
+            );
+            return;
+        }
+        var row = e.target.closest('[data-vnext-select-row]');
+        if (row) {
+            var modal = document.getElementById('vnext-lookup-search-modal');
+            if (!modal) return;
+            var fieldId = modal.dataset.fieldId;
+            var displayFieldId = modal.dataset.displayFieldId;
+            var displayField = modal.dataset.displayField || '';
+            var displayFieldKey = displayField.length > 0
+                ? displayField.charAt(0).toLowerCase() + displayField.slice(1)
+                : displayField;
+            var valueField = modal.dataset.valueField || 'id';
+            var valueCell = row.querySelector('td[data-field="' + valueField + '"]');
+            var displayCell = row.querySelector('td[data-field="' + displayFieldKey + '"]');
+            var idValue = valueCell ? valueCell.textContent : '';
+            var displayValue = displayCell ? displayCell.textContent : idValue;
+            var hiddenInput = document.getElementById(fieldId);
+            if (hiddenInput) hiddenInput.value = idValue;
+            var displayInput = document.getElementById(displayFieldId);
+            if (displayInput) displayInput.value = displayValue;
+            var bsModal = bootstrap.Modal.getInstance(modal);
+            if (bsModal) bsModal.hide();
+        }
+    });
 
 })(window);
 // VNext Router — thin SPA router powered by BareMetalRendering
