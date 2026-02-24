@@ -50,6 +50,14 @@ public sealed class VirtualEntityDef
     [JsonPropertyName("navOrder")]
     public int NavOrder { get; set; } = 0;
 
+    /// <summary>View type for list rendering: "table" (default), "treeview", "orgchart", "timeline", "timetable".</summary>
+    [JsonPropertyName("viewType")]
+    public string? ViewType { get; set; }
+
+    /// <summary>Field name used as the parent reference for tree/org chart views.</summary>
+    [JsonPropertyName("parentField")]
+    public string? ParentField { get; set; }
+
     /// <summary>Field definitions for this entity.</summary>
     [JsonPropertyName("fields")]
     public List<VirtualFieldDef> Fields { get; set; } = new();
@@ -107,6 +115,14 @@ public sealed class VirtualFieldDef
     /// <summary>Display field on the target entity (default: "Id").</summary>
     [JsonPropertyName("lookupDisplayField")]
     public string? LookupDisplayField { get; set; }
+
+    /// <summary>Query field used to filter lookup results (e.g. "Id" to exclude current record).</summary>
+    [JsonPropertyName("lookupQueryField")]
+    public string? LookupQueryField { get; set; }
+
+    /// <summary>Query operator for lookup filtering: "equals", "notequals", "contains", etc.</summary>
+    [JsonPropertyName("lookupQueryOperator")]
+    public string? LookupQueryOperator { get; set; }
 
     /// <summary>Display order in forms and list views.</summary>
     [JsonPropertyName("order")]
