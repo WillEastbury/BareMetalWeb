@@ -1155,6 +1155,59 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask DataApiFileGetHandler(HttpContext context) => ValueTask.CompletedTask;
     }
 
+    // ──────────────────────────────────────────────────────────────
+    //  VNext Schema / BuildEntitySchema tests
+    // ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void BuildEntitySchema_LookupField_ReturnsLookupListType()
+    {
+        // Arrange — register Customer (with lookup) and Address (the lookup target)
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Address>();
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Customer>();
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
+
+        // Act — invoke the private static BuildEntitySchema via reflection
+        var method = typeof(RouteRegistrationExtensions).GetMethod(
+            "BuildEntitySchema",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+        var schema = (Dictionary<string, object?>)method.Invoke(null, new object[] { meta! })!;
+        var fields = (object[])schema["fields"]!;
+        var addressField = fields
+            .Cast<Dictionary<string, object?>>()
+            .FirstOrDefault(f => string.Equals((string?)f["name"], "AddressId", StringComparison.Ordinal));
+
+        // Assert — the lookup field's type must be "LookupList" so the VNext edit form renders a dropdown
+        Assert.NotNull(addressField);
+        Assert.NotNull(addressField["lookup"]);
+        Assert.Equal("LookupList", (string?)addressField["type"]);
+    }
+
+    [Fact]
+    public void BuildEntitySchema_NonLookupField_ReturnsOriginalFieldType()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Customer>();
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
+
+        // Act
+        var method = typeof(RouteRegistrationExtensions).GetMethod(
+            "BuildEntitySchema",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+        var schema = (Dictionary<string, object?>)method.Invoke(null, new object[] { meta! })!;
+        var fields = (object[])schema["fields"]!;
+        var nameField = fields
+            .Cast<Dictionary<string, object?>>()
+            .FirstOrDefault(f => string.Equals((string?)f["name"], "Name", StringComparison.Ordinal));
+
+        // Assert — a non-lookup field's type is preserved as-is (not overridden to LookupList)
+        Assert.NotNull(nameField);
+        Assert.Null(nameField["lookup"]);
+        Assert.NotEqual("LookupList", (string?)nameField["type"]);
+    }
+
     private class InMemoryDataStore : IDataObjectStore
     {
         private readonly Dictionary<string, BaseDataObject> _store = new();
