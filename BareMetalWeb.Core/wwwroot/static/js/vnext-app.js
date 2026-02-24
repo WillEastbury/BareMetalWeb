@@ -322,7 +322,13 @@
                     html += '<div class="card mb-2"><div class="card-body p-2">';
                     listFields.forEach(function (f) {
                         var val = nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1));
-                        html += '<div class="d-flex justify-content-between"><small class="text-muted">' + escHtml(f.label) + '</small><span>' + fmtValue(val, f.type) + '</span></div>';
+                        var cellHtml;
+                        if (f.lookup && f.lookup.targetSlug && val) {
+                            cellHtml = '<span data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' + escHtml(String(val)) + '</span>';
+                        } else {
+                            cellHtml = '<span>' + fmtValue(val, f.type) + '</span>';
+                        }
+                        html += '<div class="d-flex justify-content-between"><small class="text-muted">' + escHtml(f.label) + '</small>' + cellHtml + '</div>';
                     });
                     html += '<div class="mt-2 d-flex gap-1">';
                     html += '<a class="btn btn-xs btn-outline-info btn-sm" href="' + baseUrl + '/' + encId + '"><i class="bi bi-eye"></i></a>';
