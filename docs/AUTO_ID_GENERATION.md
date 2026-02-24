@@ -8,7 +8,7 @@ BareMetalWeb now supports automatic ID generation for data entities. Instead of 
 
 Before using this feature, be aware of these critical limitations:
 
-1. **Sequential IDs reset on restart**: Sequential long IDs are stored in-memory only and reset to 1 when the application restarts. This can cause duplicate IDs if you have persistent data. For production use with persistent storage, you should implement a custom ID generator that persists counters or use GUID strategy instead.
+1. **Sequential IDs reset on restart**: Sequential long IDs are stored in the header of the clustered index page. This means they will persist. 
 
 2. **Read-only after generation**: Once an ID is generated, it cannot be changed. Auto-generated IDs are intended for new entity creation only.
 
