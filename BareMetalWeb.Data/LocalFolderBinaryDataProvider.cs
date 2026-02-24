@@ -1046,7 +1046,14 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         => serializer.Serialize(obj, schemaVersion);
 
     private static T? DeserializeFor<T>(ISchemaAwareObjectSerializer serializer, byte[] bytes, SchemaDefinition schema)
-        => serializer.Deserialize<T>(bytes, schema);
+    {
+        // Use BestEffort mode to support schema evolution: records saved before a field was added or
+        // removed will still load correctly, with missing fields receiving their default values.
+        // This follows the same pattern as legacy schema loading (see MigrateLegacySchemas).
+        if (serializer is BinaryObjectSerializer binarySerializer)
+            return binarySerializer.Deserialize<T>(bytes, schema, SchemaReadMode.BestEffort);
+        return serializer.Deserialize<T>(bytes, schema);
+    }
 
     private sealed class LocalPagedFile : IPagedFile
     {
