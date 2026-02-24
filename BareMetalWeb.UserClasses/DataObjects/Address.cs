@@ -6,6 +6,7 @@ namespace BareMetalWeb.Data.DataObjects;
 public class Address : RenderableDataObject
 {
     [DataField(Label = "Label", Order = 1, Required = true)]
+    [DataIndex]
     public string Label { get; set; } = string.Empty;
 
     [DataField(Label = "Address Line 1", Order = 2, Required = true)]
@@ -15,6 +16,7 @@ public class Address : RenderableDataObject
     public string Line2 { get; set; } = string.Empty;
 
     [DataField(Label = "City", Order = 4, Required = true)]
+    [DataIndex]
     public string City { get; set; } = string.Empty;
 
     [DataField(Label = "Region", Order = 5)]

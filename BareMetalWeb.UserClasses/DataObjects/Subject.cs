@@ -7,5 +7,6 @@ namespace BareMetalWeb.Data.DataObjects;
 public class Subject : RenderableDataObject
 {
     [DataField(Label = "Name", Order = 1, Required = true)]
+    [DataIndex]
     public string Name { get; set; } = string.Empty;
 }

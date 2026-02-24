@@ -5,6 +5,7 @@ public class TimeTablePlan : RenderableDataObject
 {
     [DataLookup(typeof(Subject), DisplayField = "Name", SortField = "Name", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
     [DataField(Label = "Subject Id", Order = 1, Required = true, List = true)]
+    [DataIndex]
     public string SubjectId { get; set; } = string.Empty;
 
     [DataField(Label = "Notes", Order = 2, List = true)]

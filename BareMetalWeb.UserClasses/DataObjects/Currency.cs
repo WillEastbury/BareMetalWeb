@@ -6,6 +6,7 @@ namespace BareMetalWeb.Data.DataObjects;
 public class Currency : RenderableDataObject
 {
     [DataField(Label = "ISO Code", Order = 1, Required = true)]
+    [DataIndex]
     public string IsoCode { get; set; } = string.Empty;
 
     [DataField(Label = "Description", Order = 2, Required = true)]

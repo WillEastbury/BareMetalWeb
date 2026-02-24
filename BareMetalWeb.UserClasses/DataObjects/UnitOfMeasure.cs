@@ -6,6 +6,7 @@ namespace BareMetalWeb.Data.DataObjects;
 public class UnitOfMeasure : RenderableDataObject
 {
     [DataField(Label = "Name", Order = 1, Required = true)]
+    [DataIndex]
     public string Name { get; set; } = string.Empty;
 
     [DataField(Label = "Abbreviation", Order = 2, Required = true)]

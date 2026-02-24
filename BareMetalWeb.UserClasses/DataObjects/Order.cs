@@ -7,6 +7,7 @@ namespace BareMetalWeb.Data.DataObjects;
 public class Order : RenderableDataObject
 {
     [DataField(Label = "Order Number", Order = 1, Required = true)]
+    [DataIndex]
     public string OrderNumber { get; set; } = string.Empty;
 
     [DataField(Label = "Customer", Order = 2, Required = true)]
@@ -23,6 +24,7 @@ public class Order : RenderableDataObject
 
     [DataField(Label = "Currency", Order = 5, Required = true)]
     [DataLookup(typeof(Currency), DisplayField = "IsoCode", SortField = "IsoCode", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
+    [DataIndex]
     public string CurrencyId { get; set; } = string.Empty;
 
     [DataField(Label = "Notes", Order = 6)]

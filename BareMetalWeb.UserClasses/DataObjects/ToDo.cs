@@ -5,6 +5,7 @@ public class ToDo : RenderableDataObject
 {
 
     [DataField(Label = "Title", Order = 1, Required = true)]
+    [DataIndex]
     public string Title { get; set; } = string.Empty;
 
     [DataField(Label = "Deadline", Order = 2, Required = true)]
