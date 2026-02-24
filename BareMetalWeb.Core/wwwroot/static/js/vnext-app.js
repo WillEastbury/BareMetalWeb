@@ -607,16 +607,34 @@
         while (cur < chartEnd) {
             var dim = new Date(cur.getFullYear(), cur.getMonth() + 1, 0).getDate();
             var wpct = dim / totalDays * 100;
-            var lbl = cur.getMonth() === 0 ? monthNames[cur.getMonth()] + ' ' + cur.getFullYear() : monthNames[cur.getMonth()];
-            months.push({ left: runLeft, width: wpct, label: lbl });
+            months.push({ left: runLeft, width: wpct, label: monthNames[cur.getMonth()], year: cur.getFullYear() });
             runLeft += wpct;
             cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
         }
 
+        // Build year groups from months
+        var years = [];
+        months.forEach(function (mo) {
+            var last = years.length ? years[years.length - 1] : null;
+            if (last && last.year === mo.year) {
+                last.width += mo.width;
+            } else {
+                years.push({ year: mo.year, left: mo.left, width: mo.width });
+            }
+        });
+
         // Render Gantt chart HTML (matches SSR bm-gantt-* classes)
         var html = '<div class="bm-gantt-container"><div class="bm-gantt-inner">';
 
-        // Header
+        // Year header row
+        html += '<div class="bm-gantt-header-row"><div class="bm-gantt-label-col"></div>';
+        html += '<div class="bm-gantt-years-hdr">';
+        years.forEach(function (yr) {
+            html += '<div class="bm-gantt-year-lbl" data-gantt-left="' + yr.left.toFixed(2) + '%" data-gantt-width="' + yr.width.toFixed(2) + '%">' + yr.year + '</div>';
+        });
+        html += '</div></div>';
+
+        // Month header row
         html += '<div class="bm-gantt-header-row"><div class="bm-gantt-label-col"></div>';
         html += '<div class="bm-gantt-months-hdr">';
         months.forEach(function (mo) {

@@ -5910,21 +5910,44 @@ public sealed class RouteHandlers : IRouteHandlers
             cur = cur.Month == 12 ? new DateOnly(cur.Year + 1, 1, 1) : new DateOnly(cur.Year, cur.Month + 1, 1);
         }
 
+        // Build year groups (contiguous runs of months sharing the same year)
+        var years = new List<(int Year, double LeftPct, double WidthPct)>();
+        foreach (var (year, _, leftPct, widthPct) in months)
+        {
+            if (years.Count > 0 && years[^1].Year == year)
+            {
+                var last = years[^1];
+                years[^1] = (last.Year, last.LeftPct, last.WidthPct + widthPct);
+            }
+            else
+            {
+                years.Add((year, leftPct, widthPct));
+            }
+        }
+
         // Bar colours (cycling)
         string[] barColors = ["#4472c4", "#c0504d", "#9bbb59", "#f79646", "#8064a2"];
 
         html.Append("<div class=\"bm-gantt-container\">");
         html.Append("<div class=\"bm-gantt-inner\">");
 
-        // Header row with month labels
+        // Year header row
+        html.Append("<div class=\"bm-gantt-header-row\">");
+        html.Append("<div class=\"bm-gantt-label-col\"></div>");
+        html.Append("<div class=\"bm-gantt-years-hdr\">");
+        foreach (var (year, leftPct, widthPct) in years)
+            html.Append($"<div class=\"bm-gantt-year-lbl\" data-gantt-left=\"{leftPct:F2}%\" data-gantt-width=\"{widthPct:F2}%\">{year}</div>");
+        html.Append("</div>");
+        html.Append("</div>");
+
+        // Month header row
         html.Append("<div class=\"bm-gantt-header-row\">");
         html.Append("<div class=\"bm-gantt-label-col\"></div>");
         html.Append("<div class=\"bm-gantt-months-hdr\">");
         foreach (var (year, month, leftPct, widthPct) in months)
         {
             var monthName = new DateOnly(year, month, 1).ToString("MMM");
-            var headerLabel = month == 1 ? $"{monthName} {year}" : monthName;
-            html.Append($"<div class=\"bm-gantt-month-lbl\" data-gantt-left=\"{leftPct:F2}%\" data-gantt-width=\"{widthPct:F2}%\">{WebUtility.HtmlEncode(headerLabel)}</div>");
+            html.Append($"<div class=\"bm-gantt-month-lbl\" data-gantt-left=\"{leftPct:F2}%\" data-gantt-width=\"{widthPct:F2}%\">{WebUtility.HtmlEncode(monthName)}</div>");
         }
         html.Append("</div>");
         html.Append("</div>");
