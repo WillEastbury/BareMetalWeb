@@ -119,8 +119,7 @@ public class ExportTests
 
         // Assert
         Assert.NotEmpty(nested);
-        var orderRowsField = nested.FirstOrDefault(n => n.Field.Name == "OrderRows");
-        Assert.NotNull(orderRowsField);
+        var orderRowsField = nested.First(n => n.Field.Name == "OrderRows");
         Assert.Equal(typeof(OrderRow), orderRowsField.ChildType);
     }
 
@@ -166,8 +165,7 @@ public class ExportTests
 
         // Assert
         Assert.NotEmpty(nested);
-        var orderRowsData = nested.FirstOrDefault(n => n.FieldName == "OrderRows");
-        Assert.NotNull(orderRowsData);
+        var orderRowsData = nested.First(n => n.FieldName == "OrderRows");
         Assert.Equal(2, orderRowsData.Rows.Length);
         
         // Check headers
@@ -205,8 +203,7 @@ public class ExportTests
 
         // Assert
         Assert.NotEmpty(nested);
-        var orderRowsData = nested.FirstOrDefault(n => n.FieldName == "OrderRows");
-        Assert.NotNull(orderRowsData);
+        var orderRowsData = nested.First(n => n.FieldName == "OrderRows");
         Assert.Empty(orderRowsData.Rows);
     }
 

@@ -62,7 +62,7 @@ public class CookieProtectionTests : IDisposable
     [InlineData("")]
     [InlineData(" ")]
     [InlineData(null)]
-    public void Unprotect_NullOrEmptyValue_ReturnsNull(string value)
+    public void Unprotect_NullOrEmptyValue_ReturnsNull(string? value)
     {
         // Act
         var result = CookieProtection.Unprotect(value);
@@ -268,7 +268,7 @@ public class CookieProtectionTests : IDisposable
     [InlineData("")]
     [InlineData(" ")]
     [InlineData(null)]
-    public void ConfigureKeyRoot_InvalidFolder_ThrowsArgumentException(string folder)
+    public void ConfigureKeyRoot_InvalidFolder_ThrowsArgumentException(string? folder)
     {
         // Act & Assert
         var exception = Assert.Throws<ArgumentException>(() => CookieProtection.ConfigureKeyRoot(folder));

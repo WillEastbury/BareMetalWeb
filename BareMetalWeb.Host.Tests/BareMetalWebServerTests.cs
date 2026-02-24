@@ -238,7 +238,7 @@ public class BareMetalWebServerTests : IDisposable
 
         // Assert
         Assert.Equal(500, context.Response.StatusCode);
-        Assert.True(_logger.ErrorLogs.Any(e => e.Contains("Test error")));
+        Assert.Contains(_logger.ErrorLogs, e => e.Contains("Test error"));
         Assert.Contains("X-Error-Id", context.Response.Headers.Keys);
     }
 
@@ -404,7 +404,7 @@ public class BareMetalWebServerTests : IDisposable
 
         // Assert
         Assert.Equal(301, context.Response.StatusCode);
-        Assert.True(context.Response.Headers.Location.ToString().StartsWith("https://"));
+        Assert.StartsWith("https://", context.Response.Headers.Location.ToString());
     }
 
     [Fact]
@@ -424,7 +424,7 @@ public class BareMetalWebServerTests : IDisposable
 
         // Assert
         Assert.Equal(301, context.Response.StatusCode);
-        Assert.True(context.Response.Headers.Location.ToString().StartsWith("https://"));
+        Assert.StartsWith("https://", context.Response.Headers.Location.ToString());
     }
 
     [Fact]
@@ -872,7 +872,7 @@ public class BareMetalWebServerTests : IDisposable
     private static PageInfo CreatePageInfo(
         string title,
         int statusCode = 200,
-        string? permissionsNeeded = null,
+        string permissionsNeeded = "",
         bool showOnNavBar = false)
     {
         var template = new MockHtmlTemplate();

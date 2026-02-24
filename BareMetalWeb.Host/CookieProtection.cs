@@ -17,7 +17,7 @@ public static class CookieProtection
     private static Lazy<byte[]> HmacKey = new(() =>
         LoadOrCreateKey(Path.Combine(KeyRootFolder, ".keys", "cookie.hmac.key"), HmacKeySize));
 
-    public static void ConfigureKeyRoot(string rootFolder)
+    public static void ConfigureKeyRoot(string? rootFolder)
     {
         if (string.IsNullOrWhiteSpace(rootFolder))
             throw new ArgumentException("Key root folder cannot be null or whitespace.", nameof(rootFolder));
@@ -41,7 +41,7 @@ public static class CookieProtection
         return $"{Base64UrlEncode(encrypted)}.{Base64UrlEncode(mac)}";
     }
 
-    public static string? Unprotect(string protectedValue)
+    public static string? Unprotect(string? protectedValue)
     {
         if (string.IsNullOrWhiteSpace(protectedValue))
             return null;
