@@ -1536,7 +1536,7 @@ public static class DataScaffold
             return null;
 
         var safeId = Uri.EscapeDataString(key);
-        return $"/admin/data/{targetMeta.Slug}/{safeId}";
+        return $"/UI/data/{targetMeta.Slug}/{safeId}";
     }
 
 

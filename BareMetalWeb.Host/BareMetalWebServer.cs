@@ -199,7 +199,7 @@ public class BareMetalWebServer : IBareWebHost
                 || string.Equals(entity.NavGroup, "System", StringComparison.OrdinalIgnoreCase);
 
             MenuOptionsList.Add(new MenuOption(
-                href: $"/admin/data/{entity.Slug}",
+                href: $"/UI/data/{entity.Slug}",
                 label: entity.Name,
                 showOnNavBar: true,
                 permissionsNeeded: permissionsNeeded,
