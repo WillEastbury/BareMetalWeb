@@ -3835,7 +3835,18 @@ public sealed class RouteHandlers : IRouteHandlers
         var wipeToken = SettingsService.GetValue(WellKnownSettings.AllowWipeData);
         if (string.IsNullOrEmpty(wipeToken))
         {
-            context.Response.StatusCode = 419;
+            await BuildPageHandler(ctx =>
+            {
+                ctx.SetStringValue("title", "Wipe All Data");
+                ctx.SetStringValue("message",
+                    "<div class=\"alert alert-warning\">" +
+                    "<h4 class=\"alert-heading\">Endpoint Disabled</h4>" +
+                    $"<p>The wipe-data endpoint is disabled because the <code>{WellKnownSettings.AllowWipeData}</code> setting is empty or missing.</p>" +
+                    "<p>To enable it, go to <strong>Settings</strong> in the admin UI and set <code>" +
+                    WebUtility.HtmlEncode(WellKnownSettings.AllowWipeData) +
+                    "</code> to a secret token value. You can also set it via config (<code>Admin:AllowWipeData</code>) or environment variable (<code>Admin__AllowWipeData</code>).</p>" +
+                    "</div>");
+            })(context);
             return;
         }
 
@@ -3847,7 +3858,13 @@ public sealed class RouteHandlers : IRouteHandlers
         var wipeToken = SettingsService.GetValue(WellKnownSettings.AllowWipeData);
         if (string.IsNullOrEmpty(wipeToken))
         {
-            context.Response.StatusCode = 419;
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.SetStringValue("title", "Wipe All Data");
+            context.SetStringValue("message",
+                "<div class=\"alert alert-warning\">" +
+                "<h4 class=\"alert-heading\">Endpoint Disabled</h4>" +
+                $"<p>The <code>{WebUtility.HtmlEncode(WellKnownSettings.AllowWipeData)}</code> setting is empty or missing.</p></div>");
+            await _renderer.RenderPage(context);
             return;
         }
 
