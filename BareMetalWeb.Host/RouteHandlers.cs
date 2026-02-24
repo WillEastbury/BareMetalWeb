@@ -1443,7 +1443,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 .ThenBy(e => e.Name)
                 .Select(entity => new[]
                 {
-                    $"<a class=\"btn btn-sm btn-outline-info me-1\" href=\"/admin/data/{entity.Slug}\" title=\"Open\" aria-label=\"Open\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i></a><a class=\"btn btn-sm btn-outline-success\" href=\"/admin/data/{entity.Slug}/import\" title=\"Import CSV\" aria-label=\"Import CSV\"><i class=\"bi bi-upload\" aria-hidden=\"true\"></i></a>",
+                    $"<a class=\"btn btn-sm btn-outline-info me-1\" href=\"/ssr/admin/data/{entity.Slug}\" title=\"Open\" aria-label=\"Open\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i></a><a class=\"btn btn-sm btn-outline-success\" href=\"/ssr/admin/data/{entity.Slug}/import\" title=\"Import CSV\" aria-label=\"Import CSV\"><i class=\"bi bi-upload\" aria-hidden=\"true\"></i></a>",
                     WebUtility.HtmlEncode(entity.Name),
                     WebUtility.HtmlEncode(entity.Slug),
                     string.IsNullOrWhiteSpace(entity.Permissions) ? "Public" : WebUtility.HtmlEncode(entity.Permissions)
@@ -1523,7 +1523,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var allQuery = DataScaffold.BuildQueryDefinition(queryDictionary, meta);
             var allResults = (await DataScaffold.QueryAsync(meta, allQuery)).Cast<BaseDataObject>().ToList();
             
-            var basePath = $"/admin/data/{typeSlug}";
+            var basePath = $"/ssr/admin/data/{typeSlug}";
 
             string viewHtml;
             if (effectiveViewType == ViewType.TreeView)
@@ -1545,7 +1545,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
             var treeToastHtml = BuildToastHtml(context, meta.Name);
             var treeViewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta);
-            var treeAddButtonHtml = $"<a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i> Add</a>";
+            var treeAddButtonHtml = $"<a class=\"btn btn-sm btn-success\" href=\"/ssr/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i> Add</a>";
             
             context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} - {GetViewTypeName(effectiveViewType)}");
             context.SetStringValue("header_controls", "<div class=\"d-flex align-items-center gap-2 flex-wrap\">" + treeViewSwitcher + treeAddButtonHtml + "</div>");
@@ -1588,7 +1588,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var rows = DataScaffold.BuildListRows(
             meta,
             results,
-            $"/admin/data/{typeSlug}",
+            $"/ssr/admin/data/{typeSlug}",
             includeActions: true,
             canRenderLookupLink: HasPermissionForMeta,
             cloneToken: cloneToken,
@@ -1599,8 +1599,8 @@ public sealed class RouteHandlers : IRouteHandlers
         
         // Build UI components
         var currentSearchText = queryDictionary.TryGetValue("q", out var searchVal) ? searchVal : null;
-        var pageSizeHtml = BuildPageSizeSelector(pageSize, $"/admin/data/{typeSlug}", queryDictionary);
-        var pagerHtml = BuildEnhancedPagination(page, totalCount, pageSize, $"/admin/data/{typeSlug}", queryDictionary);
+        var pageSizeHtml = BuildPageSizeSelector(pageSize, $"/ssr/admin/data/{typeSlug}", queryDictionary);
+        var pagerHtml = BuildEnhancedPagination(page, totalCount, pageSize, $"/ssr/admin/data/{typeSlug}", queryDictionary);
         
         var queryString = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : string.Empty;
         
@@ -1609,13 +1609,13 @@ public sealed class RouteHandlers : IRouteHandlers
         var hasNested = nestedComponents.Count > 0;
         
         var exportDropdown = BuildExportDropdown(typeSlug, queryString, hasNested);
-        var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary\" href=\"/admin/data/{typeSlug}/html{WebUtility.HtmlEncode(queryString)}\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
+        var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary\" href=\"/ssr/admin/data/{typeSlug}/html{WebUtility.HtmlEncode(queryString)}\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
         var viewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta);
-        var addButtonHtml = $"<a class=\"btn btn-sm btn-success\" href=\"/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i> Add</a>";
+        var addButtonHtml = $"<a class=\"btn btn-sm btn-success\" href=\"/ssr/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i> Add</a>";
         
         // Compact inline search form for the card header
         var safeSearchText = WebUtility.HtmlEncode(currentSearchText ?? string.Empty);
-        var safeActionUrl = WebUtility.HtmlEncode($"/admin/data/{typeSlug}");
+        var safeActionUrl = WebUtility.HtmlEncode($"/ssr/admin/data/{typeSlug}");
         var compactSearchHtml = $"<form method=\"get\" action=\"{safeActionUrl}\" class=\"d-flex align-items-center gap-1\">" +
             $"<input type=\"search\" class=\"form-control form-control-sm bm-list-search\" name=\"q\" placeholder=\"Search...\" value=\"{safeSearchText}\" aria-label=\"Search\" />" +
             "<button type=\"submit\" class=\"btn btn-sm btn-primary\" aria-label=\"Submit search\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i></button>" +
@@ -1628,7 +1628,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var bulkActionsBar = BuildBulkActionsBar(typeSlug, returnUrl, totalCount, cloneToken);
         
         // Build custom table with sortable headers
-        var tableHtml = BuildTableWithSortableHeaders(meta, rows, $"/admin/data/{typeSlug}", queryDictionary, includeActions: true, includeBulkSelection: true);
+        var tableHtml = BuildTableWithSortableHeaders(meta, rows, $"/ssr/admin/data/{typeSlug}", queryDictionary, includeActions: true, includeBulkSelection: true);
         
         // Pagination row below the table
         var paginationRowHtml = "<div class=\"d-flex justify-content-between align-items-center mt-2 mb-2\">" + pagerHtml + pageSizeHtml + "</div>";
@@ -1702,11 +1702,11 @@ public sealed class RouteHandlers : IRouteHandlers
         var hasNested = nestedComponents.Count > 0;
         
         var exportDropdown = BuildExportDropdown(typeSlug, string.Empty, hasNested, id);
-        var rtfHtml = $"<a class=\"btn btn-sm btn-outline-info ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/rtf\" title=\"Download RTF\" aria-label=\"Download RTF\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-text ms-1\" aria-hidden=\"true\"></i> RTF</a>";
-        var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/html\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
+        var rtfHtml = $"<a class=\"btn btn-sm btn-outline-info ms-2\" href=\"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/rtf\" title=\"Download RTF\" aria-label=\"Download RTF\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-text ms-1\" aria-hidden=\"true\"></i> RTF</a>";
+        var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/html\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
         var commandButtons = BuildCommandButtonsHtml(meta, typeSlug, id, CsrfProtection.EnsureToken(context));
         context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} Details");
-        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i> Edit</a>{exportDropdown}{rtfHtml}{htmlHtml}{commandButtons}</p>");
+        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i> Edit</a>{exportDropdown}{rtfHtml}{htmlHtml}{commandButtons}</p>");
         context.AddTable(new[] { "Field", "Value" }, rows);
         await _renderer.RenderPage(context);
     }
@@ -1974,7 +1974,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var help = "<p>Upload a CSV file. Columns map by field name or label (case-insensitive). If \"Upsert by Id\" is Yes and the CSV includes an Id column, existing records will be updated.</p>";
         context.SetStringValue("title", $"Import CSV: {WebUtility.HtmlEncode(meta.Name)}");
         context.SetStringValue("message", help);
-        context.AddFormDefinition(new FormDefinition($"/admin/data/{typeSlug}/import", "post", "Import CSV", fields));
+        context.AddFormDefinition(new FormDefinition($"/ssr/admin/data/{typeSlug}/import", "post", "Import CSV", fields));
         await _renderer.RenderPage(context);
     }
 
@@ -2126,7 +2126,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         context.SetStringValue("title", $"Import CSV: {WebUtility.HtmlEncode(meta.Name)}");
-        context.SetStringValue("message", summary + $"<p><a class=\"btn btn-sm btn-outline-secondary\" href=\"/admin/data/{typeSlug}\">Back to list</a></p>");
+        context.SetStringValue("message", summary + $"<p><a class=\"btn btn-sm btn-outline-secondary\" href=\"/ssr/admin/data/{typeSlug}\">Back to list</a></p>");
         await _renderer.RenderPage(context);
     }
 
@@ -2157,7 +2157,7 @@ public sealed class RouteHandlers : IRouteHandlers
         fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken));
 
         var isPopup = context.Request.Query.ContainsKey("popup");
-        var createAction = isPopup ? $"/admin/data/{typeSlug}/create?popup=1" : $"/admin/data/{typeSlug}/create";
+        var createAction = isPopup ? $"/ssr/admin/data/{typeSlug}/create?popup=1" : $"/ssr/admin/data/{typeSlug}/create";
         context.SetStringValue("title", $"Create {WebUtility.HtmlEncode(meta.Name)}");
         context.AddFormDefinition(new FormDefinition(createAction, "post", $"Create {meta.Name}", fields));
         await _renderer.RenderPage(context);
@@ -2226,7 +2226,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: true, validationResult, cspNonce: context.GetCspNonce());
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: true);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
-            var createAction = isPopup ? $"/admin/data/{typeSlug}/create?popup=1" : $"/admin/data/{typeSlug}/create";
+            var createAction = isPopup ? $"/ssr/admin/data/{typeSlug}/create?popup=1" : $"/ssr/admin/data/{typeSlug}/create";
             context.AddFormDefinition(new FormDefinition(createAction, "post", $"Create {meta.Name}", fields));
             await _renderer.RenderPage(context);
             return;
@@ -2262,7 +2262,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        context.Response.Redirect($"/admin/data/{typeSlug}?toast=created&id={WebUtility.UrlEncode(newId ?? string.Empty)}{keyQuery}");
+        context.Response.Redirect($"/ssr/admin/data/{typeSlug}?toast=created&id={WebUtility.UrlEncode(newId ?? string.Empty)}{keyQuery}");
     }
 
     public async ValueTask DataEditHandler(HttpContext context)
@@ -2303,7 +2303,7 @@ public sealed class RouteHandlers : IRouteHandlers
         fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken));
 
         context.SetStringValue("title", $"Edit {WebUtility.HtmlEncode(meta.Name)}");
-        context.AddFormDefinition(new FormDefinition($"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit", "post", $"Save {meta.Name}", fields));
+        context.AddFormDefinition(new FormDefinition($"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit", "post", $"Save {meta.Name}", fields));
         await _renderer.RenderPage(context);
     }
 
@@ -2389,7 +2389,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: false, validationResult, cspNonce: context.GetCspNonce());
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: false);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
-            context.AddFormDefinition(new FormDefinition($"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit", "post", $"Save {meta.Name}", fields));
+            context.AddFormDefinition(new FormDefinition($"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit", "post", $"Save {meta.Name}", fields));
             await _renderer.RenderPage(context);
             return;
         }
@@ -2411,7 +2411,7 @@ public sealed class RouteHandlers : IRouteHandlers
             await _auditService.AuditUpdateAsync(oldInstance, newBaseDataObject, userName, context.RequestAborted).ConfigureAwait(false);
         }
         
-        context.Response.Redirect($"/admin/data/{typeSlug}?toast=updated&id={WebUtility.UrlEncode(id)}");
+        context.Response.Redirect($"/ssr/admin/data/{typeSlug}?toast=updated&id={WebUtility.UrlEncode(id)}");
     }
 
     private static IReadOnlyList<string> ExtractSystemPrincipalKeys(IDictionary<string, string?> values)
@@ -2489,7 +2489,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var instance = meta.Handlers.Create();
             ApplyPrefillFromQuery(meta, instance, context.Request.Query);
         context.SetStringValue("message", $"<p>Delete this {WebUtility.HtmlEncode(meta.Name)} record? This cannot be undone.</p>");
-        context.AddFormDefinition(new FormDefinition($"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/delete", "post", $"Delete {meta.Name}", fields));
+        context.AddFormDefinition(new FormDefinition($"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/delete", "post", $"Delete {meta.Name}", fields));
         await _renderer.RenderPage(context);
     }
 
@@ -2562,7 +2562,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
         }, context.RequestAborted);
         
-        context.Response.Redirect($"/admin/data/{typeSlug}?toast=deleted&id={WebUtility.UrlEncode(id)}");
+        context.Response.Redirect($"/ssr/admin/data/{typeSlug}?toast=deleted&id={WebUtility.UrlEncode(id)}");
     }
 
     public async ValueTask DataBulkDeleteHandler(HttpContext context)
@@ -2834,7 +2834,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var newId = DataScaffold.GetIdValue(clone) ?? string.Empty;
         if (redirectToEdit)
         {
-            var editUrl = $"/admin/data/{typeSlug}/{WebUtility.UrlEncode(newId)}/edit?toast=cloned&id={WebUtility.UrlEncode(newId)}";
+            var editUrl = $"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(newId)}/edit?toast=cloned&id={WebUtility.UrlEncode(newId)}";
             context.Response.Redirect(editUrl);
             return;
         }
@@ -2847,7 +2847,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
         else
         {
-            context.Response.Redirect($"/admin/data/{typeSlug}?toast=cloned&id={WebUtility.UrlEncode(newId)}");
+            context.Response.Redirect($"/ssr/admin/data/{typeSlug}?toast=cloned&id={WebUtility.UrlEncode(newId)}");
         }
     }
 
@@ -2857,7 +2857,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return false;
         if (returnUrl.Contains("://") || returnUrl.StartsWith("//", StringComparison.Ordinal))
             return false;
-        if (!returnUrl.StartsWith("/admin/data/", StringComparison.OrdinalIgnoreCase))
+        if (!returnUrl.StartsWith("/ssr/admin/data/", StringComparison.OrdinalIgnoreCase))
             return false;
         return true;
     }
@@ -5083,8 +5083,8 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string BuildExportDropdown(string typeSlug, string queryString, bool includeNested, string? id = null)
     {
         var baseUrl = id != null 
-            ? $"/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/export"
-            : $"/admin/data/{typeSlug}/export";
+            ? $"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/export"
+            : $"/ssr/admin/data/{typeSlug}/export";
         
         var separator = string.IsNullOrEmpty(queryString) || queryString == "?" ? "?" : "&";
         var baseQueryString = queryString == "?" ? "" : queryString;
@@ -5801,21 +5801,21 @@ public sealed class RouteHandlers : IRouteHandlers
         html.Append("<div class=\"btn-group btn-group-sm\" role=\"group\" aria-label=\"View Type\">");
         
         var tableActive = currentView == ViewType.Table ? " active" : string.Empty;
-        html.Append($"<a class=\"btn btn-outline-secondary{tableActive}\" href=\"/admin/data/{typeSlug}?view=table\" title=\"Table View\"><i class=\"bi bi-table\" aria-hidden=\"true\"></i> Table</a>");
+        html.Append($"<a class=\"btn btn-outline-secondary{tableActive}\" href=\"/ssr/admin/data/{typeSlug}?view=table\" title=\"Table View\"><i class=\"bi bi-table\" aria-hidden=\"true\"></i> Table</a>");
         
         if (meta.ParentField != null)
         {
             var treeActive = currentView == ViewType.TreeView ? " active" : string.Empty;
-            html.Append($"<a class=\"btn btn-outline-secondary{treeActive}\" href=\"/admin/data/{typeSlug}?view=tree\" title=\"Tree View\"><i class=\"bi bi-diagram-3\" aria-hidden=\"true\"></i> Tree</a>");
+            html.Append($"<a class=\"btn btn-outline-secondary{treeActive}\" href=\"/ssr/admin/data/{typeSlug}?view=tree\" title=\"Tree View\"><i class=\"bi bi-diagram-3\" aria-hidden=\"true\"></i> Tree</a>");
             
             var orgActive = currentView == ViewType.OrgChart ? " active" : string.Empty;
-            html.Append($"<a class=\"btn btn-outline-secondary{orgActive}\" href=\"/admin/data/{typeSlug}?view=orgchart\" title=\"Org Chart\"><i class=\"bi bi-diagram-2\" aria-hidden=\"true\"></i> Org Chart</a>");
+            html.Append($"<a class=\"btn btn-outline-secondary{orgActive}\" href=\"/ssr/admin/data/{typeSlug}?view=orgchart\" title=\"Org Chart\"><i class=\"bi bi-diagram-2\" aria-hidden=\"true\"></i> Org Chart</a>");
         }
 
         if (DataScaffold.CanShowTimetableView(meta))
         {
             var timetableActive = currentView == ViewType.Timetable ? " active" : string.Empty;
-            html.Append($"<a class=\"btn btn-outline-secondary{timetableActive}\" href=\"/admin/data/{typeSlug}?view=timetable\" title=\"Timetable View\"><i class=\"bi bi-calendar-week\" aria-hidden=\"true\"></i> Timetable</a>");
+            html.Append($"<a class=\"btn btn-outline-secondary{timetableActive}\" href=\"/ssr/admin/data/{typeSlug}?view=timetable\" title=\"Timetable View\"><i class=\"bi bi-calendar-week\" aria-hidden=\"true\"></i> Timetable</a>");
         }
         
         // Check if entity has any DateOnly or DateTime fields for timeline view
@@ -5826,7 +5826,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (hasDateField)
         {
             var timelineActive = currentView == ViewType.Timeline ? " active" : string.Empty;
-            html.Append($"<a class=\"btn btn-outline-secondary{timelineActive}\" href=\"/admin/data/{typeSlug}?view=timeline\" title=\"Timeline View\"><i class=\"bi bi-clock-history\" aria-hidden=\"true\"></i> Timeline</a>");
+            html.Append($"<a class=\"btn btn-outline-secondary{timelineActive}\" href=\"/ssr/admin/data/{typeSlug}?view=timeline\" title=\"Timeline View\"><i class=\"bi bi-clock-history\" aria-hidden=\"true\"></i> Timeline</a>");
         }
         
         html.Append("</div>");

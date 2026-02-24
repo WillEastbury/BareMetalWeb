@@ -154,11 +154,11 @@ public class RouteHandlerTests : IDisposable
     [InlineData(null, false)]
     [InlineData("", false)]
     [InlineData("   ", false)]
-    [InlineData("https://evil.com/admin/data/foo", false)]     // contains ://
-    [InlineData("//evil.com/admin/data/foo", false)]            // starts with //
+    [InlineData("https://evil.com/ssr/admin/data/foo", false)]     // contains ://
+    [InlineData("//evil.com/ssr/admin/data/foo", false)]            // starts with //
     [InlineData("/home", false)]                                // wrong prefix
-    [InlineData("/admin/data/customer", true)]                  // valid
-    [InlineData("/admin/data/customer?page=2", true)]           // valid with query
+    [InlineData("/ssr/admin/data/customer", true)]                  // valid
+    [InlineData("/ssr/admin/data/customer?page=2", true)]           // valid with query
     public void IsValidCloneReturnUrl_VariousInputs_ReturnsExpected(string? input, bool expected)
     {
         var result = InvokeStatic<bool>("IsValidCloneReturnUrl", input);

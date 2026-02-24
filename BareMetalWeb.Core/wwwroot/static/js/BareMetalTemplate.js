@@ -77,7 +77,7 @@ const BareMetalTemplate = (() => {
         grp.appendChild(inp);
         const targetSlug = f.lookupUrl.replace(/[?#].*$/, '').replace(/\/$/, '').split('/').pop();
         const addBtn = mk('a', {
-          href: '/vnext/' + targetSlug + '/create',
+          href: '/admin/' + targetSlug + '/create',
           className: 'btn btn-outline-secondary', title: 'Add new', target: '_blank'
         });
         addBtn.innerHTML = '<i class="bi bi-plus"></i>';

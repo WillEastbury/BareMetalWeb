@@ -8,12 +8,12 @@
      * BMRouter — lightweight SPA router
      *
      * Usage:
-     *   BMRouter.on('/vnext/admin/data/:entity',       handlers.listView);
-     *   BMRouter.on('/vnext/admin/data/:entity/create', handlers.createView);
-     *   BMRouter.on('/vnext/admin/data/:entity/:id',    handlers.detailView);
-     *   BMRouter.on('/vnext',                           handlers.homeView);
+     *   BMRouter.on('/admin/data/:entity',       handlers.listView);
+     *   BMRouter.on('/admin/data/:entity/create', handlers.createView);
+     *   BMRouter.on('/admin/data/:entity/:id',    handlers.detailView);
+     *   BMRouter.on('/admin',                           handlers.homeView);
      *   BMRouter.start();                // match current URL and start listening
-     *   BMRouter.navigate('/vnext/...');  // programmatic navigation
+     *   BMRouter.navigate('/admin/...');  // programmatic navigation
      */
     var BMRouter = {
         _routes: [],
@@ -23,7 +23,7 @@
          * Register a route handler.
          * Patterns support named segments (:param) and a catch-all (*).
          * Routes are matched in registration order; register more-specific routes first.
-         * @param {string}   pattern  URL pattern, e.g. '/vnext/admin/data/:entity/:id/edit'
+         * @param {string}   pattern  URL pattern, e.g. '/admin/data/:entity/:id/edit'
          * @param {function} handler  Called with (params, query, state) when matched.
          */
         on: function (pattern, handler) {
@@ -64,7 +64,7 @@
 
         /**
          * Navigate to a new path without a full page reload.
-         * @param {string}  path     Absolute path, e.g. '/vnext/admin/data/customers'
+         * @param {string}  path     Absolute path, e.g. '/admin/data/customers'
          * @param {object}  [state]  Optional state object for history entry
          * @param {boolean} [replace] When true uses replaceState instead of pushState
          */
@@ -179,7 +179,8 @@
                 return false;
             }
         }
-        return href.indexOf('/vnext') === 0 ||
+        return href === '/admin' ||
+               href.indexOf('/admin/data') === 0 ||
                href.indexOf('/meta/') === 0;
     }
 
