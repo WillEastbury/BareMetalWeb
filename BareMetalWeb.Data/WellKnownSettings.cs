@@ -52,5 +52,5 @@ public static class WellKnownSettings
     /// The secret token required to trigger the wipe-all-data operation via
     /// <c>POST /admin/wipe-data</c>. When empty or absent the endpoint returns 419.
     /// </summary>
-    public const string AllowWipeData = "admin.allowWipeData";
+    public const string AllowWipeData = "AllowWipeData";
 }
