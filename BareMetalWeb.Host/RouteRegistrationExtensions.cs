@@ -923,11 +923,13 @@ public static class RouteRegistrationExtensions
     {
         // List all reports
         host.RegisterRoute("GET /reports", new RouteHandlerData(
-            pageInfoFactory.RawPage("Authenticated", true, navAlignment: NavAlignment.Right, navLabel: "Reports"),
+            pageInfoFactory.RawPage("admin", false),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.Redirect("/login"); return; }
+                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
 
                 var reports = DataStoreProvider.Current.Query<ReportDefinition>(null).OrderBy(r => r.Name).ToList();
                 var csrfToken = CsrfProtection.EnsureToken(context);
@@ -976,11 +978,13 @@ public static class RouteRegistrationExtensions
 
         // Run a report → HTML
         host.RegisterRoute("GET /reports/{id}", new RouteHandlerData(
-            pageInfoFactory.RawPage("Authenticated", false),
+            pageInfoFactory.RawPage("admin", false),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.Redirect("/login"); return; }
+                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
 
                 var id = GetRouteParam(context, "id");
                 if (string.IsNullOrWhiteSpace(id))
@@ -1039,11 +1043,13 @@ public static class RouteRegistrationExtensions
 
         // JSON results via API
         host.RegisterRoute("GET /api/reports/{id}", new RouteHandlerData(
-            pageInfoFactory.RawPage("Authenticated", false),
+            pageInfoFactory.RawPage("admin", false),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.StatusCode = 401; return; }
+                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
                 var id = GetRouteParam(context, "id");
                 if (string.IsNullOrWhiteSpace(id))
