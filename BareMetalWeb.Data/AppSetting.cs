@@ -1,6 +1,6 @@
 namespace BareMetalWeb.Data;
 
-[DataEntity("Settings", ShowOnNav = true, NavGroup = "Administration", NavOrder = 1)]
+[DataEntity("Settings", ShowOnNav = true, NavGroup = "Administration", NavOrder = 1, Permissions = "admin")]
 public class AppSetting : RenderableDataObject
 {
     [DataField(Label = "Setting ID", Order = 1, Required = true)]
