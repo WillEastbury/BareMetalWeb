@@ -953,6 +953,9 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
         var afterData = _server.routes.Count;
 
+        _server.RegisterLookupApiRoutes(_pageInfoFactory);
+        var afterLookup = _server.routes.Count;
+
         _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
         var total = _server.routes.Count;
 
@@ -961,8 +964,9 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterMonitoring > afterAuth);
         Assert.True(afterAdmin > afterMonitoring);
         Assert.True(afterData > afterAdmin);
-        Assert.True(total > afterData);
-        Assert.Equal(staticCount + 16 + 4 + 8 + 21 + 7, total); // 3+16+4+8+21+7=59
+        Assert.True(afterLookup > afterData);
+        Assert.True(total > afterLookup);
+        Assert.Equal(staticCount + 16 + 4 + 7 + 21 + 4 + 8, total); // 3+16+4+7+21+4+8=63
     }
 
     [Fact]

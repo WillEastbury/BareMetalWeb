@@ -459,16 +459,8 @@ public static class RouteRegistrationExtensions
         IRouteHandlers routeHandlers,
         IPageInfoFactory pageInfoFactory)
     {
-        // Lookup API endpoints — must be registered before parameterised /api/{type}
-        // routes to prevent /api/_lookup/customers matching as {type}=_lookup {id}=customers
-        host.RegisterRoute("GET /api/_lookup/{type}/_field/{id}/{fieldName}", new RouteHandlerData(
-            pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityFieldHandler));
-        host.RegisterRoute("GET /api/_lookup/{type}/_aggregate", new RouteHandlerData(
-            pageInfoFactory.RawPage("Public", false), LookupApiHandlers.AggregateEntitiesHandler));
-        host.RegisterRoute("GET /api/_lookup/{type}/{id}", new RouteHandlerData(
-            pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityByIdHandler));
-        host.RegisterRoute("GET /api/_lookup/{type}", new RouteHandlerData(
-            pageInfoFactory.RawPage("Public", false), LookupApiHandlers.QueryEntitiesHandler));
+        // Lookup API routes are registered separately via RegisterLookupApiRoutes()
+        // which must be called before this method (see BareMetalWebExtensions.cs).
 
         // List and create
         host.RegisterRoute("GET /api/{type}", new RouteHandlerData(
