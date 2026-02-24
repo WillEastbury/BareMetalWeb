@@ -245,7 +245,7 @@ public class DataEntityRegistryTests
         var entities = DataScaffold.Entities;
 
         // Known entities that should exist
-        var knownEntityNames = new[] { "ToDo", "Product", "Customer", "Invoice", "Order" };
+        var knownEntityNames = new[] { "ToDo", "Product", "Customer", "Order" };
         
         foreach (var name in knownEntityNames)
         {

@@ -102,17 +102,6 @@ public class DataScaffoldLookupTests : IDisposable
     }
 
     [Fact]
-    public void BuildFormFields_ForCreate_Invoice_WithLookups_DoesNotThrow()
-    {
-        var meta = DataScaffold.GetEntityByType(typeof(Invoice));
-        Assert.NotNull(meta);
-
-        var fields = DataScaffold.BuildFormFields(meta, null, forCreate: true);
-        Assert.NotNull(fields);
-        Assert.True(fields.Count > 0);
-    }
-
-    [Fact]
     public void BuildFormFields_ForEdit_WithLookupFields_DoesNotThrow()
     {
         var product = new Product
