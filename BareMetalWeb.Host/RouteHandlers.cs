@@ -5799,11 +5799,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
         
         // Check if entity has any DateOnly or DateTime fields for timeline view
-        var hasDateField = meta.Fields.Any(f => 
-            f.FieldType == FormFieldType.DateOnly || 
-            f.FieldType == FormFieldType.DateTime);
-        
-        if (hasDateField)
+        if (DataScaffold.CanShowTimelineView(meta))
         {
             var timelineActive = currentView == ViewType.Timeline ? " active" : string.Empty;
             html.Append($"<a class=\"btn btn-outline-secondary{timelineActive}\" href=\"/ssr/admin/data/{typeSlug}?view=timeline\" title=\"Timeline View\"><i class=\"bi bi-clock-history\" aria-hidden=\"true\"></i> Timeline</a>");
