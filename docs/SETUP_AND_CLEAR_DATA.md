@@ -67,6 +67,7 @@ The following reference records are created automatically during setup if they d
 | **Unit of Measure** | "Each" (abbreviation `EA`) |
 | **Address** | A placeholder address (`123 Example Street, London, SW1A 1AA, GB`) |
 | **Report Definitions** | Customer List, Orders with Customer, and several other standard reports |
+| **Settings** | `app.name`, `app.company`, `app.copyright` — seeded from `AppInfo` configuration values |
 
 These defaults are safe to edit or delete after setup.
 
