@@ -90,6 +90,71 @@ public sealed class ServerLookupResolver : ILookupResolver
         return null;
     }
 
+    public async ValueTask<object?> ResolveChainAsync(
+        string startEntitySlug,
+        IReadOnlyList<string> chain,
+        IReadOnlyDictionary<string, object?> context,
+        CancellationToken cancellationToken = default)
+    {
+        if (chain.Count < 2)
+            return null;
+
+        // Step 1: resolve the first FK from the starting entity context
+        var firstFkField = chain[0];
+        if (!context.TryGetValue(firstFkField, out var firstFkValue) || firstFkValue == null)
+            return null;
+
+        var firstFkString = firstFkValue.ToString();
+        if (string.IsNullOrEmpty(firstFkString))
+            return null;
+
+        DataEntityMetadata? currentMeta = null;
+        if (!string.IsNullOrEmpty(startEntitySlug) && DataScaffold.TryGetEntity(startEntitySlug, out var startMeta))
+        {
+            var firstFkFieldMeta = startMeta!.Fields.FirstOrDefault(f =>
+                string.Equals(f.Name, firstFkField, StringComparison.OrdinalIgnoreCase));
+            if (firstFkFieldMeta?.Lookup != null)
+                currentMeta = DataScaffold.GetEntityByType(firstFkFieldMeta.Lookup.TargetType);
+        }
+
+        if (currentMeta == null)
+            return null;
+
+        var currentEntity = await currentMeta.Handlers.LoadAsync(firstFkString, cancellationToken);
+        if (currentEntity == null)
+            return null;
+
+        // Steps 2..n-1: traverse intermediate FK fields using DataLookupAttribute reflection
+        for (int i = 1; i < chain.Count - 1; i++)
+        {
+            var nextFkField = chain[i];
+            var nextFkValue = ExtractFieldValue(currentEntity, nextFkField);
+            if (nextFkValue == null)
+                return null;
+
+            var nextFkString = nextFkValue.ToString();
+            if (string.IsNullOrEmpty(nextFkString))
+                return null;
+
+            DataEntityMetadata? nextMeta = null;
+            var lookupAttr = currentEntity.GetType()
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .FirstOrDefault(p => string.Equals(p.Name, nextFkField, StringComparison.OrdinalIgnoreCase))
+                ?.GetCustomAttribute<DataLookupAttribute>();
+            if (lookupAttr != null)
+                nextMeta = DataScaffold.GetEntityByType(lookupAttr.TargetType);
+
+            if (nextMeta == null)
+                return null;
+
+            currentEntity = await nextMeta.Handlers.LoadAsync(nextFkString, cancellationToken);
+            if (currentEntity == null)
+                return null;
+        }
+
+        return ExtractFieldValue(currentEntity, chain[chain.Count - 1]);
+    }
+
     private static object? ExtractFieldValue(object entity, string fieldName)
     {
         if (entity is DynamicDataObject dyn)

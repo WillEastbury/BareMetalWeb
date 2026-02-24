@@ -252,6 +252,7 @@ public sealed class FunctionNode : ExpressionNode
             "if" => EvaluateIf(context),
             "relatedlookup" => throw new InvalidOperationException("RelatedLookup requires async evaluation via EvaluateAsync."),
             "querylookup" => throw new InvalidOperationException("QueryLookup requires async evaluation via EvaluateAsync."),
+            "lookupmultilevel" => throw new InvalidOperationException("LookupMultiLevel requires async evaluation via EvaluateAsync."),
             _ => throw new InvalidOperationException($"Unknown function: {FunctionName}")
         };
     }
@@ -270,6 +271,7 @@ public sealed class FunctionNode : ExpressionNode
             "if" => EvaluateIf(context),
             "relatedlookup" => await EvaluateRelatedLookupAsync(context, resolver, cancellationToken),
             "querylookup" => await EvaluateQueryLookupAsync(context, resolver, cancellationToken),
+            "lookupmultilevel" => await EvaluateQueryLookupAsync(context, resolver, cancellationToken),
             _ => throw new InvalidOperationException($"Unknown function: {FunctionName}")
         };
     }
@@ -287,6 +289,7 @@ public sealed class FunctionNode : ExpressionNode
             "if" => $"({Arguments[0].ToJavaScript()} ? {Arguments[1].ToJavaScript()} : {Arguments[2].ToJavaScript()})",
             "relatedlookup" => $"await bmwRelatedLookup({args})",
             "querylookup" => $"await bmwQueryLookup({args})",
+            "lookupmultilevel" => $"await bmwQueryLookup({args})",
             _ => throw new InvalidOperationException($"Unknown function: {FunctionName}")
         };
     }
@@ -399,6 +402,8 @@ public sealed class FunctionNode : ExpressionNode
     /// <summary>
     /// QueryLookup(entitySlug, filterField1, filterValue1, ..., returnField)
     /// Queries an entity with equality filters and returns a field from the first match.
+    /// Also used as the backing implementation for LookupMultiLevel.
+    /// Filter values are evaluated asynchronously, enabling Parent.Field references.
     /// </summary>
     private async ValueTask<object?> EvaluateQueryLookupAsync(
         IReadOnlyDictionary<string, object?> context,
@@ -417,7 +422,7 @@ public sealed class FunctionNode : ExpressionNode
         for (int idx = 1; idx < Arguments.Count - 1; idx += 2)
         {
             var filterField = GetStringArgument(Arguments[idx], context, $"filterField{(idx + 1) / 2}");
-            var filterValue = Arguments[idx + 1].Evaluate(context);
+            var filterValue = await Arguments[idx + 1].EvaluateAsync(context, resolver, cancellationToken);
             filters.Add((filterField, filterValue));
         }
 
@@ -434,9 +439,11 @@ public sealed class FunctionNode : ExpressionNode
 }
 
 /// <summary>
-/// Dot-access field traversal (e.g., Customer.DiscountLevel).
-/// Syntactic sugar for RelatedLookup — the left part is treated as a FK field
-/// and the right part as the target field on the related entity.
+/// Dot-access field traversal (e.g., CustomerId.DiscountLevel or CustomerId.RegionId.TaxRate).
+/// Single-hop: left part is a FK field, right part is the target field on the related entity.
+/// Multi-hop: each intermediate segment is a FK field on the previous entity.
+/// Special case: <c>Parent.FieldName</c> reads the named field from the parent entity context
+/// (populated via <see cref="CalculatedFieldService.EvaluateCalculatedFieldsAsync"/> parentContext).
 /// </summary>
 public sealed class DotAccessNode : ExpressionNode
 {
@@ -451,6 +458,15 @@ public sealed class DotAccessNode : ExpressionNode
 
     public override object? Evaluate(IReadOnlyDictionary<string, object?> context)
     {
+        // Parent.FieldName is resolvable synchronously from the context dictionary.
+        if (string.Equals(LookupField, "Parent", StringComparison.OrdinalIgnoreCase))
+        {
+            if (Path.Count == 0) return null;
+            var key = "Parent." + Path[Path.Count - 1];
+            context.TryGetValue(key, out var parentValue);
+            return parentValue;
+        }
+
         throw new InvalidOperationException(
             $"Dot access '{LookupField}.{string.Join(".", Path)}' requires async evaluation via EvaluateAsync.");
     }
@@ -460,17 +476,46 @@ public sealed class DotAccessNode : ExpressionNode
         ILookupResolver? resolver,
         CancellationToken cancellationToken = default)
     {
+        // Parent.FieldName — read directly from the context (no resolver needed).
+        if (string.Equals(LookupField, "Parent", StringComparison.OrdinalIgnoreCase))
+        {
+            if (Path.Count == 0) return null;
+            var key = "Parent." + Path[Path.Count - 1];
+            context.TryGetValue(key, out var parentValue);
+            return parentValue;
+        }
+
         if (resolver == null)
             throw new InvalidOperationException("Dot-access traversal requires a lookup resolver.");
 
         var entitySlug = context.TryGetValue("__entitySlug", out var slug) ? slug?.ToString() ?? "" : "";
-        var targetField = Path[Path.Count - 1];
 
-        return await resolver.ResolveRelatedFieldAsync(entitySlug, LookupField, targetField, context, cancellationToken);
+        if (Path.Count == 1)
+        {
+            // Single-hop (existing behaviour).
+            return await resolver.ResolveRelatedFieldAsync(entitySlug, LookupField, Path[0], context, cancellationToken);
+        }
+
+        // Multi-hop: build the full chain and delegate to ResolveChainAsync.
+        var chain = new List<string>(Path.Count + 1) { LookupField };
+        chain.AddRange(Path);
+        return await resolver.ResolveChainAsync(entitySlug, chain, context, cancellationToken);
     }
 
     public override string ToJavaScript()
     {
-        return $"await bmwRelatedLookup('{LookupField}', '{Path[Path.Count - 1]}')";
+        // Parent.Field cannot be expressed server-side in JS; emit a placeholder comment.
+        if (string.Equals(LookupField, "Parent", StringComparison.OrdinalIgnoreCase))
+            return $"/* Parent.{string.Join(".", Path)} — server-side only */null";
+
+        // Multi-hop: pass full chain as a JSON array to bmwRelatedLookupChain.
+        if (Path.Count > 1)
+        {
+            var chainParts = new List<string>(Path.Count + 1) { $"'{LookupField}'" };
+            foreach (var seg in Path) chainParts.Add($"'{seg}'");
+            return $"await bmwRelatedLookupChain([{string.Join(", ", chainParts)}])";
+        }
+
+        return $"await bmwRelatedLookup('{LookupField}', '{Path[0]}')";
     }
 }
