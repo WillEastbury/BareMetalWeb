@@ -66,7 +66,16 @@ npm run test:headed
 
 ## Test Structure
 
-- `tests/setup-and-login.spec.ts` - Tests for initial setup process and login/logout flows
+Tests run in two Playwright projects. The **setup** project runs first; the **chromium** project depends on it and runs all remaining tests.
+
+- `tests/setup-and-login.spec.ts` — Initial setup (create admin account), login, logout, and auth redirect tests. Runs as the `setup` project before all others.
+- `tests/static-assets.spec.ts` — Verifies that key static files (`site.css`, `vnext-app.js`, etc.) are served with HTTP 200.
+- `tests/navigation.spec.ts` — VNext SPA routing: `/UI` shell loads, entity list/create/detail/edit paths work, sidebar nav, browser back/forward, deep-linking.
+- `tests/list-view.spec.ts` — Entity list view: table renders, search works, sort updates URL, lookup columns carry `data-lookup-field` attributes for resolution, export buttons present.
+- `tests/create-edit.spec.ts` — Create/edit forms: Save button and inputs present, required-field validation blocks empty submit, record creation redirects to detail view, edit form populates with existing values.
+- `tests/detail-view.spec.ts` — Detail view: field values in `<dl>`, Edit button links to edit form, breadcrumb navigation, lookup fields link to target entities, JSON export link present.
+- `tests/admin-pages.spec.ts` — SSR admin routes: `/admin/logs`, `/admin/sample-data`, and `/reports` load for the admin user; unauthenticated access redirects to `/login`.
+- `tests/helpers/auth.ts` — Shared `login()` helper used by all authenticated tests.
 
 ## CI/CD Integration
 
@@ -81,4 +90,7 @@ The workflow validates that:
 - The initial setup process works correctly
 - Login/logout flows function as expected
 - Protected pages are properly secured
+- The VNext SPA shell and all entity CRUD views load without errors
+- Static assets are served correctly
+- Admin system pages are accessible to admin users
 - The application can start from a clean state successfully

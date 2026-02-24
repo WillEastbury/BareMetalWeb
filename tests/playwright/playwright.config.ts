@@ -18,9 +18,17 @@ export default defineConfig({
     video: 'retain-on-failure',
   },
   projects: [
+    // Setup project: runs first to create the initial admin account on a fresh CI-reset site.
+    {
+      name: 'setup',
+      testMatch: '**/setup-and-login.spec.ts',
+    },
+    // Main test project: depends on setup completing first.
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
+      dependencies: ['setup'],
+      testIgnore: '**/setup-and-login.spec.ts',
     },
   ],
   timeout: 60000,
