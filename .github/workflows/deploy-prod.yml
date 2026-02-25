@@ -45,7 +45,7 @@ jobs:
         run: dotnet test --no-build --configuration Release --verbosity normal --filter "FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~PerformanceTests&Category!=Integration"
 
       - name: Publish
-        run: dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj --configuration Release --output ./publish -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} -p:FileVersion=${{ steps.version.outputs.assembly_version }} -p:InformationalVersion=${{ steps.version.outputs.info_version }}
+        run: dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj --configuration Release --self-contained -r linux-x64 --output ./publish -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} -p:FileVersion=${{ steps.version.outputs.assembly_version }} -p:InformationalVersion=${{ steps.version.outputs.info_version }}
 
       - name: Login to Azure
         uses: azure/login@v2
