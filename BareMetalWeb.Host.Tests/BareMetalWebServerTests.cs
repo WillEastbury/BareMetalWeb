@@ -243,6 +243,37 @@ public class BareMetalWebServerTests : IDisposable
     }
 
     [Fact]
+    public async Task RequestHandler_AjaxHandlerThrowsException_Returns500WithJsonBody()
+    {
+        // Arrange
+        EnsureStore();
+        _server.RegisterRoute("POST /api/error", new RouteHandlerData(
+            CreatePageInfo("Error API"),
+            async (ctx) =>
+            {
+                await Task.CompletedTask;
+                throw new InvalidOperationException("API test error");
+            }
+        ));
+
+        var context = CreateHttpContext("POST", "/api/error");
+        context.Request.Headers["X-Requested-With"] = "BareMetalWeb";
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(500, context.Response.StatusCode);
+        Assert.Contains("X-Error-Id", context.Response.Headers.Keys);
+        Assert.StartsWith("application/json", context.Response.ContentType);
+        context.Response.Body.Seek(0, System.IO.SeekOrigin.Begin);
+        var body = await new System.IO.StreamReader(context.Response.Body).ReadToEndAsync();
+        Assert.Contains("errorId", body);
+        Assert.Contains("error", body);
+        Assert.DoesNotContain("<html", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task RequestHandler_OperationCanceled_LogsDisconnection()
     {
         // Arrange
