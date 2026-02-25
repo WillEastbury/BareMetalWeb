@@ -5919,6 +5919,9 @@ public sealed class RouteHandlers : IRouteHandlers
         if (ganttItems.Count == 0)
             return "<p class=\"text-muted\">No items with valid dates found.</p>";
 
+        // Sort by start date ascending so the chart renders like a Gantt chart
+        ganttItems.Sort((a, b) => a.Start.CompareTo(b.Start));
+
         // Expand date range to full month boundaries
         var minDate = ganttItems.Min(x => x.Start);
         var maxDate = ganttItems.Max(x => x.End);

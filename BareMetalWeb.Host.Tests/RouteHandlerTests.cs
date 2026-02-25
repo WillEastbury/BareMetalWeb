@@ -740,6 +740,25 @@ public class RouteHandlerTests : IDisposable
         Assert.DoesNotContain("left:-", result);
     }
 
+    [Fact]
+    public void BuildTimelineViewHtml_SortsByStartDateAscending()
+    {
+        var meta = CreateGanttMetadata();
+        // Deliberately provide items in REVERSE chronological order
+        var laterItem  = new TimelineTestItem { StartDate = new DateOnly(2025, 3, 1), EndDate = new DateOnly(2025, 3, 31) };
+        var earlierItem = new TimelineTestItem { StartDate = new DateOnly(2025, 1, 1), EndDate = new DateOnly(2025, 1, 31) };
+        var items = new BaseDataObject[] { laterItem, earlierItem };
+        var result = InvokeStatic<string>("BuildTimelineViewHtml",
+            meta, items, "/admin/data/timeline", null, null, null);
+        // The bars should appear in ascending left-% order (earlier start = smaller left offset)
+        var bars = System.Text.RegularExpressions.Regex.Matches(
+            result, @"class=""bm-gantt-bar"" data-gantt-left=""([\d.]+)%""");
+        Assert.Equal(2, bars.Count);
+        var firstLeft  = double.Parse(bars[0].Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        var secondLeft = double.Parse(bars[1].Groups[1].Value, System.Globalization.CultureInfo.InvariantCulture);
+        Assert.True(firstLeft <= secondLeft, "Items should be rendered sorted by start date ascending");
+    }
+
     private static DataEntityMetadata CreateGanttMetadata()
     {
         var startDateProp = typeof(TimelineTestItem).GetProperty("StartDate")!;
