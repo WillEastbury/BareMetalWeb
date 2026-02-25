@@ -352,7 +352,9 @@
                     listFields.forEach(function (f) {
                         var val = nestedGet(item, f.name);
                         var cellHtml;
-                        if (f.lookup && f.lookup.targetSlug && val) {
+                        if (f.type === 'CustomHtml' && Array.isArray(val)) {
+                            cellHtml = '<span class="badge bg-secondary">' + val.length + ' item' + (val.length !== 1 ? 's' : '') + '</span>';
+                        } else if (f.lookup && f.lookup.targetSlug && val) {
                             cellHtml = '<span data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' + escHtml(String(val)) + '</span>';
                         } else {
                             cellHtml = '<span>' + fmtValue(val, f.type) + '</span>';
@@ -391,7 +393,9 @@
                     html += '<td><input type="checkbox" class="form-check-input vnext-row-select" value="' + escHtml(id) + '"></td>';
                     listFields.forEach(function (f) {
                         var val = nestedGet(item, f.name);
-                        if (f.lookup && f.lookup.targetSlug && val) {
+                        if (f.type === 'CustomHtml' && Array.isArray(val)) {
+                            html += '<td data-label="' + escHtml(f.label) + '"><span class="badge bg-secondary">' + val.length + ' item' + (val.length !== 1 ? 's' : '') + '</span></td>';
+                        } else if (f.lookup && f.lookup.targetSlug && val) {
                             html += '<td data-label="' + escHtml(f.label) + '" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
                                 '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
                         } else {
@@ -1045,9 +1049,10 @@
         viewFields.forEach(function (f) {
             var val = nestedGet(item, f.name);
 
-            if (isSubListField(val)) {
+            if (f.type === 'CustomHtml') {
+                var subItems = Array.isArray(val) ? val : [];
                 html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
-                html += '<dd class="col-sm-9">' + renderSubListReadonly(val, f) + '</dd>';
+                html += '<dd class="col-sm-9">' + renderSubListReadonly(subItems, f) + '</dd>';
             } else if (f.lookup && f.lookup.targetSlug && val) {
                 html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
                 html += '<dd class="col-sm-9" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
@@ -1127,7 +1132,38 @@
     }
 
     function renderSubListReadonly(items, field) {
-        if (!items || items.length === 0) return '<span class="text-muted">None</span>';
+        var sf = (field && Array.isArray(field.subFields) && field.subFields.length > 0) ? field.subFields : null;
+        if (!items || items.length === 0) {
+            if (sf) {
+                var colHeaders = sf.map(function (s) { return '<th>' + escHtml(s.label) + '</th>'; }).join('');
+                return '<div class="table-responsive"><table class="table table-sm table-bordered">' +
+                    '<thead><tr>' + colHeaders + '</tr></thead>' +
+                    '<tbody><tr><td colspan="' + sf.length + '" class="text-muted text-center">None</td></tr></tbody></table></div>';
+            }
+            return '<span class="text-muted">None</span>';
+        }
+        if (sf) {
+            var html = '<div class="table-responsive"><table class="table table-sm table-bordered vnext-sublist-readonly">';
+            html += '<thead><tr>' + sf.map(function (s) { return '<th>' + escHtml(s.label) + '</th>'; }).join('') + '</tr></thead>';
+            html += '<tbody>';
+            items.forEach(function (row) {
+                html += '<tr>' + sf.map(function (s) {
+                    var v = row[s.name] != null ? String(row[s.name]) : '';
+                    if (s.type === 'LookupList' && s.lookup && s.lookup.targetSlug && v) {
+                        return '<td data-lookup-field="' + escHtml(s.name) + '"' +
+                            ' data-target-slug="' + escHtml(s.lookup.targetSlug) + '"' +
+                            ' data-display-field="' + escHtml(s.lookup.displayField) + '"' +
+                            ' data-value="' + escHtml(v) + '">' + escHtml(v) + '</td>';
+                    }
+                    if (s.type === 'YesNo') {
+                        return '<td>' + (v === 'true' ? '<i class="bi bi-check-circle-fill text-success"></i>' : '<i class="bi bi-circle text-muted"></i>') + '</td>';
+                    }
+                    return '<td>' + escHtml(v) + '</td>';
+                }).join('') + '</tr>';
+            });
+            html += '</tbody></table></div>';
+            return html;
+        }
         var keys = Object.keys(items[0]).filter(function (k) { return k !== '__type'; });
         var html = '<div class="table-responsive"><table class="table table-sm table-bordered">';
         html += '<thead><tr>' + keys.map(function (k) { return '<th>' + escHtml(k) + '</th>'; }).join('') + '</tr></thead>';
