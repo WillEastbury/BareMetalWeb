@@ -447,10 +447,19 @@ public class BareMetalWebServer : IBareWebHost
                 return;
             }
             context.Response.Clear();
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
             context.Response.Headers["X-Error-Id"] = errorId;
-            context.SetPageInfo(ErrorPageInfo);
-            context.SetStringValue("message", $"<p>An unexpected error occurred.</p><p>Error ID: <code>{errorId}</code></p>");
-            await HtmlRenderer.RenderPage(context); // Render error page
+            if (IsAjaxRequest(context))
+            {
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync($"{{\"error\":\"An unexpected error occurred.\",\"errorId\":\"{errorId}\"}}");
+            }
+            else
+            {
+                context.SetPageInfo(ErrorPageInfo);
+                context.SetStringValue("message", $"<p>An unexpected error occurred.</p><p>Error ID: <code>{errorId}</code></p>");
+                await HtmlRenderer.RenderPage(context); // Render error page
+            }
             BufferedLogger.LogInfo($"{path}|500|{sourceIp}");
         }
         finally
@@ -460,6 +469,10 @@ public class BareMetalWebServer : IBareWebHost
             Metrics.RecordRequest(statusCode, stopwatch.Elapsed);
         }
     }
+
+    private static bool IsAjaxRequest(HttpContext context) =>
+        context.Request.Headers.ContainsKey("X-Requested-With") ||
+        context.Request.Path.StartsWithSegments("/api");
 
     private static bool TryParseRoute(string route, out string verb, out string path)
     {
