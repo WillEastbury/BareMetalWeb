@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -1245,7 +1246,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     private static Type AssumePublicMembers(Type type)
         => type;
 
-    private static object CreateInstance(Type type)
+    private static object CreateInstance([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
     {
         if (type.IsEnum)
             return Enum.ToObject(type, 0);
@@ -1301,7 +1302,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         }
     }
 
-    private static object? GetDefaultValue(Type type)
+    private static object? GetDefaultValue([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
     {
         if (!type.IsValueType)
             return null;
@@ -1313,7 +1314,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return TypeCache.GetOrAdd(type, CreateTypeShape);
     }
 
-    private static TypeShape CreateTypeShape(Type type)
+    private static TypeShape CreateTypeShape([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
     {
         var shape = new TypeShape(type);
         var nullable = Nullable.GetUnderlyingType(type);
@@ -1705,7 +1706,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return IsBlittableStruct(type, new HashSet<Type>());
     }
 
-    private static bool IsBlittableStruct(Type type, HashSet<Type> visited)
+    private static bool IsBlittableStruct([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields)] Type type, HashSet<Type> visited)
     {
         if (visited.Contains(type))
             return true;
@@ -1917,7 +1918,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return hmac.GetHashAndReset();
     }
 
-    private static MemberAccessor[] BuildMemberAccessors(Type type)
+    private static MemberAccessor[] BuildMemberAccessors([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicFields)] Type type)
     {
         var properties = type.GetProperties(BindingFlags.Instance | BindingFlags.Public);
         var fields = type.GetFields(BindingFlags.Instance | BindingFlags.Public);

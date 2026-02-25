@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data.Interfaces;
@@ -296,7 +297,7 @@ public sealed class ReportExecutor
         return cells;
     }
 
-    private static PropertyInfo? FindAccessorOnObject(Type type, string fieldName)
+    private static PropertyInfo? FindAccessorOnObject([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type, string fieldName)
         => type.GetProperty(fieldName,
             BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 
@@ -283,7 +284,7 @@ public static class CalculatedFieldService
         return dependencies;
     }
 
-    private static Dictionary<string, object?> BuildContext(BaseDataObject instance, Type type)
+    private static Dictionary<string, object?> BuildContext(BaseDataObject instance, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
     {
         var context = new Dictionary<string, object?>();
 
@@ -325,7 +326,7 @@ public static class CalculatedFieldService
         return false;
     }
 
-    private static object? ConvertToPropertyType(object? value, Type targetType)
+    private static object? ConvertToPropertyType(object? value, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type targetType)
     {
         if (value == null)
         {
