@@ -1687,7 +1687,7 @@
         document.getElementById(modalId + '-save').addEventListener('click', function () {
             if (!form) return;
             var row = {};
-            form.querySelectorAll('[data-field]').forEach(function (el) {
+            form.querySelectorAll('input[data-field], select[data-field], textarea[data-field]').forEach(function (el) {
                 var name = el.getAttribute('data-field');
                 if (el.type === 'checkbox') row[name] = el.checked ? 'true' : 'false';
                 else row[name] = el.value || '';
