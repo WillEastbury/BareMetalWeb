@@ -319,7 +319,7 @@
         html += '</div>';
 
         if (activeView === 'TreeView' || (activeView === '' && viewType === 'TreeView')) {
-            html += renderTreeView(meta, items, slug, baseUrl);
+            html += renderTreeView(meta, items, slug, baseUrl, query);
         } else if (activeView === 'OrgChart' || (activeView === '' && viewType === 'OrgChart')) {
             html += renderOrgChart(meta, items, slug, baseUrl);
         } else if ((activeView === 'Timeline' || (activeView === '' && viewType === 'Timeline')) && items.length > 0) {
@@ -440,16 +440,37 @@
 
     // ── Alternate view renderers ──────────────────────────────────────────────
 
-    function renderTreeView(meta, items, slug, baseUrl) {
-        // Find the parent field for hierarchical grouping
+    function renderTreeView(meta, items, slug, baseUrl, query) {
         var parentField = meta.parentField ? meta.parentField.name : null;
         var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
-        var html = '<div class="vnext-tree-view">';
+        var viewFields = meta.fields.filter(function (f) { return f.view; }).sort(function (a, b) { return a.order - b.order; });
+        var selectedId = (query && query.selected) ? query.selected : '';
 
         if (items.length === 0) {
-            html += '<p class="text-center text-muted py-4"><i class="bi bi-diagram-3 me-2"></i>No records found.</p>';
-            html += '</div>';
-            return html;
+            return '<p class="text-center text-muted py-4"><i class="bi bi-diagram-3 me-2"></i>No records found.</p>';
+        }
+
+        // Build node map
+        var nodeMap = {};
+        items.forEach(function (item) {
+            var id = item.id || item.Id || '';
+            nodeMap[id] = { item: item, children: [] };
+        });
+
+        // Determine ancestors of selected item so their branches stay expanded
+        var ancestorIds = {};
+        if (selectedId && parentField && nodeMap[selectedId]) {
+            var cur = nodeMap[selectedId].item;
+            var visited = {};
+            while (cur) {
+                var curId = cur.id || cur.Id || '';
+                if (visited[curId]) break;
+                visited[curId] = true;
+                var pid = nestedGet(cur, parentField) || '';
+                if (!pid || !nodeMap[pid]) break;
+                ancestorIds[pid] = true;
+                cur = nodeMap[pid].item;
+            }
         }
 
         function getLabel(item) {
@@ -457,57 +478,99 @@
             return labelField ? (nestedGet(item, labelField.name) || id) : id;
         }
 
-        function buildNodeHtml(node, depth) {
+        function buildNodeHtml(node) {
             var id = node.item.id || node.item.Id || '';
             var label = getLabel(node.item);
-            var indent = depth * 20;
-            var row = '<div class="vnext-tree-node d-flex align-items-center py-1 border-bottom" style="padding-left:' + indent + 'px" data-id="' + escHtml(id) + '">';
-            if (node.children.length > 0) row += '<i class="bi bi-chevron-down text-muted me-1" style="cursor:pointer" onclick="this.closest(\'.vnext-tree-node\').nextElementSibling.classList.toggle(\'d-none\');this.classList.toggle(\'bi-chevron-right\');this.classList.toggle(\'bi-chevron-down\')"></i>';
-            else row += '<i class="bi bi-dot text-muted me-1"></i>';
-            row += '<a class="link-body-emphasis text-decoration-none me-2" href="' + baseUrl + '/' + encodeURIComponent(id) + '">' + escHtml(String(label)) + '</a>';
-            row += '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>';
+            var isActive = (id === selectedId);
+            var isExpanded = isActive || ancestorIds[id] || false;
+            var activeClass = isActive ? ' bm-data-tree-active' : '';
+            var viewUrl = buildUrl(baseUrl, Object.assign({}, query, { view: 'TreeView', selected: id }));
+
+            var row = '<li class="bm-tree-item"><div class="bm-tree-node">';
+            if (node.children.length > 0) {
+                var icon = isExpanded ? '&#9662;' : '&#9656;';
+                var expCls = isExpanded ? 'bm-tree-expanded' : 'bm-tree-collapsed';
+                row += '<span class="bm-tree-toggle ' + expCls + '" onclick="(function(t){' +
+                    'var li=t.closest(\'.bm-tree-item\');' +
+                    'var ul=li&&li.querySelector(\':scope > ul\');' +
+                    'if(!ul)return;' +
+                    'var exp=!ul.classList.contains(\'d-none\');' +
+                    'ul.classList.toggle(\'d-none\',exp);' +
+                    't.innerHTML=exp?\'&#9656;\':\'&#9662;\';' +
+                    't.classList.toggle(\'bm-tree-expanded\',!exp);' +
+                    't.classList.toggle(\'bm-tree-collapsed\',exp);' +
+                    '})(this)">' + icon + '</span>';
+            } else {
+                row += '<span class="bm-tree-toggle bm-tree-spacer"></span>';
+            }
+            row += '<a class="bm-data-tree-link' + activeClass + '" href="' + viewUrl + '">' + escHtml(String(label)) + '</a>';
             row += '</div>';
             if (node.children.length > 0) {
-                row += '<div class="vnext-tree-children">';
-                node.children.forEach(function (child) { row += buildNodeHtml(child, depth + 1); });
-                row += '</div>';
+                var hiddenClass = isExpanded ? '' : ' d-none';
+                row += '<ul class="bm-data-tree-list' + hiddenClass + '">';
+                node.children.forEach(function (child) { row += buildNodeHtml(child); });
+                row += '</ul>';
             }
+            row += '</li>';
             return row;
         }
 
-        function renderFlatList() {
-            items.forEach(function (item) {
-                var id = item.id || item.Id || '';
-                var label = getLabel(item);
-                html += '<div class="vnext-tree-node d-flex align-items-center py-1 border-bottom">' +
-                    '<i class="bi bi-dot text-muted me-1"></i>' +
-                    '<a class="link-body-emphasis text-decoration-none me-2" href="' + baseUrl + '/' + encodeURIComponent(id) + '">' + escHtml(String(label)) + '</a>' +
-                    '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>' +
-                    '</div>';
-            });
-        }
-
+        // Build hierarchy
+        var roots = [];
         if (parentField) {
-            var roots = [], nodeMap = {};
-            items.forEach(function (item) {
-                var id = item.id || item.Id || '';
-                nodeMap[id] = { item: item, children: [] };
-            });
             items.forEach(function (item) {
                 var id = item.id || item.Id || '';
                 var parentId = nestedGet(item, parentField) || '';
                 if (parentId && nodeMap[parentId] && parentId !== id) nodeMap[parentId].children.push(nodeMap[id]);
                 else roots.push(nodeMap[id]);
             });
-            if (roots.length > 0) {
-                roots.forEach(function (root) { html += buildNodeHtml(root, 0); });
-            } else {
-                // All items reference parents not in the set — fall back to flat list
-                renderFlatList();
+            if (roots.length === 0) {
+                items.forEach(function (item) { roots.push(nodeMap[item.id || item.Id || '']); });
             }
         } else {
-            renderFlatList();
+            items.forEach(function (item) { roots.push(nodeMap[item.id || item.Id || '']); });
         }
+
+        // Split-panel layout (mirrors log viewer / SSR tree view)
+        var html = '<div class="bm-data-tree-layout">';
+
+        // Left: tree sidebar
+        html += '<div class="bm-data-tree-panel bm-data-tree-sidebar">';
+        html += '<div class="bm-data-tree-header">' + escHtml(meta.name) + '</div>';
+        html += '<ul class="bm-data-tree-list" style="padding-left:0">';
+        roots.forEach(function (root) { html += buildNodeHtml(root); });
+        html += '</ul>';
+        html += '</div>';
+
+        // Right: detail panel
+        html += '<div class="bm-data-tree-panel bm-data-tree-content">';
+        var selectedItem = selectedId && nodeMap[selectedId] ? nodeMap[selectedId].item : null;
+        if (selectedItem) {
+            html += '<div class="bm-data-tree-header">Details</div>';
+            html += '<dl class="row">';
+            viewFields.forEach(function (f) {
+                var val = nestedGet(selectedItem, f.name);
+                html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
+                if (f.type === 'CustomHtml' && Array.isArray(val)) {
+                    html += '<dd class="col-sm-9">' + renderSubListReadonly(val, f) + '</dd>';
+                } else if (f.lookup && f.lookup.targetSlug && val) {
+                    html += '<dd class="col-sm-9" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
+                        '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></dd>';
+                } else {
+                    html += '<dd class="col-sm-9">' + fmtValue(val, f.type) + '</dd>';
+                }
+            });
+            html += '</dl>';
+            var safeId = encodeURIComponent(selectedId);
+            html += '<div class="mt-3">';
+            html += '<a class="btn btn-warning btn-sm me-2" href="' + baseUrl + '/' + safeId + '/edit"><i class="bi bi-pencil"></i> Edit</a>';
+            html += '<a class="btn btn-outline-danger btn-sm" href="' + baseUrl + '/' + safeId + '/delete"><i class="bi bi-x-lg"></i> Delete</a>';
+            html += '</div>';
+        } else {
+            html += '<p class="text-muted mb-0">Select an item to view details.</p>';
+        }
+        html += '</div>';
+
         html += '</div>';
         return html;
     }
