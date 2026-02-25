@@ -198,7 +198,7 @@ public sealed class MetricsTracker : IMetricsTracker
             new[] { "---- MEMORY STATS ----", "" },
             new[] { "Process ID (PID)", snapshot.ProcessId.ToString() },
             new[] { "Working Set (bytes)", FormatSizeBytes(snapshot.WorkingSet64) },
-            new[] { "Virtual Memory Size", FormatSizeBytes(snapshot.VirtualMemorySize64) }
+            new[] { "Virtual Memory Size (bytes)", FormatSizeBytes(snapshot.VirtualMemorySize64) }
         ];
     }
 
