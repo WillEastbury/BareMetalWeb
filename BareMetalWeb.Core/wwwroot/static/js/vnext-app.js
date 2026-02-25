@@ -2590,14 +2590,17 @@
             var fieldId = modal.dataset.fieldId;
             var displayFieldId = modal.dataset.displayFieldId;
             var displayField = modal.dataset.displayField || '';
-            var displayFieldKey = displayField.length > 0
-                ? displayField.charAt(0).toLowerCase() + displayField.slice(1)
-                : displayField;
             var valueField = modal.dataset.valueField || 'id';
-            var valueCell = row.querySelector('td[data-field="' + valueField + '"]');
-            var displayCell = row.querySelector('td[data-field="' + displayFieldKey + '"]');
-            var idValue = valueCell ? valueCell.textContent : '';
-            var displayValue = displayCell ? displayCell.textContent : idValue;
+            var valueFieldLower = valueField.toLowerCase();
+            var displayFieldLower = displayField.toLowerCase();
+            var valueCell = null, displayCell = null;
+            row.querySelectorAll('td[data-field]').forEach(function (td) {
+                var f = (td.getAttribute('data-field') || '').toLowerCase();
+                if (f === valueFieldLower) valueCell = td;
+                if (displayFieldLower && f === displayFieldLower) displayCell = td;
+            });
+            var idValue = valueCell ? valueCell.textContent.trim() : '';
+            var displayValue = displayCell ? displayCell.textContent.trim() : idValue;
             var hiddenInput = document.getElementById(fieldId);
             if (hiddenInput) hiddenInput.value = idValue;
             var displayInput = document.getElementById(displayFieldId);

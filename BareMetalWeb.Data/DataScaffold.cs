@@ -836,6 +836,7 @@ public static class DataScaffold
                 fd["lookup"] = new Dictionary<string, object?>
                 {
                     ["targetSlug"]    = targetMeta?.Slug,
+                    ["targetName"]    = targetMeta?.Name,
                     ["valueField"]    = lookupAttr.ValueField,
                     ["displayField"]  = lookupAttr.DisplayField,
                     ["queryField"]    = lookupAttr.QueryField,
