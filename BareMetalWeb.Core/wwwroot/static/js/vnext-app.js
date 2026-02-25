@@ -53,6 +53,9 @@
         return apiFetch(url).then(function (items) {
             _lookupCache[key] = Array.isArray(items) ? items : (items.items || []);
             return _lookupCache[key];
+        }).catch(function (err) {
+            console.warn('Lookup fetch failed for ' + targetSlug + ':', err);
+            return [];
         });
     }
 
@@ -170,7 +173,20 @@
         var cur = obj;
         for (var i = 0; i < parts.length; i++) {
             if (cur == null) return undefined;
-            cur = cur[parts[i]];
+            var p = parts[i];
+            if (p in cur) { cur = cur[p]; continue; }
+            // Case-insensitive fallback: try camelCase/PascalCase variants
+            var alt = p.charAt(0) === p.charAt(0).toLowerCase()
+                ? p.charAt(0).toUpperCase() + p.slice(1)
+                : p.charAt(0).toLowerCase() + p.slice(1);
+            if (alt in cur) { cur = cur[alt]; continue; }
+            // Full case-insensitive search as last resort
+            var lp = p.toLowerCase();
+            var found = false;
+            for (var k in cur) {
+                if (k.toLowerCase() === lp) { cur = cur[k]; found = true; break; }
+            }
+            if (!found) return undefined;
         }
         return cur;
     }
@@ -334,7 +350,7 @@
                     var encId = encodeURIComponent(id);
                     html += '<div class="card mb-2"><div class="card-body p-2">';
                     listFields.forEach(function (f) {
-                        var val = nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1));
+                        var val = nestedGet(item, f.name);
                         var cellHtml;
                         if (f.lookup && f.lookup.targetSlug && val) {
                             cellHtml = '<span data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' + escHtml(String(val)) + '</span>';
@@ -374,7 +390,7 @@
                     html += '<tr data-id="' + escHtml(id) + '">';
                     html += '<td><input type="checkbox" class="form-check-input vnext-row-select" value="' + escHtml(id) + '"></td>';
                     listFields.forEach(function (f) {
-                        var val = nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1));
+                        var val = nestedGet(item, f.name);
                         if (f.lookup && f.lookup.targetSlug && val) {
                             html += '<td data-label="' + escHtml(f.label) + '" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
                                 '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
@@ -434,7 +450,7 @@
 
         function getLabel(item) {
             var id = item.id || item.Id || '';
-            return labelField ? (nestedGet(item, labelField.name) || nestedGet(item, labelField.name.charAt(0).toLowerCase() + labelField.name.slice(1)) || id) : id;
+            return labelField ? (nestedGet(item, labelField.name) || id) : id;
         }
 
         function buildNodeHtml(node, depth) {
@@ -475,7 +491,7 @@
             });
             items.forEach(function (item) {
                 var id = item.id || item.Id || '';
-                var parentId = nestedGet(item, parentField) || nestedGet(item, parentField.charAt(0).toLowerCase() + parentField.slice(1)) || '';
+                var parentId = nestedGet(item, parentField) || '';
                 if (parentId && nodeMap[parentId] && parentId !== id) nodeMap[parentId].children.push(nodeMap[id]);
                 else roots.push(nodeMap[id]);
             });
@@ -504,12 +520,12 @@
 
         function buildCardHtml(item) {
             var id = item.id || item.Id || '';
-            var label = labelField ? (nestedGet(item, labelField.name) || nestedGet(item, labelField.name.charAt(0).toLowerCase() + labelField.name.slice(1)) || id) : id;
+            var label = labelField ? (nestedGet(item, labelField.name) || id) : id;
             var subtitle = '';
             if (titleField) {
-                subtitle = nestedGet(item, titleField.name) || nestedGet(item, titleField.name.charAt(0).toLowerCase() + titleField.name.slice(1)) || '';
+                subtitle = nestedGet(item, titleField.name) || '';
             } else if (subtitleField) {
-                subtitle = nestedGet(item, subtitleField.name) || nestedGet(item, subtitleField.name.charAt(0).toLowerCase() + subtitleField.name.slice(1)) || '';
+                subtitle = nestedGet(item, subtitleField.name) || '';
             }
             return '<div class="bm-orgchart-card">' +
                 '<div class="bm-orgchart-name">' + escHtml(String(label)) + '</div>' +
@@ -536,7 +552,7 @@
             });
             items.forEach(function (item) {
                 var id = item.id || item.Id || '';
-                var parentId = nestedGet(item, parentField) || nestedGet(item, parentField.charAt(0).toLowerCase() + parentField.slice(1)) || '';
+                var parentId = nestedGet(item, parentField) || '';
                 if (parentId && nodeMap[parentId] && parentId !== id) nodeMap[parentId].children.push(nodeMap[id]);
                 else roots.push(nodeMap[id]);
             });
@@ -1027,15 +1043,15 @@
         // Fields table
         html += '<div class="card bm-page-card"><div class="card-body"><dl class="row mb-0">';
         viewFields.forEach(function (f) {
-            var val = nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1));
+            var val = nestedGet(item, f.name);
 
             if (isSubListField(val)) {
                 html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
                 html += '<dd class="col-sm-9">' + renderSubListReadonly(val, f) + '</dd>';
-            } else if (f.lookup && f.lookup.targetSlug) {
+            } else if (f.lookup && f.lookup.targetSlug && val) {
                 html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
-                html += '<dd class="col-sm-9" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val || '')) + '">' +
-                    '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val || '') + '">' + escHtml(String(val || '')) + '</a></dd>';
+                html += '<dd class="col-sm-9" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
+                    '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></dd>';
             } else {
                 html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
                 html += '<dd class="col-sm-9">' + fmtValue(val, f.type) + '</dd>';
@@ -1090,13 +1106,19 @@
                         var displayField = el.dataset.displayField;
                         var obj = results[value];
                         if (obj) {
-                            var display = nestedGet(obj, displayField) || nestedGet(obj, displayField.charAt(0).toLowerCase() + displayField.slice(1)) || value;
+                            var display = nestedGet(obj, displayField) || value;
                             var href = BASE + '/data/' + encodeURIComponent(targetSlug) + '/' + encodeURIComponent(value);
                             el.innerHTML = '<a href="' + escHtml(href) + '">' + escHtml(String(display)) + '</a>';
                         }
                     });
                 })
-                .catch(function () {});
+                .catch(function (err) {
+                    console.warn('Batch lookup failed for ' + targetSlug + ':', err);
+                    els.forEach(function (el) {
+                        el.classList.add('text-warning');
+                        el.title = 'Lookup resolution failed';
+                    });
+                });
         });
     }
 
@@ -1150,7 +1172,7 @@
         html += '<input type="hidden" name="__csrf" value="' + escHtml(getCsrfToken()) + '">';
 
         formFields.forEach(function (f) {
-            var curVal = item ? (nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1))) : null;
+            var curVal = item ? (nestedGet(item, f.name)) : null;
             html += renderFormField(f, curVal, meta, item);
         });
 
@@ -1393,11 +1415,11 @@
                         var displayField = el.dataset.displayField;
                         var obj = results[value];
                         if (obj) {
-                            var display = nestedGet(obj, displayField) || nestedGet(obj, displayField.charAt(0).toLowerCase() + displayField.slice(1)) || value;
+                            var display = nestedGet(obj, displayField) || value;
                             el.textContent = String(display);
                         }
                     });
-                }).catch(function () {});
+                }).catch(function (err) { console.warn('Sub-list lookup failed for ' + targetSlug + ':', err); });
         });
     }
 
@@ -1487,8 +1509,8 @@
             .then(function (items) {
                 sel.innerHTML = '<option value="">— Select —</option>';
                 items.forEach(function (opt) {
-                    var optVal = nestedGet(opt, lk.valueField) || nestedGet(opt, lk.valueField.charAt(0).toLowerCase() + lk.valueField.slice(1)) || '';
-                    var optLbl = nestedGet(opt, lk.displayField) || nestedGet(opt, lk.displayField.charAt(0).toLowerCase() + lk.displayField.slice(1)) || optVal;
+                    var optVal = nestedGet(opt, lk.valueField) || '';
+                    var optLbl = nestedGet(opt, lk.displayField) || optVal;
                     var selected = String(optVal) === String(currentValue) ? ' selected' : '';
                     sel.insertAdjacentHTML('beforeend', '<option value="' + escHtml(String(optVal)) + '"' + selected + '>' + escHtml(String(optLbl)) + '</option>');
                 });
@@ -1651,12 +1673,12 @@
         // Load lookup options async
         formFields.forEach(function (f) {
             if (f.type === 'LookupList' && f.lookup && f.lookup.targetSlug) {
-                var curVal = item ? (nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1))) : null;
+                var curVal = item ? (nestedGet(item, f.name)) : null;
                 loadLookupSelect(f, curVal);
             }
             // Load enum options
             if (f.type === 'Enum') {
-                loadEnumOptions(f, item ? (nestedGet(item, f.name) || nestedGet(item, f.name.charAt(0).toLowerCase() + f.name.slice(1))) : null);
+                loadEnumOptions(f, item ? (nestedGet(item, f.name)) : null);
             }
             // Resolve lookup display values in sub-list table cells
             if (f.type === 'CustomHtml') {
@@ -1845,8 +1867,8 @@
                 }
                 sel.innerHTML = '<option value="">— Select —</option>';
                 items.forEach(function (opt) {
-                    var optVal = nestedGet(opt, lk.valueField) || nestedGet(opt, lk.valueField.charAt(0).toLowerCase() + lk.valueField.slice(1)) || '';
-                    var optLbl = nestedGet(opt, lk.displayField) || nestedGet(opt, lk.displayField.charAt(0).toLowerCase() + lk.displayField.slice(1)) || optVal;
+                    var optVal = nestedGet(opt, lk.valueField) || '';
+                    var optLbl = nestedGet(opt, lk.displayField) || optVal;
                     var selected = String(optVal) === String(currentValue) ? ' selected' : '';
                     sel.insertAdjacentHTML('beforeend', '<option value="' + escHtml(String(optVal)) + '"' + selected + '>' + escHtml(String(optLbl)) + '</option>');
                 });
@@ -1868,10 +1890,10 @@
         var currentDisplay = '';
         if (currentValue) {
             var curItem = allItems.find(function (o) {
-                var v = nestedGet(o, lk.valueField) || nestedGet(o, lk.valueField.charAt(0).toLowerCase() + lk.valueField.slice(1));
+                var v = nestedGet(o, lk.valueField);
                 return String(v) === String(currentValue);
             });
-            if (curItem) currentDisplay = nestedGet(curItem, lk.displayField) || nestedGet(curItem, lk.displayField.charAt(0).toLowerCase() + lk.displayField.slice(1)) || currentValue;
+            if (curItem) currentDisplay = nestedGet(curItem, lk.displayField) || currentValue;
         }
 
         var n = escHtml(field.name);
