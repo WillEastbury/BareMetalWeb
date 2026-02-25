@@ -14,5 +14,8 @@ public readonly record struct MetricsSnapshot(
     long Requests4xx,
     long Requests5xx,
     long RequestsOther,
-    long ThrottledRequests
+    long ThrottledRequests,
+    int ProcessId,
+    long WorkingSet64,
+    long VirtualMemorySize64
 );

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading;
 using BareMetalWeb.Core.Interfaces;
@@ -80,6 +81,8 @@ public sealed class MetricsTracker : IMetricsTracker
         var recentMetrics = ComputeRecentMetrics(recentSamples);
         var recent10s = ComputeRecentMetrics(FilterRecentSamples(recentSamples, nowUtc - RecentShortWindow));
 
+        var currentProcess = Process.GetCurrentProcess();
+
         return new MetricsSnapshot(
             total,
             errors,
@@ -94,7 +97,10 @@ public sealed class MetricsTracker : IMetricsTracker
             requests4xx,
             requests5xx,
             requestsOther,
-            throttled
+            throttled,
+            currentProcess.Id,
+            currentProcess.WorkingSet64,
+            currentProcess.VirtualMemorySize64
         );
     }
 
@@ -188,7 +194,11 @@ public sealed class MetricsTracker : IMetricsTracker
             new[] { "Pages Served 4xx", snapshot.Requests4xx.ToString() },
             new[] { "Pages Served 5xx", snapshot.Requests5xx.ToString() },
             new[] { "Pages Served Other", snapshot.RequestsOther.ToString() },
-            new[] { "Pages Throttled (429)", snapshot.ThrottledRequests.ToString() }
+            new[] { "Pages Throttled (429)", snapshot.ThrottledRequests.ToString() },
+            new[] { "---- MEMORY STATS ----", "" },
+            new[] { "Process ID (PID)", snapshot.ProcessId.ToString() },
+            new[] { "Working Set (bytes)", snapshot.WorkingSet64.ToString() },
+            new[] { "Virtual Memory Size (bytes)", snapshot.VirtualMemorySize64.ToString() }
         ];
     }
 }
