@@ -108,6 +108,12 @@ dotnet run --project BareMetalWeb.PerformanceTests
 - **Thread safety**: PageStore uses single-writer queues per extent for lock-free writes
 - **Route parameters**: Extract from `PageContext.PageMetaDataKeys/Values`, not `HttpContext.Request.RouteValues`
 
+## UI Development Guidelines
+
+- **Lookup / FK fields in UI**: When building UI code (forms, grids, dropdowns), cross-entity reference fields (foreign keys) MUST always be resolved to their display/lookup value in the UI. Never show raw FK IDs to the user — always render the human-readable label from the referenced entity. Dropdowns must populate their option text from the lookup entity, and read-only displays must show the resolved name/label, not the underlying ID.
+
+- **Sub-entity (List&lt;T&gt;) rendering**: Fields that are `List<T>` on a parent entity (e.g. `Order.OrderRows` where `T` is `OrderRow`) represent sub-entities that are rendered as inline sub-grids or sub-list editors. These sub-grids MUST respect all the same field constraints, validation rules, lookup resolution, and rendering logic that apply to top-level entities. In particular: lookup/FK fields inside sub-entity rows must also display their resolved display values (not raw IDs), required fields must be validated, and the sub-grid must honour any `[DataLookup]`, `[CopyFromParent]`, and `[CalculatedField]` attributes on the sub-entity type.
+
 ## Development Workflow
 
 1. Make minimal, surgical changes focused on the specific issue
