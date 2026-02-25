@@ -4040,7 +4040,9 @@ public sealed class RouteHandlers : IRouteHandlers
     private string GetUploadRootPath(HttpContext context)
     {
         var configuration = context.RequestServices.GetService(typeof(IConfiguration)) as IConfiguration;
+        #pragma warning disable IL2026 // ConfigurationBinder.GetValue with string primitive is trim-safe
         var configured = configuration?.GetValue("Uploads:RootDirectory", "uploads") ?? "uploads";
+        #pragma warning restore IL2026
         if (Path.IsPathRooted(configured))
             return configured;
         return Path.Combine(_dataRootFolder, configured);
@@ -4092,7 +4094,9 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string GetLogRoot(HttpContext context)
     {
         var config = context.RequestServices.GetService(typeof(IConfiguration)) as IConfiguration;
+        #pragma warning disable IL2026 // ConfigurationBinder.GetValue with string primitive is trim-safe
         var logFolder = config?.GetValue("Logging:LogFolder", "Logs") ?? "Logs";
+        #pragma warning restore IL2026
         if (Path.IsPathRooted(logFolder))
             return logFolder;
 
@@ -4727,7 +4731,9 @@ public sealed class RouteHandlers : IRouteHandlers
     private async ValueTask ExportHierarchicalJson(HttpContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
     {
         var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+        #pragma warning disable IL2026 // Serializing IReadOnlyList<object?> — all entity types preserved via TrimmerRootAssembly
         var json = JsonSerializer.Serialize(items, jsonOptions);
+        #pragma warning restore IL2026
         context.Response.ContentType = "application/json";
         context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_export.json\"";
         await context.Response.WriteAsync(json);
@@ -4736,7 +4742,9 @@ public sealed class RouteHandlers : IRouteHandlers
     private async ValueTask ExportSingleHierarchicalJson(HttpContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
     {
         var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+        #pragma warning disable IL2026 // Serializing entity instance — all entity types preserved via TrimmerRootAssembly
         var json = JsonSerializer.Serialize(instance, jsonOptions);
+        #pragma warning restore IL2026
         context.Response.ContentType = "application/json";
         context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_{WebUtility.UrlEncode(id)}.json\"";
         await context.Response.WriteAsync(json);

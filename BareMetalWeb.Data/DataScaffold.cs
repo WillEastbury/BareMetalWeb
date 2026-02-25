@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
 using System.Reflection;
@@ -2003,7 +2004,7 @@ public static class DataScaffold
         return options;
     }
 
-    private static bool IsDefaultValue(object? value, Type type)
+    private static bool IsDefaultValue(object? value, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
     {
         if (value == null)
             return true;
@@ -2117,7 +2118,7 @@ public static class DataScaffold
     /// <summary>
     /// Gets child field metadata without resolving lookups (for export scenarios where we don't need lookup data)
     /// </summary>
-    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadataSimple(Type childType)
+    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadataSimple([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
     {
         var fields = new List<ChildFieldMeta>();
         var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -2149,7 +2150,7 @@ public static class DataScaffold
         return fields;
     }
 
-    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadata(Type childType)
+    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
     {
         var fields = new List<ChildFieldMeta>();
         var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
@@ -2227,7 +2228,7 @@ public static class DataScaffold
         return fields;
     }
 
-    private static string BuildChildListEditorHtml(DataFieldMetadata field, Type childType, IEnumerable? listValue, string? cspNonce = null)
+    private static string BuildChildListEditorHtml(DataFieldMetadata field, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType, IEnumerable? listValue, string? cspNonce = null)
     {
         var fieldId = WebUtility.HtmlEncode(field.Name);
         var rows = new List<Dictionary<string, string>>();
@@ -2454,7 +2455,7 @@ public static class DataScaffold
         return sb.ToString();
     }
 
-    private static string BuildChildListViewHtml(DataFieldMetadata field, Type childType, IEnumerable? listValue)
+    private static string BuildChildListViewHtml(DataFieldMetadata field, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType, IEnumerable? listValue)
     {
         var childFields = GetChildFieldMetadata(childType);
         var sb = new StringBuilder();
@@ -2497,7 +2498,7 @@ public static class DataScaffold
         return sb.ToString();
     }
 
-    private static bool TryParseChildList(string rawValue, Type childType, out object? list)
+    private static bool TryParseChildList(string rawValue, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type childType, out object? list)
     {
         list = null;
         if (string.IsNullOrWhiteSpace(rawValue))

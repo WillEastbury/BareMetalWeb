@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Rendering;
@@ -6,6 +7,7 @@ namespace BareMetalWeb.Data;
 
 public static class DataEntityRegistry
 {
+    [RequiresUnreferencedCode("Assembly scanning and MakeGenericMethod require all entity types to be preserved via TrimmerRootAssembly.")]
     public static void RegisterAllEntities()
     {
         foreach (var type in GetDataEntityTypes())
@@ -55,6 +57,7 @@ public static class DataEntityRegistry
         }
     }
 
+    [RequiresUnreferencedCode("Assembly.GetTypes() may not return all types when trimming is enabled.")]
     private static IEnumerable<Type?> GetTypesSafely(Assembly assembly)
     {
         try
@@ -67,6 +70,7 @@ public static class DataEntityRegistry
         }
     }
 
+    [RequiresUnreferencedCode("MakeGenericMethod requires the target type to be preserved.")]
     private static void RegisterEntity(Type type)
     {
         var method = typeof(DataScaffold).GetMethod(nameof(DataScaffold.RegisterEntity))!;

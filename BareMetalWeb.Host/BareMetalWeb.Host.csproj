@@ -4,6 +4,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Version>1.0.0</Version>
+    <!-- Trimming: reduce memory footprint for self-contained deploys -->
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+    <SuppressTrimAnalysisWarnings>false</SuppressTrimAnalysisWarnings>
   </PropertyGroup>
 
   <ItemGroup>
@@ -12,5 +16,14 @@
     <ProjectReference Include="..\BareMetalWeb.Rendering\BareMetalWeb.Rendering.csproj" />
     <ProjectReference Include="..\BareMetalWeb.Runtime\BareMetalWeb.Runtime.csproj" />
     <ProjectReference Include="..\BareMetalWeb.UserClasses\BareMetalWeb.UserClasses.csproj" />
+  </ItemGroup>
+
+  <!-- Root assemblies that use heavy reflection (entity types, serializer, route handlers) -->
+  <ItemGroup>
+    <TrimmerRootAssembly Include="BareMetalWeb.UserClasses" />
+    <TrimmerRootAssembly Include="BareMetalWeb.Data" />
+    <TrimmerRootAssembly Include="BareMetalWeb.Core" />
+    <TrimmerRootAssembly Include="BareMetalWeb.Runtime" />
+    <TrimmerRootAssembly Include="BareMetalWeb.Rendering" />
   </ItemGroup>
 </Project>
