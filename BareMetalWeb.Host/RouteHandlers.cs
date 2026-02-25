@@ -5696,6 +5696,23 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        // Fallback: serialize complex objects via reflection as JSON objects
+        var valueType = value.GetType();
+        if (valueType.IsClass)
+        {
+            writer.WriteStartObject();
+            #pragma warning disable IL2075 // Child entity types are preserved via TrimmerRootAssembly
+            foreach (var prop in valueType.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+            #pragma warning restore IL2075
+            {
+                if (!prop.CanRead || prop.GetIndexParameters().Length != 0) continue;
+                writer.WritePropertyName(prop.Name);
+                WriteJsonValue(writer, prop.GetValue(value));
+            }
+            writer.WriteEndObject();
+            return;
+        }
+
         writer.WriteStringValue(value.ToString());
     }
 
