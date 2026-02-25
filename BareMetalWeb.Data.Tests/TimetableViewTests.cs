@@ -229,4 +229,44 @@ public class TimetableViewTests : IDisposable
         var idxTuesday = html.IndexOf("Tuesday", StringComparison.Ordinal);
         Assert.True(idxMonday < idxTuesday, "Monday should appear before Tuesday in sorted output");
     }
+
+    [Fact]
+    public void BuildTimetableHtml_LookupField_ShowsDisplayValueNotRawId()
+    {
+        // Arrange: seed a Subject so the lookup can be resolved
+        var subject = new BareMetalWeb.Data.DataObjects.Subject { Id = "subj-abc", Name = "Mathematics" };
+        DataStoreProvider.Current.Save(subject);
+
+        // Clear lookup cache to force re-query with seeded data
+        ClearLookupCache();
+
+        var plan = new TimeTablePlan
+        {
+            Id = "plan-1",
+            SubjectId = "subj-abc",
+            Day = CustomDayOfWeek.Wednesday,
+            StartTime = new TimeOnly(10, 0),
+            Minutes = 45
+        };
+
+        var items = new List<BaseDataObject> { plan };
+        var metadata = DataScaffold.GetEntityByType(typeof(TimeTablePlan));
+        Assert.NotNull(metadata);
+
+        // Act
+        var html = DataScaffold.BuildTimetableHtml(metadata, items, "/admin/data/timetableplans");
+
+        // Assert: the Subject's Name should appear as the display value
+        Assert.Contains("Mathematics", html);
+        // The raw ID should NOT appear as a standalone cell value (it may appear in a title attribute as part of BuildLookupHtml)
+        Assert.DoesNotContain("<td>subj-abc</td>", html);
+    }
+
+    private static void ClearLookupCache()
+    {
+        var cacheField = typeof(DataScaffold).GetField("LookupCache",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+        if (cacheField?.GetValue(null) is System.Collections.IDictionary cache)
+            cache.Clear();
+    }
 }
