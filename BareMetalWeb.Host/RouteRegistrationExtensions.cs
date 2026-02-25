@@ -886,6 +886,7 @@ public static class RouteRegistrationExtensions
                     ["valueField"] = f.Lookup.ValueField,
                     ["displayField"] = f.Lookup.DisplayField,
                     ["queryField"] = f.Lookup.QueryField,
+                    ["queryOperator"] = f.Lookup.QueryOperator.ToString(),
                     ["queryValue"] = f.Lookup.QueryValue,
                     ["sortField"] = f.Lookup.SortField,
                     ["sortDirection"] = f.Lookup.SortDirection.ToString(),

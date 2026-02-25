@@ -3,7 +3,7 @@ namespace BareMetalWeb.Data.DataObjects;
 [DataEntity("Lesson Logs", ShowOnNav = true, NavGroup = "School", NavOrder = 30)]
 public class LessonLog : RenderableDataObject
 {
-    [DataField(Label = "Subject Id", Order = 1, Required = true)]
+    [DataField(Label = "Subject", Order = 1, Required = true)]
     [DataLookup(typeof(Subject), DisplayField = "Name", SortField = "Name", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
     [DataIndex]
     public string SubjectId { get; set; } = string.Empty;

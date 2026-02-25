@@ -93,12 +93,19 @@
     // ── Lookup cache ──────────────────────────────────────────────────────────
     var _lookupCache = {};
 
-    function fetchLookupOptions(targetSlug, queryField, queryValue, sortField, sortDir) {
-        var key = targetSlug + '|' + (queryField || '') + '|' + (queryValue || '') + '|' + (sortField || '') + '|' + (sortDir || '');
+    function fetchLookupOptions(targetSlug, queryField, queryValue, sortField, sortDir, queryOperator) {
+        var key = targetSlug + '|' + (queryField || '') + '|' + (queryOperator || '') + '|' + (queryValue || '') + '|' + (sortField || '') + '|' + (sortDir || '');
         if (_lookupCache[key]) return Promise.resolve(_lookupCache[key]);
 
         var params = [];
-        if (queryField && queryValue) params.push('f_' + encodeURIComponent(queryField) + '=' + encodeURIComponent(queryValue));
+        if (queryField && queryValue) {
+            params.push('f_' + encodeURIComponent(queryField) + '=' + encodeURIComponent(queryValue));
+            if (queryOperator && queryOperator !== 'Equals') {
+                var opMap = { NotEquals: 'ne', Contains: 'contains', StartsWith: 'startswith', GreaterThan: 'gt', LessThan: 'lt' };
+                var opKey = opMap[queryOperator];
+                if (opKey) params.push('op_' + encodeURIComponent(queryField) + '=' + encodeURIComponent(opKey));
+            }
+        }
         if (sortField) { params.push('sort=' + encodeURIComponent(sortField)); }
         if (sortDir)   { params.push('dir='  + encodeURIComponent(sortDir)); }
         params.push('top=500');
@@ -144,6 +151,7 @@
     function apiPost(url, body)   { return apiFetch(url, { method: 'POST',   headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
     function apiPut(url, body)    { return apiFetch(url, { method: 'PUT',    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); }
     function apiDelete(url)       { return apiFetch(url, { method: 'DELETE' }); }
+    function apiGet(url)          { return apiFetch(url); }
 
     // ── UI helpers ────────────────────────────────────────────────────────────
     var content = null;
@@ -243,6 +251,17 @@
             if (!found) return undefined;
         }
         return cur;
+    }
+
+    function findCellCaseInsensitive(row, fieldName) {
+        var cell = row.querySelector('td[data-field="' + fieldName + '"]');
+        if (cell) return cell;
+        var lower = fieldName.toLowerCase();
+        var cells = row.querySelectorAll('td[data-field]');
+        for (var i = 0; i < cells.length; i++) {
+            if (cells[i].getAttribute('data-field').toLowerCase() === lower) return cells[i];
+        }
+        return null;
     }
 
     // ── Navigation builder ────────────────────────────────────────────────────
@@ -1961,7 +1980,7 @@
         var sel = form.querySelector('select[data-field="' + sf.name + '"]');
         if (!sel) return;
         var lk = sf.lookup;
-        fetchLookupOptions(lk.targetSlug, lk.queryField, lk.queryValue, lk.sortField, lk.sortDirection)
+        fetchLookupOptions(lk.targetSlug, lk.queryField, lk.queryValue, lk.sortField, lk.sortDirection, lk.queryOperator)
             .then(function (items) {
                 sel.innerHTML = '<option value="">— Select —</option>';
                 items.forEach(function (opt) {
@@ -2129,6 +2148,10 @@
         // Load lookup options async
         formFields.forEach(function (f) {
             if (f.type === 'LookupList' && f.lookup && f.lookup.targetSlug) {
+                // Self-referencing lookup: inject current entity ID as queryValue to exclude self
+                if (f.lookup.queryField && !f.lookup.queryValue && f.lookup.targetSlug === slug && id) {
+                    f = Object.assign({}, f, { lookup: Object.assign({}, f.lookup, { queryValue: id }) });
+                }
                 var curVal = item ? (nestedGet(item, f.name)) : null;
                 loadLookupSelect(f, curVal);
             }
@@ -2314,7 +2337,7 @@
         var sel = document.querySelector('select#f_' + field.name);
         if (!sel) return;
         var lk = field.lookup;
-        fetchLookupOptions(lk.targetSlug, lk.queryField, lk.queryValue, lk.sortField, lk.sortDirection)
+        fetchLookupOptions(lk.targetSlug, lk.queryField, lk.queryValue, lk.sortField, lk.sortDirection, lk.queryOperator)
             .then(function (items) {
                 if (items.length > LOOKUP_CARDINALITY_THRESHOLD) {
                     // Replace select with search-based input
