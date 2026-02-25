@@ -197,8 +197,23 @@ public sealed class MetricsTracker : IMetricsTracker
             new[] { "Pages Throttled (429)", snapshot.ThrottledRequests.ToString() },
             new[] { "---- MEMORY STATS ----", "" },
             new[] { "Process ID (PID)", snapshot.ProcessId.ToString() },
-            new[] { "Working Set (bytes)", snapshot.WorkingSet64.ToString() },
-            new[] { "Virtual Memory Size (bytes)", snapshot.VirtualMemorySize64.ToString() }
+            new[] { "Working Set", FormatSizeBytes(snapshot.WorkingSet64) },
+            new[] { "Virtual Memory Size", FormatSizeBytes(snapshot.VirtualMemorySize64) }
         ];
+    }
+
+    private static string FormatSizeBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        double size = bytes;
+        int unitIndex = 0;
+        while (size >= 1024 && unitIndex < units.Length - 1)
+        {
+            size /= 1024;
+            unitIndex++;
+        }
+        return unitIndex == 0
+            ? $"{size:N0} {units[unitIndex]}"
+            : $"{size:N2} {units[unitIndex]}";
     }
 }
