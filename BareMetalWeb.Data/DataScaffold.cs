@@ -32,7 +32,21 @@ public sealed record DataFieldMetadata(
     UploadFieldConfig? Upload,
     CalculatedFieldAttribute? Calculated,
     ValidationConfig? Validation
-);
+)
+{
+    // Lazily compiled delegates avoid per-call PropertyInfo.GetValue / PropertyInfo.SetValue
+    // reflection overhead in hot rendering paths.  The ??= assignment is not strictly thread-safe
+    // but is idempotent — the worst case is two threads each compile an equivalent delegate; the
+    // losing result is simply GC'd.
+    private Func<object, object?>? _getValueFn;
+    private Action<object, object?>? _setValueFn;
+
+    /// <summary>Reads this field's value from a boxed entity instance via a compiled delegate.</summary>
+    public Func<object, object?> GetValueFn => _getValueFn ??= PropertyAccessorFactory.BuildGetter(Property);
+
+    /// <summary>Writes a value to this field on a boxed entity instance via a compiled delegate.</summary>
+    public Action<object, object?> SetValueFn => _setValueFn ??= PropertyAccessorFactory.BuildSetter(Property);
+}
 
 public sealed record DataEntityMetadata(
     Type Type,
@@ -423,7 +437,7 @@ public static class DataScaffold
                 }
                 else
                 {
-                    var idValue = instance != null ? field.Property.GetValue(instance)?.ToString() : null;
+                    var idValue = instance != null ? field.GetValueFn(instance)?.ToString() : null;
                     fields.Add(new FormField(
                         FormFieldType.ReadOnly,
                         field.Name,
@@ -450,7 +464,7 @@ public static class DataScaffold
                 }
 
                 // Get the computed value (for edit forms and view)
-                var computedValue = instance != null ? field.Property.GetValue(instance) : null;
+                var computedValue = instance != null ? field.GetValueFn(instance) : null;
                 var computedStringValue = ToInputString(computedValue, field.Property.PropertyType, field.FieldType);
 
                 // Render as readonly with computed indicator
@@ -472,7 +486,7 @@ public static class DataScaffold
                 var calculated = field.Calculated;
                 
                 // Get current value (for display, will be updated by JS)
-                var calculatedValue = instance != null ? field.Property.GetValue(instance) : null;
+                var calculatedValue = instance != null ? field.GetValueFn(instance) : null;
                 var calculatedStringValue = ToInputString(calculatedValue, field.Property.PropertyType, field.FieldType);
 
                 // Generate JSON AST from the expression for CSP-safe client evaluation
@@ -504,7 +518,7 @@ public static class DataScaffold
                 continue;
             }
 
-            var value = instance != null ? field.Property.GetValue(instance) : null;
+            var value = instance != null ? field.GetValueFn(instance) : null;
             if (IsChildListType(field.Property.PropertyType, out var childType))
             {
                 var html = BuildChildListEditorHtml(field, childType, value as IEnumerable, cspNonce);
@@ -646,7 +660,7 @@ public static class DataScaffold
             // Always generate ID for fields with IdGeneration attribute
             // This is called only for new entity creation
             var generatedId = IdGenerator.GenerateId(metadata.Type, field.IdGeneration);
-            field.Property.SetValue(instance, generatedId);
+            field.SetValueFn(instance, generatedId);
         }
     }
 
@@ -655,7 +669,7 @@ public static class DataScaffold
         var rows = new List<(string Label, string Value)>();
         foreach (var field in metadata.Fields.Where(f => f.View).OrderBy(f => f.Order))
         {
-            var value = field.Property.GetValue(instance);
+            var value = field.GetValueFn(instance);
             if (field.Lookup != null)
             {
                 var lookupOptions = GetLookupOptions(field.Lookup);
@@ -683,7 +697,7 @@ public static class DataScaffold
         var rows = new List<(string Label, string Value, bool IsHtml)>();
         foreach (var field in metadata.Fields.Where(f => f.View).OrderBy(f => f.Order))
         {
-            var value = field.Property.GetValue(instance);
+            var value = field.GetValueFn(instance);
             if (field.Lookup != null)
             {
                 var lookupOptions = GetLookupOptions(field.Lookup);
@@ -895,10 +909,9 @@ public static class DataScaffold
             if (!IsChildListType(field.Property.PropertyType, out var childType))
                 continue;
                 
-            var value = field.Property.GetValue(instance);
+            var value = field.GetValueFn(instance);
             if (value is not IEnumerable enumerable)
                 continue;
-                
             var childFields = GetChildFieldMetadataSimple(childType);
             var headers = childFields.Select(f => f.Label).ToArray();
             var rows = new List<string[]>();
@@ -912,10 +925,8 @@ public static class DataScaffold
                 for (int i = 0; i < childFields.Count; i++)
                 {
                     var childField = childFields[i];
-                    var prop = childType.GetProperty(childField.Name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                    var rawValue = prop?.GetValue(item);
-                    
-                    var displayText = ToDisplayString(rawValue, prop?.PropertyType ?? typeof(string));
+                    var rawValue = childField.Getter(item);
+                    var displayText = ToDisplayString(rawValue, childField.FieldType);
                     row[i] = displayText;
                 }
                 rows.Add(row);
@@ -963,7 +974,7 @@ public static class DataScaffold
             var values = new List<string>();
             foreach (var field in metadata.Fields.Where(f => f.List).OrderBy(f => f.Order))
             {
-                var rawValue = field.Property.GetValue(item);
+                var rawValue = field.GetValueFn(item);
                 if (field.Lookup != null)
                 {
                     var lookupOptions = GetLookupOptions(field.Lookup);
@@ -1038,7 +1049,7 @@ public static class DataScaffold
         var rootItems = new List<BaseDataObject>();
         foreach (var item in itemsList)
         {
-            var parentId = metadata.ParentField.Property.GetValue(item)?.ToString();
+            var parentId = metadata.ParentField.GetValueFn(item)?.ToString();
             if (string.IsNullOrWhiteSpace(parentId) || !itemsById.ContainsKey(parentId))
                 rootItems.Add(item);
         }
@@ -1119,7 +1130,7 @@ public static class DataScaffold
         {
             children = allItems.Where(child =>
             {
-                var parentId = metadata.ParentField.Property.GetValue(child)?.ToString();
+                var parentId = metadata.ParentField.GetValueFn(child)?.ToString();
                 return string.Equals(parentId, itemId, StringComparison.OrdinalIgnoreCase);
             }).OrderBy(c => GetDisplayValue(metadata, c)).ToList();
         }
@@ -1180,7 +1191,7 @@ public static class DataScaffold
 
             visited.Add(currentId);
 
-            var parentId = parentField.Property.GetValue(current)?.ToString();
+            var parentId = parentField.GetValueFn(current)?.ToString();
             if (string.Equals(parentId, itemId, StringComparison.OrdinalIgnoreCase))
                 return true;
 
@@ -1216,7 +1227,7 @@ public static class DataScaffold
             // Find first root item (no parent)
             rootItem = itemsList.FirstOrDefault(i =>
             {
-                var parentId = metadata.ParentField.Property.GetValue(i)?.ToString();
+                var parentId = metadata.ParentField.GetValueFn(i)?.ToString();
                 return string.IsNullOrWhiteSpace(parentId) || !itemsById.ContainsKey(parentId);
             });
         }
@@ -1263,7 +1274,7 @@ public static class DataScaffold
             f.Name.Contains("Title", StringComparison.OrdinalIgnoreCase) ||
             f.Name.Contains("Role", StringComparison.OrdinalIgnoreCase) ||
             f.Name.Contains("Position", StringComparison.OrdinalIgnoreCase));
-        var titleValue = titleField != null ? titleField.Property.GetValue(item)?.ToString() : null;
+        var titleValue = titleField != null ? titleField.GetValueFn(item)?.ToString() : null;
         
         // Render the current node
         html.Append("<div class=\"bm-orgchart-node\">");
@@ -1288,7 +1299,7 @@ public static class DataScaffold
         {
             var children = allItems.Where(child =>
             {
-                var parentId = metadata.ParentField.Property.GetValue(child)?.ToString();
+                var parentId = metadata.ParentField.GetValueFn(child)?.ToString();
                 return string.Equals(parentId, itemId, StringComparison.OrdinalIgnoreCase);
             }).OrderBy(c => GetDisplayValue(metadata, c)).ToList();
 
@@ -1357,7 +1368,7 @@ public static class DataScaffold
 
         // Group by day using the integer value of the enum so any day-of-week enum type works
         var groupedByDay = itemsList
-            .GroupBy(item => Convert.ToInt32(dayField.Property.GetValue(item) ?? 0))
+            .GroupBy(item => Convert.ToInt32(dayField.GetValueFn(item) ?? 0))
             .OrderBy(g => g.Key)
             .ToList();
 
@@ -1377,8 +1388,8 @@ public static class DataScaffold
 
             // Sort items by time within this day
             var sortedItems = timeField.FieldType == FormFieldType.TimeOnly
-                ? dayGroup.OrderBy(item => (TimeOnly)(timeField.Property.GetValue(item) ?? TimeOnly.MinValue)).ToList()
-                : dayGroup.OrderBy(item => (DateTime)(timeField.Property.GetValue(item) ?? DateTime.MinValue)).ToList();
+                ? dayGroup.OrderBy(item => (TimeOnly)(timeField.GetValueFn(item) ?? TimeOnly.MinValue)).ToList()
+                : dayGroup.OrderBy(item => (DateTime)(timeField.GetValueFn(item) ?? DateTime.MinValue)).ToList();
 
             html.Append("<table class=\"table table-striped table-hover\">");
             html.Append("<thead><tr>");
@@ -1423,7 +1434,7 @@ public static class DataScaffold
                 html.Append("</td>");
 
                 // Time column
-                var timeValue = timeField.Property.GetValue(item);
+                var timeValue = timeField.GetValueFn(item);
                 var timeDisplay = timeValue != null
                     ? (timeField.FieldType == FormFieldType.TimeOnly
                         ? ((TimeOnly)timeValue).ToString("HH:mm")
@@ -1434,7 +1445,7 @@ public static class DataScaffold
                 // Other list fields
                 foreach (var field in metadata.Fields.Where(f => f.List && f != dayField && f != timeField))
                 {
-                    var rawValue = field.Property.GetValue(item);
+                    var rawValue = field.GetValueFn(item);
                     string displayValue;
 
                     if (field.Lookup != null)
@@ -1485,7 +1496,7 @@ public static class DataScaffold
 
         if (nameField != null)
         {
-            var value = nameField.Property.GetValue(item)?.ToString();
+            var value = nameField.GetValueFn(item)?.ToString();
             if (!string.IsNullOrWhiteSpace(value))
                 return value;
         }
@@ -1576,7 +1587,7 @@ public static class DataScaffold
                     continue;
                 }
 
-                field.Property.SetValue(instance, listValue);
+                field.SetValueFn(instance, listValue);
                 continue;
             }
 
@@ -1595,7 +1606,7 @@ public static class DataScaffold
                     continue;
                 }
 
-                field.Property.SetValue(instance, dictValue);
+                field.SetValueFn(instance, dictValue);
                 continue;
             }
 
@@ -1613,7 +1624,7 @@ public static class DataScaffold
 
                     if (IsBooleanField(field, field.Property.PropertyType))
                     {
-                        field.Property.SetValue(instance, false);
+                        field.SetValueFn(instance, false);
                         if (field.Required)
                             errors.Add($"{field.Label} is required.");
                         continue;
@@ -1640,7 +1651,7 @@ public static class DataScaffold
                 }
             }
 
-            field.Property.SetValue(instance, converted);
+            field.SetValueFn(instance, converted);
 
             // Run field-level validators
             var fieldErrors = ValidationService.ValidateField(field, converted);
@@ -1690,7 +1701,7 @@ public static class DataScaffold
                 }
             }
 
-            field.Property.SetValue(instance, converted);
+            field.SetValueFn(instance, converted);
 
             // Run field-level validators
             var fieldErrors = ValidationService.ValidateField(field, converted);
@@ -2102,7 +2113,9 @@ public static class DataScaffold
         string? LookupCopyFields,
         string? CopyFromParentField,
         string? CopyFromParentSlug,
-        string? CopyFromParentSourceField
+        string? CopyFromParentSourceField,
+        Func<object, object?> Getter,
+        Action<object, object?> Setter
     );
 
     private static bool IsChildListType(Type type, out Type childType)
@@ -2144,7 +2157,9 @@ public static class DataScaffold
                 : fieldAttribute.FieldType;
 
             // Don't resolve lookups in this simplified version
-            fields.Add(new ChildFieldMeta(prop.Name, label, prop.PropertyType, required, effectiveFieldType, null, null, null, null, null, null, null));
+            fields.Add(new ChildFieldMeta(prop.Name, label, prop.PropertyType, required, effectiveFieldType, null, null, null, null, null, null, null,
+                PropertyAccessorFactory.BuildGetter(prop),
+                PropertyAccessorFactory.BuildSetter(prop)));
         }
 
         return fields;
@@ -2222,7 +2237,9 @@ public static class DataScaffold
                 LookupCopyFields: lookupCopyFields,
                 CopyFromParentField: copyFromParentAttr?.ParentFieldName,
                 CopyFromParentSlug: copyFromParentAttr?.EntitySlug,
-                CopyFromParentSourceField: copyFromParentAttr?.SourceFieldName));
+                CopyFromParentSourceField: copyFromParentAttr?.SourceFieldName,
+                Getter: PropertyAccessorFactory.BuildGetter(prop),
+                Setter: PropertyAccessorFactory.BuildSetter(prop)));
         }
 
         return fields;
@@ -2243,11 +2260,8 @@ public static class DataScaffold
                 var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var child in childFields)
                 {
-                    var prop = childType.GetProperty(child.Name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                    if (prop == null)
-                        continue;
-                    var value = prop.GetValue(item);
-                    row[child.Name] = ToDisplayString(value, prop.PropertyType);
+                    var value = child.Getter(item);
+                    row[child.Name] = ToDisplayString(value, child.FieldType);
                 }
                 rows.Add(row);
             }
@@ -2478,9 +2492,8 @@ public static class DataScaffold
                 sb.Append("<tr>");
                 foreach (var child in childFields)
                 {
-                    var prop = childType.GetProperty(child.Name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                    var value = prop?.GetValue(item);
-                    var displayText = ToDisplayString(value, prop?.PropertyType ?? typeof(string));
+                    var value = child.Getter(item);
+                    var displayText = ToDisplayString(value, child.FieldType);
                     if (child.LookupOptions != null)
                     {
                         var map = child.LookupOptions.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
@@ -2526,17 +2539,13 @@ public static class DataScaffold
                     if (!row.TryGetValue(child.Name, out var raw))
                         continue;
 
-                    var prop = childType.GetProperty(child.Name, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                    if (prop == null)
-                        continue;
-
-                    if (TryConvertValue(raw, prop.PropertyType, out var converted) && converted != null)
+                    if (TryConvertValue(raw, child.FieldType, out var converted) && converted != null)
                     {
-                        prop.SetValue(instance, converted);
+                        child.Setter(instance, converted);
                     }
-                    else if ((Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType) == typeof(string))
+                    else if ((Nullable.GetUnderlyingType(child.FieldType) ?? child.FieldType) == typeof(string))
                     {
-                        prop.SetValue(instance, raw);
+                        child.Setter(instance, raw);
                     }
                 }
 
