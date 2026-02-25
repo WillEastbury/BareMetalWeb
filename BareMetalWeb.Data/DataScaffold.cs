@@ -3121,6 +3121,14 @@ public static class DataScaffold
                 converted = Enum.Parse(effectiveType, element.GetString() ?? string.Empty, ignoreCase: true);
                 return true;
             }
+
+            // Child list: List<T> where T is a complex class (e.g. List<OrderRow>)
+            if (IsChildListType(effectiveType, out var childType)
+                && (element.ValueKind == JsonValueKind.Array || element.ValueKind == JsonValueKind.Null))
+            {
+                if (TryConvertJsonChildList(element, childType, out converted))
+                    return true;
+            }
         }
         catch
         {
@@ -3128,6 +3136,59 @@ public static class DataScaffold
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Deserialises a JSON array of objects into a <c>List&lt;T&gt;</c> where T is a child entity type.
+    /// Each element's properties are matched against the child type's public writable properties
+    /// and individually converted with <see cref="TryConvertJson"/>.
+    /// </summary>
+    private static bool TryConvertJsonChildList(JsonElement element, Type childType, out object? list)
+    {
+        list = null;
+        var listType = typeof(List<>).MakeGenericType(childType);
+
+        if (element.ValueKind == JsonValueKind.Null)
+        {
+            list = Activator.CreateInstance(listType);
+            return true;
+        }
+
+        try
+        {
+            var typedList = (IList)Activator.CreateInstance(listType)!;
+            var props = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Where(p => p.CanRead && p.CanWrite)
+                .ToDictionary(p => p.Name, p => p, StringComparer.OrdinalIgnoreCase);
+
+            foreach (var row in element.EnumerateArray())
+            {
+                if (row.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var instance = Activator.CreateInstance(childType);
+                if (instance == null)
+                    continue;
+
+                foreach (var prop in row.EnumerateObject())
+                {
+                    if (!props.TryGetValue(prop.Name, out var pi))
+                        continue;
+
+                    if (TryConvertJson(prop.Value, pi.PropertyType, out var val))
+                        pi.SetValue(instance, val);
+                }
+
+                typedList.Add(instance);
+            }
+
+            list = typedList;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     public static FormFieldType MapFieldType(Type type)
