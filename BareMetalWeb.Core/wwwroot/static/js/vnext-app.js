@@ -800,7 +800,13 @@
                     '<button class="btn btn-outline-danger btn-sm" data-delete-id="' + escHtml(id) + '" title="Delete"><i class="bi bi-trash"></i></button>' +
                     '</td>';
                 listFields.forEach(function (f) {
-                    html += '<td>' + fmtValue(nestedGet(item, f.name), f.type) + '</td>';
+                    var val = nestedGet(item, f.name);
+                    if (f.lookup && f.lookup.targetSlug && val) {
+                        html += '<td data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
+                            '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
+                    } else {
+                        html += '<td>' + fmtValue(val, f.type) + '</td>';
+                    }
                 });
                 html += '</tr>';
             });
