@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -23,6 +24,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 {
     private static readonly ConcurrentDictionary<Type, TypeShape> TypeCache = new();
     private static readonly ConcurrentDictionary<SchemaCacheKey, byte> SchemaValidationCache = new();
+    // Maps (Type, schema-hash) → pre-built ordinal array so schema-based deserialization
+    // uses array indexing instead of a per-field dictionary lookup.
+    private static readonly ConcurrentDictionary<(Type Type, uint SchemaHash), MemberAccessor?[]> SchemaOrdinalCache = new();
     private static readonly Encoding Utf8 = Encoding.UTF8;
     private const int Magic = 0x314F5342; // "BSO1" in little-endian
     private const int CurrentVersion = 3;
@@ -800,13 +804,15 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 
                 if (schema != null)
                 {
-                    foreach (var signature in schema.Members)
+                    var ordinals = GetOrBuildSchemaOrdinals(type, schema);
+                    for (int i = 0; i < schema.Members.Length; i++)
                     {
-                        var signatureType = AssumePublicMembers(signature.Type);
+                        var signatureType = AssumePublicMembers(schema.Members[i].Type);
                         if (!TryReadValue(reader, signatureType, depth + 1, out var memberValue))
                             break;
 
-                        if (memberMap.TryGetValue(signature.Name, out var member))
+                        var member = ordinals[i];
+                        if (member != null)
                             TryAssignValue(instance, member, memberValue);
                     }
                 }
@@ -969,13 +975,15 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 
                 if (schema != null)
                 {
-                    foreach (var signature in schema.Members)
+                    var ordinals = GetOrBuildSchemaOrdinals(type, schema);
+                    for (int i = 0; i < schema.Members.Length; i++)
                     {
-                        var signatureType = AssumePublicMembers(signature.Type);
+                        var signatureType = AssumePublicMembers(schema.Members[i].Type);
                         if (!TryReadValue(ref reader, signatureType, depth + 1, out var memberValue))
                             break;
 
-                        if (memberMap.TryGetValue(signature.Name, out var member))
+                        var member = ordinals[i];
+                        if (member != null)
                             TryAssignValue(instance, member, memberValue);
                     }
                 }
@@ -1182,22 +1190,52 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 
     private static Func<object, object?> CreatePropertyGetter(PropertyInfo property)
     {
-        return instance => property.GetValue(instance);
+        if (property.GetGetMethod(nonPublic: false) == null)
+            return instance => property.GetValue(instance);
+
+        var instanceParam = Expression.Parameter(typeof(object), "instance");
+        var declaringType = property.DeclaringType ?? typeof(object);
+        var castInstance = Expression.Convert(instanceParam, declaringType);
+        var propertyAccess = Expression.Property(castInstance, property);
+        var boxed = Expression.Convert(propertyAccess, typeof(object));
+        return Expression.Lambda<Func<object, object?>>(boxed, instanceParam).Compile();
     }
 
     private static Action<object, object?> CreatePropertySetter(PropertyInfo property)
     {
-        return (instance, value) => property.SetValue(instance, value);
+        if (property.GetSetMethod(nonPublic: false) == null)
+            return (instance, value) => property.SetValue(instance, value);
+
+        var instanceParam = Expression.Parameter(typeof(object), "instance");
+        var valueParam = Expression.Parameter(typeof(object), "value");
+        var declaringType = property.DeclaringType ?? typeof(object);
+        var castInstance = Expression.Convert(instanceParam, declaringType);
+        Expression castValue = Expression.Convert(valueParam, property.PropertyType);
+        var propertyAccess = Expression.Property(castInstance, property);
+        var assign = Expression.Assign(propertyAccess, castValue);
+        return Expression.Lambda<Action<object, object?>>(assign, instanceParam, valueParam).Compile();
     }
 
     private static Func<object, object?> CreateFieldGetter(FieldInfo field)
     {
-        return instance => field.GetValue(instance);
+        var instanceParam = Expression.Parameter(typeof(object), "instance");
+        var declaringType = field.DeclaringType ?? typeof(object);
+        var castInstance = Expression.Convert(instanceParam, declaringType);
+        var fieldAccess = Expression.Field(castInstance, field);
+        var boxed = Expression.Convert(fieldAccess, typeof(object));
+        return Expression.Lambda<Func<object, object?>>(boxed, instanceParam).Compile();
     }
 
     private static Action<object, object?> CreateFieldSetter(FieldInfo field)
     {
-        return (instance, value) => field.SetValue(instance, value);
+        var instanceParam = Expression.Parameter(typeof(object), "instance");
+        var valueParam = Expression.Parameter(typeof(object), "value");
+        var declaringType = field.DeclaringType ?? typeof(object);
+        var castInstance = Expression.Convert(instanceParam, declaringType);
+        Expression castValue = Expression.Convert(valueParam, field.FieldType);
+        var fieldAccess = Expression.Field(castInstance, field);
+        var assign = Expression.Assign(fieldAccess, castValue);
+        return Expression.Lambda<Action<object, object?>>(assign, instanceParam, valueParam).Compile();
     }
 
     private static uint GetSignatureHash(MemberSignature[] members)
@@ -1286,6 +1324,24 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             {
             }
         }
+    }
+
+    /// <summary>
+    /// Returns a pre-built ordinal array that maps each index in <paramref name="schema"/>.Members
+    /// to the corresponding <see cref="MemberAccessor"/> for <paramref name="type"/>, or
+    /// <c>null</c> when the member is absent from the current type shape (schema evolution).
+    /// The array is cached so subsequent deserializations skip the dictionary lookup.
+    /// </summary>
+    private static MemberAccessor?[] GetOrBuildSchemaOrdinals(Type type, SchemaDefinition schema)
+    {
+        return SchemaOrdinalCache.GetOrAdd((type, schema.Hash), key =>
+        {
+            var memberMap = GetTypeShape(key.Type).MemberMap;
+            var ordinals = new MemberAccessor?[schema.Members.Length];
+            for (int i = 0; i < schema.Members.Length; i++)
+                memberMap.TryGetValue(schema.Members[i].Name, out ordinals[i]);
+            return ordinals;
+        });
     }
 
     private static bool TryReadValue(BinaryReader reader, Type type, int depth, out object? value)
@@ -1784,7 +1840,8 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             throw new NotSupportedException($"Type '{type.FullName}' is not blittable.");
 
         var sizeMethod = BlittableSizeMethod.MakeGenericMethod(type);
-        return (int)sizeMethod.Invoke(null, null)!;
+        var func = (Func<int>)sizeMethod.CreateDelegate(typeof(Func<int>));
+        return func();
     }
 
     private static Action<object?, byte[]> CreateBlittableWrite(Type type)
