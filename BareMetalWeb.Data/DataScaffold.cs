@@ -1495,6 +1495,9 @@ public static class DataScaffold
 
     private static string FormatLookupDisplay(string key, string display)
     {
+        if (string.IsNullOrWhiteSpace(key) && string.IsNullOrWhiteSpace(display))
+            return "—";
+
         if (string.IsNullOrWhiteSpace(key))
             return display;
 
