@@ -323,7 +323,7 @@
         } else if (activeView === 'OrgChart' || (activeView === '' && viewType === 'OrgChart')) {
             html += renderOrgChart(meta, items, slug, baseUrl);
         } else if ((activeView === 'Timeline' || (activeView === '' && viewType === 'Timeline')) && items.length > 0) {
-            html += renderTimeline(meta, items, slug, baseUrl);
+            html += renderTimeline(meta, items, slug, baseUrl, query);
         } else if ((activeView === 'Timetable' || (activeView === '' && viewType === 'Timetable')) && items.length > 0) {
             html += renderTimetable(meta, items, slug, baseUrl);
         } else {
@@ -590,7 +590,7 @@
         return html;
     }
 
-    function renderTimeline(meta, items, slug, baseUrl) {
+    function renderTimeline(meta, items, slug, baseUrl, query) {
         // Find first two DateOnly/DateTime fields: start date, optional end date
         var dateFields = meta.fields.filter(function (f) { return f.type === 'DateTime' || f.type === 'DateOnly'; });
         if (!dateFields.length) return '<p class="text-warning">Timeline view requires a DateOnly or DateTime field.</p>';
@@ -598,6 +598,13 @@
         var startField = dateFields[0];
         var endField = dateFields.length > 1 ? dateFields[1] : null;
         var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
+
+        // Pivot/group-by support: non-date list fields the user can pivot on
+        var pivotOptions = meta.fields.filter(function (f) {
+            return f.list && f.type !== 'DateTime' && f.type !== 'DateOnly' && f.type !== 'TimeOnly';
+        }).sort(function (a, b) { return a.order - b.order; });
+        var pivotBy = (query && query.pivotBy) || '';
+        var pivotField = pivotBy ? pivotOptions.find(function (f) { return f.name === pivotBy; }) : null;
 
         // Build gantt items with parsed start/end dates
         var barColors = ['#4472c4', '#c0504d', '#9bbb59', '#f79646', '#8064a2'];
@@ -665,8 +672,67 @@
             }
         });
 
+        // Helper: build label HTML for a field value, using data-lookup-field for async resolution
+        function makeLabelHtml(field, rawVal, itemId) {
+            if (!field) return escHtml(rawVal || itemId);
+            if (field.lookup && field.lookup.targetSlug && rawVal) {
+                return '<span data-lookup-field="' + escHtml(field.name) +
+                    '" data-target-slug="' + escHtml(field.lookup.targetSlug) +
+                    '" data-display-field="' + escHtml(field.lookup.displayField || 'Name') +
+                    '" data-value="' + escHtml(String(rawVal)) + '">' + escHtml(String(rawVal)) + '</span>';
+            }
+            return escHtml(String(rawVal || itemId));
+        }
+
+        // Build rows: group by pivotField when specified, otherwise one row per item
+        var rows; // each row: { labelHtml, titleAttr, bars: [{g, color}] }
+        if (pivotField) {
+            var groups = {};
+            var groupOrder = [];
+            ganttItems.forEach(function (g) {
+                var pivotVal = String(nestedGet(g.item, pivotField.name) || '');
+                if (!groups[pivotVal]) { groups[pivotVal] = []; groupOrder.push(pivotVal); }
+                groups[pivotVal].push(g);
+            });
+            rows = groupOrder.map(function (pivotVal, gi) {
+                var color = barColors[gi % barColors.length];
+                return {
+                    labelHtml: makeLabelHtml(pivotField, pivotVal, pivotVal),
+                    titleAttr: escHtml(pivotVal || '(blank)'),
+                    bars: groups[pivotVal].map(function (g) { return { g: g, color: color }; })
+                };
+            });
+        } else {
+            rows = ganttItems.map(function (g, i) {
+                var rawVal = nestedGet(g.item, labelField ? labelField.name : '') || g.id;
+                return {
+                    labelHtml: '<a href="' + baseUrl + '/' + encodeURIComponent(g.id) + '">' +
+                        makeLabelHtml(labelField, rawVal, g.id) + '</a>',
+                    titleAttr: escHtml(g.label),
+                    bars: [{ g: g, color: barColors[i % barColors.length] }]
+                };
+            });
+        }
+
+        // "View by" pivot selector
+        var html = '';
+        if (pivotOptions.length > 0) {
+            html += '<div class="mb-2 d-flex align-items-center gap-2 flex-wrap">';
+            html += '<span class="text-muted small fw-semibold">View by:</span>';
+            var itemUrl = buildUrl(baseUrl, Object.assign({}, query, { view: 'Timeline', pivotBy: '' }));
+            html += '<a class="btn btn-sm' + (!pivotField ? ' btn-secondary' : ' btn-outline-secondary') +
+                '" href="' + itemUrl + '">Item</a>';
+            pivotOptions.forEach(function (f) {
+                var active = pivotField && pivotField.name === f.name;
+                var url = buildUrl(baseUrl, Object.assign({}, query, { view: 'Timeline', pivotBy: f.name }));
+                html += '<a class="btn btn-sm' + (active ? ' btn-secondary' : ' btn-outline-secondary') +
+                    '" href="' + url + '">' + escHtml(f.label) + '</a>';
+            });
+            html += '</div>';
+        }
+
         // Render Gantt chart HTML (matches SSR bm-gantt-* classes)
-        var html = '<div class="bm-gantt-container"><div class="bm-gantt-inner">';
+        html += '<div class="bm-gantt-container"><div class="bm-gantt-inner">';
 
         // Year header row
         html += '<div class="bm-gantt-header-row"><div class="bm-gantt-label-col"></div>';
@@ -685,28 +751,29 @@
         html += '</div></div>';
 
         // Rows
-        ganttItems.forEach(function (g, i) {
-            var sd = new Date(g.start.y, g.start.m, g.start.d);
-            var ed = new Date(g.end.y, g.end.m, g.end.d);
-            var startDays = (sd - chartStart) / 86400000;
-            var endDays = (ed - chartStart) / 86400000 + 1;
-            var barLeft = startDays / totalDays * 100;
-            var barWidth = Math.max((endDays - startDays) / totalDays * 100, 0.5);
-            var color = barColors[i % barColors.length];
-
-            var tooltip = endField
-                ? escHtml(g.label) + ': ' + sd.toISOString().slice(0,10) + ' \u2013 ' + ed.toISOString().slice(0,10)
-                : escHtml(g.label) + ': ' + sd.toISOString().slice(0,10);
-
+        rows.forEach(function (row) {
             html += '<div class="bm-gantt-row">';
-            html += '<div class="bm-gantt-lbl" title="' + escHtml(g.label) + '"><a href="' + baseUrl + '/' + encodeURIComponent(g.id) + '">' + escHtml(g.label) + '</a></div>';
+            html += '<div class="bm-gantt-lbl" title="' + row.titleAttr + '">' + row.labelHtml + '</div>';
             html += '<div class="bm-gantt-bar-area">';
             months.forEach(function (mo) {
                 html += '<div class="bm-gantt-sep" data-gantt-left="' + mo.left.toFixed(2) + '%"></div>';
             });
-            html += '<a href="' + baseUrl + '/' + encodeURIComponent(g.id) + '/edit" class="bm-gantt-bar" data-gantt-left="' + barLeft.toFixed(2) + '%" data-gantt-width="' + barWidth.toFixed(2) + '%" data-gantt-bg="' + escHtml(color) + '" title="' + tooltip + '">';
-            html += '<span class="bm-gantt-bar-text">' + escHtml(g.label) + '</span>';
-            html += '</a></div></div>';
+            row.bars.forEach(function (b) {
+                var g = b.g;
+                var sd = new Date(g.start.y, g.start.m, g.start.d);
+                var ed = new Date(g.end.y, g.end.m, g.end.d);
+                var startDays = (sd - chartStart) / 86400000;
+                var endDays = (ed - chartStart) / 86400000 + 1;
+                var barLeft = startDays / totalDays * 100;
+                var barWidth = Math.max((endDays - startDays) / totalDays * 100, 0.5);
+                var tooltip = endField
+                    ? escHtml(g.label) + ': ' + sd.toISOString().slice(0,10) + ' \u2013 ' + ed.toISOString().slice(0,10)
+                    : escHtml(g.label) + ': ' + sd.toISOString().slice(0,10);
+                html += '<a href="' + baseUrl + '/' + encodeURIComponent(g.id) + '/edit" class="bm-gantt-bar" data-gantt-left="' + barLeft.toFixed(2) + '%" data-gantt-width="' + barWidth.toFixed(2) + '%" data-gantt-bg="' + escHtml(b.color) + '" title="' + tooltip + '">';
+                html += '<span class="bm-gantt-bar-text">' + escHtml(g.label) + '</span>';
+                html += '</a>';
+            });
+            html += '</div></div>';
         });
 
         html += '</div></div>';
