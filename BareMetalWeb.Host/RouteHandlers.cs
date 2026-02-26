@@ -310,7 +310,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (!_allowAccountCreation)
             {
                 ctx.SetStringValue("title", "Create Account");
-                ctx.SetStringValue("message", "<p>Account creation is disabled in this environment.</p>");
+                ctx.SetStringValue("html_message", "<p>Account creation is disabled in this environment.</p>");
                 return;
             }
 
@@ -323,7 +323,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!_allowAccountCreation)
         {
             context.SetStringValue("title", "Create Account");
-            context.SetStringValue("message", "<p>Account creation is disabled in this environment.</p>");
+            context.SetStringValue("html_message", "<p>Account creation is disabled in this environment.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -442,7 +442,7 @@ public sealed class RouteHandlers : IRouteHandlers
                          $"<p>Email: {WebUtility.HtmlEncode(user.Email)}</p>" +
                          $"<p>Permissions: {WebUtility.HtmlEncode(permissions)}</p>" +
                          $"<p>MFA: {WebUtility.HtmlEncode(mfaStatus)} - {mfaLinks}</p>";
-            ctx.SetStringValue("message", message);
+            ctx.SetStringValue("html_message", message);
             return true;
         })(context);
     }
@@ -463,7 +463,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var message = $"<p>MFA status: {status}.</p>";
             if (!user.MfaEnabled)
                 message += "<p><a href=\"/account/mfa/setup\">Enable MFA</a></p>";
-            ctx.SetStringValue("message", message);
+            ctx.SetStringValue("html_message", message);
             return true;
         })(context);
     }
@@ -482,7 +482,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (user.MfaEnabled)
             {
                 ctx.SetStringValue("title", "Enable MFA");
-                ctx.SetStringValue("message", "<p>MFA is already enabled for your account.</p>");
+                ctx.SetStringValue("html_message", "<p>MFA is already enabled for your account.</p>");
                 return true;
             }
 
@@ -642,7 +642,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var backupHtml = string.IsNullOrWhiteSpace(backupList)
                 ? string.Empty
                 : $"<div class=\"mt-3\"><p><strong>Backup codes (save these now):</strong></p><ul>{backupList}</ul><p class=\"text-warning\">These codes are shown once.</p></div>";
-            context.SetStringValue("message", "<p>MFA enabled successfully.</p>" + backupHtml + "<p><a href=\"/account\">Back to account</a></p>");
+            context.SetStringValue("html_message", "<p>MFA enabled successfully.</p>" + backupHtml + "<p><a href=\"/account\">Back to account</a></p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -667,7 +667,7 @@ public sealed class RouteHandlers : IRouteHandlers
             ctx.SetStringValue("title", "Reset MFA");
             if (!user.MfaEnabled)
             {
-                ctx.SetStringValue("message", "<p>MFA is not enabled for your account.</p><p><a href=\"/account\">Back to account</a></p>");
+                ctx.SetStringValue("html_message", "<p>MFA is not enabled for your account.</p><p><a href=\"/account\">Back to account</a></p>");
                 return true;
             }
 
@@ -713,7 +713,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await Users.SaveAsync(user);
 
         context.SetStringValue("title", "Reset MFA");
-        context.SetStringValue("message", "<p>MFA has been reset.</p><p><a href=\"/account\">Back to account</a></p>");
+        context.SetStringValue("html_message", "<p>MFA has been reset.</p><p><a href=\"/account\">Back to account</a></p>");
         await _renderer.RenderPage(context);
     }
 
@@ -753,7 +753,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
             {
                 ctx.SetStringValue("title", "Setup");
-                ctx.SetStringValue("message", "<p>Root user already exists.</p>");
+                ctx.SetStringValue("html_message", "<p>Root user already exists.</p>");
                 return;
             }
 
@@ -766,7 +766,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
         {
             context.SetStringValue("title", "Setup");
-            context.SetStringValue("message", "<p>Root user already exists.</p>");
+            context.SetStringValue("html_message", "<p>Root user already exists.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -815,7 +815,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await EnsureDefaultAddress(userName);
         await EnsureDefaultReports(userName);
         context.SetStringValue("title", "Setup");
-        context.SetStringValue("message", "<p>Root user created successfully.</p>");
+        context.SetStringValue("html_message", "<p>Root user created successfully.</p>");
         await _renderer.RenderPage(context);
     }
 
@@ -1001,7 +1001,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         _templateStore.ReloadAll();
         context.SetStringValue("title", "Reload Templates");
-        context.SetStringValue("message", "Templates reloaded successfully.");
+        context.SetStringValue("html_message", "Templates reloaded successfully.");
         await _renderer.RenderPage(context);
     }
 
@@ -1009,7 +1009,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Login");
-        context.SetStringValue("message", string.IsNullOrWhiteSpace(message)
+        context.SetStringValue("html_message", string.IsNullOrWhiteSpace(message)
             ? string.Empty
             : $"<div class=\"alert alert-danger\">{WebUtility.HtmlEncode(message)}</div>");
         var fields = new List<FormField>
@@ -1037,7 +1037,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Create Account");
-        context.SetStringValue("message", string.IsNullOrWhiteSpace(message)
+        context.SetStringValue("html_message", string.IsNullOrWhiteSpace(message)
             ? string.Empty
             : $"<div class=\"alert alert-danger\">{WebUtility.HtmlEncode(message)}</div>");
         context.AddFormDefinition(new FormDefinition(
@@ -1061,7 +1061,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Initial Setup");
-        context.SetStringValue("message", string.IsNullOrWhiteSpace(message)
+        context.SetStringValue("html_message", string.IsNullOrWhiteSpace(message)
             ? "<p>Create the first admin account.</p>"
             : $"<div class=\"alert alert-danger\">{WebUtility.HtmlEncode(message)}</div>");
         context.AddFormDefinition(new FormDefinition(
@@ -1082,7 +1082,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Logout");
-        context.SetStringValue("message", string.IsNullOrWhiteSpace(message)
+        context.SetStringValue("html_message", string.IsNullOrWhiteSpace(message)
             ? "<p>Are you sure you want to sign out?</p>"
             : $"<div class=\"alert alert-danger\">{WebUtility.HtmlEncode(message)}</div>");
         context.AddFormDefinition(new FormDefinition(
@@ -1103,7 +1103,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var info = string.IsNullOrWhiteSpace(message)
             ? "<p>Enter the 6-digit code from your authenticator app.</p>"
             : $"<div class=\"alert alert-danger\">{WebUtility.HtmlEncode(message)}</div>";
-        context.SetStringValue("message", info + BuildOtpClientScript(context, "/mfa"));
+        context.SetStringValue("html_message", info + BuildOtpClientScript(context, "/mfa"));
 
         context.AddFormDefinition(new FormDefinition(
             Action: "/mfa",
@@ -1147,7 +1147,7 @@ public sealed class RouteHandlers : IRouteHandlers
               revealSecret +
               revealOtpAuth;
 
-        context.SetStringValue("message", intro + payload + BuildOtpClientScript(context, "/account/mfa/setup"));
+        context.SetStringValue("html_message", intro + payload + BuildOtpClientScript(context, "/account/mfa/setup"));
         context.AddFormDefinition(new FormDefinition(
             Action: "/account/mfa/setup",
             Method: "post",
@@ -1415,7 +1415,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await BuildPageHandler(ctx =>
         {
             ctx.SetStringValue("title", "Data");
-            ctx.SetStringValue("message", "<p>Manage data entities.</p>");
+            ctx.SetStringValue("html_message", "<p>Manage data entities.</p>");
 
             var rows = DataScaffold.Entities
                 .OrderBy(e => e.NavOrder)
@@ -1440,7 +1440,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
-            context.SetStringValue("message", errorMessage ?? "Entity not found.");
+            context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1449,7 +1449,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
-            context.SetStringValue("message", "<p>You do not have permission to access this resource.</p>");
+            context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1526,9 +1526,9 @@ public sealed class RouteHandlers : IRouteHandlers
             var treeViewSwitcher = BuildViewSwitcher(typeSlug, effectiveViewType, meta);
             var treeAddButtonHtml = $"<a class=\"btn btn-sm btn-success\" href=\"/ssr/admin/data/{typeSlug}/create\" title=\"Create {WebUtility.HtmlEncode(meta.Name)}\" aria-label=\"Create {WebUtility.HtmlEncode(meta.Name)}\"><i class=\"bi bi-plus-lg\" aria-hidden=\"true\"></i> Add</a>";
             
-            context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} - {GetViewTypeName(effectiveViewType)}");
-            context.SetStringValue("header_controls", "<div class=\"d-flex align-items-center gap-2 flex-wrap\">" + treeViewSwitcher + treeAddButtonHtml + "</div>");
-            context.SetStringValue("message", treeToastHtml + viewHtml);
+            context.SetStringValue("title", $"{meta.Name} - {GetViewTypeName(effectiveViewType)}");
+            context.SetStringValue("html_header_controls", "<div class=\"d-flex align-items-center gap-2 flex-wrap\">" + treeViewSwitcher + treeAddButtonHtml + "</div>");
+            context.SetStringValue("html_message", treeToastHtml + viewHtml);
             await _renderer.RenderPage(context);
             return;
         }
@@ -1612,9 +1612,9 @@ public sealed class RouteHandlers : IRouteHandlers
         // Pagination row below the table
         var paginationRowHtml = "<div class=\"d-flex justify-content-between align-items-center mt-2 mb-2\">" + pagerHtml + pageSizeHtml + "</div>";
         
-        context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} List");
-        context.SetStringValue("header_controls", headerControlsHtml);
-        context.SetStringValue("message", toastHtml + tableHtml + paginationRowHtml + bulkActionsBar);
+        context.SetStringValue("title", $"{meta.Name} List");
+        context.SetStringValue("html_header_controls", headerControlsHtml);
+        context.SetStringValue("html_message", toastHtml + tableHtml + paginationRowHtml + bulkActionsBar);
         await _renderer.RenderPage(context);
     }
 
@@ -1626,7 +1626,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
-            context.SetStringValue("message", errorMessage ?? "Entity not found.");
+            context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1635,7 +1635,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
-            context.SetStringValue("message", "<p>You do not have permission to access this resource.</p>");
+            context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1663,7 +1663,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Not Found");
-            context.SetStringValue("message", "<p>Item not found.</p>");
+            context.SetStringValue("html_message", "<p>Item not found.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1684,8 +1684,8 @@ public sealed class RouteHandlers : IRouteHandlers
         var rtfHtml = $"<a class=\"btn btn-sm btn-outline-info ms-2\" href=\"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/rtf\" title=\"Download RTF\" aria-label=\"Download RTF\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-file-earmark-text ms-1\" aria-hidden=\"true\"></i> RTF</a>";
         var htmlHtml = $"<a class=\"btn btn-sm btn-outline-primary ms-2\" href=\"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/html\" title=\"Download HTML\" aria-label=\"Download HTML\"><i class=\"bi bi-download\" aria-hidden=\"true\"></i><i class=\"bi bi-filetype-html ms-1\" aria-hidden=\"true\"></i> HTML</a>";
         var commandButtons = BuildCommandButtonsHtml(meta, typeSlug, id, CsrfProtection.EnsureToken(context));
-        context.SetStringValue("title", $"{WebUtility.HtmlEncode(meta.Name)} Details");
-        context.SetStringValue("message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i> Edit</a>{exportDropdown}{rtfHtml}{htmlHtml}{commandButtons}</p>");
+        context.SetStringValue("title", $"{meta.Name} Details");
+        context.SetStringValue("html_message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i> Edit</a>{exportDropdown}{rtfHtml}{htmlHtml}{commandButtons}</p>");
         context.AddTable(new[] { "Field", "Value" }, rows);
         await _renderer.RenderPage(context);
     }
@@ -1928,7 +1928,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Import CSV");
-            context.SetStringValue("message", errorMessage ?? "Entity not found.");
+            context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1937,7 +1937,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
-            context.SetStringValue("message", "<p>You do not have permission to access this resource.</p>");
+            context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1951,8 +1951,8 @@ public sealed class RouteHandlers : IRouteHandlers
         };
 
         var help = "<p>Upload a CSV file. Columns map by field name or label (case-insensitive). If \"Upsert by Id\" is Yes and the CSV includes an Id column, existing records will be updated.</p>";
-        context.SetStringValue("title", $"Import CSV: {WebUtility.HtmlEncode(meta.Name)}");
-        context.SetStringValue("message", help);
+        context.SetStringValue("title", $"Import CSV: {meta.Name}");
+        context.SetStringValue("html_message", help);
         context.AddFormDefinition(new FormDefinition($"/ssr/admin/data/{typeSlug}/import", "post", "Import CSV", fields));
         await _renderer.RenderPage(context);
     }
@@ -1964,7 +1964,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Import CSV");
-            context.SetStringValue("message", errorMessage ?? "Entity not found.");
+            context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1973,7 +1973,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
-            context.SetStringValue("message", "<p>You do not have permission to access this resource.</p>");
+            context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1982,7 +1982,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Import CSV");
-            context.SetStringValue("message", "<p>Invalid form submission.</p>");
+            context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1991,7 +1991,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             context.SetStringValue("title", "Import CSV");
-            context.SetStringValue("message", "<p>Invalid security token. Please try again.</p>");
+            context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2000,7 +2000,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (file == null || file.Length == 0)
         {
             context.SetStringValue("title", "Import CSV");
-            context.SetStringValue("message", "<p>No CSV file uploaded.</p>");
+            context.SetStringValue("html_message", "<p>No CSV file uploaded.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2017,7 +2017,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (rows.Count < 2)
         {
             context.SetStringValue("title", "Import CSV");
-            context.SetStringValue("message", "<p>CSV file is empty or missing headers.</p>");
+            context.SetStringValue("html_message", "<p>CSV file is empty or missing headers.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2104,8 +2104,8 @@ public sealed class RouteHandlers : IRouteHandlers
             summary += $"<div class=\"alert alert-warning\"><strong>Errors:</strong><br/>{preview}{more}</div>";
         }
 
-        context.SetStringValue("title", $"Import CSV: {WebUtility.HtmlEncode(meta.Name)}");
-        context.SetStringValue("message", summary + $"<p><a class=\"btn btn-sm btn-outline-secondary\" href=\"/ssr/admin/data/{typeSlug}\">Back to list</a></p>");
+        context.SetStringValue("title", $"Import CSV: {meta.Name}");
+        context.SetStringValue("html_message", summary + $"<p><a class=\"btn btn-sm btn-outline-secondary\" href=\"/ssr/admin/data/{typeSlug}\">Back to list</a></p>");
         await _renderer.RenderPage(context);
     }
 
@@ -2116,7 +2116,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
-            context.SetStringValue("message", errorMessage ?? "Entity not found.");
+            context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2125,7 +2125,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
-            context.SetStringValue("message", "<p>You do not have permission to access this resource.</p>");
+            context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2137,7 +2137,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var isPopup = context.Request.Query.ContainsKey("popup");
         var createAction = isPopup ? $"/ssr/admin/data/{typeSlug}/create?popup=1" : $"/ssr/admin/data/{typeSlug}/create";
-        context.SetStringValue("title", $"Create {WebUtility.HtmlEncode(meta.Name)}");
+        context.SetStringValue("title", $"Create {meta.Name}");
         context.AddFormDefinition(new FormDefinition(createAction, "post", $"Create {meta.Name}", fields));
         await _renderer.RenderPage(context);
     }
@@ -2149,7 +2149,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
-            context.SetStringValue("message", errorMessage ?? "Entity not found.");
+            context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2158,7 +2158,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
-            context.SetStringValue("message", "<p>You do not have permission to access this resource.</p>");
+            context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2167,7 +2167,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Invalid Request");
-            context.SetStringValue("message", "<p>Invalid form submission.</p>");
+            context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2176,7 +2176,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             context.SetStringValue("title", "Invalid Request");
-            context.SetStringValue("message", "<p>Invalid security token. Please try again.</p>");
+            context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2200,8 +2200,8 @@ public sealed class RouteHandlers : IRouteHandlers
 
         if (errors.Count > 0)
         {
-            context.SetStringValue("title", $"Create {WebUtility.HtmlEncode(meta.Name)}");
-            context.SetStringValue("message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
+            context.SetStringValue("title", $"Create {meta.Name}");
+            context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
             var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: true, validationResult, cspNonce: context.GetCspNonce());
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: true);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
@@ -2252,7 +2252,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
-            context.SetStringValue("message", errorMessage ?? "Entity not found.");
+            context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2261,7 +2261,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
-            context.SetStringValue("message", "<p>You do not have permission to access this resource.</p>");
+            context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2271,7 +2271,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Not Found");
-            context.SetStringValue("message", "<p>Item not found.</p>");
+            context.SetStringValue("html_message", "<p>Item not found.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2281,7 +2281,7 @@ public sealed class RouteHandlers : IRouteHandlers
         AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: false);
         fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken));
 
-        context.SetStringValue("title", $"Edit {WebUtility.HtmlEncode(meta.Name)}");
+        context.SetStringValue("title", $"Edit {meta.Name}");
         context.AddFormDefinition(new FormDefinition($"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit", "post", $"Save {meta.Name}", fields));
         await _renderer.RenderPage(context);
     }
@@ -2294,7 +2294,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
-            context.SetStringValue("message", errorMessage ?? "Entity not found.");
+            context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2303,7 +2303,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
-            context.SetStringValue("message", "<p>You do not have permission to access this resource.</p>");
+            context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2312,7 +2312,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Invalid Request");
-            context.SetStringValue("message", "<p>Invalid form submission.</p>");
+            context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2322,7 +2322,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Not Found");
-            context.SetStringValue("message", "<p>Item not found.</p>");
+            context.SetStringValue("html_message", "<p>Item not found.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2346,7 +2346,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             context.SetStringValue("title", "Invalid Request");
-            context.SetStringValue("message", "<p>Invalid security token. Please try again.</p>");
+            context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2363,8 +2363,8 @@ public sealed class RouteHandlers : IRouteHandlers
 
         if (errors.Count > 0)
         {
-            context.SetStringValue("title", $"Edit {WebUtility.HtmlEncode(meta.Name)}");
-            context.SetStringValue("message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
+            context.SetStringValue("title", $"Edit {meta.Name}");
+            context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
             var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: false, validationResult, cspNonce: context.GetCspNonce());
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: false);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
@@ -2445,7 +2445,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
-            context.SetStringValue("message", errorMessage ?? "Entity not found.");
+            context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2454,7 +2454,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
-            context.SetStringValue("message", "<p>You do not have permission to access this resource.</p>");
+            context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2467,7 +2467,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
             var instance = meta.Handlers.Create();
             ApplyPrefillFromQuery(meta, instance, context.Request.Query);
-        context.SetStringValue("message", $"<p>Delete this {WebUtility.HtmlEncode(meta.Name)} record? This cannot be undone.</p>");
+        context.SetStringValue("html_message", $"<p>Delete this {WebUtility.HtmlEncode(meta.Name)} record? This cannot be undone.</p>");
         context.AddFormDefinition(new FormDefinition($"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/delete", "post", $"Delete {meta.Name}", fields));
         await _renderer.RenderPage(context);
     }
@@ -2480,7 +2480,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
-            context.SetStringValue("message", errorMessage ?? "Entity not found.");
+            context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2489,7 +2489,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
-            context.SetStringValue("message", "<p>You do not have permission to access this resource.</p>");
+            context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2498,7 +2498,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Invalid Request");
-            context.SetStringValue("message", "<p>Invalid form submission.</p>");
+            context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -2507,7 +2507,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             context.SetStringValue("title", "Invalid Request");
-            context.SetStringValue("message", "<p>Invalid security token. Please try again.</p>");
+            context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -3490,7 +3490,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
             if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root))
             {
-                ctx.SetStringValue("message", "<p>No log folders found.</p>");
+                ctx.SetStringValue("html_message", "<p>No log folders found.</p>");
                 return;
             }
 
@@ -3599,7 +3599,7 @@ public sealed class RouteHandlers : IRouteHandlers
             html.Append("</div>");
             html.Append("</div>");
 
-            ctx.SetStringValue("message", html.ToString());
+            ctx.SetStringValue("html_message", html.ToString());
         })(context);
     }
 
@@ -3611,7 +3611,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (!TryResolveLogTarget(ctx.Request.Query, root, out var target, out var errorMessage))
             {
                 ctx.SetStringValue("title", "Prune Logs");
-                ctx.SetStringValue("message", $"<p class=\"text-danger\">{WebUtility.HtmlEncode(errorMessage)}</p>");
+                ctx.SetStringValue("html_message", $"<p class=\"text-danger\">{WebUtility.HtmlEncode(errorMessage)}</p>");
                 return;
             }
 
@@ -3627,7 +3627,7 @@ public sealed class RouteHandlers : IRouteHandlers
             };
 
             ctx.SetStringValue("title", "Prune Logs");
-            ctx.SetStringValue("message", $"<p>Are you sure you want to delete logs for <strong>{WebUtility.HtmlEncode(target.Label)}</strong>?</p>");
+            ctx.SetStringValue("html_message", $"<p>Are you sure you want to delete logs for <strong>{WebUtility.HtmlEncode(target.Label)}</strong>?</p>");
             ctx.AddFormDefinition(new FormDefinition("/admin/logs/prune", "post", "Confirm Delete", fields));
         })(context);
     }
@@ -3738,7 +3738,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Generate Sample Data");
-            context.SetStringValue("message", "<p>Invalid form submission.</p>");
+            context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -3747,7 +3747,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             context.SetStringValue("title", "Generate Sample Data");
-            context.SetStringValue("message", "<p>Invalid security token. Please try again.</p>");
+            context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
             RenderSampleDataForm(context, "<p>Invalid security token. Please try again.</p>", 100, 50, 25, 25, clearExisting: false);
             await _renderer.RenderPage(context);
             return;
@@ -3768,7 +3768,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (errors.Count > 0)
         {
             context.SetStringValue("title", "Generate Sample Data");
-            context.SetStringValue("message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
+            context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
             RenderSampleDataForm(context, $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>", addressCount, customerCount, unitCount, productCount, clearExisting);
             await _renderer.RenderPage(context);
             return;
@@ -3843,7 +3843,7 @@ public sealed class RouteHandlers : IRouteHandlers
             await BuildPageHandler(ctx =>
             {
                 ctx.SetStringValue("title", "Wipe All Data");
-                ctx.SetStringValue("message",
+                ctx.SetStringValue("html_message",
                     "<div class=\"alert alert-warning\">" +
                     "<h4 class=\"alert-heading\">Endpoint Disabled</h4>" +
                     $"<p>The wipe-data endpoint is disabled because the <code>{WellKnownSettings.AllowWipeData}</code> setting is empty or missing.</p>" +
@@ -3865,7 +3865,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Wipe All Data");
-            context.SetStringValue("message",
+            context.SetStringValue("html_message",
                 "<div class=\"alert alert-warning\">" +
                 "<h4 class=\"alert-heading\">Endpoint Disabled</h4>" +
                 $"<p>The <code>{WebUtility.HtmlEncode(WellKnownSettings.AllowWipeData)}</code> setting is empty or missing.</p></div>");
@@ -3877,7 +3877,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Wipe All Data");
-            context.SetStringValue("message", "<p>Invalid form submission.</p>");
+            context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -3933,7 +3933,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!string.IsNullOrWhiteSpace(message))
             warningHtml.Append(message);
 
-        context.SetStringValue("message", warningHtml.ToString());
+        context.SetStringValue("html_message", warningHtml.ToString());
 
         var fields = new List<FormField>
         {
@@ -3949,7 +3949,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await BuildPageHandler(ctx =>
         {
             ctx.SetStringValue("title", "Entity Designer");
-            ctx.SetStringValue("message",
+            ctx.SetStringValue("html_message",
                 "<div id=\"designer-root\"><p class=\"text-muted\">Loading designer…</p></div>" +
                 "<script src=\"/static/js/entity-designer.js\"></script>");
         })(context);
@@ -4657,7 +4657,7 @@ public sealed class RouteHandlers : IRouteHandlers
         for (int i = 0; i < pageContext.PageMetaDataKeys.Length; i++)
         {
             if (string.Equals(pageContext.PageMetaDataKeys[i], key, StringComparison.OrdinalIgnoreCase))
-                return WebUtility.HtmlDecode(pageContext.PageMetaDataValues[i]);
+                return pageContext.PageMetaDataValues[i];
         }
 
         return null;
@@ -5375,7 +5375,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Generate Sample Data");
-        context.SetStringValue("message", string.IsNullOrWhiteSpace(message) ? string.Empty : message);
+        context.SetStringValue("html_message", string.IsNullOrWhiteSpace(message) ? string.Empty : message);
 
         var fields = new List<FormField>
         {
@@ -5802,7 +5802,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Reset MFA");
-        context.SetStringValue("message", string.IsNullOrWhiteSpace(message)
+        context.SetStringValue("html_message", string.IsNullOrWhiteSpace(message)
             ? "<p>This will disable MFA and remove your secret. You can re-enable it later.</p>"
             : $"<div class=\"alert alert-danger\">{WebUtility.HtmlEncode(message)}</div>");
 

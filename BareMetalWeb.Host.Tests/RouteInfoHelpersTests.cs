@@ -29,14 +29,15 @@ public class RouteInfoHelpersTests
     }
 
     [Fact]
-    public void InjectRouteParameters_HtmlEncodesValues()
+    public void InjectRouteParameters_StoresRawValuesForTemplateEngineEncoding()
     {
+        // Route params are now stored raw; the template engine HTML-encodes at render time
         var handler = CreateRouteHandler(System.Array.Empty<string>(), System.Array.Empty<string>());
         var routeParams = new Dictionary<string, string> { { "name", "<script>alert(1)</script>" } };
 
         var result = RouteInfoHelpers.InjectRouteParametersIntoPageInfo(handler, routeParams);
 
-        Assert.Equal("&lt;script&gt;alert(1)&lt;/script&gt;", result.PageInfo!.PageContext.PageMetaDataValues[0]);
+        Assert.Equal("<script>alert(1)</script>", result.PageInfo!.PageContext.PageMetaDataValues[0]);
     }
 
     [Fact]

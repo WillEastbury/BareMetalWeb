@@ -357,4 +357,52 @@ public class HtmlRendererTests
         var html = await RenderAsync(template);
         Assert.Contains("0,2,4,6,", html);
     }
+
+    [Fact]
+    public async Task RenderToBytesAsync_HtmlSpecialCharsInValue_AreEncoded()
+    {
+        // Defense-in-depth: values with HTML special chars must be encoded
+        var template = new StubHtmlTemplate { Body = "{{title}}" };
+        var html = await RenderAsync(template,
+            keys: new[] { "title" }, values: new[] { "<script>alert('xss')</script>" });
+        Assert.DoesNotContain("<script>", html);
+        Assert.Contains("&lt;script&gt;", html);
+    }
+
+    [Fact]
+    public async Task RenderToBytesAsync_HtmlPrefixedKey_WritesRawHtml()
+    {
+        // Keys with "html_" prefix should bypass encoding (intentional raw HTML)
+        var template = new StubHtmlTemplate { Body = "{{html_message}}" };
+        var html = await RenderAsync(template,
+            keys: new[] { "html_message" }, values: new[] { "<p>Hello <strong>World</strong></p>" });
+        Assert.Contains("<p>Hello <strong>World</strong></p>", html);
+    }
+
+    [Fact]
+    public async Task RenderToBytesAsync_AppMetaHtmlSpecialChars_AreEncoded()
+    {
+        // App metadata values with special chars must also be encoded
+        var template = new StubHtmlTemplate { Body = "{{AppName}}" };
+        var html = await RenderAsync(template,
+            appkeys: new[] { "AppName" }, appvalues: new[] { "Acme & Co. <Ltd>" });
+        Assert.Contains("Acme &amp; Co. &lt;Ltd&gt;", html);
+    }
+
+    [Fact]
+    public async Task RenderToBytesAsync_LoopItemHtmlSpecialChars_AreEncoded()
+    {
+        // Loop scoped values with special chars must be encoded
+        var template = new StubHtmlTemplate { Body = "{{Loop%%rows}}{{name}}{{EndLoop%%rows}}" };
+        var loops = new[]
+        {
+            new TemplateLoop("rows", new List<IReadOnlyDictionary<string, string>>
+            {
+                new Dictionary<string, string> { ["name"] = "<Evil>" }
+            })
+        };
+        var html = await RenderAsync(template, templateLoops: loops);
+        Assert.DoesNotContain("<Evil>", html);
+        Assert.Contains("&lt;Evil&gt;", html);
+    }
 }

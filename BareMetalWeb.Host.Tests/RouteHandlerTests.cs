@@ -501,7 +501,7 @@ public class RouteHandlerTests : IDisposable
         // Assert
         var pc = context.GetPageContext();
         Assert.NotNull(pc);
-        var msgIndex = Array.IndexOf(pc.PageMetaDataKeys, "message");
+        var msgIndex = Array.IndexOf(pc.PageMetaDataKeys, "html_message");
         Assert.True(msgIndex >= 0);
         Assert.Contains("Invalid registration request", pc.PageMetaDataValues[msgIndex]);
     }
@@ -524,7 +524,7 @@ public class RouteHandlerTests : IDisposable
         // Assert
         var pc = context.GetPageContext();
         Assert.NotNull(pc);
-        var msgIndex = Array.IndexOf(pc.PageMetaDataKeys, "message");
+        var msgIndex = Array.IndexOf(pc.PageMetaDataKeys, "html_message");
         Assert.True(msgIndex >= 0);
         Assert.Contains("Invalid logout request", pc.PageMetaDataValues[msgIndex]);
     }
