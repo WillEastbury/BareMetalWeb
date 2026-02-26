@@ -2777,7 +2777,7 @@
                     'solar','spacelab','superhero','united','vapor','yeti','zephyr'];
                 if (allowed.indexOf(t) >= 0) {
                     var el = document.getElementById('bootswatch-theme');
-                    if (el) el.href = 'https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/' + encodeURIComponent(t) + '/bootstrap.min.css';
+                    if (el) el.href = '/static/css/themes/' + encodeURIComponent(t) + '.min.css';
                 }
             }
         } catch (e) {}

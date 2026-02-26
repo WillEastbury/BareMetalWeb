@@ -888,12 +888,14 @@ public class BareMetalWebServerTests : IDisposable
         Assert.True(context.Response.Headers.ContainsKey("Content-Security-Policy"));
         var csp = context.Response.Headers["Content-Security-Policy"].ToString();
         Assert.Contains("default-src 'self'", csp);
-        Assert.Contains("https://fonts.googleapis.com", csp);
-        Assert.Contains("https://fonts.gstatic.com", csp);
         Assert.Contains("nonce-", csp);
-        Assert.Contains("style-src 'self' https://cdn.jsdelivr.net", csp);
+        // All external assets (fonts, CSS, JS) are now served locally – no CDN allowances in CSP
+        Assert.DoesNotContain("cdn.jsdelivr.net", csp);
+        Assert.DoesNotContain("fonts.googleapis.com", csp);
+        Assert.DoesNotContain("fonts.gstatic.com", csp);
         Assert.DoesNotContain("https://cdnjs.cloudflare.com", csp);
-        Assert.Contains("font-src 'self' https://cdn.jsdelivr.net", csp);
+        Assert.Contains("font-src 'self'", csp);
+        Assert.Contains("style-src 'self'", csp);
     }
 
     #endregion
