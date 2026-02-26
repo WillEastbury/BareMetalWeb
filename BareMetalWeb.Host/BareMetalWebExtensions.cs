@@ -136,7 +136,6 @@ public static class BareMetalWebExtensions
         appInfo.RegisterAuthRoutes(routeHandlers, pageInfoFactory, mainTemplate, allowAccountCreation);
         appInfo.RegisterMonitoringRoutes(routeHandlers, pageInfoFactory, mainTemplate);
         appInfo.RegisterAdminRoutes(routeHandlers, pageInfoFactory, mainTemplate);
-        appInfo.RegisterDataRoutes(routeHandlers, pageInfoFactory, mainTemplate);
         appInfo.RegisterEntityMetadataRoute(pageInfoFactory);  // must be before RegisterApiRoutes
         appInfo.RegisterRuntimeApiRoutes(pageInfoFactory);       // /meta/entity/{name}, POST /query, POST /intent
         appInfo.RegisterLookupApiRoutes(pageInfoFactory);       // must be before RegisterApiRoutes

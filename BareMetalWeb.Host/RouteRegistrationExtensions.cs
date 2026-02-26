@@ -555,9 +555,10 @@ public static class RouteRegistrationExtensions
                     JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = false }));
             }));
 
-        // VNext SPA shell — serve for all /UI and /UI/{*path} routes (default UI)
+        // VNext SPA shell — serve for all /UI and /UI/{*path} routes (default UI).
+        // The root /UI route is the "Admin > Data" nav entry for the metadata-driven admin interface.
         host.RegisterRoute("GET /UI", new RouteHandlerData(
-            pageInfoFactory.RawPage("Authenticated", false),
+            pageInfoFactory.RawPage("Authenticated", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Data"),
             context => ServeVNextShell(context, host, templateStore)));
 
         host.RegisterRoute("GET /UI/{*path}", new RouteHandlerData(
