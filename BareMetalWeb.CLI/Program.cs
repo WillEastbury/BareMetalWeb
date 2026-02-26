@@ -15,6 +15,10 @@ namespace BareMetalWeb.CLI;
 [JsonSerializable(typeof(JsonElement[]))]
 [JsonSerializable(typeof(MetaEntity[]))]
 [JsonSerializable(typeof(MetaField[]))]
+[JsonSerializable(typeof(MetaLookup))]
+[JsonSerializable(typeof(MetaCommand[]))]
+[JsonSerializable(typeof(MetaCommand))]
+[JsonSerializable(typeof(string[]))]
 [JsonSourceGenerationOptions(WriteIndented = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 internal partial class BmwJsonContext : JsonSerializerContext { }
 
@@ -31,7 +35,11 @@ internal sealed class MetaEntity
     [JsonPropertyName("permissions")] public string Permissions { get; set; } = "";
     [JsonPropertyName("showOnNav")] public bool ShowOnNav { get; set; }
     [JsonPropertyName("navGroup")] public string? NavGroup { get; set; }
+    [JsonPropertyName("navOrder")] public int NavOrder { get; set; }
+    [JsonPropertyName("viewType")] public string? ViewType { get; set; }
     [JsonPropertyName("fields")] public MetaField[] Fields { get; set; } = [];
+    [JsonPropertyName("commands")] public MetaCommand[] Commands { get; set; } = [];
+    [JsonPropertyName("parentField")] public string? ParentField { get; set; }
 }
 
 internal sealed class MetaField
@@ -46,6 +54,31 @@ internal sealed class MetaField
     [JsonPropertyName("edit")] public bool Edit { get; set; }
     [JsonPropertyName("create")] public bool Create { get; set; }
     [JsonPropertyName("readOnly")] public bool ReadOnly { get; set; }
+    [JsonPropertyName("lookup")] public MetaLookup? Lookup { get; set; }
+}
+
+internal sealed class MetaLookup
+{
+    [JsonPropertyName("targetSlug")] public string? TargetSlug { get; set; }
+    [JsonPropertyName("targetName")] public string? TargetName { get; set; }
+    [JsonPropertyName("valueField")] public string? ValueField { get; set; }
+    [JsonPropertyName("displayField")] public string? DisplayField { get; set; }
+    [JsonPropertyName("queryField")] public string? QueryField { get; set; }
+    [JsonPropertyName("queryOperator")] public string? QueryOperator { get; set; }
+    [JsonPropertyName("queryValue")] public string? QueryValue { get; set; }
+    [JsonPropertyName("sortField")] public string? SortField { get; set; }
+    [JsonPropertyName("sortDirection")] public string? SortDirection { get; set; }
+}
+
+internal sealed class MetaCommand
+{
+    [JsonPropertyName("name")] public string Name { get; set; } = "";
+    [JsonPropertyName("label")] public string Label { get; set; } = "";
+    [JsonPropertyName("icon")] public string? Icon { get; set; }
+    [JsonPropertyName("confirmMessage")] public string? ConfirmMessage { get; set; }
+    [JsonPropertyName("destructive")] public bool Destructive { get; set; }
+    [JsonPropertyName("permission")] public string? Permission { get; set; }
+    [JsonPropertyName("order")] public int Order { get; set; }
 }
 
 internal static class Program
@@ -82,7 +115,9 @@ internal static class Program
             {
                 "connect" => Connect(rest),
                 "login" => await Login(rest),
+                "logout" => await Logout(),
                 "types" => await ListTypes(),
+                "schema" => await ShowSchema(rest),
                 "list" => await ListEntities(rest),
                 "get" => await GetEntity(rest),
                 "create" => await CreateEntity(rest),
@@ -90,6 +125,12 @@ internal static class Program
                 "delete" => await DeleteEntity(rest),
                 "query" => await QueryEntities(rest),
                 "first" => await FirstEntity(rest),
+                "lookup" => await LookupEntities(rest),
+                "lookup-field" => await LookupField(rest),
+                "aggregate" => await Aggregate(rest),
+                "command" => await RunCommand(rest),
+                "import" => await ImportEntities(rest),
+                "export" => await ExportEntities(rest),
                 "config" => ShowConfig(),
                 "help" or "--help" or "-h" => Help(0),
                 "--version" or "-v" or "version" => ShowVersion(),
@@ -241,6 +282,18 @@ internal static class Program
         return 1;
     }
 
+    // --- logout ---
+    static async Task<int> Logout()
+    {
+        if (string.IsNullOrEmpty(_config.Url)) return Help(1, "Not connected. Run: metal connect <url>");
+        try { await _http.PostAsync("/logout", null); } catch { /* best-effort */ }
+        if (File.Exists(CookiePath)) File.Delete(CookiePath);
+        _cookies = new CookieContainer();
+        InitHttpClient();
+        Console.WriteLine("Logged out. Session cleared.");
+        return 0;
+    }
+
     // --- types ---
     static async Task<int> ListTypes()
     {
@@ -253,6 +306,64 @@ internal static class Program
         return 0;
     }
 
+    // --- schema ---
+    static async Task<int> ShowSchema(string[] args)
+    {
+        if (args.Length < 1) return Help(1, "Usage: metal schema <type>");
+        var slug = args[0];
+        var resp = await _http.GetAsync($"/meta/{slug}");
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        var name = root.TryGetProperty("name", out var n) ? n.GetString() : slug;
+        Console.WriteLine($"Entity: {name} ({slug})");
+        if (root.TryGetProperty("permissions", out var perm)) Console.WriteLine($"Permissions: {perm.GetString()}");
+        if (root.TryGetProperty("viewType", out var vt)) Console.WriteLine($"View Type: {vt.GetString()}");
+        Console.WriteLine();
+
+        // Fields
+        if (root.TryGetProperty("fields", out var fields) && fields.ValueKind == JsonValueKind.Array)
+        {
+            Console.WriteLine($"{"Field",-22} {"Label",-22} {"Type",-12} {"Req",-5} {"List",-5} {"View",-5} {"Edit",-5} Lookup");
+            Console.WriteLine(new string('-', 100));
+            foreach (var f in fields.EnumerateArray())
+            {
+                var fName = f.TryGetProperty("name", out var fn) ? fn.GetString() ?? "" : "";
+                var fLabel = f.TryGetProperty("label", out var fl) ? fl.GetString() ?? "" : "";
+                var fType = f.TryGetProperty("type", out var ft) ? ft.GetString() ?? "" : "";
+                var fReq = f.TryGetProperty("required", out var fr) && fr.GetBoolean() ? "Y" : "";
+                var fList = f.TryGetProperty("list", out var fli) && fli.GetBoolean() ? "Y" : "";
+                var fView = f.TryGetProperty("view", out var fv) && fv.GetBoolean() ? "Y" : "";
+                var fEdit = f.TryGetProperty("edit", out var fe) && fe.GetBoolean() ? "Y" : "";
+                var lookup = "";
+                if (f.TryGetProperty("lookup", out var lu) && lu.ValueKind == JsonValueKind.Object)
+                {
+                    var ts = lu.TryGetProperty("targetSlug", out var t) ? t.GetString() : "";
+                    var df = lu.TryGetProperty("displayField", out var d) ? d.GetString() : "";
+                    lookup = $"→ {ts} ({df})";
+                }
+                Console.WriteLine($"{fName,-22} {fLabel,-22} {fType,-12} {fReq,-5} {fList,-5} {fView,-5} {fEdit,-5} {lookup}");
+            }
+        }
+
+        // Commands
+        if (root.TryGetProperty("commands", out var cmds) && cmds.ValueKind == JsonValueKind.Array && cmds.GetArrayLength() > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Commands:");
+            foreach (var c in cmds.EnumerateArray())
+            {
+                var cName = c.TryGetProperty("name", out var cn) ? cn.GetString() ?? "" : "";
+                var cLabel = c.TryGetProperty("label", out var cl) ? cl.GetString() ?? "" : "";
+                var destr = c.TryGetProperty("destructive", out var cd) && cd.GetBoolean() ? " [DESTRUCTIVE]" : "";
+                Console.WriteLine($"  {cName,-20} {cLabel}{destr}");
+            }
+        }
+        return 0;
+    }
+
     // --- list ---
     static async Task<int> ListEntities(string[] args)
     {
@@ -261,7 +372,7 @@ internal static class Program
         var resp = await _http.GetAsync($"/api/{slug}");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
-        var items = JsonSerializer.Deserialize(body, BmwJsonContext.Default.JsonElement);
+        var items = UnwrapItems(JsonSerializer.Deserialize(body, BmwJsonContext.Default.JsonElement));
         await PrintTable(slug, items);
         return 0;
     }
@@ -339,7 +450,7 @@ internal static class Program
         var resp = await _http.GetAsync($"/api/{slug}{qs}");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
-        var items = JsonSerializer.Deserialize(body, BmwJsonContext.Default.JsonElement);
+        var items = UnwrapItems(JsonSerializer.Deserialize(body, BmwJsonContext.Default.JsonElement));
         await PrintTable(slug, items);
         return 0;
     }
@@ -349,7 +460,6 @@ internal static class Program
     {
         if (args.Length < 1) return Help(1, "Usage: metal first <type> [q=text] [field=X op=eq value=Y] [sort=F] [dir=asc|desc]");
         var slug = args[0];
-        // Default sort by CreatedOnUtc desc (newest first), overridable
         var hasSort = args.Skip(1).Any(a => a.StartsWith("sort=", StringComparison.OrdinalIgnoreCase));
         var qs = new StringBuilder("?top=1");
         if (!hasSort)
@@ -364,7 +474,7 @@ internal static class Program
         var resp = await _http.GetAsync($"/api/{slug}{qs}");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
-        var items = JsonSerializer.Deserialize(body, BmwJsonContext.Default.JsonElement);
+        var items = UnwrapItems(JsonSerializer.Deserialize(body, BmwJsonContext.Default.JsonElement));
         if (items.ValueKind == JsonValueKind.Array && items.GetArrayLength() == 0)
         {
             Console.WriteLine("No results.");
@@ -375,6 +485,116 @@ internal static class Program
         {
             var val = prop.Value.ValueKind == JsonValueKind.String ? prop.Value.GetString() : prop.Value.ToString();
             Console.WriteLine($"  {prop.Name,-20} {val}");
+        }
+        return 0;
+    }
+
+    // --- lookup ---
+    static async Task<int> LookupEntities(string[] args)
+    {
+        if (args.Length < 1) return Help(1, "Usage: metal lookup <type> [filter=field:value] [sort=Field] [dir=asc] [skip=0] [top=20] [search=text] [searchField=name]");
+        var slug = args[0];
+        var qs = BuildQueryString(args[1..]);
+        var resp = await _http.GetAsync($"/api/_lookup/{slug}{qs}");
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        var items = UnwrapItems(JsonSerializer.Deserialize(body, BmwJsonContext.Default.JsonElement));
+        await PrintTable(slug, items);
+        return 0;
+    }
+
+    // --- lookup-field ---
+    static async Task<int> LookupField(string[] args)
+    {
+        if (args.Length < 3) return Help(1, "Usage: metal lookup-field <type> <id> <field>");
+        var resp = await _http.GetAsync($"/api/_lookup/{args[0]}/_field/{args[1]}/{args[2]}");
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        Console.WriteLine(body.Trim('"'));
+        return 0;
+    }
+
+    // --- aggregate ---
+    static async Task<int> Aggregate(string[] args)
+    {
+        if (args.Length < 2) return Help(1, "Usage: metal aggregate <type> <fn> [field=X] [filter=field:value]");
+        var slug = args[0]; var fn = args[1];
+        var qs = BuildQueryString(args[2..]);
+        var sep = qs.Length > 0 ? "&" : "?";
+        var url = $"/api/_lookup/{slug}/_aggregate?fn={Uri.EscapeDataString(fn)}{(qs.Length > 0 ? "&" + qs[1..] : "")}";
+        var resp = await _http.GetAsync(url);
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        Console.WriteLine(body);
+        return 0;
+    }
+
+    // --- command ---
+    static async Task<int> RunCommand(string[] args)
+    {
+        if (args.Length < 3) return Help(1, "Usage: metal command <type> <id> <command> [key=value...]");
+        var slug = args[0]; var id = args[1]; var command = args[2];
+        var payload = args.Length > 3 ? ParseKeyValues(args[3..]) : new Dictionary<string, string>();
+        var json = JsonSerializer.Serialize(payload, BmwJsonContext.Default.DictionaryStringString);
+        var resp = await _http.PostAsync($"/api/{slug}/{id}/_command/{command}",
+            new StringContent(json, Encoding.UTF8, "application/json"));
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        if (!string.IsNullOrWhiteSpace(body))
+            PrintJson(body);
+        else
+            Console.WriteLine("Command executed.");
+        return 0;
+    }
+
+    // --- import ---
+    static async Task<int> ImportEntities(string[] args)
+    {
+        if (args.Length < 2) return Help(1, "Usage: metal import <type> <file.json>");
+        var slug = args[0]; var file = args[1];
+        if (!File.Exists(file)) { Console.Error.WriteLine($"File not found: {file}"); return 1; }
+        var content = await File.ReadAllTextAsync(file);
+        var resp = await _http.PostAsync($"/api/{slug}/import",
+            new StringContent(content, Encoding.UTF8, "application/json"));
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+        if (!string.IsNullOrWhiteSpace(body))
+            PrintJson(body);
+        else
+            Console.WriteLine("Import complete.");
+        return 0;
+    }
+
+    // --- export ---
+    static async Task<int> ExportEntities(string[] args)
+    {
+        if (args.Length < 1) return Help(1, "Usage: metal export <type> [--format=csv|json] [--output=file]");
+        var slug = args[0];
+        var format = "json";
+        string? outputFile = null;
+        foreach (var a in args.Skip(1))
+        {
+            if (a.StartsWith("--format=", StringComparison.OrdinalIgnoreCase))
+                format = a[9..].ToLowerInvariant();
+            else if (a.StartsWith("--output=", StringComparison.OrdinalIgnoreCase))
+                outputFile = a[9..];
+        }
+
+        var req = new HttpRequestMessage(HttpMethod.Get, $"/api/{slug}");
+        if (format == "csv")
+            req.Headers.Add("Accept", "text/csv");
+        var resp = await _http.SendAsync(req);
+        if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
+        var body = await resp.Content.ReadAsStringAsync();
+
+        if (outputFile != null)
+        {
+            await File.WriteAllTextAsync(outputFile, body);
+            Console.WriteLine($"Exported to {outputFile}");
+        }
+        else
+        {
+            Console.WriteLine(body);
         }
         return 0;
     }
@@ -405,11 +625,33 @@ internal static class Program
     {
         if (_meta != null) return _meta;
         if (string.IsNullOrEmpty(_config.Url)) { Console.Error.WriteLine("Not connected. Run: metal connect <url>"); return null; }
-        var resp = await _http.GetAsync("/api/_meta");
+        var resp = await _http.GetAsync("/meta/objects");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return null; }
         var body = await resp.Content.ReadAsStringAsync();
         _meta = JsonSerializer.Deserialize(body, BmwJsonContext.Default.MetaEntityArray);
         return _meta;
+    }
+
+    /// Unwraps paginated envelope {items: [], total: N} → items array, or returns as-is if already an array.
+    static JsonElement UnwrapItems(JsonElement el)
+    {
+        if (el.ValueKind == JsonValueKind.Object && el.TryGetProperty("items", out var items))
+            return items;
+        return el;
+    }
+
+    static string BuildQueryString(string[] args)
+    {
+        var qs = new StringBuilder();
+        foreach (var arg in args)
+        {
+            var eqIdx = arg.IndexOf('=');
+            if (eqIdx <= 0) continue;
+            var k = arg[..eqIdx]; var v = arg[(eqIdx + 1)..];
+            qs.Append(qs.Length == 0 ? '?' : '&');
+            qs.Append(Uri.EscapeDataString(k)).Append('=').Append(Uri.EscapeDataString(v));
+        }
+        return qs.ToString();
     }
 
     static async Task PrintTable(string slug, JsonElement items)
@@ -442,6 +684,8 @@ internal static class Program
             {
                 if (item.TryGetProperty(headers[i], out var val))
                     row[i] = val.ValueKind == JsonValueKind.String ? val.GetString() ?? "" : val.ToString();
+                else if (TryGetPropertyInsensitive(item, headers[i], out var val2))
+                    row[i] = val2.ValueKind == JsonValueKind.String ? val2.GetString() ?? "" : val2.ToString();
                 else
                     row[i] = "";
             }
@@ -473,6 +717,20 @@ internal static class Program
             Console.WriteLine();
         }
         Console.WriteLine($"\n{rows.Count} result(s).");
+    }
+
+    static bool TryGetPropertyInsensitive(JsonElement element, string name, out JsonElement value)
+    {
+        foreach (var prop in element.EnumerateObject())
+        {
+            if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = prop.Value;
+                return true;
+            }
+        }
+        value = default;
+        return false;
     }
 
     static Dictionary<string, string> ParseKeyValues(string[] args)
@@ -589,11 +847,13 @@ internal static class Program
               login                       Login via device code (opens browser)
               login --outofband           Login via device code (no browser)
               login <user> <pass>         Login with username/password directly
+              logout                      Clear session and log out
               config                      Show current configuration
               --version, -v               Show CLI version
 
             Entity Operations:
               types                       List available entity types
+              schema <type>               Show full entity schema (fields, lookups, commands)
               list <type>                 List all entities of a type
               get <type> <id>             Get a single entity by ID
               create <type> k=v [k=v..]   Create a new entity
@@ -606,15 +866,39 @@ internal static class Program
                 q=searchtext sort=Field dir=desc skip=0 top=10
               first <type> [q=text]       Get first matching entity (detail view)
 
+            Lookup API:
+              lookup <type> [filters]     Query via lookup API (lightweight)
+                filter=field:value sort=Field dir=asc skip=0 top=20
+              lookup-field <type> <id> <field>  Get single field value
+              aggregate <type> <fn> [field=X]   Aggregate (count/sum/avg/min/max)
+
+            Commands:
+              command <type> <id> <cmd>   Execute a remote command on an entity
+
+            Import / Export:
+              import <type> <file.json>   Bulk import entities from JSON file
+              export <type> [options]     Export entities
+                --format=csv|json  --output=file.csv
+
             Examples:
               metal connect https://mysite.azurewebsites.net abc123key
+              metal login
               metal types
+              metal schema orders
               metal list to-do
               metal create to-do Title="Buy milk" Notes="From store"
               metal query to-do q=milk sort=Deadline dir=asc top=5
               metal get to-do abc123
               metal update to-do abc123 IsCompleted=true
               metal delete to-do abc123
+              metal lookup customers search=acme top=5
+              metal lookup-field customers abc123 Name
+              metal aggregate orders count
+              metal aggregate orders sum field=Total
+              metal command orders abc123 Approve
+              metal import products data.json
+              metal export products --format=csv --output=products.csv
+              metal logout
             """);
         return exitCode;
     }
