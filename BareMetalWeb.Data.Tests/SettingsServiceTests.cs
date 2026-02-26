@@ -27,12 +27,14 @@ public class SettingsServiceTests : IDisposable
         _testStore.RegisterProvider(_provider);
         DataStoreProvider.Current = _testStore;
         SettingsService.InvalidateCache();
+        SettingsService.OnSettingInvalidated = null;
     }
 
     public void Dispose()
     {
         DataStoreProvider.Current = _previousStore;
         SettingsService.InvalidateCache();
+        SettingsService.OnSettingInvalidated = null;
     }
 
     private sealed class InMemoryProvider : IDataProvider
@@ -265,6 +267,34 @@ public class SettingsServiceTests : IDisposable
     }
 
     // ── SettingsService.InvalidateCache ────────────────────────────────────
+
+    [Fact]
+    public void InvalidateCache_Single_FiresOnSettingInvalidatedCallback()
+    {
+        // Arrange
+        var fired = new List<string>();
+        SettingsService.OnSettingInvalidated = id => fired.Add(id);
+
+        // Act
+        SettingsService.InvalidateCache("some.setting");
+
+        // Assert
+        Assert.Single(fired);
+        Assert.Equal("some.setting", fired[0]);
+    }
+
+    [Fact]
+    public void InvalidateCache_Full_DoesNotFireOnSettingInvalidatedCallback()
+    {
+        // Full-cache invalidation does not know which keys changed, so the callback
+        // must NOT be invoked (callers must refresh themselves if needed).
+        var fired = new List<string>();
+        SettingsService.OnSettingInvalidated = id => fired.Add(id);
+
+        SettingsService.InvalidateCache();
+
+        Assert.Empty(fired);
+    }
 
     [Fact]
     public void InvalidateCache_Single_RefreshesValueForThatKey()

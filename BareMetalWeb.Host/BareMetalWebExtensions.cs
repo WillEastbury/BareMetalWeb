@@ -126,6 +126,21 @@ public static class BareMetalWebExtensions
         appInfo.CopyrightYear      = SettingsService.GetValue(WellKnownSettings.AppCopyright,      appInfo.CopyrightYear);
         appInfo.PrivacyPolicyUrl   = SettingsService.GetValue(WellKnownSettings.AppPrivacyPolicyUrl, "");
 
+        // Keep in-memory server state in sync whenever a setting is edited via the admin UI.
+        // Assign (not append) so that if UseBareMetalWeb is ever called more than once only the
+        // current appInfo is subscribed.
+        SettingsService.OnSettingInvalidated = settingId =>
+        {
+            if (string.Equals(settingId, WellKnownSettings.AppName, StringComparison.OrdinalIgnoreCase))
+                appInfo.AppName = SettingsService.GetValue(WellKnownSettings.AppName, appInfo.AppName);
+            else if (string.Equals(settingId, WellKnownSettings.AppCompany, StringComparison.OrdinalIgnoreCase))
+                appInfo.CompanyDescription = SettingsService.GetValue(WellKnownSettings.AppCompany, appInfo.CompanyDescription);
+            else if (string.Equals(settingId, WellKnownSettings.AppCopyright, StringComparison.OrdinalIgnoreCase))
+                appInfo.CopyrightYear = SettingsService.GetValue(WellKnownSettings.AppCopyright, appInfo.CopyrightYear);
+            else if (string.Equals(settingId, WellKnownSettings.AppPrivacyPolicyUrl, StringComparison.OrdinalIgnoreCase))
+                appInfo.PrivacyPolicyUrl = SettingsService.GetValue(WellKnownSettings.AppPrivacyPolicyUrl, "");
+        };
+
         // Infrastructure configuration
         ProgramSetup.ConfigureStaticFiles(app, appInfo);
 
