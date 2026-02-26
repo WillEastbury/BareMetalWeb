@@ -175,7 +175,17 @@ internal static class OpenApiHandler
                 ["tags"]        = new[] { tag },
                 ["summary"]     = $"Get a {entity.Name} by Id",
                 ["operationId"] = $"get_{entity.Slug}",
-                ["parameters"]  = new[] { idParam },
+                ["parameters"]  = new object[]
+                {
+                    idParam,
+                    new Dictionary<string, object?>
+                    {
+                        ["name"]        = "traverseRelationships",
+                        ["in"]          = "query",
+                        ["description"] = "When true, lookup FK fields are expanded into nested objects containing the full related entity.",
+                        ["schema"]      = new Dictionary<string, object?> { ["type"] = "boolean", ["default"] = false }
+                    }
+                },
                 ["responses"]   = new Dictionary<string, object?>
                 {
                     ["200"] = OkResponse(entity.Name, schemaRef),
@@ -394,6 +404,13 @@ internal static class OpenApiHandler
             ["name"]   = "search",
             ["in"]     = "query",
             ["schema"] = new Dictionary<string, object?> { ["type"] = "string" }
+        },
+        new Dictionary<string, object?>
+        {
+            ["name"]        = "traverseRelationships",
+            ["in"]          = "query",
+            ["description"] = "When true, lookup FK fields are expanded into nested objects containing the full related entity.",
+            ["schema"]      = new Dictionary<string, object?> { ["type"] = "boolean", ["default"] = false }
         }
     ];
 
