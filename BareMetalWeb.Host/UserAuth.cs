@@ -244,18 +244,39 @@ public static class UserAuth
             }
         }
 
-        // Option 2: Authorization header with "ApiKey <value>" prefix
+        // Option 2: Authorization header with "ApiKey <value>" or "Bearer <value>" prefix
         if (context.Request.Headers.TryGetValue("Authorization", out var authValues))
         {
             var header = authValues.ToString().Trim();
-            const string prefix = "ApiKey ";
-            if (!string.IsNullOrWhiteSpace(header) && header.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            const string apiKeyPrefix = "ApiKey ";
+            if (!string.IsNullOrWhiteSpace(header) && header.StartsWith(apiKeyPrefix, StringComparison.OrdinalIgnoreCase))
             {
-                apiKey = header[prefix.Length..].Trim();
+                apiKey = header[apiKeyPrefix.Length..].Trim();
+                return !string.IsNullOrWhiteSpace(apiKey);
+            }
+
+            // Option 3: Authorization header with "Bearer <value>" prefix (standard OAuth2/OpenAPI)
+            const string bearerPrefix = "Bearer ";
+            if (!string.IsNullOrWhiteSpace(header) && header.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                apiKey = header[bearerPrefix.Length..].Trim();
                 return !string.IsNullOrWhiteSpace(apiKey);
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Returns true if the request carries a valid API key that resolves to a known system principal.
+    /// Used to bypass CSRF validation for authenticated external API clients (e.g. ChatGPT, OpenAPI clients).
+    /// </summary>
+    public static async ValueTask<bool> HasValidApiKeyAsync(HttpContext context, CancellationToken cancellationToken = default)
+    {
+        if (!TryGetApiKey(context, out var apiKey))
+            return false;
+
+        var principal = await SystemPrincipal.FindByApiKeyAsync(apiKey, cancellationToken).ConfigureAwait(false);
+        return principal != null;
     }
 }

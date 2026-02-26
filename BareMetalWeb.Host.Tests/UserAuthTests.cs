@@ -23,6 +23,142 @@ public class UserAuthTests : IDisposable
         DataStoreProvider.Current = _testStore;
     }
 
+    [Fact]
+    public async Task GetRequestUserAsync_BearerTokenHeader_ResolvesApiKey()
+    {
+        // Arrange
+        EnsureStore();
+        var rawKey = "test-bearer-key-12345";
+        var principal = new SystemPrincipal
+        {
+            UserName = "chatgpt",
+            DisplayName = "ChatGPT",
+            IsActive = true
+        };
+        principal.AddApiKey(rawKey, iterations: 1);
+        await DataStoreProvider.Current.SaveAsync(principal);
+
+        var context = new DefaultHttpContext();
+        context.Request.Headers["Authorization"] = $"Bearer {rawKey}";
+        context.Request.Path = "/api/to-do";
+
+        // Act
+        var user = await UserAuth.GetRequestUserAsync(context);
+
+        // Assert
+        Assert.NotNull(user);
+        Assert.Equal("chatgpt", user.UserName);
+    }
+
+    [Fact]
+    public async Task HasValidApiKeyAsync_ValidBearerToken_ReturnsTrue()
+    {
+        // Arrange
+        EnsureStore();
+        var rawKey = "bearer-valid-key-abc";
+        var principal = new SystemPrincipal
+        {
+            UserName = "external-client",
+            DisplayName = "External Client",
+            IsActive = true
+        };
+        principal.AddApiKey(rawKey, iterations: 1);
+        await DataStoreProvider.Current.SaveAsync(principal);
+
+        var context = new DefaultHttpContext();
+        context.Request.Headers["Authorization"] = $"Bearer {rawKey}";
+        context.Request.Path = "/api/to-do";
+
+        // Act
+        var result = await UserAuth.HasValidApiKeyAsync(context);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task HasValidApiKeyAsync_InvalidBearerToken_ReturnsFalse()
+    {
+        // Arrange
+        EnsureStore();
+        var context = new DefaultHttpContext();
+        context.Request.Headers["Authorization"] = "Bearer invalid-key-xyz";
+        context.Request.Path = "/api/to-do";
+
+        // Act
+        var result = await UserAuth.HasValidApiKeyAsync(context);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task HasValidApiKeyAsync_NoAuthHeader_ReturnsFalse()
+    {
+        // Arrange
+        EnsureStore();
+        var context = new DefaultHttpContext();
+        context.Request.Path = "/api/to-do";
+
+        // Act
+        var result = await UserAuth.HasValidApiKeyAsync(context);
+
+        // Assert
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task HasValidApiKeyAsync_ValidApiKeyHeader_ReturnsTrue()
+    {
+        // Arrange
+        EnsureStore();
+        var rawKey = "apikey-header-test-999";
+        var principal = new SystemPrincipal
+        {
+            UserName = "cli-client",
+            DisplayName = "CLI Client",
+            IsActive = true
+        };
+        principal.AddApiKey(rawKey, iterations: 1);
+        await DataStoreProvider.Current.SaveAsync(principal);
+
+        var context = new DefaultHttpContext();
+        context.Request.Headers["ApiKey"] = rawKey;
+        context.Request.Path = "/api/to-do";
+
+        // Act
+        var result = await UserAuth.HasValidApiKeyAsync(context);
+
+        // Assert
+        Assert.True(result);
+    }
+
+    [Fact]
+    public async Task HasValidApiKeyAsync_InactiveApiKeyPrincipal_ReturnsFalse()
+    {
+        // Arrange
+        EnsureStore();
+        var rawKey = "inactive-principal-key";
+        var principal = new SystemPrincipal
+        {
+            UserName = "inactive-client",
+            DisplayName = "Inactive Client",
+            IsActive = false
+        };
+        principal.AddApiKey(rawKey, iterations: 1);
+        await DataStoreProvider.Current.SaveAsync(principal);
+
+        var context = new DefaultHttpContext();
+        context.Request.Headers["Authorization"] = $"Bearer {rawKey}";
+        context.Request.Path = "/api/to-do";
+
+        // Act
+        var result = await UserAuth.HasValidApiKeyAsync(context);
+
+        // Assert
+        Assert.False(result);
+    }
+
     public void Dispose()
     {
         DataStoreProvider.Current = _originalStore;
