@@ -167,6 +167,9 @@ public static class ReportHtmlRenderer
         sb.Append("<button class=\"navbar-toggler\" type=\"button\" data-bs-toggle=\"collapse\" data-bs-target=\"#report-nav-content\" aria-controls=\"report-nav-content\" aria-expanded=\"false\" aria-label=\"Toggle navigation\">");
         sb.Append("<span class=\"navbar-toggler-icon\"></span></button>");
         sb.Append("<div class=\"collapse navbar-collapse\" id=\"report-nav-content\">");
+        sb.Append("<ul id=\"vnext-nav-items\" class=\"navbar-nav me-auto mb-2 mb-lg-0\">");
+        RouteRegistrationExtensions.AppendVNextLeftNavItems(sb, host.MenuOptionsList);
+        sb.Append("</ul>");
         sb.Append("<ul class=\"navbar-nav ms-auto mb-2 mb-lg-0\">");
         RouteRegistrationExtensions.AppendVNextRightNavItems(sb, host.MenuOptionsList);
         sb.Append("</ul></div></div></nav>");

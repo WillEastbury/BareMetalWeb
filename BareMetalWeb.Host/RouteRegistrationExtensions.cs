@@ -945,7 +945,7 @@ public static class RouteRegistrationExtensions
     {
         // List all reports
         host.RegisterRoute("GET /reports", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", false),
+            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Reports"),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
@@ -1271,6 +1271,40 @@ public static class RouteRegistrationExtensions
 
             sb.Append($"<li class=\"nav-item dropdown\"><a class=\"nav-link dropdown-toggle\" href=\"#\" role=\"button\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\">{WebUtility.HtmlEncode(option.Group)}</a>");
             sb.Append("<ul class=\"dropdown-menu dropdown-menu-end\">");
+            foreach (var item in groupItems)
+            {
+                sb.Append($"<li><a class=\"dropdown-item\" href=\"{WebUtility.HtmlEncode(item.Href)}\">{WebUtility.HtmlEncode(item.Label)}</a></li>");
+            }
+            sb.Append("</ul></li>");
+        }
+    }
+
+    internal static void AppendVNextLeftNavItems(StringBuilder sb, List<IMenuOption> options)
+    {
+        var leftAligned = options.Where(o => !o.RightAligned && o.ShowOnNavBar).ToList();
+        var renderedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var option in leftAligned)
+        {
+            if (string.IsNullOrWhiteSpace(option.Group))
+            {
+                var cssClass = option.HighlightAsButton
+                    ? $"btn {(string.IsNullOrWhiteSpace(option.ColorClass) ? "btn-outline-light" : option.ColorClass)} btn-sm ms-2"
+                    : string.IsNullOrWhiteSpace(option.ColorClass) ? "nav-link" : $"nav-link {option.ColorClass}";
+                sb.Append($"<li class=\"nav-item\"><a class=\"{WebUtility.HtmlEncode(cssClass)}\" href=\"{WebUtility.HtmlEncode(option.Href)}\">{WebUtility.HtmlEncode(option.Label)}</a></li>");
+                continue;
+            }
+
+            if (renderedGroups.Contains(option.Group))
+                continue;
+
+            renderedGroups.Add(option.Group);
+            var groupItems = leftAligned
+                .Where(o => string.Equals(o.Group, option.Group, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            sb.Append($"<li class=\"nav-item dropdown\"><a class=\"nav-link dropdown-toggle\" href=\"#\" role=\"button\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\">{WebUtility.HtmlEncode(option.Group)}</a>");
+            sb.Append("<ul class=\"dropdown-menu\">");
             foreach (var item in groupItems)
             {
                 sb.Append($"<li><a class=\"dropdown-item\" href=\"{WebUtility.HtmlEncode(item.Href)}\">{WebUtility.HtmlEncode(item.Label)}</a></li>");
