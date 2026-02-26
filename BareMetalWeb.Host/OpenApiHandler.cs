@@ -9,7 +9,7 @@ using Microsoft.AspNetCore.Http;
 namespace BareMetalWeb.Host;
 
 /// <summary>
-/// Builds and serves a rudimentary OpenAPI 3.0.3 specification for the BareMetalWeb
+/// Builds and serves a rudimentary OpenAPI 3.1.1 specification for the BareMetalWeb
 /// entity API, constructed entirely without any Swagger/NSwag library by recursing
 /// entity types registered with <see cref="DataScaffold"/>.
 ///
@@ -79,7 +79,7 @@ internal static class OpenApiHandler
 
         return new Dictionary<string, object?>
         {
-            ["openapi"] = "3.0.3",
+            ["openapi"] = "3.1.1",
             ["info"] = new Dictionary<string, object?>
             {
                 ["title"]   = "BareMetalWeb API",
