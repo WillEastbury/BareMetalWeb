@@ -10,7 +10,9 @@ namespace BareMetalWeb.Data;
     "Audit Entry",
     Slug = "auditentry",
     Permissions = "admin",
-    ShowOnNav = false,
+    ShowOnNav = true,
+    NavGroup = "Administration",
+    NavOrder = 30,
     IdGeneration = AutoIdStrategy.Guid
 )]
 public sealed class AuditEntry : BaseDataObject

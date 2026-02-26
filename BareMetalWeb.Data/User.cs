@@ -6,7 +6,7 @@ using BareMetalWeb.Rendering.Models;
 
 namespace BareMetalWeb.Data;
 
-[DataEntity("Users", ShowOnNav = false, NavGroup = "", NavOrder = 0)]
+[DataEntity("Users", ShowOnNav = true, NavGroup = "Administration", NavOrder = 10, Permissions = "admin")]
 public class User : BaseDataObject
 {
     [DataField(Label = "Username", Order = 1, Required = true, List = true, View = true, Edit = true, Create = true, Placeholder = "username")]

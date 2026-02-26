@@ -250,20 +250,30 @@
     // ── Home view ─────────────────────────────────────────────────────────────
     function renderHome() {
         fetchMetaObjects().then(function (entities) {
-            var html = '<div class="p-4"><h2>Data Objects</h2><div class="row row-cols-1 row-cols-md-3 g-3 mt-2">';
+            var groups = {};
             entities.filter(function (e) { return e.showOnNav; })
                     .sort(function (a, b) { return (a.navOrder || 0) - (b.navOrder || 0) || a.name.localeCompare(b.name); })
                     .forEach(function (e) {
-                        html += '<div class="col"><div class="card h-100">' +
-                            '<div class="card-body">' +
-                            '<h5 class="card-title">' + escHtml(e.name) + '</h5>' +
-                            '<p class="card-text text-muted small">' + escHtml(e.navGroup || '') + '</p>' +
-                            '</div>' +
-                            '<div class="card-footer">' +
-                            '<a class="btn btn-primary btn-sm" href="' + BASE + '/data/' + escHtml(e.slug) + '">Open</a>' +
-                            '</div></div></div>';
+                        var g = e.navGroup || 'Other';
+                        if (!groups[g]) groups[g] = [];
+                        groups[g].push(e);
                     });
-            html += '</div></div>';
+            var html = '<div class="p-4"><h2>Data Objects</h2>';
+            Object.keys(groups).sort().forEach(function (groupName) {
+                html += '<h4 class="mt-4 mb-3 border-bottom pb-1">' + escHtml(groupName) + '</h4>';
+                html += '<div class="row row-cols-1 row-cols-md-3 g-3 mb-3">';
+                groups[groupName].forEach(function (e) {
+                    html += '<div class="col"><div class="card h-100">' +
+                        '<div class="card-body">' +
+                        '<h5 class="card-title">' + escHtml(e.name) + '</h5>' +
+                        '</div>' +
+                        '<div class="card-footer">' +
+                        '<a class="btn btn-primary btn-sm" href="' + BASE + '/data/' + escHtml(e.slug) + '">Open</a>' +
+                        '</div></div></div>';
+                });
+                html += '</div>';
+            });
+            html += '</div>';
             setContent(html);
         }).catch(function (err) { showError('Could not load entities: ' + err.message); });
     }
