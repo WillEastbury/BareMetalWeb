@@ -148,9 +148,8 @@ public static class ReportHtmlRenderer
         sb.Append(WebUtility.HtmlEncode(title));
         sb.Append("</title>");
         sb.Append("<link rel=\"icon\" type=\"image/x-icon\" href=\"/static/favicon.ico\">");
-        sb.Append("<link id=\"bootswatch-theme\" rel=\"stylesheet\" href=\"/static/css/bootstrap.min.css\">");
-        sb.Append($"<script nonce=\"{safeNonce}\">(function(){{var m=document.cookie.match(/(?:^|;\\s*)bm-selected-theme=([^;]+)/);if(m){{var t=decodeURIComponent(m[1]),a=['cerulean','cosmo','cyborg','darkly','flatly','journal','litera','lumen','lux','materia','minty','morph','pulse','quartz','sandstone','simplex','sketchy','slate','solar','spacelab','superhero','united','vapor','yeti','zephyr'];if(a.indexOf(t)>=0)document.getElementById('bootswatch-theme').href='https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/'+encodeURIComponent(t)+'/bootstrap.min.css';}}}})()</script>");
-        sb.Append("<link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css\" crossorigin=\"anonymous\">");
+        sb.Append("<link id=\"bootswatch-theme\" rel=\"stylesheet\" href=\"/static/css/themes/vapor.min.css\">");
+        sb.Append($"<script nonce=\"{safeNonce}\">(function(){{var m=document.cookie.match(/(?:^|;\\s*)bm-selected-theme=([^;]+)/);if(m){{var t=decodeURIComponent(m[1]),a=['cerulean','cosmo','cyborg','darkly','flatly','journal','litera','lumen','lux','materia','minty','morph','pulse','quartz','sandstone','simplex','sketchy','slate','solar','spacelab','superhero','united','vapor','yeti','zephyr'];if(a.indexOf(t)>=0)document.getElementById('bootswatch-theme').href='/static/css/themes/'+encodeURIComponent(t)+'.min.css';}}}})()</script>");
         sb.Append("<link rel=\"stylesheet\" href=\"/static/css/site.css\">");
         if (!string.IsNullOrEmpty(safeToken))
             sb.Append($"<meta name=\"csrf-token\" content=\"{safeToken}\">");
@@ -226,7 +225,7 @@ public static class ReportHtmlRenderer
             sb.Append("</select></div></div></div></footer>");
         }
 
-        sb.Append("<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js\" crossorigin=\"anonymous\"></script>");
+        sb.Append("<script src=\"/static/js/bootstrap.bundle.min.js\"></script>");
         sb.Append($"<script src=\"/static/js/bundle.js\" nonce=\"{safeNonce}\" defer></script>");
         sb.Append("</body></html>");
     }

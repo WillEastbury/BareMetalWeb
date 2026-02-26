@@ -13,7 +13,7 @@ public class BareMetalWebServer : IBareWebHost
 {
     // Content Security Policy: Uses nonces for inline scripts/styles to provide strong XSS protection.
     // The {0} placeholder is replaced with the request-specific nonce at runtime.
-    private const string ContentSecurityPolicyTemplate = "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'nonce-{0}'; style-src 'self' https://cdn.jsdelivr.net https://fonts.googleapis.com 'nonce-{0}'; img-src 'self' data: blob:; font-src 'self' https://cdn.jsdelivr.net https://fonts.gstatic.com; connect-src 'self' https://cdn.jsdelivr.net; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
+    private const string ContentSecurityPolicyTemplate = "default-src 'self'; script-src 'self' 'nonce-{0}'; style-src 'self' 'nonce-{0}'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'";
     private static readonly TimeSpan MenuCacheTtl = TimeSpan.FromSeconds(30);
     private static readonly QueryDefinition RootUserQuery = new()
     {
@@ -331,6 +331,12 @@ public class BareMetalWebServer : IBareWebHost
             if (await JsBundleService.TryServeAsync(context))
             {
                 BufferedLogger.LogInfo($"{path}|{context.Response.StatusCode}|{sourceIp}|bundle");
+                return;
+            }
+
+            if (await CssBundleService.TryServeAsync(context))
+            {
+                BufferedLogger.LogInfo($"{path}|{context.Response.StatusCode}|{sourceIp}|css-bundle");
                 return;
             }
 

@@ -58,8 +58,8 @@ public class ReportHtmlRendererTests
         // Act
         var html = await RenderToStringAsync(result);
 
-        // Assert
-        Assert.Contains("bootstrap.min.css", html);
+        // Assert – theme bundle is now served locally (no CDN dependency)
+        Assert.Contains("/static/css/themes/vapor.min.css", html);
     }
 
     [Fact]
@@ -71,8 +71,10 @@ public class ReportHtmlRendererTests
         // Act
         var html = await RenderToStringAsync(result);
 
-        // Assert
-        Assert.Contains("bootstrap-icons", html);
+        // Assert – bootstrap-icons are now embedded in the per-theme CSS bundle;
+        // the rendered page references the theme bundle link, not a separate CDN link.
+        Assert.Contains("/static/css/themes/", html);
+        Assert.DoesNotContain("cdn.jsdelivr.net/npm/bootstrap-icons", html);
     }
 
     [Fact]

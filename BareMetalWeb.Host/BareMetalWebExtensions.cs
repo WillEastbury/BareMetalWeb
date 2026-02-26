@@ -129,6 +129,12 @@ public static class BareMetalWebExtensions
         // Build JS bundle from static JS files (runtime bundler - no build-time changes needed)
         JsBundleService.BuildBundle(Path.Combine(appInfo.StaticFiles.RootPathFull, "js"));
 
+        // Build per-theme CSS bundles from pre-downloaded files in wwwroot/static/css/themes/.
+        // Run tools/download-assets.js first to populate those files.
+        CssBundleService.BuildBundles(Path.Combine(appInfo.StaticFiles.RootPathFull, "css"));
+        if (!CssBundleService.HasBundles)
+            logger.LogInfo("CssBundleService: no theme bundles found in wwwroot/static/css/themes/ — run tools/download-assets.js to download them.");
+
         ProgramSetup.ConfigureCors(app, appInfo);
         ProgramSetup.ConfigureHttps(app, appInfo);
         ProgramSetup.ConfigureProxyRoutes(app, appInfo, logger, pageInfoFactory);

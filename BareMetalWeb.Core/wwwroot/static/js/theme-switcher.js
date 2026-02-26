@@ -2,7 +2,9 @@
 (function() {
     'use strict';
 
-    const LOCAL_THEME_PATH = '/static/css/bootstrap.min.css';
+    const LOCAL_THEME_PATH = '/static/css/themes/vapor.min.css';
+    const THEME_PATH_PREFIX = '/static/css/themes/';
+    const THEME_PATH_SUFFIX = '.min.css';
     const STORAGE_KEY = 'bm-selected-theme';
     const DEFAULT_THEME = 'vapor';
 
@@ -58,7 +60,7 @@
         const themeLink = getThemeLink();
 
         document.body.removeAttribute('data-bs-theme');
-        themeLink.href = `https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/${themeName}/bootstrap.min.css`;
+        themeLink.href = `${THEME_PATH_PREFIX}${themeName}${THEME_PATH_SUFFIX}`;
 
         setStoredTheme(themeName);
     }

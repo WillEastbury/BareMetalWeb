@@ -1233,7 +1233,7 @@ public static class RouteRegistrationExtensions
         sb.Append("<div id=\"vnext-modal-container\"></div>");
         sb.Append("<div id=\"vnext-toast-container\" class=\"position-fixed top-0 end-0 p-3\"></div>");
         sb.Append(ReplaceTemplateTokens(footerElement, tokens));
-        sb.Append("<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js\" crossorigin=\"anonymous\"></script>");
+        sb.Append("<script src=\"/static/js/bootstrap.bundle.min.js\"></script>");
         sb.Append("<script src=\"/static/js/vnext-bundle.js\"></script>");
         sb.Append("</body></html>");
 
