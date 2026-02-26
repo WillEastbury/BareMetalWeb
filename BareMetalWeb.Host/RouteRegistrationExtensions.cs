@@ -529,6 +529,7 @@ public static class RouteRegistrationExtensions
                     .ToArray();
 
                 context.Response.ContentType = "application/json";
+                context.Response.Headers["Cache-Control"] = "private, max-age=300";
                 await context.Response.WriteAsync(
                     JsonSerializer.Serialize(entities, new JsonSerializerOptions { WriteIndented = false }));
             }));
@@ -549,6 +550,7 @@ public static class RouteRegistrationExtensions
 
                 var result = BuildEntitySchema(metadata);
                 context.Response.ContentType = "application/json";
+                context.Response.Headers["Cache-Control"] = "private, max-age=300";
                 await context.Response.WriteAsync(
                     JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = false }));
             }));

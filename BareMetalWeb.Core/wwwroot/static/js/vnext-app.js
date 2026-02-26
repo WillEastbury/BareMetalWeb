@@ -19,19 +19,43 @@
     // ── Metadata cache ────────────────────────────────────────────────────────
     var _metaObjects = null;
     var _metaCache   = {};
+    var META_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes — keep in sync with Cache-Control max-age on /meta/* server endpoints
+    var META_STORE_KEY    = 'bmw_meta_objects';
+    var META_STORE_PFX    = 'bmw_meta_';
+
+    function _loadFromSession(key) {
+        try {
+            var raw = sessionStorage.getItem(key);
+            if (!raw) return null;
+            var entry = JSON.parse(raw);
+            if (entry && entry.ts && (Date.now() - entry.ts) < META_CACHE_TTL_MS) return entry.data;
+            sessionStorage.removeItem(key);
+        } catch (e) {}
+        return null;
+    }
+
+    function _saveToSession(key, data) {
+        try { sessionStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: data })); } catch (e) { console.warn('bmw: sessionStorage write failed', e); }
+    }
 
     function fetchMetaObjects() {
         if (_metaObjects) return Promise.resolve(_metaObjects);
+        var cached = _loadFromSession(META_STORE_KEY);
+        if (cached) { _metaObjects = cached; return Promise.resolve(_metaObjects); }
         return apiFetch(META + '/objects').then(function (data) {
             _metaObjects = data;
+            _saveToSession(META_STORE_KEY, data);
             return data;
         });
     }
 
     function fetchMeta(slug) {
         if (_metaCache[slug]) return Promise.resolve(_metaCache[slug]);
+        var cached = _loadFromSession(META_STORE_PFX + slug);
+        if (cached) { _metaCache[slug] = cached; return Promise.resolve(cached); }
         return apiFetch(META + '/' + encodeURIComponent(slug)).then(function (data) {
             _metaCache[slug] = data;
+            _saveToSession(META_STORE_PFX + slug, data);
             return data;
         });
     }
