@@ -31,7 +31,8 @@ public sealed record DataFieldMetadata(
     ComputedFieldConfig? Computed,
     UploadFieldConfig? Upload,
     CalculatedFieldAttribute? Calculated,
-    ValidationConfig? Validation
+    ValidationConfig? Validation,
+    bool IsIndexed = false
 )
 {
     // Lazily compiled delegates avoid per-call PropertyInfo.GetValue / PropertyInfo.SetValue
@@ -3281,6 +3282,7 @@ public static class DataScaffold
             var idGenAttribute = prop.GetCustomAttribute<IdGenerationAttribute>();
             var computedAttribute = prop.GetCustomAttribute<ComputedFieldAttribute>();
             var calculatedAttribute = prop.GetCustomAttribute<CalculatedFieldAttribute>();
+            var dataIndexAttribute = prop.GetCustomAttribute<DataIndexAttribute>();
             if (fieldAttribute == null && imageFieldAttribute == null && fileFieldAttribute == null && !useConvention)
                 continue;
 
@@ -3374,7 +3376,8 @@ public static class DataScaffold
                 computed,
                 upload,
                 calculatedAttribute,
-                ValidationService.BuildValidationConfig(prop)
+                ValidationService.BuildValidationConfig(prop),
+                dataIndexAttribute != null
             ));
         }
 
