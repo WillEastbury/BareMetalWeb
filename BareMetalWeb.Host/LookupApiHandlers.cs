@@ -395,8 +395,11 @@ public static class LookupApiHandlers
         if (int.TryParse(context.Request.Query["skip"].ToString(), out var skip) && skip > 0)
             queryDef.Skip = skip;
         
-        if (int.TryParse(context.Request.Query["top"].ToString(), out var top) && top > 0)
-            queryDef.Top = top;
+        const int LookupMaxPageSize = 10000;
+        const int LookupDefaultPageSize = 200;
+        queryDef.Top = int.TryParse(context.Request.Query["top"].ToString(), out var top) && top > 0
+            ? Math.Min(top, LookupMaxPageSize)
+            : LookupDefaultPageSize;
 
         // Parse search: ?search=term&searchField=FieldName — does Contains matching on the specified field
         var searchTerm = context.Request.Query["search"].ToString();

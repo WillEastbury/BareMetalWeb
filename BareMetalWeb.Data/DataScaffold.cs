@@ -287,6 +287,8 @@ public static class DataScaffold
         }
     }
 
+    private const int MaxPageSize = 10000;
+
     public static QueryDefinition BuildQueryDefinition(IDictionary<string, string?> query, DataEntityMetadata metadata)
     {
         var definition = new QueryDefinition();
@@ -369,7 +371,7 @@ public static class DataScaffold
             definition.Skip = skipVal;
 
         if (query.TryGetValue("top", out var topStr) && int.TryParse(topStr, out var topVal))
-            definition.Top = topVal;
+            definition.Top = Math.Min(Math.Max(1, topVal), MaxPageSize);
 
         return definition;
     }
