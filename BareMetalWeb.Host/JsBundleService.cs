@@ -17,9 +17,11 @@ public static class JsBundleService
 {
     /// <summary>
     /// JS files to include in the SSR bundle, in dependency order.
+    /// bootstrap.bundle.min.js must be first so Bootstrap is available to all subsequent scripts.
     /// </summary>
     public static readonly string[] BundleFileOrder = new[]
     {
+        "bootstrap.bundle.min.js",
         "theme-switcher.js",
         "timezone.js",
         "image-preview.js",
@@ -37,9 +39,11 @@ public static class JsBundleService
 
     /// <summary>
     /// JS files to include in the VNext SPA bundle, in dependency order.
+    /// bootstrap.bundle.min.js must be first so Bootstrap is available to all subsequent scripts.
     /// </summary>
     public static readonly string[] VNextBundleFileOrder = new[]
     {
+        "bootstrap.bundle.min.js",
         "BareMetalRouting.js",
         "BareMetalRest.js",
         "BareMetalBind.js",

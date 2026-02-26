@@ -194,10 +194,42 @@ public class JsBundleServiceTests : IDisposable
     [Fact]
     public void BundleFileOrder_ContainsExpectedFiles()
     {
+        Assert.Contains("bootstrap.bundle.min.js", JsBundleService.BundleFileOrder);
         Assert.Contains("theme-switcher.js", JsBundleService.BundleFileOrder);
         Assert.Contains("timezone.js", JsBundleService.BundleFileOrder);
         Assert.Contains("bmw-lookup.js", JsBundleService.BundleFileOrder);
         Assert.Contains("toast.js", JsBundleService.BundleFileOrder);
         Assert.Contains("otp.js", JsBundleService.BundleFileOrder);
+    }
+
+    [Fact]
+    public void BundleFileOrder_BootstrapIsFirst()
+    {
+        Assert.Equal("bootstrap.bundle.min.js", JsBundleService.BundleFileOrder[0]);
+    }
+
+    [Fact]
+    public void VNextBundleFileOrder_BootstrapIsFirst()
+    {
+        Assert.Equal("bootstrap.bundle.min.js", JsBundleService.VNextBundleFileOrder[0]);
+    }
+
+    [Fact]
+    public async Task BuildBundle_BootstrapIsIncludedWhenPresent()
+    {
+        WriteJsFile("bootstrap.bundle.min.js", "/* bootstrap bundle */");
+        WriteJsFile("theme-switcher.js", "/* theme */");
+
+        JsBundleService.BuildBundle(_tempDir);
+
+        var context = CreateContext("GET", JsBundleService.BundlePath);
+        await JsBundleService.TryServeAsync(context);
+
+        var body = ReadResponseBody(context);
+        Assert.Contains("bootstrap bundle", body);
+        // Bootstrap should appear before theme-switcher
+        var bootstrapIdx = body.IndexOf("bootstrap bundle", StringComparison.Ordinal);
+        var themeIdx = body.IndexOf("theme-switcher.js", StringComparison.Ordinal);
+        Assert.True(bootstrapIdx < themeIdx, "bootstrap.bundle.min.js should appear before theme-switcher.js");
     }
 }
