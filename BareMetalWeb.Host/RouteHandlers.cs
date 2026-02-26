@@ -3547,12 +3547,12 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             var selectedYear = yearEntries.FirstOrDefault(entry => string.Equals(entry.Key, selectedYearKey, StringComparison.OrdinalIgnoreCase));
-            if (!selectedYear.Months.Any(entry => string.Equals(entry.Key, selectedMonthKey, StringComparison.OrdinalIgnoreCase)))
+            if (!(selectedYear.Months?.Any(entry => string.Equals(entry.Key, selectedMonthKey, StringComparison.OrdinalIgnoreCase)) ?? false))
                 selectedMonthKey = string.Empty;
 
-            if (string.IsNullOrWhiteSpace(selectedMonthKey) && selectedYear.Months.Count > 0)
+            if (string.IsNullOrWhiteSpace(selectedMonthKey) && selectedYear.Months?.Count > 0)
             {
-                var latestMonth = selectedYear.Months.OrderByDescending(entry => entry.MonthDate).First();
+                var latestMonth = selectedYear.Months!.OrderByDescending(entry => entry.MonthDate).First();
                 selectedMonthKey = latestMonth.Key;
             }
 
