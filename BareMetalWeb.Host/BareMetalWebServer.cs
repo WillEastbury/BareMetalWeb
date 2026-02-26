@@ -457,7 +457,7 @@ public class BareMetalWebServer : IBareWebHost
             else
             {
                 context.SetPageInfo(ErrorPageInfo);
-                context.SetStringValue("message", $"<p>An unexpected error occurred.</p><p>Error ID: <code>{errorId}</code></p>");
+                context.SetStringValue("html_message", $"<p>An unexpected error occurred.</p><p>Error ID: <code>{errorId}</code></p>");
                 await HtmlRenderer.RenderPage(context); // Render error page
             }
             BufferedLogger.LogInfo($"{path}|500|{sourceIp}");

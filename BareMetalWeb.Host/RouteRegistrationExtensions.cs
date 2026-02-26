@@ -40,7 +40,7 @@ public static class RouteRegistrationExtensions
             {
                 context.Response.ContentType = "text/html";
                 context.SetStringValue("title", "Server Time");
-                context.SetStringValue("message", $"Current server time is: {DateTime.UtcNow:O}");
+                context.SetStringValue("html_message", $"Current server time is: {DateTime.UtcNow:O}");
             })));
 
         host.RegisterRoute("GET /statusRaw", new RouteHandlerData(
@@ -402,7 +402,7 @@ public static class RouteRegistrationExtensions
         for (int i = 0; i < pageContext.PageMetaDataKeys.Length; i++)
         {
             if (string.Equals(pageContext.PageMetaDataKeys[i], key, StringComparison.OrdinalIgnoreCase))
-                return WebUtility.HtmlDecode(pageContext.PageMetaDataValues[i]);
+                return pageContext.PageMetaDataValues[i];
         }
         return null;
     }
@@ -771,7 +771,7 @@ public static class RouteRegistrationExtensions
         for (int i = 0; i < pageContext.PageMetaDataKeys.Length; i++)
         {
             if (string.Equals(pageContext.PageMetaDataKeys[i], key, StringComparison.OrdinalIgnoreCase))
-                return WebUtility.HtmlDecode(pageContext.PageMetaDataValues[i]);
+                return pageContext.PageMetaDataValues[i];
         }
         return null;
     }

@@ -172,7 +172,7 @@ public class HtmlRenderer : IHtmlRenderer
                         {
                             if (keySpan.SequenceEqual(scopedKeys[k]))
                             {
-                                Write(writer, scopedValues[k]);
+                                WriteTokenValue(writer, keySpan, scopedValues[k]);
                                 matched = true;
                                 break;
                             }
@@ -186,7 +186,7 @@ public class HtmlRenderer : IHtmlRenderer
                         {
                             if (keySpan.SequenceEqual(keys[k]))
                             {
-                                Write(writer, values[k]);
+                                WriteTokenValue(writer, keySpan, values[k]);
                                 matched = true;
                                 break;
                             }
@@ -200,7 +200,7 @@ public class HtmlRenderer : IHtmlRenderer
                         {
                             if (keySpan.SequenceEqual(appkeys[k]))
                             {
-                                Write(writer, appvalues[k]);
+                                WriteTokenValue(writer, keySpan, appvalues[k]);
                                 matched = true;
                                 break;
                             }
@@ -457,6 +457,16 @@ public class HtmlRenderer : IHtmlRenderer
             new ReadOnlySpan<char>(ref c),
             buffer);
         writer.Advance(bytesWritten);
+    }
+
+    private static void WriteTokenValue(PipeWriter writer, ReadOnlySpan<char> keySpan, string value)
+    {
+        // Keys prefixed with "html_" carry pre-rendered HTML and must be written raw.
+        // All other tokens are HTML-encoded for defense-in-depth XSS protection.
+        if (keySpan.StartsWith("html_".AsSpan(), StringComparison.Ordinal))
+            Write(writer, value);
+        else
+            WriteHtmlEncoded(writer, value);
     }
 
     private static void WriteHtmlEncoded(PipeWriter writer, string text)

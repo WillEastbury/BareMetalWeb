@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Net;
 
 namespace BareMetalWeb.Host;
 
@@ -15,7 +14,7 @@ public static class RouteInfoHelpers
         foreach (var param in routeParams)
         {
             newKeys.Add(param.Key);
-            newValues.Add(WebUtility.HtmlEncode(param.Value));
+            newValues.Add(param.Value);
         }
         return routeHandler with
         {

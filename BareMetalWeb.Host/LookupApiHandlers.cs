@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Net;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
@@ -349,7 +348,7 @@ public static class LookupApiHandlers
         for (int i = 0; i < pageContext.PageMetaDataKeys.Length; i++)
         {
             if (string.Equals(pageContext.PageMetaDataKeys[i], key, StringComparison.OrdinalIgnoreCase))
-                return WebUtility.HtmlDecode(pageContext.PageMetaDataValues[i]);
+                return pageContext.PageMetaDataValues[i];
         }
         return null;
     }
