@@ -335,13 +335,13 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
             );
     }
 
-    private byte[] LookupSearchButtonTemplate(string targetSlug, string targetType, string fieldName, string displayField, string valueField)
+    private byte[] LookupSearchButtonTemplate(string targetSlug, string targetType, string fieldName, string displayField, string valueField, string sourceSlug, string sourceFieldName)
     {
         return _fragmentStore
             .ZeroAllocationReplaceCopyAndEncode(
                 _fragmentStore.ReturnTemplateFragment("LookupSearchButton"),
-                new[] { "{{targetSlug}}", "{{targetType}}", "{{fieldName}}", "{{displayField}}", "{{valueField}}" },
-                new[] { targetSlug, targetType, fieldName, displayField, valueField }
+                new[] { "{{targetSlug}}", "{{targetType}}", "{{fieldName}}", "{{displayField}}", "{{valueField}}", "{{sourceSlug}}", "{{sourceFieldName}}" },
+                new[] { targetSlug, targetType, fieldName, displayField, valueField, sourceSlug, sourceFieldName }
             );
     }
 
@@ -647,7 +647,9 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                 Encode(field.LookupTargetType ?? string.Empty),
                 name,
                 Encode(field.LookupSearchField ?? string.Empty),
-                Encode(camelValueField)
+                Encode(camelValueField),
+                Encode(field.LookupSourceSlug ?? string.Empty),
+                Encode(field.LookupSourceFieldName ?? string.Empty)
             ));
             // Add button
             Write(buffer, LookupAddButtonTemplate(

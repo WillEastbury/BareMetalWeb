@@ -2142,6 +2142,8 @@
                 ' data-lookup-display-field="' + escHtml(lk.displayField) + '"' +
                 ' data-lookup-value-field="' + escHtml(lk.valueField || 'id') + '"' +
                 ' data-lookup-target-name="' + tName + '"' +
+                ' data-lookup-from="' + escHtml(lk.sourceSlug || '') + '"' +
+                ' data-lookup-via="' + escHtml(lk.sourceFieldName || '') + '"' +
                 ' title="Search ' + tName + '">' +
                 '<i class="bi bi-search" aria-hidden="true"></i></button>' +
             '<button type="button" class="btn btn-outline-secondary vnext-lookup-add"' +
@@ -2188,13 +2190,15 @@
         return _vnextSearchModal;
     }
 
-    function openVNextLookupSearch(targetSlug, fieldId, displayFieldId, displayField, valueField, targetTypeName) {
+    function openVNextLookupSearch(targetSlug, fieldId, displayFieldId, displayField, valueField, targetTypeName, sourceSlug, sourceFieldName) {
         var modal = getOrCreateVNextSearchModal();
         modal.dataset.targetSlug = targetSlug;
         modal.dataset.fieldId = fieldId;
         modal.dataset.displayFieldId = displayFieldId;
         modal.dataset.displayField = displayField;
         modal.dataset.valueField = valueField || 'id';
+        modal.dataset.lookupFrom = sourceSlug || '';
+        modal.dataset.lookupVia = sourceFieldName || '';
         var title = document.getElementById('vnext-lookup-search-title');
         if (title) title.textContent = 'Search ' + (targetTypeName || '');
         var input = document.getElementById('vnext-lookup-search-input');
@@ -2224,6 +2228,11 @@
             '?search=' + encodeURIComponent(term) +
             '&searchField=' + encodeURIComponent(displayField) +
             '&top=30';
+        var fromSlug = modal.dataset.lookupFrom;
+        var viaField = modal.dataset.lookupVia;
+        if (fromSlug && viaField) {
+            url += '&from=' + encodeURIComponent(fromSlug) + '&via=' + encodeURIComponent(viaField);
+        }
         fetch(url, { credentials: 'same-origin' })
             .then(function (r) { return r.json(); })
             .then(function (data) {
@@ -2775,7 +2784,9 @@
                 searchBtn.dataset.lookupDisplay,
                 searchBtn.dataset.lookupDisplayField,
                 searchBtn.dataset.lookupValueField || 'id',
-                searchBtn.dataset.lookupTargetName
+                searchBtn.dataset.lookupTargetName,
+                searchBtn.dataset.lookupFrom || '',
+                searchBtn.dataset.lookupVia || ''
             );
             return;
         }

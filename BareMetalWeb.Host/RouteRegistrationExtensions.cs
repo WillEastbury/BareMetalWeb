@@ -807,7 +807,9 @@ public static class RouteRegistrationExtensions
                     ["queryField"] = f.Lookup.QueryField,
                     ["queryValue"] = f.Lookup.QueryValue,
                     ["sortField"] = f.Lookup.SortField,
-                    ["sortDirection"] = f.Lookup.SortDirection.ToString()
+                    ["sortDirection"] = f.Lookup.SortDirection.ToString(),
+                    ["sourceSlug"] = meta.Slug,
+                    ["sourceFieldName"] = f.Name
                 };
             }
             else

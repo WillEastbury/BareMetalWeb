@@ -624,6 +624,8 @@ public static class DataScaffold
                 LookupDisplayValue: lookupDisplayValue,
                 LookupSearchField: lookupSearchField,
                 LookupValueField: lookupValueField,
+                LookupSourceSlug: isHighCardinality ? metadata.Slug : null,
+                LookupSourceFieldName: isHighCardinality ? field.Name : null,
                 Accept: field.Upload != null && field.Upload.AllowedMimeTypes.Length > 0
                     ? string.Join(",", field.Upload.AllowedMimeTypes)
                     : (effectiveFieldType == FormFieldType.Image ? "image/*" : null),

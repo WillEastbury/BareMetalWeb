@@ -68,9 +68,21 @@ public static class LookupApiHandlers
             return;
         }
 
+        // Validate lookup relationship if source context is provided
+        var sourceSlug = context.Request.Query["from"].ToString();
+        var sourceField = context.Request.Query["via"].ToString();
+        if (!string.IsNullOrWhiteSpace(sourceSlug) || !string.IsNullOrWhiteSpace(sourceField))
+        {
+            if (!ValidateLookupRelationship(sourceSlug, sourceField, typeSlug))
+            {
+                await WriteJsonErrorAsync(context, StatusCodes.Status403Forbidden, "No declared lookup relationship between the specified entities.");
+                return;
+            }
+        }
+
         try
         {
-            var queryDef = BuildQueryFromRequest(context);
+            var queryDef = BuildQueryFromRequest(context, meta);
             var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
             var results = entities.Select(e => EntityToJson(e, meta)).ToList();
             
@@ -186,7 +198,7 @@ public static class LookupApiHandlers
             }
 
             var field = meta.Fields.FirstOrDefault(f => 
-                string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+                string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase) && f.View);
             
             if (field == null)
             {
@@ -231,7 +243,7 @@ public static class LookupApiHandlers
 
         try
         {
-            var queryDef = BuildQueryFromRequest(context);
+            var queryDef = BuildQueryFromRequest(context, meta);
             
             if (fn == "count")
             {
@@ -252,7 +264,7 @@ public static class LookupApiHandlers
             }
 
             var field = meta.Fields.FirstOrDefault(f => 
-                string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+                string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase) && f.View);
             
             if (field == null)
             {
@@ -354,10 +366,14 @@ public static class LookupApiHandlers
         return null;
     }
 
-    private static QueryDefinition BuildQueryFromRequest(HttpContext context)
+    private static QueryDefinition BuildQueryFromRequest(HttpContext context, DataEntityMetadata meta)
     {
         var queryDef = new QueryDefinition();
-        
+
+        var viewableFields = new HashSet<string>(
+            meta.Fields.Where(f => f.View).Select(f => f.Name),
+            StringComparer.OrdinalIgnoreCase);
+
         // Parse filters from query string: ?filter=field:value
         var filters = context.Request.Query["filter"];
         foreach (var filter in filters)
@@ -368,19 +384,22 @@ public static class LookupApiHandlers
             var parts = filter.Split(':', 2);
             if (parts.Length == 2)
             {
+                var fieldName = parts[0].Trim();
+                if (!viewableFields.Contains(fieldName))
+                    continue; // reject unknown or non-viewable fields
                 queryDef.Clauses.Add(new QueryClause
                 {
-                    Field = parts[0].Trim(),
+                    Field = fieldName,
                     Operator = QueryOperator.Equals,
                     Value = parts[1].Trim()
                 });
             }
         }
 
-        // Parse sort: ?sort=fieldName&dir=asc|desc
+        // Parse sort: ?sort=fieldName&dir=asc|desc — only allow viewable fields
         var sortField = context.Request.Query["sort"].ToString();
         var sortDir = context.Request.Query["dir"].ToString();
-        if (!string.IsNullOrWhiteSpace(sortField))
+        if (!string.IsNullOrWhiteSpace(sortField) && viewableFields.Contains(sortField))
         {
             queryDef.Sorts.Add(new SortClause
             {
@@ -398,10 +417,11 @@ public static class LookupApiHandlers
         if (int.TryParse(context.Request.Query["top"].ToString(), out var top) && top > 0)
             queryDef.Top = top;
 
-        // Parse search: ?search=term&searchField=FieldName — does Contains matching on the specified field
+        // Parse search: ?search=term&searchField=FieldName — only allow viewable fields
         var searchTerm = context.Request.Query["search"].ToString();
         var searchField = context.Request.Query["searchField"].ToString();
-        if (!string.IsNullOrWhiteSpace(searchTerm) && !string.IsNullOrWhiteSpace(searchField))
+        if (!string.IsNullOrWhiteSpace(searchTerm) && !string.IsNullOrWhiteSpace(searchField)
+            && viewableFields.Contains(searchField))
         {
             queryDef.Clauses.Add(new QueryClause
             {
@@ -412,6 +432,30 @@ public static class LookupApiHandlers
         }
 
         return queryDef;
+    }
+
+    /// <summary>
+    /// Validates that <paramref name="sourceSlug"/> declares a field named <paramref name="sourceFieldName"/>
+    /// with a lookup that targets the entity identified by <paramref name="targetSlug"/>.
+    /// Returns <c>false</c> if either entity is unknown, the field does not exist, or the field has no
+    /// lookup pointing at the target entity.
+    /// </summary>
+    private static bool ValidateLookupRelationship(string sourceSlug, string sourceFieldName, string targetSlug)
+    {
+        if (string.IsNullOrWhiteSpace(sourceSlug) || string.IsNullOrWhiteSpace(sourceFieldName))
+            return false;
+
+        if (!DataScaffold.TryGetEntity(sourceSlug, out var sourceMeta))
+            return false;
+
+        var field = sourceMeta!.Fields.FirstOrDefault(f =>
+            string.Equals(f.Name, sourceFieldName, StringComparison.OrdinalIgnoreCase));
+
+        if (field?.Lookup == null)
+            return false;
+
+        var targetMeta = DataScaffold.GetEntityByType(field.Lookup.TargetType);
+        return string.Equals(targetMeta?.Slug, targetSlug, StringComparison.OrdinalIgnoreCase);
     }
 
     private static Dictionary<string, object?> EntityToJson(BaseDataObject entity, DataEntityMetadata meta)
