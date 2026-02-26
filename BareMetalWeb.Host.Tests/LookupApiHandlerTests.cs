@@ -486,6 +486,129 @@ public class LookupApiHandlerTests : IDisposable
 
     
 
+    [Fact]
+    public async Task GetEntityById_WithTraverseRelationships_ExpandsLookupField()
+    {
+        // Arrange — Order.CustomerId is a lookup to Customer
+        var customer = new Customer { Id = "cust-1", Name = "Acme Corp", Email = "acme@example.com" };
+        _testStore.Save(customer);
+
+        var order = new Order { Id = "order-1", OrderNumber = "ORD-001", CustomerId = "cust-1", Status = "Open" };
+        _testStore.Save(order);
+
+        var context = CreateHttpContext("GET", "/api/_lookup/orders/order-1?traverseRelationships=true");
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        var json = await ReadResponseJson(context);
+
+        // Original FK field is still present
+        Assert.Equal("cust-1", json.GetProperty("CustomerId").GetString());
+
+        // Expanded object added under "Customer" (Id suffix stripped)
+        Assert.True(json.TryGetProperty("Customer", out var expanded), "Expected expanded 'Customer' property");
+        Assert.Equal("cust-1", expanded.GetProperty("id").GetString());
+        Assert.Equal("Acme Corp", expanded.GetProperty("Name").GetString());
+    }
+
+    [Fact]
+    public async Task GetEntityById_WithoutTraverseRelationships_DoesNotExpandLookupField()
+    {
+        // Arrange
+        var customer = new Customer { Id = "cust-2", Name = "Beta Corp", Email = "beta@example.com" };
+        _testStore.Save(customer);
+
+        var order = new Order { Id = "order-2", OrderNumber = "ORD-002", CustomerId = "cust-2", Status = "Open" };
+        _testStore.Save(order);
+
+        var context = CreateHttpContext("GET", "/api/_lookup/orders/order-2");
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        var json = await ReadResponseJson(context);
+
+        // FK field present but NO expanded key
+        Assert.Equal("cust-2", json.GetProperty("CustomerId").GetString());
+        Assert.False(json.TryGetProperty("Customer", out _), "Should not have expanded 'Customer' without traverseRelationships=true");
+    }
+
+    [Fact]
+    public async Task QueryEntities_WithTraverseRelationships_ExpandsLookupFields()
+    {
+        // Arrange
+        var customer = new Customer { Id = "cust-3", Name = "Gamma Ltd", Email = "gamma@example.com" };
+        _testStore.Save(customer);
+
+        var order = new Order { Id = "order-3", OrderNumber = "ORD-003", CustomerId = "cust-3", Status = "Open" };
+        _testStore.Save(order);
+
+        var context = CreateHttpContext("GET", "/api/_lookup/orders?traverseRelationships=true&filter=OrderNumber:ORD-003");
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        var json = await ReadResponseJson(context);
+
+        var data = json.GetProperty("data");
+        var first = data.EnumerateArray().First(e => e.GetProperty("OrderNumber").GetString() == "ORD-003");
+
+        Assert.Equal("cust-3", first.GetProperty("CustomerId").GetString());
+        Assert.True(first.TryGetProperty("Customer", out var expanded), "Expected expanded 'Customer' property in query result");
+        Assert.Equal("Gamma Ltd", expanded.GetProperty("Name").GetString());
+    }
+
+    [Fact]
+    public async Task BatchGetEntities_WithTraverseRelationships_ExpandsLookupFields()
+    {
+        // Arrange
+        var customer = new Customer { Id = "cust-4", Name = "Delta Inc", Email = "delta@example.com" };
+        _testStore.Save(customer);
+
+        var order = new Order { Id = "order-4", OrderNumber = "ORD-004", CustomerId = "cust-4", Status = "Open" };
+        _testStore.Save(order);
+
+        var context = CreatePostHttpContext("/api/_lookup/orders/_batch?traverseRelationships=true", new { ids = new[] { "order-4" } });
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        var json = await ReadResponseJson(context);
+        var result = json.GetProperty("results").GetProperty("order-4");
+
+        Assert.Equal("cust-4", result.GetProperty("CustomerId").GetString());
+        Assert.True(result.TryGetProperty("Customer", out var expanded), "Expected expanded 'Customer' property in batch result");
+        Assert.Equal("Delta Inc", expanded.GetProperty("Name").GetString());
+    }
+
+    [Fact]
+    public async Task GetEntityById_WithTraverseRelationships_ToleratesMissingRelatedEntity()
+    {
+        // Arrange — order references a customer that doesn't exist in the store
+        var order = new Order { Id = "order-5", OrderNumber = "ORD-005", CustomerId = "missing-cust", Status = "Open" };
+        _testStore.Save(order);
+
+        var context = CreateHttpContext("GET", "/api/_lookup/orders/order-5?traverseRelationships=true");
+
+        // Act — should not throw; missing related entity is silently skipped
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        var json = await ReadResponseJson(context);
+        Assert.Equal("missing-cust", json.GetProperty("CustomerId").GetString());
+        Assert.False(json.TryGetProperty("Customer", out _), "No expanded key should be added when related entity is missing");
+    }
+
     #region Helpers
 
     private HttpContext CreateHttpContext(string method, string pathAndQuery)

@@ -36,6 +36,9 @@ public static class LookupApiHandlers
             return;
         }
 
+        var traverse = context.Request.Query.TryGetValue("traverseRelationships", out var tvVal)
+            && string.Equals(tvVal.FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
+
         try
         {
             var entity = await meta.Handlers.LoadAsync(id, context.RequestAborted);
@@ -45,7 +48,7 @@ public static class LookupApiHandlers
                 return;
             }
 
-            var result = EntityToJson(entity, meta);
+            var result = await EntityToJsonAsync(entity, meta, traverse, context.RequestAborted);
             await WriteJsonAsync(context, result);
         }
         catch (Exception)
@@ -80,12 +83,17 @@ public static class LookupApiHandlers
             }
         }
 
+        var traverse = context.Request.Query.TryGetValue("traverseRelationships", out var tvVal)
+            && string.Equals(tvVal.FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
+
         try
         {
             var queryDef = BuildQueryFromRequest(context, meta);
             var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
-            var results = entities.Select(e => EntityToJson(e, meta)).ToList();
-            
+            var results = new List<Dictionary<string, object?>>();
+            foreach (var e in entities)
+                results.Add(await EntityToJsonAsync(e, meta, traverse, context.RequestAborted));
+
             await WriteJsonAsync(context, new Dictionary<string, object>
             {
                 ["data"] = results,
@@ -142,6 +150,9 @@ public static class LookupApiHandlers
             return;
         }
 
+        var traverse = context.Request.Query.TryGetValue("traverseRelationships", out var tvVal)
+            && string.Equals(tvVal.FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
+
         try
         {
             var results = new Dictionary<string, object?>(ids.Count);
@@ -149,7 +160,7 @@ public static class LookupApiHandlers
             {
                 var entity = await meta.Handlers.LoadAsync(id, context.RequestAborted);
                 if (entity != null)
-                    results[id] = EntityToJson(entity, meta);
+                    results[id] = await EntityToJsonAsync(entity, meta, traverse, context.RequestAborted);
             }
 
             await WriteJsonAsync(context, new Dictionary<string, object> { ["results"] = results });
@@ -475,6 +486,60 @@ public static class LookupApiHandlers
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Builds the JSON dictionary for an entity, optionally expanding lookup FK fields into nested objects.
+    /// When <paramref name="traverseRelationships"/> is <c>true</c>, each viewable field decorated with
+    /// <see cref="DataLookupAttribute"/> will have an additional key added alongside it — the field name
+    /// with any trailing "Id" stripped — whose value is the full related entity object.
+    /// For example, <c>CustomerId: "abc"</c> becomes accompanied by <c>Customer: {id: "abc", Name: "Acme", ...}</c>.
+    /// Expansion is one level deep only to prevent circular traversal.
+    /// </summary>
+    private static async ValueTask<Dictionary<string, object?>> EntityToJsonAsync(
+        BaseDataObject entity,
+        DataEntityMetadata meta,
+        bool traverseRelationships,
+        CancellationToken cancellationToken)
+    {
+        var result = EntityToJson(entity, meta);
+
+        if (!traverseRelationships)
+            return result;
+
+        foreach (var field in meta.Fields.Where(f => f.View && f.Lookup != null))
+        {
+            if (!result.TryGetValue(field.Name, out var rawValue) || rawValue == null)
+                continue;
+
+            if (rawValue is not string idStr || string.IsNullOrWhiteSpace(idStr))
+                continue;
+
+            var relatedMeta = DataScaffold.GetEntityByType(field.Lookup!.TargetType);
+            if (relatedMeta == null)
+                continue;
+
+            var expandedKey = StripIdSuffix(field.Name);
+            if (string.Equals(expandedKey, field.Name, StringComparison.Ordinal) || result.ContainsKey(expandedKey))
+                continue;
+
+            var related = await relatedMeta.Handlers.LoadAsync(idStr, cancellationToken);
+            if (related != null)
+                result[expandedKey] = EntityToJson(related, relatedMeta);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Returns <paramref name="fieldName"/> with a trailing "Id" (case-insensitive) stripped.
+    /// Returns the original name unchanged when it does not end with "Id" or is 2 characters or shorter.
+    /// </summary>
+    private static string StripIdSuffix(string fieldName)
+    {
+        if (fieldName.Length > 2 && fieldName.EndsWith("Id", StringComparison.OrdinalIgnoreCase))
+            return fieldName[..^2];
+        return fieldName;
     }
 
     private static async ValueTask WriteJsonAsync(HttpContext context, object data)
