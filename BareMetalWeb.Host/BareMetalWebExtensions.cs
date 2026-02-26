@@ -129,11 +129,13 @@ public static class BareMetalWebExtensions
         // Build JS bundle from static JS files (runtime bundler - no build-time changes needed)
         JsBundleService.BuildBundle(Path.Combine(appInfo.StaticFiles.RootPathFull, "js"));
 
-        // Build per-theme CSS bundles from pre-downloaded files in wwwroot/static/css/themes/.
-        // Run tools/download-assets.js first to populate those files.
-        CssBundleService.BuildBundles(Path.Combine(appInfo.StaticFiles.RootPathFull, "css"));
+        // Ensure per-theme CSS bundles and bootstrap.bundle.min.js exist on disk (downloads from
+        // CDN if missing), then loads them into memory.  Skips files that are already present.
+        await CssBundleService.EnsureAssetsAsync(
+            appInfo.StaticFiles.RootPathFull,
+            msg => logger.LogInfo($"[CssBundleService] {msg}")).ConfigureAwait(false);
         if (!CssBundleService.HasBundles)
-            logger.LogInfo("CssBundleService: no theme bundles found in wwwroot/static/css/themes/ — run tools/download-assets.js to download them.");
+            logger.LogInfo("CssBundleService: no theme bundles loaded — asset download may have failed; check connectivity or run tools/download-assets.js manually.");
 
         ProgramSetup.ConfigureCors(app, appInfo);
         ProgramSetup.ConfigureHttps(app, appInfo);
