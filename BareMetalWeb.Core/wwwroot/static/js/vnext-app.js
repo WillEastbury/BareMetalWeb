@@ -2922,7 +2922,6 @@
     });
 
     nav.appendChild(ul);
-    nav.appendChild(el('a', { className: 'btn btn-sm btn-outline-light', href: '/ssr/admin/data', textContent: 'Classic UI' }));
     return nav;
   }
 
