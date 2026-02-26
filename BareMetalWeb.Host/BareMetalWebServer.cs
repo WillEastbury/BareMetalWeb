@@ -260,10 +260,12 @@ public class BareMetalWebServer : IBareWebHost
         // Start everything (logging, request handling etc)
         Task loggerTask = BufferedLogger.RunAsync(cts.Token); // Run the logging flusher loop
         Task clientPruneTask = ClientRequests.RunPruningAsync(cts.Token); // Run client pruning loop
+        Task todoPeriodicityTask = new TodoPeriodicityService(BufferedLogger).RunAsync(cts.Token); // Run todo periodicity reset loop
         app.Lifetime.ApplicationStopping.Register(() => BufferedLogger.OnApplicationStopping(cts, loggerTask)); // Setup shutdown to stop the logging flusher loop
         // log it
         BufferedLogger.LogInfo($"WireUpRequestHandlingAndLoggerAsyncLifetime completed and request handling is live.");
         _ = clientPruneTask;
+        _ = todoPeriodicityTask;
         return Task.CompletedTask;
     }
     public async Task RequestHandler(HttpContext context)

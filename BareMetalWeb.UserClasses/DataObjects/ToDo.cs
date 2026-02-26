@@ -14,6 +14,9 @@ public class ToDo : RenderableDataObject
     [DataField(Label = "Start Time", Order = 3, Required = true)]
     public TimeOnly StartTime { get; set; }
 
+    [DataField(Label = "Periodicity", Order = 4)]
+    public TodoPeriodicity Periodicity { get; set; } = TodoPeriodicity.OneOff;
+
     [DataField(Label = "Notes", Order = 5)]
     public string Notes { get; set; } = string.Empty;
 
