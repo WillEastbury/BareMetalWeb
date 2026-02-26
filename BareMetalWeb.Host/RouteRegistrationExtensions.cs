@@ -749,6 +749,23 @@ public static class RouteRegistrationExtensions
             McpRouteHandler.HandleAsync));
     }
 
+    // ─── OpenAPI routes ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Registers GET /openapi.json — a rudimentary OpenAPI 3.0.3 specification built
+    /// by recursing the entity types registered with <see cref="DataScaffold"/>.
+    /// Only entities accessible to the authenticated caller are included.
+    /// No Swagger/NSwag library is used; the JSON is constructed manually.
+    /// </summary>
+    public static void RegisterOpenApiRoute(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        host.RegisterRoute("GET /openapi.json", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            OpenApiHandler.HandleAsync));
+    }
+
     // ─── Private helpers ────────────────────────────────────────────────────────
 
     private static bool IsEntityAccessible(DataEntityMetadata entity, User? user, string[] userPermissions)
