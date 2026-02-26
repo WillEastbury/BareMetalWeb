@@ -365,6 +365,127 @@ public class LookupApiHandlerTests : IDisposable
         Assert.True(results.TryGetProperty("prod-1", out _));
     }
 
+    [Fact]
+    public async Task QueryEntities_IgnoresFilter_WhenFieldNotInViewableMetadata()
+    {
+        // Arrange — two products, filter on a field that does not exist in metadata
+        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+        _testStore.Save(new Product { Id = "prod-2", Name = "Gadget" });
+
+        // ?filter=NonExistentField:value should be silently dropped, so all entities are returned
+        var context = CreateHttpContext("GET", "/api/_lookup/products?filter=NonExistentField:Widget");
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        var json = await ReadResponseJson(context);
+        // Invalid field filter is dropped; all entities (>= 2) are returned
+        Assert.True(json.GetProperty("count").GetInt32() >= 2);
+    }
+
+    [Fact]
+    public async Task QueryEntities_IgnoresSort_WhenFieldNotInViewableMetadata()
+    {
+        // Arrange
+        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+
+        // ?sort=HiddenField should be silently dropped
+        var context = CreateHttpContext("GET", "/api/_lookup/products?sort=HiddenField&dir=asc");
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert — request succeeds; no error from invalid sort field
+        Assert.Equal(200, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task QueryEntities_IgnoresSearchField_WhenFieldNotInViewableMetadata()
+    {
+        // Arrange
+        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+
+        // ?searchField=PasswordHash is a field that doesn't exist on Product — should be dropped
+        var context = CreateHttpContext("GET", "/api/_lookup/products?search=abc&searchField=PasswordHash");
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert — request still succeeds (search clause is silently dropped, no results match nothing)
+        Assert.Equal(200, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task GetEntityField_Returns404_WhenFieldIsNotViewable()
+    {
+        // Arrange — Product entity has no non-viewable fields by default;
+        // use a non-existent field to confirm the check applies
+        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+
+        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/prod-1/InternalSecretField");
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(404, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task QueryEntities_Returns403_WhenFromAndViaProvided_AndRelationshipDoesNotExist()
+    {
+        // Arrange — 'orders' entity has CustomerId lookup to 'customers', but NOT to 'products'
+        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+
+        // from=orders&via=CustomerId but target is 'products' — no such relationship
+        var context = CreateHttpContext("GET", "/api/_lookup/products?from=orders&via=CustomerId");
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(403, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task QueryEntities_Returns403_WhenOnlyFromProvided_WithoutVia()
+    {
+        // Arrange
+        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+
+        // Providing 'from' without 'via' should fail validation (incomplete relationship context)
+        var context = CreateHttpContext("GET", "/api/_lookup/products?from=orders");
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(403, context.Response.StatusCode);
+    }
+
+    [Fact]
+    public async Task QueryEntities_Returns200_WhenFromAndViaProvided_AndRelationshipExists()
+    {
+        // Arrange — orders.CustomerId has a lookup to customers, so this should succeed
+        var customer = new Customer { Id = "cust-1", Name = "Acme Corp" };
+        _testStore.Save(customer);
+
+        // from=orders&via=CustomerId with target 'customers' — valid relationship
+        var context = CreateHttpContext("GET", "/api/_lookup/customers?from=orders&via=CustomerId");
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.Equal(200, context.Response.StatusCode);
+        var json = await ReadResponseJson(context);
+        Assert.True(json.GetProperty("count").GetInt32() >= 1);
+    }
+
+    
+
     #region Helpers
 
     private HttpContext CreateHttpContext(string method, string pathAndQuery)

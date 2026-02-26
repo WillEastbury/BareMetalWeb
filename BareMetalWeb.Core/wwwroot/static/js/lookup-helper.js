@@ -81,13 +81,15 @@
         return _searchModal;
     }
 
-    function openLookupSearch(targetSlug, fieldId, displayFieldId, displayField, valueField, targetTypeName) {
+    function openLookupSearch(targetSlug, fieldId, displayFieldId, displayField, valueField, targetTypeName, sourceSlug, sourceFieldName) {
         var modal = getOrCreateSearchModal();
         modal.dataset.targetSlug = targetSlug;
         modal.dataset.fieldId = fieldId;
         modal.dataset.displayFieldId = displayFieldId;
         modal.dataset.displayField = displayField;
         modal.dataset.valueField = valueField || 'id';
+        modal.dataset.lookupFrom = sourceSlug || '';
+        modal.dataset.lookupVia = sourceFieldName || '';
 
         var title = document.getElementById('bm-lookup-search-title');
         if (title) title.textContent = 'Search ' + (targetTypeName || '');
@@ -123,6 +125,11 @@
             '?search=' + encodeURIComponent(term) +
             '&searchField=' + encodeURIComponent(displayField) +
             '&top=30';
+        var fromSlug = modal.dataset.lookupFrom;
+        var viaField = modal.dataset.lookupVia;
+        if (fromSlug && viaField) {
+            url += '&from=' + encodeURIComponent(fromSlug) + '&via=' + encodeURIComponent(viaField);
+        }
 
         fetch(url, { credentials: 'same-origin' })
             .then(function(r) { return r.json(); })
@@ -226,7 +233,9 @@
             var displayField = searchBtn.getAttribute('data-lookup-display-field');
             var valueField = searchBtn.getAttribute('data-lookup-value-field') || 'id';
             var targetType = searchBtn.getAttribute('title') || '';
-            openLookupSearch(slug, fieldId, displayFieldId, displayField, valueField, targetType.replace('Search ', ''));
+            var fromSlug = searchBtn.getAttribute('data-lookup-from') || '';
+            var viaField = searchBtn.getAttribute('data-lookup-via') || '';
+            openLookupSearch(slug, fieldId, displayFieldId, displayField, valueField, targetType.replace('Search ', ''), fromSlug, viaField);
         }
     });
 })();

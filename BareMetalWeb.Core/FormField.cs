@@ -27,6 +27,8 @@ public sealed record FormField(
     string? LookupDisplayValue = null,
     string? LookupSearchField = null,
     string? LookupValueField = null,
+    string? LookupSourceSlug = null,
+    string? LookupSourceFieldName = null,
     bool IsComputed = false,
     string? ComputedStrategy = null,
     string? Accept = null,
