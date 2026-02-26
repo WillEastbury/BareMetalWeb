@@ -2991,7 +2991,8 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context))
+        if (!await UserAuth.HasValidApiKeyAsync(context, context.RequestAborted).ConfigureAwait(false) &&
+            (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context)))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.Response.ContentType = "application/json";
@@ -3150,7 +3151,8 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context))
+        if (!await UserAuth.HasValidApiKeyAsync(context, context.RequestAborted).ConfigureAwait(false) &&
+            (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context)))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("CSRF validation failed.");
@@ -3225,7 +3227,8 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context))
+        if (!await UserAuth.HasValidApiKeyAsync(context, context.RequestAborted).ConfigureAwait(false) &&
+            (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context)))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("CSRF validation failed.");
@@ -3302,7 +3305,8 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context))
+        if (!await UserAuth.HasValidApiKeyAsync(context, context.RequestAborted).ConfigureAwait(false) &&
+            (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context)))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("CSRF validation failed.");
@@ -3378,7 +3382,8 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context))
+        if (!await UserAuth.HasValidApiKeyAsync(context, context.RequestAborted).ConfigureAwait(false) &&
+            (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context)))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("CSRF validation failed.");
@@ -6436,7 +6441,8 @@ public sealed class RouteHandlers : IRouteHandlers
             }
         }
 
-        if (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context))
+        if (!await UserAuth.HasValidApiKeyAsync(context, context.RequestAborted).ConfigureAwait(false) &&
+            (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context)))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await WriteJsonResponseAsync(context, new { success = false, message = "CSRF validation failed." });
