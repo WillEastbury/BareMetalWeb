@@ -6493,7 +6493,8 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             context.Response.StatusCode = result.Success ? StatusCodes.Status200OK : StatusCodes.Status422UnprocessableEntity;
-            await WriteJsonResponseAsync(context, new { success = result.Success, message = result.Message, redirectUrl = result.RedirectUrl });
+            var entityData = result.Success ? BuildApiModel(meta, instance) : null;
+            await WriteJsonResponseAsync(context, new { success = result.Success, message = result.Message, redirectUrl = result.RedirectUrl, data = entityData });
         }
         catch (Exception ex)
         {
