@@ -331,6 +331,37 @@
             return buildUrl(baseUrl, Object.assign({}, query, { sort: fieldName, dir: newDir, skip: 0 }));
         }
 
+        var filterFields = listFields.filter(function (f) { return f.indexed; });
+
+        function buildFilterInput(f, currentVal, cssClass) {
+            var n = 'f_' + f.name;
+            var ariaLabel = 'aria-label="Filter by ' + escHtml(f.label) + '"';
+            if (f.type === 'Bool' || f.type === 'Boolean') {
+                return '<select class="' + escHtml(cssClass) + '" name="' + escHtml(n) + '" ' + ariaLabel + '>' +
+                    '<option value="">All</option>' +
+                    '<option value="true"' + (currentVal === 'true' ? ' selected' : '') + '>Yes</option>' +
+                    '<option value="false"' + (currentVal === 'false' ? ' selected' : '') + '>No</option>' +
+                    '</select>';
+            }
+            if (f.type === 'Enum' && f.enumValues && f.enumValues.length) {
+                var sel = '<select class="' + escHtml(cssClass) + '" name="' + escHtml(n) + '" ' + ariaLabel + '><option value="">All</option>';
+                f.enumValues.forEach(function (ev) {
+                    sel += '<option value="' + escHtml(String(ev.value)) + '"' + (currentVal === String(ev.value) ? ' selected' : '') + '>' + escHtml(ev.label) + '</option>';
+                });
+                return sel + '</select>';
+            }
+            if (f.type === 'Int32' || f.type === 'Int64' || f.type === 'Decimal' || f.type === 'Money' || f.type === 'Double' || f.type === 'Float') {
+                return '<input type="number" class="' + escHtml(cssClass) + '" name="' + escHtml(n) + '" value="' + escHtml(currentVal) + '" placeholder="' + escHtml(f.label) + '\u2026" ' + ariaLabel + '>';
+            }
+            if (f.type === 'DateOnly' || f.type === 'Date') {
+                return '<input type="date" class="' + escHtml(cssClass) + '" name="' + escHtml(n) + '" value="' + escHtml(currentVal) + '" ' + ariaLabel + '>';
+            }
+            if (f.type === 'DateTime') {
+                return '<input type="date" class="' + escHtml(cssClass) + '" name="' + escHtml(n) + '" value="' + escHtml(currentVal ? currentVal.substring(0, 10) : '') + '" ' + ariaLabel + '>';
+            }
+            return '<input type="text" class="' + escHtml(cssClass) + '" name="' + escHtml(n) + '" value="' + escHtml(currentVal) + '" placeholder="' + escHtml(f.label) + '\u2026" ' + ariaLabel + '>';
+        }
+
         var viewType = meta.viewType || 'Table';
         var activeView = query.view || viewType;
 
@@ -381,6 +412,38 @@
                 '</div>';
 
             // Table
+            // Mobile filter card (shown above cards on narrow viewports)
+            var hasActiveFilters = filterFields.some(function (f) { return !!query['f_' + f.name]; });
+            if (filterFields.length > 0) {
+                html += '<div class="d-md-none mb-3">';
+                html += '<div class="card">';
+                html += '<div class="card-header p-2 d-flex justify-content-between align-items-center">';
+                html += '<span class="fw-semibold small"><i class="bi bi-funnel' + (hasActiveFilters ? '-fill text-primary' : '') + ' me-1"></i>Filters</span>';
+                html += '<button class="btn btn-sm btn-outline-secondary py-0" type="button" data-bs-toggle="collapse" data-bs-target="#vnext-mobile-filters" aria-expanded="' + (hasActiveFilters ? 'true' : 'false') + '" aria-label="Toggle filters"><i class="bi bi-chevron-down"></i></button>';
+                html += '</div>';
+                html += '<div class="collapse' + (hasActiveFilters ? ' show' : '') + '" id="vnext-mobile-filters">';
+                html += '<div class="card-body p-2">';
+                html += '<form id="vnext-filter-form-mobile">';
+                if (sort) html += '<input type="hidden" name="sort" value="' + escHtml(sort) + '">';
+                if (dir) html += '<input type="hidden" name="dir" value="' + escHtml(dir) + '">';
+                html += '<input type="hidden" name="top" value="' + escHtml(String(top)) + '">';
+                if (search) html += '<input type="hidden" name="q" value="' + escHtml(search) + '">';
+                if (query.view) html += '<input type="hidden" name="view" value="' + escHtml(query.view) + '">';
+                filterFields.forEach(function (f) {
+                    var currentVal = query['f_' + f.name] || '';
+                    html += '<div class="mb-2"><label class="form-label form-label-sm mb-1 fw-semibold">' + escHtml(f.label) + '</label>';
+                    html += buildFilterInput(f, currentVal, 'form-control form-control-sm');
+                    html += '</div>';
+                });
+                html += '<button class="btn btn-sm btn-primary" type="submit"><i class="bi bi-funnel"></i> Apply</button>';
+                if (hasActiveFilters) {
+                    var clearQuery = Object.assign({}, query);
+                    filterFields.forEach(function (f) { delete clearQuery['f_' + f.name]; });
+                    html += ' <a class="btn btn-sm btn-outline-secondary" href="' + escHtml(buildUrl(baseUrl, Object.assign(clearQuery, { skip: 0 }))) + '"><i class="bi bi-x-lg"></i> Clear</a>';
+                }
+                html += '</form></div></div></div></div>';
+            }
+
             // Card layout for narrow viewports
             html += '<div class="d-md-none vnext-card-list">';
             if (items.length === 0) {
@@ -432,7 +495,24 @@
                 }
                 html += '<th scope="col"><a class="text-decoration-none text-reset" href="' + escHtml(buildSortUrl(f.name)) + '" title="Sort by ' + escHtml(f.label) + '">' + escHtml(f.label) + sortIcon + '</a></th>';
             });
-            html += '<th scope="col">Actions</th></tr></thead>';
+            html += '<th scope="col">Actions</th></tr>';
+            // Filter row for indexed columns
+            if (filterFields.length > 0) {
+                html += '<tr id="vnext-filter-row">';
+                html += '<th></th>';
+                listFields.forEach(function (f) {
+                    if (f.indexed) {
+                        var currentVal = query['f_' + f.name] || '';
+                        var activeClass = currentVal ? ' table-warning' : '';
+                        html += '<th class="p-1' + activeClass + '">' + buildFilterInput(f, currentVal, 'form-control form-control-sm bm-col-filter') + '</th>';
+                    } else {
+                        html += '<th></th>';
+                    }
+                });
+                html += '<th></th>';
+                html += '</tr>';
+            }
+            html += '</thead>';
             html += '<tbody>';
 
             if (items.length === 0) {
@@ -491,6 +571,41 @@
         // Wire import button
         var importBtn = document.getElementById('vnext-import-btn');
         if (importBtn) importBtn.addEventListener('click', function () { openImportModal(slug, baseUrl, query); });
+
+        // Wire column filter inputs (desktop table)
+        if (filterFields.length > 0) {
+            function applyColFilters() {
+                var params = Object.assign({}, query, { skip: 0 });
+                document.querySelectorAll('.bm-col-filter').forEach(function (inp) {
+                    if (inp.value) { params[inp.name] = inp.value; }
+                    else { delete params[inp.name]; }
+                });
+                BMRouter.navigate(buildUrl(baseUrl, params));
+            }
+            document.querySelectorAll('.bm-col-filter').forEach(function (inp) {
+                if (inp.tagName === 'SELECT') {
+                    inp.addEventListener('change', applyColFilters);
+                } else {
+                    inp.addEventListener('keydown', function (e) {
+                        if (e.key === 'Enter') { e.preventDefault(); applyColFilters(); }
+                    });
+                }
+            });
+
+            // Wire mobile filter form
+            var mobileFilterForm = document.getElementById('vnext-filter-form-mobile');
+            if (mobileFilterForm) {
+                mobileFilterForm.addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    var params = Object.assign({}, query, { skip: 0 });
+                    mobileFilterForm.querySelectorAll('[name^="f_"]').forEach(function (inp) {
+                        if (inp.value) { params[inp.name] = inp.value; }
+                        else { delete params[inp.name]; }
+                    });
+                    BMRouter.navigate(buildUrl(baseUrl, params));
+                });
+            }
+        }
 
         wireListEvents(slug, baseUrl, query, top, sort, dir);
 

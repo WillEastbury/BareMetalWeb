@@ -812,7 +812,8 @@ public static class RouteRegistrationExtensions
                 ["readOnly"] = f.ReadOnly,
                 ["isIdField"] = f.IdGeneration != IdGenerationStrategy.None,
                 ["idGeneration"] = f.IdGeneration.ToString(),
-                ["placeholder"] = f.Placeholder
+                ["placeholder"] = f.Placeholder,
+                ["indexed"] = f.IsIndexed
             };
 
             if (f.Lookup != null)
