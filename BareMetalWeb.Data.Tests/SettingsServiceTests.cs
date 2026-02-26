@@ -159,6 +159,7 @@ public class SettingsServiceTests : IDisposable
         Assert.Equal("app.name", WellKnownSettings.AppName);
         Assert.Equal("app.company", WellKnownSettings.AppCompany);
         Assert.Equal("app.copyright", WellKnownSettings.AppCopyright);
+        Assert.Equal("app.privacyPolicyUrl", WellKnownSettings.AppPrivacyPolicyUrl);
     }
 
     [Fact]

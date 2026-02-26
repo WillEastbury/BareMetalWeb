@@ -90,6 +90,7 @@ public static class BareMetalWebExtensions
             (WellKnownSettings.AppName,      app.Configuration.GetValue("AppInfo:Name",      "BareMetalWeb"),       "Application display name"),
             (WellKnownSettings.AppCompany,   app.Configuration.GetValue("AppInfo:Company",   "BareMetalWeb Inc."),  "Company name shown in the header and footer"),
             (WellKnownSettings.AppCopyright, app.Configuration.GetValue("AppInfo:Copyright", "2026"),              "Copyright year or statement shown in the footer"),
+            (WellKnownSettings.AppPrivacyPolicyUrl, app.Configuration.GetValue("AppInfo:PrivacyPolicyUrl", ""),    "Privacy policy URL shown as a link in the footer. Leave empty to hide the link."),
 
             // Kestrel / transport
             (WellKnownSettings.KestrelHttp2Enabled,                 app.Configuration.GetValue("Kestrel:Http2Enabled", true).ToString(),        "Enable HTTP/2 protocol support"),
@@ -120,6 +121,7 @@ public static class BareMetalWebExtensions
         // App info
         BareMetalWebServer appInfo = ProgramSetup.CreateAppInfo(
             app, logger, htmlRenderer, pageInfoFactory, mainTemplate, metricsTracker, throttling, cts);
+        appInfo.PrivacyPolicyUrl = app.Configuration.GetValue("AppInfo:PrivacyPolicyUrl", "");
 
         // Infrastructure configuration
         ProgramSetup.ConfigureStaticFiles(app, appInfo);

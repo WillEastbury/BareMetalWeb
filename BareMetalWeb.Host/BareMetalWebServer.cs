@@ -32,7 +32,17 @@ public class BareMetalWebServer : IBareWebHost
     public string AppName { get; set; }
     public string CompanyDescription { get; set; }
     public string CopyrightYear { get; set; }
-    public static string[] appMetaDataKeys { get; set; } = new[] { "AppName", "CompanyDescription", "CopyrightYear", "AppVersion" };
+    private string _privacyPolicyUrl = "";
+    public string PrivacyPolicyUrl
+    {
+        get => _privacyPolicyUrl;
+        set
+        {
+            _privacyPolicyUrl = value;
+            AppMetaDataValues[4] = ComputePrivacyPolicyLink(value);
+        }
+    }
+    public static string[] appMetaDataKeys { get; set; } = new[] { "AppName", "CompanyDescription", "CopyrightYear", "AppVersion", "PrivacyPolicyUrl" };
     public string[] AppMetaDataKeys => appMetaDataKeys;
     public string[] AppMetaDataValues { get; set; }
     public List<IMenuOption> MenuOptionsList { get; set; } = new List<IMenuOption>();
@@ -75,7 +85,7 @@ public class BareMetalWebServer : IBareWebHost
         var version = plusIdx >= 0 && trimmed.Length - plusIdx - 1 > 7
             ? trimmed[..plusIdx] + "+" + trimmed[(plusIdx + 1)..(plusIdx + 8)]
             : trimmed;
-        AppMetaDataValues = new[] { AppName, CompanyDescription, CopyrightYear, version };
+        AppMetaDataValues = new[] { AppName, CompanyDescription, CopyrightYear, version, ComputePrivacyPolicyLink(_privacyPolicyUrl) };
         app = application;
         BufferedLogger = logger;
         HtmlRenderer = htmlRenderer;
@@ -718,6 +728,10 @@ public class BareMetalWebServer : IBareWebHost
             : string.Join(',', user.Permissions);
         return $"user:{user.Id}|mfa:{user.MfaEnabled}|perms:{perms}|routes:{routesVersion}";
     }
+
+    private static string ComputePrivacyPolicyLink(string url) =>
+        string.IsNullOrWhiteSpace(url) ? string.Empty
+        : $"<a href=\"{System.Net.WebUtility.HtmlEncode(url)}\" class=\"text-white-50 ms-2\">Privacy Policy</a>";
 
     private readonly record struct MenuCacheEntry(IMenuOption[] Options, DateTime ExpiresUtc);
 
