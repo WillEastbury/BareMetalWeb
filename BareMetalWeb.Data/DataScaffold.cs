@@ -61,7 +61,9 @@ public sealed record DataEntityMetadata(
     DataFieldMetadata? ParentField,
     IReadOnlyList<DataFieldMetadata> Fields,
     DataEntityHandlers Handlers,
-    IReadOnlyList<RemoteCommandMetadata> Commands
+    IReadOnlyList<RemoteCommandMetadata> Commands,
+    string? DefaultSortField = null,
+    SortDirection DefaultSortDirection = SortDirection.Asc
 );
 
 public sealed record DataEntityHandlers(
@@ -364,6 +366,14 @@ public static class DataScaffold
             {
                 Field = sortField,
                 Direction = direction
+            });
+        }
+        else if (!string.IsNullOrWhiteSpace(metadata.DefaultSortField))
+        {
+            definition.Sorts.Add(new SortClause
+            {
+                Field = metadata.DefaultSortField,
+                Direction = metadata.DefaultSortDirection
             });
         }
 
@@ -3379,6 +3389,8 @@ public static class DataScaffold
         var navGroup = entityAttribute?.NavGroup ?? "Admin";
         var navOrder = entityAttribute?.NavOrder ?? 0;
         var idGeneration = entityAttribute?.IdGeneration ?? AutoIdStrategy.Guid;
+        var defaultSortField = string.IsNullOrWhiteSpace(entityAttribute?.DefaultSortField) ? null : entityAttribute.DefaultSortField;
+        var defaultSortDirection = entityAttribute?.DefaultSortDirection ?? SortDirection.Asc;
 
         // Detect view type and self-referencing parent field
         var viewTypeAttribute = type.GetCustomAttribute<DataViewTypeAttribute>();
@@ -3442,7 +3454,9 @@ public static class DataScaffold
             parentField,
             fields.OrderBy(f => f.Order).ToList(),
             handlers,
-            commands.OrderBy(c => c.Order).ToList()
+            commands.OrderBy(c => c.Order).ToList(),
+            defaultSortField,
+            defaultSortDirection
         );
     }
 

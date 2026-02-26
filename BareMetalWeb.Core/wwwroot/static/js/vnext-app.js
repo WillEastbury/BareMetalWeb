@@ -278,6 +278,12 @@
         var search = query.q    || '';
 
         fetchMeta(slug).then(function (meta) {
+            // Apply default sort from metadata when no explicit sort is in the URL
+            if (!sort && meta.defaultSortField) {
+                sort = meta.defaultSortField;
+                dir  = (meta.defaultSortDirection || 'Asc').toLowerCase();
+            }
+
             // Hierarchy/calendar views need all items (no pagination)
             var vt = meta.viewType || '';
             var activeView = query.view || '';

@@ -10,6 +10,8 @@ public sealed class DataEntityAttribute : Attribute
     public string? NavGroup { get; set; }
     public int NavOrder { get; set; } = 0;
     public AutoIdStrategy IdGeneration { get; set; } = AutoIdStrategy.Guid;
+    public string? DefaultSortField { get; set; }
+    public SortDirection DefaultSortDirection { get; set; } = SortDirection.Asc;
 
     public DataEntityAttribute(string name)
     {

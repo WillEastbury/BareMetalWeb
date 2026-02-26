@@ -944,6 +944,8 @@ public static class RouteRegistrationExtensions
             ["canShowTimetable"] = DataScaffold.CanShowTimetableView(meta),
             ["canShowTimeline"] = DataScaffold.CanShowTimelineView(meta),
             ["idGeneration"] = meta.IdGeneration.ToString(),
+            ["defaultSortField"] = meta.DefaultSortField,
+            ["defaultSortDirection"] = meta.DefaultSortDirection.ToString(),
             ["parentField"] = meta.ParentField != null ? (object)new Dictionary<string, object?>
             {
                 ["name"] = meta.ParentField.Name,
