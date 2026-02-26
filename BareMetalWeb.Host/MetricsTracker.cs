@@ -8,7 +8,7 @@ using BareMetalWeb.Interfaces;
 
 namespace BareMetalWeb.Host;
 
-public sealed class MetricsTracker : IMetricsTracker
+public sealed class MetricsTracker : IMetricsTracker, IDisposable
 {
     private static readonly TimeSpan RecentWindow = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan RecentShortWindow = TimeSpan.FromSeconds(10);
@@ -24,6 +24,7 @@ public sealed class MetricsTracker : IMetricsTracker
 
     private readonly object _recentLock = new();
     private readonly Queue<ResponseSample> _recentSamples = new();
+    private readonly Process _currentProcess = Process.GetCurrentProcess();
 
     public void RecordRequest(int statusCode, TimeSpan elapsed)
     {
@@ -81,7 +82,7 @@ public sealed class MetricsTracker : IMetricsTracker
         var recentMetrics = ComputeRecentMetrics(recentSamples);
         var recent10s = ComputeRecentMetrics(FilterRecentSamples(recentSamples, nowUtc - RecentShortWindow));
 
-        var currentProcess = Process.GetCurrentProcess();
+        _currentProcess.Refresh();
 
         return new MetricsSnapshot(
             total,
@@ -98,9 +99,9 @@ public sealed class MetricsTracker : IMetricsTracker
             requests5xx,
             requestsOther,
             throttled,
-            currentProcess.Id,
-            currentProcess.WorkingSet64,
-            currentProcess.VirtualMemorySize64
+            _currentProcess.Id,
+            _currentProcess.WorkingSet64,
+            _currentProcess.VirtualMemorySize64
         );
     }
 
@@ -172,6 +173,8 @@ public sealed class MetricsTracker : IMetricsTracker
         if (index >= sortedTicks.Length) index = sortedTicks.Length - 1;
         return sortedTicks[index];
     }
+
+    public void Dispose() => _currentProcess.Dispose();
 
     private readonly record struct ResponseSample(DateTime TimestampUtc, long ElapsedTicks);
     private readonly record struct RecentMetrics(TimeSpan Minimum, TimeSpan Maximum, TimeSpan Average, TimeSpan P95, TimeSpan P99);
