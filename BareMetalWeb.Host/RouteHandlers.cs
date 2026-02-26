@@ -5165,7 +5165,8 @@ public sealed class RouteHandlers : IRouteHandlers
     private const string ApiCsrfHeaderValue = "BareMetalWeb";
 
     private static bool ValidateApiCsrfHeader(HttpContext context)
-        => string.Equals(context.Request.Headers[ApiCsrfHeaderName], ApiCsrfHeaderValue, StringComparison.Ordinal);
+        => UserAuth.HasApiKeyHeader(context) ||
+           string.Equals(context.Request.Headers[ApiCsrfHeaderName], ApiCsrfHeaderValue, StringComparison.Ordinal);
 
     private static async ValueTask<bool> HasEntityPermissionAsync(HttpContext context, DataEntityMetadata meta, CancellationToken cancellationToken = default)
     {
