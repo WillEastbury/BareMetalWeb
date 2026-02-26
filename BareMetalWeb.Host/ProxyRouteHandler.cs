@@ -263,14 +263,27 @@ public sealed class ProxyRouteHandler
             if (_route.RemoveHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase))
                 continue;
 
-            if (!requestMessage.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray()))
+            if (ContainsCrlf(header.Key))
+                continue;
+
+            var rawValues = header.Value.ToArray();
+            var safeValues = rawValues.Any(ContainsCrlf)
+                ? rawValues.Where(v => !ContainsCrlf(v)).ToArray()
+                : rawValues;
+            if (safeValues.Length == 0)
+                continue;
+
+            if (!requestMessage.Headers.TryAddWithoutValidation(header.Key, safeValues))
             {
-                requestMessage.Content?.Headers.TryAddWithoutValidation(header.Key, header.Value.ToArray());
+                requestMessage.Content?.Headers.TryAddWithoutValidation(header.Key, safeValues);
             }
         }
 
         foreach (var header in _route.AddHeaders)
         {
+            if (ContainsCrlf(header.Key) || ContainsCrlf(header.Value))
+                continue;
+
             if (!requestMessage.Headers.TryAddWithoutValidation(header.Key, header.Value))
             {
                 requestMessage.Content?.Headers.TryAddWithoutValidation(header.Key, header.Value);
@@ -592,6 +605,11 @@ public sealed class ProxyRouteHandler
             await Task.Delay(delay, cancellationToken);
         }
     }
+
+    private static readonly char[] CrLfChars = ['\r', '\n'];
+
+    private static bool ContainsCrlf(string? value) =>
+        value != null && value.IndexOfAny(CrLfChars) >= 0;
 
     private void TrackResult(ProxyTargetState target, HttpStatusCode? statusCode, Exception? exception = null)
     {
