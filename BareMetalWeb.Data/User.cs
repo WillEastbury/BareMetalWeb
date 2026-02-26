@@ -93,4 +93,12 @@ public class User : BaseDataObject
         LockoutUntilUtc = null;
         LastLoginUtc = DateTime.UtcNow;
     }
+
+    [RemoteCommand(Label = "Reset Lockout", Icon = "bi-unlock", ConfirmMessage = "Reset login lockout and failed attempt counter for this user?", Permission = "admin", Order = 1)]
+    public RemoteCommandResult ResetLockout()
+    {
+        FailedLoginCount = 0;
+        LockoutUntilUtc = null;
+        return RemoteCommandResult.Ok("Lockout reset. User can now sign in.");
+    }
 }

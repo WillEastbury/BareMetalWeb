@@ -433,6 +433,164 @@ public class UserAuthTests : IDisposable
         Assert.Equal(originalExpiresUtc, storedSession.ExpiresUtc);
     }
 
+    [Fact]
+    public async Task FindByEmailOrUserNameAsync_MultipleUsers_ReturnsCorrectUserByUsername()
+    {
+        // Arrange — two users with distinct credentials
+        EnsureStore();
+        var root = new User
+        {
+            UserName = "root",
+            DisplayName = "Root User",
+            Email = "root@example.com",
+            Permissions = new[] { "admin", "monitoring" },
+            IsActive = true
+        };
+        root.SetPassword("rootpass");
+        await DataStoreProvider.Current.SaveAsync(root);
+
+        var secondUser = new User
+        {
+            UserName = "son",
+            DisplayName = "Son User",
+            Email = "son@example.com",
+            Permissions = new[] { "user" },
+            IsActive = true
+        };
+        secondUser.SetPassword("sonpass");
+        await DataStoreProvider.Current.SaveAsync(secondUser);
+
+        // Act — look up by username
+        var foundRoot = await Users.FindByEmailOrUserNameAsync("root");
+        var foundSon = await Users.FindByEmailOrUserNameAsync("son");
+
+        // Assert — each lookup returns the correct user
+        Assert.NotNull(foundRoot);
+        Assert.Equal(root.Id, foundRoot.Id);
+        Assert.Equal("root", foundRoot.UserName);
+
+        Assert.NotNull(foundSon);
+        Assert.Equal(secondUser.Id, foundSon.Id);
+        Assert.Equal("son", foundSon.UserName);
+    }
+
+    [Fact]
+    public async Task FindByEmailOrUserNameAsync_MultipleUsers_ReturnsCorrectUserByEmail()
+    {
+        // Arrange — two users with distinct credentials
+        EnsureStore();
+        var root = new User
+        {
+            UserName = "root",
+            DisplayName = "Root User",
+            Email = "root@example.com",
+            Permissions = new[] { "admin", "monitoring" },
+            IsActive = true
+        };
+        root.SetPassword("rootpass");
+        await DataStoreProvider.Current.SaveAsync(root);
+
+        var secondUser = new User
+        {
+            UserName = "son",
+            DisplayName = "Son User",
+            Email = "son@example.com",
+            Permissions = new[] { "user" },
+            IsActive = true
+        };
+        secondUser.SetPassword("sonpass");
+        await DataStoreProvider.Current.SaveAsync(secondUser);
+
+        // Act — look up by email
+        var foundRoot = await Users.FindByEmailOrUserNameAsync("root@example.com");
+        var foundSon = await Users.FindByEmailOrUserNameAsync("son@example.com");
+
+        // Assert — each lookup returns the correct user
+        Assert.NotNull(foundRoot);
+        Assert.Equal(root.Id, foundRoot.Id);
+
+        Assert.NotNull(foundSon);
+        Assert.Equal(secondUser.Id, foundSon.Id);
+    }
+
+    [Fact]
+    public async Task FindByEmailOrUserNameAsync_SecondUserPresent_RootLoginNotAffected()
+    {
+        // Arrange — simulates the reported bug:
+        // a second user is added; root must still be found by its own credentials
+        EnsureStore();
+        var root = new User
+        {
+            UserName = "admin",
+            DisplayName = "Administrator",
+            Email = "admin@example.com",
+            Permissions = new[] { "admin", "monitoring" },
+            IsActive = true
+        };
+        root.SetPassword("AdminPass1!");
+        await DataStoreProvider.Current.SaveAsync(root);
+
+        var secondUser = new User
+        {
+            UserName = "son",
+            DisplayName = "Son",
+            Email = "son@example.com",
+            Permissions = new[] { "user" },
+            IsActive = true
+        };
+        secondUser.SetPassword("SonPass1!");
+        await DataStoreProvider.Current.SaveAsync(secondUser);
+
+        // Act — root login lookup after second user exists
+        var found = await Users.FindByEmailOrUserNameAsync("admin");
+
+        // Assert — root is found and its password still verifies correctly
+        Assert.NotNull(found);
+        Assert.Equal(root.Id, found.Id);
+        Assert.True(found.VerifyPassword("AdminPass1!"), "Root password should verify correctly");
+        Assert.False(found.VerifyPassword("SonPass1!"), "Second user password must not match root");
+    }
+
+    [Fact]
+    public async Task FindByUserNameAsync_ReturnsNullForMissingUsername()
+    {
+        // Arrange
+        EnsureStore();
+        var user = new User
+        {
+            UserName = "existing",
+            Email = "existing@example.com",
+            IsActive = true
+        };
+        await DataStoreProvider.Current.SaveAsync(user);
+
+        // Act
+        var found = await Users.FindByUserNameAsync("nonexistent");
+
+        // Assert
+        Assert.Null(found);
+    }
+
+    [Fact]
+    public async Task FindByEmailAsync_ReturnsNullForMissingEmail()
+    {
+        // Arrange
+        EnsureStore();
+        var user = new User
+        {
+            UserName = "test",
+            Email = "test@example.com",
+            IsActive = true
+        };
+        await DataStoreProvider.Current.SaveAsync(user);
+
+        // Act
+        var found = await Users.FindByEmailAsync("nobody@example.com");
+
+        // Assert
+        Assert.Null(found);
+    }
+
     private static HttpContext CreateHttpContext(string? sessionId)
     {
         var context = new DefaultHttpContext();
