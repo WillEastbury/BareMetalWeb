@@ -95,11 +95,11 @@ public static class RouteRegistrationExtensions
 
         // Account management
         host.RegisterRoute("GET /account", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Account", "" }, "Authenticated", true, 1, navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Account", "" }, "Authenticated", true, 1, navGroup: "Account", navAlignment: NavAlignment.Right),
             routeHandlers.AccountHandler));
 
         host.RegisterRoute("GET /account/mfa", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Multi-Factor Authentication", "" }, "Authenticated", true, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Multi-Factor Authentication", "" }, "Authenticated", true, 1, navGroup: "Account", navAlignment: NavAlignment.Right),
             routeHandlers.MfaStatusHandler));
         host.RegisterRoute("GET /account/mfa/setup", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Enable MFA", "" }, "Authenticated", false, 1),
@@ -995,7 +995,7 @@ public static class RouteRegistrationExtensions
                 }
 
                 sb.Append("</div></div></div>");
-                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce);
+                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host);
                 context.Response.ContentType = "text/html; charset=utf-8";
                 await context.Response.WriteAsync(sb.ToString());
             }));

@@ -128,9 +128,9 @@ public static class ReportHtmlRenderer
 
         Write(writer, "</div></div></div></div>");
 
-        // Chrome footer scripts
+        // Chrome footer
         var footerSb = new StringBuilder(512);
-        AppendChromeFooter(footerSb, safeNonce);
+        AppendChromeFooter(footerSb, safeNonce, host);
         Write(writer, footerSb.ToString());
 
         await writer.FlushAsync();
@@ -175,9 +175,50 @@ public static class ReportHtmlRenderer
         sb.Append("</ul></div></div></nav>");
     }
 
-    /// <summary>Appends the closing Bootstrap scripts and body/html tags to <paramref name="sb"/>.</summary>
-    internal static void AppendChromeFooter(StringBuilder sb, string safeNonce)
+    /// <summary>Appends the standard site footer element, closing Bootstrap scripts, and body/html tags to <paramref name="sb"/>.
+    /// When <paramref name="host"/> is provided the footer includes the copyright bar and theme selector matching index.footer.html.</summary>
+    internal static void AppendChromeFooter(StringBuilder sb, string safeNonce, IBareWebHost? host = null)
     {
+        if (host != null)
+        {
+            var copyrightYear = WebUtility.HtmlEncode(host.CopyrightYear);
+            var companyDesc = WebUtility.HtmlEncode(host.CompanyDescription);
+            var appVersion = string.Empty;
+            var metaKeys = host.AppMetaDataKeys;
+            var metaValues = host.AppMetaDataValues;
+            for (int i = 0; i < metaKeys.Length && i < metaValues.Length; i++)
+            {
+                if (string.Equals(metaKeys[i], "AppVersion", StringComparison.OrdinalIgnoreCase))
+                {
+                    appVersion = WebUtility.HtmlEncode(metaValues[i]);
+                    break;
+                }
+            }
+
+            sb.Append("<footer class=\"bg-dark text-white py-2 fixed-bottom bm-footer\">");
+            sb.Append("<div class=\"container-fluid\"><div class=\"row align-items-center\">");
+            sb.Append("<div class=\"col-md-6 small\">");
+            sb.Append("<p class=\"mb-0\">&copy;");
+            sb.Append(copyrightYear);
+            sb.Append(" - ");
+            sb.Append(companyDesc);
+            sb.Append(", All rights reserved. <span id=\"tz-info\" class=\"ms-2\"></span> <span class=\"text-muted ms-2\">v");
+            sb.Append(appVersion);
+            sb.Append("</span></p>");
+            sb.Append("</div>");
+            sb.Append("<div class=\"col-md-6 text-end\">");
+            sb.Append("<label for=\"bm-theme-select\" class=\"bm-theme-label\">Theme</label>");
+            sb.Append("<select id=\"bm-theme-select\" class=\"bm-theme-select\" aria-label=\"Theme selector\">");
+            sb.Append("<option value=\"vapor\">Vapor</option>");
+            sb.Append("<option value=\"darkly\">Darkly</option>");
+            sb.Append("<option value=\"cyborg\">Cyborg</option>");
+            sb.Append("<option value=\"slate\">Slate</option>");
+            sb.Append("<option value=\"superhero\">Superhero</option>");
+            sb.Append("<option value=\"flatly\">Flatly</option>");
+            sb.Append("<option value=\"lux\">Lux</option>");
+            sb.Append("</select></div></div></div></footer>");
+        }
+
         sb.Append("<script src=\"https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js\" crossorigin=\"anonymous\"></script>");
         sb.Append($"<script src=\"/static/js/bundle.js\" nonce=\"{safeNonce}\" defer></script>");
         sb.Append("</body></html>");
