@@ -220,6 +220,15 @@ public static class UserAuth
         return context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Returns true if the request contains an API key header (ApiKey header or Authorization: ApiKey prefix).
+    /// Does not validate the key — use GetRequestUserAsync for full validation.
+    /// CSRF attacks require a browser session cookie and cannot forge explicit API key headers,
+    /// so this is sufficient to determine that CSRF protection can be safely bypassed.
+    /// </summary>
+    public static bool HasApiKeyHeader(HttpContext context)
+        => TryGetApiKey(context, out _);
+
     private static bool TryGetApiKey(HttpContext context, out string apiKey)
     {
         apiKey = string.Empty;

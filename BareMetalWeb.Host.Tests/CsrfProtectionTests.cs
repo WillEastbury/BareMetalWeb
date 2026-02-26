@@ -77,4 +77,24 @@ public class CsrfProtectionTests
     {
         Assert.Throws<ArgumentNullException>(() => CsrfProtection.ValidateApiToken(null!));
     }
+
+    [Fact]
+    public void ValidateApiToken_ReturnsTrue_WhenApiKeyHeaderPresent()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Headers["ApiKey"] = "some-raw-api-key";
+
+        // No CSRF cookie or token set — should still pass because API key bypasses CSRF
+        Assert.True(CsrfProtection.ValidateApiToken(context));
+    }
+
+    [Fact]
+    public void ValidateApiToken_ReturnsTrue_WhenAuthorizationApiKeyHeaderPresent()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Headers["Authorization"] = "ApiKey some-raw-api-key";
+
+        // No CSRF cookie or token set — should still pass because API key bypasses CSRF
+        Assert.True(CsrfProtection.ValidateApiToken(context));
+    }
 }

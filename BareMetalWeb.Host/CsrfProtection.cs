@@ -54,10 +54,16 @@ public static class CsrfProtection
     /// <summary>
     /// Validates CSRF for API requests using double-submit cookie pattern.
     /// Token is read from the X-CSRF-Token header instead of a form field.
+    /// Requests authenticated via an API key header bypass this check because
+    /// CSRF attacks rely on browser session cookies and cannot forge explicit API key headers.
     /// </summary>
     public static bool ValidateApiToken(HttpContext context)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
+
+        // API key requests are not susceptible to CSRF; bypass the token check.
+        if (UserAuth.HasApiKeyHeader(context))
+            return true;
 
         var cookieToken = context.GetCookie(CookieName);
         if (string.IsNullOrWhiteSpace(cookieToken))
