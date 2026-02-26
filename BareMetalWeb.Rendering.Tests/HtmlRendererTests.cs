@@ -76,6 +76,7 @@ internal sealed class StubBareWebHost : IBareWebHost
     public string AppName { get; set; } = "TestApp";
     public string CompanyDescription { get; set; } = "";
     public string CopyrightYear { get; set; } = "2024";
+    public string PrivacyPolicyUrl { get; set; } = "";
     public string[] AppMetaDataKeys { get; } = Array.Empty<string>();
     public string[] AppMetaDataValues { get; set; } = Array.Empty<string>();
     public List<IMenuOption> MenuOptionsList { get; set; } = new();

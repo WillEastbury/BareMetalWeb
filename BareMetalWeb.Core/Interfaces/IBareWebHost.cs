@@ -19,6 +19,7 @@ public interface IBareWebHost
     string AppName { get; set; }
     string CompanyDescription { get; set; }
     string CopyrightYear { get; set; }
+    string PrivacyPolicyUrl { get; set; }
     string[] AppMetaDataKeys { get; }
     string[] AppMetaDataValues { get; set; }
     List<IMenuOption> MenuOptionsList { get; set; }

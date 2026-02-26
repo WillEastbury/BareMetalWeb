@@ -16,6 +16,9 @@ public static class WellKnownSettings
     /// <summary>The copyright year or statement shown in the application footer.</summary>
     public const string AppCopyright = "app.copyright";
 
+    /// <summary>The privacy policy URL shown as a link in the application footer. Leave empty to hide the link.</summary>
+    public const string AppPrivacyPolicyUrl = "app.privacyPolicyUrl";
+
     // ── Kestrel / transport tuning ──────────────────────────────────────
 
     /// <summary>Enable HTTP/2 (true/false). Default: true.</summary>

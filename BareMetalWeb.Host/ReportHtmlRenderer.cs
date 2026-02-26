@@ -202,7 +202,14 @@ public static class ReportHtmlRenderer
             sb.Append(copyrightYear);
             sb.Append(" - ");
             sb.Append(companyDesc);
-            sb.Append(", All rights reserved. <span id=\"tz-info\" class=\"ms-2\"></span> <span class=\"text-muted ms-2\">v");
+            sb.Append(", All rights reserved.");
+            if (!string.IsNullOrWhiteSpace(host.PrivacyPolicyUrl))
+            {
+                sb.Append(" <a href=\"");
+                sb.Append(WebUtility.HtmlEncode(host.PrivacyPolicyUrl));
+                sb.Append("\" class=\"text-white-50 ms-2\">Privacy Policy</a>");
+            }
+            sb.Append(" <span id=\"tz-info\" class=\"ms-2\"></span> <span class=\"text-muted ms-2\">v");
             sb.Append(appVersion);
             sb.Append("</span></p>");
             sb.Append("</div>");
