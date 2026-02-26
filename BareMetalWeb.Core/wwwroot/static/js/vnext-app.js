@@ -282,6 +282,7 @@
         var items = Array.isArray(result) ? result : (result.items || []);
         var total = (result && result.total != null) ? result.total : items.length;
         var listFields = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; });
+        var commands   = meta.commands || [];
 
         var baseUrl = BASE + '/data/' + encodeURIComponent(slug);
 
@@ -366,6 +367,11 @@
                     html += '<a class="btn btn-xs btn-outline-warning btn-sm" href="' + baseUrl + '/' + encId + '/edit"><i class="bi bi-pencil"></i></a>';
                     html += '<button class="btn btn-xs btn-outline-primary btn-sm vnext-row-clone" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '"><i class="bi bi-files"></i></button>';
                     html += '<button class="btn btn-xs btn-outline-danger btn-sm vnext-row-delete" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '"><i class="bi bi-trash"></i></button>';
+                    commands.forEach(function (cmd) {
+                        var cls = cmd.destructive ? 'btn-outline-danger' : 'btn-outline-secondary';
+                        html += '<button class="btn btn-xs btn-sm ' + cls + ' vnext-row-cmd" data-id="' + escHtml(id) + '" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '" title="' + escHtml(cmd.label) + '">' +
+                            (cmd.icon ? '<i class="bi ' + escHtml(cmd.icon) + '"></i>' : escHtml(cmd.label)) + '</button>';
+                    });
                     html += '</div></div></div>';
                 });
             }
@@ -407,6 +413,11 @@
                     html += '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encId + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>';
                     html += '<button class="btn btn-xs btn-outline-primary btn-sm me-1 vnext-row-clone" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '" title="Clone"><i class="bi bi-files"></i></button>';
                     html += '<button class="btn btn-xs btn-outline-danger btn-sm vnext-row-delete" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '" title="Delete"><i class="bi bi-trash"></i></button>';
+                    commands.forEach(function (cmd) {
+                        var cls = cmd.destructive ? 'btn-outline-danger' : 'btn-outline-secondary';
+                        html += '<button class="btn btn-xs btn-sm ms-1 ' + cls + ' vnext-row-cmd" data-id="' + escHtml(id) + '" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '" title="' + escHtml(cmd.label) + '">' +
+                            (cmd.icon ? '<i class="bi ' + escHtml(cmd.icon) + '"></i>' : escHtml(cmd.label)) + '</button>';
+                    });
                     html += '</td></tr>';
                 });
             }
@@ -436,6 +447,26 @@
         if (importBtn) importBtn.addEventListener('click', function () { openImportModal(slug, baseUrl, query); });
 
         wireListEvents(slug, baseUrl, query, top, sort, dir);
+
+        // Wire row command buttons
+        document.querySelectorAll('.vnext-row-cmd').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var id = btn.dataset.id;
+                var cmdName = btn.dataset.cmd;
+                var confirm = btn.dataset.confirm;
+                var doRun = function () {
+                    apiPost(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id) + '/_command/' + encodeURIComponent(cmdName), {})
+                        .then(function () {
+                            showToast('Command executed.', 'success');
+                            clearLookupCache(slug);
+                            BMRouter.navigate(buildUrl(baseUrl, query));
+                        })
+                        .catch(function (err) { showToast('Command failed: ' + err.message, 'error'); });
+                };
+                if (confirm) showConfirm('Run command?', confirm, doRun);
+                else doRun();
+            });
+        });
     }
 
     // ── Alternate view renderers ──────────────────────────────────────────────
@@ -1331,6 +1362,7 @@
         var baseUrl  = BASE + '/data/' + encodeURIComponent(slug);
         var formFields = meta.fields.filter(function (f) { return isCreate ? f.create : f.edit; })
                                     .sort(function (a, b) { return a.order - b.order; });
+        var commands   = (!isCreate && meta.commands) ? meta.commands : [];
 
         var html = '<div class="p-3">';
         // Breadcrumb
@@ -1348,13 +1380,41 @@
             html += renderFormField(f, curVal, meta, item);
         });
 
-        html += '<div class="mt-4 d-flex gap-2">';
+        html += '<div class="mt-4 d-flex gap-2 flex-wrap">';
         html += '<button type="submit" class="btn btn-primary" id="vnext-save-btn"><i class="bi bi-check-lg"></i> Save</button>';
         html += '<a class="btn btn-secondary" href="' + (id ? baseUrl + '/' + encodeURIComponent(id) : baseUrl) + '"><i class="bi bi-x-lg"></i> Cancel</a>';
+        // Command buttons (edit mode only)
+        commands.forEach(function (cmd) {
+            var cls = cmd.destructive ? 'btn-outline-danger' : 'btn-outline-secondary';
+            html += '<button type="button" class="btn btn-sm ' + cls + ' vnext-cmd-btn" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '">' +
+                (cmd.icon ? '<i class="bi ' + escHtml(cmd.icon) + ' me-1"></i>' : '') +
+                escHtml(cmd.label) + '</button>';
+        });
         html += '</div></form></div>';
 
         setContent(html);
         initFormBehaviours(meta, item, slug, id, isCreate, formFields);
+
+        // Wire command buttons
+        document.querySelectorAll('.vnext-cmd-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var cmdName = btn.dataset.cmd;
+                var confirm = btn.dataset.confirm;
+                var doRun = function () {
+                    apiPost(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id) + '/_command/' + encodeURIComponent(cmdName), {})
+                        .then(function () {
+                            showToast('Command executed.', 'success');
+                            return apiFetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id));
+                        })
+                        .then(function (updated) {
+                            if (updated) renderFormView(meta, updated, slug, id);
+                        })
+                        .catch(function (err) { showToast('Command failed: ' + err.message, 'error'); });
+                };
+                if (confirm) showConfirm('Run command?', confirm, doRun);
+                else doRun();
+            });
+        });
     }
 
     function renderFormField(f, val, meta, item) {
