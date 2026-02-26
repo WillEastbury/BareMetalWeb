@@ -1212,9 +1212,9 @@
                 var confirm = btn.dataset.confirm;
                 var doRun = function () {
                     apiPost(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id) + '/_command/' + encodeURIComponent(cmdName), item)
-                        .then(function (updated) {
-                            showToast('Command executed.', 'success');
-                            if (updated) renderViewResult(meta, updated, slug, id);
+                        .then(function (resp) {
+                            showToast((resp && resp.message) || 'Command executed.', 'success');
+                            if (resp && resp.data) renderViewResult(meta, resp.data, slug, id);
                         })
                         .catch(function (err) { showToast('Command failed: ' + err.message, 'error'); });
                 };
