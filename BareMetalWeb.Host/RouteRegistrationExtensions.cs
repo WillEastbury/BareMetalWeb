@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -572,6 +573,8 @@ public static class RouteRegistrationExtensions
     ///   <item><description>GET /meta/entity/{name} — returns a <see cref="RuntimeEntityModel"/> as JSON, including EntityId, schemaHash, indexes, and actions.</description></item>
     ///   <item><description>POST /query — accepts { entity, clauses, sorts, skip, top } and returns matching records.</description></item>
     ///   <item><description>POST /intent — accepts a <see cref="BareMetalWeb.Runtime.CommandIntent"/> and executes create/update/delete/action.</description></item>
+    ///   <item><description>GET /api/meta/registered-types — lists C# entity types available for metadata import.</description></item>
+    ///   <item><description>POST /api/meta/seed-from-types — seeds EntityDefinition records from registered C# entity types (admin only). Pass ?overwrite=true to replace existing records.</description></item>
     /// </list>
     /// Must be registered BEFORE <see cref="RegisterApiRoutes"/> to avoid slug conflicts.
     /// </summary>
@@ -730,6 +733,55 @@ public static class RouteRegistrationExtensions
                 context.Response.StatusCode = result.Success ? 200 : 400;
                 context.Response.ContentType = "application/json";
                 await context.Response.WriteAsync(JsonSerializer.Serialize(result, jsonOptions));
+            }));
+
+        // GET /api/meta/registered-types — lists C# entity types available for metadata import
+        host.RegisterRoute("GET /api/meta/registered-types", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var types = DataScaffold.Entities
+                    .Where(m => m.Type != typeof(DynamicDataObject)
+                                && m.Type.GetCustomAttribute<DataEntityAttribute>() != null)
+                    .OrderBy(m => m.Name)
+                    .Select(m => (object)new Dictionary<string, object?>
+                    {
+                        ["name"] = m.Name,
+                        ["slug"] = m.Slug,
+                        ["typeName"] = m.Type.Name,
+                        ["assembly"] = m.Type.Assembly.GetName().Name,
+                        ["showOnNav"] = m.ShowOnNav,
+                        ["navGroup"] = m.NavGroup,
+                        ["fieldCount"] = m.Fields.Count
+                    })
+                    .ToArray();
+
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(types, jsonOptions));
+            }));
+
+        // POST /api/meta/seed-from-types — seeds EntityDefinition records for registered C# entity types
+        host.RegisterRoute("POST /api/meta/seed-from-types", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var overwrite = context.Request.Query.TryGetValue("overwrite", out var ovVal)
+                    && string.Equals(ovVal, "true", StringComparison.OrdinalIgnoreCase);
+
+                var messages = new List<string>();
+                var seeded = await BareMetalWeb.Runtime.MetadataSeeder
+                    .SeedFromRegisteredEntitiesAsync(
+                        DataStoreProvider.Current,
+                        overwrite,
+                        msg => messages.Add(msg),
+                        context.RequestAborted)
+                    .ConfigureAwait(false);
+
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(
+                    JsonSerializer.Serialize(
+                        new { seeded, count = seeded.Count, messages },
+                        jsonOptions));
             }));
     }
 
