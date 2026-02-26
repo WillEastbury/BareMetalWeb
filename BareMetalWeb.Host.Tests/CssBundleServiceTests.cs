@@ -41,6 +41,45 @@ public class CssBundleServiceTests : IDisposable
             content,
             Encoding.UTF8);
 
+    // ── DefaultThemes coverage ────────────────────────────────────────────────
+
+    [Fact]
+    public void DefaultThemes_Contains25Themes()
+    {
+        Assert.Equal(25, CssBundleService.DefaultThemes.Length);
+    }
+
+    [Theory]
+    [InlineData("cerulean")]
+    [InlineData("cosmo")]
+    [InlineData("cyborg")]
+    [InlineData("darkly")]
+    [InlineData("flatly")]
+    [InlineData("journal")]
+    [InlineData("litera")]
+    [InlineData("lumen")]
+    [InlineData("lux")]
+    [InlineData("materia")]
+    [InlineData("minty")]
+    [InlineData("morph")]
+    [InlineData("pulse")]
+    [InlineData("quartz")]
+    [InlineData("sandstone")]
+    [InlineData("simplex")]
+    [InlineData("sketchy")]
+    [InlineData("slate")]
+    [InlineData("solar")]
+    [InlineData("spacelab")]
+    [InlineData("superhero")]
+    [InlineData("united")]
+    [InlineData("vapor")]
+    [InlineData("yeti")]
+    [InlineData("zephyr")]
+    public void DefaultThemes_ContainsTheme(string theme)
+    {
+        Assert.Contains(theme, CssBundleService.DefaultThemes);
+    }
+
     // ── BuildBundles ──────────────────────────────────────────────────────────
 
     [Fact]
@@ -64,6 +103,20 @@ public class CssBundleServiceTests : IDisposable
         CssBundleService.BuildBundles(emptyRoot);
     }
 
+    [Fact]
+    public void BuildBundles_MultipleThemes_AllLoaded()
+    {
+        foreach (var theme in new[] { "darkly", "flatly", "slate" })
+            WriteThemeCss(theme, $"/* {theme} */");
+
+        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+
+        var loaded = CssBundleService.LoadedThemes();
+        Assert.Contains("darkly",  loaded);
+        Assert.Contains("flatly",  loaded);
+        Assert.Contains("slate",   loaded);
+    }
+
     // ── TryServeAsync ─────────────────────────────────────────────────────────
 
     [Fact]
@@ -80,11 +133,20 @@ public class CssBundleServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task TryServeAsync_UnknownTheme_ReturnsFalse()
+    public async Task TryServeAsync_UnknownPath_ReturnsFalse()
     {
-        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+        var context = CreateContext("GET", "/static/js/bundle.js");
+        var result = await CssBundleService.TryServeAsync(context);
 
-        var context = CreateContext("GET", "/static/css/themes/nonexistent.min.css");
+        Assert.False(result);
+    }
+
+    [Fact]
+    public async Task TryServeAsync_UnknownThemeName_ReturnsFalse()
+    {
+        // A path with a theme name that is NOT in DefaultThemes (and never will be)
+        // must always return false, regardless of what other tests have done.
+        var context = CreateContext("GET", "/static/css/themes/nonexistent-xyz-abc.min.css");
         var result = await CssBundleService.TryServeAsync(context);
 
         Assert.False(result);
@@ -158,12 +220,25 @@ public class CssBundleServiceTests : IDisposable
         Assert.Equal(0, context.Response.Body.Length);
     }
 
+    [Fact]
+    public async Task TryServeAsync_SetsCacheControlHeader()
+    {
+        WriteThemeCss("minty", "/* minty */");
+        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+
+        var context = CreateContext("GET", "/static/css/themes/minty.min.css");
+        await CssBundleService.TryServeAsync(context);
+
+        Assert.Contains("public", context.Response.Headers.CacheControl.ToString());
+        Assert.Contains("max-age=86400", context.Response.Headers.CacheControl.ToString());
+    }
+
     // ── EnsureAssetsAsync (pre-existing files — no network required) ──────────
 
     [Fact]
     public async Task EnsureAssetsAsync_AllFilesExist_SkipsDownloadAndLoadsIntoMemory()
     {
-        // Pre-create all required files so no HTTP calls are made
+        // Pre-create all required files so no HTTP calls are made.
         File.WriteAllText(Path.Combine(_tempRoot, "js", "bootstrap.bundle.min.js"), "/* bootstrap js */");
         File.WriteAllBytes(Path.Combine(_tempRoot, "fonts", "bootstrap-icons.woff2"), new byte[] { 0x77, 0x4f, 0x46, 0x32 });
 
@@ -173,10 +248,10 @@ public class CssBundleServiceTests : IDisposable
         var logged = new System.Collections.Generic.List<string>();
         await CssBundleService.EnsureAssetsAsync(_tempRoot, msg => logged.Add(msg));
 
-        // No "Downloading" messages expected since all files already existed
+        // No "Downloading" messages expected since all files already existed.
         Assert.DoesNotContain(logged, m => m.StartsWith("Downloading"));
 
-        // BuildBundles is called at end — themes should be in memory
+        // BuildBundles is called at end — all 25 themes should be in memory.
         Assert.True(CssBundleService.HasBundles);
         foreach (var theme in CssBundleService.DefaultThemes)
             Assert.Contains(theme, CssBundleService.LoadedThemes());
@@ -185,25 +260,21 @@ public class CssBundleServiceTests : IDisposable
     [Fact]
     public async Task EnsureAssetsAsync_CreatesRequiredDirectories()
     {
-        // Use a root with no subdirectories at all
+        // Use a root that has css/ and js/ but NOT themes/ or fonts/.
         var freshRoot = Path.Combine(Path.GetTempPath(), "bmw-fresh-" + Guid.NewGuid().ToString("N")[..8]);
         Directory.CreateDirectory(Path.Combine(freshRoot, "css"));
         Directory.CreateDirectory(Path.Combine(freshRoot, "js"));
 
         try
         {
-            // Pre-create all files so no network access is needed
-            File.WriteAllText(Path.Combine(freshRoot, "js", "bootstrap.bundle.min.js"), "/* js */");
-
             var fontsDir  = Path.Combine(freshRoot, "fonts");
             var themesDir = Path.Combine(freshRoot, "css", "themes");
 
-            // Ensure directories don't pre-exist
             Assert.False(Directory.Exists(fontsDir));
             Assert.False(Directory.Exists(themesDir));
 
-            // Create them manually (simulating what EnsureAssetsAsync does internally
-            // after it creates dirs, it tries to download — pre-create woff2 and themes)
+            // Pre-create files to avoid real network calls inside EnsureAssetsAsync.
+            File.WriteAllText(Path.Combine(freshRoot, "js", "bootstrap.bundle.min.js"), "/* js */");
             Directory.CreateDirectory(fontsDir);
             Directory.CreateDirectory(themesDir);
             File.WriteAllBytes(Path.Combine(fontsDir, "bootstrap-icons.woff2"), Array.Empty<byte>());
@@ -223,14 +294,23 @@ public class CssBundleServiceTests : IDisposable
     }
 
     [Fact]
-    public void DefaultThemes_ContainsExpectedThemes()
+    public async Task EnsureAssetsAsync_SetsStaticRootForLazyLoading()
     {
-        Assert.Contains("vapor",     CssBundleService.DefaultThemes);
-        Assert.Contains("darkly",    CssBundleService.DefaultThemes);
-        Assert.Contains("cyborg",    CssBundleService.DefaultThemes);
-        Assert.Contains("slate",     CssBundleService.DefaultThemes);
-        Assert.Contains("superhero", CssBundleService.DefaultThemes);
-        Assert.Contains("flatly",    CssBundleService.DefaultThemes);
-        Assert.Contains("lux",       CssBundleService.DefaultThemes);
+        // Pre-create all files so no network is needed.
+        File.WriteAllText(Path.Combine(_tempRoot, "js", "bootstrap.bundle.min.js"), "/* js */");
+        File.WriteAllBytes(Path.Combine(_tempRoot, "fonts", "bootstrap-icons.woff2"), Array.Empty<byte>());
+        foreach (var theme in CssBundleService.DefaultThemes)
+            WriteThemeCss(theme, $"/* {theme} */");
+
+        await CssBundleService.EnsureAssetsAsync(_tempRoot);
+
+        // After EnsureAssetsAsync, all DefaultThemes must be served from cache.
+        foreach (var theme in CssBundleService.DefaultThemes)
+        {
+            var context = CreateContext("GET", $"/static/css/themes/{theme}.min.css");
+            var result = await CssBundleService.TryServeAsync(context);
+            Assert.True(result, $"Theme '{theme}' should be served after EnsureAssetsAsync");
+            Assert.Equal(200, context.Response.StatusCode);
+        }
     }
 }
