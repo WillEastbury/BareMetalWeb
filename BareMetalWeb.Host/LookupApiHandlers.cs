@@ -420,6 +420,14 @@ public static class LookupApiHandlers
                     : SortDirection.Asc
             });
         }
+        else if (!string.IsNullOrWhiteSpace(meta.DefaultSortField) && viewableFields.Contains(meta.DefaultSortField))
+        {
+            queryDef.Sorts.Add(new SortClause
+            {
+                Field = meta.DefaultSortField,
+                Direction = meta.DefaultSortDirection
+            });
+        }
 
         // Parse pagination: ?skip=0&top=10
         if (int.TryParse(context.Request.Query["skip"].ToString(), out var skip) && skip > 0)
