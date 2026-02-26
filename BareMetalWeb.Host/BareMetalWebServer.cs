@@ -276,7 +276,6 @@ public class BareMetalWebServer : IBareWebHost
         string path = method + " " + requestPath;
         string sourceIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         context.SetApp(this);
-        await BuildAppInfoMenuOptionsAsync(context, context.RequestAborted).ConfigureAwait(false);
 
         bool isHttps = IsHttpsRequest(context, TrustForwardedHeaders);
         context.Response.Headers["X-BareMetal-IsHttps"] = isHttps ? "true" : "false";
@@ -345,6 +344,10 @@ public class BareMetalWebServer : IBareWebHost
                 BufferedLogger.LogInfo($"{path}|{context.Response.StatusCode}|{sourceIp}|static");
                 return;
             }
+
+            // Build the menu/session context now — only for actual page/API requests,
+            // not for static assets (bundles, files) served above.
+            await BuildAppInfoMenuOptionsAsync(context, context.RequestAborted).ConfigureAwait(false);
 
             // (simplistic routing and parameter service) - Exact match first
             if (routes.TryGetValue(path, out RouteHandlerData page))
