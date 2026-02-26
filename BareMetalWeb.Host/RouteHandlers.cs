@@ -2191,6 +2191,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: true);
         await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
         ApplyUserPasswordIfNeeded(meta, instance, values, errors, isCreate: true);
+        await ValidateUserUniquenessAsync(meta, instance, excludeId: null, errors, context.RequestAborted).ConfigureAwait(false);
 
         // Run entity-level expression validation (cross-field rules)
         var validationResult = DataScaffold.ValidateEntity(meta, instance);
@@ -2356,6 +2357,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
         await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
         ApplyUserPasswordIfNeeded(meta, instance, values, errors, isCreate: false);
+        await ValidateUserUniquenessAsync(meta, instance, excludeId: id, errors, context.RequestAborted).ConfigureAwait(false);
 
         // Run entity-level expression validation (cross-field rules)
         var validationResult = DataScaffold.ValidateEntity(meta, instance);
@@ -5762,6 +5764,29 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             user.SetPassword(password!);
+        }
+    }
+
+    private static async ValueTask ValidateUserUniquenessAsync(DataEntityMetadata meta, object instance, string? excludeId, List<string> errors, CancellationToken cancellationToken)
+    {
+        if (meta.Type != typeof(User))
+            return;
+
+        if (instance is not User user)
+            return;
+
+        if (!string.IsNullOrWhiteSpace(user.UserName))
+        {
+            var existing = await Users.FindByUserNameAsync(user.UserName, cancellationToken).ConfigureAwait(false);
+            if (existing != null && !string.Equals(existing.Id, excludeId, StringComparison.OrdinalIgnoreCase))
+                errors.Add("Username is already taken.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(user.Email))
+        {
+            var existing = await Users.FindByEmailAsync(user.Email, cancellationToken).ConfigureAwait(false);
+            if (existing != null && !string.Equals(existing.Id, excludeId, StringComparison.OrdinalIgnoreCase))
+                errors.Add("Email is already registered.");
         }
     }
 
