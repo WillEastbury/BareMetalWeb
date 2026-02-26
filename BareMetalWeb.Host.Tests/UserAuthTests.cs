@@ -219,6 +219,84 @@ public class UserAuthTests : IDisposable
         Assert.Null(result);
     }
 
+    [Fact]
+    public async Task GetSessionAsync_RecentlyExtendedSession_SkipsSave()
+    {
+        // Arrange
+        EnsureStore();
+        var now = DateTime.UtcNow;
+        // Session was just created: ExpiresUtc is essentially now + 8h (< 1 minute elapsed since last extension)
+        var session = new UserSession
+        {
+            UserId = "user123",
+            UserName = "testuser",
+            DisplayName = "Test User",
+            Permissions = Array.Empty<string>(),
+            IssuedUtc = now,
+            LastSeenUtc = now,
+            ExpiresUtc = now.AddHours(8), // Just extended; newExpiry - ExpiresUtc ≈ 0 < 1 minute
+            RememberMe = false,
+            IsRevoked = false,
+            CreatedBy = "testuser",
+            UpdatedBy = "testuser"
+        };
+
+        await DataStoreProvider.Current.SaveAsync(session);
+
+        var context = CreateHttpContext(session.Id);
+        var originalExpiresUtc = session.ExpiresUtc;
+
+        // Act
+        var result = await UserAuth.GetSessionAsync(context);
+
+        // Assert — session returned successfully
+        Assert.NotNull(result);
+        Assert.Equal(session.Id, result.Id);
+
+        // Session should NOT have been re-saved because the extension gain is < 1 minute
+        var storedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Id);
+        Assert.NotNull(storedSession);
+        Assert.Equal(originalExpiresUtc, storedSession.ExpiresUtc);
+    }
+
+    [Fact]
+    public void GetSession_RecentlyExtendedSession_SkipsSave()
+    {
+        // Arrange
+        EnsureStore();
+        var now = DateTime.UtcNow;
+        var session = new UserSession
+        {
+            UserId = "user123",
+            UserName = "testuser",
+            DisplayName = "Test User",
+            Permissions = Array.Empty<string>(),
+            IssuedUtc = now,
+            LastSeenUtc = now,
+            ExpiresUtc = now.AddHours(8),
+            RememberMe = false,
+            IsRevoked = false,
+            CreatedBy = "testuser",
+            UpdatedBy = "testuser"
+        };
+
+        DataStoreProvider.Current.Save(session);
+
+        var context = CreateHttpContext(session.Id);
+        var originalExpiresUtc = session.ExpiresUtc;
+
+        // Act
+        var result = UserAuth.GetSession(context);
+
+        // Assert — session returned successfully
+        Assert.NotNull(result);
+
+        // Session should NOT have been re-saved because the extension gain is < 1 minute
+        var storedSession = DataStoreProvider.Current.Load<UserSession>(session.Id);
+        Assert.NotNull(storedSession);
+        Assert.Equal(originalExpiresUtc, storedSession.ExpiresUtc);
+    }
+
     private static HttpContext CreateHttpContext(string? sessionId)
     {
         var context = new DefaultHttpContext();

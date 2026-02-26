@@ -52,17 +52,21 @@ public static class UserAuth
             return null;
         }
 
-        // Update LastSeenUtc and extend ExpiresUtc for sliding expiration
-        // Note: Session updates are not synchronized across concurrent requests.
-        // In the rare case of simultaneous access, the last write wins. This is
-        // acceptable for session management and avoids locking overhead.
+        // Update LastSeenUtc and extend ExpiresUtc for sliding expiration.
+        // Only persist when the new expiry meaningfully extends the session (> 1 minute gain).
+        // This avoids high-frequency concurrent saves on burst requests, which can cause a
+        // transient race where a concurrent Load reads a stale (already-moved) record location.
         var now = DateTime.UtcNow;
+        var lifetime = session.RememberMe ? RememberMeLifetime : DefaultSessionLifetime;
+        var newExpiry = now.Add(lifetime);
         session.LastSeenUtc = now;
-        session.ExpiresUtc = now.Add(session.RememberMe ? RememberMeLifetime : DefaultSessionLifetime);
-        DataStoreProvider.Current.Save(session);
-
-        if (session.RememberMe)
-            ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
+        if (newExpiry - session.ExpiresUtc > TimeSpan.FromMinutes(1))
+        {
+            session.ExpiresUtc = newExpiry;
+            DataStoreProvider.Current.Save(session);
+            if (session.RememberMe)
+                ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
+        }
 
         return session;
     }
@@ -102,17 +106,21 @@ public static class UserAuth
             return null;
         }
 
-        // Update LastSeenUtc and extend ExpiresUtc for sliding expiration
-        // Note: Session updates are not synchronized across concurrent requests.
-        // In the rare case of simultaneous access, the last write wins. This is
-        // acceptable for session management and avoids locking overhead.
+        // Update LastSeenUtc and extend ExpiresUtc for sliding expiration.
+        // Only persist when the new expiry meaningfully extends the session (> 1 minute gain).
+        // This avoids high-frequency concurrent saves on burst requests, which can cause a
+        // transient race where a concurrent Load reads a stale (already-moved) record location.
         var now = DateTime.UtcNow;
+        var lifetime = session.RememberMe ? RememberMeLifetime : DefaultSessionLifetime;
+        var newExpiry = now.Add(lifetime);
         session.LastSeenUtc = now;
-        session.ExpiresUtc = now.Add(session.RememberMe ? RememberMeLifetime : DefaultSessionLifetime);
-        await DataStoreProvider.Current.SaveAsync(session, cancellationToken).ConfigureAwait(false);
-
-        if (session.RememberMe)
-            ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
+        if (newExpiry - session.ExpiresUtc > TimeSpan.FromMinutes(1))
+        {
+            session.ExpiresUtc = newExpiry;
+            await DataStoreProvider.Current.SaveAsync(session, cancellationToken).ConfigureAwait(false);
+            if (session.RememberMe)
+                ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
+        }
 
         return session;
     }
