@@ -406,9 +406,15 @@
             html += '<thead><tr>';
             html += '<th scope="col"><input type="checkbox" class="form-check-input" id="vnext-select-all" title="Select all"></th>';
             listFields.forEach(function (f) {
-                var sortIcon = '';
-                if (sort === f.name) sortIcon = dir === 'asc' ? ' <i class="bi bi-sort-up"></i>' : ' <i class="bi bi-sort-down"></i>';
-                html += '<th scope="col"><a class="text-decoration-none text-reset" href="' + escHtml(buildSortUrl(f.name)) + '">' + escHtml(f.label) + sortIcon + '</a></th>';
+                var sortIcon;
+                if (sort === f.name) {
+                    sortIcon = dir === 'asc'
+                        ? ' <i class="bi bi-arrow-up" aria-hidden="true"></i>'
+                        : ' <i class="bi bi-arrow-down" aria-hidden="true"></i>';
+                } else {
+                    sortIcon = ' <i class="bi bi-arrow-down-up text-muted bm-sort-icon-dim" aria-hidden="true"></i>';
+                }
+                html += '<th scope="col"><a class="text-decoration-none text-reset" href="' + escHtml(buildSortUrl(f.name)) + '" title="Sort by ' + escHtml(f.label) + '">' + escHtml(f.label) + sortIcon + '</a></th>';
             });
             html += '<th scope="col">Actions</th></tr></thead>';
             html += '<tbody>';
