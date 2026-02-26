@@ -464,7 +464,10 @@ public class HtmlRenderer : IHtmlRenderer
         // Keys prefixed with "html_" carry pre-rendered HTML and must be written raw.
         // All other tokens are HTML-encoded for defense-in-depth XSS protection.
         if (keySpan.StartsWith("html_".AsSpan(), StringComparison.Ordinal))
-            Write(writer, value);
+        {
+            if (!string.IsNullOrEmpty(value))
+                Write(writer, value);
+        }
         else
             WriteHtmlEncoded(writer, value);
     }
