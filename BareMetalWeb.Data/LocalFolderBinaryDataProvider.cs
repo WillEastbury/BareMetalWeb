@@ -490,9 +490,24 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         var bytes = store.Read(location);
         if (bytes == null)
         {
-            if (_clusteredLocationMaps.TryGetValue(type.Name, out var map))
-                map.TryRemove(id, out _);
-            return default;
+            // Location may be stale: a concurrent Save may have moved the record to a new slot.
+            // Evict the cache entry and retry once using the index store as the authoritative source.
+            if (_clusteredLocationMaps.TryGetValue(type.Name, out var locationMap))
+            {
+                locationMap.TryRemove(id, out _);
+                bool foundFresh = _indexStore.TryGetLatestValue(type.Name, ClusteredIndexFieldName, id, out var freshLocation, normalizeKey: false);
+                bool isDifferentLocation = foundFresh
+                    && !string.IsNullOrWhiteSpace(freshLocation)
+                    && !string.Equals(freshLocation, location, StringComparison.OrdinalIgnoreCase);
+                if (isDifferentLocation)
+                {
+                    bytes = store.Read(freshLocation);
+                    if (bytes != null)
+                        locationMap[id] = freshLocation;
+                }
+            }
+            if (bytes == null)
+                return default;
         }
 
         try
