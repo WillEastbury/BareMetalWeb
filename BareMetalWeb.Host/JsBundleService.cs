@@ -58,6 +58,8 @@ public static class JsBundleService
     private sealed class BundleData
     {
         public byte[]? Bytes;
+        public byte[]? BrotliBytes;
+        public byte[]? GzipBytes;
         public string? ETag;
         public string LastModified = string.Empty;
     }
@@ -97,6 +99,8 @@ public static class JsBundleService
         _bundles[path] = new BundleData
         {
             Bytes = bytes,
+            BrotliBytes = CompressionHelper.CompressBrotli(bytes),
+            GzipBytes = CompressionHelper.CompressGzip(bytes),
             LastModified = (latestWrite == DateTime.MinValue ? DateTime.UtcNow : latestWrite).ToString("R"),
             ETag = $"\"{ComputeETag(bytes)}\""
         };
@@ -141,10 +145,21 @@ public static class JsBundleService
         context.Response.Headers.CacheControl = "public, max-age=86400";
         context.Response.Headers.ETag = bundle.ETag;
         context.Response.Headers.LastModified = bundle.LastModified;
-        context.Response.ContentLength = bundle.Bytes.Length;
+
+        var encoding = CompressionHelper.SelectEncoding(context);
+        var rawBytes = bundle.Bytes!; // confirmed non-null above
+        var responseBytes = encoding switch
+        {
+            "br"   => bundle.BrotliBytes ?? rawBytes,
+            "gzip" => bundle.GzipBytes   ?? rawBytes,
+            _      => rawBytes
+        };
+
+        CompressionHelper.ApplyHeaders(context.Response, encoding);
+        context.Response.ContentLength = responseBytes.Length;
 
         if (HttpMethods.IsGet(context.Request.Method))
-            await context.Response.Body.WriteAsync(bundle.Bytes);
+            await context.Response.Body.WriteAsync(responseBytes);
 
         return true;
     }

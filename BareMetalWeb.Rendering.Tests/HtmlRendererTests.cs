@@ -1,3 +1,5 @@
+using System.IO;
+using System.IO.Compression;
 using System.Text;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
@@ -404,5 +406,91 @@ public class HtmlRendererTests
         var html = await RenderAsync(template, templateLoops: loops);
         Assert.DoesNotContain("<Evil>", html);
         Assert.Contains("&lt;Evil&gt;", html);
+    }
+}
+
+public class HtmlRendererCompressionTests
+{
+    private readonly StubFragmentRenderer _fragments = new();
+    private readonly StubBareWebHost _app = new();
+    private readonly HtmlRenderer _renderer;
+
+    public HtmlRendererCompressionTests()
+    {
+        _renderer = new HtmlRenderer(_fragments);
+    }
+
+    private static PageInfo MakePageInfo(string bodyContent = "Hello World")
+    {
+        var template = new StubHtmlTemplate { Body = bodyContent };
+        var meta = new PageMetaData(template, 200);
+        var ctx = new PageContext(Array.Empty<string>(), Array.Empty<string>());
+        return new PageInfo(meta, ctx);
+    }
+
+    private static DefaultHttpContext CreateHttpContext(string? acceptEncoding = null)
+    {
+        var context = new DefaultHttpContext();
+        context.Response.Body = new MemoryStream();
+        if (acceptEncoding != null)
+            context.Request.Headers.AcceptEncoding = acceptEncoding;
+        return context;
+    }
+
+    [Fact]
+    public async Task RenderPage_WithBrotliAcceptEncoding_SetsBrContentEncoding()
+    {
+        var context = CreateHttpContext("br");
+        await _renderer.RenderPage(context, MakePageInfo(), _app);
+
+        Assert.Equal("br", context.Response.Headers.ContentEncoding.ToString());
+        Assert.Contains("Accept-Encoding", context.Response.Headers.Vary.ToString());
+    }
+
+    [Fact]
+    public async Task RenderPage_WithGzipAcceptEncoding_SetsGzipContentEncoding()
+    {
+        var context = CreateHttpContext("gzip");
+        await _renderer.RenderPage(context, MakePageInfo(), _app);
+
+        Assert.Equal("gzip", context.Response.Headers.ContentEncoding.ToString());
+        Assert.Contains("Accept-Encoding", context.Response.Headers.Vary.ToString());
+    }
+
+    [Fact]
+    public async Task RenderPage_WithNoAcceptEncoding_NoContentEncodingHeader()
+    {
+        var context = CreateHttpContext();
+        await _renderer.RenderPage(context, MakePageInfo(), _app);
+
+        Assert.Empty(context.Response.Headers.ContentEncoding.ToString());
+    }
+
+    [Fact]
+    public async Task RenderPage_WithBrotliAcceptEncoding_BodyIsDecompressibleBrotli()
+    {
+        var context = CreateHttpContext("br");
+        await _renderer.RenderPage(context, MakePageInfo("Test content for brotli"), _app);
+
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var bs = new BrotliStream(context.Response.Body, CompressionMode.Decompress);
+        using var result = new MemoryStream();
+        bs.CopyTo(result);
+        var html = Encoding.UTF8.GetString(result.ToArray());
+        Assert.Contains("Test content for brotli", html);
+    }
+
+    [Fact]
+    public async Task RenderPage_WithGzipAcceptEncoding_BodyIsDecompressibleGzip()
+    {
+        var context = CreateHttpContext("gzip");
+        await _renderer.RenderPage(context, MakePageInfo("Test content for gzip"), _app);
+
+        context.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var gz = new GZipStream(context.Response.Body, CompressionMode.Decompress);
+        using var result = new MemoryStream();
+        gz.CopyTo(result);
+        var html = Encoding.UTF8.GetString(result.ToArray());
+        Assert.Contains("Test content for gzip", html);
     }
 }

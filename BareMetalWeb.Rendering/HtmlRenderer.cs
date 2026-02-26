@@ -529,7 +529,12 @@ public class HtmlRenderer : IHtmlRenderer
         );
         context.Response.StatusCode = page.PageMetaData.StatusCode;
         context.Response.ContentType = page.PageMetaData.Template.ContentTypeHeader;
-        await context.Response.BodyWriter.WriteAsync(output);
+
+        var encoding = CompressionHelper.SelectEncoding(context);
+        var responseBytes = CompressionHelper.Compress(output, encoding);
+        CompressionHelper.ApplyHeaders(context.Response, encoding);
+        context.Response.ContentLength = responseBytes.Length;
+        await context.Response.BodyWriter.WriteAsync(responseBytes);
 
     }
 }
