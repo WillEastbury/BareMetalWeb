@@ -225,7 +225,6 @@ public static class ReportHtmlRenderer
             sb.Append("</select></div></div></div></footer>");
         }
 
-        sb.Append("<script src=\"/static/js/bootstrap.bundle.min.js\"></script>");
         sb.Append($"<script src=\"/static/js/bundle.js\" nonce=\"{safeNonce}\" defer></script>");
         sb.Append("</body></html>");
     }
