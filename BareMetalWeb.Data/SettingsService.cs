@@ -44,12 +44,22 @@ public static class SettingsService
         return defaultValue;
     }
 
+    /// <summary>
+    /// Optional callback invoked whenever a single setting is removed from the cache.
+    /// Register this in the host layer to propagate value changes to in-memory server state.
+    /// The argument is the setting ID that was invalidated.
+    /// </summary>
+    public static Action<string>? OnSettingInvalidated { get; set; }
+
     /// <summary>Clears all cached settings so the next read hits the store.</summary>
     public static void InvalidateCache() => _cache.Clear();
 
-    /// <summary>Removes a single setting from the cache.</summary>
-    public static void InvalidateCache(string settingId) =>
+    /// <summary>Removes a single setting from the cache and notifies any registered listener.</summary>
+    public static void InvalidateCache(string settingId)
+    {
         _cache.TryRemove(settingId, out _);
+        OnSettingInvalidated?.Invoke(settingId);
+    }
 
     /// <summary>
     /// Seeds the store with the supplied default settings, skipping any that already exist.
