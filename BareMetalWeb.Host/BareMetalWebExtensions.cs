@@ -118,10 +118,13 @@ public static class BareMetalWebExtensions
         IHtmlTemplate mainTemplate = templateStore.Get("Index");
         CancellationTokenSource cts = new CancellationTokenSource();
 
-        // App info
+        // App info — create from config then override with any admin-edited store values
         BareMetalWebServer appInfo = ProgramSetup.CreateAppInfo(
             app, logger, htmlRenderer, pageInfoFactory, mainTemplate, metricsTracker, throttling, cts);
-        appInfo.PrivacyPolicyUrl = app.Configuration.GetValue("AppInfo:PrivacyPolicyUrl", "");
+        appInfo.AppName            = SettingsService.GetValue(WellKnownSettings.AppName,           appInfo.AppName);
+        appInfo.CompanyDescription = SettingsService.GetValue(WellKnownSettings.AppCompany,        appInfo.CompanyDescription);
+        appInfo.CopyrightYear      = SettingsService.GetValue(WellKnownSettings.AppCopyright,      appInfo.CopyrightYear);
+        appInfo.PrivacyPolicyUrl   = SettingsService.GetValue(WellKnownSettings.AppPrivacyPolicyUrl, "");
 
         // Infrastructure configuration
         ProgramSetup.ConfigureStaticFiles(app, appInfo);

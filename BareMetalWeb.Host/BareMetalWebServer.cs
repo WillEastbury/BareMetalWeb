@@ -29,9 +29,24 @@ public class BareMetalWebServer : IBareWebHost
     public IClientRequestTracker ClientRequests { get; }
     public IHtmlRenderer HtmlRenderer { get; }
     public Dictionary<string, RouteHandlerData> routes { get; set; } = new();
-    public string AppName { get; set; }
-    public string CompanyDescription { get; set; }
-    public string CopyrightYear { get; set; }
+    private string _appName = "";
+    public string AppName
+    {
+        get => _appName;
+        set { _appName = value; if (AppMetaDataValues != null) AppMetaDataValues[0] = value; }
+    }
+    private string _companyDescription = "";
+    public string CompanyDescription
+    {
+        get => _companyDescription;
+        set { _companyDescription = value; if (AppMetaDataValues != null) AppMetaDataValues[1] = value; }
+    }
+    private string _copyrightYear = "";
+    public string CopyrightYear
+    {
+        get => _copyrightYear;
+        set { _copyrightYear = value; if (AppMetaDataValues != null) AppMetaDataValues[2] = value; }
+    }
     private string _privacyPolicyUrl = "";
     public string PrivacyPolicyUrl
     {
