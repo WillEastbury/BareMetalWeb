@@ -46,6 +46,7 @@ Detailed guides for specific features and view types.
 
 - [Calculated Fields](CALCULATED_FIELDS_IMPLEMENTATION.md) — Client-side and server-side expression-based field calculations
 - [Computed Fields](COMPUTED_FIELDS.md) — Server-side memoized snapshots and live lookups from related entities
+- [Entity Designer](ENTITY_DESIGNER.md) — Visual tool for creating virtual entity definitions without writing code
 - [Bulk Operations](BULK_OPERATIONS.md) — Bulk create, update, and delete on entity list views
 - [Entity List Enhancements](ENTITY_LIST_ENHANCEMENTS.md) — Search, filtering, sorting, and pagination on list views
 - [Export & Nested Components](EXPORT_NESTED_COMPONENTS.md) — Export support for embedded/nested entity components
