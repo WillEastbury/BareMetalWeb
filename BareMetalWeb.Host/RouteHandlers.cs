@@ -752,6 +752,13 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
             {
+                var lockedUser = await GetLockedRootUserAsync(context.RequestAborted).ConfigureAwait(false);
+                if (lockedUser != null)
+                {
+                    RenderUnlockForm(ctx, "Your admin account is locked. Enter your current password to unlock it.");
+                    return;
+                }
+
                 ctx.SetStringValue("title", "Setup");
                 ctx.SetStringValue("html_message", "<p>Root user already exists.</p>");
                 return;
@@ -765,8 +772,43 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
         {
+            var lockedUser = await GetLockedRootUserAsync(context.RequestAborted).ConfigureAwait(false);
+            if (lockedUser == null)
+            {
+                context.SetStringValue("title", "Setup");
+                context.SetStringValue("html_message", "<p>Root user already exists.</p>");
+                await _renderer.RenderPage(context);
+                return;
+            }
+
+            if (!context.Request.HasFormContentType)
+            {
+                RenderUnlockForm(context, "Invalid request.");
+                await _renderer.RenderPage(context);
+                return;
+            }
+
+            var unlockForm = await context.Request.ReadFormAsync();
+
+            if (!CsrfProtection.ValidateFormToken(context, unlockForm))
+            {
+                RenderUnlockForm(context, "Invalid security token. Please try again.");
+                await _renderer.RenderPage(context);
+                return;
+            }
+
+            var unlockPassword = unlockForm["password"].ToString();
+            if (string.IsNullOrWhiteSpace(unlockPassword) || !lockedUser.VerifyPassword(unlockPassword))
+            {
+                RenderUnlockForm(context, "Invalid password. Account remains locked.");
+                await _renderer.RenderPage(context);
+                return;
+            }
+
+            lockedUser.RegisterSuccessfulLogin();
+            await Users.SaveAsync(lockedUser);
             context.SetStringValue("title", "Setup");
-            context.SetStringValue("html_message", "<p>Root user already exists.</p>");
+            context.SetStringValue("html_message", "<p>Account unlocked successfully. You may now sign in.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1074,6 +1116,25 @@ public sealed class RouteHandlers : IRouteHandlers
                 new FormField(FormFieldType.String, "username", "Username", true, "root", Value: userName),
                 new FormField(FormFieldType.Email, "email", "Email", true, "root@example.com", Value: email),
                 new FormField(FormFieldType.Password, "password", "Password", true, "Enter password")
+            }
+        ));
+    }
+
+    private void RenderUnlockForm(HttpContext context, string? message)
+    {
+        var csrfToken = CsrfProtection.EnsureToken(context);
+        context.SetStringValue("title", "Unlock Admin Account");
+        context.SetStringValue("html_message", string.IsNullOrWhiteSpace(message)
+            ? "<p>Enter your current password to unlock your admin account.</p>"
+            : $"<div class=\"alert alert-warning\">{WebUtility.HtmlEncode(message)}</div>");
+        context.AddFormDefinition(new FormDefinition(
+            Action: "/setup",
+            Method: "post",
+            SubmitLabel: "Unlock Account",
+            Fields: new[]
+            {
+                new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken),
+                new FormField(FormFieldType.Password, "password", "Current Password", true, "Enter your current password")
             }
         ));
     }
@@ -5895,6 +5956,21 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var users = await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false);
         return users.Any();
+    }
+
+    private static async ValueTask<User?> GetLockedRootUserAsync(CancellationToken cancellationToken = default)
+    {
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "admin" },
+                new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "monitoring" }
+            }
+        };
+
+        var users = await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false);
+        return users.FirstOrDefault(u => u.IsLockedOut);
     }
 
     private static string BuildViewSwitcher(string typeSlug, ViewType currentView, DataEntityMetadata meta)
