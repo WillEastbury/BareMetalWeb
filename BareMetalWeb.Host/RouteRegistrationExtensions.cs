@@ -35,7 +35,7 @@ public static class RouteRegistrationExtensions
             routeHandlers.DefaultPageHandler));
 
         host.RegisterRoute("GET /status", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "" }, "Public", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "", "" }, "Public", false, 1),
             routeHandlers.BuildPageHandler(context =>
             {
                 context.Response.ContentType = "text/html";
