@@ -2811,6 +2811,16 @@ public sealed class RouteHandlers : IRouteHandlers
         await DataScaffold.ApplyAutoIdAsync(meta, clone, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, clone, ComputedTrigger.OnCreate, context.RequestAborted).ConfigureAwait(false);
         DataScaffold.ApplyCalculatedFields(meta, clone);
+
+        var cloneErrors = new List<string>();
+        await ValidateUserUniquenessAsync(meta, clone, excludeId: null, cloneErrors, context.RequestAborted).ConfigureAwait(false);
+        if (cloneErrors.Count > 0)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync(string.Join(" | ", cloneErrors));
+            return;
+        }
+
         await DataScaffold.SaveAsync(meta, clone);
 
         var newId = DataScaffold.GetIdValue(clone) ?? string.Empty;
@@ -3199,6 +3209,15 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await context.Response.WriteAsync(string.Join(" | ", validationResult.AllErrors()));
+            return;
+        }
+
+        var apiCreateErrors = new List<string>();
+        await ValidateUserUniquenessAsync(meta, instance, excludeId: null, apiCreateErrors, context.RequestAborted).ConfigureAwait(false);
+        if (apiCreateErrors.Count > 0)
+        {
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            await context.Response.WriteAsync(string.Join(" | ", apiCreateErrors));
             return;
         }
 

@@ -591,6 +591,77 @@ public class UserAuthTests : IDisposable
         Assert.Null(found);
     }
 
+    // ──────────────────────────────────────────────────────────────
+    //  Clone uniqueness guard – regression for "Users TABLE STILL BROKEN"
+    // ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ExistsByEmailOrUserNameAsync_DuplicateUsername_ReturnsTrue()
+    {
+        // Arrange – simulate the state the clone operation would create
+        EnsureStore();
+        var original = new User
+        {
+            UserName = "admin",
+            Email = "admin@example.com",
+            IsActive = true
+        };
+        original.SetPassword("AdminPass1!");
+        await DataStoreProvider.Current.SaveAsync(original);
+
+        // Act – the same username already exists; uniqueness check must catch it
+        var exists = await Users.ExistsByEmailOrUserNameAsync("admin");
+
+        // Assert – the guard should detect the conflict so no clone is saved
+        Assert.True(exists);
+    }
+
+    [Fact]
+    public async Task ExistsByEmailOrUserNameAsync_DuplicateEmail_ReturnsTrue()
+    {
+        // Arrange
+        EnsureStore();
+        var original = new User
+        {
+            UserName = "alice",
+            Email = "alice@example.com",
+            IsActive = true
+        };
+        original.SetPassword("AlicePass1!");
+        await DataStoreProvider.Current.SaveAsync(original);
+
+        // Act
+        var exists = await Users.ExistsByEmailOrUserNameAsync("alice@example.com");
+
+        // Assert
+        Assert.True(exists);
+    }
+
+    [Fact]
+    public async Task FindByUserNameAsync_AfterSave_PasswordVerifiesCorrectly()
+    {
+        // Arrange – a saved user must be retrievable and its password must verify;
+        // this guards against regressions where a phantom duplicate (e.g. from a bad clone)
+        // could shadow the real record and cause login to fail.
+        EnsureStore();
+        var original = new User
+        {
+            UserName = "admin",
+            Email = "admin@example.com",
+            IsActive = true
+        };
+        original.SetPassword("CorrectPass1!");
+        await DataStoreProvider.Current.SaveAsync(original);
+
+        // Act – lookup must return the record whose password verifies
+        var found = await Users.FindByUserNameAsync("admin");
+
+        // Assert
+        Assert.NotNull(found);
+        Assert.Equal(original.Id, found.Id);
+        Assert.True(found.VerifyPassword("CorrectPass1!"), "Original user password must verify correctly.");
+    }
+
     private static HttpContext CreateHttpContext(string? sessionId)
     {
         var context = new DefaultHttpContext();
