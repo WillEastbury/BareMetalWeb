@@ -75,7 +75,8 @@ public class BareMetalWebServer : IBareWebHost
     public int? HttpsRedirectPort { get; set; }
     private readonly Dictionary<string, MenuCacheEntry> _menuCache = new(StringComparer.Ordinal);
     private int _routesVersion = 0;
-    private List<KeyValuePair<string, RouteHandlerData>>? _sortedRoutes;
+    private readonly Dictionary<string, CompiledRoute> _compiledRoutes = new(StringComparer.Ordinal);
+    private List<(string Key, RouteHandlerData Data, CompiledRoute Compiled)>? _sortedRoutes;
     private int _sortedRoutesVersion = -1;
     public BareMetalWebServer(
         string appName,
@@ -267,18 +268,21 @@ public class BareMetalWebServer : IBareWebHost
     public void RegisterRoute(string path, RouteHandlerData routeHandler)
     {
         routes[path] = routeHandler;
+        _compiledRoutes[path] = new CompiledRoute(path);
         _routesVersion++;
         _sortedRoutes = null; // invalidate sorted cache
         BufferedLogger.LogInfo($"Route registered: {path} with handler {routeHandler.Handler.Method.Name}");
     }
 
     // Returns routes sorted by specificity (most literal segments first), rebuilding only when routes change.
-    private List<KeyValuePair<string, RouteHandlerData>> GetSortedRoutes()
+    private List<(string Key, RouteHandlerData Data, CompiledRoute Compiled)> GetSortedRoutes()
     {
         if (_sortedRoutes == null || _sortedRoutesVersion != _routesVersion)
         {
             _sortedRoutes = routes
-                .OrderByDescending(r => CountLiteralSegments(r.Key))
+                .Where(r => _compiledRoutes.ContainsKey(r.Key))
+                .Select(r => (r.Key, r.Value, _compiledRoutes[r.Key]))
+                .OrderByDescending(r => r.Item3.LiteralSegmentCount)
                 .ToList();
             _sortedRoutesVersion = _routesVersion;
         }
@@ -418,21 +422,18 @@ public class BareMetalWebServer : IBareWebHost
             // Pattern match fallback — iterate most-specific routes first so that literal
             // segments (e.g. /api/_lookup/{type}) beat generic routes (e.g. /api/{type}/{id}).
             bool methodNotAllowed = false;
-            foreach (var kvp in GetSortedRoutes())
+            foreach (var (_, routeData, compiled) in GetSortedRoutes())
             {
-                if (!TryParseRoute(kvp.Key, out var verb, out var templatePath))
-                    continue;
-
-                if (RouteMatching.TryMatch(requestPath, templatePath, out var parameters))
+                if (RouteMatching.TryMatch(requestPath, compiled, out var parameters))
                 {
-                    if (!verb.Equals(method, StringComparison.OrdinalIgnoreCase))
+                    if (!compiled.Verb.Equals(method, StringComparison.OrdinalIgnoreCase))
                     {
-                        if (!verb.Equals("ALL", StringComparison.OrdinalIgnoreCase))
+                        if (!compiled.Verb.Equals("ALL", StringComparison.OrdinalIgnoreCase))
                             methodNotAllowed = true;
                         continue;
                     }
                     // a routed parameter match ! --> grab it and inject it into the rendering parameters
-                    var injectedPage = RouteInfoHelpers.InjectRouteParametersIntoPageInfo(kvp.Value, parameters);
+                    var injectedPage = RouteInfoHelpers.InjectRouteParametersIntoPageInfo(routeData, parameters);
                     if (injectedPage.PageInfo != null)
                     {
                         context.SetPageInfo(injectedPage.PageInfo);
@@ -444,21 +445,23 @@ public class BareMetalWebServer : IBareWebHost
                         return;
                     }
                     await injectedPage.Handler(context);
-                    BufferedLogger.LogInfo($"{path}|{method}|{templatePath}|{string.Join(", ", parameters.Select(p => $"{p.Key}={p.Value}"))}|200|{sourceIp}");
+                    BufferedLogger.LogInfo($"{path}|{method}|{compiled.Verb}|{string.Join(", ", parameters.Select(p => $"{p.Key}={p.Value}"))}|200|{sourceIp}");
                     return;
                 }
             }
-            foreach (var kvp in routes)
+            foreach (var kvp in _compiledRoutes)
             {
-                if (!TryParseRoute(kvp.Key, out var verb, out var templatePath))
+                var compiled = kvp.Value;
+                if (!compiled.Verb.Equals("ALL", StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                if (!verb.Equals("ALL", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (RouteMatching.TryMatch(requestPath, templatePath, out var parameters))
+                if (RouteMatching.TryMatch(requestPath, compiled, out var parameters))
                 {
-                    var injectedPage = RouteInfoHelpers.InjectRouteParametersIntoPageInfo(kvp.Value, parameters);
+                    // _compiledRoutes and routes are always kept in sync by RegisterRoute;
+                    // this TryGetValue is a defensive guard against future concurrent modifications.
+                    if (!routes.TryGetValue(kvp.Key, out var routeData))
+                        continue;
+                    var injectedPage = RouteInfoHelpers.InjectRouteParametersIntoPageInfo(routeData, parameters);
                     if (injectedPage.PageInfo != null)
                     {
                         context.SetPageInfo(injectedPage.PageInfo);
@@ -470,7 +473,7 @@ public class BareMetalWebServer : IBareWebHost
                         return;
                     }
                     await injectedPage.Handler(context);
-                    BufferedLogger.LogInfo($"{path}|{method}|{templatePath}|{string.Join(", ", parameters.Select(p => $"{p.Key}={p.Value}"))}|200|{sourceIp}");
+                    BufferedLogger.LogInfo($"{path}|{method}|{compiled.Verb}|{string.Join(", ", parameters.Select(p => $"{p.Key}={p.Value}"))}|200|{sourceIp}");
                     return;
                 }
             }
@@ -749,19 +752,6 @@ public class BareMetalWebServer : IBareWebHost
         }
 
         return builder.Uri.ToString();
-    }
-
-    /// <summary>
-    /// Counts literal (non-parameterised) path segments in a route key such as
-    /// "GET /api/_lookup/{type}". More literal segments = higher specificity.
-    /// </summary>
-    private static int CountLiteralSegments(string routeKey)
-    {
-        var space = routeKey.IndexOf(' ');
-        if (space < 0) return 0;
-        var template = routeKey[(space + 1)..];
-        return template.Split('/', StringSplitOptions.RemoveEmptyEntries)
-            .Count(s => !s.StartsWith('{') && !s.StartsWith('*'));
     }
 
     private static string BuildMenuCacheKey(BareMetalWeb.Data.User? user, int routesVersion)
