@@ -192,11 +192,35 @@ internal static class Program
 
     static async Task<int> LoginDirect(string user, string pass)
     {
-        var content = new FormUrlEncodedContent(new[]
+        // Fetch CSRF token first
+        var getResp = await _http.GetAsync("/login");
+        var csrfToken = "";
+        if (getResp.IsSuccessStatusCode)
         {
-            new KeyValuePair<string, string>("username", user),
-            new KeyValuePair<string, string>("password", pass)
-        });
+            var html = await getResp.Content.ReadAsStringAsync();
+            var match = System.Text.RegularExpressions.Regex.Match(html, @"name=""csrf_token""[^>]*value=""([^""]*)""");
+            if (!match.Success)
+                match = System.Text.RegularExpressions.Regex.Match(html, @"id=""csrf_token""[^>]*value=""([^""]*)""");
+            // Also try extracting from cookie
+            if (!match.Success && _config.Url != null)
+            {
+                var cookies = _cookies.GetCookies(new Uri(_config.Url));
+                var csrfCookie = cookies.FirstOrDefault(c => c.Name == "csrf_token");
+                if (csrfCookie != null) csrfToken = csrfCookie.Value;
+            }
+            else if (match.Success)
+                csrfToken = match.Groups[1].Value;
+        }
+
+        var fields = new List<KeyValuePair<string, string>>
+        {
+            new("email", user),
+            new("password", pass)
+        };
+        if (!string.IsNullOrEmpty(csrfToken))
+            fields.Add(new("csrf_token", csrfToken));
+
+        var content = new FormUrlEncodedContent(fields);
         var resp = await _http.PostAsync("/login", content);
         if (resp.IsSuccessStatusCode || resp.StatusCode == HttpStatusCode.Redirect || resp.StatusCode == HttpStatusCode.Found)
         {
@@ -286,7 +310,7 @@ internal static class Program
     static async Task<int> Logout()
     {
         if (string.IsNullOrEmpty(_config.Url)) return Help(1, "Not connected. Run: metal connect <url>");
-        try { await _http.PostAsync("/logout", null); } catch { /* best-effort */ }
+        try { await PostWithCsrf("/logout", null); } catch { /* best-effort */ }
         if (File.Exists(CookiePath)) File.Delete(CookiePath);
         _cookies = new CookieContainer();
         InitHttpClient();
@@ -395,7 +419,7 @@ internal static class Program
         var slug = args[0];
         var obj = ParseKeyValues(args[1..]);
         var json = JsonSerializer.Serialize(obj, BmwJsonContext.Default.DictionaryStringString);
-        var resp = await _http.PostAsync($"/api/{slug}",
+        var resp = await PostWithCsrf($"/api/{slug}",
             new StringContent(json, Encoding.UTF8, "application/json"));
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
@@ -415,7 +439,7 @@ internal static class Program
         {
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
-        var resp = await _http.SendAsync(req);
+        var resp = await SendWithCsrf(req);
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
         Console.WriteLine("Updated:");
@@ -427,7 +451,8 @@ internal static class Program
     static async Task<int> DeleteEntity(string[] args)
     {
         if (args.Length < 2) return Help(1, "Usage: metal delete <type> <id>");
-        var resp = await _http.DeleteAsync($"/api/{args[0]}/{args[1]}");
+        var req = new HttpRequestMessage(HttpMethod.Delete, $"/api/{args[0]}/{args[1]}");
+        var resp = await SendWithCsrf(req);
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         Console.WriteLine("Deleted.");
         return 0;
@@ -510,6 +535,16 @@ internal static class Program
         var resp = await _http.GetAsync($"/api/_lookup/{args[0]}/_field/{args[1]}/{args[2]}");
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
+        try
+        {
+            var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("value", out var val))
+            {
+                Console.WriteLine(val.ValueKind == JsonValueKind.String ? val.GetString() : val.ToString());
+                return 0;
+            }
+        }
+        catch { /* not JSON, print raw */ }
         Console.WriteLine(body.Trim('"'));
         return 0;
     }
@@ -536,7 +571,7 @@ internal static class Program
         var slug = args[0]; var id = args[1]; var command = args[2];
         var payload = args.Length > 3 ? ParseKeyValues(args[3..]) : new Dictionary<string, string>();
         var json = JsonSerializer.Serialize(payload, BmwJsonContext.Default.DictionaryStringString);
-        var resp = await _http.PostAsync($"/api/{slug}/{id}/_command/{command}",
+        var resp = await PostWithCsrf($"/api/{slug}/{id}/_command/{command}",
             new StringContent(json, Encoding.UTF8, "application/json"));
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
@@ -554,7 +589,7 @@ internal static class Program
         var slug = args[0]; var file = args[1];
         if (!File.Exists(file)) { Console.Error.WriteLine($"File not found: {file}"); return 1; }
         var content = await File.ReadAllTextAsync(file);
-        var resp = await _http.PostAsync($"/api/{slug}/import",
+        var resp = await PostWithCsrf($"/api/{slug}/import",
             new StringContent(content, Encoding.UTF8, "application/json"));
         if (!resp.IsSuccessStatusCode) { await PrintError(resp); return 1; }
         var body = await resp.Content.ReadAsStringAsync();
@@ -632,11 +667,39 @@ internal static class Program
         return _meta;
     }
 
-    /// Unwraps paginated envelope {items: [], total: N} → items array, or returns as-is if already an array.
+    /// Gets the CSRF token from cookies for mutating requests.
+    static string? GetCsrfToken()
+    {
+        if (string.IsNullOrEmpty(_config.Url)) return null;
+        var cookies = _cookies.GetCookies(new Uri(_config.Url));
+        return cookies.FirstOrDefault(c => c.Name == "csrf_token")?.Value;
+    }
+
+    /// Sends a request with CSRF headers attached.
+    static async Task<HttpResponseMessage> SendWithCsrf(HttpRequestMessage req)
+    {
+        var csrf = GetCsrfToken();
+        if (!string.IsNullOrEmpty(csrf))
+            req.Headers.TryAddWithoutValidation("X-CSRF-Token", csrf);
+        req.Headers.TryAddWithoutValidation("X-Requested-With", "BareMetalWeb");
+        return await _http.SendAsync(req);
+    }
+
+    /// Shortcut: POST with CSRF.
+    static async Task<HttpResponseMessage> PostWithCsrf(string url, HttpContent? content)
+    {
+        var req = new HttpRequestMessage(HttpMethod.Post, url) { Content = content };
+        return await SendWithCsrf(req);
+    }
+
+    /// Unwraps paginated envelope {items: [], total: N} or {data: [], count: N} → array, or returns as-is.
     static JsonElement UnwrapItems(JsonElement el)
     {
-        if (el.ValueKind == JsonValueKind.Object && el.TryGetProperty("items", out var items))
-            return items;
+        if (el.ValueKind == JsonValueKind.Object)
+        {
+            if (el.TryGetProperty("items", out var items)) return items;
+            if (el.TryGetProperty("data", out var data)) return data;
+        }
         return el;
     }
 
