@@ -1253,8 +1253,14 @@ public static class RouteRegistrationExtensions
             ["footer_user"] = string.Empty,
         };
         // Add app-level metadata tokens (AppName, CompanyDescription, CopyrightYear, AppVersion)
+        // Keys prefixed with "html_" carry pre-rendered HTML and must NOT be encoded again.
         for (int i = 0; i < host.AppMetaDataKeys.Length && i < host.AppMetaDataValues.Length; i++)
-            tokens[host.AppMetaDataKeys[i]] = WebUtility.HtmlEncode(host.AppMetaDataValues[i]);
+        {
+            var key = host.AppMetaDataKeys[i];
+            tokens[key] = key.StartsWith("html_", StringComparison.Ordinal)
+                ? host.AppMetaDataValues[i]
+                : WebUtility.HtmlEncode(host.AppMetaDataValues[i]);
+        }
 
         // Extract only the <nav>…</nav> block from the body template
         var navEndIdx = template.Body.IndexOf("</nav>", StringComparison.OrdinalIgnoreCase);
