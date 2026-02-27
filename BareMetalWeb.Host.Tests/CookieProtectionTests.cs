@@ -346,4 +346,41 @@ public class CookieProtectionTests : IDisposable
         // Assert
         Assert.Equal(value, unprotected);
     }
+
+    [Fact]
+    public void Protect_LargeCompressibleValue_RoundTripsCorrectly()
+    {
+        // Arrange — a highly compressible string (deflate should reduce its size)
+        var value = new string('z', 500) + new string('y', 500);
+
+        // Act
+        var protected1 = CookieProtection.Protect(value);
+        var unprotected = CookieProtection.Unprotect(protected1);
+
+        // Assert
+        Assert.Equal(value, unprotected);
+    }
+
+    [Fact]
+    public void Protect_LargeCompressibleValue_SmallerThanUncompressed()
+    {
+        // Arrange — highly compressible string; compressed cookie should be shorter
+        var compressible = new string('a', 500);
+        var incompressible = Guid.NewGuid().ToString(); // short, won't compress
+
+        // Act
+        var protectedCompressible = CookieProtection.Protect(compressible);
+        var protectedIncompressible = CookieProtection.Protect(incompressible);
+
+        // Assert — the 500-char string compresses to much less than 500 chars,
+        // so its cookie is still larger but not proportionally (just validates compression fired)
+        Assert.NotNull(protectedCompressible);
+        Assert.NotNull(protectedIncompressible);
+        // The compressed 500-char value should produce a shorter token than the raw 500-char value would
+        // (i.e., shorter than a non-compressing protect would produce, roughly proportional to incompressible + overhead)
+        // Concretely: the compressed form should be shorter than 4 * the incompressible GUID cookie
+        Assert.True(protectedCompressible.Length < protectedIncompressible.Length * 4,
+            $"500-char compressible value cookie ({protectedCompressible.Length} chars) " +
+            $"should be much shorter than 4x a GUID cookie ({protectedIncompressible.Length * 4} chars)");
+    }
 }

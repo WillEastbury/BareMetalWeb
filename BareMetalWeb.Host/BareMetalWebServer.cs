@@ -75,6 +75,8 @@ public class BareMetalWebServer : IBareWebHost
     public int? HttpsRedirectPort { get; set; }
     private readonly Dictionary<string, MenuCacheEntry> _menuCache = new(StringComparer.Ordinal);
     private int _routesVersion = 0;
+    private List<KeyValuePair<string, RouteHandlerData>>? _sortedRoutes;
+    private int _sortedRoutesVersion = -1;
     public BareMetalWebServer(
         string appName,
         string companyDescription,
@@ -266,7 +268,21 @@ public class BareMetalWebServer : IBareWebHost
     {
         routes[path] = routeHandler;
         _routesVersion++;
+        _sortedRoutes = null; // invalidate sorted cache
         BufferedLogger.LogInfo($"Route registered: {path} with handler {routeHandler.Handler.Method.Name}");
+    }
+
+    // Returns routes sorted by specificity (most literal segments first), rebuilding only when routes change.
+    private List<KeyValuePair<string, RouteHandlerData>> GetSortedRoutes()
+    {
+        if (_sortedRoutes == null || _sortedRoutesVersion != _routesVersion)
+        {
+            _sortedRoutes = routes
+                .OrderByDescending(r => CountLiteralSegments(r.Key))
+                .ToList();
+            _sortedRoutesVersion = _routesVersion;
+        }
+        return _sortedRoutes;
     }
     public Task WireUpRequestHandlingAndLoggerAsyncLifetime()
     {
@@ -401,7 +417,7 @@ public class BareMetalWebServer : IBareWebHost
             // Pattern match fallback — iterate most-specific routes first so that literal
             // segments (e.g. /api/_lookup/{type}) beat generic routes (e.g. /api/{type}/{id}).
             bool methodNotAllowed = false;
-            foreach (var kvp in routes.OrderByDescending(r => CountLiteralSegments(r.Key)))
+            foreach (var kvp in GetSortedRoutes())
             {
                 if (!TryParseRoute(kvp.Key, out var verb, out var templatePath))
                     continue;
@@ -606,6 +622,9 @@ public class BareMetalWebServer : IBareWebHost
     {
         var nonce = context.GenerateCspNonce();
         context.Response.Headers["Content-Security-Policy"] = string.Format(ContentSecurityPolicyTemplate, nonce);
+        // HTTP/1.x keep-alive hint so clients reuse TCP connections across requests
+        if (context.Request.Protocol is "HTTP/1.0" or "HTTP/1.1")
+            context.Response.Headers["Keep-Alive"] = "timeout=60, max=1000";
     }
 
     public async Task RenderForbidden(HttpContext context)

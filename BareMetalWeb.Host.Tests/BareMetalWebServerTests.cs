@@ -898,6 +898,51 @@ public class BareMetalWebServerTests : IDisposable
         Assert.Contains("style-src 'self'", csp);
     }
 
+    [Theory]
+    [InlineData("HTTP/1.0")]
+    [InlineData("HTTP/1.1")]
+    public async Task RequestHandler_Http1x_IncludesKeepAliveHeader(string protocol)
+    {
+        // Arrange
+        EnsureStore();
+        _server.RegisterRoute("GET /keepalive", new RouteHandlerData(
+            CreatePageInfo("KeepAlive"),
+            async (ctx) => await Task.CompletedTask
+        ));
+
+        var context = CreateHttpContext("GET", "/keepalive");
+        context.Request.Protocol = protocol;
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert
+        Assert.True(context.Response.Headers.ContainsKey("Keep-Alive"),
+            $"Keep-Alive header should be present for {protocol}");
+        Assert.Equal("timeout=60, max=1000", context.Response.Headers["Keep-Alive"].ToString());
+    }
+
+    [Fact]
+    public async Task RequestHandler_Http2_DoesNotIncludeKeepAliveHeader()
+    {
+        // Arrange
+        EnsureStore();
+        _server.RegisterRoute("GET /noka", new RouteHandlerData(
+            CreatePageInfo("NoKA"),
+            async (ctx) => await Task.CompletedTask
+        ));
+
+        var context = CreateHttpContext("GET", "/noka");
+        context.Request.Protocol = "HTTP/2";
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert — Keep-Alive is a hop-by-hop HTTP/1.x concept; not sent for HTTP/2
+        Assert.False(context.Response.Headers.ContainsKey("Keep-Alive"),
+            "Keep-Alive header must not be set for HTTP/2 connections");
+    }
+
     #endregion
 
     #region Helper Methods
