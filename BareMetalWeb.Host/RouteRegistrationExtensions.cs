@@ -1277,9 +1277,8 @@ public static class RouteRegistrationExtensions
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
         var userPermissions = user?.Permissions ?? Array.Empty<string>();
 
-        // Always inline /meta/objects to eliminate the first round-trip on every SPA page load
+        // Inline /meta/objects (and optionally /meta/{slug}) to eliminate client-side round-trips
         var metaObjectsScript = TryBuildMetaObjectsScript(user, userPermissions, safeNonce);
-
         // For any /UI/data/{slug}[/...] path, inline /meta/{slug} to eliminate the schema round-trip
         string? metaSlugScript = null;
         string? initialDataScript = null;
