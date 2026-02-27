@@ -273,7 +273,7 @@ public static class CssBundleService
         }
 
         context.Response.ContentType = "text/css; charset=utf-8";
-        context.Response.Headers.CacheControl = "public, max-age=86400";
+        context.Response.Headers.CacheControl = "public, max-age=31536000, immutable";
         context.Response.Headers.ETag = bundle.ETag;
         context.Response.Headers.LastModified = bundle.LastModified;
 
