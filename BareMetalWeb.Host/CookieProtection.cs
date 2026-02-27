@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text;
 using BareMetalWeb.Data;
@@ -8,6 +9,13 @@ namespace BareMetalWeb.Host;
 
 public static class CookieProtection
 {
+    // Version bytes prepended to plaintext before encryption.
+    // 0x01 = uncompressed  (current format)
+    // 0x02 = deflate-compressed
+    // Legacy cookies with no version prefix are also handled in Unprotect.
+    private const byte VersionPlain = 0x01;
+    private const byte VersionDeflate = 0x02;
+
     private const int HmacKeySize = 32;
     private static string KeyRootFolder = AppContext.BaseDirectory;
 
@@ -35,7 +43,24 @@ public static class CookieProtection
         if (value is null) throw new ArgumentNullException(nameof(value));
 
         var plaintext = Encoding.UTF8.GetBytes(value);
-        var encrypted = Encryption.Value.Encrypt(plaintext);
+
+        // Try deflate compression; use it only if it reduces size
+        var compressed = DeflateCompress(plaintext);
+        byte[] payload;
+        if (compressed.Length < plaintext.Length)
+        {
+            payload = new byte[1 + compressed.Length];
+            payload[0] = VersionDeflate;
+            compressed.CopyTo(payload, 1);
+        }
+        else
+        {
+            payload = new byte[1 + plaintext.Length];
+            payload[0] = VersionPlain;
+            plaintext.CopyTo(payload, 1);
+        }
+
+        var encrypted = Encryption.Value.Encrypt(payload);
         var mac = ComputeHmac(encrypted);
 
         return $"{Base64UrlEncode(encrypted)}.{Base64UrlEncode(mac)}";
@@ -66,10 +91,10 @@ public static class CookieProtection
         if (!FixedTimeEquals(mac, expectedMac))
             return null;
 
+        byte[] decrypted;
         try
         {
-            var plaintext = Encryption.Value.Decrypt(encrypted);
-            return Encoding.UTF8.GetString(plaintext);
+            decrypted = Encryption.Value.Decrypt(encrypted);
         }
         catch (CryptographicException)
         {
@@ -79,6 +104,43 @@ public static class CookieProtection
         {
             return null;
         }
+
+        // Dispatch on version byte; legacy cookies (no version byte) are decoded as-is
+        if (decrypted.Length > 0 && decrypted[0] == VersionDeflate)
+        {
+            try
+            {
+                var decompressed = DeflateDecompress(decrypted, 1, decrypted.Length - 1);
+                return Encoding.UTF8.GetString(decompressed);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        if (decrypted.Length > 0 && decrypted[0] == VersionPlain)
+            return Encoding.UTF8.GetString(decrypted, 1, decrypted.Length - 1);
+
+        // Legacy format: no version prefix, entire payload is the UTF-8 string
+        return Encoding.UTF8.GetString(decrypted);
+    }
+
+    private static byte[] DeflateCompress(byte[] data)
+    {
+        using var output = new MemoryStream();
+        using (var deflate = new DeflateStream(output, CompressionLevel.Optimal, leaveOpen: true))
+            deflate.Write(data, 0, data.Length);
+        return output.ToArray();
+    }
+
+    private static byte[] DeflateDecompress(byte[] data, int offset, int count)
+    {
+        using var input = new MemoryStream(data, offset, count, writable: false);
+        using var deflate = new DeflateStream(input, CompressionMode.Decompress);
+        using var output = new MemoryStream();
+        deflate.CopyTo(output);
+        return output.ToArray();
     }
 
     private static byte[] ComputeHmac(byte[] payload)
