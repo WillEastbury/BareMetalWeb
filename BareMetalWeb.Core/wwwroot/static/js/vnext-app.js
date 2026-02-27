@@ -39,6 +39,14 @@
     }
 
     function fetchMetaObjects() {
+        // Consume server-inlined meta objects (always takes priority — refreshes cache on every shell load)
+        var inlined = window.__BMW_META_OBJECTS__;
+        if (inlined) {
+            window.__BMW_META_OBJECTS__ = null;
+            _metaObjects = inlined;
+            _saveToSession(META_STORE_KEY, inlined);
+            return Promise.resolve(_metaObjects);
+        }
         if (_metaObjects) return Promise.resolve(_metaObjects);
         // Consume server-inlined meta objects — eliminates the /meta/objects round-trip on first load
         if (window.__BMW_META_OBJECTS__ != null) {
@@ -57,6 +65,14 @@
     }
 
     function fetchMeta(slug) {
+        // Consume server-inlined entity schema (takes priority — refreshes cache for the current entity)
+        var inlinedSlug = window.__BMW_META_SLUG__ && window.__BMW_META_SLUG__[slug];
+        if (inlinedSlug) {
+            delete window.__BMW_META_SLUG__[slug];
+            _metaCache[slug] = inlinedSlug;
+            _saveToSession(META_STORE_PFX + slug, inlinedSlug);
+            return Promise.resolve(_metaCache[slug]);
+        }
         if (_metaCache[slug]) return Promise.resolve(_metaCache[slug]);
         // Consume server-inlined entity schema — eliminates the /meta/{slug} round-trip on first load
         if (window.__BMW_META__ && window.__BMW_META__[slug] != null) {
@@ -1456,23 +1472,41 @@
             groups[targetSlug].push(el);
         });
 
+        // Consume server-inlined lookup prefetch (one-shot: cleared after first use)
+        var prefetch = window.__BMW_LOOKUP_PREFETCH__;
+        if (prefetch) window.__BMW_LOOKUP_PREFETCH__ = null;
+
+        function applyLookupResults(els, results) {
+            els.forEach(function (el) {
+                var value        = el.dataset.value;
+                var displayField = el.dataset.displayField;
+                var obj = results[value];
+                if (obj) {
+                    var display = nestedGet(obj, displayField) || value;
+                    var href = BASE + '/data/' + encodeURIComponent(el.dataset.targetSlug) + '/' + encodeURIComponent(value);
+                    el.innerHTML = '<a href="' + escHtml(href) + '">' + escHtml(String(display)) + '</a>';
+                }
+            });
+        }
+
         Object.keys(groups).forEach(function (targetSlug) {
             var els = groups[targetSlug];
             var uniqueIds = els.map(function (el) { return el.dataset.value; })
                               .filter(function (v, i, a) { return a.indexOf(v) === i; });
+
+            // Apply server-inlined prefetch data immediately for available IDs
+            var prefetchData = prefetch && prefetch[targetSlug];
+            if (prefetchData) {
+                applyLookupResults(els, prefetchData);
+                // Only fetch IDs that were not covered by the prefetch
+                uniqueIds = uniqueIds.filter(function (id) { return !prefetchData[id]; });
+                if (uniqueIds.length === 0) return; // all resolved from prefetch
+            }
+
             apiPost(API + '/_lookup/' + encodeURIComponent(targetSlug) + '/_batch', { ids: uniqueIds })
                 .then(function (resp) {
                     var results = resp && resp.results ? resp.results : {};
-                    els.forEach(function (el) {
-                        var value       = el.dataset.value;
-                        var displayField = el.dataset.displayField;
-                        var obj = results[value];
-                        if (obj) {
-                            var display = nestedGet(obj, displayField) || value;
-                            var href = BASE + '/data/' + encodeURIComponent(targetSlug) + '/' + encodeURIComponent(value);
-                            el.innerHTML = '<a href="' + escHtml(href) + '">' + escHtml(String(display)) + '</a>';
-                        }
-                    });
+                    applyLookupResults(els, results);
                 })
                 .catch(function (err) {
                     console.warn('Batch lookup failed for ' + targetSlug + ':', err);
