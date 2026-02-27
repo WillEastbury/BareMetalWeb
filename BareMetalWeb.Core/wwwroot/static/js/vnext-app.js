@@ -287,6 +287,10 @@
         var dir   = query.dir   || 'asc';
         var search = query.q    || '';
 
+        // Consume server-inlined initial data immediately (prevents stale use on SPA back-nav)
+        var _bmwInline = window.__BMW_INITIAL_DATA__;
+        window.__BMW_INITIAL_DATA__ = null;
+
         fetchMeta(slug).then(function (meta) {
             // Apply default sort from metadata when no explicit sort is in the URL
             if (!sort && meta.defaultSortField) {
@@ -313,7 +317,18 @@
                 if (v) params.push('f_' + encodeURIComponent(f.name) + '=' + encodeURIComponent(v));
             });
 
-            return apiFetch(API + '/' + encodeURIComponent(slug) + '?' + params.join('&'))
+            // Use server-inlined initial data when available and the request matches the default first-load params
+            // (slug must match, effectiveTop must match, and no custom pagination / search / sort / field-filters in the URL)
+            var hasFieldFilters = meta.fields.some(function (f) { return !!query['f_' + f.name]; });
+            var useInline = _bmwInline && _bmwInline.slug === slug &&
+                _bmwInline.top === effectiveTop &&
+                effectiveSkip === 0 && !query.top && !query.q && !query.sort && !hasFieldFilters;
+
+            var dataPromise = useInline
+                ? Promise.resolve(_bmwInline)
+                : apiFetch(API + '/' + encodeURIComponent(slug) + '?' + params.join('&'));
+
+            return dataPromise
                 .then(function (result) { renderListResult(meta, result, slug, query, skip, top, search, sort, dir); });
         }).catch(function (err) { showError(err.message); });
     }

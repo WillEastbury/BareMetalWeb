@@ -1273,6 +1273,27 @@ public static class RouteRegistrationExtensions
             ? template.Footer.Substring(0, footerEndIdx + 9)
             : string.Empty;
 
+        // Try to embed initial list data for /UI/data/{slug} views to eliminate the first API round-trip
+        string? initialDataScript = null;
+        var reqPath = context.Request.Path.Value ?? string.Empty;
+        const string dataPrefix = "/UI/data/";
+        if (reqPath.StartsWith(dataPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var slugCandidate = reqPath.Substring(dataPrefix.Length);
+            // Only for simple slug paths (not /create, /123, /123/edit etc.)
+            if (!string.IsNullOrEmpty(slugCandidate) && !slugCandidate.Contains('/'))
+            {
+                // Only when there are no data-affecting query params in the URL
+                var q = context.Request.Query;
+                var hasCustomParams = q.ContainsKey("skip") || q.ContainsKey("top") || q.ContainsKey("q") ||
+                                      q.ContainsKey("sort") || q.ContainsKey("dir") ||
+                                      q.Keys.Any(k => k.StartsWith("f_", StringComparison.OrdinalIgnoreCase));
+                if (!hasCustomParams)
+                    initialDataScript = await TryBuildInitialDataScriptAsync(
+                        context, slugCandidate, q["view"].ToString(), safeNonce, context.RequestAborted).ConfigureAwait(false);
+            }
+        }
+
         var sb = new StringBuilder(4096);
         sb.Append("<!DOCTYPE html><html lang=\"en\">");
         sb.Append("<head>");
@@ -1286,12 +1307,96 @@ public static class RouteRegistrationExtensions
         sb.Append("<div id=\"vnext-modal-container\"></div>");
         sb.Append("<div id=\"vnext-toast-container\" class=\"position-fixed top-0 end-0 p-3\"></div>");
         sb.Append(ReplaceTemplateTokens(footerElement, tokens));
+        if (initialDataScript != null)
+            sb.Append(initialDataScript);
         sb.Append("<script src=\"/static/js/vnext-bundle.js\"></script>");
         sb.Append("</body></html>");
 
         context.Response.ContentType = "text/html; charset=utf-8";
         context.Response.Headers.CacheControl = "no-store";
         await context.Response.WriteAsync(sb.ToString());
+    }
+
+    /// <summary>
+    /// Fetches the initial list data for a VNext data entity and returns an inline &lt;script&gt; tag
+    /// that stores the result in <c>window.__BMW_INITIAL_DATA__</c>.
+    /// Eliminates the redundant API round-trip when the user first opens a data list view with no filters.
+    /// Returns <c>null</c> if the entity is not found, the user lacks permission, or any error occurs
+    /// (the client will fall back to the normal API call).
+    /// </summary>
+    private static async ValueTask<string?> TryBuildInitialDataScriptAsync(
+        HttpContext context, string slug, string activeView, string safeNonce, CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (!DataScaffold.TryGetEntity(slug, out var meta))
+                return null;
+
+            // Permission check (mirrors HasEntityPermissionAsync in RouteHandlers)
+            var permissionsNeeded = meta.Permissions?.Trim();
+            if (!string.IsNullOrWhiteSpace(permissionsNeeded) &&
+                !string.Equals(permissionsNeeded, "Public", StringComparison.OrdinalIgnoreCase))
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
+                if (user == null)
+                    return null;
+                if (!string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
+                {
+                    var userPerms = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                    var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    if (required.Length > 0 && !required.All(userPerms.Contains))
+                        return null;
+                }
+            }
+
+            // Determine top — mirrors the JS isHierarchyView logic, including the ?view= override
+            var isHierarchyView = meta.ViewType == ViewType.TreeView
+                               || meta.ViewType == ViewType.OrgChart
+                               || meta.ViewType == ViewType.Timeline
+                               || DataScaffold.CanShowTimetableView(meta)
+                               || string.Equals(activeView, "TreeView",  StringComparison.OrdinalIgnoreCase)
+                               || string.Equals(activeView, "OrgChart",  StringComparison.OrdinalIgnoreCase)
+                               || string.Equals(activeView, "Timeline",  StringComparison.OrdinalIgnoreCase)
+                               || string.Equals(activeView, "Timetable", StringComparison.OrdinalIgnoreCase);
+            var top = isHierarchyView ? 10000 : 25;
+
+            // Build query — empty dict lets BuildQueryDefinition apply default sort from metadata
+            var queryDict = new Dictionary<string, string?> { ["skip"] = "0", ["top"] = top.ToString() };
+            var query = DataScaffold.BuildQueryDefinition(queryDict, meta);
+
+            var countQuery = DataScaffold.BuildQueryDefinition(queryDict, meta);
+            countQuery.Skip = null;
+            countQuery.Top  = null;
+
+            var dataTask  = DataScaffold.QueryAsync(meta, query, cancellationToken).AsTask();
+            var countTask = DataScaffold.CountAsync(meta, countQuery, cancellationToken).AsTask();
+            await Task.WhenAll(dataTask, countTask).ConfigureAwait(false);
+
+            var results = await dataTask;
+            var total   = await countTask;
+            var payload = results.Cast<object>().Select(item => RouteHandlers.BuildApiModel(meta, item)).ToArray();
+            // Clamp total (same as DataApiListHandler)
+            if (payload.Length < top)
+                total = Math.Min(total, payload.Length);
+
+            var initialData = new Dictionary<string, object?>
+            {
+                ["slug"]  = slug,
+                ["top"]   = top,
+                ["items"] = payload,
+                ["total"] = total
+            };
+
+            var json = JsonSerializer.Serialize(initialData, new JsonSerializerOptions { WriteIndented = false });
+            // Escape </script> sequences to prevent HTML injection
+            json = json.Replace("</", "<\\/", StringComparison.Ordinal);
+
+            return $"<script nonce=\"{safeNonce}\">window.__BMW_INITIAL_DATA__={json};</script>";
+        }
+        catch
+        {
+            return null; // Silently fall back to client-side API call
+        }
     }
 
     /// <summary>Replaces all <c>{{key}}</c> tokens in <paramref name="template"/> using <paramref name="tokens"/>.
