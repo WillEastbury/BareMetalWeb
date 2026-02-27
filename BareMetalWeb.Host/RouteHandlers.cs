@@ -16,6 +16,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Primitives;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.DataObjects;
+using BareMetalWeb.UserClasses.DataObjects;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Core.Interfaces;
@@ -3810,7 +3811,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         await BuildPageHandler(ctx =>
         {
-            RenderSampleDataForm(ctx, "<p>Generate sample data for load and indexing tests.</p>", 100, 50, 25, 25, clearExisting: false);
+            RenderSampleDataForm(ctx, "<p>Generate sample data for load and indexing tests.</p>", 100, 50, 25, 25, 10, 25, 20, 10, 10, clearExisting: false);
         })(context);
     }
 
@@ -3830,7 +3831,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.SetStringValue("title", "Generate Sample Data");
             context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
-            RenderSampleDataForm(context, "<p>Invalid security token. Please try again.</p>", 100, 50, 25, 25, clearExisting: false);
+            RenderSampleDataForm(context, "<p>Invalid security token. Please try again.</p>", 100, 50, 25, 25, 10, 25, 20, 10, 10, clearExisting: false);
             await _renderer.RenderPage(context);
             return;
         }
@@ -3840,18 +3841,25 @@ public sealed class RouteHandlers : IRouteHandlers
         var customerCount = ParseSampleCount(form, "customers", errors);
         var unitCount = ParseSampleCount(form, "units", errors);
         var productCount = ParseSampleCount(form, "products", errors);
+        var employeeCount = ParseSampleCount(form, "employees", errors);
+        var orderCount = ParseSampleCount(form, "orders", errors);
+        var todoCount = ParseSampleCount(form, "todos", errors);
+        var timeTablePlanCount = ParseSampleCount(form, "timeTablePlans", errors);
+        var lessonLogCount = ParseSampleCount(form, "lessonLogs", errors);
         var clearExisting = ParseSampleToggle(form, "clearExisting");
 
         if (customerCount > 0 && addressCount == 0)
             errors.Add("Customers require at least one address.");
         if (productCount > 0 && unitCount == 0)
             errors.Add("Products require at least one unit of measure.");
+        if (orderCount > 0 && customerCount == 0)
+            errors.Add("Orders require at least one customer.");
 
         if (errors.Count > 0)
         {
             context.SetStringValue("title", "Generate Sample Data");
             context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
-            RenderSampleDataForm(context, $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>", addressCount, customerCount, unitCount, productCount, clearExisting);
+            RenderSampleDataForm(context, $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>", addressCount, customerCount, unitCount, productCount, employeeCount, orderCount, todoCount, timeTablePlanCount, lessonLogCount, clearExisting);
             await _renderer.RenderPage(context);
             return;
         }
@@ -3862,6 +3870,11 @@ public sealed class RouteHandlers : IRouteHandlers
             await DeleteAllAsync<Product>();
             await DeleteAllAsync<Address>();
             await DeleteAllAsync<UnitOfMeasure>();
+            await DeleteAllAsync<Employee>();
+            await DeleteAllAsync<Order>();
+            await DeleteAllAsync<ToDo>();
+            await DeleteAllAsync<TimeTablePlan>();
+            await DeleteAllAsync<LessonLog>();
         }
 
         var addresses_query = await DataStoreProvider.Current.QueryAsync<Address>(null).ConfigureAwait(false);
@@ -3880,40 +3893,134 @@ public sealed class RouteHandlers : IRouteHandlers
         var usedProductIds = new HashSet<string>(
             products_query.Select(product => product.Id),
             StringComparer.OrdinalIgnoreCase);
+        var employees_query = await DataStoreProvider.Current.QueryAsync<Employee>(null).ConfigureAwait(false);
+        var usedEmployeeIds = new HashSet<string>(
+            employees_query.Select(e => e.Id),
+            StringComparer.OrdinalIgnoreCase);
+        var orders_query = await DataStoreProvider.Current.QueryAsync<Order>(null).ConfigureAwait(false);
+        var usedOrderIds = new HashSet<string>(
+            orders_query.Select(o => o.Id),
+            StringComparer.OrdinalIgnoreCase);
+        var todos_query = await DataStoreProvider.Current.QueryAsync<ToDo>(null).ConfigureAwait(false);
+        var usedTodoIds = new HashSet<string>(
+            todos_query.Select(t => t.Id),
+            StringComparer.OrdinalIgnoreCase);
+        var ttpQuery = await DataStoreProvider.Current.QueryAsync<TimeTablePlan>(null).ConfigureAwait(false);
+        var usedTtpIds = new HashSet<string>(
+            ttpQuery.Select(t => t.Id),
+            StringComparer.OrdinalIgnoreCase);
+        var llQuery = await DataStoreProvider.Current.QueryAsync<LessonLog>(null).ConfigureAwait(false);
+        var usedLessonLogIds = new HashSet<string>(
+            llQuery.Select(l => l.Id),
+            StringComparer.OrdinalIgnoreCase);
 
         var addresses = GenerateAddresses(addressCount, usedAddressIds);
         var units = GenerateUnits(unitCount, usedUnitIds);
         var customers = GenerateCustomers(customerCount, addresses, usedCustomerIds);
         var products = GenerateProducts(productCount, units, usedProductIds);
+        var employees = GenerateEmployees(employeeCount, usedEmployeeIds);
+
+        // Ensure at least one currency exists when generating orders
+        var existingCurrencies = (await DataStoreProvider.Current.QueryAsync<Currency>(null).ConfigureAwait(false)).ToList();
+        var usedCurrencyIds = new HashSet<string>(existingCurrencies.Select(c => c.Id), StringComparer.OrdinalIgnoreCase);
+        List<Currency> seedCurrencies = new();
+        if (orderCount > 0 && existingCurrencies.Count == 0)
+            seedCurrencies = GenerateSeedCurrencies(usedCurrencyIds);
+
+        var allCurrencies = existingCurrencies.Concat(seedCurrencies).ToList();
+        var allCustomers = customers_query.ToList().Concat(customers).ToList();
+        var allProducts = products_query.ToList().Concat(products).ToList();
+
+        var orders = GenerateOrders(orderCount, allCustomers, allProducts, allCurrencies, usedOrderIds);
+
+        // Ensure subjects exist for timetable and lesson log generation
+        var existingSubjects = (await DataStoreProvider.Current.QueryAsync<Subject>(null).ConfigureAwait(false)).ToList();
+        var usedSubjectIds = new HashSet<string>(existingSubjects.Select(s => s.Id), StringComparer.OrdinalIgnoreCase);
+        List<Subject> seedSubjects = new();
+        if ((timeTablePlanCount > 0 || lessonLogCount > 0) && existingSubjects.Count == 0)
+            seedSubjects = GenerateSeedSubjects(usedSubjectIds);
+
+        var allSubjects = existingSubjects.Concat(seedSubjects).ToList();
+
+        var todos = GenerateToDos(todoCount, usedTodoIds);
+        var timeTablePlans = GenerateTimeTablePlans(timeTablePlanCount, allSubjects, usedTtpIds);
+        var lessonLogs = GenerateLessonLogs(lessonLogCount, allSubjects, usedLessonLogIds);
+
+        var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
 
         foreach (var address in addresses)
         {
-            ApplyAuditInfo(address, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+            ApplyAuditInfo(address, userName, isCreate: true);
             await DataStoreProvider.Current.SaveAsync(address).ConfigureAwait(false);
         }
 
         foreach (var unit in units)
         {
-            ApplyAuditInfo(unit, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+            ApplyAuditInfo(unit, userName, isCreate: true);
             await DataStoreProvider.Current.SaveAsync(unit).ConfigureAwait(false);
         }
 
         foreach (var customer in customers)
         {
-            ApplyAuditInfo(customer, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+            ApplyAuditInfo(customer, userName, isCreate: true);
             await DataStoreProvider.Current.SaveAsync(customer).ConfigureAwait(false);
         }
 
         foreach (var product in products)
         {
-            ApplyAuditInfo(product, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+            ApplyAuditInfo(product, userName, isCreate: true);
             await DataStoreProvider.Current.SaveAsync(product).ConfigureAwait(false);
         }
 
+        foreach (var employee in employees)
+        {
+            ApplyAuditInfo(employee, userName, isCreate: true);
+            await DataStoreProvider.Current.SaveAsync(employee).ConfigureAwait(false);
+        }
+
+        foreach (var currency in seedCurrencies)
+        {
+            ApplyAuditInfo(currency, userName, isCreate: true);
+            await DataStoreProvider.Current.SaveAsync(currency).ConfigureAwait(false);
+        }
+
+        foreach (var order in orders)
+        {
+            ApplyAuditInfo(order, userName, isCreate: true);
+            await DataStoreProvider.Current.SaveAsync(order).ConfigureAwait(false);
+        }
+
+        foreach (var subject in seedSubjects)
+        {
+            ApplyAuditInfo(subject, userName, isCreate: true);
+            await DataStoreProvider.Current.SaveAsync(subject).ConfigureAwait(false);
+        }
+
+        foreach (var todo in todos)
+        {
+            ApplyAuditInfo(todo, userName, isCreate: true);
+            await DataStoreProvider.Current.SaveAsync(todo).ConfigureAwait(false);
+        }
+
+        foreach (var ttp in timeTablePlans)
+        {
+            ApplyAuditInfo(ttp, userName, isCreate: true);
+            await DataStoreProvider.Current.SaveAsync(ttp).ConfigureAwait(false);
+        }
+
+        foreach (var ll in lessonLogs)
+        {
+            ApplyAuditInfo(ll, userName, isCreate: true);
+            await DataStoreProvider.Current.SaveAsync(ll).ConfigureAwait(false);
+        }
+
         var message = $"<div class=\"alert alert-success\">" +
-                      $"Created {addresses.Count} addresses, {customers.Count} customers, {units.Count} units, {products.Count} products." +
+                      $"Created {addresses.Count} addresses, {customers.Count} customers, {units.Count} units, {products.Count} products, " +
+                      $"{employees.Count} employees, {orders.Count} orders, {todos.Count} to-dos, {timeTablePlans.Count} time table plans, {lessonLogs.Count} lesson logs." +
+                      (seedCurrencies.Count > 0 ? $" Also seeded {seedCurrencies.Count} default currencies." : string.Empty) +
+                      (seedSubjects.Count > 0 ? $" Also seeded {seedSubjects.Count} default subjects." : string.Empty) +
                       "</div>";
-        RenderSampleDataForm(context, message, addressCount, customerCount, unitCount, productCount, clearExisting);
+        RenderSampleDataForm(context, message, addressCount, customerCount, unitCount, productCount, employeeCount, orderCount, todoCount, timeTablePlanCount, lessonLogCount, clearExisting);
         await _renderer.RenderPage(context);
     }
 
@@ -5453,7 +5560,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    private void RenderSampleDataForm(HttpContext context, string? message, int addresses, int customers, int units, int products, bool clearExisting)
+    private void RenderSampleDataForm(HttpContext context, string? message, int addresses, int customers, int units, int products, int employees, int orders, int todos, int timeTablePlans, int lessonLogs, bool clearExisting)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Generate Sample Data");
@@ -5466,6 +5573,11 @@ public sealed class RouteHandlers : IRouteHandlers
             new FormField(FormFieldType.Integer, "customers", "Customers", Required: true, Value: customers.ToString(CultureInfo.InvariantCulture)),
             new FormField(FormFieldType.Integer, "units", "Units Of Measure", Required: true, Value: units.ToString(CultureInfo.InvariantCulture)),
             new FormField(FormFieldType.Integer, "products", "Products", Required: true, Value: products.ToString(CultureInfo.InvariantCulture)),
+            new FormField(FormFieldType.Integer, "employees", "Employees", Required: true, Value: employees.ToString(CultureInfo.InvariantCulture)),
+            new FormField(FormFieldType.Integer, "orders", "Orders", Required: true, Value: orders.ToString(CultureInfo.InvariantCulture)),
+            new FormField(FormFieldType.Integer, "todos", "To-Do Items", Required: true, Value: todos.ToString(CultureInfo.InvariantCulture)),
+            new FormField(FormFieldType.Integer, "timeTablePlans", "Time Table Plans", Required: true, Value: timeTablePlans.ToString(CultureInfo.InvariantCulture)),
+            new FormField(FormFieldType.Integer, "lessonLogs", "Lesson Logs", Required: true, Value: lessonLogs.ToString(CultureInfo.InvariantCulture)),
             new FormField(FormFieldType.YesNo, "clearExisting", "Clear existing data", false, SelectedValue: clearExisting ? "true" : "false")
         };
 
@@ -5666,8 +5778,246 @@ public sealed class RouteHandlers : IRouteHandlers
         return list;
     }
 
-    private static void EnsureUniqueId(BaseDataObject dataObject, HashSet<string> usedIds)
+    private static List<Employee> GenerateEmployees(int count, HashSet<string> usedIds)
     {
+        var list = new List<Employee>(count);
+        if (count <= 0)
+            return list;
+
+        var firstNames = new[] { "Alice", "Bob", "Carol", "David", "Eve", "Frank", "Grace", "Henry", "Iris", "Jack" };
+        var lastNames = new[] { "Anderson", "Baker", "Clarke", "Davis", "Evans", "Foster", "Green", "Harris", "Ingram", "Jones" };
+        var titles = new[] { "Manager", "Senior Developer", "Developer", "Analyst", "Designer", "QA Engineer", "DevOps Engineer", "Product Owner", "Scrum Master", "Architect" };
+        var departments = new[] { "Engineering", "Sales", "Marketing", "HR", "Finance", "Operations", "Support", "Legal" };
+        var rnd = Random.Shared;
+
+        for (var i = 0; i < count; i++)
+        {
+            var first = firstNames[rnd.Next(firstNames.Length)];
+            var last = lastNames[rnd.Next(lastNames.Length)];
+            var title = titles[rnd.Next(titles.Length)];
+            var dept = departments[rnd.Next(departments.Length)];
+            var hireDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-rnd.Next(30, 3650)));
+
+            var employee = new Employee
+            {
+                Name = $"{first} {last}",
+                Title = title,
+                Email = $"{first.ToLowerInvariant()}.{last.ToLowerInvariant()}.{i + 1}@example.com",
+                Department = dept,
+                HireDate = hireDate,
+                ManagerId = list.Count > 0 ? list[rnd.Next(Math.Min(list.Count, 3))].Id : null
+            };
+            EnsureUniqueId(employee, usedIds);
+            list.Add(employee);
+        }
+
+        return list;
+    }
+
+    private static List<Currency> GenerateSeedCurrencies(HashSet<string> usedIds)
+    {
+        var defaults = new (string IsoCode, string Description, string Symbol)[]
+        {
+            ("USD", "US Dollar", "$"),
+            ("EUR", "Euro", "€"),
+            ("GBP", "British Pound", "£"),
+            ("JPY", "Japanese Yen", "¥"),
+            ("CAD", "Canadian Dollar", "CA$")
+        };
+
+        var list = new List<Currency>(defaults.Length);
+        foreach (var (isoCode, description, symbol) in defaults)
+        {
+            var currency = new Currency
+            {
+                IsoCode = isoCode,
+                Description = description,
+                Symbol = symbol,
+                DecimalPlaces = isoCode == "JPY" ? 0 : 2,
+                IsEnabled = true,
+                IsBase = isoCode == "USD"
+            };
+            EnsureUniqueId(currency, usedIds);
+            list.Add(currency);
+        }
+
+        return list;
+    }
+
+    private static List<Order> GenerateOrders(int count, List<Customer> customers, List<Product> products, List<Currency> currencies, HashSet<string> usedIds)
+    {
+        var list = new List<Order>(count);
+        if (count <= 0 || customers.Count == 0)
+            return list;
+
+        var statuses = new[] { "Open", "Approved", "Shipped", "Closed", "Cancelled" };
+        var rnd = Random.Shared;
+
+        for (var i = 0; i < count; i++)
+        {
+            var customer = customers[rnd.Next(customers.Count)];
+            var currency = currencies.Count > 0 ? currencies[rnd.Next(currencies.Count)] : null;
+            var status = statuses[rnd.Next(statuses.Length)];
+            var orderDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-rnd.Next(0, 365)));
+
+            var order = new Order
+            {
+                OrderNumber = $"ORD-{i + 1:00000}",
+                CustomerId = customer.Id,
+                OrderDate = orderDate,
+                Status = status,
+                CurrencyId = currency?.Id ?? string.Empty,
+                Notes = string.Empty,
+                IsOpen = status == "Open",
+                OrderRows = new List<OrderRow>()
+            };
+
+            var rowCount = rnd.Next(1, 5);
+            for (var r = 0; r < rowCount && products.Count > 0; r++)
+            {
+                var product = products[rnd.Next(products.Count)];
+                var qty = rnd.Next(1, 20);
+                var price = product.Price;
+                var discountPct = rnd.Next(0, 3) == 0 ? rnd.Next(5, 20) : 0;
+                var subtotal = qty * price;
+                order.OrderRows.Add(new OrderRow
+                {
+                    ProductId = product.Id,
+                    Quantity = qty,
+                    UnitPrice = price,
+                    DiscountPercent = discountPct,
+                    Subtotal = subtotal,
+                    LineTotal = Math.Round(subtotal * (1 - discountPct / 100m), 2),
+                    Notes = string.Empty
+                });
+            }
+
+            EnsureUniqueId(order, usedIds);
+            list.Add(order);
+        }
+
+        return list;
+    }
+
+    private static List<ToDo> GenerateToDos(int count, HashSet<string> usedIds)
+    {
+        var list = new List<ToDo>(count);
+        if (count <= 0)
+            return list;
+
+        var titles = new[] { "Review pull request", "Write unit tests", "Update documentation", "Fix bug", "Deploy to staging", "Team standup", "Code review", "Plan sprint", "Refactor module", "Performance audit" };
+        var periodicities = new[] { TodoPeriodicity.OneOff, TodoPeriodicity.Daily, TodoPeriodicity.Weekly, TodoPeriodicity.Monthly };
+        var rnd = Random.Shared;
+
+        for (var i = 0; i < count; i++)
+        {
+            var title = $"{titles[rnd.Next(titles.Length)]} {i + 1}";
+            var deadline = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(rnd.Next(-30, 90)));
+            var startHour = rnd.Next(8, 18);
+            var startMinute = rnd.Next(0, 4) * 15;
+
+            list.Add(new ToDo
+            {
+                Title = title,
+                Deadline = deadline,
+                StartTime = new TimeOnly(startHour, startMinute),
+                Periodicity = periodicities[rnd.Next(periodicities.Length)],
+                Notes = string.Empty,
+                Link = string.Empty,
+                IsCompleted = rnd.Next(0, 5) == 0,
+                SubItems = new List<string>()
+            });
+            EnsureUniqueId(list[^1], usedIds);
+        }
+
+        return list;
+    }
+
+    private static List<Subject> GenerateSeedSubjects(HashSet<string> usedIds)
+    {
+        var defaultSubjects = new[] { "Mathematics", "English", "Science", "History", "Geography", "Art", "Music", "Physical Education", "Computing", "Languages" };
+        var list = new List<Subject>(defaultSubjects.Length);
+
+        foreach (var name in defaultSubjects)
+        {
+            var subject = new Subject { Name = name };
+            EnsureUniqueId(subject, usedIds);
+            list.Add(subject);
+        }
+
+        return list;
+    }
+
+    private static List<TimeTablePlan> GenerateTimeTablePlans(int count, List<Subject> subjects, HashSet<string> usedIds)
+    {
+        var list = new List<TimeTablePlan>(count);
+        if (count <= 0 || subjects.Count == 0)
+            return list;
+
+        var days = new BareMetalWeb.Data.DataObjects.DayOfWeek[]
+        {
+            BareMetalWeb.Data.DataObjects.DayOfWeek.Monday,
+            BareMetalWeb.Data.DataObjects.DayOfWeek.Tuesday,
+            BareMetalWeb.Data.DataObjects.DayOfWeek.Wednesday,
+            BareMetalWeb.Data.DataObjects.DayOfWeek.Thursday,
+            BareMetalWeb.Data.DataObjects.DayOfWeek.Friday
+        };
+        var durations = new[] { 30, 45, 60, 90 };
+        var rnd = Random.Shared;
+
+        for (var i = 0; i < count; i++)
+        {
+            var subject = subjects[rnd.Next(subjects.Count)];
+            var day = days[rnd.Next(days.Length)];
+            var startHour = rnd.Next(8, 16);
+            var startMinute = rnd.Next(0, 2) * 30;
+
+            list.Add(new TimeTablePlan
+            {
+                SubjectId = subject.Id,
+                Notes = string.Empty,
+                Day = day,
+                StartTime = new TimeOnly(startHour, startMinute),
+                Minutes = durations[rnd.Next(durations.Length)]
+            });
+            EnsureUniqueId(list[^1], usedIds);
+        }
+
+        return list;
+    }
+
+    private static List<LessonLog> GenerateLessonLogs(int count, List<Subject> subjects, HashSet<string> usedIds)
+    {
+        var list = new List<LessonLog>(count);
+        if (count <= 0 || subjects.Count == 0)
+            return list;
+
+        var durations = new[] { 30, 45, 60, 90 };
+        var rnd = Random.Shared;
+
+        for (var i = 0; i < count; i++)
+        {
+            var subject = subjects[rnd.Next(subjects.Count)];
+            var date = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-rnd.Next(0, 180)));
+            var startHour = rnd.Next(8, 16);
+            var startMinute = rnd.Next(0, 2) * 30;
+
+            list.Add(new LessonLog
+            {
+                SubjectId = subject.Id,
+                Date = date,
+                StartTime = new TimeOnly(startHour, startMinute),
+                Minutes = durations[rnd.Next(durations.Length)],
+                Notes = string.Empty,
+                Link = string.Empty
+            });
+            EnsureUniqueId(list[^1], usedIds);
+        }
+
+        return list;
+    }
+
+    private static void EnsureUniqueId(BaseDataObject dataObject, HashSet<string> usedIds)    {
         var id = dataObject.Id;
         if (string.IsNullOrWhiteSpace(id) || usedIds.Contains(id))
         {
