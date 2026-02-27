@@ -489,6 +489,126 @@ public sealed class IndexStore
             _handle.Dispose();
         }
     }
+    /// <summary>
+    /// Enumerates all (entityName, fieldName) pairs tracked in the index registry.
+    /// Safe to call while the server is running (opens registry file with shared read access).
+    /// </summary>
+    public static IEnumerable<(string EntityName, string FieldName)> ListTrackedIndexes(IDataProvider provider)
+    {
+        if (provider == null)
+            throw new ArgumentNullException(nameof(provider));
+        return ReadRegistryEntries(provider);
+    }
+
+    /// <summary>
+    /// Returns header statistics (snapshot page count, log page count, sequence number) for the
+    /// specified index. Returns zeroes when the index file does not yet exist.
+    /// Safe to call while the server is running (read-only access).
+    /// </summary>
+    public (long SnapshotPageCount, long LogPageCount, long Sequence) ReadIndexStats(string entityName, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(entityName))
+            throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
+        if (string.IsNullOrWhiteSpace(fieldName))
+            throw new ArgumentException("Field name cannot be empty.", nameof(fieldName));
+
+        var pagedFileName = GetPagedFileName(fieldName);
+        if (!_provider.PagedFileExists(entityName, pagedFileName))
+            return (0, 0, 0);
+
+        using var pagedFile = _provider.OpenPagedFile(entityName, pagedFileName, DefaultPageSize, FileAccess.Read);
+        var buffer = ArrayPool<byte>.Shared.Rent(pagedFile.PageSize);
+        try
+        {
+            var header = ReadIndexHeader(pagedFile, buffer);
+            return (header.SnapshotPageCount, header.LogPageCount, header.Sequence);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>
+    /// Reads raw WAL (write-ahead log) entries from the log pages of the specified index.
+    /// Returns each entry as a value-tuple with its timestamp ticks, operation ('A' or 'D'),
+    /// decoded key, decoded id, and optional expiry ticks.
+    /// Safe to call while the server is running (read-only access).
+    /// </summary>
+    public IReadOnlyList<(long Ticks, char Op, string Key, string Id, long? ExpiresAtUtcTicks)> ReadRawLogEntries(string entityName, string fieldName)
+    {
+        if (string.IsNullOrWhiteSpace(entityName))
+            throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
+        if (string.IsNullOrWhiteSpace(fieldName))
+            throw new ArgumentException("Field name cannot be empty.", nameof(fieldName));
+
+        var pagedFileName = GetPagedFileName(fieldName);
+        if (!_provider.PagedFileExists(entityName, pagedFileName))
+            return Array.Empty<(long, char, string, string, long?)>();
+
+        using var pagedFile = _provider.OpenPagedFile(entityName, pagedFileName, DefaultPageSize, FileAccess.Read);
+        var buffer = ArrayPool<byte>.Shared.Rent(pagedFile.PageSize);
+        try
+        {
+            var header = ReadIndexHeader(pagedFile, buffer);
+            var logStartPage = HeaderPageCount + header.SnapshotPageCount;
+            var endPage = logStartPage + header.LogPageCount;
+            var entries = new List<(long, char, string, string, long?)>();
+            for (long pageIndex = logStartPage; pageIndex < endPage; pageIndex++)
+            {
+                var bytesRead = pagedFile.ReadPage(pageIndex, buffer);
+                if (bytesRead == 0)
+                    continue;
+
+                var span = buffer.AsSpan(0, pagedFile.PageSize);
+                if (span[0] != PageKindLog)
+                    continue;
+
+                var length = System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(span.Slice(PageKindSize, PageLengthPrefixSize));
+                if (length <= 0 || length > pagedFile.PageSize - PageHeaderSize)
+                    continue;
+
+                var line = System.Text.Encoding.UTF8.GetString(span.Slice(PageHeaderSize, length));
+                if (string.IsNullOrWhiteSpace(line))
+                    continue;
+                if (!TryParseRawEntry(line, out var ticks, out var op, out var key, out var id, out var expiresAtUtcTicks))
+                    continue;
+
+                entries.Add((ticks, op, key, id, expiresAtUtcTicks));
+            }
+            return entries;
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    private static bool TryParseRawEntry(string line, out long ticks, out char op, out string key, out string id, out long? expiresAtUtcTicks)
+    {
+        ticks = 0;
+        op = '\0';
+        key = string.Empty;
+        id = string.Empty;
+        expiresAtUtcTicks = null;
+
+        var parts = line.Split('|');
+        if (parts.Length < 4 || parts.Length > 5)
+            return false;
+        if (!long.TryParse(parts[0], out ticks))
+            return false;
+        if (parts[1].Length != 1)
+            return false;
+        op = parts[1][0];
+        if (op != 'A' && op != 'D')
+            return false;
+        key = Decode(parts[2]);
+        id = Decode(parts[3]);
+        if (parts.Length == 5 && long.TryParse(parts[4], out var exp))
+            expiresAtUtcTicks = exp;
+        return true;
+    }
+
     public static IReadOnlyList<IndexLease> RecoverTrackedIndexes(IDataProvider provider, IBufferedLogger? logger = null)
     {
         if (provider == null)
