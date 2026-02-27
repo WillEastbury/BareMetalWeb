@@ -175,7 +175,8 @@ public class JsBundleServiceTests : IDisposable
         await JsBundleService.TryServeAsync(context);
 
         Assert.Contains("public", context.Response.Headers.CacheControl.ToString());
-        Assert.Contains("max-age=86400", context.Response.Headers.CacheControl.ToString());
+        Assert.Contains("max-age=31536000", context.Response.Headers.CacheControl.ToString());
+        Assert.Contains("immutable", context.Response.Headers.CacheControl.ToString());
     }
 
     [Fact]

@@ -558,7 +558,39 @@ public class HtmlRenderer : IHtmlRenderer
             };
             page = page with { PageContext = pageContext };
         }
-        
+
+        // Inject theme_css_url — resolved server-side from the bm-selected-theme cookie
+        // so the browser fetches exactly one theme stylesheet with no client-side swap.
+        pageContext = page.PageContext;
+        var currentKeys = pageContext.PageMetaDataKeys;
+        bool hasThemeUrl = false;
+        for (int i = 0; i < currentKeys.Length; i++)
+        {
+            if (string.Equals(currentKeys[i], "theme_css_url", StringComparison.Ordinal))
+            {
+                hasThemeUrl = true;
+                break;
+            }
+        }
+
+        if (!hasThemeUrl)
+        {
+            var themeUrl = GetThemeCssUrl(context);
+            var existingValuesForTheme = pageContext.PageMetaDataValues;
+            var keysWithTheme   = new string[currentKeys.Length + 1];
+            var valuesWithTheme = new string[existingValuesForTheme.Length + 1];
+            Array.Copy(currentKeys, keysWithTheme, currentKeys.Length);
+            Array.Copy(existingValuesForTheme, valuesWithTheme, existingValuesForTheme.Length);
+            keysWithTheme[currentKeys.Length]                   = "theme_css_url";
+            valuesWithTheme[existingValuesForTheme.Length]      = themeUrl;
+            pageContext = pageContext with
+            {
+                PageMetaDataKeys   = keysWithTheme,
+                PageMetaDataValues = valuesWithTheme
+            };
+            page = page with { PageContext = pageContext };
+        }
+
         byte[] output = await RenderToBytesAsync(
             page.PageMetaData.Template,
             page.PageContext.PageMetaDataKeys,
@@ -580,5 +612,28 @@ public class HtmlRenderer : IHtmlRenderer
         context.Response.ContentLength = responseBytes.Length;
         await context.Response.BodyWriter.WriteAsync(responseBytes);
 
+    }
+
+    // ── Theme helpers ──────────────────────────────────────────────────────────
+
+    private static readonly HashSet<string> _validThemes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "cerulean", "cosmo",    "cyborg",   "darkly",  "flatly",
+        "journal",  "litera",   "lumen",    "lux",     "materia",
+        "minty",    "morph",    "pulse",    "quartz",  "sandstone",
+        "simplex",  "sketchy",  "slate",    "solar",   "spacelab",
+        "superhero","united",   "vapor",    "yeti",    "zephyr"
+    };
+
+    private const string DefaultTheme   = "vapor";
+    private const string ThemeCookieKey = "bm-selected-theme";
+
+    private static string GetThemeCssUrl(HttpContext context)
+    {
+        var cookie = context.GetCookie(ThemeCookieKey);
+        var theme  = (!string.IsNullOrEmpty(cookie) && _validThemes.Contains(cookie))
+                     ? cookie
+                     : DefaultTheme;
+        return $"/static/css/themes/{theme}.min.css";
     }
 }
