@@ -1341,11 +1341,9 @@ public static class RouteRegistrationExtensions
     }
 
     /// <summary>
-    /// Builds an inline &lt;script&gt; tag that seeds <c>window.__BMW_META_OBJECTS__</c>
-    /// with the list of entities accessible to the current user.
-    /// The user and permissions are supplied by the caller (already fetched for the current request)
-    /// to avoid a redundant async lookup.
-    /// Returns <c>null</c> on any error so the client falls back to the <c>/api/meta/registered-types</c> API call.
+    /// Builds an inline &lt;script&gt; tag that pre-seeds <c>window.__BMW_META_OBJECTS__</c> with the
+    /// list of entities accessible to the current user.
+    /// Returns <c>null</c> on any error so the client falls back to normal API calls.
     /// </summary>
     private static string? TryBuildMetaObjectsScript(User? user, string[] userPermissions, string safeNonce)
     {
@@ -1364,8 +1362,7 @@ public static class RouteRegistrationExtensions
                 })
                 .ToArray();
 
-            var json = JsonSerializer.Serialize(entities, new JsonSerializerOptions { WriteIndented = false });
-            json = EscapeJsonForInlineScript(json);
+            var json = EscapeJsonForInlineScript(JsonSerializer.Serialize(entities, new JsonSerializerOptions { WriteIndented = false }));
             return $"<script nonce=\"{safeNonce}\">window.__BMW_META_OBJECTS__={json};</script>";
         }
         catch
