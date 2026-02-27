@@ -192,6 +192,11 @@ The `/admin/sample-data` route creates synthetic reference data useful for load 
    | **Customers** | Customer | At least one address needed |
    | **Units** | Unit of Measure | Required if products > 0 |
    | **Products** | Product | At least one unit of measure needed |
+   | **Employees** | Employee | Self-referential hierarchy (first few become managers) |
+   | **Orders** | Order | Requires at least one customer; auto-seeds currencies if none exist |
+   | **To-Do Items** | ToDo | Standalone; generates varied deadlines and periodicities |
+   | **Time Table Plans** | TimeTablePlan | Auto-seeds default subjects if none exist |
+   | **Lesson Logs** | LessonLog | Auto-seeds default subjects if none exist |
 
 4. Click **Generate**.
 
@@ -199,9 +204,15 @@ The generator appends new records to whatever already exists in the store.
 
 ### Clearing Existing Data Before Generation
 
-Enable **Clear existing data** on the form to delete all existing Address, Customer, Unit of Measure, and Product records before generating new ones. This lets you replace test data in one step without running a full data wipe.
+Enable **Clear existing data** on the form to delete all existing Address, Customer, Unit of Measure, Product, Employee, Order, ToDo, TimeTablePlan, and LessonLog records before generating new ones. This lets you replace test data in one step without running a full data wipe.
 
-> Note: `clearExisting` removes only the four entity types listed above. Other entity types (orders, invoices, users, etc.) are not affected.
+> Note: `clearExisting` removes only the entity types listed in the form. Other entity types (invoices, users, currencies, subjects, etc.) are not affected.
+
+#### Auto-seeded dependencies
+
+When generating **Orders** and no currencies exist in the store, the generator automatically seeds five default currencies (USD, EUR, GBP, JPY, CAD) before creating orders.
+
+When generating **Time Table Plans** or **Lesson Logs** and no subjects exist in the store, the generator automatically seeds ten default subjects (Mathematics, English, Science, History, Geography, Art, Music, Physical Education, Computing, Languages).
 
 ---
 

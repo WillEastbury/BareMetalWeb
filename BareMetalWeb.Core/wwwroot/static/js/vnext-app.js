@@ -48,6 +48,13 @@
             return Promise.resolve(_metaObjects);
         }
         if (_metaObjects) return Promise.resolve(_metaObjects);
+        // Consume server-inlined meta objects — eliminates the /meta/objects round-trip on first load
+        if (window.__BMW_META_OBJECTS__ != null) {
+            _metaObjects = window.__BMW_META_OBJECTS__;
+            window.__BMW_META_OBJECTS__ = null;
+            _saveToSession(META_STORE_KEY, _metaObjects);
+            return Promise.resolve(_metaObjects);
+        }
         var cached = _loadFromSession(META_STORE_KEY);
         if (cached) { _metaObjects = cached; return Promise.resolve(_metaObjects); }
         return apiFetch(META + '/objects').then(function (data) {
@@ -67,6 +74,13 @@
             return Promise.resolve(_metaCache[slug]);
         }
         if (_metaCache[slug]) return Promise.resolve(_metaCache[slug]);
+        // Consume server-inlined entity schema — eliminates the /meta/{slug} round-trip on first load
+        if (window.__BMW_META__ && window.__BMW_META__[slug] != null) {
+            _metaCache[slug] = window.__BMW_META__[slug];
+            _saveToSession(META_STORE_PFX + slug, _metaCache[slug]);
+            delete window.__BMW_META__[slug];
+            return Promise.resolve(_metaCache[slug]);
+        }
         var cached = _loadFromSession(META_STORE_PFX + slug);
         if (cached) { _metaCache[slug] = cached; return Promise.resolve(cached); }
         return apiFetch(META + '/' + encodeURIComponent(slug)).then(function (data) {
