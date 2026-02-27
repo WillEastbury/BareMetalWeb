@@ -414,4 +414,205 @@ public sealed class WalStoreTests : IDisposable
             Assert.Equal(ptrs[i], head);
         }
     }
+
+    // ── V2: VisibleCommitPtr ─────────────────────────────────────────────────
+
+    [Fact]
+    public async Task VisibleCommitPtr_UpdatedAfterEachCommit()
+    {
+        using var store = new WalStore(_dir);
+        Assert.Equal(WalConstants.NullPtr, store.VisibleCommitPtr);
+
+        ulong ptr1 = await store.CommitAsync(new[] { WalOp.Upsert(WalConstants.PackKey(1, 1), new byte[] { 1 }) });
+        Assert.Equal(ptr1, store.VisibleCommitPtr);
+
+        ulong ptr2 = await store.CommitAsync(new[] { WalOp.Upsert(WalConstants.PackKey(1, 2), new byte[] { 2 }) });
+        Assert.Equal(ptr2, store.VisibleCommitPtr);
+        Assert.NotEqual(ptr1, ptr2);
+    }
+
+    // ── V2: WalTransaction ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Transaction_Commit_WritesOpsToStore()
+    {
+        using var store = new WalStore(_dir);
+        ulong key = WalConstants.PackKey(30, 1);
+
+        using var tx = store.BeginTransaction();
+        tx.Stage(WalOp.Upsert(key, new byte[] { 0xAB }));
+        Assert.Equal(1, tx.StagedCount);
+
+        ulong ptr = await tx.CommitAsync();
+
+        Assert.NotEqual(WalConstants.NullPtr, ptr);
+        Assert.True(store.TryGetHead(key, out ulong head));
+        Assert.Equal(ptr, head);
+    }
+
+    [Fact]
+    public async Task Transaction_Rollback_LeavesStoreUnchanged()
+    {
+        using var store = new WalStore(_dir);
+        ulong key = WalConstants.PackKey(31, 1);
+
+        {
+            using var tx = store.BeginTransaction();
+            tx.Stage(WalOp.Upsert(key, new byte[] { 0xFF }));
+        } // Dispose without commit → rollback
+
+        Assert.False(store.TryGetHead(key, out _));
+    }
+
+    [Fact]
+    public void Transaction_CannotCommitTwice()
+    {
+        using var store = new WalStore(_dir);
+        var tx = store.BeginTransaction();
+        tx.Stage(WalOp.Upsert(WalConstants.PackKey(32, 1), new byte[] { 1 }));
+        tx.CommitAsync().GetAwaiter().GetResult();
+        Assert.Throws<InvalidOperationException>(() => tx.CommitAsync().GetAwaiter().GetResult());
+        tx.Dispose();
+    }
+
+    [Fact]
+    public void Transaction_EmptyBatch_Throws()
+    {
+        using var store = new WalStore(_dir);
+        using var tx = store.BeginTransaction();
+        Assert.Throws<InvalidOperationException>(() => tx.CommitAsync().GetAwaiter().GetResult());
+    }
+
+    // ── V2: WalSnapshot ──────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Snapshot_WriteAndLoad_RoundTrip()
+    {
+        ulong key1 = WalConstants.PackKey(40, 1);
+        ulong key2 = WalConstants.PackKey(40, 2);
+
+        ulong ptr1, ptr2;
+        {
+            using var store = new WalStore(_dir);
+            ptr1 = await store.CommitAsync(new[] { WalOp.Upsert(key1, new byte[] { 1 }) });
+            ptr2 = await store.CommitAsync(new[] { WalOp.Upsert(key2, new byte[] { 2 }) });
+        } // Dispose writes snapshot + segment footer
+
+        // Verify snapshot file exists
+        Assert.True(File.Exists(Path.Combine(_dir, WalSnapshot.FileName)));
+
+        // Load snapshot directly
+        Assert.True(WalSnapshot.TryLoad(_dir, out ulong loadedPtr, out var keys, out var heads));
+        Assert.Equal(ptr2, loadedPtr); // last committed ptr
+        Assert.Equal(2, keys.Length);
+
+        // Verify head map on fresh store reopen
+        using var store2 = new WalStore(_dir);
+        Assert.True(store2.TryGetHead(key1, out ulong r1));
+        Assert.True(store2.TryGetHead(key2, out ulong r2));
+        Assert.Equal(ptr1, r1);
+        Assert.Equal(ptr2, r2);
+    }
+
+    [Fact]
+    public void Snapshot_MissingFile_ReturnsFalse()
+    {
+        Assert.False(WalSnapshot.TryLoad(_dir, out _, out _, out _));
+    }
+
+    [Fact]
+    public void Snapshot_CorruptFile_ReturnsFalse()
+    {
+        // Write a garbage file
+        File.WriteAllBytes(Path.Combine(_dir, WalSnapshot.FileName), new byte[] { 0xFF, 0x00, 0xAA });
+        Assert.False(WalSnapshot.TryLoad(_dir, out _, out _, out _));
+    }
+
+    // ── V2: ISecondaryIndex / WalProjectionManager ───────────────────────────
+
+    [Fact]
+    public async Task ProjectionManager_ApplyCommit_DispatchedAfterCommit()
+    {
+        using var store = new WalStore(_dir);
+        var tracker = new TestSecondaryIndex(tableId: 50);
+        store.ProjectionManager.Register(tracker);
+
+        ulong key = WalConstants.PackKey(50, 7);
+        await store.CommitAsync(new[] { WalOp.Upsert(key, Encoding.UTF8.GetBytes("hello")) });
+
+        Assert.Equal(1, tracker.UpsertCount);
+        Assert.Equal(0, tracker.DeleteCount);
+    }
+
+    [Fact]
+    public async Task ProjectionManager_DeleteOp_CallsRemove()
+    {
+        using var store = new WalStore(_dir);
+        var tracker = new TestSecondaryIndex(tableId: 51);
+        store.ProjectionManager.Register(tracker);
+
+        ulong key = WalConstants.PackKey(51, 3);
+        await store.CommitAsync(new[] { WalOp.Upsert(key, new byte[] { 0x01 }) });
+        await store.CommitAsync(new[] { WalOp.Delete(key) });
+
+        Assert.Equal(1, tracker.UpsertCount);
+        Assert.Equal(1, tracker.DeleteCount);
+    }
+
+    [Fact]
+    public async Task ProjectionManager_DifferentTable_NotDispatched()
+    {
+        using var store = new WalStore(_dir);
+        var tracker = new TestSecondaryIndex(tableId: 60);
+        store.ProjectionManager.Register(tracker);
+
+        // Commit to table 61 – tracker registered for 60 should not receive it
+        ulong key = WalConstants.PackKey(61, 1);
+        await store.CommitAsync(new[] { WalOp.Upsert(key, new byte[] { 0x01 }) });
+
+        Assert.Equal(0, tracker.UpsertCount);
+    }
+
+    // ── IndexKey helpers ─────────────────────────────────────────────────────
+
+    [Fact]
+    public void IndexKey_FromUInt64_RoundTrip()
+    {
+        var k = IndexKey.FromUInt64(12345678uL);
+        Assert.Equal(12345678uL, k.RawValue);
+    }
+
+    [Fact]
+    public void IndexKey_FromString_Deterministic()
+    {
+        var k1 = IndexKey.FromString("hello");
+        var k2 = IndexKey.FromString("hello");
+        Assert.Equal(k1, k2);
+    }
+
+    [Fact]
+    public void IndexKey_FromString_DifferentStrings_DifferentKeys()
+    {
+        var k1 = IndexKey.FromString("hello");
+        var k2 = IndexKey.FromString("world");
+        Assert.NotEqual(k1, k2);
+    }
+
+    // ── Helper: simple test secondary index ──────────────────────────────────
+
+    private sealed class TestSecondaryIndex(uint tableId) : ISecondaryIndex
+    {
+        public uint   TableId     => tableId;
+        public string Name        => "test";
+        public int    UpsertCount { get; private set; }
+        public int    DeleteCount { get; private set; }
+
+        public void ApplyChange(ulong key, ReadOnlySpan<byte> oldRow, ReadOnlySpan<byte> newRow, ChangeType ct)
+        {
+            if (ct == ChangeType.Upsert) UpsertCount++;
+        }
+        public void Remove(ulong key, ReadOnlySpan<byte> oldRow) => DeleteCount++;
+        public IEnumerable<ulong> QueryEquals(IndexKey k)            => [];
+        public IEnumerable<ulong> QueryRange(IndexKey min, IndexKey max) => [];
+    }
 }

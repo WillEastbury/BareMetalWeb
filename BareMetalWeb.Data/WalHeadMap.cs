@@ -95,6 +95,20 @@ public sealed class WalHeadMap : IDisposable
         finally { _lock.ExitWriteLock(); }
     }
 
+    /// <summary>
+    /// Copies the current sorted key/head arrays for snapshot use.
+    /// </summary>
+    internal void CopyArrays(out ulong[] keys, out ulong[] heads)
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            keys  = (ulong[])_keysSorted.Clone();
+            heads = (ulong[])_headsSorted.Clone();
+        }
+        finally { _lock.ExitReadLock(); }
+    }
+
     /// <inheritdoc/>
     public void Dispose() => _lock.Dispose();
 }

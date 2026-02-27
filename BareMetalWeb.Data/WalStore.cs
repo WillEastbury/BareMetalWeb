@@ -7,16 +7,17 @@ using System.Threading.Tasks;
 namespace BareMetalWeb.Data;
 
 /// <summary>
-/// Log-structured WAL-backed record store.
+/// Log-structured WAL-backed record store (V2).
 ///
 /// Design summary:
 /// - Append-only segment files on disk form the authoritative committed history.
 /// - Only committed batches are written to disk.
 /// - Each <see cref="CommitAsync"/> writes exactly ONE atomic CommitBatch record,
 ///   fsyncs the segment, then updates the in-memory head map.
-/// - Startup recovery reads per-segment footer indexes (newest → oldest); falls
-///   back to a linear scan for any segment without a valid footer.
-/// - <see cref="Dispose"/> writes a footer to the active segment for clean shutdown.
+/// - Startup recovery loads a snapshot if present, then replays WAL tail.
+/// - <see cref="Dispose"/> writes a snapshot and a segment footer for clean shutdown.
+/// - <see cref="ProjectionManager"/> dispatches committed ops to secondary indexes.
+/// - <see cref="VisibleCommitPtr"/> tracks the latest durable commit watermark.
 ///
 /// Thread-safety: all writes serialised under <see cref="_writeLock"/>;
 /// reads from <see cref="HeadMap"/> are independently lock-protected.
@@ -33,12 +34,26 @@ public sealed class WalStore : IDisposable
     private WalSegmentWriter? _activeWriter;
     private uint _nextSegmentId;
     private ulong _nextTxId = 1;
+    private ulong _visibleCommitPtr;
     private bool _disposed;
 
     // ── Public surface ────────────────────────────────────────────────────────
 
     /// <summary>In-memory head map: key → Ptr of the latest committed record for that key.</summary>
     public WalHeadMap HeadMap { get; } = new();
+
+    /// <summary>
+    /// Global monotonic commit watermark (V2 spec §3.1 VisibleCommitPtr).
+    /// Queries and projections should only observe versions ≤ this value.
+    /// Updated after every successful commit.
+    /// </summary>
+    public ulong VisibleCommitPtr => Volatile.Read(ref _visibleCommitPtr);
+
+    /// <summary>
+    /// Secondary-index coordinator (V2 spec §4.2).
+    /// Register <see cref="ISecondaryIndex"/> instances here before the first commit.
+    /// </summary>
+    public WalProjectionManager ProjectionManager { get; } = new();
 
     /// <summary>Convenience proxy for <see cref="WalHeadMap.TryGetHead"/>.</summary>
     public bool TryGetHead(ulong key, out ulong ptr) => HeadMap.TryGetHead(key, out ptr);
@@ -58,6 +73,16 @@ public sealed class WalStore : IDisposable
         Directory.CreateDirectory(directory);
         Recover();
     }
+
+    // ── Transaction ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Creates a new staging transaction (V2 spec §3).
+    /// Stage operations on the returned <see cref="WalTransaction"/>, then call
+    /// <see cref="WalTransaction.CommitAsync"/> to persist atomically.
+    /// If the transaction is disposed without committing, staged ops are discarded.
+    /// </summary>
+    public WalTransaction BeginTransaction() => new(this);
 
     // ── Commit ────────────────────────────────────────────────────────────────
 
@@ -113,9 +138,14 @@ public sealed class WalStore : IDisposable
             ulong ptr = _activeWriter.AppendCommitBatch(txId, filledOps);
             _activeWriter.Flush(flushToDisk: true);
 
-            // Update head map (completes the "TCS" notification in spec terms)
+            // Update head map and VisibleCommitPtr (completes the "TCS" notification in spec terms)
             foreach (var op in filledOps)
                 HeadMap.SetHead(op.Key, ptr);
+
+            Volatile.Write(ref _visibleCommitPtr, ptr);
+
+            // Dispatch to secondary projections (V2 spec §4.2)
+            ProjectionManager.ApplyCommit(filledOps);
 
             return Task.FromResult(ptr);
         }
@@ -154,9 +184,18 @@ public sealed class WalStore : IDisposable
         {
             if (_disposed) return;
             _disposed = true;
+
+            // Persist a snapshot on clean shutdown (V2 spec §5.3)
+            if (_visibleCommitPtr != WalConstants.NullPtr)
+            {
+                try { WalSnapshot.Write(_directory, _visibleCommitPtr, HeadMap); }
+                catch { /* best-effort snapshot on shutdown */ }
+            }
+
             _activeWriter?.WriteFooterAndClose();
             _activeWriter = null;
         }
+        ProjectionManager.Dispose();
         HeadMap.Dispose();
     }
 
@@ -164,26 +203,41 @@ public sealed class WalStore : IDisposable
 
     /// <summary>
     /// Reads all existing segments (newest → oldest) to rebuild the head map,
-    /// then sets <see cref="_nextSegmentId"/> for the next new segment.
+    /// optionally bootstrapping from a persisted snapshot to bound replay cost.
+    /// Sets <see cref="_nextSegmentId"/> for the next new segment.
     /// </summary>
     private void Recover()
     {
+        ulong snapshotPtr = WalConstants.NullPtr;
+
+        // V2 spec §9: load latest snapshot first, then replay WAL tail only
+        if (WalSnapshot.TryLoad(_directory, out snapshotPtr, out var snapKeys, out var snapHeads))
+        {
+            HeadMap.BulkLoad(snapKeys, snapHeads);
+            Volatile.Write(ref _visibleCommitPtr, snapshotPtr);
+        }
+
         var segments = DiscoverSegments();  // sorted descending
 
         // Build head map from newest segment to oldest.
-        // We accumulate into a flat list then sort once for BulkLoad.
+        // Skip segments entirely within the snapshot horizon (all ptrs ≤ snapshotPtr)
+        // when the snapshot was just loaded – conservative: we replay all segments.
         var headEntries = new SortedDictionary<ulong, ulong>();
 
         foreach (var (segId, filePath) in segments)
         {
+            // If snapshot covered this segment's entire range we still scan,
+            // but SetHead will be ignored for keys already in the head map.
             Dictionary<ulong, uint>? index = WalSegmentReader.TryReadFooterIndex(filePath)
                                           ?? WalSegmentReader.LinearScanIndex(filePath);
 
             foreach (var (key, offset32) in index)
             {
-                // Only set if this key is not yet known (we process newest → oldest)
+                ulong ptr = WalConstants.PackPtr(segId, offset32);
+
+                // Prefer WAL-derived ptr over snapshot ptr (WAL is authoritative for the tail)
                 if (!headEntries.ContainsKey(key))
-                    headEntries[key] = WalConstants.PackPtr(segId, offset32);
+                    headEntries[key] = ptr;
             }
         }
 
@@ -193,7 +247,9 @@ public sealed class WalStore : IDisposable
             var heads = new ulong[headEntries.Count];
             int i = 0;
             foreach (var kv in headEntries) { keys[i] = kv.Key; heads[i] = kv.Value; i++; }
-            HeadMap.BulkLoad(keys, heads);
+            // Merge with existing (snapshot-loaded) head map: WAL wins for keys present in both
+            foreach (var kv in headEntries)
+                HeadMap.SetHead(kv.Key, kv.Value);
         }
 
         // Always start a new segment; don't resume the previous active segment.
