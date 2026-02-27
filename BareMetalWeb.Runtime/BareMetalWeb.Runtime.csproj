@@ -14,4 +14,8 @@
     <ProjectReference Include="..\BareMetalWeb.Data\BareMetalWeb.Data.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <EmbeddedResource Include="Samples\*.json" />
+  </ItemGroup>
+
 </Project>
