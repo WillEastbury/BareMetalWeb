@@ -1290,7 +1290,7 @@ public static class RouteRegistrationExtensions
                                       q.Keys.Any(k => k.StartsWith("f_", StringComparison.OrdinalIgnoreCase));
                 if (!hasCustomParams)
                     initialDataScript = await TryBuildInitialDataScriptAsync(
-                        context, slugCandidate, q["view"].ToString(), safeNonce, context.RequestAborted).ConfigureAwait(false);
+                        context, slugCandidate, safeNonce, context.RequestAborted).ConfigureAwait(false);
             }
         }
 
@@ -1325,7 +1325,7 @@ public static class RouteRegistrationExtensions
     /// (the client will fall back to the normal API call).
     /// </summary>
     private static async ValueTask<string?> TryBuildInitialDataScriptAsync(
-        HttpContext context, string slug, string activeView, string safeNonce, CancellationToken cancellationToken)
+        HttpContext context, string slug, string safeNonce, CancellationToken cancellationToken)
     {
         try
         {
@@ -1349,19 +1349,13 @@ public static class RouteRegistrationExtensions
                 }
             }
 
-            // Determine top — mirrors the JS isHierarchyView logic, including the ?view= override
-            var isHierarchyView = meta.ViewType == ViewType.TreeView
-                               || meta.ViewType == ViewType.OrgChart
-                               || meta.ViewType == ViewType.Timeline
-                               || DataScaffold.CanShowTimetableView(meta)
-                               || string.Equals(activeView, "TreeView",  StringComparison.OrdinalIgnoreCase)
-                               || string.Equals(activeView, "OrgChart",  StringComparison.OrdinalIgnoreCase)
-                               || string.Equals(activeView, "Timeline",  StringComparison.OrdinalIgnoreCase)
-                               || string.Equals(activeView, "Timetable", StringComparison.OrdinalIgnoreCase);
-            var top = isHierarchyView ? 10000 : 25;
+            // Always embed just the first page (25 rows) with the full row count.
+            // Hierarchy views (TreeView, OrgChart, Timeline, Timetable) need top=10000 and will
+            // fall back to the normal API call because their effectiveTop won't match this value.
+            const int top = 25;
 
-            // Build query — empty dict lets BuildQueryDefinition apply default sort from metadata
-            var queryDict = new Dictionary<string, string?> { ["skip"] = "0", ["top"] = top.ToString() };
+            // Build query — lets BuildQueryDefinition apply default sort from metadata
+            var queryDict = new Dictionary<string, string?> { ["skip"] = "0", ["top"] = "25" };
             var query = DataScaffold.BuildQueryDefinition(queryDict, meta);
 
             var countQuery = DataScaffold.BuildQueryDefinition(queryDict, meta);
