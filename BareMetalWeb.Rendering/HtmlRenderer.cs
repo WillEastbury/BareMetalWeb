@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO.Pipelines;
-using System.Net;
 using System.Text;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Core;
@@ -43,27 +42,30 @@ public class HtmlRenderer : IHtmlRenderer
 
         Write(writer, _fragments.HeadEndAndBodyStart);
 
-        // The menu is part of the app metadata and should be injected here if present from the apps property app.MenuOptionsList so lets pre-render that with the helper
-        // Add the pre-rendered menu options to the output value and key for substitution as 'links'
-        var byteKeysList = new List<string> { "links_left", "links_right" };
-        var byteValuesList = new List<byte[]>
-        {
-            _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: false),
-            _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: true)
-        };
-
+        // Build the byte-rendered key/value pairs for the body section (at most 4 entries).
+        // Using fixed-size arrays avoids List<T> allocation and the subsequent ToArray() copies.
+        int byteCount = 2
+            + (tableColumnTitles is not null && tableRows is not null ? 1 : 0)
+            + (formDefinition is not null ? 1 : 0);
+        var byteKeysArr = new string[byteCount];
+        var byteValuesArr = new byte[byteCount][];
+        byteKeysArr[0] = "links_left";
+        byteValuesArr[0] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: false);
+        byteKeysArr[1] = "links_right";
+        byteValuesArr[1] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: true);
+        int idx = 2;
         if (tableColumnTitles != null && tableRows != null)
         {
-            byteKeysList.Add("table");
-            byteValuesList.Add(_fragments.RenderTable(tableColumnTitles, tableRows));
+            byteKeysArr[idx] = "table";
+            byteValuesArr[idx++] = _fragments.RenderTable(tableColumnTitles, tableRows);
         }
         if (formDefinition is not null)
         {
-            byteKeysList.Add("form");
-            byteValuesList.Add(_fragments.RenderForm(formDefinition));
+            byteKeysArr[idx] = "form";
+            byteValuesArr[idx] = _fragments.RenderForm(formDefinition);
         }
-       
-        RenderSection(writer, template.Body, keys, values, appkeys, appvalues, byteKeysList.ToArray(), byteValuesList.ToArray(), templateLoops);
+
+        RenderSection(writer, template.Body, keys, values, appkeys, appvalues, byteKeysArr, byteValuesArr, templateLoops);
         RenderSection(writer, template.Footer, keys, values, appkeys, appvalues, null, null, templateLoops);
 
         if (!string.IsNullOrEmpty(template.Script))
@@ -472,12 +474,42 @@ public class HtmlRenderer : IHtmlRenderer
             WriteHtmlEncoded(writer, value);
     }
 
-    private static void WriteHtmlEncoded(PipeWriter writer, string text)
+    private static void WriteHtmlEncoded(PipeWriter writer, string? text)
     {
-        // HTML encode the text to prevent XSS injection through template tokens
-        // Handle null by treating as empty string
-        var encoded = WebUtility.HtmlEncode(text ?? string.Empty);
-        Write(writer, encoded);
+        // Write HTML-encoded text directly to the PipeWriter without allocating an intermediate string.
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        ReadOnlySpan<char> span = text.AsSpan();
+        int i = 0;
+        int segStart = 0;
+
+        while (i < span.Length)
+        {
+            char c = span[i];
+            ReadOnlySpan<char> entity;
+            switch (c)
+            {
+                case '&':  entity = "&amp;".AsSpan();  break;
+                case '<':  entity = "&lt;".AsSpan();   break;
+                case '>':  entity = "&gt;".AsSpan();   break;
+                case '"':  entity = "&quot;".AsSpan(); break;
+                case '\'': entity = "&#39;".AsSpan();  break;
+                default:   i++;                        continue;
+            }
+
+            // Flush literal segment before the special char
+            if (i > segStart)
+                Write(writer, span.Slice(segStart, i - segStart));
+
+            Write(writer, entity);
+            i++;
+            segStart = i;
+        }
+
+        // Flush any remaining literal tail
+        if (segStart < span.Length)
+            Write(writer, span.Slice(segStart));
     }
 
     public async ValueTask RenderPage(HttpContext context)
@@ -496,21 +528,33 @@ public class HtmlRenderer : IHtmlRenderer
 
     public async ValueTask RenderPage(HttpContext context, PageInfo page, IBareWebHost app)
     {
-        // Ensure CSP nonce is in page context
+        // Ensure CSP nonce is in page context — search without List allocation
         var pageContext = page.PageContext;
-        var keys = pageContext.PageMetaDataKeys.ToList();
-        var values = pageContext.PageMetaDataValues.ToList();
-        
-        var nonceIndex = keys.FindIndex(k => string.Equals(k, "csp_nonce", StringComparison.Ordinal));
+        var existingKeys = pageContext.PageMetaDataKeys;
+        int nonceIndex = -1;
+        for (int i = 0; i < existingKeys.Length; i++)
+        {
+            if (string.Equals(existingKeys[i], "csp_nonce", StringComparison.Ordinal))
+            {
+                nonceIndex = i;
+                break;
+            }
+        }
+
         if (nonceIndex < 0)
         {
             var nonce = context.GetCspNonce();
-            keys.Add("csp_nonce");
-            values.Add(nonce);
+            var existingValues = pageContext.PageMetaDataValues;
+            var newKeys = new string[existingKeys.Length + 1];
+            var newValues = new string[existingValues.Length + 1];
+            Array.Copy(existingKeys, newKeys, existingKeys.Length);
+            Array.Copy(existingValues, newValues, existingValues.Length);
+            newKeys[existingKeys.Length] = "csp_nonce";
+            newValues[existingValues.Length] = nonce;
             pageContext = pageContext with
             {
-                PageMetaDataKeys = keys.ToArray(),
-                PageMetaDataValues = values.ToArray()
+                PageMetaDataKeys = newKeys,
+                PageMetaDataValues = newValues
             };
             page = page with { PageContext = pageContext };
         }

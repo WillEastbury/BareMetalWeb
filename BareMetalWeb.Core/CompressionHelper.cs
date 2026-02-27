@@ -68,20 +68,20 @@ public static class CompressionHelper
     public static string? SelectEncoding(HttpContext context)
         => SelectEncoding(context.Request.Headers.AcceptEncoding.ToString());
 
-    /// <summary>Compresses <paramref name="data"/> using Brotli at Optimal level.</summary>
+    /// <summary>Compresses <paramref name="data"/> using Brotli at Fastest level.</summary>
     public static byte[] CompressBrotli(byte[] data)
     {
-        using var ms = new MemoryStream();
-        using (var bs = new BrotliStream(ms, CompressionLevel.Optimal, leaveOpen: true))
+        using var ms = new MemoryStream(data.Length);
+        using (var bs = new BrotliStream(ms, CompressionLevel.Fastest, leaveOpen: true))
             bs.Write(data, 0, data.Length);
         return ms.ToArray();
     }
 
-    /// <summary>Compresses <paramref name="data"/> using GZip at Optimal level.</summary>
+    /// <summary>Compresses <paramref name="data"/> using GZip at Fastest level.</summary>
     public static byte[] CompressGzip(byte[] data)
     {
-        using var ms = new MemoryStream();
-        using (var gz = new GZipStream(ms, CompressionLevel.Optimal, leaveOpen: true))
+        using var ms = new MemoryStream(data.Length);
+        using (var gz = new GZipStream(ms, CompressionLevel.Fastest, leaveOpen: true))
             gz.Write(data, 0, data.Length);
         return ms.ToArray();
     }
