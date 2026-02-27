@@ -57,7 +57,7 @@ public class BareMetalWebServer : IBareWebHost
             AppMetaDataValues[4] = ComputePrivacyPolicyLink(value);
         }
     }
-    public static string[] appMetaDataKeys { get; set; } = new[] { "AppName", "CompanyDescription", "CopyrightYear", "AppVersion", "PrivacyPolicyUrl" };
+    public static string[] appMetaDataKeys { get; set; } = new[] { "AppName", "CompanyDescription", "CopyrightYear", "AppVersion", "html_PrivacyPolicyUrl" };
     public string[] AppMetaDataKeys => appMetaDataKeys;
     public string[] AppMetaDataValues { get; set; }
     public List<IMenuOption> MenuOptionsList { get; set; } = new List<IMenuOption>();
