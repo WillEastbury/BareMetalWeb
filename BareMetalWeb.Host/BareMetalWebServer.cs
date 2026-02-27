@@ -302,7 +302,8 @@ public class BareMetalWebServer : IBareWebHost
     public async Task RequestHandler(HttpContext context)
     {
         var stopwatch = Stopwatch.StartNew();
-        string method = context.Request.Method.ToUpperInvariant();
+        // Kestrel normalises HTTP methods to uppercase; avoid the extra allocation from ToUpperInvariant().
+        string method = context.Request.Method;
         string requestPath = context.Request.Path.Value ?? "/";
         string path = method + " " + requestPath;
         string sourceIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";

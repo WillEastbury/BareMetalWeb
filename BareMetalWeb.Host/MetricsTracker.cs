@@ -1,7 +1,7 @@
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Threading;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Interfaces;
@@ -119,32 +119,41 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
         if (samples.Length == 0)
             return new RecentMetrics(TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero);
 
-        var ticks = new long[samples.Length];
-        long totalTicks = 0;
-        long minTicks = long.MaxValue;
-        long maxTicks = long.MinValue;
-
-        for (int i = 0; i < samples.Length; i++)
+        // Rent a buffer from ArrayPool to avoid allocating a new long[] on every snapshot call.
+        var pool = ArrayPool<long>.Shared;
+        long[] ticks = pool.Rent(samples.Length);
+        try
         {
-            var t = samples[i].ElapsedTicks;
-            ticks[i] = t;
-            totalTicks += t;
-            if (t < minTicks) minTicks = t;
-            if (t > maxTicks) maxTicks = t;
+            long totalTicks = 0;
+            long minTicks = long.MaxValue;
+            long maxTicks = long.MinValue;
+
+            for (int i = 0; i < samples.Length; i++)
+            {
+                var t = samples[i].ElapsedTicks;
+                ticks[i] = t;
+                totalTicks += t;
+                if (t < minTicks) minTicks = t;
+                if (t > maxTicks) maxTicks = t;
+            }
+
+            Array.Sort(ticks, 0, samples.Length);
+            var p95 = PercentileTicks(ticks, samples.Length, 0.95);
+            var p99 = PercentileTicks(ticks, samples.Length, 0.99);
+
+            var avgTicks = totalTicks / samples.Length;
+            return new RecentMetrics(
+                TimeSpan.FromTicks(minTicks),
+                TimeSpan.FromTicks(maxTicks),
+                TimeSpan.FromTicks(avgTicks),
+                TimeSpan.FromTicks(p95),
+                TimeSpan.FromTicks(p99)
+            );
         }
-
-        Array.Sort(ticks);
-        var p95 = PercentileTicks(ticks, 0.95);
-        var p99 = PercentileTicks(ticks, 0.99);
-
-        var avgTicks = totalTicks / samples.Length;
-        return new RecentMetrics(
-            TimeSpan.FromTicks(minTicks),
-            TimeSpan.FromTicks(maxTicks),
-            TimeSpan.FromTicks(avgTicks),
-            TimeSpan.FromTicks(p95),
-            TimeSpan.FromTicks(p99)
-        );
+        finally
+        {
+            pool.Return(ticks);
+        }
     }
 
     private static ResponseSample[] FilterRecentSamples(ResponseSample[] samples, DateTime cutoffUtc)
@@ -152,25 +161,36 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
         if (samples.Length == 0)
             return Array.Empty<ResponseSample>();
 
-        var list = new List<ResponseSample>(samples.Length);
+        // Count matches first so the output array is exactly sized (avoids List<T> overhead).
+        int matchCount = 0;
         for (int i = 0; i < samples.Length; i++)
         {
             if (samples[i].TimestampUtc >= cutoffUtc)
-                list.Add(samples[i]);
+                matchCount++;
         }
 
-        return list.Count == samples.Length ? samples : list.ToArray();
+        if (matchCount == samples.Length) return samples;
+        if (matchCount == 0) return Array.Empty<ResponseSample>();
+
+        var result = new ResponseSample[matchCount];
+        int j = 0;
+        for (int i = 0; i < samples.Length; i++)
+        {
+            if (samples[i].TimestampUtc >= cutoffUtc)
+                result[j++] = samples[i];
+        }
+        return result;
     }
 
-    private static long PercentileTicks(long[] sortedTicks, double percentile)
+    private static long PercentileTicks(long[] sortedTicks, int count, double percentile)
     {
-        if (sortedTicks.Length == 0)
+        if (count == 0)
             return 0;
 
-        var position = percentile * sortedTicks.Length;
+        var position = percentile * count;
         var index = (int)Math.Ceiling(position) - 1;
         if (index < 0) index = 0;
-        if (index >= sortedTicks.Length) index = sortedTicks.Length - 1;
+        if (index >= count) index = count - 1;
         return sortedTicks[index];
     }
 
