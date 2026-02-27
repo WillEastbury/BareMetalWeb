@@ -4145,7 +4145,7 @@ public sealed class RouteHandlers : IRouteHandlers
             File.Delete(fullPath);
     }
 
-    private static Dictionary<string, object?> BuildApiModel(DataEntityMetadata meta, object instance)
+    internal static Dictionary<string, object?> BuildApiModel(DataEntityMetadata meta, object instance)
     {
         var data = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
         var id = instance is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) : null;
