@@ -1,0 +1,19 @@
+{
+  "name": "baremetalweb-js-unit-tests",
+  "version": "1.0.0",
+  "description": "Jest unit tests for BareMetalWeb client-side JS mini libraries",
+  "scripts": {
+    "test": "jest",
+    "test:coverage": "jest --coverage"
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0"
+  },
+  "jest": {
+    "testEnvironment": "jest-environment-jsdom",
+    "testMatch": ["**/tests/**/*.test.js"],
+    "verbose": true
+  }
+}
