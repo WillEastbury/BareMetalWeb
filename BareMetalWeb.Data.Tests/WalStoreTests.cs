@@ -615,4 +615,149 @@ public sealed class WalStoreTests : IDisposable
         public IEnumerable<ulong> QueryEquals(IndexKey k)            => [];
         public IEnumerable<ulong> QueryRange(IndexKey min, IndexKey max) => [];
     }
+
+    // ── WalTableKeyAllocator ─────────────────────────────────────────────────
+
+    [Fact]
+    public void KeyAllocator_AllocateRecordId_Monotonic()
+    {
+        using var store = new WalStore(_dir);
+        uint id1 = store.KeyAllocator.AllocateRecordId(1);
+        uint id2 = store.KeyAllocator.AllocateRecordId(1);
+        uint id3 = store.KeyAllocator.AllocateRecordId(1);
+        Assert.Equal(1u, id1);
+        Assert.Equal(2u, id2);
+        Assert.Equal(3u, id3);
+    }
+
+    [Fact]
+    public void KeyAllocator_DifferentTables_IndependentSequences()
+    {
+        using var store = new WalStore(_dir);
+        Assert.Equal(1u, store.KeyAllocator.AllocateRecordId(10));
+        Assert.Equal(1u, store.KeyAllocator.AllocateRecordId(20));
+        Assert.Equal(2u, store.KeyAllocator.AllocateRecordId(10));
+    }
+
+    [Fact]
+    public void KeyAllocator_PersistAndReload_MonotonicAcrossRestarts()
+    {
+        {
+            using var s = new WalStore(_dir);
+            s.KeyAllocator.AllocateRecordId(5); // id=1
+            s.KeyAllocator.AllocateRecordId(5); // id=2
+        } // Dispose flushes seqids
+
+        {
+            using var s2 = new WalStore(_dir);
+            uint next = s2.KeyAllocator.AllocateRecordId(5);
+            Assert.Equal(3u, next); // continues from 2
+        }
+    }
+
+    [Fact]
+    public void AllocateKey_PacksTableAndRecordId()
+    {
+        using var store = new WalStore(_dir);
+        ulong key = store.AllocateKey(tableId: 7);
+        var (t, r) = WalConstants.UnpackKey(key);
+        Assert.Equal(7u, t);
+        Assert.Equal(1u, r); // first allocation for table 7
+    }
+
+    [Fact]
+    public void KeyAllocator_Seed_AdvancesFloor()
+    {
+        using var store = new WalStore(_dir);
+        store.KeyAllocator.Seed(3, 100);
+        uint next = store.KeyAllocator.AllocateRecordId(3);
+        Assert.Equal(101u, next);
+    }
+
+    [Fact]
+    public void KeyAllocator_Seed_DoesNotDecreaseExisting()
+    {
+        using var store = new WalStore(_dir);
+        store.KeyAllocator.AllocateRecordId(4); // 1
+        store.KeyAllocator.AllocateRecordId(4); // 2
+        store.KeyAllocator.Seed(4, 1);          // below current — ignored
+        uint next = store.KeyAllocator.AllocateRecordId(4);
+        Assert.Equal(3u, next);
+    }
+
+    // ── WalLatin1Key32 ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void Latin1Key_FromString_Short_PaddedWithZero()
+    {
+        var k = WalLatin1Key32.FromString("Hi");
+        Span<byte> buf = stackalloc byte[32];
+        k.CopyTo(buf);
+        Assert.Equal((byte)'H', buf[0]);
+        Assert.Equal((byte)'i', buf[1]);
+        for (int i = 2; i < 32; i++) Assert.Equal(0, buf[i]);
+    }
+
+    [Fact]
+    public void Latin1Key_FromString_Truncates_At32Chars()
+    {
+        string s = new('A', 40);
+        var k = WalLatin1Key32.FromString(s);
+        Span<byte> buf = stackalloc byte[32];
+        k.CopyTo(buf);
+        for (int i = 0; i < 32; i++) Assert.Equal((byte)'A', buf[i]);
+    }
+
+    [Fact]
+    public void Latin1Key_NonLatin1_ReplacedWithQuestion()
+    {
+        var k = WalLatin1Key32.FromString("\u0100"); // U+0100 = Ā, above Latin-1
+        Span<byte> buf = stackalloc byte[32];
+        k.CopyTo(buf);
+        Assert.Equal((byte)'?', buf[0]);
+    }
+
+    [Fact]
+    public void Latin1Key_Equality_SameContent_Equal()
+    {
+        var k1 = WalLatin1Key32.FromString("hello");
+        var k2 = WalLatin1Key32.FromString("hello");
+        Assert.Equal(k1, k2);
+        Assert.Equal(k1.ToIndexKey(), k2.ToIndexKey());
+    }
+
+    [Fact]
+    public void Latin1Key_Equality_DifferentContent_NotEqual()
+    {
+        var k1 = WalLatin1Key32.FromString("hello");
+        var k2 = WalLatin1Key32.FromString("world");
+        Assert.NotEqual(k1, k2);
+        Assert.NotEqual(k1.ToIndexKey(), k2.ToIndexKey());
+    }
+
+    [Fact]
+    public void Latin1Key_Null_MapsToZeroKey()
+    {
+        var k = WalLatin1Key32.FromString(null);
+        Span<byte> buf = stackalloc byte[32];
+        k.CopyTo(buf);
+        for (int i = 0; i < 32; i++) Assert.Equal(0, buf[i]);
+    }
+
+    [Fact]
+    public void Latin1Key_ToString_RoundTrips_AsciiString()
+    {
+        var k = WalLatin1Key32.FromString("Hello WAL");
+        Assert.Equal("Hello WAL", k.ToString());
+    }
+
+    [Fact]
+    public void Latin1Key_Comparison_Lexicographic()
+    {
+        var ka = WalLatin1Key32.FromString("apple");
+        var kb = WalLatin1Key32.FromString("banana");
+        Assert.True(ka.CompareTo(kb) < 0);
+        Assert.True(kb.CompareTo(ka) > 0);
+        Assert.Equal(0, ka.CompareTo(ka));
+    }
 }

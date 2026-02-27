@@ -55,8 +55,22 @@ public sealed class WalStore : IDisposable
     /// </summary>
     public WalProjectionManager ProjectionManager { get; } = new();
 
+    /// <summary>
+    /// Per-table monotonic <c>uint32</c> primary-key sequence (PR-574 concept).
+    /// Use <see cref="AllocateKey"/> to generate a fully-packed WAL key with an auto-numbered recordId.
+    /// </summary>
+    public WalTableKeyAllocator KeyAllocator { get; private set; } = null!;
+
     /// <summary>Convenience proxy for <see cref="WalHeadMap.TryGetHead"/>.</summary>
     public bool TryGetHead(ulong key, out ulong ptr) => HeadMap.TryGetHead(key, out ptr);
+
+    /// <summary>
+    /// Allocates the next monotonic <c>recordId</c> for <paramref name="tableId"/> and
+    /// returns the packed WAL key <c>(tableId &lt;&lt; 32 | newRecordId)</c>.
+    /// Use this to obtain a primary key before staging a <see cref="WalOp.Upsert"/> op.
+    /// </summary>
+    public ulong AllocateKey(uint tableId)
+        => WalConstants.PackKey(tableId, KeyAllocator.AllocateRecordId(tableId));
 
     // ── Construction / startup ────────────────────────────────────────────────
 
@@ -71,6 +85,7 @@ public sealed class WalStore : IDisposable
         _directory       = directory;
         _maxSegmentBytes = maxSegmentBytes;
         Directory.CreateDirectory(directory);
+        KeyAllocator = WalTableKeyAllocator.Load(directory);
         Recover();
     }
 
@@ -196,6 +211,7 @@ public sealed class WalStore : IDisposable
             _activeWriter = null;
         }
         ProjectionManager.Dispose();
+        KeyAllocator.Dispose();
         HeadMap.Dispose();
     }
 
