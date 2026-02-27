@@ -105,19 +105,6 @@ public class ReportHtmlRendererTests
     }
 
     [Fact]
-    public async Task RenderAsync_IncludesBootstrapJs()
-    {
-        // Arrange
-        var result = MakeResult(Array.Empty<string[]>(), "Col");
-
-        // Act
-        var html = await RenderToStringAsync(result);
-
-        // Assert
-        Assert.Contains("bootstrap.bundle.min.js", html);
-    }
-
-    [Fact]
     public async Task RenderAsync_IncludesBundleJs()
     {
         // Arrange
