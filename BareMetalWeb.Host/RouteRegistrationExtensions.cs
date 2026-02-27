@@ -1273,25 +1273,33 @@ public static class RouteRegistrationExtensions
             ? template.Footer.Substring(0, footerEndIdx + 9)
             : string.Empty;
 
-        // Try to embed initial list data for /UI/data/{slug} views to eliminate the first API round-trip
-        string? initialDataScript = null;
+        // Extract the entity slug for /UI/data/{slug} pages
         var reqPath = context.Request.Path.Value ?? string.Empty;
         const string dataPrefix = "/UI/data/";
+        string? dataSlug = null;
         if (reqPath.StartsWith(dataPrefix, StringComparison.OrdinalIgnoreCase))
         {
             var slugCandidate = reqPath.Substring(dataPrefix.Length);
             // Only for simple slug paths (not /create, /123, /123/edit etc.)
             if (!string.IsNullOrEmpty(slugCandidate) && !slugCandidate.Contains('/'))
-            {
-                // Only when there are no data-affecting query params in the URL
-                var q = context.Request.Query;
-                var hasCustomParams = q.ContainsKey("skip") || q.ContainsKey("top") || q.ContainsKey("q") ||
-                                      q.ContainsKey("sort") || q.ContainsKey("dir") ||
-                                      q.Keys.Any(k => k.StartsWith("f_", StringComparison.OrdinalIgnoreCase));
-                if (!hasCustomParams)
-                    initialDataScript = await TryBuildInitialDataScriptAsync(
-                        context, slugCandidate, safeNonce, context.RequestAborted).ConfigureAwait(false);
-            }
+                dataSlug = slugCandidate;
+        }
+
+        // Inline /meta/objects (and optionally /meta/{slug}) to eliminate client-side round-trips
+        var metaScript = await TryBuildMetaScriptAsync(context, dataSlug, safeNonce, context.RequestAborted).ConfigureAwait(false);
+
+        // Inline initial list data for /UI/data/{slug} pages (eliminates the first API round-trip)
+        string? initialDataScript = null;
+        if (dataSlug != null)
+        {
+            // Only when there are no data-affecting query params in the URL
+            var q = context.Request.Query;
+            var hasCustomParams = q.ContainsKey("skip") || q.ContainsKey("top") || q.ContainsKey("q") ||
+                                  q.ContainsKey("sort") || q.ContainsKey("dir") ||
+                                  q.Keys.Any(k => k.StartsWith("f_", StringComparison.OrdinalIgnoreCase));
+            if (!hasCustomParams)
+                initialDataScript = await TryBuildInitialDataScriptAsync(
+                    context, dataSlug, safeNonce, context.RequestAborted).ConfigureAwait(false);
         }
 
         var sb = new StringBuilder(4096);
@@ -1307,6 +1315,8 @@ public static class RouteRegistrationExtensions
         sb.Append("<div id=\"vnext-modal-container\"></div>");
         sb.Append("<div id=\"vnext-toast-container\" class=\"position-fixed top-0 end-0 p-3\"></div>");
         sb.Append(ReplaceTemplateTokens(footerElement, tokens));
+        if (metaScript != null)
+            sb.Append(metaScript);
         if (initialDataScript != null)
             sb.Append(initialDataScript);
         sb.Append("<script src=\"/static/js/vnext-bundle.js\"></script>");
@@ -1315,6 +1325,68 @@ public static class RouteRegistrationExtensions
         context.Response.ContentType = "text/html; charset=utf-8";
         context.Response.Headers.CacheControl = "no-store";
         await context.Response.WriteAsync(sb.ToString());
+    }
+
+    /// <summary>
+    /// Builds an inline &lt;script&gt; tag that pre-seeds client-side metadata caches,
+    /// eliminating the round-trips to <c>/meta/objects</c> and (optionally) <c>/meta/{slug}</c>
+    /// on first page load.
+    /// Sets <c>window.__BMW_META_OBJECTS__</c> with the list of entities accessible to the
+    /// current user, and optionally sets <c>window.__BMW_META__</c> with the full schema for
+    /// <paramref name="slug"/> when the user lands directly on a data-list page.
+    /// Returns <c>null</c> on any error so the client falls back to normal API calls.
+    /// </summary>
+    private static async ValueTask<string?> TryBuildMetaScriptAsync(
+        HttpContext context, string? slug, string safeNonce, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
+            var userPermissions = user?.Permissions ?? Array.Empty<string>();
+
+            var entities = DataScaffold.Entities
+                .Where(e => IsEntityAccessible(e, user, userPermissions))
+                .Select(e => (object)new Dictionary<string, object?>
+                {
+                    ["slug"]      = e.Slug,
+                    ["name"]      = e.Name,
+                    ["navGroup"]  = e.NavGroup,
+                    ["showOnNav"] = e.ShowOnNav,
+                    ["navOrder"]  = e.NavOrder,
+                    ["viewType"]  = e.ViewType.ToString()
+                })
+                .ToArray();
+
+            var metaJson = JsonSerializer.Serialize(entities, new JsonSerializerOptions { WriteIndented = false });
+            metaJson = metaJson.Replace("</", "<\\/", StringComparison.Ordinal);
+
+            var sb = new StringBuilder();
+            sb.Append($"<script nonce=\"{safeNonce}\">window.__BMW_META_OBJECTS__=");
+            sb.Append(metaJson);
+            sb.Append(';');
+
+            // When on a data-list page, also inline the full entity schema so /meta/{slug} is not needed
+            if (!string.IsNullOrEmpty(slug) &&
+                DataScaffold.TryGetEntity(slug, out var metadata) &&
+                IsEntityAccessible(metadata, user, userPermissions))
+            {
+                var schema = BuildEntitySchema(metadata);
+                var schemaJson = JsonSerializer.Serialize(schema, new JsonSerializerOptions { WriteIndented = false });
+                schemaJson = schemaJson.Replace("</", "<\\/", StringComparison.Ordinal);
+                sb.Append("window.__BMW_META__={\"");
+                sb.Append(slug.Replace("\"", "\\\"", StringComparison.Ordinal));
+                sb.Append("\":");
+                sb.Append(schemaJson);
+                sb.Append("};");
+            }
+
+            sb.Append("</script>");
+            return sb.ToString();
+        }
+        catch
+        {
+            return null; // Silently fall back to client-side API calls
+        }
     }
 
     /// <summary>
