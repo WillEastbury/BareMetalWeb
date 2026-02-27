@@ -1277,9 +1277,8 @@ public static class RouteRegistrationExtensions
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
         var userPermissions = user?.Permissions ?? Array.Empty<string>();
 
-        // Always inline /meta/objects to eliminate the first round-trip on every SPA page load
+        // Inline /meta/objects (and optionally /meta/{slug}) to eliminate client-side round-trips
         var metaObjectsScript = TryBuildMetaObjectsScript(user, userPermissions, safeNonce);
-
         // For any /UI/data/{slug}[/...] path, inline /meta/{slug} to eliminate the schema round-trip
         string? metaSlugScript = null;
         string? initialDataScript = null;
@@ -1314,23 +1313,6 @@ public static class RouteRegistrationExtensions
                 dataSlug = slugCandidate;
         }
 
-        // Inline /meta/objects (and optionally /meta/{slug}) to eliminate client-side round-trips
-        var metaScript = await TryBuildMetaScriptAsync(context, dataSlug, safeNonce, context.RequestAborted).ConfigureAwait(false);
-
-        // Inline initial list data for /UI/data/{slug} pages (eliminates the first API round-trip)
-        string? initialDataScript = null;
-        if (dataSlug != null)
-        {
-            // Only when there are no data-affecting query params in the URL
-            var q = context.Request.Query;
-            var hasCustomParams = q.ContainsKey("skip") || q.ContainsKey("top") || q.ContainsKey("q") ||
-                                  q.ContainsKey("sort") || q.ContainsKey("dir") ||
-                                  q.Keys.Any(k => k.StartsWith("f_", StringComparison.OrdinalIgnoreCase));
-            if (!hasCustomParams)
-                initialDataScript = await TryBuildInitialDataScriptAsync(
-                    context, dataSlug, safeNonce, context.RequestAborted).ConfigureAwait(false);
-        }
-
         var sb = new StringBuilder(4096);
         sb.Append("<!DOCTYPE html><html lang=\"en\">");
         sb.Append("<head>");
@@ -1348,8 +1330,6 @@ public static class RouteRegistrationExtensions
             sb.Append(metaObjectsScript);
         if (metaSlugScript != null)
             sb.Append(metaSlugScript);
-        if (metaScript != null)
-            sb.Append(metaScript);
         if (initialDataScript != null)
             sb.Append(initialDataScript);
         sb.Append("<script src=\"/static/js/vnext-bundle.js\"></script>");
@@ -1360,22 +1340,17 @@ public static class RouteRegistrationExtensions
         await context.Response.WriteAsync(sb.ToString());
     }
 
-    /// Builds an inline &lt;script&gt; tag that pre-seeds client-side metadata caches,
-    /// eliminating the round-trips to <c>/meta/objects</c> and (optionally) <c>/meta/{slug}</c>
-    /// on first page load.
-    /// Sets <c>window.__BMW_META_OBJECTS__</c> with the list of entities accessible to the
-    /// current user, and optionally sets <c>window.__BMW_META__</c> with the full schema for
-    /// <paramref name="slug"/> when the user lands directly on a data-list page.
-    /// Returns <c>null</c> on any error so the client falls back to normal API calls.
+    /// <summary>
+    /// Builds an inline &lt;script&gt; tag that seeds <c>window.__BMW_META_OBJECTS__</c>
+    /// with the list of entities accessible to the current user.
+    /// The user and permissions are supplied by the caller (already fetched for the current request)
+    /// to avoid a redundant async lookup.
+    /// Returns <c>null</c> on any error so the client falls back to the <c>/api/meta/registered-types</c> API call.
     /// </summary>
-    private static async ValueTask<string?> TryBuildMetaScriptAsync(
-        HttpContext context, string? slug, string safeNonce, CancellationToken cancellationToken)
+    private static string? TryBuildMetaObjectsScript(User? user, string[] userPermissions, string safeNonce)
     {
         try
         {
-            var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
-            var userPermissions = user?.Permissions ?? Array.Empty<string>();
-
             var entities = DataScaffold.Entities
                 .Where(e => IsEntityAccessible(e, user, userPermissions))
                 .Select(e => (object)new Dictionary<string, object?>
@@ -1421,35 +1396,6 @@ public static class RouteRegistrationExtensions
         catch
         {
             return null;
-            var metaJson = JsonSerializer.Serialize(entities, new JsonSerializerOptions { WriteIndented = false });
-            metaJson = metaJson.Replace("</", "<\\/", StringComparison.Ordinal);
-
-            var sb = new StringBuilder();
-            sb.Append($"<script nonce=\"{safeNonce}\">window.__BMW_META_OBJECTS__=");
-            sb.Append(metaJson);
-            sb.Append(';');
-
-            // When on a data-list page, also inline the full entity schema so /meta/{slug} is not needed
-            if (!string.IsNullOrEmpty(slug) &&
-                DataScaffold.TryGetEntity(slug, out var metadata) &&
-                IsEntityAccessible(metadata, user, userPermissions))
-            {
-                var schema = BuildEntitySchema(metadata);
-                var schemaJson = JsonSerializer.Serialize(schema, new JsonSerializerOptions { WriteIndented = false });
-                schemaJson = schemaJson.Replace("</", "<\\/", StringComparison.Ordinal);
-                sb.Append("window.__BMW_META__={\"");
-                sb.Append(slug.Replace("\"", "\\\"", StringComparison.Ordinal));
-                sb.Append("\":");
-                sb.Append(schemaJson);
-                sb.Append("};");
-            }
-
-            sb.Append("</script>");
-            return sb.ToString();
-        }
-        catch
-        {
-            return null; // Silently fall back to client-side API calls
         }
     }
 

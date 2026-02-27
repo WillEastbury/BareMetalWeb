@@ -232,4 +232,108 @@ public class JsBundleServiceTests : IDisposable
         var themeIdx = body.IndexOf("theme-switcher.js", StringComparison.Ordinal);
         Assert.True(bootstrapIdx < themeIdx, "bootstrap.bundle.min.js should appear before theme-switcher.js");
     }
+
+    // ── MinifyJs unit tests ────────────────────────────────────────────────────
+
+    [Fact]
+    public void MinifyJs_RemovesLineComments()
+    {
+        var result = JsBundleService.MinifyJs("var x = 1; // this is a comment\nvar y = 2;");
+        Assert.DoesNotContain("this is a comment", result);
+        Assert.Contains("var x = 1;", result);
+        Assert.Contains("var y = 2;", result);
+    }
+
+    [Fact]
+    public void MinifyJs_RemovesBlockComments()
+    {
+        var result = JsBundleService.MinifyJs("var x = /* block comment */ 1;");
+        Assert.DoesNotContain("block comment", result);
+        Assert.Contains("var x =", result);
+        Assert.Contains("1;", result);
+    }
+
+    [Fact]
+    public void MinifyJs_BlockComment_ReplacedWithSpace_PreventsMerge()
+    {
+        // "return/* comment */true" must not become "returntrue"
+        var result = JsBundleService.MinifyJs("return/* comment */true;");
+        Assert.Contains("return true;", result);
+    }
+
+    [Fact]
+    public void MinifyJs_CollapsesExcessiveBlankLines()
+    {
+        var result = JsBundleService.MinifyJs("var x = 1;\n\n\n\nvar y = 2;");
+        Assert.DoesNotContain("\n\n", result);
+        Assert.Contains("var x = 1;", result);
+        Assert.Contains("var y = 2;", result);
+    }
+
+    [Fact]
+    public void MinifyJs_PreservesDoubleQuoteStringWithCommentSyntax()
+    {
+        var result = JsBundleService.MinifyJs("var url = \"http://example.com\"; // comment");
+        Assert.Contains("http://example.com", result);
+        Assert.DoesNotContain("// comment", result);
+    }
+
+    [Fact]
+    public void MinifyJs_PreservesSingleQuoteStringWithBlockComment()
+    {
+        var result = JsBundleService.MinifyJs("var s = '/* not a comment */';");
+        Assert.Contains("/* not a comment */", result);
+    }
+
+    [Fact]
+    public void MinifyJs_PreservesTemplateLiteralWithCommentSyntax()
+    {
+        var result = JsBundleService.MinifyJs("var t = `// not a comment`;");
+        Assert.Contains("// not a comment", result);
+    }
+
+    [Fact]
+    public void MinifyJs_NormalisesCarriageReturns()
+    {
+        var result = JsBundleService.MinifyJs("var x = 1;\r\nvar y = 2;");
+        Assert.DoesNotContain('\r', result);
+        Assert.Contains("var x = 1;", result);
+        Assert.Contains("var y = 2;", result);
+    }
+
+    [Fact]
+    public void MinifyJs_SingleBlankLine_IsPreserved()
+    {
+        var result = JsBundleService.MinifyJs("var x = 1;\n\nvar y = 2;");
+        // One blank line (two newlines) is acceptable – only *excessive* runs are collapsed
+        Assert.Contains("var x = 1;", result);
+        Assert.Contains("var y = 2;", result);
+    }
+
+    [Fact]
+    public async Task BuildBundle_MinifiesNonMinFiles()
+    {
+        WriteJsFile("theme-switcher.js", "var x = 1; // comment to strip\nvar y = 2;");
+        JsBundleService.BuildBundle(_tempDir);
+
+        var context = CreateContext("GET", JsBundleService.BundlePath);
+        await JsBundleService.TryServeAsync(context);
+
+        var body = ReadResponseBody(context);
+        Assert.DoesNotContain("comment to strip", body);
+        Assert.Contains("var x = 1;", body);
+    }
+
+    [Fact]
+    public async Task BuildBundle_DoesNotMinifyMinFiles()
+    {
+        WriteJsFile("bootstrap.bundle.min.js", "/* preserved comment */ var b=1;");
+        JsBundleService.BuildBundle(_tempDir);
+
+        var context = CreateContext("GET", JsBundleService.BundlePath);
+        await JsBundleService.TryServeAsync(context);
+
+        var body = ReadResponseBody(context);
+        Assert.Contains("preserved comment", body);
+    }
 }

@@ -95,8 +95,11 @@ public static class JsBundleService
             if (writeTime > latestWrite)
                 latestWrite = writeTime;
 
+            var content = File.ReadAllText(filePath, Encoding.UTF8);
+            if (!fileName.EndsWith(".min.js", StringComparison.OrdinalIgnoreCase))
+                content = MinifyJs(content);
             sb.Append("/* === ").Append(fileName).AppendLine(" === */");
-            sb.AppendLine(File.ReadAllText(filePath, Encoding.UTF8));
+            sb.AppendLine(content);
         }
 
         var bytes = Encoding.UTF8.GetBytes(sb.ToString());
@@ -114,6 +117,91 @@ public static class JsBundleService
     {
         var hash = SHA256.HashData(data);
         return Convert.ToHexString(hash)[..16].ToLowerInvariant();
+    }
+
+    /// <summary>
+    /// Applies a simple, deterministic minification pass to JavaScript source text.
+    /// <list type="bullet">
+    ///   <item>Single-line comments (<c>//</c>) are stripped up to the end of the line.</item>
+    ///   <item>Block comments (<c>/* … */</c>) are replaced with a single space so adjacent tokens are not merged.</item>
+    ///   <item>Runs of more than one consecutive blank line are collapsed to a single newline.</item>
+    ///   <item>CRLF line endings are normalised to LF.</item>
+    ///   <item>Content inside string literals (single-quote, double-quote, template) is copied verbatim.</item>
+    /// </list>
+    /// Already-minified files (those whose name ends with <c>.min.js</c>) are passed through unchanged by the caller.
+    /// </summary>
+    internal static string MinifyJs(string source)
+    {
+        var sb = new StringBuilder(source.Length);
+        int i = 0, len = source.Length;
+        int consecutiveNewlines = 0;
+
+        while (i < len)
+        {
+            char c = source[i];
+
+            // Normalise CRLF → LF by skipping bare \r
+            if (c == '\r') { i++; continue; }
+
+            // String literals – copy verbatim so comment-like sequences inside are preserved
+            if (c == '"' || c == '\'' || c == '`')
+            {
+                consecutiveNewlines = 0;
+                char quote = c;
+                sb.Append(c);
+                i++;
+                while (i < len)
+                {
+                    char sc = source[i];
+                    if (sc == '\\' && i + 1 < len)   // escape sequence: copy both chars
+                    {
+                        sb.Append(sc);
+                        i++;
+                        sb.Append(source[i]);
+                        i++;
+                        continue;
+                    }
+                    sb.Append(sc);
+                    i++;
+                    if (sc == quote) break;
+                    if (sc == '\n' && quote != '`') break; // unterminated non-template string
+                }
+                continue;
+            }
+
+            // Line comment: skip to end of line (newline is handled on the next iteration)
+            if (c == '/' && i + 1 < len && source[i + 1] == '/')
+            {
+                i += 2;
+                while (i < len && source[i] != '\n') i++;
+                continue;
+            }
+
+            // Block comment: replace the whole comment with one space to avoid merging tokens
+            if (c == '/' && i + 1 < len && source[i + 1] == '*')
+            {
+                i += 2;
+                while (i + 1 < len && !(source[i] == '*' && source[i + 1] == '/')) i++;
+                if (i + 1 < len) i += 2; // consume closing */
+                sb.Append(' ');
+                continue;
+            }
+
+            // Collapse runs of more than one consecutive blank line
+            if (c == '\n')
+            {
+                consecutiveNewlines++;
+                if (consecutiveNewlines <= 1) sb.Append(c);
+                i++;
+                continue;
+            }
+
+            consecutiveNewlines = 0;
+            sb.Append(c);
+            i++;
+        }
+
+        return sb.ToString();
     }
 
     /// <summary>
