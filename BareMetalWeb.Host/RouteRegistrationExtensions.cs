@@ -1273,15 +1273,29 @@ public static class RouteRegistrationExtensions
             ? template.Footer.Substring(0, footerEndIdx + 9)
             : string.Empty;
 
-        // Try to embed initial list data for /UI/data/{slug} views to eliminate the first API round-trip
+        // Fetch user once — used by both meta-objects and initial-data inline scripts
+        var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        var userPermissions = user?.Permissions ?? Array.Empty<string>();
+
+        // Always inline /meta/objects to eliminate the first round-trip on every SPA page load
+        var metaObjectsScript = TryBuildMetaObjectsScript(user, userPermissions, safeNonce);
+
+        // For any /UI/data/{slug}[/...] path, inline /meta/{slug} to eliminate the schema round-trip
+        string? metaSlugScript = null;
         string? initialDataScript = null;
         var reqPath = context.Request.Path.Value ?? string.Empty;
         const string dataPrefix = "/UI/data/";
         if (reqPath.StartsWith(dataPrefix, StringComparison.OrdinalIgnoreCase))
         {
-            var slugCandidate = reqPath.Substring(dataPrefix.Length);
-            // Only for simple slug paths (not /create, /123, /123/edit etc.)
-            if (!string.IsNullOrEmpty(slugCandidate) && !slugCandidate.Contains('/'))
+            var pathAfterData = reqPath.Substring(dataPrefix.Length);
+            // Extract slug — it is the first path segment (before any '/')
+            var slashIdx = pathAfterData.IndexOf('/');
+            var entitySlug = slashIdx >= 0 ? pathAfterData.Substring(0, slashIdx) : pathAfterData;
+            if (!string.IsNullOrEmpty(entitySlug))
+                metaSlugScript = TryBuildMetaSlugScript(entitySlug, safeNonce);
+
+            // For simple list-view paths (no sub-path), also inline the first page of data
+            if (slashIdx < 0)
             {
                 // Only when there are no data-affecting query params in the URL
                 var q = context.Request.Query;
@@ -1290,7 +1304,7 @@ public static class RouteRegistrationExtensions
                                       q.Keys.Any(k => k.StartsWith("f_", StringComparison.OrdinalIgnoreCase));
                 if (!hasCustomParams)
                     initialDataScript = await TryBuildInitialDataScriptAsync(
-                        context, slugCandidate, safeNonce, context.RequestAborted).ConfigureAwait(false);
+                        context, entitySlug, safeNonce, user, context.RequestAborted).ConfigureAwait(false);
             }
         }
 
@@ -1307,6 +1321,10 @@ public static class RouteRegistrationExtensions
         sb.Append("<div id=\"vnext-modal-container\"></div>");
         sb.Append("<div id=\"vnext-toast-container\" class=\"position-fixed top-0 end-0 p-3\"></div>");
         sb.Append(ReplaceTemplateTokens(footerElement, tokens));
+        if (metaObjectsScript != null)
+            sb.Append(metaObjectsScript);
+        if (metaSlugScript != null)
+            sb.Append(metaSlugScript);
         if (initialDataScript != null)
             sb.Append(initialDataScript);
         sb.Append("<script src=\"/static/js/vnext-bundle.js\"></script>");
@@ -1318,14 +1336,74 @@ public static class RouteRegistrationExtensions
     }
 
     /// <summary>
+    /// Builds an inline &lt;script&gt; tag that seeds <c>window.__BMW_META_OBJECTS__</c> with the
+    /// list of entities accessible to the current user, matching the /meta/objects response.
+    /// Eliminates the /meta/objects round-trip on every SPA page load.
+    /// Returns <c>null</c> on any error (the client falls back to the API call).
+    /// </summary>
+    private static string? TryBuildMetaObjectsScript(User? user, string[] userPermissions, string safeNonce)
+    {
+        try
+        {
+            var entities = DataScaffold.Entities
+                .Where(e => IsEntityAccessible(e, user, userPermissions))
+                .Select(e => (object)new Dictionary<string, object?>
+                {
+                    ["slug"]      = e.Slug,
+                    ["name"]      = e.Name,
+                    ["navGroup"]  = e.NavGroup,
+                    ["showOnNav"] = e.ShowOnNav,
+                    ["navOrder"]  = e.NavOrder,
+                    ["viewType"]  = e.ViewType.ToString()
+                })
+                .ToArray();
+
+            var json = JsonSerializer.Serialize(entities, new JsonSerializerOptions { WriteIndented = false });
+            json = EscapeJsonForInlineScript(json);
+            return $"<script nonce=\"{safeNonce}\">window.__BMW_META_OBJECTS__={json};</script>";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Builds an inline &lt;script&gt; tag that seeds <c>window.__BMW_META_SLUG__[slug]</c> with the
+    /// entity schema, matching the /meta/{slug} response.
+    /// Eliminates the /meta/{slug} round-trip when first opening a data entity page.
+    /// Returns <c>null</c> if the entity is not found or any error occurs.
+    /// </summary>
+    private static string? TryBuildMetaSlugScript(string slug, string safeNonce)
+    {
+        try
+        {
+            if (!DataScaffold.TryGetEntity(slug, out var meta))
+                return null;
+
+            var schema = BuildEntitySchema(meta);
+            var schemaJson = EscapeJsonForInlineScript(JsonSerializer.Serialize(schema, new JsonSerializerOptions { WriteIndented = false }));
+
+            var safeSlug = JsonSerializer.Serialize(slug);
+            return $"<script nonce=\"{safeNonce}\">window.__BMW_META_SLUG__=window.__BMW_META_SLUG__||{{}};window.__BMW_META_SLUG__[{safeSlug}]={schemaJson};</script>";
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Fetches the initial list data for a VNext data entity and returns an inline &lt;script&gt; tag
     /// that stores the result in <c>window.__BMW_INITIAL_DATA__</c>.
+    /// Also pre-resolves FK lookup values and stores them in <c>window.__BMW_LOOKUP_PREFETCH__</c>
+    /// to eliminate batch lookup round-trips when the list first renders.
     /// Eliminates the redundant API round-trip when the user first opens a data list view with no filters.
     /// Returns <c>null</c> if the entity is not found, the user lacks permission, or any error occurs
     /// (the client will fall back to the normal API call).
     /// </summary>
     private static async ValueTask<string?> TryBuildInitialDataScriptAsync(
-        HttpContext context, string slug, string safeNonce, CancellationToken cancellationToken)
+        HttpContext context, string slug, string safeNonce, User? user, CancellationToken cancellationToken)
     {
         try
         {
@@ -1337,7 +1415,6 @@ public static class RouteRegistrationExtensions
             if (!string.IsNullOrWhiteSpace(permissionsNeeded) &&
                 !string.Equals(permissionsNeeded, "Public", StringComparison.OrdinalIgnoreCase))
             {
-                var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
                 if (user == null)
                     return null;
                 if (!string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
@@ -1381,17 +1458,84 @@ public static class RouteRegistrationExtensions
                 ["total"] = total
             };
 
-            var json = JsonSerializer.Serialize(initialData, new JsonSerializerOptions { WriteIndented = false });
-            // Escape </script> sequences to prevent HTML injection
-            json = json.Replace("</", "<\\/", StringComparison.Ordinal);
+            var initialJson = EscapeJsonForInlineScript(JsonSerializer.Serialize(initialData, new JsonSerializerOptions { WriteIndented = false }));
 
-            return $"<script nonce=\"{safeNonce}\">window.__BMW_INITIAL_DATA__={json};</script>";
+            // Pre-resolve FK lookup values for all lookup fields visible in the list view.
+            // This allows the client to skip the /api/_lookup/{slug}/_batch round-trips.
+            var lookupPrefetch = await BuildLookupPrefetchAsync(meta, payload, cancellationToken).ConfigureAwait(false);
+            string? prefetchJson = null;
+            if (lookupPrefetch != null)
+                prefetchJson = EscapeJsonForInlineScript(JsonSerializer.Serialize(lookupPrefetch, new JsonSerializerOptions { WriteIndented = false }));
+
+            var scriptContent = $"window.__BMW_INITIAL_DATA__={initialJson};";
+            if (prefetchJson != null)
+                scriptContent += $"window.__BMW_LOOKUP_PREFETCH__={prefetchJson};";
+
+            return $"<script nonce=\"{safeNonce}\">{scriptContent}</script>";
         }
         catch
         {
             return null; // Silently fall back to client-side API call
         }
     }
+
+    /// <summary>
+    /// Pre-resolves FK lookup values for all lookup fields shown in the list view.
+    /// Returns a dictionary keyed by target entity slug, each value being a dictionary of id → entity model.
+    /// Returns <c>null</c> when there are no lookup fields or no items to resolve.
+    /// </summary>
+    private static async ValueTask<Dictionary<string, Dictionary<string, object?>>?> BuildLookupPrefetchAsync(
+        DataEntityMetadata meta,
+        Dictionary<string, object?>[] payload,
+        CancellationToken cancellationToken)
+    {
+        if (payload.Length == 0) return null;
+
+        // Only consider lookup fields that are shown in the list view
+        var lookupFields = meta.Fields.Where(f => f.Lookup != null && f.List).ToList();
+        if (lookupFields.Count == 0) return null;
+
+        var prefetch = new Dictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var field in lookupFields)
+        {
+            var targetMeta = DataScaffold.GetEntityByType(field.Lookup!.TargetType);
+            if (targetMeta == null) continue;
+
+            // Collect unique non-null IDs for this field across all payload rows
+            var uniqueIds = payload
+                .Select(item => item.TryGetValue(field.Name, out var val) ? val as string : null)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            if (uniqueIds.Count == 0) continue;
+
+            if (!prefetch.TryGetValue(targetMeta.Slug, out var slugResults))
+            {
+                slugResults = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                prefetch[targetMeta.Slug] = slugResults;
+            }
+
+            foreach (var id in uniqueIds)
+            {
+                if (slugResults.ContainsKey(id!)) continue; // already loaded by a previous field
+                var entity = await targetMeta.Handlers.LoadAsync(id!, cancellationToken).ConfigureAwait(false);
+                if (entity != null)
+                    slugResults[id!] = RouteHandlers.BuildApiModel(targetMeta, entity);
+            }
+        }
+
+        return prefetch.Count > 0 ? prefetch : null;
+    }
+
+    /// <summary>
+    /// Escapes a JSON string for safe embedding inside a &lt;script&gt; tag.
+    /// Replaces <c>&lt;/</c> with <c>&lt;\/</c> to prevent the browser from
+    /// treating <c>&lt;/script&gt;</c> inside the JSON as a closing tag.
+    /// </summary>
+    private static string EscapeJsonForInlineScript(string json)
+        => json.Replace("</", "<\\/", StringComparison.Ordinal);
 
     /// <summary>Replaces all <c>{{key}}</c> tokens in <paramref name="template"/> using <paramref name="tokens"/>.
     /// Unknown tokens are silently removed (replaced with empty string).</summary>

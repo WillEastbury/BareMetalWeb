@@ -1215,6 +1215,144 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.NotEmpty(subFields!.Cast<object>());
     }
 
+    // ──────────────────────────────────────────────────────────────
+    //  Metadata inlining tests
+    // ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void TryBuildMetaObjectsScript_WithAccessibleEntity_ReturnsScriptWithSlug()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Customer>();
+
+        var method = typeof(RouteRegistrationExtensions).GetMethod(
+            "TryBuildMetaObjectsScript",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        // Customer entity defaults permissions to "Customers" — pass a user with that permission
+        var user = new User { Id = "u1", UserName = "test", IsActive = true, Permissions = new[] { "Customers" } };
+
+        // Act
+        var script = (string?)method.Invoke(null, new object?[] { user, user.Permissions, "testnonce" });
+
+        // Assert
+        Assert.NotNull(script);
+        Assert.Contains("__BMW_META_OBJECTS__", script);
+        Assert.Contains("customers", script);
+        Assert.Contains("testnonce", script);
+    }
+
+    [Fact]
+    public void TryBuildMetaObjectsScript_NullUser_ReturnsScriptExcludingPermissionedEntities()
+    {
+        // Arrange — register a permission-restricted entity
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Customer>();
+
+        var method = typeof(RouteRegistrationExtensions).GetMethod(
+            "TryBuildMetaObjectsScript",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        // Act — null user, no permissions
+        var script = (string?)method.Invoke(null, new object?[] { null, Array.Empty<string>(), "nonce" });
+
+        // Assert — script is still returned (may be empty list), but Customer is filtered out
+        Assert.NotNull(script);
+        Assert.Contains("__BMW_META_OBJECTS__", script);
+        Assert.DoesNotContain("\"customers\"", script ?? "");
+    }
+
+    [Fact]
+    public void TryBuildMetaSlugScript_KnownEntity_ReturnsScriptWithEntitySchema()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Customer>();
+
+        var method = typeof(RouteRegistrationExtensions).GetMethod(
+            "TryBuildMetaSlugScript",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        // Act
+        var script = (string?)method.Invoke(null, new object[] { "customers", "testnonce" });
+
+        // Assert
+        Assert.NotNull(script);
+        Assert.Contains("__BMW_META_SLUG__", script);
+        Assert.Contains("customers", script);
+        Assert.Contains("testnonce", script);
+        // Schema should include fields array
+        Assert.Contains("fields", script);
+    }
+
+    [Fact]
+    public void TryBuildMetaSlugScript_UnknownSlug_ReturnsNull()
+    {
+        var method = typeof(RouteRegistrationExtensions).GetMethod(
+            "TryBuildMetaSlugScript",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var script = (string?)method.Invoke(null, new object[] { "nonexistent-entity-xyz", "nonce" });
+
+        Assert.Null(script);
+    }
+
+    [Fact]
+    public async Task BuildLookupPrefetchAsync_WithLookupFields_ReturnsResolvedData()
+    {
+        // Arrange — register Customer (has AddressId lookup) and Address (the target)
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Address>();
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Customer>();
+
+        var store = (InMemoryDataStore)DataStoreProvider.Current;
+        var address = new BareMetalWeb.Data.DataObjects.Address { Id = "addr-1", Label = "Home" };
+        store.Save(address);
+
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
+
+        // Build a payload item that has AddressId = "addr-1"
+        var item = new Dictionary<string, object?> { ["AddressId"] = "addr-1", ["Name"] = "Acme" };
+        var payload = new[] { item };
+
+        var method = typeof(RouteRegistrationExtensions).GetMethod(
+            "BuildLookupPrefetchAsync",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        // Act
+        var task = (System.Threading.Tasks.ValueTask<Dictionary<string, Dictionary<string, object?>>?>)method.Invoke(
+            null, new object[] { meta!, payload, CancellationToken.None })!;
+        var result = await task;
+
+        // Assert — AddressId field is list-visible (List=true by default), so prefetch should contain addresses
+        Assert.NotNull(result);
+        Assert.True(result!.ContainsKey("addresses"));
+        Assert.True(result["addresses"].ContainsKey("addr-1"));
+    }
+
+    [Fact]
+    public async Task BuildLookupPrefetchAsync_EmptyPayload_ReturnsNull()
+    {
+        // Arrange
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Customer>();
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
+
+        var method = typeof(RouteRegistrationExtensions).GetMethod(
+            "BuildLookupPrefetchAsync",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        // Act — empty payload
+        var task = (System.Threading.Tasks.ValueTask<Dictionary<string, Dictionary<string, object?>>?>)method.Invoke(
+            null, new object[] { meta!, Array.Empty<Dictionary<string, object?>>(), CancellationToken.None })!;
+        var result = await task;
+
+        // Assert
+        Assert.Null(result);
+    }
+
     private class InMemoryDataStore : IDataObjectStore
     {
         private readonly Dictionary<string, BaseDataObject> _store = new();
