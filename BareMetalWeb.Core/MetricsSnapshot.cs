@@ -17,5 +17,6 @@ public readonly record struct MetricsSnapshot(
     long ThrottledRequests,
     int ProcessId,
     long WorkingSet64,
-    long VirtualMemorySize64
+    long VirtualMemorySize64,
+    TimeSpan ProcessUptime
 );

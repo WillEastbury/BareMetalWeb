@@ -3558,7 +3558,8 @@ public sealed class RouteHandlers : IRouteHandlers
             ["requests4xx"] = snapshot.Requests4xx,
             ["requests5xx"] = snapshot.Requests5xx,
             ["requestsOther"] = snapshot.RequestsOther,
-            ["throttledRequests"] = snapshot.ThrottledRequests
+            ["throttledRequests"] = snapshot.ThrottledRequests,
+            ["processUptimeSeconds"] = (long)snapshot.ProcessUptime.TotalSeconds
         };
 
         await WriteJsonResponseAsync(context, payload);

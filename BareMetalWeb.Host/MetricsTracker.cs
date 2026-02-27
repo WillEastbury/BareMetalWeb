@@ -101,7 +101,8 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             throttled,
             _currentProcess.Id,
             _currentProcess.WorkingSet64,
-            _currentProcess.VirtualMemorySize64
+            _currentProcess.VirtualMemorySize64,
+            DateTime.UtcNow - _currentProcess.StartTime.ToUniversalTime()
         );
     }
 
@@ -220,9 +221,19 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             new[] { "Pages Throttled (429)", snapshot.ThrottledRequests.ToString() },
             new[] { "---- MEMORY STATS ----", "" },
             new[] { "Process ID (PID)", snapshot.ProcessId.ToString() },
+            new[] { "Process Uptime", FormatUptime(snapshot.ProcessUptime) },
             new[] { "Working Set (bytes)", FormatSizeBytes(snapshot.WorkingSet64) },
             new[] { "Virtual Memory Size (bytes)", FormatSizeBytes(snapshot.VirtualMemorySize64) }
         ];
+    }
+
+    private static string FormatUptime(TimeSpan uptime)
+    {
+        if (uptime.TotalDays >= 1)
+            return $"{(int)uptime.TotalDays}d {uptime.Hours:D2}h {uptime.Minutes:D2}m {uptime.Seconds:D2}s";
+        if (uptime.TotalHours >= 1)
+            return $"{uptime.Hours:D2}h {uptime.Minutes:D2}m {uptime.Seconds:D2}s";
+        return $"{uptime.Minutes:D2}m {uptime.Seconds:D2}s";
     }
 
     private static string FormatSizeBytes(long bytes)

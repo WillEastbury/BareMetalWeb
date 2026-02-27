@@ -333,7 +333,7 @@ public class MetricsTrackerTests
         Assert.Equal(2, columns.Length);
         Assert.Equal("Metric", columns[0]);
         Assert.Equal("Value", columns[1]);
-        Assert.Equal(18, rows.Length);
+        Assert.Equal(19, rows.Length);
     }
 
     [Fact]
@@ -563,7 +563,7 @@ public class MetricsTrackerTests
 
         // Assert
         Assert.Equal(2, columns.Length);
-        Assert.Equal(18, rows.Length);
+        Assert.Equal(19, rows.Length);
         Assert.Equal("0", metricDict["Total Requests"]);
         Assert.Equal("0", metricDict["Errored Requests (5xx)"]);
         Assert.Equal("0", metricDict["Pages Served 2xx"]);
