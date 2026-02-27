@@ -1100,7 +1100,7 @@ public class BareMetalWebServerTests : IDisposable
         }
         public MetricsSnapshot GetSnapshot() => new MetricsSnapshot(
             0, 0, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero,
-            TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, 0, 0, 0, 0, 0, 0, 0, 0);
+            TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, 0, 0, 0, 0, 0, 0, 0, 0, TimeSpan.Zero);
     }
 
     private class MockClientRequestTracker : IClientRequestTracker
