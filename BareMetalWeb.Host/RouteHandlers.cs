@@ -23,6 +23,7 @@ using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Core.Delegates;
 using BareMetalWeb.Rendering.Models;
 using BareMetalWeb.Core;
+using BareMetalWeb.Runtime;
 
 namespace BareMetalWeb.Host;
 
@@ -4143,6 +4144,114 @@ public sealed class RouteHandlers : IRouteHandlers
                 "<div id=\"designer-root\"><p class=\"text-muted\">Loading designer…</p></div>" +
                 "<script src=\"/static/js/entity-designer.js\"></script>");
         })(context);
+    }
+
+    public async ValueTask GalleryHandler(HttpContext context)
+    {
+        await BuildPageHandler(async ctx =>
+        {
+            var packages = SampleGalleryService.GetAllPackages();
+
+            // Determine which packages are already deployed (have at least one EntityDefinition with matching slug)
+            var deployedSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var existingDefs = (await DataStoreProvider.Current.QueryAsync<EntityDefinition>(null, ctx.RequestAborted)
+                .ConfigureAwait(false)).ToList();
+            var existingSlugs = existingDefs
+                .Select(e => e.Slug ?? string.Empty)
+                .Where(s => s.Length > 0)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var pkg in packages)
+            {
+                if (pkg.Entities.Any(e => existingSlugs.Contains(e.Slug ?? string.Empty)))
+                    deployedSlugs.Add(pkg.Slug);
+            }
+
+            var sb = new StringBuilder();
+            sb.Append("<h4>Sample Metadata Gallery</h4>");
+            sb.Append("<p class=\"text-muted\">Deploy pre-built entity schemas to get started quickly. Deploying a package imports its <em>EntityDefinition</em>, <em>FieldDefinition</em>, and <em>IndexDefinition</em> records.</p>");
+            sb.Append("<div class=\"row g-3\">");
+
+            var csrfToken = CsrfProtection.EnsureToken(ctx);
+
+            foreach (var pkg in packages)
+            {
+                var isDeployed = deployedSlugs.Contains(pkg.Slug);
+                var badgeClass = isDeployed ? "bg-success" : "bg-secondary";
+                var badgeLabel = isDeployed ? "Deployed" : "Not Deployed";
+                var btnClass = isDeployed ? "btn-outline-secondary" : "btn-primary";
+                var btnLabel = isDeployed ? "Re-deploy" : "Deploy";
+
+                sb.Append("<div class=\"col-md-6 col-lg-4\">");
+                sb.Append("<div class=\"card h-100\">");
+                sb.Append("<div class=\"card-body\">");
+                sb.Append($"<h5 class=\"card-title\"><i class=\"bi {WebUtility.HtmlEncode(pkg.Icon)} me-2\"></i>{WebUtility.HtmlEncode(pkg.Name)}</h5>");
+                sb.Append($"<p class=\"card-text text-muted small\">{WebUtility.HtmlEncode(pkg.Description)}</p>");
+                sb.Append($"<p><span class=\"badge {badgeClass}\">{badgeLabel}</span> ");
+                sb.Append($"<span class=\"text-muted small\">{pkg.Entities.Count} entit{(pkg.Entities.Count == 1 ? "y" : "ies")}, {pkg.Fields.Count} field{(pkg.Fields.Count == 1 ? "" : "s")}</span></p>");
+                sb.Append($"<form method=\"post\" action=\"/admin/gallery/deploy/{WebUtility.HtmlEncode(pkg.Slug)}\">");
+                sb.Append($"<input type=\"hidden\" name=\"{CsrfProtection.FormFieldName}\" value=\"{WebUtility.HtmlEncode(csrfToken)}\">");
+                sb.Append($"<button type=\"submit\" class=\"btn {btnClass} btn-sm\">{btnLabel}</button>");
+                sb.Append("</form>");
+                sb.Append("</div></div></div>");
+            }
+
+            sb.Append("</div>");
+
+            ctx.SetStringValue("title", "Sample Gallery");
+            ctx.SetStringValue("html_message", sb.ToString());
+        })(context);
+    }
+
+    public async ValueTask GalleryDeployPostHandler(HttpContext context)
+    {
+        var packageSlug = GetRouteValue(context, "package") ?? string.Empty;
+
+        if (!context.Request.HasFormContentType)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid form submission.");
+            return;
+        }
+
+        var form = await context.Request.ReadFormAsync();
+        if (!CsrfProtection.ValidateFormToken(context, form))
+        {
+            await BuildPageHandler(ctx =>
+            {
+                ctx.SetStringValue("title", "Sample Gallery");
+                ctx.SetStringValue("html_message", "<div class=\"alert alert-danger\">Invalid security token. Please try again.</div>");
+            })(context);
+            return;
+        }
+
+        var pkg = SampleGalleryService.GetPackage(packageSlug);
+        if (pkg == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await BuildPageHandler(ctx =>
+            {
+                ctx.SetStringValue("title", "Sample Gallery");
+                ctx.SetStringValue("html_message", $"<div class=\"alert alert-danger\">Package '{WebUtility.HtmlEncode(packageSlug)}' not found.</div>");
+            })(context);
+            return;
+        }
+
+        var messages = new List<string>();
+        var deployed = await SampleGalleryService.DeployPackageAsync(
+            pkg,
+            DataStoreProvider.Current,
+            overwrite: false,
+            msg => messages.Add(msg),
+            context.RequestAborted)
+            .ConfigureAwait(false);
+
+        var message = deployed.Count > 0
+            ? $"<div class=\"alert alert-success\">Deployed <strong>{WebUtility.HtmlEncode(pkg.Name)}</strong>: {deployed.Count} entit{(deployed.Count == 1 ? "y" : "ies")} imported.</div>"
+            : $"<div class=\"alert alert-info\">Package <strong>{WebUtility.HtmlEncode(pkg.Name)}</strong> entities are already deployed. No changes made.</div>";
+
+        context.Response.Redirect("/admin/gallery");
+        _ = message; // redirect supersedes any rendered message
     }
 
     private async ValueTask ApplyUploadFieldsFromFormAsync(HttpContext context, DataEntityMetadata meta, BaseDataObject instance, IFormCollection form, List<string> errors)

@@ -218,6 +218,14 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /admin/entity-designer", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Entity Designer", "" }, "admin", true, 2, navGroup: "System", navAlignment: NavAlignment.Right),
             routeHandlers.EntityDesignerHandler));
+
+        // Gallery — browse and deploy pre-built sample entity schema packages
+        host.RegisterRoute("GET /admin/gallery", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Sample Gallery", "" }, "admin", true, 3, navGroup: "System", navAlignment: NavAlignment.Right),
+            routeHandlers.GalleryHandler));
+        host.RegisterRoute("POST /admin/gallery/deploy/{package}", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Sample Gallery", "" }, "admin", false, 0),
+            routeHandlers.GalleryDeployPostHandler));
     }
 
     /// <summary>
