@@ -1538,7 +1538,7 @@ public static class RouteRegistrationExtensions
             foreach (var id in uniqueIds)
             {
                 if (slugResults.ContainsKey(id!)) continue; // already loaded by a previous field
-                var entity = await targetMeta.Handlers.LoadAsync(id!, cancellationToken).ConfigureAwait(false);
+                var entity = await targetMeta.Handlers.LoadAsync(uint.Parse(id!), cancellationToken).ConfigureAwait(false);
                 if (entity != null)
                     slugResults[id!] = RouteHandlers.BuildApiModel(targetMeta, entity);
             }

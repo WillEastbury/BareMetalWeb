@@ -57,8 +57,8 @@ public class SampleGalleryServiceTests
 
         Assert.NotEmpty(pkg.Entities);
         Assert.NotEmpty(pkg.Fields);
-        // Each field must reference a valid entity Id
-        var entityIds = pkg.Entities.Select(e => e.Id).ToHashSet();
+        // Each field must reference a valid entity EntityId
+        var entityIds = pkg.Entities.Select(e => e.EntityId).ToHashSet();
         Assert.All(pkg.Fields, f => Assert.Contains(f.EntityId, entityIds));
     }
 

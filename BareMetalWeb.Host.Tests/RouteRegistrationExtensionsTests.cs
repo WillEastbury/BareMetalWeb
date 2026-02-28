@@ -1232,7 +1232,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.NotNull(method);
 
         // Customer entity defaults permissions to "Customers" — pass a user with that permission
-        var user = new User { Id = "u1", UserName = "test", IsActive = true, Permissions = new[] { "Customers" } };
+        var user = new User { Key = 1, UserName = "test", IsActive = true, Permissions = new[] { "Customers" } };
 
         // Act
         var script = (string?)method.Invoke(null, new object?[] { user, user.Permissions, "testnonce" });
@@ -1308,13 +1308,13 @@ public class RouteRegistrationExtensionsTests : IDisposable
         DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Customer>();
 
         var store = (InMemoryDataStore)DataStoreProvider.Current;
-        var address = new BareMetalWeb.Data.DataObjects.Address { Id = "addr-1", Label = "Home" };
+        var address = new BareMetalWeb.Data.DataObjects.Address { Key = 1, Label = "Home" };
         store.Save(address);
 
         Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
 
-        // Build a payload item that has AddressId = "addr-1"
-        var item = new Dictionary<string, object?> { ["AddressId"] = "addr-1", ["Name"] = "Acme" };
+        // Build a payload item that has AddressId = "1"
+        var item = new Dictionary<string, object?> { ["AddressId"] = "1", ["Name"] = "Acme" };
         var payload = new[] { item };
 
         var method = typeof(RouteRegistrationExtensions).GetMethod(
@@ -1330,7 +1330,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         // Assert — AddressId field is list-visible (List=true by default), so prefetch should contain addresses
         Assert.NotNull(result);
         Assert.True(result!.ContainsKey("addresses"));
-        Assert.True(result["addresses"].ContainsKey("addr-1"));
+        Assert.True(result["addresses"].ContainsKey("1"));
     }
 
     [Fact]

@@ -40,10 +40,11 @@ public sealed class WalDataProviderTests : IDisposable
         // Arrange
         using var provider = new WalDataProvider(_dir);
         var setting = MakeSetting("key1", "hello");
+        setting.Key = provider.NextSequentialKey("AppSetting");
 
         // Act
         provider.Save(setting);
-        var loaded = provider.Load<AppSetting>(setting.Id);
+        var loaded = provider.Load<AppSetting>(setting.Key);
 
         // Assert
         Assert.NotNull(loaded);
@@ -55,17 +56,18 @@ public sealed class WalDataProviderTests : IDisposable
     public void Save_ThenLoad_FreshInstance_ReturnsObject()
     {
         // Arrange: write with one provider instance
-        string id;
+        uint key;
         using (var p1 = new WalDataProvider(_dir))
         {
             var s = MakeSetting("k2");
+            s.Key = p1.NextSequentialKey("AppSetting");
             p1.Save(s);
-            id = s.Id;
+            key = s.Key;
         }
 
         // Act: read with a completely separate provider (simulates app restart)
         using var p2 = new WalDataProvider(_dir);
-        var loaded = p2.Load<AppSetting>(id);
+        var loaded = p2.Load<AppSetting>(key);
 
         // Assert
         Assert.NotNull(loaded);
@@ -76,7 +78,7 @@ public sealed class WalDataProviderTests : IDisposable
     public void Load_NonExistentId_ReturnsNull()
     {
         using var provider = new WalDataProvider(_dir);
-        var result = provider.Load<AppSetting>(Guid.NewGuid().ToString("N"));
+        var result = provider.Load<AppSetting>(99999u);
         Assert.Null(result);
     }
 
@@ -85,12 +87,13 @@ public sealed class WalDataProviderTests : IDisposable
     {
         using var provider = new WalDataProvider(_dir);
         var setting = MakeSetting("upd", "original");
+        setting.Key = provider.NextSequentialKey("AppSetting");
         provider.Save(setting);
 
         setting.Value = "updated";
         provider.Save(setting);
 
-        var loaded = provider.Load<AppSetting>(setting.Id);
+        var loaded = provider.Load<AppSetting>(setting.Key);
         Assert.NotNull(loaded);
         Assert.Equal("updated", loaded.Value);
     }
@@ -102,7 +105,11 @@ public sealed class WalDataProviderTests : IDisposable
     {
         using var provider = new WalDataProvider(_dir);
         for (int i = 0; i < 5; i++)
-            provider.Save(MakeSetting("q_" + i));
+        {
+            var s = MakeSetting("q_" + i);
+            s.Key = provider.NextSequentialKey("AppSetting");
+            provider.Save(s);
+        }
 
         var results = provider.Query<AppSetting>();
         Assert.Equal(5, results.Count());
@@ -113,7 +120,11 @@ public sealed class WalDataProviderTests : IDisposable
     {
         using (var p1 = new WalDataProvider(_dir))
             for (int i = 0; i < 4; i++)
-                p1.Save(MakeSetting("r_" + i));
+            {
+                var s = MakeSetting("r_" + i);
+                s.Key = p1.NextSequentialKey("AppSetting");
+                p1.Save(s);
+            }
 
         using var p2 = new WalDataProvider(_dir);
         Assert.Equal(4, p2.Query<AppSetting>().Count());
@@ -126,8 +137,12 @@ public sealed class WalDataProviderTests : IDisposable
         BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
 
         using var provider = new WalDataProvider(_dir);
-        provider.Save(MakeSetting("needle",  "yes"));
-        provider.Save(MakeSetting("haystack", "no"));
+        var s1 = MakeSetting("needle",  "yes");
+        s1.Key = provider.NextSequentialKey("AppSetting");
+        provider.Save(s1);
+        var s2 = MakeSetting("haystack", "no");
+        s2.Key = provider.NextSequentialKey("AppSetting");
+        provider.Save(s2);
 
         var query = new QueryDefinition
         {
@@ -149,7 +164,11 @@ public sealed class WalDataProviderTests : IDisposable
     {
         using var provider = new WalDataProvider(_dir);
         for (int i = 0; i < 6; i++)
-            provider.Save(MakeSetting("c" + i));
+        {
+            var s = MakeSetting("c" + i);
+            s.Key = provider.NextSequentialKey("AppSetting");
+            provider.Save(s);
+        }
 
         Assert.Equal(6, provider.Count<AppSetting>());
     }
@@ -161,11 +180,12 @@ public sealed class WalDataProviderTests : IDisposable
     {
         using var provider = new WalDataProvider(_dir);
         var s = MakeSetting("del");
+        s.Key = provider.NextSequentialKey("AppSetting");
         provider.Save(s);
 
-        provider.Delete<AppSetting>(s.Id);
+        provider.Delete<AppSetting>(s.Key);
 
-        Assert.Null(provider.Load<AppSetting>(s.Id));
+        Assert.Null(provider.Load<AppSetting>(s.Key));
     }
 
     [Fact]
@@ -173,11 +193,13 @@ public sealed class WalDataProviderTests : IDisposable
     {
         using var provider = new WalDataProvider(_dir);
         var s1 = MakeSetting("keep");
+        s1.Key = provider.NextSequentialKey("AppSetting");
         var s2 = MakeSetting("gone");
+        s2.Key = provider.NextSequentialKey("AppSetting");
         provider.Save(s1);
         provider.Save(s2);
 
-        provider.Delete<AppSetting>(s2.Id);
+        provider.Delete<AppSetting>(s2.Key);
 
         var results = provider.Query<AppSetting>().ToList();
         Assert.Single(results);
@@ -187,17 +209,18 @@ public sealed class WalDataProviderTests : IDisposable
     [Fact]
     public void Delete_FreshInstance_LoadReturnsNull()
     {
-        string id;
+        uint key;
         using (var p1 = new WalDataProvider(_dir))
         {
             var s = MakeSetting("gone2");
+            s.Key = p1.NextSequentialKey("AppSetting");
             p1.Save(s);
-            id = s.Id;
-            p1.Delete<AppSetting>(id);
+            key = s.Key;
+            p1.Delete<AppSetting>(key);
         }
 
         using var p2 = new WalDataProvider(_dir);
-        Assert.Null(p2.Load<AppSetting>(id));
+        Assert.Null(p2.Load<AppSetting>(key));
         Assert.Equal(0, p2.Count<AppSetting>());
     }
 
@@ -206,7 +229,7 @@ public sealed class WalDataProviderTests : IDisposable
     {
         using var provider = new WalDataProvider(_dir);
         var exception = Record.Exception(
-            () => provider.Delete<AppSetting>(Guid.NewGuid().ToString("N")));
+            () => provider.Delete<AppSetting>(99999u));
         Assert.Null(exception);
     }
 
@@ -217,8 +240,9 @@ public sealed class WalDataProviderTests : IDisposable
     {
         using var provider = new WalDataProvider(_dir);
         var s = MakeSetting("async_key", "async_val");
+        s.Key = provider.NextSequentialKey("AppSetting");
         await provider.SaveAsync(s);
-        var loaded = await provider.LoadAsync<AppSetting>(s.Id);
+        var loaded = await provider.LoadAsync<AppSetting>(s.Key);
 
         Assert.NotNull(loaded);
         Assert.Equal("async_val", loaded.Value);
@@ -228,8 +252,8 @@ public sealed class WalDataProviderTests : IDisposable
     public async Task QueryAsync_ReturnsRecords()
     {
         using var provider = new WalDataProvider(_dir);
-        provider.Save(MakeSetting("a1"));
-        provider.Save(MakeSetting("a2"));
+        var a1 = MakeSetting("a1"); a1.Key = provider.NextSequentialKey("AppSetting"); provider.Save(a1);
+        var a2 = MakeSetting("a2"); a2.Key = provider.NextSequentialKey("AppSetting"); provider.Save(a2);
         var results = await provider.QueryAsync<AppSetting>();
         Assert.Equal(2, results.Count());
     }
@@ -237,25 +261,25 @@ public sealed class WalDataProviderTests : IDisposable
     // ── Sequential IDs ────────────────────────────────────────────────────────
 
     [Fact]
-    public void NextSequentialId_IsMonotonicAcrossInstances()
+    public void NextSequentialKey_IsMonotonicAcrossInstances()
     {
-        string id1, id2;
+        uint key1, key2;
         using (var p1 = new WalDataProvider(_dir))
-            id1 = p1.NextSequentialId("MyEntity");
+            key1 = p1.NextSequentialKey("MyEntity");
 
         using (var p2 = new WalDataProvider(_dir))
-            id2 = p2.NextSequentialId("MyEntity");
+            key2 = p2.NextSequentialKey("MyEntity");
 
-        Assert.True(long.Parse(id2) > long.Parse(id1));
+        Assert.True(key2 > key1);
     }
 
     [Fact]
-    public void SeedSequentialId_AdvancesCounter()
+    public void SeedSequentialKey_AdvancesCounter()
     {
         using var provider = new WalDataProvider(_dir);
-        provider.SeedSequentialId("SeedEntity", 100);
-        var next = provider.NextSequentialId("SeedEntity");
-        Assert.True(long.Parse(next) > 100);
+        provider.SeedSequentialKey("SeedEntity", 100);
+        var next = provider.NextSequentialKey("SeedEntity");
+        Assert.True(next > 100u);
     }
 
     // ── Multiple saves survive restart ───────────────────────────────────────
@@ -264,23 +288,24 @@ public sealed class WalDataProviderTests : IDisposable
     public void BulkSave_FreshInstance_AllRecordsLoaded()
     {
         const int count = 25;
-        var savedIds = new List<string>();
+        var savedKeys = new List<uint>();
 
         using (var p1 = new WalDataProvider(_dir))
         {
             for (int i = 0; i < count; i++)
             {
                 var s = MakeSetting("bulk_" + i, "val_" + i);
+                s.Key = p1.NextSequentialKey("AppSetting");
                 p1.Save(s);
-                savedIds.Add(s.Id);
+                savedKeys.Add(s.Key);
             }
         }
 
         using var p2 = new WalDataProvider(_dir);
         int loaded = 0;
-        foreach (var id in savedIds)
+        foreach (var key in savedKeys)
         {
-            if (p2.Load<AppSetting>(id) != null) loaded++;
+            if (p2.Load<AppSetting>(key) != null) loaded++;
         }
 
         Assert.Equal(count, loaded);
@@ -294,6 +319,7 @@ public sealed class WalDataProviderTests : IDisposable
     {
         using var provider = new WalDataProvider(_dir);
         var s = MakeSetting("meta");
+        s.Key = provider.NextSequentialKey("AppSetting");
 
         provider.Save(s);
 
@@ -307,11 +333,11 @@ public sealed class WalDataProviderTests : IDisposable
     [Fact]
     public void IdMap_PersistsAndReloads_Correctly()
     {
-        string id1, id2;
+        uint key1, key2;
         using (var p1 = new WalDataProvider(_dir))
         {
-            var s1 = MakeSetting("m1"); p1.Save(s1); id1 = s1.Id;
-            var s2 = MakeSetting("m2"); p1.Save(s2); id2 = s2.Id;
+            var s1 = MakeSetting("m1"); s1.Key = p1.NextSequentialKey("AppSetting"); p1.Save(s1); key1 = s1.Key;
+            var s2 = MakeSetting("m2"); s2.Key = p1.NextSequentialKey("AppSetting"); p1.Save(s2); key2 = s2.Key;
         }
 
         // Assert idmap file was created
@@ -320,8 +346,8 @@ public sealed class WalDataProviderTests : IDisposable
 
         // Reload with fresh instance and verify both records accessible
         using var p2 = new WalDataProvider(_dir);
-        Assert.NotNull(p2.Load<AppSetting>(id1));
-        Assert.NotNull(p2.Load<AppSetting>(id2));
+        Assert.NotNull(p2.Load<AppSetting>(key1));
+        Assert.NotNull(p2.Load<AppSetting>(key2));
     }
 
     // ── CanHandle always returns true ─────────────────────────────────────────

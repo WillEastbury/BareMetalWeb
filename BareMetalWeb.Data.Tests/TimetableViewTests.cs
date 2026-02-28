@@ -234,7 +234,7 @@ public class TimetableViewTests : IDisposable
     public void BuildTimetableHtml_LookupField_ShowsDisplayValueNotRawId()
     {
         // Arrange: seed a Subject so the lookup can be resolved
-        var subject = new BareMetalWeb.Data.DataObjects.Subject { Id = "subj-abc", Name = "Mathematics" };
+        var subject = new BareMetalWeb.Data.DataObjects.Subject { Key = 1, Name = "Mathematics" };
         DataStoreProvider.Current.Save(subject);
 
         // Clear lookup cache to force re-query with seeded data
@@ -242,8 +242,8 @@ public class TimetableViewTests : IDisposable
 
         var plan = new TimeTablePlan
         {
-            Id = "plan-1",
-            SubjectId = "subj-abc",
+            Key = 2,
+            SubjectId = "1",
             Day = CustomDayOfWeek.Wednesday,
             StartTime = new TimeOnly(10, 0),
             Minutes = 45
@@ -259,7 +259,7 @@ public class TimetableViewTests : IDisposable
         // Assert: the Subject's Name should appear as the display value
         Assert.Contains("Mathematics", html);
         // The raw ID should NOT appear as a standalone cell value (it may appear in a title attribute as part of BuildLookupHtml)
-        Assert.DoesNotContain("<td>subj-abc</td>", html);
+        Assert.DoesNotContain("<td>1</td>", html);
     }
 
     private static void ClearLookupCache()

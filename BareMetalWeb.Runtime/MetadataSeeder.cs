@@ -76,12 +76,12 @@ public static class MetadataSeeder
             if (overwrite && existingBySlug.TryGetValue(slug, out var existing))
             {
                 // Preserve the identity so the record is updated in-place.
-                entityDef.Id = existing.Id;
+                entityDef.Key = existing.Key;
                 entityDef.EntityId = existing.EntityId;
                 entityDef.Version = existing.Version + 1;
 
                 // Remove old field and index records before writing fresh ones.
-                await DeleteChildRecordsAsync(store, existing.Id, cancellationToken)
+                await DeleteChildRecordsAsync(store, existing.EntityId, cancellationToken)
                     .ConfigureAwait(false);
             }
 
@@ -123,12 +123,12 @@ public static class MetadataSeeder
             .ToList();
 
         foreach (var f in fields)
-            await store.DeleteAsync<FieldDefinition>(f.Id, ct).ConfigureAwait(false);
+            await store.DeleteAsync<FieldDefinition>(f.Key, ct).ConfigureAwait(false);
 
         var idxs = (await store.QueryAsync<IndexDefinition>(entityIdQuery, ct).ConfigureAwait(false))
             .ToList();
 
         foreach (var idx in idxs)
-            await store.DeleteAsync<IndexDefinition>(idx.Id, ct).ConfigureAwait(false);
+            await store.DeleteAsync<IndexDefinition>(idx.Key, ct).ConfigureAwait(false);
     }
 }

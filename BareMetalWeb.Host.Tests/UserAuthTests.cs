@@ -379,7 +379,7 @@ public class UserAuthTests : IDisposable
 
         await DataStoreProvider.Current.SaveAsync(session);
 
-        var context = CreateHttpContext(session.Id);
+        var context = CreateHttpContext(session.Key.ToString());
         var originalExpiresUtc = session.ExpiresUtc;
 
         // Act
@@ -387,10 +387,10 @@ public class UserAuthTests : IDisposable
 
         // Assert — session returned successfully
         Assert.NotNull(result);
-        Assert.Equal(session.Id, result.Id);
+        Assert.Equal(session.Key, result.Key);
 
         // Session should NOT have been re-saved because the extension gain is < 1 minute
-        var storedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Id);
+        var storedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Key);
         Assert.NotNull(storedSession);
         Assert.Equal(originalExpiresUtc, storedSession.ExpiresUtc);
     }
@@ -418,7 +418,7 @@ public class UserAuthTests : IDisposable
 
         DataStoreProvider.Current.Save(session);
 
-        var context = CreateHttpContext(session.Id);
+        var context = CreateHttpContext(session.Key.ToString());
         var originalExpiresUtc = session.ExpiresUtc;
 
         // Act
@@ -428,7 +428,7 @@ public class UserAuthTests : IDisposable
         Assert.NotNull(result);
 
         // Session should NOT have been re-saved because the extension gain is < 1 minute
-        var storedSession = DataStoreProvider.Current.Load<UserSession>(session.Id);
+        var storedSession = DataStoreProvider.Current.Load<UserSession>(session.Key);
         Assert.NotNull(storedSession);
         Assert.Equal(originalExpiresUtc, storedSession.ExpiresUtc);
     }
@@ -440,6 +440,7 @@ public class UserAuthTests : IDisposable
         EnsureStore();
         var root = new User
         {
+            Key = 1,
             UserName = "root",
             DisplayName = "Root User",
             Email = "root@example.com",
@@ -451,6 +452,7 @@ public class UserAuthTests : IDisposable
 
         var secondUser = new User
         {
+            Key = 2,
             UserName = "son",
             DisplayName = "Son User",
             Email = "son@example.com",
@@ -466,11 +468,11 @@ public class UserAuthTests : IDisposable
 
         // Assert — each lookup returns the correct user
         Assert.NotNull(foundRoot);
-        Assert.Equal(root.Id, foundRoot.Id);
+        Assert.Equal(root.Key, foundRoot.Key);
         Assert.Equal("root", foundRoot.UserName);
 
         Assert.NotNull(foundSon);
-        Assert.Equal(secondUser.Id, foundSon.Id);
+        Assert.Equal(secondUser.Key, foundSon.Key);
         Assert.Equal("son", foundSon.UserName);
     }
 
@@ -481,6 +483,7 @@ public class UserAuthTests : IDisposable
         EnsureStore();
         var root = new User
         {
+            Key = 1,
             UserName = "root",
             DisplayName = "Root User",
             Email = "root@example.com",
@@ -492,6 +495,7 @@ public class UserAuthTests : IDisposable
 
         var secondUser = new User
         {
+            Key = 2,
             UserName = "son",
             DisplayName = "Son User",
             Email = "son@example.com",
@@ -507,10 +511,10 @@ public class UserAuthTests : IDisposable
 
         // Assert — each lookup returns the correct user
         Assert.NotNull(foundRoot);
-        Assert.Equal(root.Id, foundRoot.Id);
+        Assert.Equal(root.Key, foundRoot.Key);
 
         Assert.NotNull(foundSon);
-        Assert.Equal(secondUser.Id, foundSon.Id);
+        Assert.Equal(secondUser.Key, foundSon.Key);
     }
 
     [Fact]
@@ -521,6 +525,7 @@ public class UserAuthTests : IDisposable
         EnsureStore();
         var root = new User
         {
+            Key = 1,
             UserName = "admin",
             DisplayName = "Administrator",
             Email = "admin@example.com",
@@ -532,6 +537,7 @@ public class UserAuthTests : IDisposable
 
         var secondUser = new User
         {
+            Key = 2,
             UserName = "son",
             DisplayName = "Son",
             Email = "son@example.com",
@@ -546,7 +552,7 @@ public class UserAuthTests : IDisposable
 
         // Assert — root is found and its password still verifies correctly
         Assert.NotNull(found);
-        Assert.Equal(root.Id, found.Id);
+        Assert.Equal(root.Key, found.Key);
         Assert.True(found.VerifyPassword("AdminPass1!"), "Root password should verify correctly");
         Assert.False(found.VerifyPassword("SonPass1!"), "Second user password must not match root");
     }
@@ -658,7 +664,7 @@ public class UserAuthTests : IDisposable
 
         // Assert
         Assert.NotNull(found);
-        Assert.Equal(original.Id, found.Id);
+        Assert.Equal(original.Key, found.Key);
         Assert.True(found.VerifyPassword("CorrectPass1!"), "Original user password must verify correctly.");
     }
 

@@ -670,7 +670,7 @@ public static class DataScaffold
 
             // Always generate key for fields with IdGeneration attribute
             // This is called only for new entity creation
-            var generatedKey = IdGenerator.GenerateKey(metadata.Type, field.IdGeneration);
+            var generatedKey = IdGenerator.GenerateKey(metadata.Type);
             field.SetValueFn(instance, generatedKey);
         }
     }

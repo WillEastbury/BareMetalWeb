@@ -3897,23 +3897,23 @@ public sealed class RouteHandlers : IRouteHandlers
             StringComparer.OrdinalIgnoreCase);
         var employees_query = await DataStoreProvider.Current.QueryAsync<Employee>(null).ConfigureAwait(false);
         var usedEmployeeIds = new HashSet<string>(
-            employees_query.Select(e => e.Id),
+            employees_query.Select(e => e.Key.ToString()),
             StringComparer.OrdinalIgnoreCase);
         var orders_query = await DataStoreProvider.Current.QueryAsync<Order>(null).ConfigureAwait(false);
         var usedOrderIds = new HashSet<string>(
-            orders_query.Select(o => o.Id),
+            orders_query.Select(o => o.Key.ToString()),
             StringComparer.OrdinalIgnoreCase);
         var todos_query = await DataStoreProvider.Current.QueryAsync<ToDo>(null).ConfigureAwait(false);
         var usedTodoIds = new HashSet<string>(
-            todos_query.Select(t => t.Id),
+            todos_query.Select(t => t.Key.ToString()),
             StringComparer.OrdinalIgnoreCase);
         var ttpQuery = await DataStoreProvider.Current.QueryAsync<TimeTablePlan>(null).ConfigureAwait(false);
         var usedTtpIds = new HashSet<string>(
-            ttpQuery.Select(t => t.Id),
+            ttpQuery.Select(t => t.Key.ToString()),
             StringComparer.OrdinalIgnoreCase);
         var llQuery = await DataStoreProvider.Current.QueryAsync<LessonLog>(null).ConfigureAwait(false);
         var usedLessonLogIds = new HashSet<string>(
-            llQuery.Select(l => l.Id),
+            llQuery.Select(l => l.Key.ToString()),
             StringComparer.OrdinalIgnoreCase);
 
         var addresses = GenerateAddresses(addressCount, usedAddressIds);
@@ -3924,7 +3924,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // Ensure at least one currency exists when generating orders
         var existingCurrencies = (await DataStoreProvider.Current.QueryAsync<Currency>(null).ConfigureAwait(false)).ToList();
-        var usedCurrencyIds = new HashSet<string>(existingCurrencies.Select(c => c.Id), StringComparer.OrdinalIgnoreCase);
+        var usedCurrencyIds = new HashSet<string>(existingCurrencies.Select(c => c.Key.ToString()), StringComparer.OrdinalIgnoreCase);
         List<Currency> seedCurrencies = new();
         if (orderCount > 0 && existingCurrencies.Count == 0)
             seedCurrencies = GenerateSeedCurrencies(usedCurrencyIds);
@@ -3937,7 +3937,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // Ensure subjects exist for timetable and lesson log generation
         var existingSubjects = (await DataStoreProvider.Current.QueryAsync<Subject>(null).ConfigureAwait(false)).ToList();
-        var usedSubjectIds = new HashSet<string>(existingSubjects.Select(s => s.Id), StringComparer.OrdinalIgnoreCase);
+        var usedSubjectIds = new HashSet<string>(existingSubjects.Select(s => s.Key.ToString()), StringComparer.OrdinalIgnoreCase);
         List<Subject> seedSubjects = new();
         if ((timeTablePlanCount > 0 || lessonLogCount > 0) && existingSubjects.Count == 0)
             seedSubjects = GenerateSeedSubjects(usedSubjectIds);
@@ -6318,14 +6318,14 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!string.IsNullOrWhiteSpace(user.UserName))
         {
             var existing = await Users.FindByUserNameAsync(user.UserName, cancellationToken).ConfigureAwait(false);
-            if (existing != null && !string.Equals(existing.Id, excludeId, StringComparison.OrdinalIgnoreCase))
+            if (existing != null && !string.Equals(existing.Key.ToString(), excludeId, StringComparison.OrdinalIgnoreCase))
                 errors.Add("Username is already taken.");
         }
 
         if (!string.IsNullOrWhiteSpace(user.Email))
         {
             var existing = await Users.FindByEmailAsync(user.Email, cancellationToken).ConfigureAwait(false);
-            if (existing != null && !string.Equals(existing.Id, excludeId, StringComparison.OrdinalIgnoreCase))
+            if (existing != null && !string.Equals(existing.Key.ToString(), excludeId, StringComparison.OrdinalIgnoreCase))
                 errors.Add("Email is already registered.");
         }
     }

@@ -14,6 +14,8 @@ public class TodoPeriodicityServiceTests
 {
     // ── helpers ───────────────────────────────────────────────────────────────
 
+    private static uint _nextKey = 1;
+
     private static ToDo MakeTodo(
         TodoPeriodicity periodicity,
         bool isCompleted,
@@ -21,7 +23,7 @@ public class TodoPeriodicityServiceTests
         TimeOnly startTime = default)
         => new ToDo
         {
-            Id = Guid.NewGuid().ToString("N"),
+            Key = _nextKey++,
             Title = "Test",
             Periodicity = periodicity,
             IsCompleted = isCompleted,
@@ -146,7 +148,7 @@ public class TodoPeriodicityServiceTests
         var count = TodoPeriodicityService.ProcessTodos(store, nowUtc);
 
         Assert.Equal(0, count);
-        Assert.True(store.Get<ToDo>(todo.Id)!.IsCompleted);
+        Assert.True(store.Load<ToDo>(todo.Key)!.IsCompleted);
     }
 
     [Fact]
@@ -175,7 +177,7 @@ public class TodoPeriodicityServiceTests
         var count = TodoPeriodicityService.ProcessTodos(store, nowUtc);
 
         Assert.Equal(1, count);
-        var updated = store.Get<ToDo>(todo.Id)!;
+        var updated = store.Load<ToDo>(todo.Key)!;
         Assert.False(updated.IsCompleted);
         Assert.True(updated.Deadline > DateOnly.FromDateTime(nowUtc));
     }
@@ -193,7 +195,7 @@ public class TodoPeriodicityServiceTests
         var count = TodoPeriodicityService.ProcessTodos(store, nowUtc);
 
         Assert.Equal(0, count);
-        Assert.True(store.Get<ToDo>(todo.Id)!.IsCompleted);
+        Assert.True(store.Load<ToDo>(todo.Key)!.IsCompleted);
     }
 
     [Fact]
@@ -220,7 +222,7 @@ public class TodoPeriodicityServiceTests
 
     private sealed class SimpleStore : IDataObjectStore
     {
-        private readonly Dictionary<(Type, string), BaseDataObject> _data = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _data = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
@@ -228,7 +230,7 @@ public class TodoPeriodicityServiceTests
         public void ClearProviders() { }
 
         public void Save<T>(T obj) where T : BaseDataObject
-            => _data[(typeof(T), obj.Id)] = obj;
+            => _data[(typeof(T), obj.Key)] = obj;
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
@@ -236,12 +238,10 @@ public class TodoPeriodicityServiceTests
             return ValueTask.CompletedTask;
         }
 
-        public T? Get<T>(string id) where T : BaseDataObject
-            => _data.TryGetValue((typeof(T), id), out var v) ? v as T : null;
-
-        public T? Load<T>(string id) where T : BaseDataObject => Get<T>(id);
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult(Load<T>(id));
+        public T? Load<T>(uint key) where T : BaseDataObject
+            => _data.TryGetValue((typeof(T), key), out var v) ? v as T : null;
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult(Load<T>(key));
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
             => _data.Values.OfType<T>();
@@ -252,10 +252,10 @@ public class TodoPeriodicityServiceTests
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
             => ValueTask.FromResult(Count<T>());
 
-        public void Delete<T>(string id) where T : BaseDataObject => _data.Remove((typeof(T), id));
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public void Delete<T>(uint key) where T : BaseDataObject => _data.Remove((typeof(T), key));
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            Delete<T>(id);
+            Delete<T>(key);
             return ValueTask.CompletedTask;
         }
     }

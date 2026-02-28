@@ -119,14 +119,13 @@ public static class SampleGalleryService
                 continue;
             }
 
-            // Assign a fresh Id to avoid collisions; remap child records accordingly
-            var oldEntityId = srcEntity.Id;
-            var newEntityId = Guid.NewGuid().ToString("N");
+            // Assign a fresh EntityId to avoid collisions; remap child records accordingly
+            var oldEntityId = srcEntity.EntityId;
+            var newEntityId = Guid.NewGuid().ToString("D");
 
             var newEntity = new EntityDefinition
             {
-                Id = newEntityId,
-                EntityId = Guid.NewGuid().ToString("D"),
+                EntityId = newEntityId,
                 Name = srcEntity.Name,
                 Slug = slug,
                 IdStrategy = srcEntity.IdStrategy,
@@ -140,15 +139,15 @@ public static class SampleGalleryService
             if (overwrite && existingBySlug.TryGetValue(slug, out var existing))
             {
                 // Preserve existing identity; remove stale child records
-                newEntity.Id = existing.Id;
+                newEntity.Key = existing.Key;
                 newEntity.EntityId = existing.EntityId;
                 newEntity.Version = existing.Version + 1;
-                await DeleteChildRecordsAsync(store, existing.Id, cancellationToken).ConfigureAwait(false);
+                await DeleteChildRecordsAsync(store, existing.EntityId, cancellationToken).ConfigureAwait(false);
 
-                // Use preserved Id for remapping child records
-                oldEntityId = existing.Id;
-                newEntityId = existing.Id;
-                newEntity.Id = existing.Id;
+                // Use preserved EntityId for remapping child records
+                oldEntityId = existing.EntityId;
+                newEntityId = existing.EntityId;
+                newEntity.Key = existing.Key;
             }
 
             await store.SaveAsync(newEntity, cancellationToken).ConfigureAwait(false);
@@ -158,9 +157,8 @@ public static class SampleGalleryService
             {
                 var newField = new FieldDefinition
                 {
-                    Id = Guid.NewGuid().ToString("N"),
                     FieldId = Guid.NewGuid().ToString("D"),
-                    EntityId = newEntity.Id,
+                    EntityId = newEntity.EntityId,
                     Name = srcField.Name,
                     Label = srcField.Label,
                     Ordinal = srcField.Ordinal,
@@ -194,8 +192,7 @@ public static class SampleGalleryService
             {
                 var newIndex = new IndexDefinition
                 {
-                    Id = Guid.NewGuid().ToString("N"),
-                    EntityId = newEntity.Id,
+                    EntityId = newEntity.EntityId,
                     FieldNames = srcIndex.FieldNames,
                     Type = srcIndex.Type
                 };
@@ -226,10 +223,10 @@ public static class SampleGalleryService
 
         var fields = (await store.QueryAsync<FieldDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
         foreach (var f in fields)
-            await store.DeleteAsync<FieldDefinition>(f.Id, ct).ConfigureAwait(false);
+            await store.DeleteAsync<FieldDefinition>(f.Key, ct).ConfigureAwait(false);
 
         var idxs = (await store.QueryAsync<IndexDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
         foreach (var idx in idxs)
-            await store.DeleteAsync<IndexDefinition>(idx.Id, ct).ConfigureAwait(false);
+            await store.DeleteAsync<IndexDefinition>(idx.Key, ct).ConfigureAwait(false);
     }
 }

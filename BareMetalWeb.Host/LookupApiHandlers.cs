@@ -530,7 +530,7 @@ public static class LookupApiHandlers
             if (string.Equals(expandedKey, field.Name, StringComparison.Ordinal) || result.ContainsKey(expandedKey))
                 continue;
 
-            var related = await relatedMeta.Handlers.LoadAsync(idStr, cancellationToken);
+            var related = await relatedMeta.Handlers.LoadAsync(uint.Parse(idStr), cancellationToken);
             if (related != null)
                 result[expandedKey] = EntityToJson(related, relatedMeta);
         }
