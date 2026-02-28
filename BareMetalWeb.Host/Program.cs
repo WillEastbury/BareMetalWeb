@@ -345,7 +345,7 @@ static class ProgramSetup
     {
         var dataStore = new DataObjectStore();
         DataStoreProvider.Current = dataStore;
-        var provider = new LocalFolderBinaryDataProvider(
+        var provider = new WalDataProvider(
             app.Configuration.GetValue("Data:Root", Path.Combine(app.Environment.ContentRootPath, "Data")),
             serializer,
             queryEvaluator,
