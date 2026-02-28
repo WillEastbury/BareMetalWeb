@@ -51,7 +51,7 @@ public class HighCardinalityLookupTests : IDisposable
 
         var store = (CountableInMemoryDataStore)DataStoreProvider.Current;
         for (int i = 1; i <= 3; i++)
-            store.Save(new Employee { Id = $"emp-{i}", Name = $"Employee {i}" });
+            store.Save(new Employee { Key = (uint)i, Name = $"Employee {i}" });
 
         var meta = DataScaffold.GetEntityByType(typeof(Employee));
         Assert.NotNull(meta);
@@ -78,7 +78,7 @@ public class HighCardinalityLookupTests : IDisposable
 
         var store = (CountableInMemoryDataStore)DataStoreProvider.Current;
         for (int i = 1; i <= 5; i++)
-            store.Save(new Employee { Id = $"emp-{i}", Name = $"Employee {i}" });
+            store.Save(new Employee { Key = (uint)i, Name = $"Employee {i}" });
 
         var meta = DataScaffold.GetEntityByType(typeof(Employee));
         Assert.NotNull(meta);
@@ -103,11 +103,11 @@ public class HighCardinalityLookupTests : IDisposable
         ClearCaches();
 
         var store = (CountableInMemoryDataStore)DataStoreProvider.Current;
-        store.Save(new Employee { Id = "mgr-1", Name = "Alice Manager" });
+        store.Save(new Employee { Key = 100, Name = "Alice Manager" });
         for (int i = 2; i <= 5; i++)
-            store.Save(new Employee { Id = $"emp-{i}", Name = $"Employee {i}" });
+            store.Save(new Employee { Key = (uint)i, Name = $"Employee {i}" });
 
-        var instance = new Employee { Id = "emp-1", Name = "Bob", ManagerId = "mgr-1" };
+        var instance = new Employee { Key = 1, Name = "Bob", ManagerId = "100" };
 
         var meta = DataScaffold.GetEntityByType(typeof(Employee));
         Assert.NotNull(meta);
@@ -131,7 +131,7 @@ public class HighCardinalityLookupTests : IDisposable
 
         var store = (CountableInMemoryDataStore)DataStoreProvider.Current;
         for (int i = 1; i <= 5; i++)
-            store.Save(new Employee { Id = $"emp-{i}", Name = $"Employee {i}" });
+            store.Save(new Employee { Key = (uint)i, Name = $"Employee {i}" });
 
         var meta = DataScaffold.GetEntityByType(typeof(Employee));
         Assert.NotNull(meta);
@@ -182,7 +182,7 @@ public class HighCardinalityLookupTests : IDisposable
 
     private class CountableInMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<(Type, string), BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
@@ -190,16 +190,16 @@ public class HighCardinalityLookupTests : IDisposable
         public void ClearProviders() { }
 
         public void Save<T>(T obj) where T : BaseDataObject
-            => _store[(typeof(T), obj.Id)] = obj;
+            => _store[(typeof(T), obj.Key)] = obj;
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
         { Save(obj); return ValueTask.CompletedTask; }
 
-        public T? Load<T>(string id) where T : BaseDataObject
-            => _store.TryGetValue((typeof(T), id), out var obj) ? obj as T : null;
+        public T? Load<T>(uint key) where T : BaseDataObject
+            => _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
 
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult(Load<T>(id));
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult(Load<T>(key));
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
         {
@@ -232,10 +232,10 @@ public class HighCardinalityLookupTests : IDisposable
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
             => ValueTask.FromResult(Query<T>(query).Count());
 
-        public void Delete<T>(string id) where T : BaseDataObject
-            => _store.Remove((typeof(T), id));
+        public void Delete<T>(uint key) where T : BaseDataObject
+            => _store.Remove((typeof(T), key));
 
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-        { Delete<T>(id); return ValueTask.CompletedTask; }
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+        { Delete<T>(key); return ValueTask.CompletedTask; }
     }
 }

@@ -38,7 +38,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
     private const string WalSubFolder          = "wal";
     private const uint   IdMapMagic            = 0x494D4150u; // "IMAP"
-    private const ushort IdMapVersion          = 1;
+    private const ushort IdMapVersion          = 2;
 
     // ── Fields ────────────────────────────────────────────────────────────────
 
@@ -48,8 +48,8 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private readonly IBufferedLogger?          _logger;
     private readonly WalStore                  _walStore;
 
-    // Per-entity string-ID → packed-ulong-key map (loaded lazily from the id-map file)
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, ulong>> _idMaps
+    // Per-entity uint-key → packed-ulong-WAL-key map (loaded lazily from the id-map file)
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<uint, ulong>> _idMaps
         = new(StringComparer.OrdinalIgnoreCase);
 
     // Per-entity lock objects used when persisting the id-map file
@@ -110,8 +110,8 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     {
         if (obj is null)
             throw new ArgumentNullException(nameof(obj));
-        if (string.IsNullOrWhiteSpace(obj.Id))
-            throw new ArgumentException("DataObject must have a non-empty Id.", nameof(obj));
+        if (obj.Key == 0)
+            throw new ArgumentException("DataObject must have a non-zero Key.", nameof(obj));
 
         ClearSingletonFlagsOnOtherRecords(obj);
 
@@ -156,17 +156,17 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         // ── Serialize and commit to WAL ────────────────────────────────────
         try
         {
-            var bytes = _serializer.Serialize(obj, schemaVersion);
-            var key   = GetOrAllocateKey(type.Name, obj.Id);
+            var bytes  = _serializer.Serialize(obj, schemaVersion);
+            var walKey = GetOrAllocateKey(type.Name, obj.Key);
 
-            _walStore.CommitAsync(new[] { WalOp.Upsert(key, bytes) })
+            _walStore.CommitAsync(new[] { WalOp.Upsert(walKey, bytes) })
                      .GetAwaiter().GetResult();
 
             PersistIdMap(type.Name);
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"Save failed for {type.Name} with Id {obj.Id}.", ex);
+            _logger?.LogError($"Save failed for {type.Name} with Key {obj.Key}.", ex);
             throw;
         }
     }
@@ -178,25 +178,25 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         return ValueTask.CompletedTask;
     }
 
-    public T? Load<T>(string id) where T : BaseDataObject
+    public T? Load<T>(uint key) where T : BaseDataObject
     {
-        if (string.IsNullOrWhiteSpace(id))
-            throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
+        if (key == 0)
+            throw new ArgumentException("Key cannot be zero.", nameof(key));
 
         var typeName = typeof(T).Name;
         var idMap    = GetOrLoadIdMap(typeName);
 
-        if (!idMap.TryGetValue(id, out var key)) return default;
-        if (!_walStore.TryGetHead(key, out var ptr)) return default;
-        if (!_walStore.TryReadOpPayload(ptr, key, out var payload)) return default;
+        if (!idMap.TryGetValue(key, out var walKey)) return default;
+        if (!_walStore.TryGetHead(walKey, out var ptr)) return default;
+        if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) return default;
         if (payload.IsEmpty) return default;  // tombstone
 
-        return DeserializePayload<T>(payload.ToArray(), id);
+        return DeserializePayload<T>(payload.ToArray(), key);
     }
 
-    public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default)
+    public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default)
         where T : BaseDataObject
-        => ValueTask.FromResult(Load<T>(id));
+        => ValueTask.FromResult(Load<T>(key));
 
     public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
     {
@@ -213,20 +213,20 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var results         = new List<T>();
         int matched         = 0;
 
-        foreach (var (stringId, key) in idMap)  // ConcurrentDictionary supports safe concurrent enumeration
+        foreach (var (objKey, walKey) in idMap)  // ConcurrentDictionary supports safe concurrent enumeration
         {
-            if (!_walStore.TryGetHead(key, out var ptr)) continue;
-            if (!_walStore.TryReadOpPayload(ptr, key, out var payload)) continue;
+            if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
+            if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
             if (payload.IsEmpty) continue;  // tombstone
 
             T? obj;
             try
             {
-                obj = DeserializePayload<T>(payload.ToArray(), stringId);
+                obj = DeserializePayload<T>(payload.ToArray(), objKey);
             }
             catch (Exception ex)
             {
-                _logger?.LogError($"Deserialization failed for {typeName} with Id {stringId}.", ex);
+                _logger?.LogError($"Deserialization failed for {typeName} with Key {objKey}.", ex);
                 continue;
             }
 
@@ -271,10 +271,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         if (query == null || (query.Clauses.Count == 0 && query.Groups.Count == 0))
         {
             int live = 0;
-            foreach (var (_, key) in idMap)  // ConcurrentDictionary supports safe concurrent enumeration
+            foreach (var (_, walKey) in idMap)  // ConcurrentDictionary supports safe concurrent enumeration
             {
-                if (!_walStore.TryGetHead(key, out var ptr)) continue;
-                if (!_walStore.TryReadOpPayload(ptr, key, out var payload)) continue;
+                if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
+                if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
                 if (!payload.IsEmpty) live++;
             }
             return live;
@@ -287,32 +287,32 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         CancellationToken cancellationToken = default) where T : BaseDataObject
         => ValueTask.FromResult(Count<T>(query));
 
-    public void Delete<T>(string id) where T : BaseDataObject
+    public void Delete<T>(uint key) where T : BaseDataObject
     {
-        if (string.IsNullOrWhiteSpace(id))
-            throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
+        if (key == 0)
+            throw new ArgumentException("Key cannot be zero.", nameof(key));
 
         var typeName = typeof(T).Name;
         var idMap    = GetOrLoadIdMap(typeName);
-        if (!idMap.TryGetValue(id, out var key)) return;
+        if (!idMap.TryGetValue(key, out var walKey)) return;
 
-        _walStore.CommitAsync(new[] { WalOp.Delete(key) })
+        _walStore.CommitAsync(new[] { WalOp.Delete(walKey) })
                  .GetAwaiter().GetResult();
 
-        idMap.TryRemove(id, out _);
+        idMap.TryRemove(key, out _);
         PersistIdMap(typeName);
     }
 
-    public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default)
+    public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default)
         where T : BaseDataObject
     {
-        Delete<T>(id);
+        Delete<T>(key);
         return ValueTask.CompletedTask;
     }
 
     // ── Sequential IDs ────────────────────────────────────────────────────────
 
-    public string NextSequentialId(string entityName)
+    public uint NextSequentialKey(string entityName)
     {
         if (string.IsNullOrWhiteSpace(entityName))
             throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
@@ -328,7 +328,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             try
             {
                 lock (lockObj)
-                    return IncrementAndReadSeqIdFile(path);
+                    return IncrementAndReadSeqKeyFile(path);
             }
             catch (IOException) when (attempt < maxRetries)
             {
@@ -337,10 +337,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         }
 
         lock (lockObj)
-            return IncrementAndReadSeqIdFile(path);
+            return IncrementAndReadSeqKeyFile(path);
     }
 
-    public void SeedSequentialId(string entityName, long floor)
+    public void SeedSequentialKey(string entityName, uint floor)
     {
         if (string.IsNullOrWhiteSpace(entityName))
             throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
@@ -356,7 +356,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             try
             {
                 lock (lockObj)
-                    SeedSeqIdFileIfLower(path, floor);
+                    SeedSeqKeyFileIfLower(path, floor);
                 return;
             }
             catch (IOException) when (attempt < maxRetries)
@@ -366,7 +366,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         }
 
         lock (lockObj)
-            SeedSeqIdFileIfLower(path, floor);
+            SeedSeqKeyFileIfLower(path, floor);
     }
 
     // ── IDataProvider: index / paged-file plumbing (not used by WalDataProvider) ─
@@ -421,10 +421,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             return h == 0 ? 1u : h;
         });
 
-    private ulong GetOrAllocateKey(string typeName, string id)
+    private ulong GetOrAllocateKey(string typeName, uint key)
     {
         var map = GetOrLoadIdMap(typeName);
-        return map.GetOrAdd(id, _ =>
+        return map.GetOrAdd(key, _ =>
             _walStore.AllocateKey(GetOrCreateTableId(typeName)));
     }
 
@@ -433,12 +433,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private string GetIdMapPath(string typeName)
         => Path.Combine(_rootPath, WalSubFolder, SanitizeFilePart(typeName) + "_idmap.bin");
 
-    private ConcurrentDictionary<string, ulong> GetOrLoadIdMap(string typeName)
+    private ConcurrentDictionary<uint, ulong> GetOrLoadIdMap(string typeName)
         => _idMaps.GetOrAdd(typeName, LoadIdMapCore);
 
-    private ConcurrentDictionary<string, ulong> LoadIdMapCore(string typeName)
+    private ConcurrentDictionary<uint, ulong> LoadIdMapCore(string typeName)
     {
-        var map  = new ConcurrentDictionary<string, ulong>(StringComparer.OrdinalIgnoreCase);
+        var map  = new ConcurrentDictionary<uint, ulong>();
         var path = GetIdMapPath(typeName);
         if (!File.Exists(path)) return map;
 
@@ -461,12 +461,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             int offset = 12;
             for (int i = 0; i < entryCount; i++)
             {
-                if (offset + 2 > bytes.Length - 4) break;
-                ushort idLen = BinaryPrimitives.ReadUInt16LittleEndian(span[offset..]); offset += 2;
-                if (offset + idLen + 8 > bytes.Length - 4) break;
-                string id    = Encoding.UTF8.GetString(span[offset..(offset + idLen)]); offset += idLen;
-                ulong  key   = BinaryPrimitives.ReadUInt64LittleEndian(span[offset..]);  offset += 8;
-                map[id] = key;
+                if (offset + 12 > bytes.Length - 4) break;
+                uint objKey  = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]); offset += 4;
+                ulong walKey = BinaryPrimitives.ReadUInt64LittleEndian(span[offset..]); offset += 8;
+                map[objKey] = walKey;
             }
         }
         catch (IOException) { /* treat file as missing */ }
@@ -483,11 +481,8 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         {
             var snapshot = map.ToArray();
 
-            // Compute total buffer size
-            int size = 12;  // header: magic(4) + version(2) + reserved(2) + count(4)
-            foreach (var kv in snapshot)
-                size += 2 + Encoding.UTF8.GetByteCount(kv.Key) + 8;
-            size += 4;  // CRC
+            // Compute total buffer size: header(12) + entries(12 each) + CRC(4)
+            int size = 12 + snapshot.Length * 12 + 4;
 
             var buf  = new byte[size];
             var span = buf.AsSpan();
@@ -498,12 +493,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             BinaryPrimitives.WriteUInt16LittleEndian(span[o..], 0);                  o += 2;  // reserved
             BinaryPrimitives.WriteUInt32LittleEndian(span[o..], (uint)snapshot.Length); o += 4;
 
-            foreach (var (id, key) in snapshot)
+            foreach (var (objKey, walKey) in snapshot)
             {
-                var idBytes = Encoding.UTF8.GetBytes(id);
-                BinaryPrimitives.WriteUInt16LittleEndian(span[o..], (ushort)idBytes.Length); o += 2;
-                idBytes.AsSpan().CopyTo(span[o..]);                                           o += idBytes.Length;
-                BinaryPrimitives.WriteUInt64LittleEndian(span[o..], key);                     o += 8;
+                BinaryPrimitives.WriteUInt32LittleEndian(span[o..], objKey);  o += 4;
+                BinaryPrimitives.WriteUInt64LittleEndian(span[o..], walKey);  o += 8;
             }
 
             uint crc = WalCrc32C.Compute(span[..o]);
@@ -649,7 +642,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
     // ── Deserialization helper ────────────────────────────────────────────────
 
-    private T? DeserializePayload<T>(byte[] bytes, string id) where T : BaseDataObject
+    private T? DeserializePayload<T>(byte[] bytes, uint key) where T : BaseDataObject
     {
         var type          = typeof(T);
         var schemaVersion = _serializer.ReadSchemaVersion(bytes);
@@ -658,7 +651,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         if (schemaFile == null)
         {
             _logger?.LogInfo(
-                $"Schema fallback for {type.Name} Id={id}: missing version {schemaVersion}; returning null.");
+                $"Schema fallback for {type.Name} Key={key}: missing version {schemaVersion}; returning null.");
             return default;
         }
 
@@ -692,7 +685,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
         foreach (var record in Query<T>())
         {
-            if (string.Equals(record.Id, obj.Id, StringComparison.OrdinalIgnoreCase)) continue;
+            if (record.Key == obj.Key) continue;
             bool changed = false;
             foreach (var prop in singletonProps)
             {
@@ -711,41 +704,41 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private string GetSeqIdFilePath(string entityName)
         => Path.Combine(_rootPath, SanitizeFilePart(entityName), "_seqid.dat");
 
-    private static string IncrementAndReadSeqIdFile(string path)
+    private static uint IncrementAndReadSeqKeyFile(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? Path.GetTempPath());
-        var buf = new byte[8];
+        var buf = new byte[4];
         using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        long current = 0;
-        if (file.Length >= 8)
+        uint current = 0;
+        if (file.Length >= 4)
         {
-            file.ReadExactly(buf, 0, 8);
-            current = BinaryPrimitives.ReadInt64LittleEndian(buf);
+            file.ReadExactly(buf, 0, 4);
+            current = BinaryPrimitives.ReadUInt32LittleEndian(buf);
         }
         var next = current + 1;
-        BinaryPrimitives.WriteInt64LittleEndian(buf, next);
+        BinaryPrimitives.WriteUInt32LittleEndian(buf, next);
         file.Position = 0;
-        file.Write(buf, 0, 8);
+        file.Write(buf, 0, 4);
         file.Flush(true);
-        return next.ToString();
+        return next;
     }
 
-    private static void SeedSeqIdFileIfLower(string path, long floor)
+    private static void SeedSeqKeyFileIfLower(string path, uint floor)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? Path.GetTempPath());
-        var buf = new byte[8];
+        var buf = new byte[4];
         using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        long current = 0;
-        if (file.Length >= 8)
+        uint current = 0;
+        if (file.Length >= 4)
         {
-            file.ReadExactly(buf, 0, 8);
-            current = BinaryPrimitives.ReadInt64LittleEndian(buf);
+            file.ReadExactly(buf, 0, 4);
+            current = BinaryPrimitives.ReadUInt32LittleEndian(buf);
         }
         if (current < floor)
         {
-            BinaryPrimitives.WriteInt64LittleEndian(buf, floor);
+            BinaryPrimitives.WriteUInt32LittleEndian(buf, floor);
             file.Position = 0;
-            file.Write(buf, 0, 8);
+            file.Write(buf, 0, 4);
             file.Flush(true);
         }
     }

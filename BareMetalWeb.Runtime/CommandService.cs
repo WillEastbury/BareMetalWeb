@@ -61,7 +61,7 @@ public sealed class CommandService : ICommandService
         await DataScaffold.ApplyAutoIdAsync(meta, obj, ct).ConfigureAwait(false);
         await meta.Handlers.SaveAsync(obj, ct).ConfigureAwait(false);
 
-        return CommandResult.Ok(obj.Id, QueryService.SerializeObject(obj, meta));
+        return CommandResult.Ok(obj.Key.ToString(), QueryService.SerializeObject(obj, meta));
     }
 
     private static async ValueTask<CommandResult> UpdateAsync(
@@ -72,7 +72,7 @@ public sealed class CommandService : ICommandService
         if (string.IsNullOrWhiteSpace(intent.EntityId))
             return CommandResult.Fail("EntityId is required for 'update'.");
 
-        var obj = await meta.Handlers.LoadAsync(intent.EntityId!, ct).ConfigureAwait(false);
+        var obj = await meta.Handlers.LoadAsync(uint.Parse(intent.EntityId!), ct).ConfigureAwait(false);
         if (obj == null)
             return CommandResult.Fail($"Entity '{intent.EntitySlug}' with id '{intent.EntityId}' not found.");
 
@@ -81,7 +81,7 @@ public sealed class CommandService : ICommandService
             return CommandResult.Fail(string.Join("; ", errors));
 
         await meta.Handlers.SaveAsync(obj, ct).ConfigureAwait(false);
-        return CommandResult.Ok(obj.Id, QueryService.SerializeObject(obj, meta));
+        return CommandResult.Ok(obj.Key.ToString(), QueryService.SerializeObject(obj, meta));
     }
 
     private static async ValueTask<CommandResult> DeleteAsync(
@@ -92,7 +92,7 @@ public sealed class CommandService : ICommandService
         if (string.IsNullOrWhiteSpace(intent.EntityId))
             return CommandResult.Fail("EntityId is required for 'delete'.");
 
-        await meta.Handlers.DeleteAsync(intent.EntityId!, ct).ConfigureAwait(false);
+        await meta.Handlers.DeleteAsync(uint.Parse(intent.EntityId!), ct).ConfigureAwait(false);
         return CommandResult.Ok(intent.EntityId!);
     }
 
@@ -117,7 +117,7 @@ public sealed class CommandService : ICommandService
         if (string.IsNullOrWhiteSpace(intent.EntityId))
             return CommandResult.Fail($"EntityId is required for action '{intent.Operation}'.");
 
-        var obj = await meta.Handlers.LoadAsync(intent.EntityId!, ct).ConfigureAwait(false);
+        var obj = await meta.Handlers.LoadAsync(uint.Parse(intent.EntityId!), ct).ConfigureAwait(false);
         if (obj == null)
             return CommandResult.Fail($"Entity '{intent.EntitySlug}' with id '{intent.EntityId}' not found.");
 
@@ -139,6 +139,6 @@ public sealed class CommandService : ICommandService
         }
 
         await meta.Handlers.SaveAsync(obj, ct).ConfigureAwait(false);
-        return CommandResult.Ok(obj.Id, QueryService.SerializeObject(obj, meta));
+        return CommandResult.Ok(obj.Key.ToString(), QueryService.SerializeObject(obj, meta));
     }
 }

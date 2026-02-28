@@ -1232,7 +1232,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.NotNull(method);
 
         // Customer entity defaults permissions to "Customers" — pass a user with that permission
-        var user = new User { Id = "u1", UserName = "test", IsActive = true, Permissions = new[] { "Customers" } };
+        var user = new User { Key = 1, UserName = "test", IsActive = true, Permissions = new[] { "Customers" } };
 
         // Act
         var script = (string?)method.Invoke(null, new object?[] { user, user.Permissions, "testnonce" });
@@ -1308,13 +1308,13 @@ public class RouteRegistrationExtensionsTests : IDisposable
         DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Customer>();
 
         var store = (InMemoryDataStore)DataStoreProvider.Current;
-        var address = new BareMetalWeb.Data.DataObjects.Address { Id = "addr-1", Label = "Home" };
+        var address = new BareMetalWeb.Data.DataObjects.Address { Key = 1, Label = "Home" };
         store.Save(address);
 
         Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
 
-        // Build a payload item that has AddressId = "addr-1"
-        var item = new Dictionary<string, object?> { ["AddressId"] = "addr-1", ["Name"] = "Acme" };
+        // Build a payload item that has AddressId = "1"
+        var item = new Dictionary<string, object?> { ["AddressId"] = "1", ["Name"] = "Acme" };
         var payload = new[] { item };
 
         var method = typeof(RouteRegistrationExtensions).GetMethod(
@@ -1330,7 +1330,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         // Assert — AddressId field is list-visible (List=true by default), so prefetch should contain addresses
         Assert.NotNull(result);
         Assert.True(result!.ContainsKey("addresses"));
-        Assert.True(result["addresses"].ContainsKey("addr-1"));
+        Assert.True(result["addresses"].ContainsKey("1"));
     }
 
     [Fact]
@@ -1356,7 +1356,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<string, BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
@@ -1364,14 +1364,14 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public void ClearProviders() { }
         public void Clear() => _store.Clear();
 
-        public void Save<T>(T obj) where T : BaseDataObject => _store[obj.Id] = obj;
+        public void Save<T>(T obj) where T : BaseDataObject => _store[(typeof(T), obj.Key)] = obj;
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject { Save(obj); return ValueTask.CompletedTask; }
-        public T? Load<T>(string id) where T : BaseDataObject => _store.TryGetValue(id, out var obj) ? obj as T : null;
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject => ValueTask.FromResult(Load<T>(id));
+        public T? Load<T>(uint key) where T : BaseDataObject => _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject => ValueTask.FromResult(Load<T>(key));
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject => _store.Values.OfType<T>();
         public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject => ValueTask.FromResult(Query<T>(query));
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject => ValueTask.FromResult(Query<T>(query).Count());
-        public void Delete<T>(string id) where T : BaseDataObject => _store.Remove(id);
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject { Delete<T>(id); return ValueTask.CompletedTask; }
+        public void Delete<T>(uint key) where T : BaseDataObject => _store.Remove((typeof(T), key));
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject { Delete<T>(key); return ValueTask.CompletedTask; }
     }
 }

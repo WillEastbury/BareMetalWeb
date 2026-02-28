@@ -263,7 +263,7 @@ public class VirtualEmployeeTests : IDisposable
         Assert.True(meta!.ShowOnNav);
         Assert.Equal("Organization", meta.NavGroup);
         Assert.Equal(ViewType.TreeView, meta.ViewType);
-        Assert.Equal(AutoIdStrategy.Guid, meta.IdGeneration);
+        Assert.Equal(AutoIdStrategy.Sequential, meta.IdGeneration);
 
         // ParentField
         Assert.NotNull(meta.ParentField);
@@ -322,7 +322,7 @@ public class VirtualEmployeeTests : IDisposable
 
         // Create
         var emp = (DynamicDataObject)meta!.Handlers.Create();
-        emp.Id = Guid.NewGuid().ToString("D");
+        emp.Key = 1;
         emp.SetField("Name", "Alice Smith");
         emp.SetField("Department", "Engineering");
 
@@ -330,14 +330,14 @@ public class VirtualEmployeeTests : IDisposable
         await DataScaffold.SaveAsync(meta, emp);
 
         // Load
-        var loaded = (DynamicDataObject?)await DataScaffold.LoadAsync(meta, emp.Id);
+        var loaded = (DynamicDataObject?)await DataScaffold.LoadAsync(meta, emp.Key);
         Assert.NotNull(loaded);
         Assert.Equal("Alice Smith", loaded!.GetField("Name"));
         Assert.Equal("Engineering", loaded.GetField("Department"));
 
         // Delete
-        await meta.Handlers.DeleteAsync(emp.Id, default);
-        var deleted = await DataScaffold.LoadAsync(meta, emp.Id);
+        await meta.Handlers.DeleteAsync(emp.Key, default);
+        var deleted = await DataScaffold.LoadAsync(meta, emp.Key);
         Assert.Null(deleted);
     }
 }

@@ -66,10 +66,10 @@ public class DataScaffoldLookupTests : IDisposable
     public void BuildFormFields_ForCreate_WithLookupFields_PopulatesLookupOptions()
     {
         // Seed some lookup data
-        var uom = new UnitOfMeasure { Id = "uom-1", Name = "Each" };
+        var uom = new UnitOfMeasure { Key = 1, Name = "Each" };
         DataStoreProvider.Current.Save(uom);
 
-        var currency = new Currency { Id = "cur-1" };
+        var currency = new Currency { Key = 1 };
         // Set IsoCode via reflection (it's a property)
         typeof(Currency).GetProperty("IsoCode")?.SetValue(currency, "USD");
 
@@ -86,7 +86,7 @@ public class DataScaffoldLookupTests : IDisposable
         var uomField = fields.FirstOrDefault(f => f.Name == "UnitOfMeasureId");
         Assert.NotNull(uomField);
         Assert.NotNull(uomField.LookupOptions);
-        Assert.Contains(uomField.LookupOptions, o => o.Key == "uom-1" && o.Value == "Each");
+        Assert.Contains(uomField.LookupOptions, o => o.Key == "1" && o.Value == "Each");
     }
 
     [Fact]
@@ -106,11 +106,11 @@ public class DataScaffoldLookupTests : IDisposable
     {
         var product = new Product
         {
-            Id = "prod-1",
+            Key = 1,
             Name = "Widget",
             Sku = "W001",
-            UnitOfMeasureId = "uom-1",
-            CurrencyId = "cur-1",
+            UnitOfMeasureId = "1",
+            CurrencyId = "1",
             Price = 9.99m
         };
 
@@ -136,7 +136,7 @@ public class DataScaffoldLookupTests : IDisposable
     /// </summary>
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<(Type, string), BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
@@ -144,16 +144,16 @@ public class DataScaffoldLookupTests : IDisposable
         public void ClearProviders() { }
 
         public void Save<T>(T obj) where T : BaseDataObject
-            => _store[(typeof(T), obj.Id)] = obj;
+            => _store[(typeof(T), obj.Key)] = obj;
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
         { Save(obj); return ValueTask.CompletedTask; }
 
-        public T? Load<T>(string id) where T : BaseDataObject
-            => _store.TryGetValue((typeof(T), id), out var obj) ? obj as T : null;
+        public T? Load<T>(uint key) where T : BaseDataObject
+            => _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
 
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult(Load<T>(id));
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult(Load<T>(key));
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
             => _store.Values.OfType<T>();
@@ -164,11 +164,11 @@ public class DataScaffoldLookupTests : IDisposable
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
             => ValueTask.FromResult(Query<T>(query).Count());
 
-        public void Delete<T>(string id) where T : BaseDataObject
-            => _store.Remove((typeof(T), id));
+        public void Delete<T>(uint key) where T : BaseDataObject
+            => _store.Remove((typeof(T), key));
 
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-        { Delete<T>(id); return ValueTask.CompletedTask; }
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+        { Delete<T>(key); return ValueTask.CompletedTask; }
     }
 
     [DataEntity("Upload test entities", Slug = "upload-test-entities")]
@@ -207,7 +207,7 @@ public class DataScaffoldLookupTests : IDisposable
         Assert.NotNull(meta);
         var instance = new UploadTestEntity
         {
-            Id = "abc123",
+            Key = 1,
             Photo = new StoredFileData { FileName = "avatar.png", StorageKey = "x/y.png", ContentType = "image/png", IsImage = true }
         };
 
@@ -218,7 +218,7 @@ public class DataScaffoldLookupTests : IDisposable
         // Assert
         Assert.NotNull(photoField);
         Assert.Equal("avatar.png", photoField!.ExistingFileName);
-        Assert.Equal("/api/upload-test-entities/abc123/files/Photo", photoField.ExistingFileUrl);
+        Assert.Equal("/api/upload-test-entities/1/files/Photo", photoField.ExistingFileUrl);
         Assert.Equal("image/png", photoField.Accept);
     }
 
@@ -228,7 +228,7 @@ public class DataScaffoldLookupTests : IDisposable
         // Arrange
         var address = new Address
         {
-            Id = "addr-1",
+            Key = 1,
             Label = "Main",
             Line1 = "123 Example Street",
             City = "London",
@@ -264,10 +264,10 @@ public class DataScaffoldLookupTests : IDisposable
 
         var customer = new Customer
         {
-            Id = "cust-1",
+            Key = 1,
             Name = "Test Customer",
             Email = "test@example.com",
-            AddressId = "addr-dup"
+            AddressId = "1"
         };
 
         // Act – must not throw ArgumentException ("An item with the same key has already been added")
@@ -288,7 +288,7 @@ public class DataScaffoldLookupTests : IDisposable
         // Arrange: a TimeTablePlan with Day = Tuesday
         var plan = new TimeTablePlan
         {
-            Id = "ttp-1",
+            Key = 1,
             SubjectId = "subj-1",
             Day = BareMetalWeb.Data.DataObjects.DayOfWeek.Tuesday,
             StartTime = new TimeOnly(12, 0)
@@ -325,8 +325,8 @@ public class DataScaffoldLookupTests : IDisposable
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
             => ValueTask.CompletedTask;
 
-        public T? Load<T>(string id) where T : BaseDataObject => null;
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public T? Load<T>(uint key) where T : BaseDataObject => null;
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
             => ValueTask.FromResult((T?)null);
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
@@ -336,8 +336,8 @@ public class DataScaffoldLookupTests : IDisposable
                 // Return two Address objects sharing the same Id – the duplicated-data scenario
                 return (IEnumerable<T>)(IEnumerable<Address>)new[]
                 {
-                    new Address { Id = "addr-dup", Label = "First copy",  Line1 = "1 Main St", City = "Springfield", Country = "US" },
-                    new Address { Id = "addr-dup", Label = "Second copy", Line1 = "2 Main St", City = "Springfield", Country = "US" }
+                    new Address { Key = 1, Label = "First copy",  Line1 = "1 Main St", City = "Springfield", Country = "US" },
+                    new Address { Key = 1, Label = "Second copy", Line1 = "2 Main St", City = "Springfield", Country = "US" }
                 };
             }
 
@@ -350,8 +350,8 @@ public class DataScaffoldLookupTests : IDisposable
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
             => ValueTask.FromResult(0);
 
-        public void Delete<T>(string id) where T : BaseDataObject { }
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public void Delete<T>(uint key) where T : BaseDataObject { }
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
             => ValueTask.CompletedTask;
     }
 }

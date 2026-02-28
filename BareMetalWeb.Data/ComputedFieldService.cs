@@ -74,7 +74,7 @@ public static class ComputedFieldService
 
         if (config.Strategy == ComputedStrategy.CachedLive)
         {
-            var cacheKey = $"{metadata.Type.FullName}.{instance.Id}.{field.Name}";
+            var cacheKey = $"{metadata.Type.FullName}.{instance.Key}.{field.Name}";
             if (_cache.TryGetValue(cacheKey, out var cached) && cached.ExpiresUtc > DateTime.UtcNow)
             {
                 return cached.Value;
@@ -145,7 +145,7 @@ public static class ComputedFieldService
             return null;
 
         var foreignKeyValue = fkProperty.GetValue(instance)?.ToString();
-        if (string.IsNullOrEmpty(foreignKeyValue))
+        if (string.IsNullOrEmpty(foreignKeyValue) || !uint.TryParse(foreignKeyValue, out var foreignKey))
             return null;
 
         // Load the related entity
@@ -153,7 +153,7 @@ public static class ComputedFieldService
         if (sourceMetadata == null)
             return null;
 
-        var relatedEntity = await sourceMetadata.Handlers.LoadAsync(foreignKeyValue, cancellationToken);
+        var relatedEntity = await sourceMetadata.Handlers.LoadAsync(foreignKey, cancellationToken);
         if (relatedEntity == null)
             return null;
 

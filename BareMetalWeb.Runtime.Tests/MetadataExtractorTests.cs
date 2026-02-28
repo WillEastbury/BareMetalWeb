@@ -18,7 +18,7 @@ public class MetadataExtractorTests
 
     [DataEntity("Sample Widgets", Slug = "sample-widgets", Permissions = "admin",
         ShowOnNav = true, NavGroup = "Testing", NavOrder = 5,
-        IdGeneration = AutoIdStrategy.Guid)]
+        IdGeneration = AutoIdStrategy.Sequential)]
     private class SampleWidget : BaseDataObject
     {
         [DataField(Label = "Widget Name", Order = 1, Required = true)]
@@ -74,7 +74,7 @@ public class MetadataExtractorTests
         Assert.True(entity.ShowOnNav);
         Assert.Equal("Testing", entity.NavGroup);
         Assert.Equal(5, entity.NavOrder);
-        Assert.Equal("guid", entity.IdStrategy);
+        Assert.Equal("sequential", entity.IdStrategy);
         Assert.Equal(1, entity.Version);
     }
 
@@ -104,7 +104,7 @@ public class MetadataExtractorTests
         var (e2, _, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
 
         // Each call produces fresh GUIDs
-        Assert.NotEqual(e1.Id, e2.Id);
+        Assert.NotEqual(e1.EntityId, e2.EntityId);
         Assert.NotEqual(e1.EntityId, e2.EntityId);
     }
 
@@ -170,7 +170,7 @@ public class MetadataExtractorTests
     {
         var (entity, fields, _) = MetadataExtractor.ExtractFromType(typeof(SampleWidget));
 
-        Assert.All(fields, f => Assert.Equal(entity.Id, f.EntityId));
+        Assert.All(fields, f => Assert.Equal(entity.EntityId, f.EntityId));
     }
 
     [Fact]
@@ -243,7 +243,7 @@ public class MetadataExtractorTests
         // SampleWidget.Category has [DataIndex]
         Assert.Single(indexes);
         Assert.Equal("Category", indexes[0].FieldNames);
-        Assert.Equal(entity.Id, indexes[0].EntityId);
+        Assert.Equal(entity.EntityId, indexes[0].EntityId);
         Assert.Equal("secondary", indexes[0].Type);
     }
 

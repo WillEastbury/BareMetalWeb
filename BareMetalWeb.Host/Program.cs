@@ -64,7 +64,7 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
         }
         if (dc.Status == "approved" && !string.IsNullOrEmpty(dc.UserId))
         {
-            var user = await DataStoreProvider.Current.LoadAsync<User>(dc.UserId);
+            var user = await DataStoreProvider.Current.LoadAsync<User>(uint.Parse(dc.UserId));
             if (user != null)
             {
                 await UserAuth.SignInAsync(context, user, false);
@@ -147,7 +147,7 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
             return;
         }
         dc.Status = "approved";
-        dc.UserId = user.Id;
+        dc.UserId = user.Key.ToString();
         DataStoreProvider.Current.Save(dc);
         context.Response.Redirect("/device?msg=Device+authorized+successfully!+You+can+close+this+tab.");
     }));
@@ -224,7 +224,7 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
         {
             var todo = new ToDo
             {
-                Id = Guid.NewGuid().ToString("N"),
+                Key = 0,
                 Title = q,
                 Notes = $"caller={caller ?? ""}, source={source ?? ""}",
                 Deadline = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7)),
@@ -343,10 +343,15 @@ static class ProgramSetup
 
     public static IDataObjectStore CreateDataStore(WebApplication app, ISchemaAwareObjectSerializer serializer, IDataQueryEvaluator queryEvaluator, IBufferedLogger logger)
     {
+        var dataRoot = app.Configuration.GetValue("Data:Root", Path.Combine(app.Environment.ContentRootPath, "Data"));
+
+        // Detect and wipe legacy GUID-based data before opening the store
+        LegacyDataWipeGuard.WipeIfLegacyDetected(dataRoot, logger);
+
         var dataStore = new DataObjectStore();
         DataStoreProvider.Current = dataStore;
         var provider = new WalDataProvider(
-            app.Configuration.GetValue("Data:Root", Path.Combine(app.Environment.ContentRootPath, "Data")),
+            dataRoot,
             serializer,
             queryEvaluator,
             logger);

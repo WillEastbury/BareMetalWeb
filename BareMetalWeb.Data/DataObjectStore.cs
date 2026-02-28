@@ -48,18 +48,18 @@ public sealed class DataObjectStore : IDataObjectStore
         await provider.SaveAsync(obj, cancellationToken).ConfigureAwait(false);
     }
 
-    public T? Load<T>(string id) where T : BaseDataObject
+    public T? Load<T>(uint key) where T : BaseDataObject
     {
-        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
+        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
         var provider = ResolveProvider(typeof(T));
-        return provider.Load<T>(id);
+        return provider.Load<T>(key);
     }
 
-    public async ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+    public async ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
     {
-        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
+        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
         var provider = ResolveProvider(typeof(T));
-        return await provider.LoadAsync<T>(id, cancellationToken).ConfigureAwait(false);
+        return await provider.LoadAsync<T>(key, cancellationToken).ConfigureAwait(false);
     }
 
     public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
@@ -80,18 +80,18 @@ public sealed class DataObjectStore : IDataObjectStore
         return await provider.CountAsync<T>(query, cancellationToken).ConfigureAwait(false);
     }
 
-    public void Delete<T>(string id) where T : BaseDataObject
+    public void Delete<T>(uint key) where T : BaseDataObject
     {
-        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
+        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
         var provider = ResolveProvider(typeof(T));
-        provider.Delete<T>(id);
+        provider.Delete<T>(key);
     }
 
-    public async ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+    public async ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
     {
-        if (string.IsNullOrWhiteSpace(id)) throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
+        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
         var provider = ResolveProvider(typeof(T));
-        await provider.DeleteAsync<T>(id, cancellationToken).ConfigureAwait(false);
+        await provider.DeleteAsync<T>(key, cancellationToken).ConfigureAwait(false);
     }
 
     private IDataProvider ResolveProvider(Type type)

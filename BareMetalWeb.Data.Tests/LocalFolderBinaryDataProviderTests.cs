@@ -178,7 +178,7 @@ public class LocalFolderBinaryDataProviderTests : IDisposable
         // Arrange
         DataScaffold.RegisterEntity<User>();
         var provider = new LocalFolderBinaryDataProvider(_testRoot);
-        var user = new User { Id = "u1", UserName = "alice", Email = "alice@test.com" };
+        var user = new User { Key = 1, UserName = "alice", Email = "alice@test.com" };
 
         // Act
         provider.Save(user);
@@ -194,9 +194,9 @@ public class LocalFolderBinaryDataProviderTests : IDisposable
         // Arrange
         DataScaffold.RegisterEntity<User>();
         var provider = new LocalFolderBinaryDataProvider(_testRoot);
-        var u1 = new User { Id = "u1", UserName = "alice", Email = "alice@test.com" };
-        var u2 = new User { Id = "u2", UserName = "bob", Email = "bob@test.com" };
-        var u3 = new User { Id = "u3", UserName = "charlie", Email = "charlie@test.com" };
+        var u1 = new User { Key = 1, UserName = "alice", Email = "alice@test.com" };
+        var u2 = new User { Key = 2, UserName = "bob", Email = "bob@test.com" };
+        var u3 = new User { Key = 3, UserName = "charlie", Email = "charlie@test.com" };
         provider.Save(u1);
         provider.Save(u2);
         provider.Save(u3);
@@ -219,7 +219,7 @@ public class LocalFolderBinaryDataProviderTests : IDisposable
         // Arrange
         DataScaffold.RegisterEntity<User>();
         var provider = new LocalFolderBinaryDataProvider(_testRoot);
-        var u1 = new User { Id = "u1", UserName = "alice", Email = "alice@test.com" };
+        var u1 = new User { Key = 1, UserName = "alice", Email = "alice@test.com" };
         provider.Save(u1);
 
         // Act
@@ -239,11 +239,11 @@ public class LocalFolderBinaryDataProviderTests : IDisposable
         // Arrange
         DataScaffold.RegisterEntity<User>();
         var provider = new LocalFolderBinaryDataProvider(_testRoot);
-        var user = new User { Id = "del1", UserName = "todelete", Email = "del@test.com" };
+        var user = new User { Key = 1, UserName = "todelete", Email = "del@test.com" };
         provider.Save(user);
 
         // Act
-        provider.Delete<User>("del1");
+        provider.Delete<User>(1);
 
         // Assert - entity no longer found by index query
         var query = new QueryDefinition
@@ -260,7 +260,7 @@ public class LocalFolderBinaryDataProviderTests : IDisposable
         // Arrange
         DataScaffold.RegisterEntity<User>();
         var provider = new LocalFolderBinaryDataProvider(_testRoot);
-        var user = new User { Id = "upd1", UserName = "original", Email = "orig@test.com" };
+        var user = new User { Key = 1, UserName = "original", Email = "orig@test.com" };
         provider.Save(user);
 
         // Act - change the indexed field value
@@ -282,6 +282,6 @@ public class LocalFolderBinaryDataProviderTests : IDisposable
         };
         var newResults = provider.Query<User>(queryNew).ToList();
         Assert.Single(newResults);
-        Assert.Equal("upd1", newResults[0].Id);
+        Assert.Equal(1u, newResults[0].Key);
     }
 }

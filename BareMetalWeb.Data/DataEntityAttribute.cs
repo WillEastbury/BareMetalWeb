@@ -9,7 +9,7 @@ public sealed class DataEntityAttribute : Attribute
     public bool ShowOnNav { get; set; } = false;
     public string? NavGroup { get; set; }
     public int NavOrder { get; set; } = 0;
-    public AutoIdStrategy IdGeneration { get; set; } = AutoIdStrategy.Guid;
+    public AutoIdStrategy IdGeneration { get; set; } = AutoIdStrategy.Sequential;
     public string? DefaultSortField { get; set; }
     public SortDirection DefaultSortDirection { get; set; } = SortDirection.Asc;
 

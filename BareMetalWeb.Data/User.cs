@@ -51,8 +51,8 @@ public class User : BaseDataObject
 
     public bool IsLockedOut => LockoutUntilUtc.HasValue && LockoutUntilUtc.Value > DateTime.UtcNow;
 
-    public static ValueTask<User?> GetByIdAsync(string id, CancellationToken cancellationToken = default)
-        => DataStoreProvider.Current.LoadAsync<User>(id, cancellationToken);
+    public static ValueTask<User?> GetByIdAsync(uint key, CancellationToken cancellationToken = default)
+        => DataStoreProvider.Current.LoadAsync<User>(key, cancellationToken);
 
     public ValueTask SaveAsync(CancellationToken cancellationToken = default)
         => DataStoreProvider.Current.SaveAsync(this, cancellationToken);

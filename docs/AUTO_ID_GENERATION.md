@@ -1,226 +1,98 @@
-# Auto-ID Generation Feature
+# Auto Key Generation & Identifier System
 
 ## Overview
 
-BareMetalWeb now supports automatic ID generation for data entities. Instead of requiring users to provide IDs manually, you can mark entity properties with the `[IdGeneration]` attribute to have IDs automatically generated when creating new instances.
+BareMetalWeb uses a two-part identity system for all data entities:
 
-## Limitations
+1. **`Key`** (`uint32`) — Auto-incrementing clustered primary key used for all internal storage, lookups, and references. Assigned automatically by the engine.
+2. **`Identifier`** (`IdentifierValue`, 16 bytes) — A human-readable code encoded in base-37 (A-Z, 0-9, hyphen). Max 25 characters. Stored as two `ulong` values for compact binary representation.
 
-Before using this feature, be aware of these critical limitations:
+The old GUID-based `Id` field has been removed entirely.
 
-1. **Sequential IDs are persistent**: Sequential long IDs are stored in the header of the clustered index page. This means they will persist. 
+## Key Generation
 
-2. **Read-only after generation**: Once an ID is generated, it cannot be changed. Auto-generated IDs are intended for new entity creation only.
+Keys are sequential `uint32` values, starting from 1 and auto-incrementing per entity type. They are:
+- Persisted in a 4-byte little-endian file (`_seqid.dat`) per entity type
+- Thread-safe via `Interlocked` operations and file locking
+- Unique per entity type (each type has its own counter)
 
-3. **String storage**: All IDs are stored as strings (matching the base `BaseDataObject.Id` property type), even sequential integers.
+### Automatic Assignment
 
-## Strategies
+Keys are automatically assigned when saving a new entity:
 
-Two ID generation strategies are available:
-
-### 1. GuidString
-Generates a unique 32-character hexadecimal GUID string (without hyphens).
-
-**Use case:** When you need globally unique identifiers that are unpredictable and suitable for distributed systems.
-
-**Example:**
 ```csharp
-[IdGeneration(IdGenerationStrategy.GuidString)]
-[DataField(Order = 0, ReadOnly = true)]
-public new string Id
-{
-    get => base.Id;
-    set => base.Id = value;
-}
+var customer = new Customer { Identifier = IdentifierValue.Parse("ACME-CORP") };
+await DataStoreProvider.Current.SaveAsync(customer);
+// customer.Key is now 1 (or next available)
 ```
 
-Generated IDs look like: `6c3d6b1820bf4c72a86457a4ca493fae`
+## Identifier System
 
-### 2. SequentialLong
-Generates sequential long integer IDs starting from 1, incrementing for each new entity of that type.
+The `IdentifierValue` struct provides compact storage for human-readable codes:
 
-**Use case:** When you need human-readable, predictable IDs suitable for invoice numbers, order IDs, etc.
+### Character Set (Base-37)
+- `A-Z` (26 letters, uppercase only)
+- `0-9` (10 digits)
+- `-` (hyphen)
 
-**Example:**
+### Normalization
+- Accented characters are stripped to ASCII (é→E, ñ→N, ü→U)
+- All characters are uppercased
+- Invalid characters are rejected
+
+### Storage
+- Encoded as two `ulong` values (16 bytes total)
+- Max 25 characters per identifier
+- Binary format: two little-endian uint64 values
+
+### Usage
+
 ```csharp
-[IdGeneration(IdGenerationStrategy.SequentialLong)]
-[DataField(Order = 0, ReadOnly = true)]
-public new string Id
-{
-    get => base.Id;
-    set => base.Id = value;
-}
+// Parse from string
+var id = IdentifierValue.Parse("ACME-CORP-2024");
+
+// Accents are normalized
+var id2 = IdentifierValue.Parse("Café-Résumé");  // → "CAFERESUME"
+
+// Convert back to string
+string display = id.ToString();  // "ACME-CORP-2024"
+
+// Binary serialization (16 bytes)
+Span<byte> buffer = stackalloc byte[16];
+id.WriteTo(buffer);
+var restored = IdentifierValue.ReadFrom(buffer);
 ```
 
-Generated IDs look like: `1`, `2`, `3`, etc.
+## Entity Configuration
 
-**Important:** Sequences are maintained per entity type. Each entity type has its own independent counter.
-
-## Usage
-
-### Step 1: Mark the ID Property
-
-Override the `Id` property in your entity class and add the `[IdGeneration]` attribute:
+### Using DataEntity Attribute
 
 ```csharp
-using BareMetalWeb.Data;
-
-[DataEntity("Invoices", ShowOnNav = true, NavGroup = "Finance")]
+[DataEntity("Invoices", ShowOnNav = true, NavGroup = "Finance",
+            IdGeneration = AutoIdStrategy.Sequential)]
 public class Invoice : RenderableDataObject
 {
-    [IdGeneration(IdGenerationStrategy.SequentialLong)]
-    [DataField(Label = "Invoice #", Order = 0, ReadOnly = true, 
-               List = true, View = true, Edit = false, Create = false)]
-    public new string Id
-    {
-        get => base.Id;
-        set => base.Id = value;
-    }
+    [DataField(Label = "Invoice Code", Order = 1)]
+    public IdentifierValue Identifier { get; set; }
 
     // Other properties...
 }
 ```
 
-### Step 2: Configure DataField Attributes
-
-For auto-generated IDs, set these `DataField` properties:
-- `ReadOnly = true` - Prevents manual editing
-- `Edit = false` - Hides from edit forms
-- `Create = false` - Hides from create forms (ID is generated server-side)
-- `List = true` - Shows in list views (optional)
-- `View = true` - Shows in detail views (optional)
-
-### Step 3: Create Entities Normally
-
-When creating entities through forms or API:
-
-**Form submission:**
-```csharp
-// The ID field won't appear in the create form
-// ID is automatically generated when the form is submitted
-```
-
-**Programmatic creation:**
-```csharp
-var invoice = new Invoice();
-var metadata = DataScaffold.GetEntityByType(typeof(Invoice));
-DataScaffold.ApplyAutoGeneratedIds(metadata, invoice);
-// invoice.Id now contains a generated value like "1", "2", "3"...
-```
-
-## Examples
-
-### Example 1: Invoice with Sequential IDs
-
-See `BareMetalWeb.UserClasses/DataObjects/Invoice.cs` for a complete example of sequential ID generation suitable for financial documents.
-
-### Example 2: Session Log with GUID IDs
-
-See `BareMetalWeb.UserClasses/DataObjects/SessionLog.cs` for a complete example of GUID-based ID generation suitable for session tracking.
-
-## How It Works
-
-1. **Metadata Detection:** When `DataScaffold` builds entity metadata, it detects properties marked with `[IdGeneration]` and stores the strategy.
-
-2. **Form Rendering:** Fields marked with `IdGeneration` are automatically excluded from create forms (but can appear in edit/view/list if configured).
-
-3. **ID Generation:** When a new entity is created via form POST or API:
-   - `DataScaffold.ApplyAutoGeneratedIds()` is called after instantiation
-   - The appropriate ID generator creates a new ID based on the strategy
-   - The ID is set on the property before user values are applied
-
-4. **Form Binding:** Auto-generated ID fields are skipped during form value binding, preventing users from overriding generated IDs.
+### AutoIdStrategy Options
+- `Sequential` (default) — Auto-increment uint32 key
+- `None` — Key must be manually assigned before saving
 
 ## Thread Safety
 
-The `DefaultIdGenerator` implementation is fully thread-safe:
-- GUID generation uses `Guid.NewGuid()` which is thread-safe
-- Sequential counters use `Interlocked.Increment()` for atomic operations
-- Each entity type maintains its own counter in a `ConcurrentDictionary`
+- Key generation uses `Interlocked.Increment()` for atomic operations
+- Each entity type has its own independent counter
+- File-based persistence uses exclusive locking with retry
 
-## Testing
+## Legacy Data Migration
 
-Comprehensive tests are available in `BareMetalWeb.Data.Tests/IdGenerationTests.cs`:
-- Tests for GUID string generation
-- Tests for sequential long generation  
-- Tests for per-type sequence isolation
-- Tests for form field exclusion
-- Tests for form value binding protection
+**This is a breaking change.** The system detects old GUID-based data at startup and automatically wipes the data folder. There is no migration path — all data is re-created fresh. This is acceptable since there are no live consumers.
 
-Run tests with:
-```bash
-dotnet test BareMetalWeb.Data.Tests/BareMetalWeb.Data.Tests.csproj --filter "FullyQualifiedName~IdGenerationTests"
-```
-
-## Recommendations
-
-### For Development/Testing
-Both strategies work well for development and testing scenarios.
-
-### For Production with Persistent Storage
-
-**Use GuidString strategy** if:
-- You need globally unique IDs that survive application restarts
-- You don't need human-readable IDs
-- You're working in a distributed environment
-
-**Use SequentialLong with custom persistence** if:
-- You need human-readable, sequential IDs (e.g., invoice numbers)
-- You can implement a custom `IIdGenerator` that persists counters to storage
-- You need to avoid gaps in numbering
-
-**Example custom implementation with persistence:**
-```csharp
-public class PersistentSequentialIdGenerator : IIdGenerator
-{
-    public string GenerateId(Type entityType, IdGenerationStrategy strategy)
-    {
-        if (strategy == IdGenerationStrategy.SequentialLong)
-        {
-            // Load last used ID from database
-            var lastId = LoadLastIdFromDatabase(entityType);
-            var nextId = lastId + 1;
-            // Save to database before returning
-            SaveLastIdToDatabase(entityType, nextId);
-            return nextId.ToString();
-        }
-        return Guid.NewGuid().ToString("N");
-    }
-}
-```
-
-## Migration from Manual IDs
-
-If you have existing entities with manual IDs and want to add auto-generation:
-
-1. Add the `[IdGeneration]` attribute to your entity
-2. Existing records keep their IDs unchanged
-3. New records get auto-generated IDs
-4. **For SequentialLong with existing data**: Initialize the counter to max(existing IDs) + 1 to avoid conflicts, or implement a custom generator that checks the database
-
-## Previous Limitations Section
-
-- Auto-generated IDs are applied only during entity creation (not during edits)
-- Once generated, IDs cannot be changed (readonly)
-- **⚠️ Sequential IDs are in-memory only and reset on application restart** - implement persistence for production use
-- All IDs are stored as strings (base `BaseDataObject.Id` property type)
-
-## Customization
-
-To implement custom ID generation logic:
-
-1. Implement the `IIdGenerator` interface
-2. Register your implementation by replacing `DataScaffold`'s static `IdGenerator` field
-3. Add a new value to the `IdGenerationStrategy` enum
-
-Example:
-```csharp
-public class CustomIdGenerator : IIdGenerator
-{
-    public string GenerateId(Type entityType, IdGenerationStrategy strategy)
-    {
-        // Your custom logic here
-        return "CUSTOM-" + DateTime.UtcNow.Ticks;
-    }
-}
-```
+Detection checks:
+- 8-byte `_seqid.dat` files (old int64 format vs new 4-byte uint32)
+- 32-character hex-named `.bin` files (old GUID filenames)

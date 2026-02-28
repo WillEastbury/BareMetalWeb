@@ -30,8 +30,8 @@ public sealed class VirtualEntityJsonStore
     private string GetEntityFolder(string entityTypeName)
         => Path.Combine(_rootPath, "virtual", SanitizeName(entityTypeName));
 
-    private string GetFilePath(string entityTypeName, string id)
-        => Path.Combine(GetEntityFolder(entityTypeName), SanitizeName(id) + ".json");
+    private string GetFilePath(string entityTypeName, uint key)
+        => Path.Combine(GetEntityFolder(entityTypeName), key.ToString() + ".json");
 
     private static string SanitizeName(string name)
     {
@@ -49,12 +49,12 @@ public sealed class VirtualEntityJsonStore
         var folder = GetEntityFolder(entityTypeName);
         Directory.CreateDirectory(folder);
         var json = JsonSerializer.Serialize(obj, JsonOptions);
-        await File.WriteAllTextAsync(GetFilePath(entityTypeName, obj.Id), json, cancellationToken).ConfigureAwait(false);
+        await File.WriteAllTextAsync(GetFilePath(entityTypeName, obj.Key), json, cancellationToken).ConfigureAwait(false);
     }
 
-    public async ValueTask<DynamicDataObject?> LoadAsync(string entityTypeName, string id, CancellationToken cancellationToken = default)
+    public async ValueTask<DynamicDataObject?> LoadAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
     {
-        var filePath = GetFilePath(entityTypeName, id);
+        var filePath = GetFilePath(entityTypeName, key);
         if (!File.Exists(filePath))
             return null;
 
@@ -62,9 +62,9 @@ public sealed class VirtualEntityJsonStore
         return JsonSerializer.Deserialize<DynamicDataObject>(json);
     }
 
-    public ValueTask DeleteAsync(string entityTypeName, string id, CancellationToken cancellationToken = default)
+    public ValueTask DeleteAsync(string entityTypeName, uint key, CancellationToken cancellationToken = default)
     {
-        var filePath = GetFilePath(entityTypeName, id);
+        var filePath = GetFilePath(entityTypeName, key);
         if (File.Exists(filePath))
             File.Delete(filePath);
         return ValueTask.CompletedTask;
@@ -191,7 +191,7 @@ public sealed class VirtualEntityJsonStore
 
         return field.ToLowerInvariant() switch
         {
-            "id" => obj.Id,
+            "id" => obj.Key.ToString(),
             "createdby" => obj.CreatedBy,
             "updatedby" => obj.UpdatedBy,
             "createdonutc" => obj.CreatedOnUtc.ToString("O"),

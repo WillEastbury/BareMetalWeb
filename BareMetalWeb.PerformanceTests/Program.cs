@@ -69,10 +69,10 @@ class Program
     {
         var sw = Stopwatch.StartNew();
 
-        var usedAddressIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var usedCustomerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var usedProductIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var usedUnitIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var usedAddressIds = new HashSet<uint>();
+        var usedCustomerIds = new HashSet<uint>();
+        var usedProductIds = new HashSet<uint>();
+        var usedUnitIds = new HashSet<uint>();
 
         var addresses = GenerateAddresses(addressCount, usedAddressIds);
         var units = GenerateUnits(unitCount, usedUnitIds);
@@ -163,7 +163,7 @@ class Program
     }
 
     // Sample data generation methods (simplified versions from RouteHandlers)
-    static List<Address> GenerateAddresses(int count, HashSet<string> usedIds)
+    static List<Address> GenerateAddresses(int count, HashSet<uint> usedIds)
     {
         var list = new List<Address>(count);
         if (count <= 0)
@@ -189,14 +189,14 @@ class Program
                 PostalCode = rnd.Next(10000, 99999).ToString(CultureInfo.InvariantCulture),
                 Country = "US"
             };
-            EnsureUniqueId(address, usedIds);
+            EnsureUniqueKey(address, usedIds);
             list.Add(address);
         }
 
         return list;
     }
 
-    static List<UnitOfMeasure> GenerateUnits(int count, HashSet<string> usedIds)
+    static List<UnitOfMeasure> GenerateUnits(int count, HashSet<uint> usedIds)
     {
         var list = new List<UnitOfMeasure>(count);
         if (count <= 0)
@@ -224,7 +224,7 @@ class Program
                 Description = string.Empty,
                 IsActive = true
             });
-            EnsureUniqueId(list[^1], usedIds);
+            EnsureUniqueKey(list[^1], usedIds);
         }
 
         while (list.Count < count)
@@ -236,14 +236,14 @@ class Program
                 Description = string.Empty,
                 IsActive = true
             });
-            EnsureUniqueId(list[^1], usedIds);
+            EnsureUniqueKey(list[^1], usedIds);
             index++;
         }
 
         return list;
     }
 
-    static List<Customer> GenerateCustomers(int count, List<Address> addresses, HashSet<string> usedIds)
+    static List<Customer> GenerateCustomers(int count, List<Address> addresses, HashSet<uint> usedIds)
     {
         var list = new List<Customer>(count);
         if (count <= 0)
@@ -269,18 +269,18 @@ class Program
                 Email = email,
                 Phone = $"555-{rnd.Next(100, 999)}-{rnd.Next(1000, 9999)}",
                 Company = company,
-                AddressId = address?.Id ?? string.Empty,
+                AddressId = address?.Key.ToString() ?? string.Empty,
                 IsActive = true,
                 Notes = string.Empty,
                 Tags = new List<string>()
             });
-            EnsureUniqueId(list[^1], usedIds);
+            EnsureUniqueKey(list[^1], usedIds);
         }
 
         return list;
     }
 
-    static List<Product> GenerateProducts(int count, List<UnitOfMeasure> units, HashSet<string> usedIds)
+    static List<Product> GenerateProducts(int count, List<UnitOfMeasure> units, HashSet<uint> usedIds)
     {
         var list = new List<Product>(count);
         if (count <= 0)
@@ -300,7 +300,7 @@ class Program
                 Name = name,
                 Sku = $"SKU-{i + 1:0000}",
                 Category = categories[rnd.Next(categories.Length)],
-                UnitOfMeasureId = unit?.Id ?? string.Empty,
+                UnitOfMeasureId = unit?.Key.ToString() ?? string.Empty,
                 Price = price,
                 InventoryCount = rnd.Next(0, 5000),
                 ReorderLevel = rnd.Next(0, 200),
@@ -309,20 +309,20 @@ class Program
                 Description = string.Empty,
                 Tags = new List<string>()
             };
-            EnsureUniqueId(product, usedIds);
+            EnsureUniqueKey(product, usedIds);
             list.Add(product);
         }
 
         return list;
     }
 
-    static void EnsureUniqueId(BaseDataObject obj, HashSet<string> usedIds)
+    static void EnsureUniqueKey(BaseDataObject obj, HashSet<uint> usedKeys)
     {
-        while (usedIds.Contains(obj.Id))
+        while (usedKeys.Contains(obj.Key))
         {
-            obj.Id = Guid.NewGuid().ToString("N");
+            obj.Key = (uint)Random.Shared.Next(1, int.MaxValue);
         }
-        usedIds.Add(obj.Id);
+        usedKeys.Add(obj.Key);
     }
 
     static int GetArgument(string[] args, string flag, int defaultValue)

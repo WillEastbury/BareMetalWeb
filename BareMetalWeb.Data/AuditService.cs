@@ -42,7 +42,7 @@ public sealed class AuditService
             var auditEntry = new AuditEntry(userName)
             {
                 EntityType = typeof(T).Name,
-                EntityId = entity.Id,
+                EntityKey = entity.Key,
                 Operation = AuditOperation.Create,
                 TimestampUtc = DateTime.UtcNow,
                 UserName = userName,
@@ -74,7 +74,7 @@ public sealed class AuditService
             var auditEntry = new AuditEntry(userName)
             {
                 EntityType = typeof(T).Name,
-                EntityId = newEntity.Id,
+                EntityKey = newEntity.Key,
                 Operation = AuditOperation.Update,
                 TimestampUtc = DateTime.UtcNow,
                 UserName = userName,
@@ -94,7 +94,7 @@ public sealed class AuditService
     /// <summary>
     /// Captures an audit record for entity deletion
     /// </summary>
-    public async ValueTask AuditDeleteAsync<T>(string entityId, string userName, CancellationToken cancellationToken = default)
+    public async ValueTask AuditDeleteAsync<T>(uint entityKey, string userName, CancellationToken cancellationToken = default)
         where T : BaseDataObject
     {
         try
@@ -102,7 +102,7 @@ public sealed class AuditService
             var auditEntry = new AuditEntry(userName)
             {
                 EntityType = typeof(T).Name,
-                EntityId = entityId,
+                EntityKey = entityKey,
                 Operation = AuditOperation.Delete,
                 TimestampUtc = DateTime.UtcNow,
                 UserName = userName,
@@ -134,7 +134,7 @@ public sealed class AuditService
             var auditEntry = new AuditEntry(userName)
             {
                 EntityType = typeof(T).Name,
-                EntityId = entity.Id,
+                EntityKey = entity.Key,
                 Operation = AuditOperation.RemoteCommand,
                 TimestampUtc = DateTime.UtcNow,
                 UserName = userName,
@@ -156,7 +156,7 @@ public sealed class AuditService
     /// Gets audit history for a specific entity
     /// </summary>
     public async ValueTask<IEnumerable<AuditEntry>> GetEntityHistoryAsync<T>(
-        string entityId,
+        uint entityKey,
         CancellationToken cancellationToken = default)
         where T : BaseDataObject
     {
@@ -166,7 +166,7 @@ public sealed class AuditService
             Clauses = new List<QueryClause>
             {
                 new() { Field = nameof(AuditEntry.EntityType), Operator = QueryOperator.Equals, Value = typeof(T).Name },
-                new() { Field = nameof(AuditEntry.EntityId), Operator = QueryOperator.Equals, Value = entityId }
+                new() { Field = nameof(AuditEntry.EntityKey), Operator = QueryOperator.Equals, Value = entityKey }
             },
             Sorts = new List<SortClause>
             {
@@ -299,6 +299,15 @@ public sealed class AuditService
 
     private async ValueTask SaveAuditEntryAsync(AuditEntry entry, string operationName, CancellationToken cancellationToken)
     {
+        // Auto-assign a sequential key if not already set
+        if (entry.Key == 0)
+        {
+            var provider = DataStoreProvider.PrimaryProvider;
+            entry.Key = provider != null
+                ? provider.NextSequentialKey(nameof(AuditEntry))
+                : IdSequenceProvider.NextKey(nameof(AuditEntry));
+        }
+
         if (RunSynchronously)
         {
             await _store.SaveAsync(entry, cancellationToken).ConfigureAwait(false);

@@ -19,7 +19,7 @@ public static class MetadataExtractor
     // Properties inherited from BaseDataObject that must not be included as schema fields.
     private static readonly HashSet<string> CorePropertyNames = new(StringComparer.Ordinal)
     {
-        nameof(BaseDataObject.Id),
+        nameof(BaseDataObject.Key),
         nameof(BaseDataObject.CreatedOnUtc),
         nameof(BaseDataObject.UpdatedOnUtc),
         nameof(BaseDataObject.CreatedBy),
@@ -64,11 +64,10 @@ public static class MetadataExtractor
 
         var entity = new EntityDefinition
         {
-            Id = Guid.NewGuid().ToString("N"),
             EntityId = Guid.NewGuid().ToString("D"),
             Name = name,
             Slug = slug,
-            IdStrategy = MapIdStrategyString(entityAttr?.IdGeneration ?? AutoIdStrategy.Guid),
+            IdStrategy = MapIdStrategyString(entityAttr?.IdGeneration ?? AutoIdStrategy.Sequential),
             ShowOnNav = entityAttr?.ShowOnNav ?? false,
             NavGroup = entityAttr?.NavGroup ?? "Admin",
             NavOrder = entityAttr?.NavOrder ?? 0,
@@ -133,9 +132,8 @@ public static class MetadataExtractor
 
             fields.Add(new FieldDefinition
             {
-                Id = Guid.NewGuid().ToString("N"),
                 FieldId = Guid.NewGuid().ToString("D"),
-                EntityId = entity.Id,
+                EntityId = entity.EntityId,
                 Name = prop.Name,
                 Label = !string.IsNullOrWhiteSpace(fieldAttr?.Label)
                     ? fieldAttr!.Label
@@ -160,8 +158,7 @@ public static class MetadataExtractor
             {
                 indexes.Add(new IndexDefinition
                 {
-                    Id = Guid.NewGuid().ToString("N"),
-                    EntityId = entity.Id,
+                    EntityId = entity.EntityId,
                     FieldNames = prop.Name,
                     Type = indexAttr.Kind == IndexKind.BTree ? "btree" : "secondary"
                 });

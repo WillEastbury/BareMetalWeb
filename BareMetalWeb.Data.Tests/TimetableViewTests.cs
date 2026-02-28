@@ -33,7 +33,7 @@ public class TimetableViewTests : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<(Type, string), BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
@@ -41,16 +41,16 @@ public class TimetableViewTests : IDisposable
         public void ClearProviders() { }
 
         public void Save<T>(T obj) where T : BaseDataObject
-            => _store[(typeof(T), obj.Id)] = obj;
+            => _store[(typeof(T), obj.Key)] = obj;
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
         { Save(obj); return ValueTask.CompletedTask; }
 
-        public T? Load<T>(string id) where T : BaseDataObject
-            => _store.TryGetValue((typeof(T), id), out var obj) ? obj as T : null;
+        public T? Load<T>(uint key) where T : BaseDataObject
+            => _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
 
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult(Load<T>(id));
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult(Load<T>(key));
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
             => _store.Values.OfType<T>();
@@ -61,11 +61,11 @@ public class TimetableViewTests : IDisposable
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
             => ValueTask.FromResult(Query<T>(query).Count());
 
-        public void Delete<T>(string id) where T : BaseDataObject
-            => _store.Remove((typeof(T), id));
+        public void Delete<T>(uint key) where T : BaseDataObject
+            => _store.Remove((typeof(T), key));
 
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-        { Delete<T>(id); return ValueTask.CompletedTask; }
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+        { Delete<T>(key); return ValueTask.CompletedTask; }
     }
 
     [Fact]
@@ -102,21 +102,21 @@ public class TimetableViewTests : IDisposable
         // Arrange
         var monday = new TimeTablePlan
         {
-            Id = "1",
+            Key = 1,
             Day = CustomDayOfWeek.Monday,
             StartTime = new TimeOnly(9, 0),
             Minutes = 60
         };
         var tuesday = new TimeTablePlan
         {
-            Id = "2",
+            Key = 2,
             Day = CustomDayOfWeek.Tuesday,
             StartTime = new TimeOnly(10, 0),
             Minutes = 45
         };
         var mondayLater = new TimeTablePlan
         {
-            Id = "3",
+            Key = 3,
             Day = CustomDayOfWeek.Monday,
             StartTime = new TimeOnly(11, 0),
             Minutes = 30
@@ -142,14 +142,14 @@ public class TimetableViewTests : IDisposable
         // Arrange: two Monday entries out of time order
         var laterLesson = new TimeTablePlan
         {
-            Id = "late",
+            Key = 4,
             Day = CustomDayOfWeek.Monday,
             StartTime = new TimeOnly(12, 0),
             Minutes = 60
         };
         var earlierLesson = new TimeTablePlan
         {
-            Id = "early",
+            Key = 5,
             Day = CustomDayOfWeek.Monday,
             StartTime = new TimeOnly(9, 5),
             Minutes = 120
@@ -204,14 +204,14 @@ public class TimetableViewTests : IDisposable
         // Arrange: Tuesday (enum value 2) and Monday (enum value 1) - added in reverse order
         var tuesday = new TimeTablePlan
         {
-            Id = "t1",
+            Key = 6,
             Day = CustomDayOfWeek.Tuesday,
             StartTime = new TimeOnly(9, 0),
             Minutes = 60
         };
         var monday = new TimeTablePlan
         {
-            Id = "m1",
+            Key = 7,
             Day = CustomDayOfWeek.Monday,
             StartTime = new TimeOnly(9, 0),
             Minutes = 60
@@ -234,7 +234,7 @@ public class TimetableViewTests : IDisposable
     public void BuildTimetableHtml_LookupField_ShowsDisplayValueNotRawId()
     {
         // Arrange: seed a Subject so the lookup can be resolved
-        var subject = new BareMetalWeb.Data.DataObjects.Subject { Id = "subj-abc", Name = "Mathematics" };
+        var subject = new BareMetalWeb.Data.DataObjects.Subject { Key = 1, Name = "Mathematics" };
         DataStoreProvider.Current.Save(subject);
 
         // Clear lookup cache to force re-query with seeded data
@@ -242,8 +242,8 @@ public class TimetableViewTests : IDisposable
 
         var plan = new TimeTablePlan
         {
-            Id = "plan-1",
-            SubjectId = "subj-abc",
+            Key = 2,
+            SubjectId = "1",
             Day = CustomDayOfWeek.Wednesday,
             StartTime = new TimeOnly(10, 0),
             Minutes = 45
@@ -259,7 +259,7 @@ public class TimetableViewTests : IDisposable
         // Assert: the Subject's Name should appear as the display value
         Assert.Contains("Mathematics", html);
         // The raw ID should NOT appear as a standalone cell value (it may appear in a title attribute as part of BuildLookupHtml)
-        Assert.DoesNotContain("<td>subj-abc</td>", html);
+        Assert.DoesNotContain("<td>1</td>", html);
     }
 
     private static void ClearLookupCache()

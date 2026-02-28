@@ -452,7 +452,7 @@ internal static class Program
             var rows = list.Select(obj =>
             {
                 var cells = new string[colNames.Length];
-                cells[0] = obj.Id;
+                cells[0] = obj.Key.ToString();
                 for (int i = 0; i < listFields.Count; i++)
                 {
                     var val = listFields[i].GetValueFn(obj);
@@ -508,7 +508,7 @@ internal static class Program
             return 0;
         }
 
-        var obj = await meta.Handlers.LoadAsync(id, CancellationToken.None);
+        var obj = await meta.Handlers.LoadAsync(uint.Parse(id), CancellationToken.None);
         if (obj == null)
         {
             Console.WriteLine($"  Record '{id}' not found.");
@@ -516,7 +516,7 @@ internal static class Program
         }
 
         Console.WriteLine($"  Entity : {meta.Name}");
-        Console.WriteLine($"  Id     : {obj.Id}");
+        Console.WriteLine($"  Key    : {obj.Key}");
         Console.WriteLine($"  ETag   : {obj.ETag}");
         Console.WriteLine($"  Created: {obj.CreatedOnUtc:yyyy-MM-dd HH:mm:ss} UTC");
         Console.WriteLine($"  Updated: {obj.UpdatedOnUtc:yyyy-MM-dd HH:mm:ss} UTC");
@@ -549,7 +549,7 @@ internal static class Program
         if (meta == null)
             return ArgError($"Entity '{entity}' is not registered. Cannot edit unknown entities.");
 
-        var obj = await meta.Handlers.LoadAsync(id, CancellationToken.None);
+        var obj = await meta.Handlers.LoadAsync(uint.Parse(id), CancellationToken.None);
         if (obj == null)
         {
             Console.WriteLine($"  Record '{id}' not found.");
@@ -617,7 +617,7 @@ internal static class Program
             return 0;
         }
 
-        await meta.Handlers.DeleteAsync(id, CancellationToken.None);
+        await meta.Handlers.DeleteAsync(uint.Parse(id), CancellationToken.None);
         Console.WriteLine($"  Deleted {entity}/{id}.");
         return 0;
     }

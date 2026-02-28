@@ -8,8 +8,8 @@ namespace BareMetalWeb.Data;
 
 public static class Users
 {
-    public static ValueTask<User?> GetByIdAsync(string id, CancellationToken cancellationToken = default)
-        => DataStoreProvider.Current.LoadAsync<User>(id, cancellationToken);
+    public static ValueTask<User?> GetByIdAsync(uint key, CancellationToken cancellationToken = default)
+        => DataStoreProvider.Current.LoadAsync<User>(key, cancellationToken);
 
     public static ValueTask SaveAsync(User user, CancellationToken cancellationToken = default)
         => DataStoreProvider.Current.SaveAsync(user, cancellationToken);

@@ -44,7 +44,7 @@ public class ExampleOrder : BaseDataObject
     public string CustomerName { get; set; } = string.Empty;
 
     [DataField(Label = "Product", Order = 3)]
-    [DataLookup(typeof(ExampleProduct), DisplayField = nameof(ExampleProduct.Name), ValueField = nameof(ExampleProduct.Id))]
+    [DataLookup(typeof(ExampleProduct), DisplayField = nameof(ExampleProduct.Name), ValueField = nameof(ExampleProduct.Key))]
     public string ProductId { get; set; } = string.Empty;
 
     [DataField(Label = "Quantity", Order = 4)]

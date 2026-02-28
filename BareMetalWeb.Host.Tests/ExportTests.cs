@@ -133,7 +133,7 @@ public class ExportTests
 
         var order = new Order
         {
-            Id = "ORD-001",
+            Key = 1,
             OrderNumber = "12345",
             CustomerId = "CUST-001",
             OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
@@ -189,7 +189,7 @@ public class ExportTests
 
         var order = new Order
         {
-            Id = "ORD-002",
+            Key = 2,
             OrderNumber = "67890",
             CustomerId = "CUST-002",
             OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),

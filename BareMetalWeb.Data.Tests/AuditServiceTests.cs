@@ -48,6 +48,7 @@ public sealed class AuditServiceTests : IDisposable
         // Arrange
         var testEntity = new TestEntity("testuser")
         {
+            Key = 1,
             Name = "Test Entity",
             Value = 42
         };
@@ -57,10 +58,10 @@ public sealed class AuditServiceTests : IDisposable
         
         // Assert
         var auditEntries = await _store.QueryAsync<AuditEntry>();
-        var entry = auditEntries.FirstOrDefault(e => e.EntityId == testEntity.Id);
+        var entry = auditEntries.FirstOrDefault(e => e.EntityKey == testEntity.Key);
         Assert.NotNull(entry);
         Assert.Equal(typeof(TestEntity).Name, entry.EntityType);
-        Assert.Equal(testEntity.Id, entry.EntityId);
+        Assert.Equal(testEntity.Key, entry.EntityKey);
         Assert.Equal(AuditOperation.Create, entry.Operation);
         Assert.Equal("testuser", entry.UserName);
     }
@@ -71,13 +72,14 @@ public sealed class AuditServiceTests : IDisposable
         // Arrange
         var oldEntity = new TestEntity("testuser")
         {
+            Key = 2,
             Name = "Old Name",
             Value = 10
         };
         
         var newEntity = new TestEntity("testuser")
         {
-            Id = oldEntity.Id,
+            Key = oldEntity.Key,
             CreatedOnUtc = oldEntity.CreatedOnUtc,
             CreatedBy = oldEntity.CreatedBy,
             Name = "New Name",
@@ -89,7 +91,7 @@ public sealed class AuditServiceTests : IDisposable
 
         // Assert
         var auditEntries = (await _store.QueryAsync<AuditEntry>()).ToList();
-        var entry = auditEntries.FirstOrDefault(e => e.EntityId == oldEntity.Id && e.Operation == AuditOperation.Update);
+        var entry = auditEntries.FirstOrDefault(e => e.EntityKey == oldEntity.Key && e.Operation == AuditOperation.Update);
         Assert.NotNull(entry);
         Assert.Equal(AuditOperation.Update, entry.Operation);
         Assert.Equal(2, entry.FieldChanges.Count);
@@ -111,13 +113,14 @@ public sealed class AuditServiceTests : IDisposable
         // Arrange
         var oldEntity = new TestEntity("testuser")
         {
+            Key = 3,
             Name = "Same Name",
             Value = 42
         };
         
         var newEntity = new TestEntity("testuser")
         {
-            Id = oldEntity.Id,
+            Key = oldEntity.Key,
             CreatedOnUtc = oldEntity.CreatedOnUtc,
             CreatedBy = oldEntity.CreatedBy,
             Name = "Same Name",
@@ -130,7 +133,7 @@ public sealed class AuditServiceTests : IDisposable
 
         // Assert - no audit entry should be created since only metadata changed
         var auditEntries = await _store.QueryAsync<AuditEntry>();
-        var entry = auditEntries.FirstOrDefault(e => e.EntityId == oldEntity.Id);
+        var entry = auditEntries.FirstOrDefault(e => e.EntityKey == oldEntity.Key);
         
         Assert.Null(entry); // No audit entry for metadata-only changes
     }
@@ -139,14 +142,14 @@ public sealed class AuditServiceTests : IDisposable
     public async Task AuditDeleteAsync_CreatesAuditEntry()
     {
         // Arrange
-        var entityId = Guid.NewGuid().ToString("N");
+        var entityKey = (uint)Random.Shared.Next(1, int.MaxValue);
 
         // Act
-        await _auditService.AuditDeleteAsync<TestEntity>(entityId, "testuser");
+        await _auditService.AuditDeleteAsync<TestEntity>(entityKey, "testuser");
 
         // Assert
         var auditEntries = await _store.QueryAsync<AuditEntry>();
-        var entry = auditEntries.FirstOrDefault(e => e.EntityId == entityId);
+        var entry = auditEntries.FirstOrDefault(e => e.EntityKey == entityKey);
         
         Assert.NotNull(entry);
         Assert.Equal(typeof(TestEntity).Name, entry.EntityType);
@@ -160,6 +163,7 @@ public sealed class AuditServiceTests : IDisposable
         // Arrange
         var testEntity = new TestEntity("testuser")
         {
+            Key = 4,
             Name = "Test Entity",
             Value = 42
         };
@@ -170,7 +174,7 @@ public sealed class AuditServiceTests : IDisposable
 
         // Assert
         var auditEntries = await _store.QueryAsync<AuditEntry>();
-        var entry = auditEntries.FirstOrDefault(e => e.EntityId == testEntity.Id);
+        var entry = auditEntries.FirstOrDefault(e => e.EntityKey == testEntity.Key);
         
         Assert.NotNull(entry);
         Assert.Equal(AuditOperation.RemoteCommand, entry.Operation);
@@ -182,18 +186,18 @@ public sealed class AuditServiceTests : IDisposable
     public async Task GetEntityHistoryAsync_ReturnsAuditEntriesForEntity()
     {
         // Arrange
-        var testEntity = new TestEntity("testuser") { Name = "Test", Value = 1 };
+        var testEntity = new TestEntity("testuser") { Key = 5, Name = "Test", Value = 1 };
         
         await _auditService.AuditCreateAsync(testEntity, "testuser");
         
-        var updatedEntity = new TestEntity("testuser") { Id = testEntity.Id, CreatedOnUtc = testEntity.CreatedOnUtc, CreatedBy = testEntity.CreatedBy, Name = "Updated", Value = 2 };
+        var updatedEntity = new TestEntity("testuser") { Key = testEntity.Key, CreatedOnUtc = testEntity.CreatedOnUtc, CreatedBy = testEntity.CreatedBy, Name = "Updated", Value = 2 };
         await _auditService.AuditUpdateAsync(testEntity, updatedEntity, "testuser");
         
-        await _auditService.AuditDeleteAsync<TestEntity>(testEntity.Id, "testuser");
+        await _auditService.AuditDeleteAsync<TestEntity>(testEntity.Key, "testuser");
 
         // Act
         var allEntries = await _store.QueryAsync<AuditEntry>();
-        var history = allEntries.Where(e => e.EntityId == testEntity.Id && e.EntityType == "TestEntity").ToList();
+        var history = allEntries.Where(e => e.EntityKey == testEntity.Key && e.EntityType == "TestEntity").ToList();
 
         // Assert
         Assert.Equal(3, history.Count);

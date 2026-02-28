@@ -28,7 +28,7 @@ public sealed class ServerLookupResolver : ILookupResolver
             return null;
 
         var fkString = fkValue.ToString();
-        if (string.IsNullOrEmpty(fkString))
+        if (string.IsNullOrEmpty(fkString) || !uint.TryParse(fkString, out var fkKey))
             return null;
 
         // Find the lookup target entity from the FK field's metadata
@@ -49,7 +49,7 @@ public sealed class ServerLookupResolver : ILookupResolver
             return null;
 
         // Load the related entity
-        var relatedEntity = await targetMeta.Handlers.LoadAsync(fkString, cancellationToken);
+        var relatedEntity = await targetMeta.Handlers.LoadAsync(fkKey, cancellationToken);
         if (relatedEntity == null)
             return null;
 
@@ -105,7 +105,7 @@ public sealed class ServerLookupResolver : ILookupResolver
             return null;
 
         var firstFkString = firstFkValue.ToString();
-        if (string.IsNullOrEmpty(firstFkString))
+        if (string.IsNullOrEmpty(firstFkString) || !uint.TryParse(firstFkString, out var firstFkKey))
             return null;
 
         DataEntityMetadata? currentMeta = null;
@@ -120,7 +120,7 @@ public sealed class ServerLookupResolver : ILookupResolver
         if (currentMeta == null)
             return null;
 
-        var currentEntity = await currentMeta.Handlers.LoadAsync(firstFkString, cancellationToken);
+        var currentEntity = await currentMeta.Handlers.LoadAsync(firstFkKey, cancellationToken);
         if (currentEntity == null)
             return null;
 
@@ -133,7 +133,7 @@ public sealed class ServerLookupResolver : ILookupResolver
                 return null;
 
             var nextFkString = nextFkValue.ToString();
-            if (string.IsNullOrEmpty(nextFkString))
+            if (string.IsNullOrEmpty(nextFkString) || !uint.TryParse(nextFkString, out var nextFkKey))
                 return null;
 
             DataEntityMetadata? nextMeta = null;
@@ -147,7 +147,7 @@ public sealed class ServerLookupResolver : ILookupResolver
             if (nextMeta == null)
                 return null;
 
-            currentEntity = await nextMeta.Handlers.LoadAsync(nextFkString, cancellationToken);
+            currentEntity = await nextMeta.Handlers.LoadAsync(nextFkKey, cancellationToken);
             if (currentEntity == null)
                 return null;
         }

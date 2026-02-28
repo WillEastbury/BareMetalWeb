@@ -327,12 +327,12 @@ public class VirtualEntityTests : IDisposable
     public async Task VirtualEntityJsonStore_SaveAndLoad_RoundTrips()
     {
         var store = new VirtualEntityJsonStore(_tempDir);
-        var obj = new DynamicDataObject { EntityTypeName = "Widget", Id = Guid.NewGuid().ToString("N") };
+        var obj = new DynamicDataObject { EntityTypeName = "Widget", Key = 1 };
         obj.SetField("Title", "My Widget");
         obj.SetField("Count", "42");
 
         await store.SaveAsync("Widget", obj);
-        var loaded = await store.LoadAsync("Widget", obj.Id);
+        var loaded = await store.LoadAsync("Widget", obj.Key);
 
         Assert.NotNull(loaded);
         Assert.Equal("My Widget", loaded!.GetField("Title"));
@@ -343,14 +343,14 @@ public class VirtualEntityTests : IDisposable
     public async Task VirtualEntityJsonStore_Delete_RemovesRecord()
     {
         var store = new VirtualEntityJsonStore(_tempDir);
-        var id = Guid.NewGuid().ToString("N");
-        var obj = new DynamicDataObject { EntityTypeName = "Widget", Id = id };
+        uint key = 2;
+        var obj = new DynamicDataObject { EntityTypeName = "Widget", Key = key };
         obj.SetField("X", "1");
 
         await store.SaveAsync("Widget", obj);
-        await store.DeleteAsync("Widget", id);
+        await store.DeleteAsync("Widget", key);
 
-        var loaded = await store.LoadAsync("Widget", id);
+        var loaded = await store.LoadAsync("Widget", key);
         Assert.Null(loaded);
     }
 
@@ -362,7 +362,7 @@ public class VirtualEntityTests : IDisposable
 
         for (int i = 0; i < 5; i++)
         {
-            var obj = new DynamicDataObject { Id = Guid.NewGuid().ToString("N") };
+            var obj = new DynamicDataObject { Key = (uint)(i + 1) };
             obj.SetField("Priority", i < 3 ? "High" : "Low");
             await store.SaveAsync(entity, obj);
         }
@@ -388,7 +388,7 @@ public class VirtualEntityTests : IDisposable
 
         for (int i = 0; i < 4; i++)
         {
-            var obj = new DynamicDataObject { Id = Guid.NewGuid().ToString("N") };
+            var obj = new DynamicDataObject { Key = (uint)(i + 1) };
             await store.SaveAsync(entity, obj);
         }
 
@@ -430,7 +430,7 @@ public class VirtualEntityTests : IDisposable
         await meta.Handlers.SaveAsync(instance, default);
 
         // Load
-        var loaded = await meta.Handlers.LoadAsync(instance.Id, default);
+        var loaded = await meta.Handlers.LoadAsync(instance.Key, default);
         Assert.NotNull(loaded);
         Assert.IsType<DynamicDataObject>(loaded);
         Assert.Equal("Alice", ((DynamicDataObject)loaded!).GetField("Name"));
@@ -460,10 +460,12 @@ public class VirtualEntityTests : IDisposable
         DataScaffold.TryGetEntity(slug, out var meta);
 
         var a = (DynamicDataObject)meta!.Handlers.Create();
+        a.Key = 1;
         a.SetField("Category", "Alpha");
         await meta.Handlers.SaveAsync(a, default);
 
         var b = (DynamicDataObject)meta.Handlers.Create();
+        b.Key = 2;
         b.SetField("Category", "Beta");
         await meta.Handlers.SaveAsync(b, default);
 

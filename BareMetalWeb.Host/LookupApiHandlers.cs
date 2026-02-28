@@ -40,7 +40,7 @@ public static class LookupApiHandlers
 
         try
         {
-            var entity = await meta.Handlers.LoadAsync(id, context.RequestAborted);
+            var entity = await meta.Handlers.LoadAsync(uint.Parse(id), context.RequestAborted);
             if (entity == null)
             {
                 await WriteJsonErrorAsync(context, StatusCodes.Status404NotFound, $"Entity with ID '{id}' not found.");
@@ -157,7 +157,7 @@ public static class LookupApiHandlers
             var results = new Dictionary<string, object?>(ids.Count);
             foreach (var id in ids)
             {
-                var entity = await meta.Handlers.LoadAsync(id, context.RequestAborted);
+                var entity = await meta.Handlers.LoadAsync(uint.Parse(id), context.RequestAborted);
                 if (entity != null)
                     results[id] = await EntityToJsonAsync(entity, meta, traverse, context.RequestAborted);
             }
@@ -200,7 +200,7 @@ public static class LookupApiHandlers
 
         try
         {
-            var entity = await meta.Handlers.LoadAsync(id, context.RequestAborted);
+            var entity = await meta.Handlers.LoadAsync(uint.Parse(id), context.RequestAborted);
             if (entity == null)
             {
                 await WriteJsonErrorAsync(context, StatusCodes.Status404NotFound, $"Entity with ID '{id}' not found.");
@@ -483,7 +483,7 @@ public static class LookupApiHandlers
     {
         var result = new Dictionary<string, object?>
         {
-            ["id"] = entity.Id
+            ["id"] = entity.Key.ToString()
         };
 
         foreach (var field in meta.Fields.Where(f => f.View))
@@ -530,7 +530,7 @@ public static class LookupApiHandlers
             if (string.Equals(expandedKey, field.Name, StringComparison.Ordinal) || result.ContainsKey(expandedKey))
                 continue;
 
-            var related = await relatedMeta.Handlers.LoadAsync(idStr, cancellationToken);
+            var related = await relatedMeta.Handlers.LoadAsync(uint.Parse(idStr), cancellationToken);
             if (related != null)
                 result[expandedKey] = EntityToJson(related, relatedMeta);
         }

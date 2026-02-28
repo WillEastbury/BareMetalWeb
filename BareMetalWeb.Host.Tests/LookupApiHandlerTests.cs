@@ -55,7 +55,7 @@ public class LookupApiHandlerTests : IDisposable
         // and a user session for authenticated lookup requests
         var rootUser = new User
         {
-            Id = "root",
+            Key = 1,
             UserName = "admin",
             DisplayName = "Admin",
             Email = "admin@test.com",
@@ -66,15 +66,15 @@ public class LookupApiHandlerTests : IDisposable
 
         var session = new UserSession
         {
-            Id = "test-session",
-            UserId = rootUser.Id,
+            Key = 100,
+            UserId = rootUser.Key.ToString(),
             IssuedUtc = DateTime.UtcNow,
             LastSeenUtc = DateTime.UtcNow,
             ExpiresUtc = DateTime.UtcNow.AddHours(8),
             IsRevoked = false
         };
         _testStore.Save(session);
-        _testSessionId = session.Id;
+        _testSessionId = session.Key.ToString();
 
         // Force UserClasses assembly to load before scanning
         _ = typeof(Product).Assembly;
@@ -111,6 +111,7 @@ public class LookupApiHandlerTests : IDisposable
     {
         DataStoreProvider.Current = _originalStore;
         _cts.Cancel();
+        (_app as IDisposable)?.Dispose();
         try { Directory.Delete(_keyRootDirectory, true); } catch { }
     }
 
@@ -118,10 +119,10 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityById_ReturnsEntity_WhenExists()
     {
         // Arrange
-        var product = new Product { Id = "prod-1", Name = "Widget", Description = "A test widget" };
+        var product = new Product { Key = 1, Name = "Widget", Description = "A test widget" };
         _testStore.Save(product);
 
-        var context = CreateHttpContext("GET", "/api/_lookup/products/prod-1");
+        var context = CreateHttpContext("GET", "/api/_lookup/products/1");
 
         // Act
         await _server.RequestHandler(context);
@@ -129,14 +130,14 @@ public class LookupApiHandlerTests : IDisposable
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
         var json = await ReadResponseJson(context);
-        Assert.Equal("prod-1", json.GetProperty("id").GetString());
+        Assert.Equal("1", json.GetProperty("id").GetString());
     }
 
     [Fact]
     public async Task GetEntityById_Returns404_WhenNotExists()
     {
         // Arrange
-        var context = CreateHttpContext("GET", "/api/_lookup/products/nonexistent");
+        var context = CreateHttpContext("GET", "/api/_lookup/products/999");
 
         // Act
         await _server.RequestHandler(context);
@@ -149,7 +150,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityById_Returns404_ForUnknownEntityType()
     {
         // Arrange
-        var context = CreateHttpContext("GET", "/api/_lookup/nonexistent-type/some-id");
+        var context = CreateHttpContext("GET", "/api/_lookup/nonexistent-type/1");
 
         // Act
         await _server.RequestHandler(context);
@@ -162,8 +163,8 @@ public class LookupApiHandlerTests : IDisposable
     public async Task QueryEntities_ReturnsAllEntities_WhenNoFilter()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
-        _testStore.Save(new Product { Id = "prod-2", Name = "Gadget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
+        _testStore.Save(new Product { Key = 2, Name = "Gadget" });
 
         var context = CreateHttpContext("GET", "/api/_lookup/products");
 
@@ -180,10 +181,10 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityField_ReturnsFieldValue_WhenExists()
     {
         // Arrange
-        var product = new Product { Id = "prod-1", Name = "Widget" };
+        var product = new Product { Key = 1, Name = "Widget" };
         _testStore.Save(product);
 
-        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/prod-1/Name");
+        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/1/Name");
 
         // Act
         await _server.RequestHandler(context);
@@ -199,7 +200,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityField_Returns404_WhenEntityNotFound()
     {
         // Arrange
-        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/nonexistent/Name");
+        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/999/Name");
 
         // Act
         await _server.RequestHandler(context);
@@ -212,8 +213,8 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityField_Returns404_WhenFieldNotFound()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
-        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/prod-1/NonExistentField");
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
+        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/1/NonExistentField");
 
         // Act
         await _server.RequestHandler(context);
@@ -226,8 +227,8 @@ public class LookupApiHandlerTests : IDisposable
     public async Task AggregateEntities_Count_ReturnsCorrectCount()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
-        _testStore.Save(new Product { Id = "prod-2", Name = "Gadget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
+        _testStore.Save(new Product { Key = 2, Name = "Gadget" });
 
         var context = CreateHttpContext("GET", "/api/_lookup/products/_aggregate?fn=count");
 
@@ -271,10 +272,10 @@ public class LookupApiHandlerTests : IDisposable
     public async Task BatchGetEntities_ReturnsMatchedEntities_WhenAllExist()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
-        _testStore.Save(new Product { Id = "prod-2", Name = "Gadget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
+        _testStore.Save(new Product { Key = 2, Name = "Gadget" });
 
-        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "prod-1", "prod-2" } });
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "1", "2" } });
 
         // Act
         await _server.RequestHandler(context);
@@ -283,17 +284,17 @@ public class LookupApiHandlerTests : IDisposable
         Assert.Equal(200, context.Response.StatusCode);
         var json = await ReadResponseJson(context);
         var results = json.GetProperty("results");
-        Assert.Equal("Widget", results.GetProperty("prod-1").GetProperty("Name").GetString());
-        Assert.Equal("Gadget", results.GetProperty("prod-2").GetProperty("Name").GetString());
+        Assert.Equal("Widget", results.GetProperty("1").GetProperty("Name").GetString());
+        Assert.Equal("Gadget", results.GetProperty("2").GetProperty("Name").GetString());
     }
 
     [Fact]
     public async Task BatchGetEntities_OmitsMissingEntities_WhenSomeNotFound()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
-        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "prod-1", "nonexistent" } });
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "1", "999" } });
 
         // Act
         await _server.RequestHandler(context);
@@ -302,8 +303,8 @@ public class LookupApiHandlerTests : IDisposable
         Assert.Equal(200, context.Response.StatusCode);
         var json = await ReadResponseJson(context);
         var results = json.GetProperty("results");
-        Assert.True(results.TryGetProperty("prod-1", out _));
-        Assert.False(results.TryGetProperty("nonexistent", out _));
+        Assert.True(results.TryGetProperty("1", out _));
+        Assert.False(results.TryGetProperty("999", out _));
     }
 
     [Fact]
@@ -338,7 +339,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task BatchGetEntities_Returns404_ForUnknownEntityType()
     {
         // Arrange
-        var context = CreatePostHttpContext("/api/_lookup/nonexistent-type/_batch", new { ids = new[] { "id-1" } });
+        var context = CreatePostHttpContext("/api/_lookup/nonexistent-type/_batch", new { ids = new[] { "1" } });
 
         // Act
         await _server.RequestHandler(context);
@@ -351,9 +352,9 @@ public class LookupApiHandlerTests : IDisposable
     public async Task BatchGetEntities_DeduplicatesIds_WhenDuplicatesPassed()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
-        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "prod-1", "prod-1", "prod-1" } });
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "1", "1", "1" } });
 
         // Act
         await _server.RequestHandler(context);
@@ -362,15 +363,15 @@ public class LookupApiHandlerTests : IDisposable
         Assert.Equal(200, context.Response.StatusCode);
         var json = await ReadResponseJson(context);
         var results = json.GetProperty("results");
-        Assert.True(results.TryGetProperty("prod-1", out _));
+        Assert.True(results.TryGetProperty("1", out _));
     }
 
     [Fact]
     public async Task QueryEntities_IgnoresFilter_WhenFieldNotInViewableMetadata()
     {
         // Arrange — two products, filter on a field that does not exist in metadata
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
-        _testStore.Save(new Product { Id = "prod-2", Name = "Gadget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
+        _testStore.Save(new Product { Key = 2, Name = "Gadget" });
 
         // ?filter=NonExistentField:value should be silently dropped, so all entities are returned
         var context = CreateHttpContext("GET", "/api/_lookup/products?filter=NonExistentField:Widget");
@@ -389,7 +390,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task QueryEntities_IgnoresSort_WhenFieldNotInViewableMetadata()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
         // ?sort=HiddenField should be silently dropped
         var context = CreateHttpContext("GET", "/api/_lookup/products?sort=HiddenField&dir=asc");
@@ -405,7 +406,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task QueryEntities_IgnoresSearchField_WhenFieldNotInViewableMetadata()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
         // ?searchField=PasswordHash is a field that doesn't exist on Product — should be dropped
         var context = CreateHttpContext("GET", "/api/_lookup/products?search=abc&searchField=PasswordHash");
@@ -422,9 +423,9 @@ public class LookupApiHandlerTests : IDisposable
     {
         // Arrange — Product entity has no non-viewable fields by default;
         // use a non-existent field to confirm the check applies
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
-        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/prod-1/InternalSecretField");
+        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/1/InternalSecretField");
 
         // Act
         await _server.RequestHandler(context);
@@ -437,7 +438,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task QueryEntities_Returns403_WhenFromAndViaProvided_AndRelationshipDoesNotExist()
     {
         // Arrange — 'orders' entity has CustomerId lookup to 'customers', but NOT to 'products'
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
         // from=orders&via=CustomerId but target is 'products' — no such relationship
         var context = CreateHttpContext("GET", "/api/_lookup/products?from=orders&via=CustomerId");
@@ -453,7 +454,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task QueryEntities_Returns403_WhenOnlyFromProvided_WithoutVia()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
         // Providing 'from' without 'via' should fail validation (incomplete relationship context)
         var context = CreateHttpContext("GET", "/api/_lookup/products?from=orders");
@@ -469,7 +470,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task QueryEntities_Returns200_WhenFromAndViaProvided_AndRelationshipExists()
     {
         // Arrange — orders.CustomerId has a lookup to customers, so this should succeed
-        var customer = new Customer { Id = "cust-1", Name = "Acme Corp" };
+        var customer = new Customer { Key = 100, Name = "Acme Corp" };
         _testStore.Save(customer);
 
         // from=orders&via=CustomerId with target 'customers' — valid relationship
@@ -490,13 +491,13 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityById_WithTraverseRelationships_ExpandsLookupField()
     {
         // Arrange — Order.CustomerId is a lookup to Customer
-        var customer = new Customer { Id = "cust-1", Name = "Acme Corp", Email = "acme@example.com" };
+        var customer = new Customer { Key = 100, Name = "Acme Corp", Email = "acme@example.com" };
         _testStore.Save(customer);
 
-        var order = new Order { Id = "order-1", OrderNumber = "ORD-001", CustomerId = "cust-1", Status = "Open" };
+        var order = new Order { Key = 101, OrderNumber = "ORD-001", CustomerId = "100", Status = "Open" };
         _testStore.Save(order);
 
-        var context = CreateHttpContext("GET", "/api/_lookup/orders/order-1?traverseRelationships=true");
+        var context = CreateHttpContext("GET", "/api/_lookup/orders/101?traverseRelationships=true");
 
         // Act
         await _server.RequestHandler(context);
@@ -506,11 +507,11 @@ public class LookupApiHandlerTests : IDisposable
         var json = await ReadResponseJson(context);
 
         // Original FK field is still present
-        Assert.Equal("cust-1", json.GetProperty("CustomerId").GetString());
+        Assert.Equal("100", json.GetProperty("CustomerId").GetString());
 
         // Expanded object added under "Customer" (Id suffix stripped)
         Assert.True(json.TryGetProperty("Customer", out var expanded), "Expected expanded 'Customer' property");
-        Assert.Equal("cust-1", expanded.GetProperty("id").GetString());
+        Assert.Equal("100", expanded.GetProperty("id").GetString());
         Assert.Equal("Acme Corp", expanded.GetProperty("Name").GetString());
     }
 
@@ -518,13 +519,13 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityById_WithoutTraverseRelationships_DoesNotExpandLookupField()
     {
         // Arrange
-        var customer = new Customer { Id = "cust-2", Name = "Beta Corp", Email = "beta@example.com" };
+        var customer = new Customer { Key = 200, Name = "Beta Corp", Email = "beta@example.com" };
         _testStore.Save(customer);
 
-        var order = new Order { Id = "order-2", OrderNumber = "ORD-002", CustomerId = "cust-2", Status = "Open" };
+        var order = new Order { Key = 201, OrderNumber = "ORD-002", CustomerId = "200", Status = "Open" };
         _testStore.Save(order);
 
-        var context = CreateHttpContext("GET", "/api/_lookup/orders/order-2");
+        var context = CreateHttpContext("GET", "/api/_lookup/orders/201");
 
         // Act
         await _server.RequestHandler(context);
@@ -534,7 +535,7 @@ public class LookupApiHandlerTests : IDisposable
         var json = await ReadResponseJson(context);
 
         // FK field present but NO expanded key
-        Assert.Equal("cust-2", json.GetProperty("CustomerId").GetString());
+        Assert.Equal("200", json.GetProperty("CustomerId").GetString());
         Assert.False(json.TryGetProperty("Customer", out _), "Should not have expanded 'Customer' without traverseRelationships=true");
     }
 
@@ -542,10 +543,10 @@ public class LookupApiHandlerTests : IDisposable
     public async Task QueryEntities_WithTraverseRelationships_ExpandsLookupFields()
     {
         // Arrange
-        var customer = new Customer { Id = "cust-3", Name = "Gamma Ltd", Email = "gamma@example.com" };
+        var customer = new Customer { Key = 300, Name = "Gamma Ltd", Email = "gamma@example.com" };
         _testStore.Save(customer);
 
-        var order = new Order { Id = "order-3", OrderNumber = "ORD-003", CustomerId = "cust-3", Status = "Open" };
+        var order = new Order { Key = 301, OrderNumber = "ORD-003", CustomerId = "300", Status = "Open" };
         _testStore.Save(order);
 
         var context = CreateHttpContext("GET", "/api/_lookup/orders?traverseRelationships=true&filter=OrderNumber:ORD-003");
@@ -560,7 +561,7 @@ public class LookupApiHandlerTests : IDisposable
         var data = json.GetProperty("data");
         var first = data.EnumerateArray().First(e => e.GetProperty("OrderNumber").GetString() == "ORD-003");
 
-        Assert.Equal("cust-3", first.GetProperty("CustomerId").GetString());
+        Assert.Equal("300", first.GetProperty("CustomerId").GetString());
         Assert.True(first.TryGetProperty("Customer", out var expanded), "Expected expanded 'Customer' property in query result");
         Assert.Equal("Gamma Ltd", expanded.GetProperty("Name").GetString());
     }
@@ -569,13 +570,13 @@ public class LookupApiHandlerTests : IDisposable
     public async Task BatchGetEntities_WithTraverseRelationships_ExpandsLookupFields()
     {
         // Arrange
-        var customer = new Customer { Id = "cust-4", Name = "Delta Inc", Email = "delta@example.com" };
+        var customer = new Customer { Key = 400, Name = "Delta Inc", Email = "delta@example.com" };
         _testStore.Save(customer);
 
-        var order = new Order { Id = "order-4", OrderNumber = "ORD-004", CustomerId = "cust-4", Status = "Open" };
+        var order = new Order { Key = 401, OrderNumber = "ORD-004", CustomerId = "400", Status = "Open" };
         _testStore.Save(order);
 
-        var context = CreatePostHttpContext("/api/_lookup/orders/_batch?traverseRelationships=true", new { ids = new[] { "order-4" } });
+        var context = CreatePostHttpContext("/api/_lookup/orders/_batch?traverseRelationships=true", new { ids = new[] { "401" } });
 
         // Act
         await _server.RequestHandler(context);
@@ -583,9 +584,9 @@ public class LookupApiHandlerTests : IDisposable
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
         var json = await ReadResponseJson(context);
-        var result = json.GetProperty("results").GetProperty("order-4");
+        var result = json.GetProperty("results").GetProperty("401");
 
-        Assert.Equal("cust-4", result.GetProperty("CustomerId").GetString());
+        Assert.Equal("400", result.GetProperty("CustomerId").GetString());
         Assert.True(result.TryGetProperty("Customer", out var expanded), "Expected expanded 'Customer' property in batch result");
         Assert.Equal("Delta Inc", expanded.GetProperty("Name").GetString());
     }
@@ -594,10 +595,10 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityById_WithTraverseRelationships_ToleratesMissingRelatedEntity()
     {
         // Arrange — order references a customer that doesn't exist in the store
-        var order = new Order { Id = "order-5", OrderNumber = "ORD-005", CustomerId = "missing-cust", Status = "Open" };
+        var order = new Order { Key = 501, OrderNumber = "ORD-005", CustomerId = "999", Status = "Open" };
         _testStore.Save(order);
 
-        var context = CreateHttpContext("GET", "/api/_lookup/orders/order-5?traverseRelationships=true");
+        var context = CreateHttpContext("GET", "/api/_lookup/orders/501?traverseRelationships=true");
 
         // Act — should not throw; missing related entity is silently skipped
         await _server.RequestHandler(context);
@@ -605,7 +606,7 @@ public class LookupApiHandlerTests : IDisposable
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
         var json = await ReadResponseJson(context);
-        Assert.Equal("missing-cust", json.GetProperty("CustomerId").GetString());
+        Assert.Equal("999", json.GetProperty("CustomerId").GetString());
         Assert.False(json.TryGetProperty("Customer", out _), "No expanded key should be added when related entity is missing");
     }
 
@@ -719,7 +720,7 @@ public class LookupApiHandlerTests : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<string, BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
 
@@ -729,7 +730,7 @@ public class LookupApiHandlerTests : IDisposable
 
         public void Save<T>(T obj) where T : BaseDataObject
         {
-            _store[typeof(T).Name + ":" + obj.Id] = obj;
+            _store[(typeof(T), obj.Key)] = obj;
         }
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
@@ -738,24 +739,24 @@ public class LookupApiHandlerTests : IDisposable
             return ValueTask.CompletedTask;
         }
 
-        public T? Load<T>(string id) where T : BaseDataObject
+        public T? Load<T>(uint key) where T : BaseDataObject
         {
-            return _store.TryGetValue(typeof(T).Name + ":" + id, out var obj) ? obj as T : null;
+            return _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
         }
 
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            return ValueTask.FromResult(Load<T>(id));
+            return ValueTask.FromResult(Load<T>(key));
         }
 
-        public void Delete<T>(string id) where T : BaseDataObject
+        public void Delete<T>(uint key) where T : BaseDataObject
         {
-            _store.Remove(typeof(T).Name + ":" + id);
+            _store.Remove((typeof(T), key));
         }
 
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            Delete<T>(id);
+            Delete<T>(key);
             return ValueTask.CompletedTask;
         }
 

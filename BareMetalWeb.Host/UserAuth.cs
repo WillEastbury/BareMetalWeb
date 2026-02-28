@@ -32,7 +32,7 @@ public static class UserAuth
             return null;
         }
 
-        var session = DataStoreProvider.Current.Load<UserSession>(sessionId);
+        var session = DataStoreProvider.Current.Load<UserSession>(uint.Parse(sessionId));
         if (session == null)
             return null;
 
@@ -86,7 +86,7 @@ public static class UserAuth
             return null;
         }
 
-        var session = await DataStoreProvider.Current.LoadAsync<UserSession>(sessionId, cancellationToken).ConfigureAwait(false);
+        var session = await DataStoreProvider.Current.LoadAsync<UserSession>(uint.Parse(sessionId), cancellationToken).ConfigureAwait(false);
         if (session == null)
             return null;
 
@@ -131,7 +131,7 @@ public static class UserAuth
         if (session == null)
             return null;
 
-        var user = await Users.GetByIdAsync(session.UserId, cancellationToken).ConfigureAwait(false);
+        var user = await Users.GetByIdAsync(uint.Parse(session.UserId), cancellationToken).ConfigureAwait(false);
         if (user == null || !user.IsActive)
             return null;
 
@@ -161,7 +161,7 @@ public static class UserAuth
         var now = DateTime.UtcNow;
         var session = new UserSession
         {
-            UserId = user.Id,
+            UserId = user.Key.ToString(),
             UserName = user.UserName,
             DisplayName = user.DisplayName,
             Permissions = user.Permissions ?? Array.Empty<string>(),
@@ -185,7 +185,7 @@ public static class UserAuth
         if (rememberMe)
             options.Expires = session.ExpiresUtc;
 
-        var protectedSessionId = CookieProtection.Protect(session.Id);
+        var protectedSessionId = CookieProtection.Protect(session.Key.ToString());
         context.SetCookie(SessionCookieName, protectedSessionId, options);
     }
 

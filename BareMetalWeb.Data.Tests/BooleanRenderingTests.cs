@@ -40,7 +40,7 @@ public class BooleanRenderingTests : IDisposable
         // Arrange
         var customer = new Customer
         {
-            Id = "cust-1",
+            Key = 1,
             Name = "Test Customer",
             Email = "test@example.com",
             IsActive = true
@@ -66,7 +66,7 @@ public class BooleanRenderingTests : IDisposable
         // Arrange
         var customer = new Customer
         {
-            Id = "cust-2",
+            Key = 2,
             Name = "Inactive Customer",
             Email = "inactive@example.com",
             IsActive = false
@@ -94,7 +94,7 @@ public class BooleanRenderingTests : IDisposable
         {
             new Product
             {
-                Id = "prod-1",
+                Key = 1,
                 Name = "Active Product",
                 Sku = "SKU-001",
                 IsActive = true,
@@ -132,7 +132,7 @@ public class BooleanRenderingTests : IDisposable
         {
             new Product
             {
-                Id = "prod-2",
+                Key = 2,
                 Name = "Inactive Product",
                 Sku = "SKU-002",
                 IsActive = false,
@@ -168,8 +168,8 @@ public class BooleanRenderingTests : IDisposable
         // Arrange
         var customers = new[]
         {
-            new Customer { Id = "c1", Name = "Active", Email = "a@test.com", IsActive = true },
-            new Customer { Id = "c2", Name = "Inactive", Email = "b@test.com", IsActive = false }
+            new Customer { Key = 1, Name = "Active", Email = "a@test.com", IsActive = true },
+            new Customer { Key = 2, Name = "Inactive", Email = "b@test.com", IsActive = false }
         };
 
         var meta = DataScaffold.GetEntityByType(typeof(Customer));
@@ -201,7 +201,7 @@ public class BooleanRenderingTests : IDisposable
     /// </summary>
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<(Type, string), BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
@@ -209,16 +209,16 @@ public class BooleanRenderingTests : IDisposable
         public void ClearProviders() { }
 
         public void Save<T>(T obj) where T : BaseDataObject
-            => _store[(typeof(T), obj.Id)] = obj;
+            => _store[(typeof(T), obj.Key)] = obj;
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
         { Save(obj); return ValueTask.CompletedTask; }
 
-        public T? Load<T>(string id) where T : BaseDataObject
-            => _store.TryGetValue((typeof(T), id), out var obj) ? obj as T : null;
+        public T? Load<T>(uint key) where T : BaseDataObject
+            => _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
 
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult(Load<T>(id));
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult(Load<T>(key));
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
             => _store.Values.OfType<T>();
@@ -229,10 +229,10 @@ public class BooleanRenderingTests : IDisposable
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
             => ValueTask.FromResult(Query<T>(query).Count());
 
-        public void Delete<T>(string id) where T : BaseDataObject
-            => _store.Remove((typeof(T), id));
+        public void Delete<T>(uint key) where T : BaseDataObject
+            => _store.Remove((typeof(T), key));
 
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-        { Delete<T>(id); return ValueTask.CompletedTask; }
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+        { Delete<T>(key); return ValueTask.CompletedTask; }
     }
 }

@@ -63,7 +63,7 @@
   "fields": [
     {
       "FieldId": "c7fc83f8-a959-4ad0-ae7b-b12e3b31584f",
-      "EntityId": "390ff9e0bc5641bc949e8de00e74ff56",
+      "EntityId": "08f87c54-7743-4444-9518-36b80802d30c",
       "Name": "Name",
       "Label": "Name",
       "Ordinal": 1,
@@ -85,7 +85,7 @@
     },
     {
       "FieldId": "99b0e7bb-4cf0-4326-8006-a15bf1356c7b",
-      "EntityId": "5619854a21754507aef78a9eb326cf9f",
+      "EntityId": "6618d6fa-ad62-4f5f-baae-5b8a33e83a16",
       "Name": "SubjectId",
       "Label": "Subject Id",
       "Ordinal": 1,
@@ -110,7 +110,7 @@
     },
     {
       "FieldId": "ecaa3f96-3cab-48b6-a0a6-f69ee4f267f6",
-      "EntityId": "5619854a21754507aef78a9eb326cf9f",
+      "EntityId": "6618d6fa-ad62-4f5f-baae-5b8a33e83a16",
       "Name": "Notes",
       "Label": "Notes",
       "Ordinal": 2,
@@ -132,7 +132,7 @@
     },
     {
       "FieldId": "e0dde8f0-5c45-4577-b8ac-ea2f3329256c",
-      "EntityId": "5619854a21754507aef78a9eb326cf9f",
+      "EntityId": "6618d6fa-ad62-4f5f-baae-5b8a33e83a16",
       "Name": "Day",
       "Label": "Day",
       "Ordinal": 3,
@@ -155,7 +155,7 @@
     },
     {
       "FieldId": "db2629ac-5d46-4822-8c31-640cbaaa036b",
-      "EntityId": "5619854a21754507aef78a9eb326cf9f",
+      "EntityId": "6618d6fa-ad62-4f5f-baae-5b8a33e83a16",
       "Name": "StartTime",
       "Label": "Start Time",
       "Ordinal": 4,
@@ -177,7 +177,7 @@
     },
     {
       "FieldId": "fa7f9baf-d6e1-44a7-b566-e217520b8787",
-      "EntityId": "5619854a21754507aef78a9eb326cf9f",
+      "EntityId": "6618d6fa-ad62-4f5f-baae-5b8a33e83a16",
       "Name": "Minutes",
       "Label": "Minutes",
       "Ordinal": 5,
@@ -199,7 +199,7 @@
     },
     {
       "FieldId": "82cda030-1085-4973-a3ff-8befac329081",
-      "EntityId": "2aa78e7a64c04528a794a6cafedeb875",
+      "EntityId": "3cebf6bb-116d-4268-aeac-47ffada6981c",
       "Name": "SubjectId",
       "Label": "Subject Id",
       "Ordinal": 1,
@@ -224,7 +224,7 @@
     },
     {
       "FieldId": "1604ffe2-fbb0-45bb-b1c4-c5913fb7ecd2",
-      "EntityId": "2aa78e7a64c04528a794a6cafedeb875",
+      "EntityId": "3cebf6bb-116d-4268-aeac-47ffada6981c",
       "Name": "Date",
       "Label": "Date",
       "Ordinal": 2,
@@ -246,7 +246,7 @@
     },
     {
       "FieldId": "0bd47504-15ee-428d-8764-c05bcbff3157",
-      "EntityId": "2aa78e7a64c04528a794a6cafedeb875",
+      "EntityId": "3cebf6bb-116d-4268-aeac-47ffada6981c",
       "Name": "StartTime",
       "Label": "Start Time",
       "Ordinal": 3,
@@ -268,7 +268,7 @@
     },
     {
       "FieldId": "d349323f-ada2-49e5-9eba-d5850524454d",
-      "EntityId": "2aa78e7a64c04528a794a6cafedeb875",
+      "EntityId": "3cebf6bb-116d-4268-aeac-47ffada6981c",
       "Name": "Minutes",
       "Label": "Minutes",
       "Ordinal": 4,
@@ -290,7 +290,7 @@
     },
     {
       "FieldId": "968f51ef-5283-4300-bc47-c07ce9f69a1c",
-      "EntityId": "2aa78e7a64c04528a794a6cafedeb875",
+      "EntityId": "3cebf6bb-116d-4268-aeac-47ffada6981c",
       "Name": "Notes",
       "Label": "Notes",
       "Ordinal": 5,
@@ -312,7 +312,7 @@
     },
     {
       "FieldId": "56159a01-e408-40ef-b9be-ce0924737e29",
-      "EntityId": "2aa78e7a64c04528a794a6cafedeb875",
+      "EntityId": "3cebf6bb-116d-4268-aeac-47ffada6981c",
       "Name": "Link",
       "Label": "Link",
       "Ordinal": 6,

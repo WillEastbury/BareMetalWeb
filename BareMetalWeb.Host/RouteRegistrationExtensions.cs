@@ -886,6 +886,7 @@ public static class RouteRegistrationExtensions
                     ["valueField"] = f.Lookup.ValueField,
                     ["displayField"] = f.Lookup.DisplayField,
                     ["queryField"] = f.Lookup.QueryField,
+                    ["queryOperator"] = f.Lookup.QueryOperator.ToString(),
                     ["queryValue"] = f.Lookup.QueryValue,
                     ["sortField"] = f.Lookup.SortField,
                     ["sortDirection"] = f.Lookup.SortDirection.ToString(),
@@ -1071,7 +1072,7 @@ public static class RouteRegistrationExtensions
                         sb.Append("</td><td><code>");
                         sb.Append(WebUtility.HtmlEncode(r.RootEntity));
                         sb.Append("</code></td><td><a class=\"btn btn-sm btn-primary\" href=\"/reports/");
-                        sb.Append(WebUtility.UrlEncode(r.Id));
+                        sb.Append(WebUtility.UrlEncode(r.Key.ToString()));
                         sb.Append("\"><i class=\"bi bi-play-fill\"></i> Run</a></td></tr>");
                     }
                     sb.Append("</tbody></table></div>");
@@ -1101,7 +1102,7 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(id, context.RequestAborted).ConfigureAwait(false);
+                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(uint.Parse(id), context.RequestAborted).ConfigureAwait(false);
                 if (def == null)
                 {
                     context.Response.StatusCode = 404;
@@ -1167,7 +1168,7 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(id, context.RequestAborted).ConfigureAwait(false);
+                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(uint.Parse(id), context.RequestAborted).ConfigureAwait(false);
                 if (def == null)
                 {
                     context.Response.StatusCode = 404;
@@ -1537,7 +1538,7 @@ public static class RouteRegistrationExtensions
             foreach (var id in uniqueIds)
             {
                 if (slugResults.ContainsKey(id!)) continue; // already loaded by a previous field
-                var entity = await targetMeta.Handlers.LoadAsync(id!, cancellationToken).ConfigureAwait(false);
+                var entity = await targetMeta.Handlers.LoadAsync(uint.Parse(id!), cancellationToken).ConfigureAwait(false);
                 if (entity != null)
                     slugResults[id!] = RouteHandlers.BuildApiModel(targetMeta, entity);
             }

@@ -217,7 +217,7 @@ internal sealed class SearchIndexManager
 
     public void IndexObject(BaseDataObject obj)
     {
-        if (obj == null || string.IsNullOrWhiteSpace(obj.Id))
+        if (obj == null || string.IsNullOrWhiteSpace(obj.Key.ToString()))
             return;
 
         var type = obj.GetType();
@@ -227,7 +227,7 @@ internal sealed class SearchIndexManager
 
         lock (index.Sync)
         {
-            RemoveObjectInternal(index, obj.Id, metadata);
+            RemoveObjectInternal(index, obj.Key.ToString(), metadata);
             if (tokens.Count == 0)
             {
                 index.IsBuilt = true;
@@ -235,7 +235,7 @@ internal sealed class SearchIndexManager
                 return;
             }
 
-            index.IdToTokens[obj.Id] = tokens;
+            index.IdToTokens[obj.Key.ToString()] = tokens;
             foreach (var token in tokens)
             {
                 // Add to Inverted index (always present for backward compatibility)
@@ -244,18 +244,18 @@ internal sealed class SearchIndexManager
                     ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     index.Tokens[token] = ids;
                 }
-                ids.Add(obj.Id);
+                ids.Add(obj.Key.ToString());
                 AddToPrefixTree(index, token);
 
                 // Add to other index types as needed
                 if (metadata.IndexKinds.Contains(IndexKind.BTree))
-                    AddToBTree(index, token, obj.Id);
+                    AddToBTree(index, token, obj.Key.ToString());
                 
                 if (metadata.IndexKinds.Contains(IndexKind.Treap))
-                    AddToTreap(index, token, obj.Id);
+                    AddToTreap(index, token, obj.Key.ToString());
                 
                 if (metadata.IndexKinds.Contains(IndexKind.Bloom))
-                    AddToBloomFilter(index, token, obj.Id);
+                    AddToBloomFilter(index, token, obj.Key.ToString());
             }
 
             index.IsBuilt = true;
@@ -281,7 +281,7 @@ internal sealed class SearchIndexManager
 
     public void RemoveObject(BaseDataObject obj)
     {
-        if (obj == null || string.IsNullOrWhiteSpace(obj.Id))
+        if (obj == null || string.IsNullOrWhiteSpace(obj.Key.ToString()))
             return;
 
         var type = obj.GetType();
@@ -289,7 +289,7 @@ internal sealed class SearchIndexManager
         var index = _indexes.GetOrAdd(type, LoadIndex);
         lock (index.Sync)
         {
-            RemoveObjectInternal(index, obj.Id, metadata);
+            RemoveObjectInternal(index, obj.Key.ToString(), metadata);
             SaveIndex(type, index);
         }
     }
@@ -555,14 +555,14 @@ internal sealed class SearchIndexManager
         
         foreach (var obj in allObjects)
         {
-            if (obj == null || string.IsNullOrWhiteSpace(obj.Id))
+            if (obj == null || string.IsNullOrWhiteSpace(obj.Key.ToString()))
                 continue;
 
             var tokens = BuildTokens(obj, index);
             if (tokens.Count == 0)
                 continue;
 
-            index.IdToTokens[obj.Id] = tokens;
+            index.IdToTokens[obj.Key.ToString()] = tokens;
             foreach (var token in tokens)
             {
                 // Build inverted index
@@ -571,18 +571,18 @@ internal sealed class SearchIndexManager
                     ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                     index.Tokens[token] = ids;
                 }
-                ids.Add(obj.Id);
+                ids.Add(obj.Key.ToString());
                 AddToPrefixTree(index, token);
                 
                 // Build other index types
                 if (metadata.IndexKinds.Contains(IndexKind.BTree))
-                    AddToBTree(index, token, obj.Id);
+                    AddToBTree(index, token, obj.Key.ToString());
                 
                 if (metadata.IndexKinds.Contains(IndexKind.Treap))
-                    AddToTreap(index, token, obj.Id);
+                    AddToTreap(index, token, obj.Key.ToString());
                 
                 if (metadata.IndexKinds.Contains(IndexKind.Bloom))
-                    AddToBloomFilter(index, token, obj.Id);
+                    AddToBloomFilter(index, token, obj.Key.ToString());
             }
         }
     }

@@ -82,7 +82,7 @@ public class SearchIndexingTests : IDisposable
         var manager = new SearchIndexManager(_testRoot, _logger);
         var item = new TestSearchableItem
         {
-            Id = "1",
+            Key = 1,
             Name = "Test Product",
             Category = "Electronics",
             Tags = "gadget device",
@@ -94,7 +94,7 @@ public class SearchIndexingTests : IDisposable
         var results = manager.Search(typeof(TestSearchableItem), "Product", () => new[] { item });
 
         // Assert
-        Assert.Contains(item.Id, results);
+        Assert.Contains(item.Key.ToString(), results);
     }
 
     [Fact]
@@ -104,9 +104,9 @@ public class SearchIndexingTests : IDisposable
         var manager = new SearchIndexManager(_testRoot, _logger);
         var items = new[]
         {
-            new TestSearchableItem { Id = "1", Name = "Item1", Category = "Electronics" },
-            new TestSearchableItem { Id = "2", Name = "Item2", Category = "Books" },
-            new TestSearchableItem { Id = "3", Name = "Item3", Category = "Electronics" }
+            new TestSearchableItem { Key = 1, Name = "Item1", Category = "Electronics" },
+            new TestSearchableItem { Key = 2, Name = "Item2", Category = "Books" },
+            new TestSearchableItem { Key = 3, Name = "Item3", Category = "Electronics" }
         };
 
         // Act
@@ -128,9 +128,9 @@ public class SearchIndexingTests : IDisposable
         var manager = new SearchIndexManager(_testRoot, _logger);
         var items = new[]
         {
-            new TestSearchableItem { Id = "1", Name = "Item1", Tags = "gadget device" },
-            new TestSearchableItem { Id = "2", Name = "Item2", Tags = "book reading" },
-            new TestSearchableItem { Id = "3", Name = "Item3", Tags = "gadget tech" }
+            new TestSearchableItem { Key = 1, Name = "Item1", Tags = "gadget device" },
+            new TestSearchableItem { Key = 2, Name = "Item2", Tags = "book reading" },
+            new TestSearchableItem { Key = 3, Name = "Item3", Tags = "gadget tech" }
         };
 
         // Act
@@ -152,9 +152,9 @@ public class SearchIndexingTests : IDisposable
         var manager = new SearchIndexManager(_testRoot, _logger);
         var items = new[]
         {
-            new TestSearchableItem { Id = "1", Name = "Item1", Description = "great product" },
-            new TestSearchableItem { Id = "2", Name = "Item2", Description = "amazing deal" },
-            new TestSearchableItem { Id = "3", Name = "Item3", Description = "great value" }
+            new TestSearchableItem { Key = 1, Name = "Item1", Description = "great product" },
+            new TestSearchableItem { Key = 2, Name = "Item2", Description = "amazing deal" },
+            new TestSearchableItem { Key = 3, Name = "Item3", Description = "great value" }
         };
 
         // Act
@@ -176,7 +176,7 @@ public class SearchIndexingTests : IDisposable
         var manager = new SearchIndexManager(_testRoot, _logger);
         var item = new TestSearchableItem
         {
-            Id = "1",
+            Key = 1,
             Name = "Test Product",
             Category = "Electronics",
             Tags = "gadget",
@@ -206,7 +206,7 @@ public class SearchIndexingTests : IDisposable
         var manager = new SearchIndexManager(_testRoot, _logger);
         var item = new TestSearchableItem
         {
-            Id = "1",
+            Key = 1,
             Name = "Old Name",
             Category = "Old Category"
         };
@@ -232,9 +232,9 @@ public class SearchIndexingTests : IDisposable
         var manager = new SearchIndexManager(_testRoot, _logger);
         var items = new[]
         {
-            new TestSearchableItem { Id = "1", Name = "Apple Phone" },
-            new TestSearchableItem { Id = "2", Name = "Orange Juice" },
-            new TestSearchableItem { Id = "3", Name = "Apple Juice" }
+            new TestSearchableItem { Key = 1, Name = "Apple Phone" },
+            new TestSearchableItem { Key = 2, Name = "Orange Juice" },
+            new TestSearchableItem { Key = 3, Name = "Apple Juice" }
         };
 
         // Act
@@ -254,9 +254,9 @@ public class SearchIndexingTests : IDisposable
         var manager = new SearchIndexManager(_testRoot, _logger);
         var items = new[]
         {
-            new TestSearchableItem { Id = "1", Category = "Electronics" },
-            new TestSearchableItem { Id = "2", Category = "Electrical" },
-            new TestSearchableItem { Id = "3", Category = "Books" }
+            new TestSearchableItem { Key = 1, Category = "Electronics" },
+            new TestSearchableItem { Key = 2, Category = "Electrical" },
+            new TestSearchableItem { Key = 3, Category = "Books" }
         };
 
         // Act
@@ -353,7 +353,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_And_Search_FindsByExactToken()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "Hello World" };
+        var entity = new SimpleEntity { Key = 1, Name = "Hello World" };
         _manager.IndexObject(entity);
 
         // Act
@@ -367,7 +367,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_CaseInsensitive_FindsMatch()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "FooBar" };
+        var entity = new SimpleEntity { Key = 1, Name = "FooBar" };
         _manager.IndexObject(entity);
 
         // Act
@@ -381,8 +381,8 @@ public class SearchIndexingTests : IDisposable
     public void Search_MultipleTokensInQuery_FindsAll()
     {
         // Arrange
-        var e1 = new SimpleEntity { Id = "1", Name = "alpha" };
-        var e2 = new SimpleEntity { Id = "2", Name = "beta" };
+        var e1 = new SimpleEntity { Key = 1, Name = "alpha" };
+        var e2 = new SimpleEntity { Key = 2, Name = "beta" };
         _manager.IndexObject(e1);
         _manager.IndexObject(e2);
 
@@ -398,7 +398,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_NoMatch_ReturnsEmpty()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "Hello" };
+        var entity = new SimpleEntity { Key = 1, Name = "Hello" };
         _manager.IndexObject(entity);
 
         // Act
@@ -412,7 +412,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_PrefixMatch_FindsToken()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "programming" };
+        var entity = new SimpleEntity { Key = 1, Name = "programming" };
         _manager.IndexObject(entity);
 
         // Act - "pro" is a 3-char prefix that should match via prefix tree
@@ -430,7 +430,7 @@ public class SearchIndexingTests : IDisposable
         // Arrange
         var entity = new MultiFieldEntity
         {
-            Id = "1",
+            Key = 1,
             Title = "Widgets",
             Description = "Industrial gadgets"
         };
@@ -451,7 +451,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_IntField_SearchByNumberString()
     {
         // Arrange
-        var entity = new IntFieldEntity { Id = "1", Code = 42 };
+        var entity = new IntFieldEntity { Key = 1, Code = 42 };
         _manager.IndexObject(entity);
 
         // Act
@@ -467,7 +467,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_ListField_SearchByAnyTag()
     {
         // Arrange
-        var entity = new ListFieldEntity { Id = "1", Tags = new List<string> { "csharp", "dotnet", "testing" } };
+        var entity = new ListFieldEntity { Key = 1, Tags = new List<string> { "csharp", "dotnet", "testing" } };
         _manager.IndexObject(entity);
 
         // Act
@@ -483,7 +483,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_TokenizesOnPunctuation()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "foo-bar_baz.qux" };
+        var entity = new SimpleEntity { Key = 1, Name = "foo-bar_baz.qux" };
         _manager.IndexObject(entity);
 
         // Act - each word between separators is a token
@@ -503,7 +503,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_TokensAreLowercased()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "CamelCaseWord" };
+        var entity = new SimpleEntity { Key = 1, Name = "CamelCaseWord" };
         _manager.IndexObject(entity);
 
         // Act
@@ -519,7 +519,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_UnicodeLetters_AreIndexed()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "café résumé" };
+        var entity = new SimpleEntity { Key = 1, Name = "café résumé" };
         _manager.IndexObject(entity);
 
         // Act
@@ -533,7 +533,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_SpecialCharactersStripped_TokensSplit()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "hello@world.com" };
+        var entity = new SimpleEntity { Key = 1, Name = "hello@world.com" };
         _manager.IndexObject(entity);
 
         // Act - '@' and '.' are separators, tokens are "hello", "world", "com"
@@ -547,7 +547,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_DigitsInTokens_ArePreserved()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "version2 release3" };
+        var entity = new SimpleEntity { Key = 1, Name = "version2 release3" };
         _manager.IndexObject(entity);
 
         // Act
@@ -563,7 +563,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_EmptyQuery_ReturnsEmpty()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "test" };
+        var entity = new SimpleEntity { Key = 1, Name = "test" };
         _manager.IndexObject(entity);
 
         // Act
@@ -577,7 +577,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_NullQuery_ReturnsEmpty()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "test" };
+        var entity = new SimpleEntity { Key = 1, Name = "test" };
         _manager.IndexObject(entity);
 
         // Act
@@ -591,7 +591,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_WhitespaceQuery_ReturnsEmpty()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "test" };
+        var entity = new SimpleEntity { Key = 1, Name = "test" };
         _manager.IndexObject(entity);
 
         // Act
@@ -612,7 +612,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_NullId_DoesNotThrow()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = null!, Name = "test" };
+        var entity = new SimpleEntity { Key = 0, Name = "test" };
 
         // Act & Assert - should not throw
         _manager.IndexObject(entity);
@@ -622,7 +622,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_EmptyName_DoesNotThrow()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "" };
+        var entity = new SimpleEntity { Key = 1, Name = "" };
 
         // Act & Assert - should not throw
         _manager.IndexObject(entity);
@@ -635,7 +635,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_NullableIntField_NullValue_DoesNotThrow()
     {
         // Arrange
-        var entity = new NullableIntEntity { Id = "1", Score = null };
+        var entity = new NullableIntEntity { Key = 1, Score = null };
 
         // Act & Assert - should not throw
         _manager.IndexObject(entity);
@@ -650,7 +650,7 @@ public class SearchIndexingTests : IDisposable
     public void RemoveObject_RemovesFromIndex()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "removeme" };
+        var entity = new SimpleEntity { Key = 1, Name = "removeme" };
         _manager.IndexObject(entity);
 
         // Act
@@ -676,9 +676,9 @@ public class SearchIndexingTests : IDisposable
         // Arrange
         var entities = new List<BaseDataObject>
         {
-            new SimpleEntity { Id = "1", Name = "apple" },
-            new SimpleEntity { Id = "2", Name = "banana" },
-            new SimpleEntity { Id = "3", Name = "cherry" }
+            new SimpleEntity { Key = 1, Name = "apple" },
+            new SimpleEntity { Key = 2, Name = "banana" },
+            new SimpleEntity { Key = 3, Name = "cherry" }
         };
 
         // Act
@@ -696,9 +696,9 @@ public class SearchIndexingTests : IDisposable
         // Arrange
         var entities = new List<BaseDataObject>
         {
-            new SimpleEntity { Id = "1", Name = "valid" },
+            new SimpleEntity { Key = 1, Name = "valid" },
             null!,
-            new SimpleEntity { Id = "", Name = "emptyid" }
+            new SimpleEntity { Key = 0, Name = "emptyid" }
         };
 
         // Act & Assert - should not throw
@@ -713,7 +713,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_ReindexSameId_UpdatesTokens()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "oldvalue" };
+        var entity = new SimpleEntity { Key = 1, Name = "oldvalue" };
         _manager.IndexObject(entity);
 
         // Act - update the entity and re-index
@@ -755,9 +755,9 @@ public class SearchIndexingTests : IDisposable
     public void Search_ReturnsAllMatchingIds()
     {
         // Arrange
-        var e1 = new SimpleEntity { Id = "1", Name = "search term here" };
-        var e2 = new SimpleEntity { Id = "2", Name = "another search result" };
-        var e3 = new SimpleEntity { Id = "3", Name = "unrelated content" };
+        var e1 = new SimpleEntity { Key = 1, Name = "search term here" };
+        var e2 = new SimpleEntity { Key = 2, Name = "another search result" };
+        var e3 = new SimpleEntity { Key = 3, Name = "unrelated content" };
         _manager.IndexObject(e1);
         _manager.IndexObject(e2);
         _manager.IndexObject(e3);
@@ -777,7 +777,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_ShortQueryToken_FallsBackToContains()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "example" };
+        var entity = new SimpleEntity { Key = 1, Name = "example" };
         _manager.IndexObject(entity);
 
         // Act - short query tokens (< 3 chars) that don't exactly match use fallback contains
@@ -793,7 +793,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_PersistsToFile_NewManagerCanSearch()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "persisted" };
+        var entity = new SimpleEntity { Key = 1, Name = "persisted" };
         _manager.IndexObject(entity);
 
         // Act - create a new manager pointing at the same root
@@ -810,7 +810,7 @@ public class SearchIndexingTests : IDisposable
     public void RemoveObject_NonExistentId_DoesNotThrow()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "nonexistent", Name = "test" };
+        var entity = new SimpleEntity { Key = 999, Name = "test" };
 
         // Act & Assert - should not throw
         _manager.RemoveObject(entity);
@@ -820,7 +820,7 @@ public class SearchIndexingTests : IDisposable
     public void RemoveObject_EmptyId_DoesNotThrow()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "", Name = "test" };
+        var entity = new SimpleEntity { Key = 0, Name = "test" };
 
         // Act & Assert - should not throw
         _manager.RemoveObject(entity);
@@ -830,8 +830,8 @@ public class SearchIndexingTests : IDisposable
     public void RemoveObject_OnlyRemovesTargetEntity()
     {
         // Arrange
-        var e1 = new SimpleEntity { Id = "1", Name = "shared token" };
-        var e2 = new SimpleEntity { Id = "2", Name = "shared value" };
+        var e1 = new SimpleEntity { Key = 1, Name = "shared token" };
+        var e2 = new SimpleEntity { Key = 2, Name = "shared value" };
         _manager.IndexObject(e1);
         _manager.IndexObject(e2);
 
@@ -854,7 +854,7 @@ public class SearchIndexingTests : IDisposable
         IEnumerable<BaseDataObject> LoadAll()
         {
             loadCount++;
-            return new[] { new SimpleEntity { Id = "1", Name = "test" } };
+            return new[] { new SimpleEntity { Key = 1, Name = "test" } };
         }
 
         // Act
@@ -871,7 +871,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_NullableIntField_WithValue_IsSearchable()
     {
         // Arrange
-        var entity = new NullableIntEntity { Id = "1", Score = 99 };
+        var entity = new NullableIntEntity { Key = 1, Score = 99 };
         _manager.IndexObject(entity);
 
         // Act
@@ -887,7 +887,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_ListField_EmptyList_DoesNotThrow()
     {
         // Arrange
-        var entity = new ListFieldEntity { Id = "1", Tags = new List<string>() };
+        var entity = new ListFieldEntity { Key = 1, Tags = new List<string>() };
 
         // Act & Assert
         _manager.IndexObject(entity);
@@ -899,7 +899,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_ListField_NullItems_DoesNotThrow()
     {
         // Arrange
-        var entity = new ListFieldEntity { Id = "1", Tags = new List<string> { null!, "valid", "" } };
+        var entity = new ListFieldEntity { Key = 1, Tags = new List<string> { null!, "valid", "" } };
 
         // Act & Assert - should not throw
         _manager.IndexObject(entity);
@@ -919,7 +919,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_NonInvertedKind_FallsBackToInverted()
     {
         // Arrange
-        var entity = new BTreeEntity { Id = "1", Label = "fallback" };
+        var entity = new BTreeEntity { Key = 1, Label = "fallback" };
 
         // Act - BTree is not implemented, should fall back to inverted
         _manager.IndexObject(entity);
@@ -935,7 +935,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_CJKCharacters_AreIndexed()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "日本語テスト" };
+        var entity = new SimpleEntity { Key = 1, Name = "日本語テスト" };
         _manager.IndexObject(entity);
 
         // Act
@@ -949,7 +949,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_EmojiStripped_TokensSplit()
     {
         // Arrange - emoji are not letters/digits, so they act as separators
-        var entity = new SimpleEntity { Id = "1", Name = "hello😀world" };
+        var entity = new SimpleEntity { Key = 1, Name = "hello😀world" };
         _manager.IndexObject(entity);
 
         // Act
@@ -965,7 +965,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_AccentedCharacters_AreLowercased()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "RÉSUMÉ" };
+        var entity = new SimpleEntity { Key = 1, Name = "RÉSUMÉ" };
         _manager.IndexObject(entity);
 
         // Act
@@ -979,7 +979,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_QueryWithOnlySpecialChars_ReturnsEmpty()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "test" };
+        var entity = new SimpleEntity { Key = 1, Name = "test" };
         _manager.IndexObject(entity);
 
         // Act - query of only special characters produces no tokens
@@ -996,7 +996,7 @@ public class SearchIndexingTests : IDisposable
     {
         // Arrange - token > 256 chars triggers overflow buffer in TokenizeToHashSet
         var longWord = new string('a', 300);
-        var entity = new SimpleEntity { Id = "1", Name = longWord };
+        var entity = new SimpleEntity { Key = 1, Name = longWord };
         _manager.IndexObject(entity);
 
         // Act
@@ -1012,7 +1012,7 @@ public class SearchIndexingTests : IDisposable
     public void RemoveObject_CleansUpPrefixTree_NoStaleResults()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "uniqueprefix" };
+        var entity = new SimpleEntity { Key = 1, Name = "uniqueprefix" };
         _manager.IndexObject(entity);
 
         // Act
@@ -1029,8 +1029,8 @@ public class SearchIndexingTests : IDisposable
     public void Search_MultiField_MatchesAcrossFieldsIndependently()
     {
         // Arrange
-        var e1 = new MultiFieldEntity { Id = "1", Title = "alpha", Description = "beta" };
-        var e2 = new MultiFieldEntity { Id = "2", Title = "gamma", Description = "delta" };
+        var e1 = new MultiFieldEntity { Key = 1, Title = "alpha", Description = "beta" };
+        var e2 = new MultiFieldEntity { Key = 2, Title = "gamma", Description = "delta" };
         _manager.IndexObject(e1);
         _manager.IndexObject(e2);
 
@@ -1049,9 +1049,9 @@ public class SearchIndexingTests : IDisposable
         var manager = new SearchIndexManager(_testRoot, _logger);
         var items = new[]
         {
-            new TestSearchableItem { Id = "1", Name = "Item One" },
-            new TestSearchableItem { Id = "2", Name = "Item Two" },
-            new TestSearchableItem { Id = "3", Name = "Item Three" }
+            new TestSearchableItem { Key = 1, Name = "Item One" },
+            new TestSearchableItem { Key = 2, Name = "Item Two" },
+            new TestSearchableItem { Key = 3, Name = "Item Three" }
         };
 
         // Act - EnsureBuilt should be called internally by Search
@@ -1069,12 +1069,12 @@ public class SearchIndexingTests : IDisposable
         // Arrange
         var entities = new List<BaseDataObject>
         {
-            new SimpleEntity { Id = "1", Name = "original" }
+            new SimpleEntity { Key = 1, Name = "original" }
         };
         _manager.EnsureBuilt(typeof(SimpleEntity), () => entities);
 
         // Act - add a new entity after index is built
-        var newEntity = new SimpleEntity { Id = "2", Name = "incremental" };
+        var newEntity = new SimpleEntity { Key = 2, Name = "incremental" };
         _manager.IndexObject(newEntity);
         var results = _manager.Search(typeof(SimpleEntity), "incremental", () => entities);
 
@@ -1094,7 +1094,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_IntEnumerable_TokenizesViaToString()
     {
         // Arrange
-        var entity = new IntListEntity { Id = "1", Values = new List<int> { 10, 20, 30 } };
+        var entity = new IntListEntity { Key = 1, Values = new List<int> { 10, 20, 30 } };
         _manager.IndexObject(entity);
 
         // Act
@@ -1110,9 +1110,9 @@ public class SearchIndexingTests : IDisposable
     public void Search_MultipleEntitiesSameToken_ReturnsAll()
     {
         // Arrange
-        var e1 = new SimpleEntity { Id = "1", Name = "common word" };
-        var e2 = new SimpleEntity { Id = "2", Name = "common phrase" };
-        var e3 = new SimpleEntity { Id = "3", Name = "common term" };
+        var e1 = new SimpleEntity { Key = 1, Name = "common word" };
+        var e2 = new SimpleEntity { Key = 2, Name = "common phrase" };
+        var e3 = new SimpleEntity { Key = 3, Name = "common term" };
         _manager.IndexObject(e1);
         _manager.IndexObject(e2);
         _manager.IndexObject(e3);
@@ -1147,8 +1147,8 @@ public class SearchIndexingTests : IDisposable
     public void Search_DifferentTypes_AreIsolated()
     {
         // Arrange
-        var simple = new SimpleEntity { Id = "1", Name = "overlap" };
-        var multi = new MultiFieldEntity { Id = "2", Title = "overlap", Description = "" };
+        var simple = new SimpleEntity { Key = 1, Name = "overlap" };
+        var multi = new MultiFieldEntity { Key = 2, Title = "overlap", Description = "" };
         _manager.IndexObject(simple);
         _manager.IndexObject(multi);
 
@@ -1182,7 +1182,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_MixedAlphanumericToken_IsKeptTogether()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "abc123def" };
+        var entity = new SimpleEntity { Key = 1, Name = "abc123def" };
         _manager.IndexObject(entity);
 
         // Act
@@ -1220,7 +1220,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_SingleCharToken_MatchesViaContainsFallback()
     {
         // Arrange - "a" is < 3 chars, so prefix tree won't be used
-        var entity = new SimpleEntity { Id = "1", Name = "a" };
+        var entity = new SimpleEntity { Key = 1, Name = "a" };
         _manager.IndexObject(entity);
 
         // Act
@@ -1234,7 +1234,7 @@ public class SearchIndexingTests : IDisposable
     public void Search_TwoCharToken_ExactMatch()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "ab" };
+        var entity = new SimpleEntity { Key = 1, Name = "ab" };
         _manager.IndexObject(entity);
 
         // Act
@@ -1250,7 +1250,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_WhitespaceOnlyName_ProducesNoTokens()
     {
         // Arrange
-        var entity = new SimpleEntity { Id = "1", Name = "   \t\n  " };
+        var entity = new SimpleEntity { Key = 1, Name = "   \t\n  " };
         _manager.IndexObject(entity);
 
         // Act
@@ -1281,8 +1281,8 @@ public class SearchIndexingTests : IDisposable
         // Arrange - two entities with the same ID, last one's tokens should win
         var entities = new List<BaseDataObject>
         {
-            new SimpleEntity { Id = "1", Name = "first" },
-            new SimpleEntity { Id = "1", Name = "second" }
+            new SimpleEntity { Key = 1, Name = "first" },
+            new SimpleEntity { Key = 1, Name = "second" }
         };
 
         // Act

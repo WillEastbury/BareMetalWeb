@@ -8,10 +8,7 @@ namespace BareMetalWeb.Data.Interfaces;
 public interface IIdGenerator
 {
     /// <summary>
-    /// Generates a new ID value for the specified entity type and strategy.
+    /// Generates a new sequential uint key for the specified entity type.
     /// </summary>
-    /// <param name="entityType">The type of entity requiring an ID.</param>
-    /// <param name="strategy">The ID generation strategy to use.</param>
-    /// <returns>A newly generated ID value as a string.</returns>
-    string GenerateId(Type entityType, IdGenerationStrategy strategy);
+    uint GenerateKey(Type entityType);
 }
