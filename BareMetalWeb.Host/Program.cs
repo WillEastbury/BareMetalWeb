@@ -343,10 +343,15 @@ static class ProgramSetup
 
     public static IDataObjectStore CreateDataStore(WebApplication app, ISchemaAwareObjectSerializer serializer, IDataQueryEvaluator queryEvaluator, IBufferedLogger logger)
     {
+        var dataRoot = app.Configuration.GetValue("Data:Root", Path.Combine(app.Environment.ContentRootPath, "Data"));
+
+        // Detect and wipe legacy GUID-based data before opening the store
+        LegacyDataWipeGuard.WipeIfLegacyDetected(dataRoot, logger);
+
         var dataStore = new DataObjectStore();
         DataStoreProvider.Current = dataStore;
         var provider = new WalDataProvider(
-            app.Configuration.GetValue("Data:Root", Path.Combine(app.Environment.ContentRootPath, "Data")),
+            dataRoot,
             serializer,
             queryEvaluator,
             logger);
