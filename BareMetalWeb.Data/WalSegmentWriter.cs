@@ -32,7 +32,7 @@ internal sealed class WalSegmentWriter : IDisposable
         SegmentId = segmentId;
         bool isNew = !File.Exists(filePath);
         _file = new FileStream(filePath, FileMode.OpenOrCreate, FileAccess.ReadWrite,
-            FileShare.None, 65536, FileOptions.None);
+            FileShare.Read, 65536, FileOptions.None);
 
         if (isNew)
             WriteSegmentHeader();
