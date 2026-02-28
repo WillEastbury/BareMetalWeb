@@ -29,9 +29,10 @@ public class RuntimeEntityRegistryTests : IDisposable
 
     // ── EntityDefinition helpers ─────────────────────────────────────────────
 
+    private static uint _nextKey = 1;
     private static EntityDefinition MakeEntity(string name, string? slug = null) => new()
     {
-        Id = Guid.NewGuid().ToString("N"),
+        Key = _nextKey++,
         EntityId = Guid.NewGuid().ToString("D"),
         Name = name,
         Slug = slug,
@@ -46,7 +47,7 @@ public class RuntimeEntityRegistryTests : IDisposable
     private static FieldDefinition MakeField(string entityId, string name, string type,
         int ordinal = 0, bool required = false) => new()
     {
-        Id = Guid.NewGuid().ToString("N"),
+        Key = _nextKey++,
         FieldId = Guid.NewGuid().ToString("D"),
         EntityId = entityId,
         Name = name,
@@ -66,8 +67,8 @@ public class RuntimeEntityRegistryTests : IDisposable
         var entity = MakeEntity("Ticket", "tickets");
         var fields = new List<FieldDefinition>
         {
-            MakeField(entity.Id, "Title", "string", ordinal: 1, required: true),
-            MakeField(entity.Id, "Priority", "enum", ordinal: 2)
+            MakeField(entity.Key.ToString(), "Title", "string", ordinal: 1, required: true),
+            MakeField(entity.Key.ToString(), "Priority", "enum", ordinal: 2)
         };
         ((FieldDefinition)fields[1]).EnumValues = "Low|Medium|High";
 
@@ -104,8 +105,8 @@ public class RuntimeEntityRegistryTests : IDisposable
         // Fields with no ordinal — should get assigned deterministically
         var fields = new List<FieldDefinition>
         {
-            MakeField(entity.Id, "Zzz", "string", ordinal: 0),
-            MakeField(entity.Id, "Aaa", "string", ordinal: 0)
+            MakeField(entity.Key.ToString(), "Zzz", "string", ordinal: 0),
+            MakeField(entity.Key.ToString(), "Aaa", "string", ordinal: 0)
         };
 
         var model = compiler.Compile(entity, fields, Array.Empty<IndexDefinition>(),
@@ -125,7 +126,7 @@ public class RuntimeEntityRegistryTests : IDisposable
     {
         var compiler = new RuntimeEntityCompiler();
         var entity = MakeEntity("HashTest");
-        var fields = new[] { MakeField(entity.Id, "Name", "string", ordinal: 1) };
+        var fields = new[] { MakeField(entity.Key.ToString(), "Name", "string", ordinal: 1) };
 
         var model1 = compiler.Compile(entity, fields, Array.Empty<IndexDefinition>(),
             Array.Empty<ActionDefinition>(), out _);
@@ -144,11 +145,11 @@ public class RuntimeEntityRegistryTests : IDisposable
         var compiler = new RuntimeEntityCompiler();
         var entity = MakeEntity("HashChange");
 
-        var fields1 = new[] { MakeField(entity.Id, "Name", "string", ordinal: 1) };
+        var fields1 = new[] { MakeField(entity.Key.ToString(), "Name", "string", ordinal: 1) };
         var fields2 = new[]
         {
-            MakeField(entity.Id, "Name", "string", ordinal: 1),
-            MakeField(entity.Id, "Email", "email", ordinal: 2)
+            MakeField(entity.Key.ToString(), "Name", "string", ordinal: 1),
+            MakeField(entity.Key.ToString(), "Email", "email", ordinal: 2)
         };
 
         var model1 = compiler.Compile(entity, fields1, Array.Empty<IndexDefinition>(),
@@ -180,8 +181,8 @@ public class RuntimeEntityRegistryTests : IDisposable
         var entity = MakeEntity("IndexTest");
         var index = new IndexDefinition
         {
-            Id = Guid.NewGuid().ToString("N"),
-            EntityId = entity.Id,
+            Key = _nextKey++,
+            EntityId = entity.Key.ToString(),
             FieldNames = "DueDate|Priority",
             Type = "composite"
         };
@@ -202,8 +203,8 @@ public class RuntimeEntityRegistryTests : IDisposable
         var entity = MakeEntity("ActionTest");
         var action = new ActionDefinition
         {
-            Id = Guid.NewGuid().ToString("N"),
-            EntityId = entity.Id,
+            Key = _nextKey++,
+            EntityId = entity.Key.ToString(),
             Name = "Resolve",
             Label = "Mark as Resolved",
             Permission = "Ticket.Resolve",
@@ -243,7 +244,7 @@ public class RuntimeEntityRegistryTests : IDisposable
     {
         var compiler = new RuntimeEntityCompiler();
         var entity = MakeEntity($"TypeTest_{typeStr}");
-        var field = MakeField(entity.Id, "TestField", typeStr, ordinal: 1);
+        var field = MakeField(entity.Key.ToString(), "TestField", typeStr, ordinal: 1);
 
         var model = compiler.Compile(entity, new[] { field }, Array.Empty<IndexDefinition>(),
             Array.Empty<ActionDefinition>(), out _);
@@ -257,7 +258,7 @@ public class RuntimeEntityRegistryTests : IDisposable
     {
         var compiler = new RuntimeEntityCompiler();
         var entity = MakeEntity("MultilineTest");
-        var field = MakeField(entity.Id, "Notes", "string", ordinal: 1);
+        var field = MakeField(entity.Key.ToString(), "Notes", "string", ordinal: 1);
         field.Multiline = true;
 
         var model = compiler.Compile(entity, new[] { field }, Array.Empty<IndexDefinition>(),
@@ -351,7 +352,7 @@ public class RuntimeEntityRegistryTests : IDisposable
     {
         var compiler = new RuntimeEntityCompiler();
         var entity = MakeEntity("ToMetaTest", $"to-meta-{Guid.NewGuid():N}");
-        var fields = new[] { MakeField(entity.Id, "Title", "string", ordinal: 1) };
+        var fields = new[] { MakeField(entity.Key.ToString(), "Title", "string", ordinal: 1) };
         var model = compiler.Compile(entity, fields, Array.Empty<IndexDefinition>(),
             Array.Empty<ActionDefinition>(), out _)!;
 

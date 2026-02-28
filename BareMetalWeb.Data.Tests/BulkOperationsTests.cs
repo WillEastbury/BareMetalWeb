@@ -74,8 +74,8 @@ public class BulkOperationsTests : IDisposable
 
         var items = new List<Product>
         {
-            new Product { Id = "test-1", Name = "Item 1", Price = 10.99m },
-            new Product { Id = "test-2", Name = "Item 2", Price = 20.99m }
+            new Product { Key = 1, Name = "Item 1", Price = 10.99m },
+            new Product { Key = 2, Name = "Item 2", Price = 20.99m }
         };
 
         // Act
@@ -92,12 +92,12 @@ public class BulkOperationsTests : IDisposable
         // First row should have checkbox as first cell
         var firstRow = rows[0];
         Assert.Contains("data-row-checkbox", firstRow[0]);
-        Assert.Contains("data-row-id=\"test-1\"", firstRow[0]);
+        Assert.Contains("data-row-id=\"1\"", firstRow[0]);
         
         // Second row should have checkbox as first cell
         var secondRow = rows[1];
         Assert.Contains("data-row-checkbox", secondRow[0]);
-        Assert.Contains("data-row-id=\"test-2\"", secondRow[0]);
+        Assert.Contains("data-row-id=\"2\"", secondRow[0]);
     }
 
     [Fact]
@@ -109,7 +109,7 @@ public class BulkOperationsTests : IDisposable
 
         var items = new List<Product>
         {
-            new Product { Id = "test-1", Name = "Item 1", Price = 10.99m }
+            new Product { Key = 1, Name = "Item 1", Price = 10.99m }
         };
 
         // Act
@@ -138,7 +138,7 @@ public class BulkOperationsTests : IDisposable
 
         var items = new List<Product>
         {
-            new Product { Id = "test-1", Name = "Item 1", Price = 10.99m }
+            new Product { Key = 1, Name = "Item 1", Price = 10.99m }
         };
 
         // Act
@@ -163,7 +163,7 @@ public class BulkOperationsTests : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<(Type, string), BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
@@ -171,16 +171,16 @@ public class BulkOperationsTests : IDisposable
         public void ClearProviders() { }
 
         public void Save<T>(T obj) where T : BaseDataObject
-            => _store[(typeof(T), obj.Id)] = obj;
+            => _store[(typeof(T), obj.Key)] = obj;
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
         { Save(obj); return ValueTask.CompletedTask; }
 
-        public T? Load<T>(string id) where T : BaseDataObject
-            => _store.TryGetValue((typeof(T), id), out var obj) ? obj as T : null;
+        public T? Load<T>(uint key) where T : BaseDataObject
+            => _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
 
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult(Load<T>(id));
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult(Load<T>(key));
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
             => _store.Values.OfType<T>();
@@ -191,10 +191,10 @@ public class BulkOperationsTests : IDisposable
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
             => ValueTask.FromResult(Query<T>(query).Count());
 
-        public void Delete<T>(string id) where T : BaseDataObject
-            => _store.Remove((typeof(T), id));
+        public void Delete<T>(uint key) where T : BaseDataObject
+            => _store.Remove((typeof(T), key));
 
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-        { Delete<T>(id); return ValueTask.CompletedTask; }
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+        { Delete<T>(key); return ValueTask.CompletedTask; }
     }
 }

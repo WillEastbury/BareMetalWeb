@@ -90,7 +90,7 @@ public static class VirtualEntityLoader
         {
             "sequential" => AutoIdStrategy.Sequential,
             "none" => AutoIdStrategy.None,
-            _ => AutoIdStrategy.Guid
+            _ => AutoIdStrategy.Sequential
         };
 
         // Build field metadata list
@@ -105,9 +105,9 @@ public static class VirtualEntityLoader
         // Build CRUD handlers backed by the JSON store
         var handlers = new DataEntityHandlers(
             Create: () => new DynamicDataObject { EntityTypeName = entityTypeName },
-            LoadAsync: async (id, ct) =>
+            LoadAsync: async (key, ct) =>
             {
-                var obj = await store.LoadAsync(entityTypeName, id, ct).ConfigureAwait(false);
+                var obj = await store.LoadAsync(entityTypeName, key, ct).ConfigureAwait(false);
                 if (obj != null) obj.EntityTypeName = entityTypeName;
                 return obj;
             },
@@ -116,7 +116,7 @@ public static class VirtualEntityLoader
                 if (obj is DynamicDataObject dyn)
                     await store.SaveAsync(entityTypeName, dyn, ct).ConfigureAwait(false);
             },
-            DeleteAsync: (id, ct) => store.DeleteAsync(entityTypeName, id, ct),
+            DeleteAsync: (key, ct) => store.DeleteAsync(entityTypeName, key, ct),
             QueryAsync: async (query, ct) =>
             {
                 var items = await store.QueryAsync(entityTypeName, query, ct).ConfigureAwait(false);

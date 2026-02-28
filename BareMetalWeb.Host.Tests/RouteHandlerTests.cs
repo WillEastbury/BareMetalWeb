@@ -170,7 +170,7 @@ public class RouteHandlerTests : IDisposable
     // ──────────────────────────────────────────────────────────────
 
     [Theory]
-    [InlineData("Id", true)]
+    [InlineData("Key", true)]
     [InlineData("CreatedOnUtc", true)]
     [InlineData("UpdatedOnUtc", true)]
     [InlineData("CreatedBy", true)]
@@ -555,7 +555,7 @@ public class RouteHandlerTests : IDisposable
     [Fact]
     public void ApplyAuditInfo_Create_SetsCreatedAndUpdatedFields()
     {
-        var user = new User { Id = "u1", UserName = "test" };
+        var user = new User { Key = 1, UserName = "test" };
         var before = DateTime.UtcNow;
 
         InvokeStaticRaw("ApplyAuditInfo",
@@ -573,7 +573,7 @@ public class RouteHandlerTests : IDisposable
     {
         var user = new User
         {
-            Id = "u1",
+            Key = 1,
             UserName = "test",
             CreatedBy = "original",
             CreatedOnUtc = DateTime.UtcNow.AddDays(-1)
@@ -894,7 +894,7 @@ public class RouteHandlerTests : IDisposable
     public void ApplyUserPasswordIfNeeded_NonUserMeta_DoesNothing()
     {
         var meta = CreateEmptyEntityMetadata(typeof(Address));
-        var address = new Address { Id = "a1" };
+        var address = new Address { Key = 1 };
         var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["password"] = "secret"
@@ -912,7 +912,7 @@ public class RouteHandlerTests : IDisposable
     public void ApplyUserPasswordIfNeeded_UserMeta_CreateMissingPassword_AddsError()
     {
         var meta = CreateEmptyEntityMetadata(typeof(User));
-        var user = new User { Id = "u1", UserName = "test" };
+        var user = new User { Key = 1, UserName = "test" };
         var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var errors = new List<string>();
 
@@ -927,7 +927,7 @@ public class RouteHandlerTests : IDisposable
     public void ApplyUserPasswordIfNeeded_UserMeta_CreatePasswordMismatch_AddsError()
     {
         var meta = CreateEmptyEntityMetadata(typeof(User));
-        var user = new User { Id = "u1", UserName = "test" };
+        var user = new User { Key = 1, UserName = "test" };
         var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["password"] = "abc123",
@@ -946,7 +946,7 @@ public class RouteHandlerTests : IDisposable
     public void ApplyUserPasswordIfNeeded_UserMeta_CreateMatchingPasswords_SetsPassword()
     {
         var meta = CreateEmptyEntityMetadata(typeof(User));
-        var user = new User { Id = "u1", UserName = "test" };
+        var user = new User { Key = 1, UserName = "test" };
         var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["password"] = "SecurePass123!",
@@ -966,7 +966,7 @@ public class RouteHandlerTests : IDisposable
     public void ApplyUserPasswordIfNeeded_UserMeta_UpdateWithPassword_SetsPassword()
     {
         var meta = CreateEmptyEntityMetadata(typeof(User));
-        var user = new User { Id = "u1", UserName = "test" };
+        var user = new User { Key = 1, UserName = "test" };
         user.SetPassword("OldPassword!");
         var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
@@ -987,7 +987,7 @@ public class RouteHandlerTests : IDisposable
     public void ApplyUserPasswordIfNeeded_UserMeta_UpdateNoPassword_KeepsCurrent()
     {
         var meta = CreateEmptyEntityMetadata(typeof(User));
-        var user = new User { Id = "u1", UserName = "test" };
+        var user = new User { Key = 1, UserName = "test" };
         user.SetPassword("OriginalPassword!");
         var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
         var errors = new List<string>();
@@ -1074,7 +1074,7 @@ public class RouteHandlerTests : IDisposable
     [Fact]
     public void GenerateBackupCodes_ZeroCount_ReturnsEmptyArrays()
     {
-        var user = new User { Id = "u1" };
+        var user = new User { Key = 1 };
         var result = InvokeStaticRaw("GenerateBackupCodes",
             new[] { typeof(User), typeof(int) },
             user, 0);
@@ -1091,7 +1091,7 @@ public class RouteHandlerTests : IDisposable
     [Fact]
     public void GenerateBackupCodes_PositiveCount_GeneratesUniqueCodesAndHashes()
     {
-        var user = new User { Id = "u1" };
+        var user = new User { Key = 1 };
         var result = InvokeStaticRaw("GenerateBackupCodes",
             new[] { typeof(User), typeof(int) },
             user, 4);
@@ -1139,7 +1139,7 @@ public class RouteHandlerTests : IDisposable
         EnsureStore();
         const string slug = "pagination-test-items";
         var items = Enumerable.Range(1, 5)
-            .Select(i => (BaseDataObject)new Address { Id = $"item-{i}" })
+            .Select(i => (BaseDataObject)new Address { Key = (uint)i })
             .ToArray();
 
         var meta = new DataEntityMetadata(
@@ -1197,7 +1197,7 @@ public class RouteHandlerTests : IDisposable
         EnsureStore();
         const string slug = "plain-array-test-items";
         var items = Enumerable.Range(1, 3)
-            .Select(i => (BaseDataObject)new Address { Id = $"item-{i}" })
+            .Select(i => (BaseDataObject)new Address { Key = (uint)i })
             .ToArray();
 
         var meta = new DataEntityMetadata(
@@ -1297,7 +1297,7 @@ public class RouteHandlerTests : IDisposable
         EnsureStore();
         const string slug = "partial-page-clamp-items";
         var items = Enumerable.Range(1, 3)
-            .Select(i => (BaseDataObject)new Address { Id = $"item-{i}" })
+            .Select(i => (BaseDataObject)new Address { Key = (uint)i })
             .ToArray();
 
         var meta = new DataEntityMetadata(
@@ -1478,7 +1478,7 @@ public class RouteHandlerTests : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<string, BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
@@ -1486,17 +1486,17 @@ public class RouteHandlerTests : IDisposable
         public void ClearProviders() { }
         public void Clear() => _store.Clear();
 
-        public void Save<T>(T obj) where T : BaseDataObject => _store[obj.Id] = obj;
+        public void Save<T>(T obj) where T : BaseDataObject => _store[(typeof(T), obj.Key)] = obj;
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
             Save(obj);
             return ValueTask.CompletedTask;
         }
 
-        public T? Load<T>(string id) where T : BaseDataObject =>
-            _store.TryGetValue(id, out var obj) ? obj as T : null;
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject =>
-            ValueTask.FromResult(Load<T>(id));
+        public T? Load<T>(uint key) where T : BaseDataObject =>
+            _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject =>
+            ValueTask.FromResult(Load<T>(key));
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject =>
             _store.Values.OfType<T>();
@@ -1505,10 +1505,10 @@ public class RouteHandlerTests : IDisposable
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject =>
             ValueTask.FromResult(Query<T>(query).Count());
 
-        public void Delete<T>(string id) where T : BaseDataObject => _store.Remove(id);
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public void Delete<T>(uint key) where T : BaseDataObject => _store.Remove((typeof(T), key));
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            Delete<T>(id);
+            Delete<T>(key);
             return ValueTask.CompletedTask;
         }
     }

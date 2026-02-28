@@ -128,7 +128,7 @@ public class BinaryObjectSerializerTests
         // Arrange - simulates what happens when an entity class changes (new field added)
         // and old records are read with a schema whose hash no longer matches the current type.
         var serializer = new BinaryObjectSerializer();
-        var original = new Customer { Id = "c1", Name = "Acme Corp", Email = "acme@test.com" };
+        var original = new Customer { Key = 1, Name = "Acme Corp", Email = "acme@test.com" };
         var bytes = serializer.Serialize(original, 1);
 
         var currentSchema = serializer.BuildSchema(typeof(Customer));
@@ -145,7 +145,7 @@ public class BinaryObjectSerializerTests
         // Arrange - simulates schema evolution: entity was modified after records were saved.
         // The stored schema's hash differs from the current type's hash, but the data is still readable.
         var serializer = new BinaryObjectSerializer();
-        var original = new Customer { Id = "c1", Name = "Acme Corp", Email = "acme@test.com" };
+        var original = new Customer { Key = 1, Name = "Acme Corp", Email = "acme@test.com" };
         var bytes = serializer.Serialize(original, 1);
 
         var currentSchema = serializer.BuildSchema(typeof(Customer));
@@ -157,7 +157,7 @@ public class BinaryObjectSerializerTests
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal("c1", result.Id);
+        Assert.Equal(1u, result.Key);
         Assert.Equal("Acme Corp", result.Name);
         Assert.Equal("acme@test.com", result.Email);
     }

@@ -13,7 +13,7 @@ namespace BareMetalWeb.Data;
     ShowOnNav = true,
     NavGroup = "Administration",
     NavOrder = 30,
-    IdGeneration = AutoIdStrategy.Guid
+    IdGeneration = AutoIdStrategy.Sequential
 )]
 public sealed class AuditEntry : BaseDataObject
 {
@@ -33,11 +33,11 @@ public sealed class AuditEntry : BaseDataObject
     public string EntityType { get; set; } = string.Empty;
 
     /// <summary>
-    /// ID of the entity being audited
+    /// Key of the entity being audited
     /// </summary>
-    [DataField(Label = "Entity ID", Required = true, Order = 2)]
+    [DataField(Label = "Entity Key", Required = true, Order = 2)]
     [DataIndex(IndexKind.Inverted)]
-    public string EntityId { get; set; } = string.Empty;
+    public uint EntityKey { get; set; }
 
     /// <summary>
     /// Operation performed (Create, Update, Delete, RemoteCommand)

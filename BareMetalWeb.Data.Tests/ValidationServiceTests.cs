@@ -251,7 +251,7 @@ public class ValidationServiceTests
         var meta = DataScaffold.GetEntityByType(typeof(DateRangeEntity))!;
         var instance = new DateRangeEntity
         {
-            Id = "1",
+            Key = 1,
             StartDate = new DateTime(2024, 6, 1),
             EndDate = new DateTime(2024, 1, 1) // Before start
         };
@@ -272,7 +272,7 @@ public class ValidationServiceTests
         var meta = DataScaffold.GetEntityByType(typeof(DateRangeEntity))!;
         var instance = new DateRangeEntity
         {
-            Id = "1",
+            Key = 2,
             StartDate = new DateTime(2024, 1, 1),
             EndDate = new DateTime(2024, 6, 1) // After start
         };
@@ -287,7 +287,7 @@ public class ValidationServiceTests
     [Fact]
     public void BuildValidationConfig_NoAttributes_ReturnsNull()
     {
-        var prop = typeof(BaseDataObject).GetProperty(nameof(BaseDataObject.Id))!;
+        var prop = typeof(BaseDataObject).GetProperty(nameof(BaseDataObject.Key))!;
         var config = ValidationService.BuildValidationConfig(prop);
         Assert.Null(config);
     }

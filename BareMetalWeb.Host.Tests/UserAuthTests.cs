@@ -192,7 +192,7 @@ public class UserAuthTests : IDisposable
 
         await DataStoreProvider.Current.SaveAsync(session);
 
-        var context = CreateHttpContext(session.Id);
+        var context = CreateHttpContext(session.Key.ToString());
         var originalExpiresUtc = session.ExpiresUtc;
         var originalLastSeenUtc = session.LastSeenUtc;
 
@@ -201,10 +201,10 @@ public class UserAuthTests : IDisposable
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(session.Id, result.Id);
+        Assert.Equal(session.Key, result.Key);
 
         // Reload session to check if it was updated
-        var updatedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Id);
+        var updatedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Key);
         Assert.NotNull(updatedSession);
         
         // LastSeenUtc should be updated to now (or very close)
@@ -240,7 +240,7 @@ public class UserAuthTests : IDisposable
 
         await DataStoreProvider.Current.SaveAsync(session);
 
-        var context = CreateHttpContext(session.Id);
+        var context = CreateHttpContext(session.Key.ToString());
         var originalExpiresUtc = session.ExpiresUtc;
 
         // Act
@@ -250,7 +250,7 @@ public class UserAuthTests : IDisposable
         Assert.NotNull(result);
 
         // Reload session to check if it was updated
-        var updatedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Id);
+        var updatedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Key);
         Assert.NotNull(updatedSession);
         
         // ExpiresUtc should be extended (30 days from LastSeenUtc for RememberMe)
@@ -282,7 +282,7 @@ public class UserAuthTests : IDisposable
 
         DataStoreProvider.Current.Save(session);
 
-        var context = CreateHttpContext(session.Id);
+        var context = CreateHttpContext(session.Key.ToString());
         var originalExpiresUtc = session.ExpiresUtc;
         var originalLastSeenUtc = session.LastSeenUtc;
 
@@ -291,10 +291,10 @@ public class UserAuthTests : IDisposable
 
         // Assert
         Assert.NotNull(result);
-        Assert.Equal(session.Id, result.Id);
+        Assert.Equal(session.Key, result.Key);
 
         // Reload session to check if it was updated
-        var updatedSession = DataStoreProvider.Current.Load<UserSession>(session.Id);
+        var updatedSession = DataStoreProvider.Current.Load<UserSession>(session.Key);
         Assert.NotNull(updatedSession);
         
         // LastSeenUtc should be updated
@@ -327,7 +327,7 @@ public class UserAuthTests : IDisposable
 
         await DataStoreProvider.Current.SaveAsync(session);
 
-        var context = CreateHttpContext(session.Id);
+        var context = CreateHttpContext(session.Key.ToString());
 
         // Act
         var result = await UserAuth.GetSessionAsync(context);
@@ -336,7 +336,7 @@ public class UserAuthTests : IDisposable
         Assert.Null(result);
 
         // Session should be marked as revoked
-        var updatedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Id);
+        var updatedSession = await DataStoreProvider.Current.LoadAsync<UserSession>(session.Key);
         Assert.NotNull(updatedSession);
         Assert.True(updatedSession.IsRevoked);
     }
@@ -680,7 +680,7 @@ public class UserAuthTests : IDisposable
     // Simple in-memory data store for testing
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<string, BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
 
@@ -690,7 +690,7 @@ public class UserAuthTests : IDisposable
 
         public void Save<T>(T obj) where T : BaseDataObject
         {
-            _store[obj.Id] = obj;
+            _store[(typeof(T), obj.Key)] = obj;
         }
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
@@ -699,14 +699,14 @@ public class UserAuthTests : IDisposable
             return ValueTask.CompletedTask;
         }
 
-        public T? Load<T>(string id) where T : BaseDataObject
+        public T? Load<T>(uint key) where T : BaseDataObject
         {
-            return _store.TryGetValue(id, out var obj) ? obj as T : null;
+            return _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
         }
 
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            return ValueTask.FromResult(Load<T>(id));
+            return ValueTask.FromResult(Load<T>(key));
         }
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
@@ -728,14 +728,14 @@ public class UserAuthTests : IDisposable
             return ValueTask.FromResult(Query<T>(query).Count());
         }
 
-        public void Delete<T>(string id) where T : BaseDataObject
+        public void Delete<T>(uint key) where T : BaseDataObject
         {
-            _store.Remove(id);
+            _store.Remove((typeof(T), key));
         }
 
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            Delete<T>(id);
+            Delete<T>(key);
             return ValueTask.CompletedTask;
         }
     }

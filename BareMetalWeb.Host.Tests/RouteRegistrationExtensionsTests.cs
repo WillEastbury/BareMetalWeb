@@ -1356,7 +1356,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<string, BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
@@ -1364,14 +1364,14 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public void ClearProviders() { }
         public void Clear() => _store.Clear();
 
-        public void Save<T>(T obj) where T : BaseDataObject => _store[obj.Id] = obj;
+        public void Save<T>(T obj) where T : BaseDataObject => _store[(typeof(T), obj.Key)] = obj;
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject { Save(obj); return ValueTask.CompletedTask; }
-        public T? Load<T>(string id) where T : BaseDataObject => _store.TryGetValue(id, out var obj) ? obj as T : null;
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject => ValueTask.FromResult(Load<T>(id));
+        public T? Load<T>(uint key) where T : BaseDataObject => _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject => ValueTask.FromResult(Load<T>(key));
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject => _store.Values.OfType<T>();
         public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject => ValueTask.FromResult(Query<T>(query));
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject => ValueTask.FromResult(Query<T>(query).Count());
-        public void Delete<T>(string id) where T : BaseDataObject => _store.Remove(id);
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject { Delete<T>(id); return ValueTask.CompletedTask; }
+        public void Delete<T>(uint key) where T : BaseDataObject => _store.Remove((typeof(T), key));
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject { Delete<T>(key); return ValueTask.CompletedTask; }
     }
 }

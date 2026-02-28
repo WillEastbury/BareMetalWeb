@@ -2,7 +2,8 @@ namespace BareMetalWeb.Data;
 
 public interface IBaseDataObject
 {
-    string Id { get; set; }
+    uint Key { get; set; }
+    IdentifierValue Identifier { get; set; }
     DateTime CreatedOnUtc { get; set; }
     DateTime UpdatedOnUtc { get; set; }
     string CreatedBy { get; set; }

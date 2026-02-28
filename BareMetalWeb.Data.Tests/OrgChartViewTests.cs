@@ -31,7 +31,7 @@ public class OrgChartViewTests : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<(Type, string), BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
@@ -39,16 +39,16 @@ public class OrgChartViewTests : IDisposable
         public void ClearProviders() { }
 
         public void Save<T>(T obj) where T : BaseDataObject
-            => _store[(typeof(T), obj.Id)] = obj;
+            => _store[(typeof(T), obj.Key)] = obj;
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
         { Save(obj); return ValueTask.CompletedTask; }
 
-        public T? Load<T>(string id) where T : BaseDataObject
-            => _store.TryGetValue((typeof(T), id), out var obj) ? obj as T : null;
+        public T? Load<T>(uint key) where T : BaseDataObject
+            => _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
 
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult(Load<T>(id));
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+            => ValueTask.FromResult(Load<T>(key));
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
             => _store.Values.OfType<T>();
@@ -59,11 +59,11 @@ public class OrgChartViewTests : IDisposable
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
             => ValueTask.FromResult(Query<T>(query).Count());
 
-        public void Delete<T>(string id) where T : BaseDataObject
-            => _store.Remove((typeof(T), id));
+        public void Delete<T>(uint key) where T : BaseDataObject
+            => _store.Remove((typeof(T), key));
 
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
-        { Delete<T>(id); return ValueTask.CompletedTask; }
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
+        { Delete<T>(key); return ValueTask.CompletedTask; }
     }
 
     [Fact]
@@ -72,7 +72,7 @@ public class OrgChartViewTests : IDisposable
         // Arrange: Create a simple hierarchy: Idit -> Jaime -> William
         var ceo = new BareMetalWeb.UserClasses.DataObjects.Employee
         {
-            Id = "idit-id",
+            Key = 1,
             Name = "Idit",
             Title = "Manager",
             ManagerId = null // CEO has no manager
@@ -80,18 +80,18 @@ public class OrgChartViewTests : IDisposable
 
         var manager = new BareMetalWeb.UserClasses.DataObjects.Employee
         {
-            Id = "jaime-id",
+            Key = 2,
             Name = "Jaime",
             Title = "Manager",
-            ManagerId = "idit-id"
+            ManagerId = "1"
         };
 
         var engineer = new BareMetalWeb.UserClasses.DataObjects.Employee
         {
-            Id = "william-id",
+            Key = 3,
             Name = "Mr William Eastbury",
             Title = "Solution Engineer",
-            ManagerId = "jaime-id"
+            ManagerId = "2"
         };
 
         var items = new List<BaseDataObject> { ceo, manager, engineer };
@@ -146,7 +146,7 @@ public class OrgChartViewTests : IDisposable
         // Arrange
         var employee = new BareMetalWeb.UserClasses.DataObjects.Employee
         {
-            Id = "emp-1",
+            Key = 4,
             Name = "Test User",
             Title = "Engineer",
             ManagerId = null
@@ -157,7 +157,7 @@ public class OrgChartViewTests : IDisposable
         Assert.NotNull(metadata);
 
         // Act
-        var html = DataScaffold.BuildOrgChartHtml(metadata, items, selectedId: "emp-1", basePath: "/admin/data/employees");
+        var html = DataScaffold.BuildOrgChartHtml(metadata, items, selectedId: "4", basePath: "/admin/data/employees");
 
         // Assert
         Assert.Contains("bm-orgchart-card-selected", html);
@@ -169,7 +169,7 @@ public class OrgChartViewTests : IDisposable
         // Arrange: One parent with two children
         var parent = new BareMetalWeb.UserClasses.DataObjects.Employee
         {
-            Id = "parent-id",
+            Key = 5,
             Name = "Parent",
             Title = "Manager",
             ManagerId = null
@@ -177,18 +177,18 @@ public class OrgChartViewTests : IDisposable
 
         var child1 = new BareMetalWeb.UserClasses.DataObjects.Employee
         {
-            Id = "child1-id",
+            Key = 6,
             Name = "Child One",
             Title = "Engineer",
-            ManagerId = "parent-id"
+            ManagerId = "5"
         };
 
         var child2 = new BareMetalWeb.UserClasses.DataObjects.Employee
         {
-            Id = "child2-id",
+            Key = 7,
             Name = "Child Two",
             Title = "Engineer",
-            ManagerId = "parent-id"
+            ManagerId = "5"
         };
 
         var items = new List<BaseDataObject> { parent, child1, child2 };

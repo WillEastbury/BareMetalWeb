@@ -27,12 +27,7 @@ public enum IdGenerationStrategy
     None = 0,
 
     /// <summary>
-    /// Auto-generate using a GUID converted to a string (32 hex characters).
+    /// Auto-generate using a sequential uint32 per entity type.
     /// </summary>
-    GuidString = 1,
-
-    /// <summary>
-    /// Auto-generate using a sequential long integer per entity type.
-    /// </summary>
-    SequentialLong = 2
+    Sequential = 1
 }

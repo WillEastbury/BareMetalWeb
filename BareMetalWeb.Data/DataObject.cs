@@ -9,7 +9,8 @@ public class RenderableDataObject : BaseDataObject , IBaseDataObject
 
 public abstract class BaseDataObject : IBaseDataObject
 {
-    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public uint Key { get; set; }
+    public IdentifierValue Identifier { get; set; }
     public DateTime CreatedOnUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedOnUtc { get; set; } = DateTime.UtcNow;
     public string CreatedBy { get; set; } = string.Empty;
@@ -24,7 +25,6 @@ public abstract class BaseDataObject : IBaseDataObject
     public BaseDataObject(string createdBy)
     {
         CreatedBy = createdBy;
-        Id = Guid.NewGuid().ToString("N");
         CreatedOnUtc = DateTime.UtcNow;
         UpdatedOnUtc = CreatedOnUtc;
         ETag = Guid.NewGuid().ToString("N");

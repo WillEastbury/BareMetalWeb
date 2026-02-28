@@ -127,22 +127,22 @@ public sealed class RuntimeEntityRegistry
         {
             // Ensure EntityId is populated (falls back to Id on first load)
             if (string.IsNullOrWhiteSpace(entityDef.EntityId))
-                entityDef.EntityId = entityDef.Id;
+                entityDef.EntityId = entityDef.Key.ToString();
 
             var entityFields = allFields
-                .Where(f => string.Equals(f.EntityId, entityDef.Id, StringComparison.OrdinalIgnoreCase))
+                .Where(f => string.Equals(f.EntityId, entityDef.Key.ToString(), StringComparison.OrdinalIgnoreCase))
                 .ToList();
             var entityIndexes = allIndexes
-                .Where(i => string.Equals(i.EntityId, entityDef.Id, StringComparison.OrdinalIgnoreCase))
+                .Where(i => string.Equals(i.EntityId, entityDef.Key.ToString(), StringComparison.OrdinalIgnoreCase))
                 .ToList();
             var entityActions = allActions
-                .Where(a => string.Equals(a.EntityId, entityDef.Id, StringComparison.OrdinalIgnoreCase))
+                .Where(a => string.Equals(a.EntityId, entityDef.Key.ToString(), StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
             // Ensure FieldId populated
             foreach (var f in entityFields)
                 if (string.IsNullOrWhiteSpace(f.FieldId))
-                    f.FieldId = f.Id;
+                    f.FieldId = f.Key.ToString();
 
             var model = compiler.Compile(entityDef, entityFields, entityIndexes, entityActions,
                 out var warnings);

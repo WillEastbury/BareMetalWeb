@@ -170,14 +170,14 @@ public sealed class RouteHandlers : IRouteHandlers
 
             var challenge = new MfaChallenge
             {
-                UserId = user.Id,
+                UserId = user.Key.ToString(),
                 RememberMe = rememberMe,
                 ExpiresUtc = DateTime.UtcNow.AddMinutes(5),
                 CreatedBy = user.UserName,
                 UpdatedBy = user.UserName
             };
             await DataStoreProvider.Current.SaveAsync(challenge);
-            context.SetCookie(MfaChallengeCookieName, challenge.Id, new CookieOptions
+            context.SetCookie(MfaChallengeCookieName, challenge.Key.ToString(), new CookieOptions
             {
                 HttpOnly = true,
                 Secure = context.Request.IsHttps,
@@ -243,7 +243,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var user = await Users.GetByIdAsync(challenge.UserId, context.RequestAborted).ConfigureAwait(false);
+        var user = await Users.GetByIdAsync(uint.Parse(challenge.UserId), context.RequestAborted).ConfigureAwait(false);
         if (user == null || !user.IsActive || !user.MfaEnabled || !TryGetActiveSecret(user, out var activeSecret, out var upgraded))
         {
             RenderMfaChallengeForm(context, "MFA is not available for this account.");
@@ -255,7 +255,7 @@ public sealed class RouteHandlers : IRouteHandlers
             await Users.SaveAsync(user);
 
         var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-        if (IsThrottled(BuildMfaAttemptKey("challenge:user", user.Id), MfaChallengeMaxFailures, out var retryAfter)
+        if (IsThrottled(BuildMfaAttemptKey("challenge:user", user.Key.ToString()), MfaChallengeMaxFailures, out var retryAfter)
             || IsThrottled(BuildMfaAttemptKey("challenge:ip", remoteIp), MfaChallengeMaxFailures, out retryAfter))
         {
             RenderMfaChallengeForm(context, FormatThrottleMessage(retryAfter));
@@ -269,7 +269,7 @@ public sealed class RouteHandlers : IRouteHandlers
             secretBytes = Encoding.UTF8.GetBytes(activeSecret);
             if (!MfaTotp.ValidateCode(activeSecret, code, out var matchedStep))
             {
-                RegisterFailure(BuildMfaAttemptKey("challenge:user", user.Id), MfaChallengeMaxFailures);
+                RegisterFailure(BuildMfaAttemptKey("challenge:user", user.Key.ToString()), MfaChallengeMaxFailures);
                 RegisterFailure(BuildMfaAttemptKey("challenge:ip", remoteIp), MfaChallengeMaxFailures);
                 RenderMfaChallengeForm(context, "Invalid authentication code.");
                 await _renderer.RenderPage(context);
@@ -287,7 +287,7 @@ public sealed class RouteHandlers : IRouteHandlers
             user.RegisterSuccessfulLogin();
             await Users.SaveAsync(user);
 
-            RegisterSuccess(BuildMfaAttemptKey("challenge:user", user.Id));
+            RegisterSuccess(BuildMfaAttemptKey("challenge:user", user.Key.ToString()));
             RegisterSuccess(BuildMfaAttemptKey("challenge:ip", remoteIp));
 
             challenge.IsUsed = true;
@@ -570,7 +570,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var setupIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-        if (IsThrottled(BuildMfaAttemptKey("setup:user", user.Id), MfaPendingMaxFailures, out var setupRetry)
+        if (IsThrottled(BuildMfaAttemptKey("setup:user", user.Key.ToString()), MfaPendingMaxFailures, out var setupRetry)
             || IsThrottled(BuildMfaAttemptKey("setup:ip", setupIp), MfaPendingMaxFailures, out setupRetry)
             || IsThrottled(BuildMfaAttemptKey("setup:secret", currentPendingSecret), MfaPendingMaxFailures, out setupRetry))
         {
@@ -603,7 +603,7 @@ public sealed class RouteHandlers : IRouteHandlers
                     return;
                 }
 
-                RegisterFailure(BuildMfaAttemptKey("setup:user", user.Id), MfaPendingMaxFailures);
+                RegisterFailure(BuildMfaAttemptKey("setup:user", user.Key.ToString()), MfaPendingMaxFailures);
                 RegisterFailure(BuildMfaAttemptKey("setup:ip", setupIp), MfaPendingMaxFailures);
                 RegisterFailure(BuildMfaAttemptKey("setup:secret", currentPendingSecret), MfaPendingMaxFailures);
 
@@ -623,7 +623,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
             user.MfaEnabled = true;
             user.MfaLastVerifiedStep = matchedStep;
-            user.MfaSecretEncrypted = _mfaProtector.EncryptSecret(currentPendingSecret, user.Id);
+            user.MfaSecretEncrypted = _mfaProtector.EncryptSecret(currentPendingSecret, user.Key.ToString());
             user.MfaSecret = null;
             user.MfaPendingSecret = null;
             user.MfaPendingSecretEncrypted = null;
@@ -635,7 +635,7 @@ public sealed class RouteHandlers : IRouteHandlers
             user.MfaBackupCodesGeneratedUtc = DateTime.UtcNow;
             await Users.SaveAsync(user);
 
-            RegisterSuccess(BuildMfaAttemptKey("setup:user", user.Id));
+            RegisterSuccess(BuildMfaAttemptKey("setup:user", user.Key.ToString()));
             RegisterSuccess(BuildMfaAttemptKey("setup:ip", setupIp));
             RegisterSuccess(BuildMfaAttemptKey("setup:secret", currentPendingSecret));
 
@@ -1229,7 +1229,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (forceNew || string.IsNullOrWhiteSpace(user.MfaPendingSecretEncrypted) || user.MfaPendingExpiresUtc is null || user.MfaPendingExpiresUtc <= DateTime.UtcNow)
         {
             var secret = MfaTotp.GenerateSecret();
-            user.MfaPendingSecretEncrypted = _mfaProtector.EncryptSecret(secret, user.Id);
+            user.MfaPendingSecretEncrypted = _mfaProtector.EncryptSecret(secret, user.Key.ToString());
             user.MfaPendingSecret = null;
             user.MfaPendingExpiresUtc = DateTime.UtcNow.Add(MfaPendingLifetime);
             user.MfaPendingFailedAttempts = 0;
@@ -1244,7 +1244,7 @@ public sealed class RouteHandlers : IRouteHandlers
         upgraded = false;
         if (!string.IsNullOrWhiteSpace(user.MfaPendingSecretEncrypted))
         {
-            if (_mfaProtector.TryDecryptSecret(user.MfaPendingSecretEncrypted, user.Id, out var bytes))
+            if (_mfaProtector.TryDecryptSecret(user.MfaPendingSecretEncrypted, user.Key.ToString(), out var bytes))
             {
                 try
                 {
@@ -1260,7 +1260,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!string.IsNullOrWhiteSpace(user.MfaPendingSecret))
         {
             var legacy = user.MfaPendingSecret;
-            user.MfaPendingSecretEncrypted = _mfaProtector.EncryptSecret(legacy, user.Id);
+            user.MfaPendingSecretEncrypted = _mfaProtector.EncryptSecret(legacy, user.Key.ToString());
             user.MfaPendingSecret = null;
             upgraded = true;
             return legacy;
@@ -1275,7 +1275,7 @@ public sealed class RouteHandlers : IRouteHandlers
         upgraded = false;
         if (!string.IsNullOrWhiteSpace(user.MfaSecretEncrypted))
         {
-            if (_mfaProtector.TryDecryptSecret(user.MfaSecretEncrypted, user.Id, out var bytes))
+            if (_mfaProtector.TryDecryptSecret(user.MfaSecretEncrypted, user.Key.ToString(), out var bytes))
             {
                 try
                 {
@@ -1294,7 +1294,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!string.IsNullOrWhiteSpace(user.MfaSecret))
         {
             var legacy = user.MfaSecret;
-            user.MfaSecretEncrypted = _mfaProtector.EncryptSecret(legacy, user.Id);
+            user.MfaSecretEncrypted = _mfaProtector.EncryptSecret(legacy, user.Key.ToString());
             user.MfaSecret = null;
             secret = legacy;
             upgraded = true;
@@ -1405,7 +1405,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string HashBackupCode(User user, string code)
     {
         using var sha = SHA256.Create();
-        var payload = Encoding.UTF8.GetBytes($"{user.Id}:{code}");
+        var payload = Encoding.UTF8.GetBytes($"{user.Key}:{code}");
         return Convert.ToHexString(sha.ComputeHash(payload));
     }
 
@@ -1721,7 +1721,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return required.Length == 0 || required.All(userPermissions.Contains);
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, id);
+        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -1867,7 +1867,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, id);
+        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -1924,7 +1924,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, id);
+        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -1963,7 +1963,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, id);
+        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -2106,7 +2106,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var upsertWithExplicitId = false;
             if (upsert && !string.IsNullOrWhiteSpace(idValue))
             {
-                var existing = await DataScaffold.LoadAsync(meta, idValue!);
+                var existing = await DataScaffold.LoadAsync(meta, uint.Parse(idValue!));
                 if (existing is BaseDataObject existingObject)
                 {
                     instance = existingObject;
@@ -2115,7 +2115,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 else
                 {
                     instance = meta.Handlers.Create();
-                    instance.Id = idValue;
+                    instance.Key = uint.Parse(idValue);
                     upsertWithExplicitId = true;
                 }
             }
@@ -2330,7 +2330,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, id);
+        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -2381,7 +2381,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, id);
+        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -2582,13 +2582,13 @@ public sealed class RouteHandlers : IRouteHandlers
         // Capture entity type for audit before deletion
         var entityTypeName = meta.Type.Name;
         
-        await DataScaffold.DeleteAsync(meta, id);
+        await DataScaffold.DeleteAsync(meta, uint.Parse(id));
         
         // Audit the delete operation - create audit entry with entity type and ID
         var auditEntry = new AuditEntry(userName)
         {
             EntityType = entityTypeName,
-            EntityId = id,
+            EntityKey = uint.Parse(id),
             Operation = AuditOperation.Delete,
             TimestampUtc = DateTime.UtcNow,
             UserName = userName,
@@ -2658,7 +2658,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (id == null) continue;
             try
             {
-                await DataScaffold.DeleteAsync(meta, id);
+                await DataScaffold.DeleteAsync(meta, uint.Parse(id));
                 successCount++;
             }
             catch (Exception ex)
@@ -2719,7 +2719,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var items = new List<object>();
         foreach (var id in ids)
         {
-            var item = await DataScaffold.LoadAsync(meta, id);
+            var item = await DataScaffold.LoadAsync(meta, uint.Parse(id));
             if (item != null)
                 items.Add(item);
         }
@@ -2861,7 +2861,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, id);
+        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
         if (instance is not BaseDataObject source)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -2935,7 +2935,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static bool IsCloneExcluded(string propertyName)
     {
-        return string.Equals(propertyName, nameof(BaseDataObject.Id), StringComparison.OrdinalIgnoreCase)
+        return string.Equals(propertyName, nameof(BaseDataObject.Key), StringComparison.OrdinalIgnoreCase)
             || string.Equals(propertyName, nameof(BaseDataObject.CreatedOnUtc), StringComparison.OrdinalIgnoreCase)
             || string.Equals(propertyName, nameof(BaseDataObject.UpdatedOnUtc), StringComparison.OrdinalIgnoreCase)
             || string.Equals(propertyName, nameof(BaseDataObject.CreatedBy), StringComparison.OrdinalIgnoreCase)
@@ -3128,7 +3128,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var upsertWithExplicitId = false;
             if (upsert && !string.IsNullOrWhiteSpace(idValue))
             {
-                var existing = await DataScaffold.LoadAsync(meta, idValue!);
+                var existing = await DataScaffold.LoadAsync(meta, uint.Parse(idValue!));
                 if (existing is BaseDataObject existingObject)
                 {
                     instance = existingObject;
@@ -3137,7 +3137,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 else
                 {
                     instance = meta.Handlers.Create();
-                    instance.Id = idValue;
+                    instance.Key = uint.Parse(idValue);
                     upsertWithExplicitId = true;
                 }
             }
@@ -3198,7 +3198,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, id);
+        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -3319,7 +3319,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, id);
+        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -3397,7 +3397,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, id);
+        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -3474,7 +3474,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        await DataScaffold.DeleteAsync(meta, id);
+        await DataScaffold.DeleteAsync(meta, uint.Parse(id));
         context.Response.StatusCode = StatusCodes.Status204NoContent;
     }
 
@@ -3497,7 +3497,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, id);
+        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
         if (instance is not BaseDataObject)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -3881,19 +3881,19 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var addresses_query = await DataStoreProvider.Current.QueryAsync<Address>(null).ConfigureAwait(false);
         var usedAddressIds = new HashSet<string>(
-            addresses_query.Select(address => address.Id),
+            addresses_query.Select(address => address.Key.ToString()),
             StringComparer.OrdinalIgnoreCase);
         var units_query = await DataStoreProvider.Current.QueryAsync<UnitOfMeasure>(null).ConfigureAwait(false);
         var usedUnitIds = new HashSet<string>(
-            units_query.Select(unit => unit.Id),
+            units_query.Select(unit => unit.Key.ToString()),
             StringComparer.OrdinalIgnoreCase);
         var customers_query = await DataStoreProvider.Current.QueryAsync<Customer>(null).ConfigureAwait(false);
         var usedCustomerIds = new HashSet<string>(
-            customers_query.Select(customer => customer.Id),
+            customers_query.Select(customer => customer.Key.ToString()),
             StringComparer.OrdinalIgnoreCase);
         var products_query = await DataStoreProvider.Current.QueryAsync<Product>(null).ConfigureAwait(false);
         var usedProductIds = new HashSet<string>(
-            products_query.Select(product => product.Id),
+            products_query.Select(product => product.Key.ToString()),
             StringComparer.OrdinalIgnoreCase);
         var employees_query = await DataStoreProvider.Current.QueryAsync<Employee>(null).ConfigureAwait(false);
         var usedEmployeeIds = new HashSet<string>(
@@ -4096,9 +4096,9 @@ public sealed class RouteHandlers : IRouteHandlers
             var items = (await entity.Handlers.QueryAsync(null, context.RequestAborted).ConfigureAwait(false)).ToList();
             foreach (var item in items)
             {
-                if (item == null || string.IsNullOrWhiteSpace(item.Id))
+                if (item == null || item.Key == 0)
                     continue;
-                await entity.Handlers.DeleteAsync(item.Id, context.RequestAborted).ConfigureAwait(false);
+                await entity.Handlers.DeleteAsync(item.Key, context.RequestAborted).ConfigureAwait(false);
             }
             wiped.Add(WebUtility.HtmlEncode(entity.Name));
         }
@@ -4296,7 +4296,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
             var safeName = SanitizeFileName(uploadedFile.FileName);
             var extension = Path.GetExtension(safeName);
-            var storageKey = $"{meta.Slug}/{instance.Id}/{field.Name}/{Guid.NewGuid():N}{extension}";
+            var storageKey = $"{meta.Slug}/{instance.Key}/{field.Name}/{Guid.NewGuid():N}{extension}";
             var fullPath = ResolveUploadPath(context, storageKey);
             var folder = Path.GetDirectoryName(fullPath);
             if (!string.IsNullOrWhiteSpace(folder))
@@ -4383,7 +4383,7 @@ public sealed class RouteHandlers : IRouteHandlers
                     ["isImage"] = fileData.IsImage,
                     ["width"] = fileData.Width,
                     ["height"] = fileData.Height,
-                    ["url"] = $"/api/{meta.Slug}/{Uri.EscapeDataString(obj.Id)}/files/{Uri.EscapeDataString(field.Name)}"
+                    ["url"] = $"/api/{meta.Slug}/{Uri.EscapeDataString(obj.Key.ToString())}/files/{Uri.EscapeDataString(field.Name)}"
                 };
                 continue;
             }
@@ -5711,9 +5711,9 @@ public sealed class RouteHandlers : IRouteHandlers
         var items = (await DataStoreProvider.Current.QueryAsync<T>(null).ConfigureAwait(false)).ToList();
         foreach (var item in items)
         {
-            if (item == null || string.IsNullOrWhiteSpace(item.Id))
+            if (item == null || item.Key == 0)
                 continue;
-            await DataStoreProvider.Current.DeleteAsync<T>(item.Id);
+            await DataStoreProvider.Current.DeleteAsync<T>(item.Key);
         }
     }
 
@@ -5841,7 +5841,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 Email = email,
                 Phone = $"555-{rnd.Next(100, 999)}-{rnd.Next(1000, 9999)}",
                 Company = company,
-                AddressId = address?.Id ?? string.Empty,
+                AddressId = address?.Key.ToString() ?? string.Empty,
                 IsActive = true,
                 Notes = string.Empty,
                 Tags = new List<string>()
@@ -5872,7 +5872,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 Name = name,
                 Sku = $"SKU-{i + 1:0000}",
                 Category = categories[rnd.Next(categories.Length)],
-                UnitOfMeasureId = unit?.Id ?? string.Empty,
+                UnitOfMeasureId = unit?.Key.ToString() ?? string.Empty,
                 Price = price,
                 InventoryCount = rnd.Next(0, 5000),
                 ReorderLevel = rnd.Next(0, 200),
@@ -5915,7 +5915,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 Email = $"{first.ToLowerInvariant()}.{last.ToLowerInvariant()}.{i + 1}@example.com",
                 Department = dept,
                 HireDate = hireDate,
-                ManagerId = list.Count > 0 ? list[rnd.Next(Math.Min(list.Count, 3))].Id : null
+                ManagerId = list.Count > 0 ? list[rnd.Next(Math.Min(list.Count, 3))].Key.ToString() : null
             };
             EnsureUniqueId(employee, usedIds);
             list.Add(employee);
@@ -5973,10 +5973,10 @@ public sealed class RouteHandlers : IRouteHandlers
             var order = new Order
             {
                 OrderNumber = $"ORD-{i + 1:00000}",
-                CustomerId = customer.Id,
+                CustomerId = customer.Key.ToString(),
                 OrderDate = orderDate,
                 Status = status,
-                CurrencyId = currency?.Id ?? string.Empty,
+                CurrencyId = currency?.Key.ToString() ?? string.Empty,
                 Notes = string.Empty,
                 IsOpen = status == "Open",
                 OrderRows = new List<OrderRow>()
@@ -5992,7 +5992,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 var subtotal = qty * price;
                 order.OrderRows.Add(new OrderRow
                 {
-                    ProductId = product.Id,
+                    ProductId = product.Key.ToString(),
                     Quantity = qty,
                     UnitPrice = price,
                     DiscountPercent = discountPct,
@@ -6084,7 +6084,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
             list.Add(new TimeTablePlan
             {
-                SubjectId = subject.Id,
+                SubjectId = subject.Key.ToString(),
                 Notes = string.Empty,
                 Day = day,
                 StartTime = new TimeOnly(startHour, startMinute),
@@ -6114,7 +6114,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
             list.Add(new LessonLog
             {
-                SubjectId = subject.Id,
+                SubjectId = subject.Key.ToString(),
                 Date = date,
                 StartTime = new TimeOnly(startHour, startMinute),
                 Minutes = durations[rnd.Next(durations.Length)],
@@ -6128,16 +6128,16 @@ public sealed class RouteHandlers : IRouteHandlers
     }
 
     private static void EnsureUniqueId(BaseDataObject dataObject, HashSet<string> usedIds)    {
-        var id = dataObject.Id;
-        if (string.IsNullOrWhiteSpace(id) || usedIds.Contains(id))
+        var id = dataObject.Key.ToString();
+        if (string.IsNullOrWhiteSpace(id) || id == "0" || usedIds.Contains(id))
         {
             do
             {
-                id = Guid.NewGuid().ToString("N");
+                id = ((uint)Random.Shared.Next(1, int.MaxValue)).ToString();
             }
             while (usedIds.Contains(id));
 
-            dataObject.Id = id;
+            dataObject.Key = uint.Parse(id);
         }
 
         usedIds.Add(id);
@@ -6388,7 +6388,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.IsNullOrWhiteSpace(challengeId))
             return null;
 
-        var challenge = await DataStoreProvider.Current.LoadAsync<MfaChallenge>(challengeId, cancellationToken).ConfigureAwait(false);
+        var challenge = await DataStoreProvider.Current.LoadAsync<MfaChallenge>(uint.Parse(challengeId), cancellationToken).ConfigureAwait(false);
         if (challenge == null || challenge.IsExpired())
         {
             if (challenge != null)
@@ -7041,7 +7041,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, id);
+        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;

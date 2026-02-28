@@ -35,20 +35,20 @@ public class ComputedFieldTests : IDisposable
     // Minimal in-memory implementation used as a safe default for this test class
     private sealed class InMemoryDataObjectStore : IDataObjectStore
     {
-        private readonly Dictionary<(Type, string), BaseDataObject> _items = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _items = new();
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
         public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
         public void RegisterFallbackProvider(IDataProvider provider) { }
         public void ClearProviders() { }
-        public void Save<T>(T obj) where T : BaseDataObject => _items[(typeof(T), obj.Id)] = obj;
+        public void Save<T>(T obj) where T : BaseDataObject => _items[(typeof(T), obj.Key)] = obj;
         public ValueTask SaveAsync<T>(T obj, CancellationToken ct = default) where T : BaseDataObject { Save(obj); return ValueTask.CompletedTask; }
-        public T? Load<T>(string id) where T : BaseDataObject => _items.TryGetValue((typeof(T), id), out var o) ? (T)o : null;
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken ct = default) where T : BaseDataObject => ValueTask.FromResult(Load<T>(id));
+        public T? Load<T>(uint key) where T : BaseDataObject => _items.TryGetValue((typeof(T), key), out var o) ? (T)o : null;
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken ct = default) where T : BaseDataObject => ValueTask.FromResult(Load<T>(key));
         public IEnumerable<T> Query<T>(QueryDefinition? q = null) where T : BaseDataObject => _items.Values.OfType<T>();
         public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? q = null, CancellationToken ct = default) where T : BaseDataObject => ValueTask.FromResult(Query<T>(q));
         public ValueTask<int> CountAsync<T>(QueryDefinition? q = null, CancellationToken ct = default) where T : BaseDataObject => ValueTask.FromResult(Query<T>(q).Count());
-        public void Delete<T>(string id) where T : BaseDataObject => _items.Remove((typeof(T), id));
-        public ValueTask DeleteAsync<T>(string id, CancellationToken ct = default) where T : BaseDataObject { Delete<T>(id); return ValueTask.CompletedTask; }
+        public void Delete<T>(uint key) where T : BaseDataObject => _items.Remove((typeof(T), key));
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken ct = default) where T : BaseDataObject { Delete<T>(key); return ValueTask.CompletedTask; }
     }
 
     // Test entities for computed field scenarios
@@ -207,7 +207,7 @@ public class ComputedFieldTests : IDisposable
         var order = new TestOrder
         {
             OrderNumber = "ORD-001",
-            ProductId = "PROD-1",
+            ProductId = "1",
             Quantity = 5
         };
 
@@ -232,7 +232,7 @@ public class ComputedFieldTests : IDisposable
         var order = new TestOrder
         {
             OrderNumber = "ORD-001",
-            ProductId = "PROD-1",
+            ProductId = "1",
             Quantity = 5,
             UnitPriceSnapshot = 99.99m
         };
@@ -269,7 +269,7 @@ public class ComputedFieldTests : IDisposable
             // Create a product
             var product = new TestProduct
             {
-                Id = "PROD-1",
+                Key = 1,
                 Name = "Widget",
                 BasePrice = 49.99m,
                 StockQuantity = 100
@@ -279,9 +279,9 @@ public class ComputedFieldTests : IDisposable
             // Create an order
             var order = new TestOrder
             {
-                Id = "ORD-1",
+                Key = 1,
                 OrderNumber = "ORD-001",
-                ProductId = "PROD-1",
+                ProductId = "1",
                 Quantity = 5
             };
 
@@ -322,7 +322,7 @@ public class ComputedFieldTests : IDisposable
             // Create a product
             var product = new TestProduct
             {
-                Id = "PROD-1",
+                Key = 1,
                 Name = "Widget",
                 BasePrice = 49.99m,
                 StockQuantity = 100
@@ -331,9 +331,9 @@ public class ComputedFieldTests : IDisposable
 
             var order = new TestOrder
             {
-                Id = "ORD-1",
+                Key = 1,
                 OrderNumber = "ORD-001",
-                ProductId = "PROD-1",
+                ProductId = "1",
                 Quantity = 5
             };
 
@@ -387,7 +387,7 @@ public class ComputedFieldTests : IDisposable
             // Create a product
             var product = new TestProduct
             {
-                Id = "PROD-1",
+                Key = 1,
                 Name = "Widget",
                 BasePrice = 49.99m,
                 StockQuantity = 100
@@ -396,9 +396,9 @@ public class ComputedFieldTests : IDisposable
 
             var order = new TestOrder
             {
-                Id = "ORD-1",
+                Key = 1,
                 OrderNumber = "ORD-001",
-                ProductId = "PROD-1",
+                ProductId = "1",
                 Quantity = 5
             };
 
@@ -440,11 +440,11 @@ public class ComputedFieldTests : IDisposable
 
         var order = new TestOrder
         {
-            Id = "ORD-1",
+            Key = 1,
             OrderNumber = "ORD-001",
             Lines = new List<TestOrderLine>
             {
-                new() { ProductId = "PROD-1", UnitPrice = 10.00m, Quantity = 2 },
+                new() { ProductId = "1", UnitPrice = 10.00m, Quantity = 2 },
                 new() { ProductId = "PROD-2", UnitPrice = 25.00m, Quantity = 3 },
                 new() { ProductId = "PROD-3", UnitPrice = 5.00m, Quantity = 10 }
             }

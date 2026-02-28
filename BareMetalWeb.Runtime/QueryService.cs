@@ -33,7 +33,7 @@ public sealed class QueryService : IQueryService
         if (!DataScaffold.TryGetEntity(entitySlug, out var meta))
             return null;
 
-        var obj = await meta.Handlers.LoadAsync(id, cancellationToken).ConfigureAwait(false);
+        var obj = await meta.Handlers.LoadAsync(uint.Parse(id), cancellationToken).ConfigureAwait(false);
         return obj == null ? null : SerializeObject(obj, meta);
     }
 
@@ -61,7 +61,7 @@ public sealed class QueryService : IQueryService
     {
         var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
-            ["id"] = obj.Id,
+            ["id"] = obj.Key,
             ["createdOnUtc"] = obj.CreatedOnUtc,
             ["updatedOnUtc"] = obj.UpdatedOnUtc,
             ["createdBy"] = obj.CreatedBy,

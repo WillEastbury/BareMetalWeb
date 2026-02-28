@@ -61,20 +61,20 @@ public class SingletonFlagTests : IDisposable
     public void Save_SingletonFlagTrue_ClearsOtherRecordsFlag()
     {
         // Arrange - save first record with the flag set
-        var first = new SingletonTestItem { Id = "s1", Name = "First", IsDefault = true };
+        var first = new SingletonTestItem { Key = 1, Name = "First", IsDefault = true };
         _provider.Save(first);
 
         // Act - save second record with the flag also set to true
-        var second = new SingletonTestItem { Id = "s2", Name = "Second", IsDefault = true };
+        var second = new SingletonTestItem { Key = 2, Name = "Second", IsDefault = true };
         _provider.Save(second);
 
         // Assert - first record's flag should have been cleared
-        var reloadedFirst = _provider.Load<SingletonTestItem>("s1");
+        var reloadedFirst = _provider.Load<SingletonTestItem>(1);
         Assert.NotNull(reloadedFirst);
         Assert.False(reloadedFirst!.IsDefault);
 
         // And second record should still have the flag set
-        var reloadedSecond = _provider.Load<SingletonTestItem>("s2");
+        var reloadedSecond = _provider.Load<SingletonTestItem>(2);
         Assert.NotNull(reloadedSecond);
         Assert.True(reloadedSecond!.IsDefault);
     }
@@ -83,19 +83,19 @@ public class SingletonFlagTests : IDisposable
     public async Task SaveAsync_SingletonFlagTrue_ClearsOtherRecordsFlag()
     {
         // Arrange
-        var first = new SingletonTestItem { Id = "sa1", Name = "First", IsDefault = true };
+        var first = new SingletonTestItem { Key = 1, Name = "First", IsDefault = true };
         await _provider.SaveAsync(first);
 
         // Act
-        var second = new SingletonTestItem { Id = "sa2", Name = "Second", IsDefault = true };
+        var second = new SingletonTestItem { Key = 2, Name = "Second", IsDefault = true };
         await _provider.SaveAsync(second);
 
         // Assert
-        var reloadedFirst = _provider.Load<SingletonTestItem>("sa1");
+        var reloadedFirst = _provider.Load<SingletonTestItem>(1);
         Assert.NotNull(reloadedFirst);
         Assert.False(reloadedFirst!.IsDefault);
 
-        var reloadedSecond = _provider.Load<SingletonTestItem>("sa2");
+        var reloadedSecond = _provider.Load<SingletonTestItem>(2);
         Assert.NotNull(reloadedSecond);
         Assert.True(reloadedSecond!.IsDefault);
     }
@@ -104,15 +104,15 @@ public class SingletonFlagTests : IDisposable
     public void Save_SingletonFlagFalse_DoesNotAffectOtherRecords()
     {
         // Arrange - save a record with the flag set
-        var first = new SingletonTestItem { Id = "sf1", Name = "First", IsDefault = true };
+        var first = new SingletonTestItem { Key = 1, Name = "First", IsDefault = true };
         _provider.Save(first);
 
         // Act - save second record with flag NOT set
-        var second = new SingletonTestItem { Id = "sf2", Name = "Second", IsDefault = false };
+        var second = new SingletonTestItem { Key = 2, Name = "Second", IsDefault = false };
         _provider.Save(second);
 
         // Assert - first record's flag should be unchanged
-        var reloadedFirst = _provider.Load<SingletonTestItem>("sf1");
+        var reloadedFirst = _provider.Load<SingletonTestItem>(1);
         Assert.NotNull(reloadedFirst);
         Assert.True(reloadedFirst!.IsDefault);
     }
@@ -123,7 +123,7 @@ public class SingletonFlagTests : IDisposable
         // Arrange - save multiple records, each one setting the flag to true
         for (int i = 1; i <= 5; i++)
         {
-            var item = new SingletonTestItem { Id = $"m{i}", Name = $"Item {i}", IsDefault = true };
+            var item = new SingletonTestItem { Key = (uint)i, Name = $"Item {i}", IsDefault = true };
             _provider.Save(item);
         }
 
@@ -132,14 +132,14 @@ public class SingletonFlagTests : IDisposable
         Assert.Equal(5, allItems.Count);
         var flaggedItems = allItems.Where(x => x.IsDefault).ToList();
         Assert.Single(flaggedItems);
-        Assert.Equal("m5", flaggedItems[0].Id);
+        Assert.Equal(5u, flaggedItems[0].Key);
     }
 
     [Fact]
     public void Save_UpdateSameRecord_RetainsSingletonFlag()
     {
         // Arrange - save a record with the flag set
-        var item = new SingletonTestItem { Id = "upd1", Name = "Original", IsDefault = true };
+        var item = new SingletonTestItem { Key = 1, Name = "Original", IsDefault = true };
         _provider.Save(item);
 
         // Act - update the same record (keeping the flag)
@@ -147,7 +147,7 @@ public class SingletonFlagTests : IDisposable
         _provider.Save(item);
 
         // Assert - the record still has the flag
-        var reloaded = _provider.Load<SingletonTestItem>("upd1");
+        var reloaded = _provider.Load<SingletonTestItem>(1);
         Assert.NotNull(reloaded);
         Assert.True(reloaded!.IsDefault);
         Assert.Equal("Updated", reloaded.Name);
@@ -157,28 +157,28 @@ public class SingletonFlagTests : IDisposable
     public void Save_MultipleSingletonFlags_EachEnforcedIndependently()
     {
         // Arrange - save two records each with different singleton flags
-        var first = new MultiSingletonTestItem { Id = "ms1", Name = "First", IsPrimary = true, IsSecondary = false };
+        var first = new MultiSingletonTestItem { Key = 1, Name = "First", IsPrimary = true, IsSecondary = false };
         _provider.Save(first);
 
-        var second = new MultiSingletonTestItem { Id = "ms2", Name = "Second", IsPrimary = false, IsSecondary = true };
+        var second = new MultiSingletonTestItem { Key = 2, Name = "Second", IsPrimary = false, IsSecondary = true };
         _provider.Save(second);
 
         // Act - save third record with both flags set
-        var third = new MultiSingletonTestItem { Id = "ms3", Name = "Third", IsPrimary = true, IsSecondary = true };
+        var third = new MultiSingletonTestItem { Key = 3, Name = "Third", IsPrimary = true, IsSecondary = true };
         _provider.Save(third);
 
         // Assert - first record's IsPrimary should be cleared
-        var reloadedFirst = _provider.Load<MultiSingletonTestItem>("ms1");
+        var reloadedFirst = _provider.Load<MultiSingletonTestItem>(1);
         Assert.NotNull(reloadedFirst);
         Assert.False(reloadedFirst!.IsPrimary);
 
         // Assert - second record's IsSecondary should be cleared
-        var reloadedSecond = _provider.Load<MultiSingletonTestItem>("ms2");
+        var reloadedSecond = _provider.Load<MultiSingletonTestItem>(2);
         Assert.NotNull(reloadedSecond);
         Assert.False(reloadedSecond!.IsSecondary);
 
         // Assert - third record has both flags set
-        var reloadedThird = _provider.Load<MultiSingletonTestItem>("ms3");
+        var reloadedThird = _provider.Load<MultiSingletonTestItem>(3);
         Assert.NotNull(reloadedThird);
         Assert.True(reloadedThird!.IsPrimary);
         Assert.True(reloadedThird!.IsSecondary);

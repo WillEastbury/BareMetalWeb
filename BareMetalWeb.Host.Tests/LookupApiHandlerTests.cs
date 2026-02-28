@@ -55,7 +55,7 @@ public class LookupApiHandlerTests : IDisposable
         // and a user session for authenticated lookup requests
         var rootUser = new User
         {
-            Id = "root",
+            Key = 1,
             UserName = "admin",
             DisplayName = "Admin",
             Email = "admin@test.com",
@@ -66,15 +66,15 @@ public class LookupApiHandlerTests : IDisposable
 
         var session = new UserSession
         {
-            Id = "test-session",
-            UserId = rootUser.Id,
+            Key = 100,
+            UserId = rootUser.Key.ToString(),
             IssuedUtc = DateTime.UtcNow,
             LastSeenUtc = DateTime.UtcNow,
             ExpiresUtc = DateTime.UtcNow.AddHours(8),
             IsRevoked = false
         };
         _testStore.Save(session);
-        _testSessionId = session.Id;
+        _testSessionId = session.Key.ToString();
 
         // Force UserClasses assembly to load before scanning
         _ = typeof(Product).Assembly;
@@ -111,6 +111,7 @@ public class LookupApiHandlerTests : IDisposable
     {
         DataStoreProvider.Current = _originalStore;
         _cts.Cancel();
+        (_app as IDisposable)?.Dispose();
         try { Directory.Delete(_keyRootDirectory, true); } catch { }
     }
 
@@ -118,10 +119,10 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityById_ReturnsEntity_WhenExists()
     {
         // Arrange
-        var product = new Product { Id = "prod-1", Name = "Widget", Description = "A test widget" };
+        var product = new Product { Key = 1, Name = "Widget", Description = "A test widget" };
         _testStore.Save(product);
 
-        var context = CreateHttpContext("GET", "/api/_lookup/products/prod-1");
+        var context = CreateHttpContext("GET", "/api/_lookup/products/1");
 
         // Act
         await _server.RequestHandler(context);
@@ -129,14 +130,14 @@ public class LookupApiHandlerTests : IDisposable
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
         var json = await ReadResponseJson(context);
-        Assert.Equal("prod-1", json.GetProperty("id").GetString());
+        Assert.Equal("1", json.GetProperty("id").GetString());
     }
 
     [Fact]
     public async Task GetEntityById_Returns404_WhenNotExists()
     {
         // Arrange
-        var context = CreateHttpContext("GET", "/api/_lookup/products/nonexistent");
+        var context = CreateHttpContext("GET", "/api/_lookup/products/999");
 
         // Act
         await _server.RequestHandler(context);
@@ -149,7 +150,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityById_Returns404_ForUnknownEntityType()
     {
         // Arrange
-        var context = CreateHttpContext("GET", "/api/_lookup/nonexistent-type/some-id");
+        var context = CreateHttpContext("GET", "/api/_lookup/nonexistent-type/1");
 
         // Act
         await _server.RequestHandler(context);
@@ -162,8 +163,8 @@ public class LookupApiHandlerTests : IDisposable
     public async Task QueryEntities_ReturnsAllEntities_WhenNoFilter()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
-        _testStore.Save(new Product { Id = "prod-2", Name = "Gadget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
+        _testStore.Save(new Product { Key = 2, Name = "Gadget" });
 
         var context = CreateHttpContext("GET", "/api/_lookup/products");
 
@@ -180,10 +181,10 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityField_ReturnsFieldValue_WhenExists()
     {
         // Arrange
-        var product = new Product { Id = "prod-1", Name = "Widget" };
+        var product = new Product { Key = 1, Name = "Widget" };
         _testStore.Save(product);
 
-        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/prod-1/Name");
+        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/1/Name");
 
         // Act
         await _server.RequestHandler(context);
@@ -199,7 +200,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityField_Returns404_WhenEntityNotFound()
     {
         // Arrange
-        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/nonexistent/Name");
+        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/999/Name");
 
         // Act
         await _server.RequestHandler(context);
@@ -212,8 +213,8 @@ public class LookupApiHandlerTests : IDisposable
     public async Task GetEntityField_Returns404_WhenFieldNotFound()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
-        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/prod-1/NonExistentField");
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
+        var context = CreateHttpContext("GET", "/api/_lookup/products/_field/1/NonExistentField");
 
         // Act
         await _server.RequestHandler(context);
@@ -226,8 +227,8 @@ public class LookupApiHandlerTests : IDisposable
     public async Task AggregateEntities_Count_ReturnsCorrectCount()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
-        _testStore.Save(new Product { Id = "prod-2", Name = "Gadget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
+        _testStore.Save(new Product { Key = 2, Name = "Gadget" });
 
         var context = CreateHttpContext("GET", "/api/_lookup/products/_aggregate?fn=count");
 
@@ -271,10 +272,10 @@ public class LookupApiHandlerTests : IDisposable
     public async Task BatchGetEntities_ReturnsMatchedEntities_WhenAllExist()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
-        _testStore.Save(new Product { Id = "prod-2", Name = "Gadget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
+        _testStore.Save(new Product { Key = 2, Name = "Gadget" });
 
-        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "prod-1", "prod-2" } });
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "1", "2" } });
 
         // Act
         await _server.RequestHandler(context);
@@ -283,17 +284,17 @@ public class LookupApiHandlerTests : IDisposable
         Assert.Equal(200, context.Response.StatusCode);
         var json = await ReadResponseJson(context);
         var results = json.GetProperty("results");
-        Assert.Equal("Widget", results.GetProperty("prod-1").GetProperty("Name").GetString());
-        Assert.Equal("Gadget", results.GetProperty("prod-2").GetProperty("Name").GetString());
+        Assert.Equal("Widget", results.GetProperty("1").GetProperty("Name").GetString());
+        Assert.Equal("Gadget", results.GetProperty("2").GetProperty("Name").GetString());
     }
 
     [Fact]
     public async Task BatchGetEntities_OmitsMissingEntities_WhenSomeNotFound()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
-        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "prod-1", "nonexistent" } });
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "1", "999" } });
 
         // Act
         await _server.RequestHandler(context);
@@ -302,8 +303,8 @@ public class LookupApiHandlerTests : IDisposable
         Assert.Equal(200, context.Response.StatusCode);
         var json = await ReadResponseJson(context);
         var results = json.GetProperty("results");
-        Assert.True(results.TryGetProperty("prod-1", out _));
-        Assert.False(results.TryGetProperty("nonexistent", out _));
+        Assert.True(results.TryGetProperty("1", out _));
+        Assert.False(results.TryGetProperty("999", out _));
     }
 
     [Fact]
@@ -338,7 +339,7 @@ public class LookupApiHandlerTests : IDisposable
     public async Task BatchGetEntities_Returns404_ForUnknownEntityType()
     {
         // Arrange
-        var context = CreatePostHttpContext("/api/_lookup/nonexistent-type/_batch", new { ids = new[] { "id-1" } });
+        var context = CreatePostHttpContext("/api/_lookup/nonexistent-type/_batch", new { ids = new[] { "1" } });
 
         // Act
         await _server.RequestHandler(context);
@@ -351,9 +352,9 @@ public class LookupApiHandlerTests : IDisposable
     public async Task BatchGetEntities_DeduplicatesIds_WhenDuplicatesPassed()
     {
         // Arrange
-        _testStore.Save(new Product { Id = "prod-1", Name = "Widget" });
+        _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
-        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "prod-1", "prod-1", "prod-1" } });
+        var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "1", "1", "1" } });
 
         // Act
         await _server.RequestHandler(context);
@@ -362,7 +363,7 @@ public class LookupApiHandlerTests : IDisposable
         Assert.Equal(200, context.Response.StatusCode);
         var json = await ReadResponseJson(context);
         var results = json.GetProperty("results");
-        Assert.True(results.TryGetProperty("prod-1", out _));
+        Assert.True(results.TryGetProperty("1", out _));
     }
 
     [Fact]
@@ -719,7 +720,7 @@ public class LookupApiHandlerTests : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<string, BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
 
@@ -729,7 +730,7 @@ public class LookupApiHandlerTests : IDisposable
 
         public void Save<T>(T obj) where T : BaseDataObject
         {
-            _store[typeof(T).Name + ":" + obj.Id] = obj;
+            _store[(typeof(T), obj.Key)] = obj;
         }
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
@@ -738,24 +739,24 @@ public class LookupApiHandlerTests : IDisposable
             return ValueTask.CompletedTask;
         }
 
-        public T? Load<T>(string id) where T : BaseDataObject
+        public T? Load<T>(uint key) where T : BaseDataObject
         {
-            return _store.TryGetValue(typeof(T).Name + ":" + id, out var obj) ? obj as T : null;
+            return _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
         }
 
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            return ValueTask.FromResult(Load<T>(id));
+            return ValueTask.FromResult(Load<T>(key));
         }
 
-        public void Delete<T>(string id) where T : BaseDataObject
+        public void Delete<T>(uint key) where T : BaseDataObject
         {
-            _store.Remove(typeof(T).Name + ":" + id);
+            _store.Remove((typeof(T), key));
         }
 
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            Delete<T>(id);
+            Delete<T>(key);
             return ValueTask.CompletedTask;
         }
 

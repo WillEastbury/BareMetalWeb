@@ -1072,7 +1072,7 @@ public static class RouteRegistrationExtensions
                         sb.Append("</td><td><code>");
                         sb.Append(WebUtility.HtmlEncode(r.RootEntity));
                         sb.Append("</code></td><td><a class=\"btn btn-sm btn-primary\" href=\"/reports/");
-                        sb.Append(WebUtility.UrlEncode(r.Id));
+                        sb.Append(WebUtility.UrlEncode(r.Key.ToString()));
                         sb.Append("\"><i class=\"bi bi-play-fill\"></i> Run</a></td></tr>");
                     }
                     sb.Append("</tbody></table></div>");
@@ -1102,7 +1102,7 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(id, context.RequestAborted).ConfigureAwait(false);
+                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(uint.Parse(id), context.RequestAborted).ConfigureAwait(false);
                 if (def == null)
                 {
                     context.Response.StatusCode = 404;
@@ -1168,7 +1168,7 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(id, context.RequestAborted).ConfigureAwait(false);
+                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(uint.Parse(id), context.RequestAborted).ConfigureAwait(false);
                 if (def == null)
                 {
                     context.Response.StatusCode = 404;

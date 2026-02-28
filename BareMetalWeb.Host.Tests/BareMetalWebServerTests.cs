@@ -51,7 +51,7 @@ public class BareMetalWebServerTests : IDisposable
         DataStoreProvider.Current = _testStore;
 
         // Create a root user to prevent setup redirects in tests
-        var rootUser = CreateUser("root", new[] { "admin", "monitoring" });
+        var rootUser = CreateUser(1, new[] { "admin", "monitoring" });
         _testStore.Save(rootUser);
 
         _logger = new MockBufferedLogger();
@@ -87,6 +87,7 @@ public class BareMetalWebServerTests : IDisposable
         DataStoreProvider.Current = _originalStore;
         _cts.Cancel();
         _cts.Dispose();
+        (_app as IDisposable)?.Dispose();
         if (Directory.Exists(_keyRootDirectory))
             Directory.Delete(_keyRootDirectory, true);
     }
@@ -664,7 +665,7 @@ public class BareMetalWebServerTests : IDisposable
     {
         // Arrange
         EnsureStore();
-        var user = CreateUser("user1", Array.Empty<string>());
+        var user = CreateUser(2, Array.Empty<string>());
         var session = CreateSession(user);
         DataStoreProvider.Current.Save(user);
         DataStoreProvider.Current.Save(session);
@@ -690,7 +691,7 @@ public class BareMetalWebServerTests : IDisposable
     {
         // Arrange
         EnsureStore();
-        var user = CreateUser("user1", new[] { "viewer" });
+        var user = CreateUser(2, new[] { "viewer" });
         var session = CreateSession(user);
         DataStoreProvider.Current.Save(user);
         DataStoreProvider.Current.Save(session);
@@ -715,7 +716,7 @@ public class BareMetalWebServerTests : IDisposable
     {
         // Arrange
         EnsureStore();
-        var user = CreateUser("user1", new[] { "admin" });
+        var user = CreateUser(2, new[] { "admin" });
         var session = CreateSession(user);
         DataStoreProvider.Current.Save(user);
         DataStoreProvider.Current.Save(session);
@@ -744,7 +745,7 @@ public class BareMetalWebServerTests : IDisposable
     {
         // Arrange
         EnsureStore();
-        var user = CreateUser("user1", new[] { "admin" });
+        var user = CreateUser(2, new[] { "admin" });
         var session = CreateSession(user);
         DataStoreProvider.Current.Save(user);
         DataStoreProvider.Current.Save(session);
@@ -848,7 +849,7 @@ public class BareMetalWebServerTests : IDisposable
     {
         // Arrange
         EnsureStore();
-        var rootUser = CreateUser("root", new[] { "admin", "monitoring" });
+        var rootUser = CreateUser(1, new[] { "admin", "monitoring" });
         DataStoreProvider.Current.Save(rootUser);
 
         _server.RegisterRoute("GET /home", new RouteHandlerData(
@@ -982,19 +983,19 @@ public class BareMetalWebServerTests : IDisposable
     private static HttpContext CreateHttpContextWithSession(string method, string path, UserSession session)
     {
         var context = CreateHttpContext(method, path);
-        var protectedSessionId = CookieProtection.Protect(session.Id);
+        var protectedSessionId = CookieProtection.Protect(session.Key.ToString());
         context.Request.Headers.Cookie = $"{UserAuth.SessionCookieName}={protectedSessionId}";
         return context;
     }
 
-    private static User CreateUser(string id, string[] permissions)
+    private static User CreateUser(uint key, string[] permissions)
     {
         return new User
         {
-            Id = id,
-            UserName = $"user_{id}",
-            DisplayName = $"User {id}",
-            Email = $"{id}@example.com",
+            Key = key,
+            UserName = $"user_{key}",
+            DisplayName = $"User {key}",
+            Email = $"{key}@example.com",
             Permissions = permissions,
             IsActive = true
         };
@@ -1004,8 +1005,7 @@ public class BareMetalWebServerTests : IDisposable
     {
         return new UserSession
         {
-            Id = Guid.NewGuid().ToString(),
-            UserId = user.Id,
+            UserId = user.Key.ToString(),
             IssuedUtc = DateTime.UtcNow,
             LastSeenUtc = DateTime.UtcNow,
             ExpiresUtc = DateTime.UtcNow.AddHours(8),
@@ -1127,7 +1127,7 @@ public class BareMetalWebServerTests : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<string, BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
 
@@ -1139,7 +1139,7 @@ public class BareMetalWebServerTests : IDisposable
 
         public void Save<T>(T obj) where T : BaseDataObject
         {
-            _store[obj.Id] = obj;
+            _store[(typeof(T), obj.Key)] = obj;
         }
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
@@ -1148,14 +1148,14 @@ public class BareMetalWebServerTests : IDisposable
             return ValueTask.CompletedTask;
         }
 
-        public T? Load<T>(string id) where T : BaseDataObject
+        public T? Load<T>(uint key) where T : BaseDataObject
         {
-            return _store.TryGetValue(id, out var obj) ? obj as T : null;
+            return _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
         }
 
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            return ValueTask.FromResult(Load<T>(id));
+            return ValueTask.FromResult(Load<T>(key));
         }
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
@@ -1196,14 +1196,14 @@ public class BareMetalWebServerTests : IDisposable
             return ValueTask.FromResult(Query<T>(query).Count());
         }
 
-        public void Delete<T>(string id) where T : BaseDataObject
+        public void Delete<T>(uint key) where T : BaseDataObject
         {
-            _store.Remove(id);
+            _store.Remove((typeof(T), key));
         }
 
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            Delete<T>(id);
+            Delete<T>(key);
             return ValueTask.CompletedTask;
         }
     }

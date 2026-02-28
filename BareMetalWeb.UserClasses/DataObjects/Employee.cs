@@ -2,7 +2,7 @@ using BareMetalWeb.Data;
 
 namespace BareMetalWeb.UserClasses.DataObjects;
 
-[DataEntity("Employees", ShowOnNav = true, NavGroup = "Organization", NavOrder = 10, IdGeneration = AutoIdStrategy.Guid)]
+[DataEntity("Employees", ShowOnNav = true, NavGroup = "Organization", NavOrder = 10, IdGeneration = AutoIdStrategy.Sequential)]
 [DataViewType(ViewType.TreeView)]
 public class Employee : RenderableDataObject
 {
@@ -18,7 +18,7 @@ public class Employee : RenderableDataObject
     public string? Email { get; set; }
 
     [DataField(Order = 5, Label = "Manager", List = true, View = true, Edit = true, Create = true)]
-    [DataLookup(typeof(Employee), DisplayField = nameof(Name), QueryField = nameof(Id), QueryOperator = QueryOperator.NotEquals)]
+    [DataLookup(typeof(Employee), DisplayField = nameof(Name), QueryField = nameof(Key), QueryOperator = QueryOperator.NotEquals)]
     [DataIndex]
     public string? ManagerId { get; set; }
 

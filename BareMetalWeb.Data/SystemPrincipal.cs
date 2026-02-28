@@ -90,6 +90,6 @@ public sealed class SystemPrincipal : User
             return UserName;
         if (!string.IsNullOrWhiteSpace(DisplayName))
             return DisplayName;
-        return Id ?? string.Empty;
+        return Key.ToString();
     }
 }

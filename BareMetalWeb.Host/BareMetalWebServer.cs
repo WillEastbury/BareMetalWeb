@@ -762,7 +762,7 @@ public class BareMetalWebServer : IBareWebHost
         var perms = user.Permissions is null || user.Permissions.Length == 0
             ? string.Empty
             : string.Join(',', user.Permissions);
-        return $"user:{user.Id}|mfa:{user.MfaEnabled}|perms:{perms}|routes:{routesVersion}";
+        return $"user:{user.Key}|mfa:{user.MfaEnabled}|perms:{perms}|routes:{routesVersion}";
     }
 
     private static string ComputePrivacyPolicyLink(string url) =>

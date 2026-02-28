@@ -64,7 +64,7 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
         }
         if (dc.Status == "approved" && !string.IsNullOrEmpty(dc.UserId))
         {
-            var user = await DataStoreProvider.Current.LoadAsync<User>(dc.UserId);
+            var user = await DataStoreProvider.Current.LoadAsync<User>(uint.Parse(dc.UserId));
             if (user != null)
             {
                 await UserAuth.SignInAsync(context, user, false);
@@ -147,7 +147,7 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
             return;
         }
         dc.Status = "approved";
-        dc.UserId = user.Id;
+        dc.UserId = user.Key.ToString();
         DataStoreProvider.Current.Save(dc);
         context.Response.Redirect("/device?msg=Device+authorized+successfully!+You+can+close+this+tab.");
     }));
@@ -224,7 +224,7 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
         {
             var todo = new ToDo
             {
-                Id = Guid.NewGuid().ToString("N"),
+                Key = 0,
                 Title = q,
                 Notes = $"caller={caller ?? ""}, source={source ?? ""}",
                 Deadline = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7)),

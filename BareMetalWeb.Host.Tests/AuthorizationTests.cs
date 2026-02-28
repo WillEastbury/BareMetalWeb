@@ -55,7 +55,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
     {
         // Arrange - Empty string permissions should mean public access
         var pageInfo = CreatePageInfo(permissionsNeeded: "");
-        var user = CreateUser("user1", new[] { "Admin" });
+        var user = CreateUser(1, new[] { "Admin" });
         var context = CreateMockHttpContext(user: user);
 
         // Act
@@ -98,7 +98,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
     {
         // Arrange
         var pageInfo = CreatePageInfo(permissionsNeeded: "Public");
-        var user = CreateUser("user1", Array.Empty<string>());
+        var user = CreateUser(1, Array.Empty<string>());
         var context = CreateMockHttpContext(user: user);
 
         // Act
@@ -127,7 +127,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
     {
         // Arrange
         var pageInfo = CreatePageInfo(permissionsNeeded: "AnonymousOnly");
-        var user = CreateUser("user1", Array.Empty<string>());
+        var user = CreateUser(1, Array.Empty<string>());
         var context = CreateMockHttpContext(user: user);
 
         // Act
@@ -156,7 +156,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
     {
         // Arrange
         var pageInfo = CreatePageInfo(permissionsNeeded: "Authenticated");
-        var user = CreateUser("user1", Array.Empty<string>());
+        var user = CreateUser(1, Array.Empty<string>());
         var context = CreateMockHttpContext(user: user);
 
         // Act
@@ -171,7 +171,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
     {
         // Arrange
         var pageInfo = CreatePageInfo(permissionsNeeded: "Admin");
-        var user = CreateUser("user1", new[] { "Admin", "Editor" });
+        var user = CreateUser(1, new[] { "Admin", "Editor" });
         var context = CreateMockHttpContext(user: user);
 
         // Act
@@ -186,7 +186,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
     {
         // Arrange
         var pageInfo = CreatePageInfo(permissionsNeeded: "Admin");
-        var user = CreateUser("user1", new[] { "Editor", "Viewer" });
+        var user = CreateUser(1, new[] { "Editor", "Viewer" });
         var context = CreateMockHttpContext(user: user);
 
         // Act
@@ -215,7 +215,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
     {
         // Arrange
         var pageInfo = CreatePageInfo(permissionsNeeded: "Admin, Editor");
-        var user = CreateUser("user1", new[] { "Admin", "Editor", "Viewer" });
+        var user = CreateUser(1, new[] { "Admin", "Editor", "Viewer" });
         var context = CreateMockHttpContext(user: user);
 
         // Act
@@ -230,7 +230,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
     {
         // Arrange
         var pageInfo = CreatePageInfo(permissionsNeeded: "Admin, Editor");
-        var user = CreateUser("user1", new[] { "Admin", "Viewer" }); // Missing Editor
+        var user = CreateUser(1, new[] { "Admin", "Viewer" }); // Missing Editor
         var context = CreateMockHttpContext(user: user);
 
         // Act
@@ -245,7 +245,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
     {
         // Arrange
         var pageInfo = CreatePageInfo(permissionsNeeded: "ADMIN");
-        var user = CreateUser("user1", new[] { "admin" }); // Lowercase
+        var user = CreateUser(1, new[] { "admin" }); // Lowercase
         var context = CreateMockHttpContext(user: user);
 
         // Act
@@ -260,7 +260,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
     {
         // Arrange - Permissions split with whitespace should be trimmed
         var pageInfo = CreatePageInfo(permissionsNeeded: "Admin , Editor , Viewer");
-        var user = CreateUser("user1", new[] { "Admin", "Editor", "Viewer" });
+        var user = CreateUser(1, new[] { "Admin", "Editor", "Viewer" });
         var context = CreateMockHttpContext(user: user);
 
         // Act
@@ -331,8 +331,7 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
             // Create a session for the user
             var session = new UserSession
             {
-                Id = Guid.NewGuid().ToString(),
-                UserId = user.Id,
+                UserId = user.Key.ToString(),
                 IssuedUtc = DateTime.UtcNow,
                 LastSeenUtc = DateTime.UtcNow,
                 ExpiresUtc = DateTime.UtcNow.AddHours(8),
@@ -341,21 +340,21 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
             DataStoreProvider.Current.Save(session);
             
             // Set the session cookie
-            var protectedSessionId = CookieProtection.Protect(session.Id);
+            var protectedSessionId = CookieProtection.Protect(session.Key.ToString());
             context.Request.Headers.Cookie = $"{UserAuth.SessionCookieName}={protectedSessionId}";
         }
         
         return context;
     }
 
-    private static User CreateUser(string id, string[] permissions)
+    private static User CreateUser(uint key, string[] permissions)
     {
         return new User
         {
-            Id = id,
-            UserName = $"user_{id}",
-            DisplayName = $"User {id}",
-            Email = $"{id}@example.com",
+            Key = key,
+            UserName = $"user_{key}",
+            DisplayName = $"User {key}",
+            Email = $"{key}@example.com",
             Permissions = permissions,
             IsActive = true
         };
@@ -397,7 +396,7 @@ public class DataStoreFixture : IDisposable
 
     private class InMemoryDataStore : IDataObjectStore
     {
-        private readonly Dictionary<string, BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
 
         public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
 
@@ -407,7 +406,7 @@ public class DataStoreFixture : IDisposable
 
         public void Save<T>(T obj) where T : BaseDataObject
         {
-            _store[obj.Id] = obj;
+            _store[(typeof(T), obj.Key)] = obj;
         }
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
@@ -416,14 +415,14 @@ public class DataStoreFixture : IDisposable
             return ValueTask.CompletedTask;
         }
 
-        public T? Load<T>(string id) where T : BaseDataObject
+        public T? Load<T>(uint key) where T : BaseDataObject
         {
-            return _store.TryGetValue(id, out var obj) ? obj as T : null;
+            return _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
         }
 
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            return ValueTask.FromResult(Load<T>(id));
+            return ValueTask.FromResult(Load<T>(key));
         }
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
@@ -445,14 +444,14 @@ public class DataStoreFixture : IDisposable
             return ValueTask.FromResult(Query<T>(query).Count());
         }
 
-        public void Delete<T>(string id) where T : BaseDataObject
+        public void Delete<T>(uint key) where T : BaseDataObject
         {
-            _store.Remove(id);
+            _store.Remove((typeof(T), key));
         }
 
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            Delete<T>(id);
+            Delete<T>(key);
             return ValueTask.CompletedTask;
         }
     }

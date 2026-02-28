@@ -4,7 +4,7 @@ namespace BareMetalWeb.Data;
 public sealed class DataLookupAttribute : Attribute
 {
     public Type TargetType { get; }
-    public string ValueField { get; set; } = nameof(BaseDataObject.Id);
+    public string ValueField { get; set; } = nameof(BaseDataObject.Key);
     public string DisplayField { get; set; } = "Name";
     public string? QueryField { get; set; }
     public QueryOperator QueryOperator { get; set; } = QueryOperator.Equals;

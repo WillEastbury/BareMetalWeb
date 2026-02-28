@@ -25,7 +25,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
 
         if (string.IsNullOrWhiteSpace(entity.Name))
         {
-            warnList.Add($"EntityDefinition {entity.Id}: Name is empty — skipped.");
+            warnList.Add($"EntityDefinition {entity.Key}: Name is empty — skipped.");
             return null;
         }
 
@@ -63,7 +63,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
         var compiledFields = new List<RuntimeFieldModel>(sortedFields.Count);
         foreach (var f in sortedFields)
         {
-            var fieldId = !string.IsNullOrWhiteSpace(f.FieldId) ? f.FieldId : f.Id;
+            var fieldId = !string.IsNullOrWhiteSpace(f.FieldId) ? f.FieldId : f.Key.ToString();
             var label = !string.IsNullOrWhiteSpace(f.Label) ? f.Label! : DataScaffold.DeCamelcase(f.Name);
             var fieldType = MapFormFieldType(f);
             var enumValues = ParsePipeList(f.EnumValues);
@@ -106,7 +106,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
 
         var compiledIndexes = indexes
             .Select(idx => new RuntimeIndexModel(
-                IndexId: idx.Id,
+                IndexId: idx.Key.ToString(),
                 EntityId: idx.EntityId,
                 FieldNames: idx.GetFieldList(),
                 Type: string.IsNullOrWhiteSpace(idx.Type) ? "secondary" : idx.Type))
@@ -117,7 +117,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
         var compiledActions = actions
             .Where(a => !string.IsNullOrWhiteSpace(a.Name))
             .Select(a => new RuntimeActionModel(
-                ActionId: a.Id,
+                ActionId: a.Key.ToString(),
                 EntityId: a.EntityId,
                 Name: a.Name,
                 Label: a.Label ?? a.Name,
@@ -134,7 +134,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
 
         // ── Entity identity ────────────────────────────────────────────────────
 
-        var entityId = !string.IsNullOrWhiteSpace(entity.EntityId) ? entity.EntityId : entity.Id;
+        var entityId = !string.IsNullOrWhiteSpace(entity.EntityId) ? entity.EntityId : entity.Key.ToString();
 
         return new RuntimeEntityModel(
             entityId: entityId,
@@ -293,7 +293,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
         {
             "sequential" => AutoIdStrategy.Sequential,
             "none" => AutoIdStrategy.None,
-            _ => AutoIdStrategy.Guid
+            _ => AutoIdStrategy.Sequential
         };
 
     private static IReadOnlyList<string> ParsePipeList(string? value)

@@ -69,9 +69,9 @@ public sealed record DataEntityMetadata(
 
 public sealed record DataEntityHandlers(
     Func<BaseDataObject> Create,
-    Func<string, CancellationToken, ValueTask<BaseDataObject?>> LoadAsync,
+    Func<uint, CancellationToken, ValueTask<BaseDataObject?>> LoadAsync,
     Func<BaseDataObject, CancellationToken, ValueTask> SaveAsync,
-    Func<string, CancellationToken, ValueTask> DeleteAsync,
+    Func<uint, CancellationToken, ValueTask> DeleteAsync,
     Func<QueryDefinition?, CancellationToken, ValueTask<IEnumerable<BaseDataObject>>> QueryAsync,
     Func<QueryDefinition?, CancellationToken, ValueTask<int>> CountAsync
 );
@@ -161,9 +161,9 @@ public static class DataScaffold
         return true;
     }
 
-    public static async ValueTask<object?> LoadAsync(DataEntityMetadata metadata, string id, CancellationToken cancellationToken = default)
+    public static async ValueTask<object?> LoadAsync(DataEntityMetadata metadata, uint key, CancellationToken cancellationToken = default)
     {
-        return await metadata.Handlers.LoadAsync(id, cancellationToken);
+        return await metadata.Handlers.LoadAsync(key, cancellationToken);
     }
 
     public static async ValueTask SaveAsync(DataEntityMetadata metadata, object instance, CancellationToken cancellationToken = default)
@@ -179,10 +179,6 @@ public static class DataScaffold
     {
         switch (metadata.IdGeneration)
         {
-            case AutoIdStrategy.Guid:
-                // Constructor already sets a GUID; nothing to do.
-                break;
-
             case AutoIdStrategy.Sequential:
             {
                 // Seed the persistent counter from existing data on first use after startup
@@ -190,23 +186,23 @@ public static class DataScaffold
                 if (!_sequenceSeeded.ContainsKey(metadata.Name))
                 {
                     var existing = await metadata.Handlers.QueryAsync(null, cancellationToken);
-                    long max = 0;
+                    uint max = 0;
                     foreach (var obj in existing)
                     {
-                        if (long.TryParse(obj.Id, out var parsed) && parsed > max)
-                            max = parsed;
+                        if (obj.Key > max)
+                            max = obj.Key;
                     }
                     var provider = DataStoreProvider.PrimaryProvider;
                     if (provider != null)
-                        provider.SeedSequentialId(metadata.Type.Name, max);
+                        provider.SeedSequentialKey(metadata.Type.Name, max);
                     else
                         IdSequenceProvider.SeedIfHigher(metadata.Name, max);
                     _sequenceSeeded[metadata.Name] = true;
                 }
                 var idProvider = DataStoreProvider.PrimaryProvider;
-                instance.Id = idProvider != null
-                    ? idProvider.NextSequentialId(metadata.Type.Name)
-                    : IdSequenceProvider.NextId(metadata.Name);
+                instance.Key = idProvider != null
+                    ? idProvider.NextSequentialKey(metadata.Type.Name)
+                    : IdSequenceProvider.NextKey(metadata.Name);
                 break;
             }
 
@@ -215,38 +211,38 @@ public static class DataScaffold
                 // If any field uses field-level sequential generation, seed and assign here
                 // to ensure the ID survives application restarts without duplicates.
                 var seqField = metadata.Fields.FirstOrDefault(f =>
-                    f.IdGeneration == IdGenerationStrategy.SequentialLong &&
-                    string.Equals(f.Property.Name, nameof(BaseDataObject.Id), StringComparison.Ordinal));
+                    f.IdGeneration == IdGenerationStrategy.Sequential &&
+                    string.Equals(f.Property.Name, nameof(BaseDataObject.Key), StringComparison.Ordinal));
 
                 if (seqField != null && !_sequenceSeeded.ContainsKey(metadata.Name))
                 {
                     // One-time scan to seed the persistent counter from existing data
                     // (handles the upgrade migration case where the counter file is absent).
                     var existing = await metadata.Handlers.QueryAsync(null, cancellationToken);
-                    long max = 0;
+                    uint max = 0;
                     foreach (var obj in existing)
                     {
-                        if (long.TryParse(obj.Id, out var parsed) && parsed > max)
-                            max = parsed;
+                        if (obj.Key > max)
+                            max = obj.Key;
                     }
                     var provider = DataStoreProvider.PrimaryProvider;
                     if (provider != null)
                     {
-                        provider.SeedSequentialId(metadata.Type.Name, max);
-                        // Re-assign the ID so the seeded counter is used (overrides the
+                        provider.SeedSequentialKey(metadata.Type.Name, max);
+                        // Re-assign the Key so the seeded counter is used (overrides the
                         // temporary value that DefaultIdGenerator set from the un-seeded counter).
-                        instance.Id = provider.NextSequentialId(metadata.Type.Name);
+                        instance.Key = provider.NextSequentialKey(metadata.Type.Name);
                     }
                     else
                     {
                         IdSequenceProvider.SeedIfHigher(metadata.Name, max);
-                        instance.Id = IdSequenceProvider.NextId(metadata.Name);
+                        instance.Key = IdSequenceProvider.NextKey(metadata.Name);
                     }
                     _sequenceSeeded[metadata.Name] = true;
                 }
-                else if (string.IsNullOrWhiteSpace(instance.Id))
+                else if (instance.Key == 0)
                 {
-                    throw new InvalidOperationException($"Entity {metadata.Name} requires a manually specified Id (IdGeneration = None).");
+                    throw new InvalidOperationException($"Entity {metadata.Name} requires a manually specified Key (IdGeneration = None).");
                 }
                 break;
             }
@@ -258,9 +254,9 @@ public static class DataScaffold
         await ComputedFieldService.ApplyComputedValuesAsync(metadata, instance, trigger, cancellationToken);
     }
 
-    public static async ValueTask DeleteAsync(DataEntityMetadata metadata, string id, CancellationToken cancellationToken = default)
+    public static async ValueTask DeleteAsync(DataEntityMetadata metadata, uint key, CancellationToken cancellationToken = default)
     {
-        await metadata.Handlers.DeleteAsync(id, cancellationToken);
+        await metadata.Handlers.DeleteAsync(key, cancellationToken);
     }
 
     public static async ValueTask<IEnumerable> QueryAsync(DataEntityMetadata metadata, QueryDefinition? query = null, CancellationToken cancellationToken = default)
@@ -645,7 +641,7 @@ public static class DataScaffold
                 MaxFileSizeBytes: field.Upload?.MaxFileSizeBytes,
                 ExistingFileName: value is StoredFileData fileData ? fileData.FileName : null,
                 ExistingFileUrl: value is StoredFileData && instance is BaseDataObject dataObject
-                    ? $"/api/{metadata.Slug}/{Uri.EscapeDataString(dataObject.Id)}/files/{Uri.EscapeDataString(field.Name)}"
+                    ? $"/api/{metadata.Slug}/{dataObject.Key}/files/{Uri.EscapeDataString(field.Name)}"
                     : null,
                 MinLength: field.Validation?.MinLength,
                 MaxLength: field.Validation?.MaxLength,
@@ -672,10 +668,10 @@ public static class DataScaffold
             if (field.IdGeneration == IdGenerationStrategy.None)
                 continue;
 
-            // Always generate ID for fields with IdGeneration attribute
+            // Always generate key for fields with IdGeneration attribute
             // This is called only for new entity creation
-            var generatedId = IdGenerator.GenerateId(metadata.Type, field.IdGeneration);
-            field.SetValueFn(instance, generatedId);
+            var generatedKey = IdGenerator.GenerateKey(metadata.Type, field.IdGeneration);
+            field.SetValueFn(instance, generatedKey);
         }
     }
 
@@ -747,7 +743,7 @@ public static class DataScaffold
 
             if (value is StoredFileData storedFile && instance is BaseDataObject dataObject)
             {
-                var safeUrl = $"/api/{metadata.Slug}/{Uri.EscapeDataString(dataObject.Id)}/files/{Uri.EscapeDataString(field.Name)}";
+                var safeUrl = $"/api/{metadata.Slug}/{dataObject.Key}/files/{Uri.EscapeDataString(field.Name)}";
                 var safeName = WebUtility.HtmlEncode(storedFile.FileName);
                 if (storedFile.IsImage)
                 {
@@ -1927,7 +1923,8 @@ public static class DataScaffold
         // Note: This uses sync-over-async, consistent with QueryByType — see that method for rationale.
         var method = typeof(IDataObjectStore).GetMethod(nameof(IDataObjectStore.LoadAsync))!;
         var generic = method.MakeGenericMethod(type);
-        var result = generic.Invoke(DataStoreProvider.Current, new object?[] { id, CancellationToken.None })!;
+        var key = uint.Parse(id);
+        var result = generic.Invoke(DataStoreProvider.Current, new object?[] { key, CancellationToken.None })!;
         var asTaskMethod = result.GetType().GetMethod(nameof(ValueTask<object>.AsTask))!;
         var task = (Task)asTaskMethod.Invoke(result, null)!;
         task.GetAwaiter().GetResult();
@@ -1972,7 +1969,7 @@ public static class DataScaffold
         try
         {
             object? entity;
-            if (string.Equals(lookup.ValueField, nameof(BaseDataObject.Id), StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(lookup.ValueField, nameof(BaseDataObject.Key), StringComparison.OrdinalIgnoreCase))
             {
                 entity = LoadByIdForType(lookup.TargetType, currentValue);
             }
@@ -2069,7 +2066,7 @@ public static class DataScaffold
     }
 
     public static string? GetIdValue(BaseDataObject instance)
-        => instance.Id;
+        => instance.Key.ToString();
 
     public static bool IsTruthy(object? value)
     {
@@ -3391,7 +3388,7 @@ public static class DataScaffold
         var showOnNav = entityAttribute?.ShowOnNav ?? false;
         var navGroup = entityAttribute?.NavGroup ?? "Admin";
         var navOrder = entityAttribute?.NavOrder ?? 0;
-        var idGeneration = entityAttribute?.IdGeneration ?? AutoIdStrategy.Guid;
+        var idGeneration = entityAttribute?.IdGeneration ?? AutoIdStrategy.Sequential;
         var defaultSortField = string.IsNullOrWhiteSpace(entityAttribute?.DefaultSortField) ? null : entityAttribute.DefaultSortField;
         var defaultSortDirection = entityAttribute?.DefaultSortDirection ?? SortDirection.Asc;
 
@@ -3466,7 +3463,7 @@ public static class DataScaffold
     private static bool IsCoreDataObjectProperty(PropertyInfo property)
     {
         return property.DeclaringType == typeof(BaseDataObject)
-            || property.Name == nameof(BaseDataObject.Id)
+            || property.Name == nameof(BaseDataObject.Key)
             || property.Name == nameof(BaseDataObject.CreatedOnUtc)
             || property.Name == nameof(BaseDataObject.UpdatedOnUtc)
             || property.Name == nameof(BaseDataObject.CreatedBy)
@@ -3588,14 +3585,14 @@ public static class DataScaffold
         return slug.Trim('-');
     }
 
-    private static async ValueTask<BaseDataObject?> LoadTypedAsync<T>(string id, CancellationToken cancellationToken) where T : BaseDataObject
-        => await DataStoreProvider.Current.LoadAsync<T>(id, cancellationToken);
+    private static async ValueTask<BaseDataObject?> LoadTypedAsync<T>(uint key, CancellationToken cancellationToken) where T : BaseDataObject
+        => await DataStoreProvider.Current.LoadAsync<T>(key, cancellationToken);
 
     private static async ValueTask SaveTypedAsync<T>(BaseDataObject instance, CancellationToken cancellationToken) where T : BaseDataObject
         => await DataStoreProvider.Current.SaveAsync((T)instance, cancellationToken);
 
-    private static async ValueTask DeleteTypedAsync<T>(string id, CancellationToken cancellationToken) where T : BaseDataObject
-        => await DataStoreProvider.Current.DeleteAsync<T>(id, cancellationToken);
+    private static async ValueTask DeleteTypedAsync<T>(uint key, CancellationToken cancellationToken) where T : BaseDataObject
+        => await DataStoreProvider.Current.DeleteAsync<T>(key, cancellationToken);
 
     private static async ValueTask<IEnumerable<BaseDataObject>> QueryTypedAsync<T>(QueryDefinition? query, CancellationToken cancellationToken) where T : BaseDataObject
     {

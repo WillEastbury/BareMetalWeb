@@ -187,7 +187,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         return ValueTask.CompletedTask;
     }
 
-    public string NextSequentialId(string entityName)
+    public uint NextSequentialKey(string entityName)
     {
         if (string.IsNullOrWhiteSpace(entityName))
             throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
@@ -205,7 +205,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             {
                 try
                 {
-                    return IncrementAndReadSeqIdFile(path);
+                    return IncrementAndReadSeqKeyFile(path);
                 }
                 catch (IOException)
                 {
@@ -214,15 +214,15 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             }
 
             // Final attempt – let any IOException propagate.
-            return IncrementAndReadSeqIdFile(path);
+            return IncrementAndReadSeqKeyFile(path);
         }
     }
 
-    public void SeedSequentialId(string entityName, long floor)
+    public void SeedSequentialKey(string entityName, uint floor)
     {
         if (string.IsNullOrWhiteSpace(entityName))
             throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
-        if (floor <= 0)
+        if (floor == 0)
             return;
 
         var path = GetSeqIdFilePath(entityName);
@@ -238,7 +238,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             {
                 try
                 {
-                    SeedSeqIdFileIfLower(path, floor);
+                    SeedSeqKeyFileIfLower(path, floor);
                     return;
                 }
                 catch (IOException)
@@ -248,43 +248,43 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             }
 
             // Final attempt – let any IOException propagate.
-            SeedSeqIdFileIfLower(path, floor);
+            SeedSeqKeyFileIfLower(path, floor);
         }
     }
 
-    private static string IncrementAndReadSeqIdFile(string path)
+    private static uint IncrementAndReadSeqKeyFile(string path)
     {
-        var buf = new byte[8];
+        var buf = new byte[4];
         using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        long current = 0;
-        if (file.Length >= 8)
+        uint current = 0;
+        if (file.Length >= 4)
         {
-            file.ReadExactly(buf, 0, 8);
-            current = BinaryPrimitives.ReadInt64LittleEndian(buf);
+            file.ReadExactly(buf, 0, 4);
+            current = BinaryPrimitives.ReadUInt32LittleEndian(buf);
         }
         var next = current + 1;
-        BinaryPrimitives.WriteInt64LittleEndian(buf, next);
+        BinaryPrimitives.WriteUInt32LittleEndian(buf, next);
         file.Position = 0;
-        file.Write(buf, 0, 8);
+        file.Write(buf, 0, 4);
         file.Flush(true);
-        return next.ToString();
+        return next;
     }
 
-    private static void SeedSeqIdFileIfLower(string path, long floor)
+    private static void SeedSeqKeyFileIfLower(string path, uint floor)
     {
-        var buf = new byte[8];
+        var buf = new byte[4];
         using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
-        long current = 0;
-        if (file.Length >= 8)
+        uint current = 0;
+        if (file.Length >= 4)
         {
-            file.ReadExactly(buf, 0, 8);
-            current = BinaryPrimitives.ReadInt64LittleEndian(buf);
+            file.ReadExactly(buf, 0, 4);
+            current = BinaryPrimitives.ReadUInt32LittleEndian(buf);
         }
         if (current < floor)
         {
-            BinaryPrimitives.WriteInt64LittleEndian(buf, floor);
+            BinaryPrimitives.WriteUInt32LittleEndian(buf, floor);
             file.Position = 0;
-            file.Write(buf, 0, 8);
+            file.Write(buf, 0, 4);
             file.Flush(true);
         }
     }
@@ -323,8 +323,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     public void Save<T>(T obj) where T : BaseDataObject
     {
         if (obj is null) throw new ArgumentNullException(nameof(obj));
-        if (string.IsNullOrWhiteSpace(obj.Id))
-            throw new ArgumentException("DataObject must have a non-empty Id.", nameof(obj));
+        if (obj.Key == 0)
+            throw new ArgumentException("DataObject must have a non-zero Key.", nameof(obj));
 
         // Enforce singleton flag: when a boolean property marked [SingletonFlag] is true,
         // clear that flag on all other records of this type before saving.
@@ -377,27 +377,27 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             // New inserts skip this load since there are no prior index entries to clean up.
             T? oldObj = null;
             List<PropertyInfo> indexedFields = new();
-            if (_searchIndexManager.HasIndexedFields(type, out indexedFields) && TryGetClusteredLocation(type.Name, obj.Id, out _))
-                oldObj = Load<T>(obj.Id);
+            if (_searchIndexManager.HasIndexedFields(type, out indexedFields) && TryGetClusteredLocation(type.Name, obj.Key.ToString(), out _))
+                oldObj = Load<T>(obj.Key);
 
-            var location = store.Write(obj.Id, bytes);
+            var location = store.Write(obj.Key.ToString(), bytes);
             var map = GetClusteredLocationMap(type.Name);
-            map.TryGetValue(obj.Id, out var existingLocation);
+            map.TryGetValue(obj.Key.ToString(), out var existingLocation);
 
             // Batch append operations to avoid lock contention
             var entries = new List<(string key, string id, char op, long? expiresAtUtcTicks)>
             {
-                (obj.Id, location, 'A', null)
+                (obj.Key.ToString(), location, 'A', null)
             };
 
             if (!string.IsNullOrWhiteSpace(existingLocation)
                 && !string.Equals(existingLocation, location, StringComparison.OrdinalIgnoreCase))
             {
-                entries.Add((obj.Id, existingLocation, 'D', null));
+                entries.Add((obj.Key.ToString(), existingLocation, 'D', null));
             }
 
             _indexStore.AppendEntries(type.Name, ClusteredIndexFieldName, entries, normalizeKey: false);
-            map[obj.Id] = location;
+            map[obj.Key.ToString()] = location;
 
             if (!string.IsNullOrWhiteSpace(existingLocation)
                 && !string.Equals(existingLocation, location, StringComparison.OrdinalIgnoreCase))
@@ -416,16 +416,16 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                         var oldValue = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
                         if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
                             continue; // value unchanged — existing index entry is still valid
-                        _indexStore.AppendEntry(type.Name, prop.Name, oldValue, obj.Id, 'D');
+                        _indexStore.AppendEntry(type.Name, prop.Name, oldValue, obj.Key.ToString(), 'D');
                     }
-                    _indexStore.AppendEntry(type.Name, prop.Name, newValue, obj.Id, 'A');
+                    _indexStore.AppendEntry(type.Name, prop.Name, newValue, obj.Key.ToString(), 'A');
                 }
                 _searchIndexManager.IndexObject(obj);
             }
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"Serialization failed for {type.Name} with Id {obj.Id}.", ex);
+            _logger?.LogError($"Serialization failed for {type.Name} with Key {obj.Key}.", ex);
             throw;
         }
     }
@@ -459,7 +459,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         var allRecords = Query<T>();
         foreach (var record in allRecords)
         {
-            if (string.Equals(record.Id, obj.Id, StringComparison.OrdinalIgnoreCase))
+            if (record.Key == obj.Key)
                 continue;
 
             bool changed = false;
@@ -477,13 +477,13 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         }
     }
 
-    public T? Load<T>(string id) where T : BaseDataObject
+    public T? Load<T>(uint key) where T : BaseDataObject
     {
-        if (string.IsNullOrWhiteSpace(id))
-            throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
+        if (key == 0)
+            throw new ArgumentException("Key cannot be zero.", nameof(key));
 
         var type = typeof(T);
-        if (!TryGetClusteredLocation(type.Name, id, out var location))
+        if (!TryGetClusteredLocation(type.Name, key.ToString(), out var location))
             return default;
 
         var store = GetClusteredStore(type.Name);
@@ -494,8 +494,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             // Evict the cache entry and retry once using the index store as the authoritative source.
             if (_clusteredLocationMaps.TryGetValue(type.Name, out var locationMap))
             {
-                locationMap.TryRemove(id, out _);
-                bool foundFresh = _indexStore.TryGetLatestValue(type.Name, ClusteredIndexFieldName, id, out var freshLocation, normalizeKey: false);
+                locationMap.TryRemove(key.ToString(), out _);
+                bool foundFresh = _indexStore.TryGetLatestValue(type.Name, ClusteredIndexFieldName, key.ToString(), out var freshLocation, normalizeKey: false);
                 bool isDifferentLocation = foundFresh
                     && !string.IsNullOrWhiteSpace(freshLocation)
                     && !string.Equals(freshLocation, location, StringComparison.OrdinalIgnoreCase);
@@ -503,7 +503,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                 {
                     bytes = store.Read(freshLocation);
                     if (bytes != null)
-                        locationMap[id] = freshLocation;
+                        locationMap[key.ToString()] = freshLocation;
                 }
             }
             if (bytes == null)
@@ -516,7 +516,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             var schemaFile = GetSchemaDefinition(type, schemaVersion);
             if (schemaFile == null)
             {
-                _logger?.LogInfo($"Schema fallback for {type.Name} with Id {id}. Missing version {schemaVersion}; returning null.");
+                _logger?.LogInfo($"Schema fallback for {type.Name} with Key {key}. Missing version {schemaVersion}; returning null.");
                 return default;
             }
 
@@ -530,14 +530,14 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"Deserialization failed for {type.Name} with Id {id}.", ex);
+            _logger?.LogError($"Deserialization failed for {type.Name} with Key {key}.", ex);
             throw;
         }
     }
 
-    public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+    public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
     {
-        return ValueTask.FromResult(Load<T>(id));
+        return ValueTask.FromResult(Load<T>(key));
     }
 
     public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
@@ -575,9 +575,12 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                             var loaded = new List<T>(candidateIds.Count);
                             foreach (var candidateId in candidateIds)
                             {
-                                var obj = Load<T>(candidateId);
-                                if (obj != null)
-                                    loaded.Add(obj);
+                                if (uint.TryParse(candidateId, out var candidateKey))
+                                {
+                                    var obj = Load<T>(candidateKey);
+                                    if (obj != null)
+                                        loaded.Add(obj);
+                                }
                             }
                             candidates = loaded;
                         }
@@ -750,25 +753,26 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         return ValueTask.FromResult(Count<T>(query));
     }
 
-    public void Delete<T>(string id) where T : BaseDataObject
+    public void Delete<T>(uint key) where T : BaseDataObject
     {
-        if (string.IsNullOrWhiteSpace(id))
-            throw new ArgumentException("Id cannot be null or whitespace.", nameof(id));
+        if (key == 0)
+            throw new ArgumentException("Key cannot be zero.", nameof(key));
 
         var type = typeof(T);
-        if (TryGetClusteredLocation(type.Name, id, out var location))
+        var keyStr = key.ToString();
+        if (TryGetClusteredLocation(type.Name, keyStr, out var location))
         {
             // Load old object for field index cleanup before deleting
             T? oldObj = null;
             List<PropertyInfo> indexedFields = new();
             if (_searchIndexManager.HasIndexedFields(type, out indexedFields))
-                oldObj = Load<T>(id);
+                oldObj = Load<T>(key);
 
             var store = GetClusteredStore(type.Name);
             store.Delete(location);
-            _indexStore.AppendEntry(type.Name, ClusteredIndexFieldName, id, location, 'D', normalizeKey: false);
+            _indexStore.AppendEntry(type.Name, ClusteredIndexFieldName, keyStr, location, 'D', normalizeKey: false);
             if (_clusteredLocationMaps.TryGetValue(type.Name, out var map))
-                map.TryRemove(id, out _);
+                map.TryRemove(keyStr, out _);
 
             // Remove from secondary field indexes and full-text search index
             if (indexedFields.Count > 0 && oldObj != null)
@@ -776,16 +780,16 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                 foreach (var prop in indexedFields)
                 {
                     var value = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
-                    _indexStore.AppendEntry(type.Name, prop.Name, value, id, 'D');
+                    _indexStore.AppendEntry(type.Name, prop.Name, value, keyStr, 'D');
                 }
-                _searchIndexManager.RemoveObject(type, id);
+                _searchIndexManager.RemoveObject(type, keyStr);
             }
         }
     }
 
-    public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+    public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
     {
-        Delete<T>(id);
+        Delete<T>(key);
         return ValueTask.CompletedTask;
     }
 
@@ -856,7 +860,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
 
     private string GetTypeFolder(Type type) => Path.Combine(_rootPath, type.Name);
 
-    private string GetFilePath(Type type, string id) => Path.Combine(GetTypeFolder(type), $"{id}.bin");
+    private string GetFilePath(Type type, uint key) => Path.Combine(GetTypeFolder(type), $"{key}.bin");
 
     private string GetPagedEntityFolder(string entityName)
         => Path.Combine(_rootPath, DefaultPagedFolderName, SanitizeFilePart(entityName));

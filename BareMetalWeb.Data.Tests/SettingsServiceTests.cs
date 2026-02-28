@@ -39,7 +39,8 @@ public class SettingsServiceTests : IDisposable
 
     private sealed class InMemoryProvider : IDataProvider
     {
-        private readonly Dictionary<(Type, string), BaseDataObject> _store = new();
+        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
+        private uint _nextKey = 1;
 
         public string Name => "InMemory";
         public string IndexRootPath => string.Empty;
@@ -52,7 +53,9 @@ public class SettingsServiceTests : IDisposable
 
         public void Save<T>(T obj) where T : BaseDataObject
         {
-            _store[(typeof(T), obj.Id)] = obj;
+            if (obj.Key == 0)
+                obj.Key = _nextKey++;
+            _store[(typeof(T), obj.Key)] = obj;
         }
 
         public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
@@ -61,11 +64,11 @@ public class SettingsServiceTests : IDisposable
             return ValueTask.CompletedTask;
         }
 
-        public T? Load<T>(string id) where T : BaseDataObject =>
-            _store.TryGetValue((typeof(T), id), out var obj) ? obj as T : null;
+        public T? Load<T>(uint key) where T : BaseDataObject =>
+            _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
 
-        public ValueTask<T?> LoadAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject =>
-            ValueTask.FromResult(Load<T>(id));
+        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject =>
+            ValueTask.FromResult(Load<T>(key));
 
         public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject =>
             _store.Values.OfType<T>();
@@ -79,12 +82,12 @@ public class SettingsServiceTests : IDisposable
         public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject =>
             ValueTask.FromResult(Count<T>(query));
 
-        public void Delete<T>(string id) where T : BaseDataObject =>
-            _store.Remove((typeof(T), id));
+        public void Delete<T>(uint key) where T : BaseDataObject =>
+            _store.Remove((typeof(T), key));
 
-        public ValueTask DeleteAsync<T>(string id, CancellationToken cancellationToken = default) where T : BaseDataObject
+        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
         {
-            Delete<T>(id);
+            Delete<T>(key);
             return ValueTask.CompletedTask;
         }
 
@@ -98,17 +101,17 @@ public class SettingsServiceTests : IDisposable
         public IPagedFile OpenPagedFile(string entityName, string fileName, int pageSize, FileAccess access) => throw new NotImplementedException();
         public ValueTask DeletePagedFileAsync(string entityName, string fileName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
 
-        private readonly Dictionary<string, long> _seqIds = new();
-        public string NextSequentialId(string entityName)
+        private readonly Dictionary<string, uint> _seqIds = new();
+        public uint NextSequentialKey(string entityName)
         {
-            _seqIds.TryGetValue(entityName, out long current);
+            _seqIds.TryGetValue(entityName, out uint current);
             current++;
             _seqIds[entityName] = current;
-            return current.ToString();
+            return current;
         }
-        public void SeedSequentialId(string entityName, long floor)
+        public void SeedSequentialKey(string entityName, uint floor)
         {
-            if (!_seqIds.TryGetValue(entityName, out long current) || current < floor)
+            if (!_seqIds.TryGetValue(entityName, out uint current) || current < floor)
                 _seqIds[entityName] = floor;
         }
 
@@ -132,7 +135,7 @@ public class SettingsServiceTests : IDisposable
     public void AppSetting_DefaultsAreCorrect()
     {
         var setting = new AppSetting();
-        Assert.NotNull(setting.Id);
+        Assert.Equal(0u, setting.Key);
         Assert.Equal(string.Empty, setting.SettingId);
         Assert.Equal(string.Empty, setting.Value);
         Assert.Equal(string.Empty, setting.Description);
@@ -494,9 +497,9 @@ public class SettingsServiceTests : IDisposable
         // Build a minimal metadata whose SaveAsync delegates to the test store
         var handlers = new DataEntityHandlers(
             Create: () => new AppSetting(),
-            LoadAsync: (id, ct) => ValueTask.FromResult((BaseDataObject?)_testStore.Query<AppSetting>().FirstOrDefault(s => s.Id == id)),
+            LoadAsync: (key, ct) => ValueTask.FromResult((BaseDataObject?)_testStore.Query<AppSetting>().FirstOrDefault(s => s.Key == key)),
             SaveAsync: (obj, ct) => { _testStore.Save((AppSetting)obj); return ValueTask.CompletedTask; },
-            DeleteAsync: (id, ct) => { _testStore.Delete<AppSetting>(id); return ValueTask.CompletedTask; },
+            DeleteAsync: (key, ct) => { _testStore.Delete<AppSetting>(key); return ValueTask.CompletedTask; },
             QueryAsync: (q, ct) => ValueTask.FromResult(_testStore.Query<AppSetting>(q).Cast<BaseDataObject>()),
             CountAsync: (q, ct) => ValueTask.FromResult(_testStore.Query<AppSetting>(q).Count())
         );
@@ -508,7 +511,7 @@ public class SettingsServiceTests : IDisposable
             ShowOnNav: false,
             NavGroup: null,
             NavOrder: 0,
-            IdGeneration: AutoIdStrategy.Guid,
+            IdGeneration: AutoIdStrategy.Sequential,
             ViewType: ViewType.Table,
             ParentField: null,
             Fields: Array.Empty<DataFieldMetadata>(),
