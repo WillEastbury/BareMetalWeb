@@ -38,6 +38,8 @@ public sealed class DataObjectStore : IDataObjectStore
     {
         if (obj is null) throw new ArgumentNullException(nameof(obj));
         var provider = ResolveProvider(typeof(T));
+        if (obj.Key == 0)
+            obj.Key = provider.NextSequentialKey(typeof(T).Name);
         provider.Save(obj);
     }
 
@@ -45,6 +47,8 @@ public sealed class DataObjectStore : IDataObjectStore
     {
         if (obj is null) throw new ArgumentNullException(nameof(obj));
         var provider = ResolveProvider(typeof(T));
+        if (obj.Key == 0)
+            obj.Key = provider.NextSequentialKey(typeof(T).Name);
         await provider.SaveAsync(obj, cancellationToken).ConfigureAwait(false);
     }
 
