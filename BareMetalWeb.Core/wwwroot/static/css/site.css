@@ -731,6 +731,7 @@ body {
 .bm-sort-icon-dim { opacity: 0.3; }
 .bm-img-preview { max-width: 200px; max-height: 200px; }
 #vnext-toast-container { z-index: 1100; }
+.bm-job-progress { min-width: 80px; }
 
 /* VNext SPA polish */
 .vnext-tag-container {

@@ -496,6 +496,10 @@ public static class RouteRegistrationExtensions
         // which must be called before this method (see BareMetalWebExtensions.cs).
 
         // Background job status — must precede /api/{type}/{id} to avoid 'jobs' matching {type}
+        host.RegisterRoute("GET /api/jobs", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.JobsListHandler));
+
         host.RegisterRoute("GET /api/jobs/{jobId}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.JobStatusHandler));

@@ -124,6 +124,30 @@ public sealed class BackgroundJobService
     }
 
     /// <summary>
+    /// Returns point-in-time snapshots of all currently tracked jobs
+    /// (both active and recently completed, up to <see cref="RetentionPeriod"/>).
+    /// </summary>
+    public IReadOnlyList<JobStatusSnapshot> GetAllJobs()
+    {
+        var result = new List<JobStatusSnapshot>();
+        foreach (var kv in _jobs)
+        {
+            var entry = kv.Value;
+            result.Add(new JobStatusSnapshot(
+                entry.JobId,
+                entry.OperationName,
+                entry.Status,
+                entry.PercentComplete,
+                entry.Description,
+                entry.StartedAt,
+                entry.CompletedAt,
+                entry.Error,
+                entry.ResultUrl));
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Returns a point-in-time snapshot of the job, or <c>false</c> if the job
     /// ID is unknown (e.g. pruned after <see cref="RetentionPeriod"/>).
     /// </summary>

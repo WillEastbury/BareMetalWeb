@@ -7319,4 +7319,40 @@ public sealed class RouteHandlers : IRouteHandlers
 
         await context.Response.WriteAsync(json).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// GET /api/jobs
+    /// Returns all tracked background jobs (active and recently completed) as a JSON array.
+    /// </summary>
+    public async ValueTask JobsListHandler(HttpContext context)
+    {
+        var jobs = BackgroundJobService.Instance.GetAllJobs();
+
+        var items = jobs
+            .OrderByDescending(s => s.StartedAt)
+            .Select(snapshot => (object)new
+            {
+                jobId           = snapshot.JobId,
+                operationName   = snapshot.OperationName,
+                status          = snapshot.Status switch
+                {
+                    BackgroundJobStatus.Queued    => "queued",
+                    BackgroundJobStatus.Running   => "running",
+                    BackgroundJobStatus.Succeeded => "succeeded",
+                    BackgroundJobStatus.Failed    => "failed",
+                    _                             => "unknown"
+                },
+                percentComplete = snapshot.PercentComplete,
+                description     = snapshot.Description,
+                startedAt       = snapshot.StartedAt.ToString("O"),
+                completedAt     = snapshot.CompletedAt?.ToString("O"),
+                error           = snapshot.Error,
+                resultUrl       = snapshot.ResultUrl
+            })
+            .ToArray();
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(items)).ConfigureAwait(false);
+    }
 }
