@@ -141,6 +141,26 @@ const BareMetalRest = (() => {
         }
         return call('DELETE', `${jsonBase}/${id}`);
       },
+      /** Apply a field-level delta mutation (JSON). Only sends changed fields. */
+      delta: async (id, changes, expectedVersion = 0) => {
+        await ensureBinary();
+        if (isBinaryAvailable()) {
+          try {
+            return await BareMetalBinary.applyDeltaJson(slug, id, changes, expectedVersion);
+          } catch { /* fall back to full update */ }
+        }
+        return call('PUT', `${jsonBase}/${id}`, changes);
+      },
+      /** Apply a binary delta mutation from a change tracker. */
+      deltaFromTracker: async (tracker) => {
+        await ensureBinary();
+        if (!isBinaryAvailable()) throw new Error('Binary API not available');
+        const layout = await BareMetalBinary.fetchLayout(slug);
+        const buf = BareMetalBinary.buildDelta(tracker, layout);
+        if (!buf) return tracker.entity; // no changes
+        const id = tracker.entity.Key;
+        return BareMetalBinary.applyDelta(slug, id, buf);
+      },
       metadata: () => call('GET', `${root}metadata/${slug}`)
     };
   }

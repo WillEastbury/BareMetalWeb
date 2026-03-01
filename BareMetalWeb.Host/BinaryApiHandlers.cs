@@ -15,6 +15,9 @@ namespace BareMetalWeb.Host;
 public static class BinaryApiHandlers
 {
     private static MetadataWireSerializer? _serializer;
+
+    /// <summary>Get the serializer instance for use by related handlers.</summary>
+    internal static MetadataWireSerializer? GetSerializer() => _serializer;
     private static byte[]? _signingKeyRaw;
     private static readonly ConcurrentDictionary<string, MetadataWireSerializer.FieldPlan[]> _plans = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, MetadataWireSerializer.WireSchemaDescriptor> _schemas = new(StringComparer.OrdinalIgnoreCase);
@@ -37,6 +40,10 @@ public static class BinaryApiHandlers
     {
         return _plans.GetOrAdd(meta.Slug, _ => BuildPlanFromMetadata(meta));
     }
+
+    /// <summary>Public accessor for GetOrBuildPlan, used by DeltaApiHandlers.</summary>
+    internal static MetadataWireSerializer.FieldPlan[] GetOrBuildPlanPublic(DataEntityMetadata meta)
+        => GetOrBuildPlan(meta);
 
     private static MetadataWireSerializer.FieldPlan[] BuildPlanFromMetadata(DataEntityMetadata meta)
     {
@@ -378,7 +385,7 @@ public static class BinaryApiHandlers
         return (meta, typeSlug, null);
     }
 
-    private static string? GetRouteValue(HttpContext context, string key)
+    internal static string? GetRouteValue(HttpContext context, string key)
     {
         var pageContext = context.GetPageContext();
         if (pageContext == null) return null;
