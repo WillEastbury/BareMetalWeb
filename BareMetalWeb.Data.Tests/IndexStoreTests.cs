@@ -43,7 +43,7 @@ public class IndexStoreTests : IDisposable
         const string entityName = "TestEntity";
         const string fieldName = "TestField";
         const string key = "testkey";
-        const string id = "test-id-1";
+        const string id = "1";
 
         // Act
         _indexStore.AppendEntry(entityName, fieldName, key, id, 'A', normalizeKey: false);
@@ -51,7 +51,7 @@ public class IndexStoreTests : IDisposable
         // Assert
         var index = _indexStore.ReadIndex(entityName, fieldName, normalizeKey: false);
         Assert.True(index.ContainsKey(key));
-        Assert.Contains(id, index[key]);
+        Assert.Contains(1u, index[key]);
     }
 
     [Fact]
@@ -62,9 +62,9 @@ public class IndexStoreTests : IDisposable
         const string fieldName = "TestField";
         var entries = new List<(string key, string id, char op, long? expiresAtUtcTicks)>
         {
-            ("key1", "id1", 'A', null),
-            ("key2", "id2", 'A', null),
-            ("key1", "id3", 'D', null)
+            ("key1", "1", 'A', null),
+            ("key2", "2", 'A', null),
+            ("key1", "3", 'D', null)
         };
 
         // Act
@@ -74,7 +74,7 @@ public class IndexStoreTests : IDisposable
         var index = _indexStore.ReadIndex(entityName, fieldName, normalizeKey: false);
         Assert.True(index.ContainsKey("key1"));
         Assert.True(index.ContainsKey("key2"));
-        Assert.Contains("id2", index["key2"]);
+        Assert.Contains(2u, index["key2"]);
     }
 
     [Fact]

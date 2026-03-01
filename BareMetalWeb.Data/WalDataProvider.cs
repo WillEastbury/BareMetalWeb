@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -39,6 +40,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private const string WalSubFolder          = "wal";
     private const uint   IdMapMagic            = 0x494D4150u; // "IMAP"
     private const ushort IdMapVersion          = 2;
+    private const int    DefaultQueryLimit     = int.MaxValue;
+
+    // Monotonic ETag counter — cheaper than Guid.NewGuid() per save
+    private static long _etagCounter = DateTime.UtcNow.Ticks;
 
     // ── Fields ────────────────────────────────────────────────────────────────
 
@@ -118,7 +123,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var now = DateTime.UtcNow;
         if (obj.CreatedOnUtc == default) obj.CreatedOnUtc = now;
         obj.UpdatedOnUtc = now;
-        obj.ETag = Guid.NewGuid().ToString("N");
+        obj.ETag = Interlocked.Increment(ref _etagCounter).ToString("x");
 
         var type       = typeof(T);
         var typeFolder = GetTypeFolder(type);
@@ -191,7 +196,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) return default;
         if (payload.IsEmpty) return default;  // tombstone
 
-        return DeserializePayload<T>(payload.ToArray(), key);
+        return DeserializePayload<T>(payload, key);
     }
 
     public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default)
@@ -205,7 +210,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         if (idMap.Count == 0) return Array.Empty<T>();
 
         var skip = query?.Skip ?? 0;
-        var top  = query?.Top  ?? int.MaxValue;
+        var top  = query?.Top  ?? DefaultQueryLimit;
         if (skip < 0) skip = 0;
         if (top <= 0) return Array.Empty<T>();
 
@@ -222,7 +227,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             T? obj;
             try
             {
-                obj = DeserializePayload<T>(payload.ToArray(), objKey);
+                obj = DeserializePayload<T>(payload, objKey);
             }
             catch (Exception ex)
             {
@@ -479,33 +484,40 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
         lock (lockObj)
         {
-            var snapshot = map.ToArray();
-
+            int entryCount = map.Count;
             // Compute total buffer size: header(12) + entries(12 each) + CRC(4)
-            int size = 12 + snapshot.Length * 12 + 4;
+            int size = 12 + entryCount * 12 + 4;
 
-            var buf  = new byte[size];
-            var span = buf.AsSpan();
-            int o    = 0;
-
-            BinaryPrimitives.WriteUInt32LittleEndian(span[o..], IdMapMagic);         o += 4;
-            BinaryPrimitives.WriteUInt16LittleEndian(span[o..], IdMapVersion);       o += 2;
-            BinaryPrimitives.WriteUInt16LittleEndian(span[o..], 0);                  o += 2;  // reserved
-            BinaryPrimitives.WriteUInt32LittleEndian(span[o..], (uint)snapshot.Length); o += 4;
-
-            foreach (var (objKey, walKey) in snapshot)
+            var buf = ArrayPool<byte>.Shared.Rent(size);
+            try
             {
-                BinaryPrimitives.WriteUInt32LittleEndian(span[o..], objKey);  o += 4;
-                BinaryPrimitives.WriteUInt64LittleEndian(span[o..], walKey);  o += 8;
+                var span = buf.AsSpan(0, size);
+                int o    = 0;
+
+                BinaryPrimitives.WriteUInt32LittleEndian(span[o..], IdMapMagic);         o += 4;
+                BinaryPrimitives.WriteUInt16LittleEndian(span[o..], IdMapVersion);       o += 2;
+                BinaryPrimitives.WriteUInt16LittleEndian(span[o..], 0);                  o += 2;  // reserved
+                BinaryPrimitives.WriteUInt32LittleEndian(span[o..], (uint)entryCount);   o += 4;
+
+                foreach (var (objKey, walKey) in map)
+                {
+                    BinaryPrimitives.WriteUInt32LittleEndian(span[o..], objKey);  o += 4;
+                    BinaryPrimitives.WriteUInt64LittleEndian(span[o..], walKey);  o += 8;
+                }
+
+                uint crc = WalCrc32C.Compute(span[..o]);
+                BinaryPrimitives.WriteUInt32LittleEndian(span[o..], crc);
+
+                var path    = GetIdMapPath(typeName);
+                var tmpPath = path + ".tmp";
+                using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
+                    fs.Write(buf, 0, size);
+                File.Move(tmpPath, path, overwrite: true);
             }
-
-            uint crc = WalCrc32C.Compute(span[..o]);
-            BinaryPrimitives.WriteUInt32LittleEndian(span[o..], crc);
-
-            var path    = GetIdMapPath(typeName);
-            var tmpPath = path + ".tmp";
-            File.WriteAllBytes(tmpPath, buf);
-            File.Move(tmpPath, path, overwrite: true);
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buf);
+            }
         }
     }
 
@@ -642,8 +654,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
     // ── Deserialization helper ────────────────────────────────────────────────
 
-    private T? DeserializePayload<T>(byte[] bytes, uint key) where T : BaseDataObject
+    // Cache: (type, schemaVersion) → MemberSignature[]
+    private readonly ConcurrentDictionary<(Type, int), MemberSignature[]> _schemaMemberCache = new();
+
+    private T? DeserializePayload<T>(ReadOnlyMemory<byte> memory, uint key) where T : BaseDataObject
     {
+        var bytes         = memory.Span;
         var type          = typeof(T);
         var schemaVersion = _serializer.ReadSchemaVersion(bytes);
         var schemaFile    = GetSchemaDefinition(type, schemaVersion);
@@ -655,18 +671,22 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             return default;
         }
 
-        var schemaMembers = schemaFile.Members
-            .Select(m => new MemberSignature(
-                m.Name, m.TypeName,
-                AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)),
-                m.BlittableSize))
-            .ToArray();
+        var schemaMembers = _schemaMemberCache.GetOrAdd((type, schemaVersion), _ =>
+            schemaFile.Members
+                .Select(m => new MemberSignature(
+                    m.Name, m.TypeName,
+                    AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)),
+                    m.BlittableSize))
+                .ToArray());
+
         var arch   = ParseArchitecture(schemaFile.Architecture);
         var schema = _serializer.CreateSchema(schemaFile.Version, schemaMembers, arch, schemaFile.Hash);
 
+        // Materialize to array only at the serializer boundary
+        var arr = memory.ToArray();
         if (_serializer is BinaryObjectSerializer bin)
-            return bin.Deserialize<T>(bytes, schema, SchemaReadMode.BestEffort);
-        return _serializer.Deserialize<T>(bytes, schema);
+            return bin.Deserialize<T>(arr, schema, SchemaReadMode.BestEffort);
+        return _serializer.Deserialize<T>(arr, schema);
     }
 
     // ── Singleton-flag enforcement ────────────────────────────────────────────
@@ -707,18 +727,18 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private static uint IncrementAndReadSeqKeyFile(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? Path.GetTempPath());
-        var buf = new byte[4];
+        Span<byte> buf = stackalloc byte[4];
         using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         uint current = 0;
         if (file.Length >= 4)
         {
-            file.ReadExactly(buf, 0, 4);
+            file.ReadExactly(buf);
             current = BinaryPrimitives.ReadUInt32LittleEndian(buf);
         }
         var next = current + 1;
         BinaryPrimitives.WriteUInt32LittleEndian(buf, next);
         file.Position = 0;
-        file.Write(buf, 0, 4);
+        file.Write(buf);
         file.Flush(true);
         return next;
     }
@@ -726,19 +746,19 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private static void SeedSeqKeyFileIfLower(string path, uint floor)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? Path.GetTempPath());
-        var buf = new byte[4];
+        Span<byte> buf = stackalloc byte[4];
         using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         uint current = 0;
         if (file.Length >= 4)
         {
-            file.ReadExactly(buf, 0, 4);
+            file.ReadExactly(buf);
             current = BinaryPrimitives.ReadUInt32LittleEndian(buf);
         }
         if (current < floor)
         {
             BinaryPrimitives.WriteUInt32LittleEndian(buf, floor);
             file.Position = 0;
-            file.Write(buf, 0, 4);
+            file.Write(buf);
             file.Flush(true);
         }
     }

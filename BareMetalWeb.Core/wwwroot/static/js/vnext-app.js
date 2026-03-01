@@ -350,7 +350,7 @@
             // Hierarchy/calendar views need all items (no pagination)
             var vt = meta.viewType || '';
             var activeView = query.view || '';
-            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' || meta.canShowTimetable ||
+            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' ||
                 activeView === 'TreeView' || activeView === 'OrgChart' || activeView === 'Timeline' || activeView === 'Timetable');
 
             var effectiveSkip = isHierarchyView ? 0 : skip;
@@ -672,6 +672,13 @@
         }
 
         wireListEvents(slug, baseUrl, query, top, sort, dir);
+
+        // Wire page-size selector
+        var pageSizeSel = document.getElementById('vnext-page-size');
+        if (pageSizeSel) pageSizeSel.addEventListener('change', function () {
+            var newTop = parseInt(pageSizeSel.value, 10) || 25;
+            BMRouter.navigate(buildUrl(baseUrl, Object.assign({}, query, { skip: 0, top: newTop })));
+        });
 
         // Wire row command buttons
         document.querySelectorAll('.vnext-row-cmd').forEach(function (btn) {
@@ -1374,8 +1381,19 @@
     function renderPagination(total, skip, top, baseUrl, query) {
         var startRecord = total === 0 ? 0 : skip + 1;
         var endRecord = Math.min(skip + top, total);
-        var summary = '<div class="small text-muted mt-2">Records ' + startRecord + ' to ' + endRecord + ' of ' + total + ' total</div>';
-        if (total <= top) return summary;
+        var sizes = [10, 25, 50, 100, 1000, 10000];
+        var sizeOptions = '';
+        for (var si = 0; si < sizes.length; si++) {
+            sizeOptions += '<option value="' + sizes[si] + '"' + (sizes[si] === top ? ' selected' : '') + '>' + sizes[si] + '</option>';
+        }
+        var summary = '<div class="d-flex align-items-center gap-2 small text-muted mt-2">' +
+            '<span>Records ' + startRecord + ' \u2013 ' + endRecord + ' of ' + total + '</span>' +
+            '<select class="form-select form-select-sm d-inline-block" style="width:auto" id="vnext-page-size">' + sizeOptions + '</select>' +
+            '<span>per page</span></div>';
+        if (total <= top) {
+            // Still show size selector even when everything fits on one page
+            return summary;
+        }
         var pages = Math.ceil(total / top);
         var current = Math.floor(skip / top);
         var html = summary + '<nav class="mt-3"><ul class="pagination pagination-sm">';

@@ -94,7 +94,7 @@ public class SearchIndexingTests : IDisposable
         var results = manager.Search(typeof(TestSearchableItem), "Product", () => new[] { item });
 
         // Assert
-        Assert.Contains(item.Key.ToString(), results);
+        Assert.Contains(item.Key, results);
     }
 
     [Fact]
@@ -117,8 +117,8 @@ public class SearchIndexingTests : IDisposable
 
         // Assert
         Assert.Equal(2, results.Count);
-        Assert.Contains("1", results);
-        Assert.Contains("3", results);
+        Assert.Contains(1u, results);
+        Assert.Contains(3u, results);
     }
 
     [Fact]
@@ -141,8 +141,8 @@ public class SearchIndexingTests : IDisposable
 
         // Assert
         Assert.Equal(2, results.Count);
-        Assert.Contains("1", results);
-        Assert.Contains("3", results);
+        Assert.Contains(1u, results);
+        Assert.Contains(3u, results);
     }
 
     [Fact]
@@ -165,8 +165,8 @@ public class SearchIndexingTests : IDisposable
 
         // Assert
         Assert.Equal(2, results.Count);
-        Assert.Contains("1", results);
-        Assert.Contains("3", results);
+        Assert.Contains(1u, results);
+        Assert.Contains(3u, results);
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public class SearchIndexingTests : IDisposable
 
         // Assert
         Assert.Empty(oldNameResults); // Old name should be removed
-        Assert.Contains("1", newNameResults); // New name should be found
+        Assert.Contains(1u, newNameResults); // New name should be found
     }
 
     [Fact]
@@ -360,7 +360,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "hello", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     [Fact]
@@ -374,7 +374,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "FOOBAR", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     [Fact]
@@ -390,8 +390,8 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "alpha beta", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
-        Assert.Contains("2", results);
+        Assert.Contains(1u, results);
+        Assert.Contains(2u, results);
     }
 
     [Fact]
@@ -419,7 +419,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "pro", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- Multi-field indexing ---
@@ -441,8 +441,8 @@ public class SearchIndexingTests : IDisposable
         var byDesc = _manager.Search(typeof(MultiFieldEntity), "gadgets", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", byTitle);
-        Assert.Contains("1", byDesc);
+        Assert.Contains(1u, byTitle);
+        Assert.Contains(1u, byDesc);
     }
 
     // --- Integer field indexing ---
@@ -458,7 +458,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(IntFieldEntity), "42", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- List field indexing ---
@@ -474,7 +474,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(ListFieldEntity), "dotnet", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- Token extraction and normalization ---
@@ -493,10 +493,10 @@ public class SearchIndexingTests : IDisposable
         var r4 = _manager.Search(typeof(SimpleEntity), "qux", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", r1);
-        Assert.Contains("1", r2);
-        Assert.Contains("1", r3);
-        Assert.Contains("1", r4);
+        Assert.Contains(1u, r1);
+        Assert.Contains(1u, r2);
+        Assert.Contains(1u, r3);
+        Assert.Contains(1u, r4);
     }
 
     [Fact]
@@ -510,7 +510,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "camelcaseword", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- Special characters and Unicode ---
@@ -526,7 +526,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "café", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     [Fact]
@@ -540,7 +540,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "world", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     [Fact]
@@ -554,7 +554,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "version2", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- Empty/null input handling ---
@@ -628,7 +628,7 @@ public class SearchIndexingTests : IDisposable
         _manager.IndexObject(entity);
 
         var results = _manager.Search(typeof(SimpleEntity), "anything", () => Array.Empty<BaseDataObject>());
-        Assert.DoesNotContain("1", results);
+        Assert.DoesNotContain(1u, results);
     }
 
     [Fact]
@@ -687,7 +687,7 @@ public class SearchIndexingTests : IDisposable
 
         // Assert
         Assert.Single(results);
-        Assert.Contains("2", results);
+        Assert.Contains(2u, results);
     }
 
     [Fact]
@@ -704,7 +704,7 @@ public class SearchIndexingTests : IDisposable
         // Act & Assert - should not throw
         _manager.EnsureBuilt(typeof(SimpleEntity), () => entities);
         var results = _manager.Search(typeof(SimpleEntity), "valid", () => entities);
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- IndexObject replaces previous tokens ---
@@ -724,7 +724,7 @@ public class SearchIndexingTests : IDisposable
         var oldResults = _manager.Search(typeof(SimpleEntity), "oldvalue", () => Array.Empty<BaseDataObject>());
         var newResults = _manager.Search(typeof(SimpleEntity), "newvalue", () => Array.Empty<BaseDataObject>());
         Assert.Empty(oldResults);
-        Assert.Contains("1", newResults);
+        Assert.Contains(1u, newResults);
     }
 
     // --- DataIndexAttribute ---
@@ -766,9 +766,9 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "search", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
-        Assert.Contains("2", results);
-        Assert.DoesNotContain("3", results);
+        Assert.Contains(1u, results);
+        Assert.Contains(2u, results);
+        Assert.DoesNotContain(3u, results);
     }
 
     // --- Substring / contains matching fallback ---
@@ -784,7 +784,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "ex", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- Index persistence (save/load round-trip) ---
@@ -801,7 +801,7 @@ public class SearchIndexingTests : IDisposable
         var results = manager2.Search(typeof(SimpleEntity), "persisted", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- RemoveObject edge cases ---
@@ -840,8 +840,8 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "shared", () => Array.Empty<BaseDataObject>());
 
         // Assert - only e2 remains
-        Assert.DoesNotContain("1", results);
-        Assert.Contains("2", results);
+        Assert.DoesNotContain(1u, results);
+        Assert.Contains(2u, results);
     }
 
     // --- EnsureBuilt idempotency ---
@@ -878,7 +878,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(NullableIntEntity), "99", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- List field edge cases ---
@@ -904,7 +904,7 @@ public class SearchIndexingTests : IDisposable
         // Act & Assert - should not throw
         _manager.IndexObject(entity);
         var results = _manager.Search(typeof(ListFieldEntity), "valid", () => Array.Empty<BaseDataObject>());
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- Non-inverted IndexKind fallback ---
@@ -926,7 +926,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(BTreeEntity), "fallback", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- Unicode and special character edge cases ---
@@ -942,7 +942,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "日本語テスト", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     [Fact]
@@ -957,8 +957,8 @@ public class SearchIndexingTests : IDisposable
         var r2 = _manager.Search(typeof(SimpleEntity), "world", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", r1);
-        Assert.Contains("1", r2);
+        Assert.Contains(1u, r1);
+        Assert.Contains(1u, r2);
     }
 
     [Fact]
@@ -972,7 +972,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "résumé", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     [Fact]
@@ -1003,7 +1003,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), longWord, () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- Prefix tree cleanup on remove ---
@@ -1038,8 +1038,8 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(MultiFieldEntity), "alpha delta", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
-        Assert.Contains("2", results);
+        Assert.Contains(1u, results);
+        Assert.Contains(2u, results);
     }
 
     [Fact]
@@ -1079,7 +1079,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "incremental", () => entities);
 
         // Assert
-        Assert.Contains("2", results);
+        Assert.Contains(2u, results);
     }
 
     // --- IEnumerable of non-string (int list) ---
@@ -1101,7 +1101,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(IntListEntity), "20", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- Search with multiple shared tokens ---
@@ -1122,9 +1122,9 @@ public class SearchIndexingTests : IDisposable
 
         // Assert
         Assert.Equal(3, results.Count);
-        Assert.Contains("1", results);
-        Assert.Contains("2", results);
-        Assert.Contains("3", results);
+        Assert.Contains(1u, results);
+        Assert.Contains(2u, results);
+        Assert.Contains(3u, results);
     }
 
     // --- HasIndexedFields with non-inverted kind ---
@@ -1158,9 +1158,9 @@ public class SearchIndexingTests : IDisposable
 
         // Assert - each type's index is separate
         Assert.Single(simpleResults);
-        Assert.Contains("1", simpleResults);
+        Assert.Contains(1u, simpleResults);
         Assert.Single(multiResults);
-        Assert.Contains("2", multiResults);
+        Assert.Contains(2u, multiResults);
     }
 
     // --- EnsureBuilt with empty collection ---
@@ -1189,7 +1189,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "abc123def", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- DataIndexAttribute enum values ---
@@ -1227,7 +1227,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "a", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     [Fact]
@@ -1241,7 +1241,7 @@ public class SearchIndexingTests : IDisposable
         var results = _manager.Search(typeof(SimpleEntity), "ab", () => Array.Empty<BaseDataObject>());
 
         // Assert
-        Assert.Contains("1", results);
+        Assert.Contains(1u, results);
     }
 
     // --- Whitespace-only name ---
@@ -1292,7 +1292,7 @@ public class SearchIndexingTests : IDisposable
 
         // Assert - both tokens are indexed because BuildFrom doesn't de-dup
         // The last entity's tokens are in IdToTokens, but first entity's tokens remain in Tokens
-        Assert.Contains("1", secondResults);
+        Assert.Contains(1u, secondResults);
     }
 }
 
