@@ -1,0 +1,196 @@
+using System;
+using System.Collections.Concurrent;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace BareMetalWeb.Host;
+
+/// <summary>
+/// Status values for a background job, following the Azure async-request-reply pattern.
+/// </summary>
+public enum BackgroundJobStatus
+{
+    Queued,
+    Running,
+    Succeeded,
+    Failed
+}
+
+/// <summary>
+/// Allows a background job callback to report its progress.
+/// </summary>
+public interface IJobProgressReporter
+{
+    /// <summary>Report progress (0-100) and a human-readable description.</summary>
+    void Report(int percentComplete, string description);
+
+    /// <summary>Token that is cancelled if the job is cancelled or the server is shutting down.</summary>
+    CancellationToken CancellationToken { get; }
+}
+
+/// <summary>
+/// Immutable snapshot of a job's current state, safe to return from the status endpoint.
+/// </summary>
+public sealed record JobStatusSnapshot(
+    string JobId,
+    string OperationName,
+    BackgroundJobStatus Status,
+    int PercentComplete,
+    string Description,
+    DateTime StartedAt,
+    DateTime? CompletedAt,
+    string? Error,
+    string? ResultUrl);
+
+/// <summary>
+/// In-process registry that starts and tracks background jobs.
+/// Follows the Azure async-request-reply cloud pattern:
+///   POST → 202 Accepted + Location: /api/jobs/{jobId}
+///   GET /api/jobs/{jobId} → 202 while running, 200 on completion.
+/// Jobs are retained in memory for <see cref="RetentionPeriod"/> after completion.
+/// </summary>
+public sealed class BackgroundJobService
+{
+    /// <summary>Singleton instance; no DI needed in the bare-metal model.</summary>
+    public static readonly BackgroundJobService Instance = new();
+
+    internal static readonly TimeSpan RetentionPeriod = TimeSpan.FromHours(1);
+
+    private readonly ConcurrentDictionary<string, JobEntry> _jobs =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    // ──────────────────────────────────────────────────────────────
+    // Public API
+    // ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Enqueue <paramref name="work"/> as a fire-and-forget background task and
+    /// return the new job ID immediately.
+    /// </summary>
+    /// <param name="operationName">Human-readable name shown in the status response.</param>
+    /// <param name="resultUrl">
+    ///   Optional URL included in the <c>Location</c> header when the job succeeds
+    ///   (e.g. the admin page that triggered the job).
+    /// </param>
+    /// <param name="work">
+    ///   The long-running work to execute. Receives an <see cref="IJobProgressReporter"/>
+    ///   and a <see cref="CancellationToken"/>; should call
+    ///   <see cref="IJobProgressReporter.Report"/> periodically.
+    /// </param>
+    public string StartJob(
+        string operationName,
+        string? resultUrl,
+        Func<IJobProgressReporter, CancellationToken, Task> work)
+    {
+        if (work == null) throw new ArgumentNullException(nameof(work));
+
+        var jobId = Guid.NewGuid().ToString("N");
+        var entry = new JobEntry
+        {
+            JobId = jobId,
+            OperationName = operationName ?? string.Empty,
+            ResultUrl = resultUrl
+        };
+        _jobs[jobId] = entry;
+
+        _ = Task.Run(async () =>
+        {
+            entry.Status = BackgroundJobStatus.Running;
+            var reporter = new ProgressReporter(entry);
+            try
+            {
+                await work(reporter, entry.Cts.Token).ConfigureAwait(false);
+                entry.PercentComplete = 100;
+                entry.Status = BackgroundJobStatus.Succeeded;
+            }
+            catch (OperationCanceledException)
+            {
+                entry.Status = BackgroundJobStatus.Failed;
+                entry.Error = "Job was cancelled.";
+            }
+            catch (Exception ex)
+            {
+                entry.Status = BackgroundJobStatus.Failed;
+                entry.Error = ex.Message;
+            }
+            finally
+            {
+                entry.CompletedAt = DateTime.UtcNow;
+            }
+        });
+
+        PruneOldJobs();
+        return jobId;
+    }
+
+    /// <summary>
+    /// Returns a point-in-time snapshot of the job, or <c>false</c> if the job
+    /// ID is unknown (e.g. pruned after <see cref="RetentionPeriod"/>).
+    /// </summary>
+    public bool TryGetJob(string jobId, out JobStatusSnapshot? snapshot)
+    {
+        if (!_jobs.TryGetValue(jobId, out var entry))
+        {
+            snapshot = null;
+            return false;
+        }
+
+        snapshot = new JobStatusSnapshot(
+            entry.JobId,
+            entry.OperationName,
+            entry.Status,
+            entry.PercentComplete,
+            entry.Description,
+            entry.StartedAt,
+            entry.CompletedAt,
+            entry.Error,
+            entry.ResultUrl);
+        return true;
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Internals
+    // ──────────────────────────────────────────────────────────────
+
+    private void PruneOldJobs()
+    {
+        var cutoff = DateTime.UtcNow - RetentionPeriod;
+        foreach (var kv in _jobs)
+        {
+            if (kv.Value.Status is BackgroundJobStatus.Succeeded or BackgroundJobStatus.Failed
+                && kv.Value.CompletedAt.HasValue
+                && kv.Value.CompletedAt.Value < cutoff)
+            {
+                _jobs.TryRemove(kv.Key, out _);
+            }
+        }
+    }
+
+    // Mutable per-job state (all fields written only from the single Task.Run worker
+    // except Status/PercentComplete/Description which are written atomically enough
+    // for a progress-polling use case).
+    internal sealed class JobEntry
+    {
+        public string JobId { get; init; } = string.Empty;
+        public string OperationName { get; init; } = string.Empty;
+        public volatile BackgroundJobStatus Status = BackgroundJobStatus.Queued;
+        public volatile int PercentComplete;
+        public volatile string Description = string.Empty;
+        public DateTime StartedAt { get; } = DateTime.UtcNow;
+        public DateTime? CompletedAt { get; set; }
+        public string? Error { get; set; }
+        public string? ResultUrl { get; init; }
+        public CancellationTokenSource Cts { get; } = new();
+    }
+
+    private sealed class ProgressReporter(JobEntry entry) : IJobProgressReporter
+    {
+        public CancellationToken CancellationToken => entry.Cts.Token;
+
+        public void Report(int percentComplete, string description)
+        {
+            entry.PercentComplete = Math.Clamp(percentComplete, 0, 100);
+            entry.Description = description ?? string.Empty;
+        }
+    }
+}
