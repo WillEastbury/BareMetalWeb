@@ -1420,7 +1420,7 @@
                 });
                 if (colLinks.length > 0) {
                     colLinks.forEach(function (l) {
-                        html += '<div class="bm-sankey-arrow" title="' + escHtml(l.count + ' linked') + '">' +
+                        html += '<div class="bm-sankey-arrow" title="' + escHtml(String(l.count) + ' linked') + '">' +
                             '<span class="bm-sankey-arrow-label">' + escHtml(String(l.count)) + '</span>' +
                             '<i class="bi bi-arrow-right"></i></div>';
                     });
