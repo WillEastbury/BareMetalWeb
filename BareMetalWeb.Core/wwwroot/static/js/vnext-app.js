@@ -413,8 +413,8 @@
             // Hierarchy/calendar views need all items (no pagination)
             var vt = meta.viewType || '';
             var activeView = query.view || '';
-            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' ||
-                activeView === 'TreeView' || activeView === 'OrgChart' || activeView === 'Timeline' || activeView === 'Timetable');
+            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' || vt === 'Sankey' ||
+                activeView === 'TreeView' || activeView === 'OrgChart' || activeView === 'Timeline' || activeView === 'Timetable' || activeView === 'Sankey');
 
             var effectiveSkip = isHierarchyView ? 0 : skip;
             var effectiveTop  = isHierarchyView ? 10000 : top;
@@ -506,13 +506,14 @@
         html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=json" download><i class="bi bi-filetype-json"></i> Export JSON</a>';
         html += '<button class="btn btn-outline-secondary btn-sm" id="vnext-import-btn" data-slug="' + escHtml(slug) + '"><i class="bi bi-upload"></i> Import CSV</button>';
         // View type switcher (when entity supports alternate views or has a parent field for hierarchy)
-        if (viewType !== 'Table' || meta.parentField || meta.canShowTimetable || meta.canShowTimeline) {
+        if (viewType !== 'Table' || meta.parentField || meta.canShowTimetable || meta.canShowTimeline || meta.canShowSankey) {
             html += '<div class="btn-group btn-group-sm ms-2">';
             html += '<a class="btn btn-outline-secondary' + (activeView === 'Table' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Table' })) + '" title="Table View"><i class="bi bi-table"></i></a>';
             if (viewType === 'TreeView' || (viewType === 'OrgChart' && meta.parentField)) html += '<a class="btn btn-outline-secondary' + (activeView === 'TreeView' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'TreeView' })) + '" title="Tree View"><i class="bi bi-diagram-3"></i></a>';
             if (viewType === 'OrgChart' || (viewType === 'TreeView' && meta.parentField)) html += '<a class="btn btn-outline-secondary' + (activeView === 'OrgChart' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'OrgChart' })) + '" title="Org Chart"><i class="bi bi-people"></i></a>';
             if (viewType === 'Timeline' || meta.canShowTimeline) html += '<a class="btn btn-outline-secondary' + (activeView === 'Timeline' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timeline' })) + '" title="Timeline"><i class="bi bi-calendar-range"></i></a>';
             if (meta.canShowTimetable) html += '<a class="btn btn-outline-secondary' + (activeView === 'Timetable' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timetable' })) + '" title="Timetable"><i class="bi bi-calendar3"></i></a>';
+            if (viewType === 'Sankey' || meta.canShowSankey) html += '<a class="btn btn-outline-secondary' + (activeView === 'Sankey' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Sankey' })) + '" title="Document Chain (Sankey)"><i class="bi bi-diagram-2-fill"></i></a>';
             html += '</div>';
         }
         html += '</div>';
@@ -525,6 +526,8 @@
             html += renderTimeline(meta, items, slug, baseUrl, query);
         } else if ((activeView === 'Timetable' || (activeView === '' && viewType === 'Timetable')) && items.length > 0) {
             html += renderTimetable(meta, items, slug, baseUrl);
+        } else if (activeView === 'Sankey' || (activeView === '' && viewType === 'Sankey')) {
+            html += renderSankeyView(meta, items, slug, baseUrl);
         } else {
             // Search bar
             html += '<form class="d-flex gap-2 mb-3" id="vnext-search-form">';
@@ -892,12 +895,34 @@
             html += '<a class="btn btn-warning btn-sm me-2" href="' + baseUrl + '/' + safeId + '/edit"><i class="bi bi-pencil"></i> Edit</a>';
             html += '<a class="btn btn-outline-danger btn-sm" href="' + baseUrl + '/' + safeId + '/delete"><i class="bi bi-x-lg"></i> Delete</a>';
             html += '</div>';
+
+            // Document chain mini-panel (async)
+            var relFields = meta.documentRelationFields || [];
+            if (relFields.length > 0) {
+                html += '<div class="mt-3 bm-doc-chain-tree-panel" id="bm-tree-chain-body">';
+                html += '<div class="bm-doc-chain-label text-muted small fw-semibold mb-1"><i class="bi bi-diagram-3 me-1"></i>Document Chain</div>';
+                html += '<div class="text-muted small"><i class="bi bi-hourglass-split me-1"></i>Loading\u2026</div>';
+                html += '</div>';
+            }
         } else {
             html += '<p class="text-muted mb-0">Select an item to view details.</p>';
         }
         html += '</div>';
 
         html += '</div>';
+
+        // Async chain load for the selected tree item
+        if (selectedItem && (meta.documentRelationFields || []).length > 0) {
+            setTimeout(function () {
+                apiFetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(selectedId) + '/_related-chain')
+                    .then(function (chain) { renderDocumentChainPanel(chain, 'bm-tree-chain-body'); })
+                    .catch(function () {
+                        var el = document.getElementById('bm-tree-chain-body');
+                        if (el) el.innerHTML = '<span class="text-warning small">Chain unavailable</span>';
+                    });
+            }, 50);
+        }
+
         return html;
     }
 
@@ -1273,7 +1298,151 @@
         return html;
     }
 
-    // ── CSV Import modal ──────────────────────────────────────────────────────
+    // ── Document chain / Sankey view ─────────────────────────────────────────
+
+    /**
+     * renderSankeyView — shows a document-pipeline (Sankey-style) visualisation.
+     *
+     * The view has two sections:
+     * 1. A "pipeline summary" card that fetches aggregate counts from
+     *    GET /api/_document-chain-graph and renders stage → stage flow nodes.
+     * 2. A per-record table showing each item's upstream document link(s).
+     */
+    function renderSankeyView(meta, items, slug, baseUrl) {
+        var relFields = meta.documentRelationFields || [];
+        var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
+
+        // Render the per-record table first (synchronous)
+        var html = '';
+
+        // Pipeline graph card — populated async after render
+        html += '<div class="card shadow-sm mb-4 bm-page-card" id="bm-sankey-graph-card">';
+        html += '<div class="card-header"><h6 class="mb-0"><i class="bi bi-diagram-2-fill me-2"></i>Document Pipeline</h6></div>';
+        html += '<div class="card-body" id="bm-sankey-graph-body">';
+        html += '<div class="text-muted small"><i class="bi bi-hourglass-split me-1"></i>Loading pipeline graph\u2026</div>';
+        html += '</div></div>';
+
+        // Per-record chain table
+        if (items.length === 0) {
+            html += '<p class="text-center text-muted py-4"><i class="bi bi-diagram-2-fill me-2"></i>No records found.</p>';
+        } else {
+            html += '<div class="table-responsive"><table class="table table-sm table-hover table-bordered align-middle">';
+            html += '<thead class="table-light"><tr>';
+            html += '<th>' + escHtml(labelField ? labelField.label : 'Record') + '</th>';
+            relFields.forEach(function (rf) {
+                html += '<th><i class="bi bi-arrow-up-circle me-1 text-primary"></i>' + escHtml(rf.label) + ' (' + escHtml(rf.targetName || rf.targetSlug) + ')</th>';
+            });
+            html += '<th></th>';
+            html += '</tr></thead><tbody>';
+
+            items.forEach(function (item) {
+                var id = item.id || item.Id || '';
+                var label = labelField ? (nestedGet(item, labelField.name) || id) : id;
+                html += '<tr>';
+                html += '<td><a href="' + baseUrl + '/' + encodeURIComponent(id) + '">' + escHtml(String(label)) + '</a></td>';
+                relFields.forEach(function (rf) {
+                    var fkVal = nestedGet(item, rf.name);
+                    if (fkVal && rf.targetSlug) {
+                        var href = BASE + '/data/' + encodeURIComponent(rf.targetSlug) + '/' + encodeURIComponent(String(fkVal));
+                        html += '<td><a href="' + href + '" class="badge bg-primary text-decoration-none">' + escHtml(String(fkVal)) + '</a></td>';
+                    } else {
+                        html += '<td><span class="text-muted small">—</span></td>';
+                    }
+                });
+                html += '<td class="text-nowrap">';
+                html += '<a class="btn btn-sm btn-outline-info me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '?view=chain" title="View chain"><i class="bi bi-diagram-3"></i></a>';
+                html += '</td>';
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+        }
+
+        // Kick off async graph load after the DOM settles
+        setTimeout(function () {
+            apiFetch(API + '/_document-chain-graph')
+                .then(function (graph) { renderSankeyGraph(graph, 'bm-sankey-graph-body'); })
+                .catch(function (err) {
+                    var el = document.getElementById('bm-sankey-graph-body');
+                    if (el) el.innerHTML = '<span class="text-warning small">Pipeline graph unavailable: ' + escHtml(err.message) + '</span>';
+                });
+        }, 50);
+
+        return html;
+    }
+
+    /**
+     * Render a simple horizontal-flow graph in the given container element.
+     * Nodes are grouped into columns by their position in the chain.
+     * Arrows between columns represent flows (record counts).
+     */
+    function renderSankeyGraph(graph, containerId) {
+        var el = document.getElementById(containerId);
+        if (!el) return;
+
+        var nodes = graph.nodes || [];
+        var links = graph.links || [];
+
+        if (nodes.length === 0) {
+            el.innerHTML = '<span class="text-muted small">No document-chain relationships detected.</span>';
+            return;
+        }
+
+        // Topological ordering: build a DAG and assign column depths
+        var depth = {};
+        nodes.forEach(function (n) { depth[n.slug] = 0; });
+
+        // links go from → to, so "to" is always one level deeper
+        var changed = true;
+        for (var iter = 0; iter < 20 && changed; iter++) {
+            changed = false;
+            links.forEach(function (l) {
+                var d = (depth[l.from] || 0) + 1;
+                if (d > (depth[l.to] || 0)) { depth[l.to] = d; changed = true; }
+            });
+        }
+
+        // Group nodes by depth column
+        var cols = {};
+        nodes.forEach(function (n) {
+            var d = depth[n.slug] || 0;
+            if (!cols[d]) cols[d] = [];
+            cols[d].push(n);
+        });
+        var colKeys = Object.keys(cols).map(Number).sort(function (a, b) { return a - b; });
+
+        var html = '<div class="bm-sankey-flow">';
+        colKeys.forEach(function (col, ci) {
+            if (ci > 0) {
+                // Render arrows between columns
+                html += '<div class="bm-sankey-connector">';
+                var colLinks = links.filter(function (l) {
+                    return (depth[l.from] || 0) === col - 1 && (depth[l.to] || 0) === col;
+                });
+                if (colLinks.length > 0) {
+                    colLinks.forEach(function (l) {
+                        html += '<div class="bm-sankey-arrow" title="' + escHtml(l.count + ' linked') + '">' +
+                            '<span class="bm-sankey-arrow-label">' + escHtml(String(l.count)) + '</span>' +
+                            '<i class="bi bi-arrow-right"></i></div>';
+                    });
+                } else {
+                    html += '<div class="bm-sankey-arrow"><i class="bi bi-arrow-right"></i></div>';
+                }
+                html += '</div>';
+            }
+
+            html += '<div class="bm-sankey-col">';
+            cols[col].forEach(function (n) {
+                html += '<div class="bm-sankey-node">' +
+                    '<div class="bm-sankey-node-name">' + escHtml(n.name) + '</div>' +
+                    '<div class="bm-sankey-node-count badge bg-secondary">' + escHtml(String(n.count)) + ' records</div>' +
+                    '</div>';
+            });
+            html += '</div>';
+        });
+        html += '</div>';
+
+        el.innerHTML = html;
+    }
 
     function openImportModal(slug, baseUrl, query) {
         var id = 'import-modal-' + Date.now();
@@ -1536,11 +1705,32 @@
             }
         });
         html += '</dl></div></div>';
+
+        // Document chain panel — shown when the entity has [RelatedDocument] fields
+        var relFields = meta.documentRelationFields || [];
+        if (relFields.length > 0) {
+            html += '<div class="card bm-page-card mt-3" id="bm-doc-chain-card">';
+            html += '<div class="card-header"><h6 class="mb-0"><i class="bi bi-diagram-3 me-2"></i>Document Chain</h6></div>';
+            html += '<div class="card-body" id="bm-doc-chain-body">';
+            html += '<div class="text-muted small"><i class="bi bi-hourglass-split me-1"></i>Loading related documents\u2026</div>';
+            html += '</div></div>';
+        }
+
         html += '</div>';
         setContent(html);
 
         // Resolve lookup display values in background
         resolveViewLookups(slug);
+
+        // Load document chain async
+        if (relFields.length > 0) {
+            apiFetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id) + '/_related-chain')
+                .then(function (chain) { renderDocumentChainPanel(chain, 'bm-doc-chain-body'); })
+                .catch(function (err) {
+                    var panel = document.getElementById('bm-doc-chain-body');
+                    if (panel) panel.innerHTML = '<span class="text-warning small">Could not load chain: ' + escHtml(err.message) + '</span>';
+                });
+        }
 
         // Wire command buttons
         document.querySelectorAll('.vnext-cmd-btn').forEach(function (btn) {
@@ -1559,6 +1749,61 @@
                 else doRun();
             });
         });
+    }
+
+    /**
+     * Render the document chain panel inside the given container element.
+     * Shows upstream (parent documents this record was created from) and
+     * downstream (child documents that reference this record) in a visual chain.
+     */
+    function renderDocumentChainPanel(chain, containerId) {
+        var el = document.getElementById(containerId);
+        if (!el) return;
+
+        var upstream   = chain.upstream   || [];
+        var downstream = chain.downstream || [];
+
+        if (upstream.length === 0 && downstream.length === 0) {
+            el.innerHTML = '<span class="text-muted small">No related documents found.</span>';
+            return;
+        }
+
+        var html = '<div class="bm-doc-chain">';
+
+        // Upstream (parent documents)
+        if (upstream.length > 0) {
+            html += '<div class="bm-doc-chain-section">';
+            html += '<div class="bm-doc-chain-label text-muted small fw-semibold mb-1"><i class="bi bi-arrow-up-circle me-1"></i>Source Documents</div>';
+            upstream.forEach(function (doc) {
+                var href = BASE + '/data/' + encodeURIComponent(doc.targetSlug) + '/' + encodeURIComponent(doc.id);
+                html += '<div class="bm-doc-chain-node bm-doc-chain-upstream">' +
+                    '<span class="badge bg-secondary me-2">' + escHtml(doc.targetName || doc.targetSlug) + '</span>' +
+                    '<a href="' + href + '">' + escHtml(doc.label || doc.id) + '</a>' +
+                    '</div>';
+            });
+            html += '</div>';
+        }
+
+        // Current node marker
+        html += '<div class="bm-doc-chain-current"><i class="bi bi-circle-fill me-1"></i>' +
+            '<span class="fw-semibold">' + escHtml(chain.sourceSlug) + ' #' + escHtml(chain.sourceId) + '</span></div>';
+
+        // Downstream (child documents)
+        if (downstream.length > 0) {
+            html += '<div class="bm-doc-chain-section">';
+            html += '<div class="bm-doc-chain-label text-muted small fw-semibold mt-2 mb-1"><i class="bi bi-arrow-down-circle me-1"></i>Derived Documents</div>';
+            downstream.forEach(function (doc) {
+                var href = BASE + '/data/' + encodeURIComponent(doc.targetSlug) + '/' + encodeURIComponent(doc.id);
+                html += '<div class="bm-doc-chain-node bm-doc-chain-downstream">' +
+                    '<span class="badge bg-primary me-2">' + escHtml(doc.targetName || doc.targetSlug) + '</span>' +
+                    '<a href="' + href + '">' + escHtml(doc.label || doc.id) + '</a>' +
+                    '</div>';
+            });
+            html += '</div>';
+        }
+
+        html += '</div>';
+        el.innerHTML = html;
     }
 
     function resolveViewLookups(slug) {

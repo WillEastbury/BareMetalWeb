@@ -769,7 +769,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
 
         // Assert
-        Assert.Equal(11, _server.routes.Count);
+        Assert.Equal(13, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -957,7 +957,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterData > afterAdmin);
         Assert.True(afterLookup > afterData);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 16 + 4 + 13 + 21 + 5 + 11, total); // 3+16+4+13+21+5+11=73
+        Assert.Equal(staticCount + 16 + 4 + 13 + 21 + 5 + 13, total); // 3+16+4+13+21+5+13=75
     }
 
     [Fact]
