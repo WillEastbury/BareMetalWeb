@@ -40,7 +40,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private const string WalSubFolder          = "wal";
     private const uint   IdMapMagic            = 0x494D4150u; // "IMAP"
     private const ushort IdMapVersion          = 2;
-    private const int    DefaultQueryLimit     = 1000;
+    private const int    DefaultQueryLimit     = int.MaxValue;
 
     // Monotonic ETag counter — cheaper than Guid.NewGuid() per save
     private static long _etagCounter = DateTime.UtcNow.Ticks;
