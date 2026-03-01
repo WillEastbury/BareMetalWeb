@@ -1,0 +1,250 @@
+using System.Text;
+using System.Text.RegularExpressions;
+using BareMetalWeb.Core;
+using BareMetalWeb.Data;
+using Microsoft.AspNetCore.Http;
+
+namespace BareMetalWeb.Host;
+
+/// <summary>
+/// Renders Page entities (Markdown or HTML) inside the platform chrome shell.
+/// Handles GET /page/{slug} route.
+/// </summary>
+public static class PageRenderer
+{
+    /// <summary>Handler for GET /page/{slug}.</summary>
+    public static async ValueTask RenderPageHandler(HttpContext context)
+    {
+        var slug = BinaryApiHandlers.GetRouteValue(context, "slug") ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("Page slug is required.");
+            return;
+        }
+
+        if (!DataScaffold.TryGetEntity("pages", out var meta))
+        {
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsync("Page entity not configured.");
+            return;
+        }
+
+        // Find published page by slug
+        var pages = await meta.Handlers.QueryAsync(null, context.RequestAborted);
+        BaseDataObject? pageObj = null;
+
+        foreach (var p in pages)
+        {
+            var pageSlug = GetField(p, meta, "Slug");
+            var status = GetField(p, meta, "Status");
+
+            if (string.Equals(pageSlug, slug, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(status, "published", StringComparison.OrdinalIgnoreCase))
+            {
+                pageObj = p;
+                break;
+            }
+        }
+
+        if (pageObj == null)
+        {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync("Page not found.");
+            return;
+        }
+
+        var title = GetField(pageObj, meta, "Title");
+        var content = GetField(pageObj, meta, "Content");
+        var format = GetField(pageObj, meta, "Format");
+        var metaDesc = GetField(pageObj, meta, "MetaDescription");
+
+        // Convert markdown to HTML if needed
+        var htmlContent = string.Equals(format, "markdown", StringComparison.OrdinalIgnoreCase)
+            ? ConvertMarkdownToHtml(content)
+            : content;
+
+        context.Response.StatusCode = 200;
+        context.Response.ContentType = "text/html; charset=utf-8";
+
+        var sb = new StringBuilder(4096);
+        AppendChromeHead(sb, title, metaDesc);
+        AppendChromeNavbar(sb, title);
+
+        sb.AppendLine("""<div class="container-fluid py-4 px-4 bm-content">""");
+        sb.AppendLine("""  <div class="card shadow-sm bm-page-card">""");
+        sb.AppendLine("""    <div class="card-body">""");
+        sb.AppendLine($"""      <h1 class="mb-4">{System.Net.WebUtility.HtmlEncode(title)}</h1>""");
+        sb.AppendLine("""      <div class="page-content">""");
+        sb.AppendLine(htmlContent);
+        sb.AppendLine("      </div>");
+        sb.AppendLine("    </div>");
+        sb.AppendLine("  </div>");
+        sb.AppendLine("</div>");
+
+        AppendChromeFooter(sb);
+
+        await context.Response.WriteAsync(sb.ToString(), context.RequestAborted);
+    }
+
+    /// <summary>API handler: GET /api/pages — list published pages for navigation.</summary>
+    public static async ValueTask ListPagesHandler(HttpContext context)
+    {
+        if (!DataScaffold.TryGetEntity("pages", out var meta))
+        {
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("[]");
+            return;
+        }
+
+        var pages = await meta.Handlers.QueryAsync(null, context.RequestAborted);
+        var published = new List<(string Slug, string Title, int NavOrder, bool ShowInNav)>();
+
+        foreach (var p in pages)
+        {
+            var status = GetField(p, meta, "Status");
+            if (!string.Equals(status, "published", StringComparison.OrdinalIgnoreCase)) continue;
+
+            published.Add((
+                GetField(p, meta, "Slug"),
+                GetField(p, meta, "Title"),
+                int.TryParse(GetField(p, meta, "NavOrder"), out var order) ? order : 100,
+                string.Equals(GetField(p, meta, "ShowInNav"), "True", StringComparison.OrdinalIgnoreCase)));
+        }
+
+        published.Sort((a, b) => a.NavOrder.CompareTo(b.NavOrder));
+
+        context.Response.StatusCode = 200;
+        context.Response.ContentType = "application/json";
+        await using var w = new System.Text.Json.Utf8JsonWriter(context.Response.Body);
+        w.WriteStartArray();
+        foreach (var (s, t, _, showNav) in published)
+        {
+            w.WriteStartObject();
+            w.WriteString("slug", s);
+            w.WriteString("title", t);
+            w.WriteBoolean("showInNav", showNav);
+            w.WriteString("url", $"/page/{s}");
+            w.WriteEndObject();
+        }
+        w.WriteEndArray();
+        await w.FlushAsync(context.RequestAborted);
+    }
+
+    // ── Minimal Markdown → HTML conversion ──────────────────────────────────
+
+    private static string ConvertMarkdownToHtml(string markdown)
+    {
+        if (string.IsNullOrWhiteSpace(markdown)) return string.Empty;
+
+        var lines = markdown.Split('\n');
+        var sb = new StringBuilder(markdown.Length * 2);
+        bool inList = false;
+        bool inCodeBlock = false;
+
+        foreach (var rawLine in lines)
+        {
+            var line = rawLine.TrimEnd('\r');
+
+            // Fenced code blocks
+            if (line.StartsWith("```"))
+            {
+                if (inCodeBlock) { sb.AppendLine("</code></pre>"); inCodeBlock = false; }
+                else { sb.AppendLine("<pre><code>"); inCodeBlock = true; }
+                continue;
+            }
+            if (inCodeBlock) { sb.AppendLine(System.Net.WebUtility.HtmlEncode(line)); continue; }
+
+            // Headers
+            if (line.StartsWith("### ")) { CloseLi(sb, ref inList); sb.AppendLine($"<h3>{InlineFormat(line[4..])}</h3>"); continue; }
+            if (line.StartsWith("## ")) { CloseLi(sb, ref inList); sb.AppendLine($"<h2>{InlineFormat(line[3..])}</h2>"); continue; }
+            if (line.StartsWith("# ")) { CloseLi(sb, ref inList); sb.AppendLine($"<h1>{InlineFormat(line[2..])}</h1>"); continue; }
+
+            // Horizontal rule
+            if (line.StartsWith("---") || line.StartsWith("***")) { CloseLi(sb, ref inList); sb.AppendLine("<hr/>"); continue; }
+
+            // Unordered list
+            if (line.StartsWith("- ") || line.StartsWith("* "))
+            {
+                if (!inList) { sb.AppendLine("<ul>"); inList = true; }
+                sb.AppendLine($"<li>{InlineFormat(line[2..])}</li>");
+                continue;
+            }
+
+            // Close list if non-list line
+            CloseLi(sb, ref inList);
+
+            // Empty line = paragraph break
+            if (string.IsNullOrWhiteSpace(line)) { sb.AppendLine("<br/>"); continue; }
+
+            // Regular paragraph
+            sb.AppendLine($"<p>{InlineFormat(line)}</p>");
+        }
+
+        CloseLi(sb, ref inList);
+        if (inCodeBlock) sb.AppendLine("</code></pre>");
+
+        return sb.ToString();
+    }
+
+    private static void CloseLi(StringBuilder sb, ref bool inList)
+    {
+        if (inList) { sb.AppendLine("</ul>"); inList = false; }
+    }
+
+    private static string InlineFormat(string text)
+    {
+        var encoded = System.Net.WebUtility.HtmlEncode(text);
+        // Bold
+        encoded = Regex.Replace(encoded, @"\*\*(.+?)\*\*", "<strong>$1</strong>");
+        // Italic
+        encoded = Regex.Replace(encoded, @"\*(.+?)\*", "<em>$1</em>");
+        // Code
+        encoded = Regex.Replace(encoded, @"`(.+?)`", "<code>$1</code>");
+        // Links [text](url)
+        encoded = Regex.Replace(encoded, @"\[(.+?)\]\((.+?)\)", """<a href="$2">$1</a>""");
+        return encoded;
+    }
+
+    // ── Chrome helpers ──────────────────────────────────────────────────────
+
+    private static void AppendChromeHead(StringBuilder sb, string title, string metaDesc)
+    {
+        sb.AppendLine("<!DOCTYPE html><html lang=\"en\"><head>");
+        sb.AppendLine("<meta charset=\"utf-8\"/>");
+        sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>");
+        sb.AppendLine($"<title>{System.Net.WebUtility.HtmlEncode(title)}</title>");
+        if (!string.IsNullOrWhiteSpace(metaDesc))
+            sb.AppendLine($"<meta name=\"description\" content=\"{System.Net.WebUtility.HtmlEncode(metaDesc)}\"/>");
+        sb.AppendLine("""<link rel="stylesheet" href="/static/css/bootstrap.min.css"/>""");
+        sb.AppendLine("""<link rel="stylesheet" href="/static/css/bootstrap-icons.min.css"/>""");
+        sb.AppendLine("<style>.page-content { line-height: 1.8; font-size: 1.05rem; } .page-content pre { background: #f8f9fa; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; } .page-content code { color: #d63384; } .page-content pre code { color: inherit; }</style>");
+        sb.AppendLine("</head><body class=\"bg-light\">");
+    }
+
+    private static void AppendChromeNavbar(StringBuilder sb, string title)
+    {
+        sb.AppendLine("""<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-0">""");
+        sb.AppendLine("""  <div class="container-fluid">""");
+        sb.AppendLine("""    <a class="navbar-brand" href="/">BareMetalWeb</a>""");
+        sb.AppendLine("""    <span class="navbar-text text-light">""");
+        sb.Append(System.Net.WebUtility.HtmlEncode(title));
+        sb.AppendLine("</span>");
+        sb.AppendLine("  </div></nav>");
+    }
+
+    private static void AppendChromeFooter(StringBuilder sb)
+    {
+        sb.AppendLine("""<script src="/static/js/bootstrap.bundle.min.js"></script>""");
+        sb.AppendLine("</body></html>");
+    }
+
+    private static string GetField(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    {
+        var field = meta.Fields.FirstOrDefault(f =>
+            string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        return field?.GetValueFn?.Invoke(obj)?.ToString() ?? string.Empty;
+    }
+}
