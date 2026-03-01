@@ -139,5 +139,10 @@ public enum AggregateFunction
     /// <summary>
     /// Average of numeric values.
     /// </summary>
-    Average = 5
+    Average = 5,
+
+    /// <summary>
+    /// Population standard deviation of numeric values.
+    /// </summary>
+    StdDev = 6
 }

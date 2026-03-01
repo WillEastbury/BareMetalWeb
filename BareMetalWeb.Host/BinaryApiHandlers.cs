@@ -168,6 +168,75 @@ public static class BinaryApiHandlers
     }
 
     /// <summary>
+    /// GET /api/_binary/{type}/_aggregate?fn=count|sum|avg|min|max|stddev&amp;field=FieldName
+    /// Returns aggregation result. Supports multiple aggregates via repeated fn/field params.
+    /// </summary>
+    public static async ValueTask AggregateHandler(HttpContext context)
+    {
+        var (meta, _, error) = await ValidateAsync(context);
+        if (meta == null) { await WriteError(context, error!.Value); return; }
+
+        var fn = context.Request.Query["fn"].ToString().ToLowerInvariant();
+        var fieldName = context.Request.Query["field"].ToString();
+
+        if (string.IsNullOrWhiteSpace(fn))
+        {
+            await WriteError(context, (400, "Aggregate function not specified (use ?fn=count|sum|avg|min|max|stddev)."));
+            return;
+        }
+
+        var aggFn = fn switch
+        {
+            "count" => AggregateFunction.Count,
+            "sum" => AggregateFunction.Sum,
+            "avg" => AggregateFunction.Average,
+            "min" => AggregateFunction.Min,
+            "max" => AggregateFunction.Max,
+            "stddev" => AggregateFunction.StdDev,
+            _ => AggregateFunction.None,
+        };
+
+        if (aggFn == AggregateFunction.None)
+        {
+            await WriteError(context, (400, $"Unsupported aggregate function '{fn}'."));
+            return;
+        }
+
+        if (aggFn != AggregateFunction.Count && string.IsNullOrWhiteSpace(fieldName))
+        {
+            await WriteError(context, (400, $"Field name required for '{fn}' (use ?field=FieldName)."));
+            return;
+        }
+
+        try
+        {
+            var queryDef = LookupApiHandlers.BuildQueryFromRequest(context, meta);
+            var result = await AggregationEngine.ComputeAsync(
+                meta, queryDef, fieldName, aggFn, context.RequestAborted);
+
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "application/json";
+            await using var writer = new System.Text.Json.Utf8JsonWriter(context.Response.Body);
+            writer.WriteStartObject();
+            writer.WriteString("function", fn);
+            writer.WriteString("field", fieldName);
+            writer.WriteNumber("count", result.Count);
+            if (result.Value is int iv) writer.WriteNumber("result", iv);
+            else if (result.Value is long lv) writer.WriteNumber("result", lv);
+            else if (result.Value is double dv) writer.WriteNumber("result", dv);
+            else if (result.Value is decimal mv) writer.WriteNumber("result", mv);
+            else if (result.Value != null) writer.WriteNumber("result", Convert.ToDouble(result.Value));
+            else writer.WriteNull("result");
+            writer.WriteEndObject();
+            await writer.FlushAsync(context.RequestAborted);
+        }
+        catch (Exception)
+        {
+            await WriteError(context, (500, "Error computing aggregate."));
+        }
+    }
+
+    /// <summary>
     /// GET /api/_binary/{type}/{id}
     /// Returns a single entity in binary or JSON based on Accept header.
     /// </summary>

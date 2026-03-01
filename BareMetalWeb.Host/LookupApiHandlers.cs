@@ -247,7 +247,7 @@ public static class LookupApiHandlers
 
         if (string.IsNullOrWhiteSpace(fn))
         {
-            await WriteJsonErrorAsync(context, StatusCodes.Status400BadRequest, "Aggregate function not specified (use ?fn=count|sum|avg|min|max).");
+            await WriteJsonErrorAsync(context, StatusCodes.Status400BadRequest, "Aggregate function not specified (use ?fn=count|sum|avg|min|max|stddev).");
             return;
         }
 
@@ -255,48 +255,36 @@ public static class LookupApiHandlers
         {
             var queryDef = BuildQueryFromRequest(context, meta);
             
-            if (fn == "count")
+            // Map string function name to enum
+            var aggFn = fn switch
             {
-                var count = await meta.Handlers.CountAsync(queryDef, context.RequestAborted);
-                await WriteJsonAsync(context, new Dictionary<string, object>
-                {
-                    ["function"] = "count",
-                    ["result"] = count
-                });
+                "count" => AggregateFunction.Count,
+                "sum" => AggregateFunction.Sum,
+                "avg" => AggregateFunction.Average,
+                "min" => AggregateFunction.Min,
+                "max" => AggregateFunction.Max,
+                "stddev" => AggregateFunction.StdDev,
+                _ => AggregateFunction.None,
+            };
+
+            if (aggFn == AggregateFunction.None)
+            {
+                await WriteJsonErrorAsync(context, StatusCodes.Status400BadRequest, $"Unsupported aggregate function '{fn}'. Use count|sum|avg|min|max|stddev.");
                 return;
             }
 
-            // For sum, avg, min, max we need to load entities and compute
-            if (string.IsNullOrWhiteSpace(fieldName))
+            if (aggFn != AggregateFunction.Count && string.IsNullOrWhiteSpace(fieldName))
             {
                 await WriteJsonErrorAsync(context, StatusCodes.Status400BadRequest, $"Field name required for '{fn}' function (use ?field=FieldName).");
                 return;
             }
 
-            var field = meta.Fields.FirstOrDefault(f => 
-                string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase) && f.View);
-            
-            if (field == null)
-            {
-                await WriteJsonErrorAsync(context, StatusCodes.Status404NotFound, $"Field '{fieldName}' not found.");
-                return;
-            }
+            var result = await AggregationEngine.ComputeAsync(
+                meta, queryDef, fieldName, aggFn, context.RequestAborted);
 
-            var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
-            var values = entities.Select(e => field.Property.GetValue(e)).Where(v => v != null).ToList();
-
-            object? result = fn switch
+            if (result.Value == null && aggFn != AggregateFunction.Count)
             {
-                "sum" => ComputeSum(values),
-                "avg" => ComputeAverage(values),
-                "min" => ComputeMin(values),
-                "max" => ComputeMax(values),
-                _ => null
-            };
-
-            if (result == null)
-            {
-                await WriteJsonErrorAsync(context, StatusCodes.Status400BadRequest, $"Unsupported aggregate function '{fn}'.");
+                await WriteJsonErrorAsync(context, StatusCodes.Status404NotFound, $"Field '{fieldName}' not found or not numeric.");
                 return;
             }
 
@@ -304,8 +292,8 @@ public static class LookupApiHandlers
             {
                 ["function"] = fn,
                 ["field"] = fieldName,
-                ["result"] = result,
-                ["count"] = values.Count
+                ["result"] = result.Value,
+                ["count"] = result.Count
             });
         }
         catch (Exception)
@@ -569,48 +557,6 @@ public static class LookupApiHandlers
             ["error"] = message,
             ["status"] = statusCode
         });
-    }
-
-    private static object? ComputeSum(List<object?> values)
-    {
-        if (values.Count == 0) return 0;
-        
-        var first = values[0];
-        if (first is int || first is long || first is short || first is byte)
-            return values.Sum(v => Convert.ToInt64(v));
-        if (first is float || first is double)
-            return values.Sum(v => Convert.ToDouble(v));
-        if (first is decimal)
-            return values.Sum(v => Convert.ToDecimal(v));
-        
-        return null;
-    }
-
-    private static object? ComputeAverage(List<object?> values)
-    {
-        if (values.Count == 0) return 0;
-        
-        var first = values[0];
-        if (first is int || first is long || first is short || first is byte)
-            return values.Average(v => Convert.ToDouble(v));
-        if (first is float || first is double)
-            return values.Average(v => Convert.ToDouble(v));
-        if (first is decimal)
-            return values.Average(v => Convert.ToDecimal(v));
-        
-        return null;
-    }
-
-    private static object? ComputeMin(List<object?> values)
-    {
-        if (values.Count == 0) return null;
-        return values.Min();
-    }
-
-    private static object? ComputeMax(List<object?> values)
-    {
-        if (values.Count == 0) return null;
-        return values.Max();
     }
 
     private record ErrorResponse(int StatusCode, string Message);
