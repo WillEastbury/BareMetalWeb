@@ -9,6 +9,7 @@ Welcome to the BareMetalWeb documentation. This index is organized by audience a
 Conceptual documentation explaining how the system works.
 
 - [System Overview](architecture/system-overview.md) — Component diagram, project dependencies, request lifecycle, and route divergence
+- [Domain Transition Kernel](architecture/domain-transition-kernel.md) — Runtime intent, mutation-first transaction model, and architectural guardrails
 - [Data Layer & Storage](architecture/data-layer.md) — DataStore stack, entity registration, CRUD lifecycle, binary serializer, virtual entities
 - [Indexing Pipeline](architecture/indexing.md) — SearchIndexManager, index creation/update/delete lifecycle, query acceleration
 - [UI Rendering](architecture/rendering.md) — SSR template pipeline, VNext SPA path, form rendering, report rendering
