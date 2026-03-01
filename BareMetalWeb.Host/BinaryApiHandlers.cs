@@ -138,7 +138,7 @@ public static class BinaryApiHandlers
 
     /// <summary>
     /// GET /api/_binary/{type}
-    /// Returns binary-encoded entity list.
+    /// Returns entity list in binary or JSON based on Accept header.
     /// </summary>
     public static async ValueTask ListHandler(HttpContext context)
     {
@@ -151,13 +151,8 @@ public static class BinaryApiHandlers
             var queryDef = LookupApiHandlers.BuildQueryFromRequest(context, meta);
             var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
             var list = entities.Cast<object>().ToList();
-
             var plan = GetOrBuildPlan(meta);
-            var payload = _serializer.SerializeList(list, plan, 1, list.Count);
-
-            context.Response.ContentType = BinaryContentType;
-            context.Response.ContentLength = payload.Length;
-            await context.Response.Body.WriteAsync(payload, context.RequestAborted);
+            await WriteListResponse(context, list, plan);
         }
         catch (Exception)
         {
@@ -167,7 +162,7 @@ public static class BinaryApiHandlers
 
     /// <summary>
     /// GET /api/_binary/{type}/{id}
-    /// Returns a single binary-encoded entity.
+    /// Returns a single entity in binary or JSON based on Accept header.
     /// </summary>
     public static async ValueTask GetHandler(HttpContext context)
     {
@@ -188,11 +183,7 @@ public static class BinaryApiHandlers
             if (entity == null) { await WriteError(context, (404, "Entity not found.")); return; }
 
             var plan = GetOrBuildPlan(meta);
-            var payload = _serializer.Serialize(entity, plan, 1);
-
-            context.Response.ContentType = BinaryContentType;
-            context.Response.ContentLength = payload.Length;
-            await context.Response.Body.WriteAsync(payload, context.RequestAborted);
+            await WriteEntityResponse(context, entity, plan);
         }
         catch (Exception)
         {
@@ -202,7 +193,7 @@ public static class BinaryApiHandlers
 
     /// <summary>
     /// POST /api/_binary/{type}
-    /// Accepts a binary-encoded entity, saves it, returns the saved entity as binary.
+    /// Accepts binary or JSON entity, saves it, returns in matching format.
     /// </summary>
     public static async ValueTask CreateHandler(HttpContext context)
     {
@@ -212,17 +203,12 @@ public static class BinaryApiHandlers
 
         try
         {
-            var body = await ReadBodyAsync(context);
             var plan = GetOrBuildPlan(meta);
-            var entity = _serializer.Deserialize(body.Span, plan, meta.Type);
+            var entity = await ReadEntityFromRequest(context, plan, meta.Type);
+            if (entity == null) { await WriteError(context, (400, "Invalid request body.")); return; }
 
             await DataScaffold.SaveAsync(meta, entity, context.RequestAborted);
-
-            var payload = _serializer.Serialize(entity, plan, 1);
-            context.Response.StatusCode = StatusCodes.Status201Created;
-            context.Response.ContentType = BinaryContentType;
-            context.Response.ContentLength = payload.Length;
-            await context.Response.Body.WriteAsync(payload, context.RequestAborted);
+            await WriteEntityResponse(context, entity, plan, StatusCodes.Status201Created);
         }
         catch (Exception)
         {
@@ -232,7 +218,7 @@ public static class BinaryApiHandlers
 
     /// <summary>
     /// PUT /api/_binary/{type}/{id}
-    /// Accepts a binary-encoded entity, updates it.
+    /// Accepts binary or JSON entity, updates it, returns in matching format.
     /// </summary>
     public static async ValueTask UpdateHandler(HttpContext context)
     {
@@ -249,20 +235,15 @@ public static class BinaryApiHandlers
 
         try
         {
-            var body = await ReadBodyAsync(context);
             var plan = GetOrBuildPlan(meta);
-            var entity = _serializer.Deserialize(body.Span, plan, meta.Type);
+            var entity = await ReadEntityFromRequest(context, plan, meta.Type);
+            if (entity == null) { await WriteError(context, (400, "Invalid request body.")); return; }
 
-            // Ensure key matches URL
             if (entity is BaseDataObject bdo && bdo.Key != id)
                 bdo.Key = id;
 
             await DataScaffold.SaveAsync(meta, entity, context.RequestAborted);
-
-            var payload = _serializer.Serialize(entity, plan, 1);
-            context.Response.ContentType = BinaryContentType;
-            context.Response.ContentLength = payload.Length;
-            await context.Response.Body.WriteAsync(payload, context.RequestAborted);
+            await WriteEntityResponse(context, entity, plan);
         }
         catch (Exception)
         {
@@ -298,6 +279,70 @@ public static class BinaryApiHandlers
     }
 
     // ────────────── Shared utilities ──────────────
+
+    private static bool WantsJson(HttpContext context)
+    {
+        var accept = context.Request.Headers.Accept.ToString();
+        // Default to binary; only use JSON if explicitly requested
+        return accept.Contains("application/json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool RequestIsJson(HttpContext context)
+    {
+        var ct = context.Request.ContentType ?? string.Empty;
+        return ct.Contains("application/json", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async ValueTask WriteEntityResponse(HttpContext context, object entity, MetadataWireSerializer.FieldPlan[] plan, int statusCode = StatusCodes.Status200OK)
+    {
+        context.Response.StatusCode = statusCode;
+        if (WantsJson(context))
+        {
+            context.Response.ContentType = "application/json";
+            await using var writer = new System.Text.Json.Utf8JsonWriter(context.Response.Body);
+            MetadataWireSerializer.WriteEntityJson(writer, entity, plan);
+            await writer.FlushAsync(context.RequestAborted);
+        }
+        else
+        {
+            var payload = _serializer!.Serialize(entity, plan, 1);
+            context.Response.ContentType = BinaryContentType;
+            context.Response.ContentLength = payload.Length;
+            await context.Response.Body.WriteAsync(payload, context.RequestAborted);
+        }
+    }
+
+    private static async ValueTask WriteListResponse(HttpContext context, List<object> list, MetadataWireSerializer.FieldPlan[] plan)
+    {
+        if (WantsJson(context))
+        {
+            context.Response.ContentType = "application/json";
+            await using var writer = new System.Text.Json.Utf8JsonWriter(context.Response.Body);
+            MetadataWireSerializer.WriteEntityListJson(writer, list, plan, list.Count);
+            await writer.FlushAsync(context.RequestAborted);
+        }
+        else
+        {
+            var payload = _serializer!.SerializeList(list, plan, 1, list.Count);
+            context.Response.ContentType = BinaryContentType;
+            context.Response.ContentLength = payload.Length;
+            await context.Response.Body.WriteAsync(payload, context.RequestAborted);
+        }
+    }
+
+    private static async ValueTask<object?> ReadEntityFromRequest(HttpContext context, MetadataWireSerializer.FieldPlan[] plan, Type entityType)
+    {
+        if (RequestIsJson(context))
+        {
+            using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+            return MetadataWireSerializer.DeserializeFromJson(doc.RootElement, plan, entityType);
+        }
+        else
+        {
+            var body = await ReadBodyAsync(context);
+            return _serializer!.Deserialize(body.Span, plan, entityType);
+        }
+    }
 
     private static async ValueTask<(DataEntityMetadata? Meta, string TypeSlug, (int StatusCode, string Message)? Error)> ValidateAsync(HttpContext context)
     {
