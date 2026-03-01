@@ -482,6 +482,9 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/_binary/{type}/_actions", new RouteHandlerData(raw, ActionApiHandlers.ListActionsHandler));
         host.RegisterRoute("POST /api/_binary/{type}/_action/{actionId}", new RouteHandlerData(raw, ActionApiHandlers.ExecuteActionHandler));
         host.RegisterRoute("GET /api/_metrics", new RouteHandlerData(raw, EngineMetricsHandler));
+        host.RegisterRoute("GET /api/_cluster", new RouteHandlerData(raw, ClusterApiHandlers.ClusterStatusHandler));
+        host.RegisterRoute("GET /api/_cluster/replicate", new RouteHandlerData(raw, ClusterApiHandlers.ReplicationHandler));
+        host.RegisterRoute("POST /api/_cluster/stepdown", new RouteHandlerData(raw, ClusterApiHandlers.StepDownHandler));
         host.RegisterRoute("GET /page/{slug}", new RouteHandlerData(raw, PageRenderer.RenderPageHandler));
         host.RegisterRoute("GET /api/pages", new RouteHandlerData(raw, PageRenderer.ListPagesHandler));
         host.RegisterRoute("GET /products", new RouteHandlerData(raw, ProductRenderer.CategoryBrowseHandler));
