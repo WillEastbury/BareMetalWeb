@@ -34,8 +34,13 @@ public sealed class ReportParameter
 {
     public string Name { get; set; } = string.Empty;
     public string Label { get; set; } = string.Empty;
+    /// <summary>Parameter input type: string, date, number, select.</summary>
     public string Type { get; set; } = "string";
     public string DefaultValue { get; set; } = string.Empty;
+    /// <summary>Static options for dropdown (Type=select). Each entry is "value|label" or just "value".</summary>
+    public List<string>? Options { get; set; }
+    /// <summary>Dynamic dropdown source: "entitySlug.fieldName" — distinct values loaded at render time.</summary>
+    public string? FieldSource { get; set; }
 }
 
 /// <summary>The output of a report execution — column headers and data rows.</summary>

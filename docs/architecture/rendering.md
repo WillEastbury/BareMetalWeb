@@ -166,3 +166,7 @@ CSV export is available via `GET /api/reports/{id}` (returns `text/csv`).
 ## Output Caching
 
 `OutputCache` (in `BareMetalWeb.Rendering`) stores rendered HTML fragments keyed by a cache key.  It is used for fragments that are expensive to regenerate (e.g. navigation menus) with a configurable TTL.  Dynamic per-request content is never cached.
+
+---
+
+_Status: Verified against codebase @ commit e38d19057e1a55fc1d9a563f5ec6228bb991a0b5_

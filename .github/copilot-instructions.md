@@ -114,6 +114,33 @@ dotnet run --project BareMetalWeb.PerformanceTests
 
 - **Sub-entity (List&lt;T&gt;) rendering**: Fields that are `List<T>` on a parent entity (e.g. `Order.OrderRows` where `T` is `OrderRow`) represent sub-entities that are rendered as inline sub-grids or sub-list editors. These sub-grids MUST respect all the same field constraints, validation rules, lookup resolution, and rendering logic that apply to top-level entities. In particular: lookup/FK fields inside sub-entity rows must also display their resolved display values (not raw IDs), required fields must be validated, and the sub-grid must honour any `[DataLookup]`, `[CopyFromParent]`, and `[CalculatedField]` attributes on the sub-entity type.
 
+## Documentation Invariants
+
+> **The codebase is always canonical over documentation. When discrepancies exist, correct the docs — do not extend or preserve stale text.**
+
+Any change to the following areas **MUST** update the corresponding `docs/architecture/` file(s) in the same PR:
+
+| Changed area | Affected doc(s) |
+|---|---|
+| WAL behaviour (`WalStore`, `WalSegmentWriter`, `WalDataProvider`, `WalTransaction`) | `docs/architecture/data-layer.md` |
+| Transaction pipeline (`TransactionEnvelope`, `CommandService`, `ActionExpander`) | `docs/architecture/domain-transition-kernel.md` |
+| Locking semantics (`AggregateLockManager`) | `docs/architecture/domain-transition-kernel.md` |
+| Delta format (`FieldValueChange`, `AggregateMutation`) | `docs/architecture/domain-transition-kernel.md` |
+| Action primitives (`ActionDefinition`, `ActionCommandDefinition`, `ActionCommands`) | `docs/architecture/domain-transition-kernel.md` |
+| Storage layout (file paths, index format, entity registration) | `docs/architecture/data-layer.md`, `docs/architecture/indexing.md` |
+| Auth / session / CSRF | `docs/architecture/auth.md` |
+| Rendering pipeline, template syntax, VNext SPA | `docs/architecture/rendering.md` |
+| Component diagram, request lifecycle, route divergence | `docs/architecture/system-overview.md` |
+
+**A PR is considered incomplete if:**
+- Architecture-affecting code was changed, and
+- The corresponding architecture doc was not updated.
+
+**Required steps when updating architecture docs:**
+1. Search `docs/architecture/` for all text describing the affected concept.
+2. Correct outdated descriptions — do not append "also" or "alternatively" to preserve stale text.
+3. Append or update the `_Status_` line at the bottom of the affected doc(s) with the current commit hash.
+
 ## Development Workflow
 
 1. Make minimal, surgical changes focused on the specific issue
@@ -121,6 +148,29 @@ dotnet run --project BareMetalWeb.PerformanceTests
 3. Use existing linters/build tools (do not add new ones unless required)
 4. For data entity changes, update all registries (see Data and Storage section)
 5. Store useful codebase facts using the memory tool for future reference
+6. When architecture changes, update the relevant `docs/architecture/` file(s) immediately (see Documentation Invariants above)
+
+## Documentation Requirements (MANDATORY)
+
+When making code changes, you **MUST** update the corresponding architecture documentation in `docs/architecture/` if your changes affect any of the following:
+
+1. **New components or subsystems** — Add to `system-overview.md` component diagram
+2. **New API routes or endpoints** — Add to `system-overview.md` route divergence diagram and `rendering.md` endpoint tables
+3. **Storage or data layer changes** — Update `data-layer.md` (storage stack, CRUD lifecycle, serializer format, storage layout)
+4. **Index changes** — Update `indexing.md` (file format, data types, index types)
+5. **Auth or security changes** — Update `auth.md` (cookie settings, API key methods, permission model)
+6. **UI/rendering changes** — Update `rendering.md` (new JS modules, view types, client libraries)
+7. **Transaction, action, or mutation engine changes** — Update `docs/architecture/` transaction/action documentation
+8. **New project dependencies** — Update project dependency table in `system-overview.md`
+
+**Architecture docs location:** `docs/architecture/`
+- `system-overview.md` — Component diagram, project dependencies, request lifecycle, route divergence
+- `data-layer.md` — Storage stack, entity registration, CRUD lifecycle, binary serializer, storage layout
+- `indexing.md` — Search index types, file format, lookup mechanism
+- `auth.md` — Login flow, session validation, permission model, API keys
+- `rendering.md` — SSR pipeline, VNext SPA, JS libraries, view types
+
+**Rule:** If you add a new class, endpoint, or subsystem, ask yourself: "Does any architecture doc describe this area?" If yes, update it. If no doc exists for the area, create one in `docs/architecture/`.
 
 ## Pre-Commit Requirements (MANDATORY)
 

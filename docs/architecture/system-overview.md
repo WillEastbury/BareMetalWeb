@@ -31,6 +31,8 @@ graph TD
 
     subgraph Data["BareMetalWeb.Data"]
         DataStore["LocalFolderBinaryDataProvider<br/>(IDataProvider)"]
+        WalDP["WalDataProvider<br/>(IDataProvider — WAL-backed)"]
+        WalS["WalStore / WalSegmentWriter"]
         DataStoreProvider["DataStoreProvider (singleton)"]
         BinSerializer["BinaryObjectSerializer"]
         EntityReg["DataEntityRegistry"]
@@ -57,6 +59,10 @@ graph TD
         RuntimeReg["RuntimeEntityRegistry"]
         RuntimeComp["RuntimeEntityCompiler"]
         RuntimeModel["RuntimeEntityModel"]
+        ActionExp["ActionExpander"]
+        AggrLock["AggregateLockManager"]
+        TxEnv["TransactionEnvelope"]
+        CmdSvc["CommandService"]
     end
 
     subgraph API["BareMetalWeb.API"]
@@ -80,8 +86,12 @@ graph TD
 
     Extensions --> DataStoreProvider
     DataStoreProvider --> DataStore
+    DataStoreProvider --> WalDP
     DataStore --> BinSerializer
     DataStore --> SearchIdx
+    WalDP --> WalS
+    WalDP --> BinSerializer
+    WalDP --> SearchIdx
     SearchIdx --> IndexStore
     Extensions --> EntityReg
     EntityReg --> Scaffold
@@ -91,6 +101,10 @@ graph TD
     Extensions --> RuntimeReg
     RuntimeReg --> RuntimeComp
     RuntimeComp --> RuntimeModel
+    RuntimeReg --> CmdSvc
+    CmdSvc --> ActionExp
+    CmdSvc --> AggrLock
+    ActionExp --> TxEnv
 
     Extensions --> HtmlRenderer
     HtmlRenderer --> FragRenderer
@@ -199,3 +213,7 @@ flowchart TD
 - **Mutable routes** — routes are stored in `BareMetalWebServer.routes` dictionary; new routes can be added at runtime; call `BuildAppInfoMenuOptionsAsync()` to refresh navigation.
 - **Performance first** — `PipeWriter`/`PipeReader` streaming, `Span<T>`/`Memory<T>` throughout, minimal allocations.
 - **Strong security defaults** — CSP with per-request nonces, CSRF tokens, PBKDF2 password hashing, token-bucket rate limiting.
+
+---
+
+_Status: Verified against codebase @ commit e38d19057e1a55fc1d9a563f5ec6228bb991a0b5_

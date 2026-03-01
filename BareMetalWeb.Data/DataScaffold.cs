@@ -173,6 +173,17 @@ public static class DataScaffold
         await metadata.Handlers.SaveAsync((BaseDataObject)instance, cancellationToken);
         if (instance is AppSetting appSetting && !string.IsNullOrWhiteSpace(appSetting.SettingId))
             SettingsService.InvalidateCache(appSetting.SettingId);
+
+        // Invalidate RBAC cache when security entities change
+        var slug = metadata.Slug;
+        if (string.Equals(slug, "security-groups", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(slug, "roles", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(slug, "permissions", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(slug, "users", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(slug, "system-principals", StringComparison.OrdinalIgnoreCase))
+        {
+            PermissionResolver.Invalidate();
+        }
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _sequenceSeeded = new(StringComparer.OrdinalIgnoreCase);
