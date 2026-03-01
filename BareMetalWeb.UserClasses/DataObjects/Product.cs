@@ -43,6 +43,9 @@ public class Product : RenderableDataObject
     [DataField(Label = "Description", Order = 11)]
     public string Description { get; set; } = string.Empty;
 
-    [DataField(Label = "Tags", Order = 12)]
+    [DataField(Label = "Image URL", Order = 12)]
+    public string ImageUrl { get; set; } = string.Empty;
+
+    [DataField(Label = "Tags", Order = 13)]
     public List<string> Tags { get; set; } = new();
 }
