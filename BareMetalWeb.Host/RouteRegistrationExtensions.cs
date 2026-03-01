@@ -467,6 +467,24 @@ public static class RouteRegistrationExtensions
     }
 
     /// <summary>
+    /// Register binary wire-format API routes.
+    /// These serve BSO1-encoded payloads for the JS client and CLI — no JSON.
+    /// </summary>
+    public static void RegisterBinaryApiRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        var raw = pageInfoFactory.RawPage("Public", false);
+        host.RegisterRoute("GET /api/_binary/_key", new RouteHandlerData(raw, BinaryApiHandlers.KeyHandler));
+        host.RegisterRoute("GET /api/_binary/{type}/_schema", new RouteHandlerData(raw, BinaryApiHandlers.SchemaHandler));
+        host.RegisterRoute("GET /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.GetHandler));
+        host.RegisterRoute("GET /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.ListHandler));
+        host.RegisterRoute("POST /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.CreateHandler));
+        host.RegisterRoute("PUT /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.UpdateHandler));
+        host.RegisterRoute("DELETE /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.DeleteHandler));
+    }
+
+    /// <summary>
     /// Register RESTful API routes for entity operations.
     /// </summary>
     public static void RegisterApiRoutes(

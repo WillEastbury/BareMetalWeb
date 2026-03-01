@@ -8,7 +8,7 @@ namespace BareMetalWeb.Data;
 /// <see cref="Expression"/> trees, eliminating per-call <see cref="PropertyInfo.GetValue"/> /
 /// <see cref="PropertyInfo.SetValue"/> reflection overhead.
 /// </summary>
-internal static class PropertyAccessorFactory
+public static class PropertyAccessorFactory
 {
     /// <summary>
     /// Returns a compiled <see cref="Func{Object, Object}"/> that reads the property value from a

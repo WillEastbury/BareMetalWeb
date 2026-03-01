@@ -376,7 +376,7 @@ public static class LookupApiHandlers
         return null;
     }
 
-    private static QueryDefinition BuildQueryFromRequest(HttpContext context, DataEntityMetadata meta)
+    internal static QueryDefinition BuildQueryFromRequest(HttpContext context, DataEntityMetadata meta)
     {
         var queryDef = new QueryDefinition();
 
