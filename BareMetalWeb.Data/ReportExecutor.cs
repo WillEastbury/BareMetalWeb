@@ -72,8 +72,13 @@ public sealed class ReportExecutor
         if (!DataScaffold.TryGetEntity(rootSlug, out var rootMeta))
             throw new InvalidOperationException($"Entity '{rootSlug}' not found. Check the entity slug.");
 
-        // Load root entity rows (capped to prevent unbounded memory usage)
-        var rootRows = (await rootMeta.Handlers.QueryAsync(null, cancellationToken))
+        // Plan query — produce optimised execution plan
+        var planner = new QueryPlanner();
+        var plan = planner.Plan(query);
+
+        // Load root entity rows with pushed-down filters
+        plan.PushedFilters.TryGetValue(rootSlug, out var rootPushedFilter);
+        var rootRows = (await rootMeta.Handlers.QueryAsync(rootPushedFilter, cancellationToken))
             .Take(MaxEntityLoadSize).ToList();
 
         // Start: each combined row is a dict of entitySlug -> BaseDataObject
@@ -93,7 +98,9 @@ public sealed class ReportExecutor
             if (!DataScaffold.TryGetEntity(join.FromEntity, out var fromMeta))
                 continue;
 
-            var joinRows = (await joinMeta.Handlers.QueryAsync(null, cancellationToken))
+            // Load join entity rows with pushed-down filters
+            plan.PushedFilters.TryGetValue(join.ToEntity, out var joinPushedFilter);
+            var joinRows = (await joinMeta.Handlers.QueryAsync(joinPushedFilter, cancellationToken))
                 .Take(MaxEntityLoadSize).ToList();
 
             // Build hash map: toField value -> list of matching join rows
