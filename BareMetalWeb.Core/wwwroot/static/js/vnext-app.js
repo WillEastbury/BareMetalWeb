@@ -1381,7 +1381,7 @@
     function renderPagination(total, skip, top, baseUrl, query) {
         var startRecord = total === 0 ? 0 : skip + 1;
         var endRecord = Math.min(skip + top, total);
-        var sizes = [10, 25, 50, 100];
+        var sizes = [10, 25, 50, 100, 1000, 10000];
         var sizeOptions = '';
         for (var si = 0; si < sizes.length; si++) {
             sizeOptions += '<option value="' + sizes[si] + '"' + (sizes[si] === top ? ' selected' : '') + '>' + sizes[si] + '</option>';
