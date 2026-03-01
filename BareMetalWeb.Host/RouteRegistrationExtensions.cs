@@ -509,6 +509,179 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.JobStatusHandler));
 
+        // Document chain — must be before the generic GET /api/{type}/{id} route
+        host.RegisterRoute("GET /api/{type}/{id}/_related-chain", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context =>
+            {
+                var slug = GetRouteParam(context, "type") ?? string.Empty;
+                var id   = GetRouteParam(context, "id")   ?? string.Empty;
+
+                if (!DataScaffold.TryGetEntity(slug, out var meta))
+                {
+                    context.Response.StatusCode = 404;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Entity not found\"}");
+                    return;
+                }
+
+                var jsonOpts = new JsonSerializerOptions { WriteIndented = false };
+
+                // ── Upstream: walk RelatedDocument fields to find parent documents ──────────
+                var upstream = new List<object>();
+                if (meta.DocumentRelationFields is { Count: > 0 })
+                {
+                    // Load the current record to get its FK values
+                    if (uint.TryParse(id, out var uKey))
+                    {
+                        var current = await meta.Handlers.LoadAsync(uKey, context.RequestAborted).ConfigureAwait(false);
+                        if (current != null)
+                        {
+                            foreach (var rf in meta.DocumentRelationFields)
+                            {
+                                if (rf.RelatedDocument == null) continue;
+                                var fkVal = rf.GetValueFn(current)?.ToString();
+                                if (string.IsNullOrEmpty(fkVal)) continue;
+
+                                var targetMeta = DataScaffold.GetEntityByType(rf.RelatedDocument.TargetType);
+                                if (targetMeta == null) continue;
+
+                                // Try to load the upstream document
+                                object? parentDoc = null;
+                                string? parentLabel = null;
+                                if (uint.TryParse(fkVal, out var parentKey))
+                                {
+                                    parentDoc = await targetMeta.Handlers.LoadAsync(parentKey, context.RequestAborted).ConfigureAwait(false);
+                                    if (parentDoc != null)
+                                    {
+                                        var displayField = targetMeta.Fields.FirstOrDefault(f =>
+                                            string.Equals(f.Name, rf.RelatedDocument.DisplayField, StringComparison.OrdinalIgnoreCase));
+                                        parentLabel = displayField?.GetValueFn(parentDoc)?.ToString();
+                                    }
+                                }
+
+                                upstream.Add(new Dictionary<string, object?>
+                                {
+                                    ["fieldName"]   = rf.Name,
+                                    ["fieldLabel"]  = rf.Label,
+                                    ["targetSlug"]  = targetMeta.Slug,
+                                    ["targetName"]  = targetMeta.Name,
+                                    ["id"]          = fkVal,
+                                    ["label"]       = parentLabel ?? fkVal
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // ── Downstream: find entities whose RelatedDocument field points to this type ─
+                var downstream = new List<object>();
+                foreach (var childMeta in DataScaffold.Entities)
+                {
+                    if (childMeta.DocumentRelationFields == null) continue;
+                    foreach (var rf in childMeta.DocumentRelationFields)
+                    {
+                        if (rf.RelatedDocument == null) continue;
+                        if (rf.RelatedDocument.TargetType != meta.Type) continue;
+
+                        // Query child records that reference this record's ID
+                        var query = new QueryDefinition
+                        {
+                            Clauses = new List<QueryClause> { new QueryClause { Field = rf.Name, Operator = QueryOperator.Equals, Value = id } },
+                            Top = 50
+                        };
+
+                        var children = await childMeta.Handlers.QueryAsync(query, context.RequestAborted).ConfigureAwait(false);
+                        var labelField = childMeta.Fields
+                            .Where(f => f.List)
+                            .OrderBy(f => f.Order)
+                            .FirstOrDefault();
+
+                        foreach (var child in children)
+                        {
+                            var childId = (child as BaseDataObject)?.Key.ToString() ?? string.Empty;
+                            var childLabel = labelField?.GetValueFn(child)?.ToString() ?? childId;
+                            downstream.Add(new Dictionary<string, object?>
+                            {
+                                ["fieldName"]  = rf.Name,
+                                ["fieldLabel"] = rf.Label,
+                                ["targetSlug"] = childMeta.Slug,
+                                ["targetName"] = childMeta.Name,
+                                ["id"]         = childId,
+                                ["label"]      = childLabel
+                            });
+                        }
+                    }
+                }
+
+                var result = new Dictionary<string, object?>
+                {
+                    ["sourceSlug"] = slug,
+                    ["sourceId"]   = id,
+                    ["upstream"]   = upstream,
+                    ["downstream"] = downstream
+                };
+
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(result, jsonOpts));
+            }));
+
+        // Sankey graph: aggregate document chain counts across all entities with RelatedDocument fields
+        host.RegisterRoute("GET /api/_document-chain-graph", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            async context =>
+            {
+                var jsonOpts = new JsonSerializerOptions { WriteIndented = false };
+
+                var nodes = new List<object>();
+                var links = new List<object>();
+                var seenSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var entityMeta in DataScaffold.Entities)
+                {
+                    if (entityMeta.DocumentRelationFields == null || entityMeta.DocumentRelationFields.Count == 0)
+                        continue;
+
+                    var count = await entityMeta.Handlers.CountAsync(null, context.RequestAborted).ConfigureAwait(false);
+
+                    if (seenSlugs.Add(entityMeta.Slug))
+                        nodes.Add(new Dictionary<string, object?> { ["slug"] = entityMeta.Slug, ["name"] = entityMeta.Name, ["count"] = count });
+
+                    foreach (var rf in entityMeta.DocumentRelationFields)
+                    {
+                        if (rf.RelatedDocument == null) continue;
+                        var targetMeta = DataScaffold.GetEntityByType(rf.RelatedDocument.TargetType);
+                        if (targetMeta == null) continue;
+
+                        if (seenSlugs.Add(targetMeta.Slug))
+                        {
+                            var tCount = await targetMeta.Handlers.CountAsync(null, context.RequestAborted).ConfigureAwait(false);
+                            nodes.Add(new Dictionary<string, object?> { ["slug"] = targetMeta.Slug, ["name"] = targetMeta.Name, ["count"] = tCount });
+                        }
+
+                        // Count how many child records have the FK populated (non-empty)
+                        var linkedQuery = new QueryDefinition
+                        {
+                            Clauses = new List<QueryClause> { new QueryClause { Field = rf.Name, Operator = QueryOperator.NotEquals, Value = "" } }
+                        };
+                        var linkedCount = await entityMeta.Handlers.CountAsync(linkedQuery, context.RequestAborted).ConfigureAwait(false);
+
+                        links.Add(new Dictionary<string, object?>
+                        {
+                            ["from"]   = targetMeta.Slug,
+                            ["to"]     = entityMeta.Slug,
+                            ["field"]  = rf.Name,
+                            ["count"]  = linkedCount
+                        });
+                    }
+                }
+
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(
+                    new Dictionary<string, object?> { ["nodes"] = nodes, ["links"] = links },
+                    jsonOpts));
+            }));
+
         // List and create
         host.RegisterRoute("GET /api/{type}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
@@ -1017,6 +1190,21 @@ public static class RouteRegistrationExtensions
                     .ToArray()
                 : null;
 
+            if (f.RelatedDocument != null)
+            {
+                var targetMeta = DataScaffold.GetEntityByType(f.RelatedDocument.TargetType);
+                fd["relatedDocument"] = new Dictionary<string, object?>
+                {
+                    ["targetSlug"] = targetMeta?.Slug,
+                    ["targetName"] = targetMeta?.Name,
+                    ["displayField"] = f.RelatedDocument.DisplayField
+                };
+            }
+            else
+            {
+                fd["relatedDocument"] = null;
+            }
+
             return (object)fd;
         }).ToArray();
 
@@ -1042,6 +1230,7 @@ public static class RouteRegistrationExtensions
             ["viewType"] = meta.ViewType.ToString(),
             ["canShowTimetable"] = DataScaffold.CanShowTimetableView(meta),
             ["canShowTimeline"] = DataScaffold.CanShowTimelineView(meta),
+            ["canShowSankey"] = DataScaffold.CanShowSankeyView(meta),
             ["idGeneration"] = meta.IdGeneration.ToString(),
             ["defaultSortField"] = meta.DefaultSortField,
             ["defaultSortDirection"] = meta.DefaultSortDirection.ToString(),
@@ -1050,6 +1239,20 @@ public static class RouteRegistrationExtensions
                 ["name"] = meta.ParentField.Name,
                 ["label"] = meta.ParentField.Label
             } : null,
+            ["documentRelationFields"] = meta.DocumentRelationFields != null && meta.DocumentRelationFields.Count > 0
+                ? meta.DocumentRelationFields.Select(f =>
+                {
+                    var targetMeta = DataScaffold.GetEntityByType(f.RelatedDocument!.TargetType);
+                    return (object)new Dictionary<string, object?>
+                    {
+                        ["name"] = f.Name,
+                        ["label"] = f.Label,
+                        ["targetSlug"] = targetMeta?.Slug,
+                        ["targetName"] = targetMeta?.Name,
+                        ["displayField"] = f.RelatedDocument.DisplayField
+                    };
+                }).ToArray()
+                : null,
             ["fields"] = fields,
             ["commands"] = commands
         };

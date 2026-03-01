@@ -32,7 +32,8 @@ public sealed record DataFieldMetadata(
     UploadFieldConfig? Upload,
     CalculatedFieldAttribute? Calculated,
     ValidationConfig? Validation,
-    bool IsIndexed = false
+    bool IsIndexed = false,
+    RelatedDocumentConfig? RelatedDocument = null
 )
 {
     // Lazily compiled delegates avoid per-call PropertyInfo.GetValue / PropertyInfo.SetValue
@@ -64,7 +65,8 @@ public sealed record DataEntityMetadata(
     DataEntityHandlers Handlers,
     IReadOnlyList<RemoteCommandMetadata> Commands,
     string? DefaultSortField = null,
-    SortDirection DefaultSortDirection = SortDirection.Asc
+    SortDirection DefaultSortDirection = SortDirection.Asc,
+    IReadOnlyList<DataFieldMetadata>? DocumentRelationFields = null
 );
 
 public sealed record DataEntityHandlers(
@@ -1367,6 +1369,15 @@ public static class DataScaffold
         return metadata.Fields.Any(f =>
             f.FieldType == FormFieldType.DateOnly ||
             f.FieldType == FormFieldType.DateTime);
+    }
+
+    /// <summary>
+    /// Returns true when the entity has at least one <see cref="RelatedDocumentAttribute"/>
+    /// field, making it a candidate for Sankey and document-chain tree views.
+    /// </summary>
+    public static bool CanShowSankeyView(DataEntityMetadata metadata)
+    {
+        return metadata.DocumentRelationFields is { Count: > 0 };
     }
 
     public static string BuildTimetableHtml(
@@ -3300,6 +3311,7 @@ public static class DataScaffold
             var computedAttribute = prop.GetCustomAttribute<ComputedFieldAttribute>();
             var calculatedAttribute = prop.GetCustomAttribute<CalculatedFieldAttribute>();
             var dataIndexAttribute = prop.GetCustomAttribute<DataIndexAttribute>();
+            var relatedDocAttribute = prop.GetCustomAttribute<RelatedDocumentAttribute>();
             if (fieldAttribute == null && imageFieldAttribute == null && fileFieldAttribute == null && !useConvention)
                 continue;
 
@@ -3375,6 +3387,10 @@ public static class DataScaffold
                 );
             }
 
+            RelatedDocumentConfig? relatedDoc = relatedDocAttribute != null
+                ? new RelatedDocumentConfig(relatedDocAttribute.TargetType, relatedDocAttribute.DisplayField)
+                : null;
+
             fields.Add(new DataFieldMetadata(
                 prop,
                 prop.Name,
@@ -3394,7 +3410,8 @@ public static class DataScaffold
                 upload,
                 calculatedAttribute,
                 ValidationService.BuildValidationConfig(prop),
-                dataIndexAttribute != null
+                dataIndexAttribute != null,
+                relatedDoc
             ));
         }
 
@@ -3476,7 +3493,8 @@ public static class DataScaffold
             handlers,
             commands.OrderBy(c => c.Order).ToList(),
             defaultSortField,
-            defaultSortDirection
+            defaultSortDirection,
+            fields.Where(f => f.RelatedDocument != null).ToList()
         );
     }
 

@@ -15,25 +15,34 @@ public class Order : RenderableDataObject
     [DataIndex]
     public string CustomerId { get; set; } = string.Empty;
 
-    [DataField(Label = "Order Date", Order = 3, Required = true)]
+    /// <summary>
+    /// The quote this order was raised from.
+    /// Expressed as a document-chain relationship: Quote → Order.
+    /// </summary>
+    [DataField(Label = "Quote", Order = 3)]
+    [DataLookup(typeof(Quote), DisplayField = "QuoteNumber", SortField = "QuoteNumber", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
+    [RelatedDocument(typeof(Quote), DisplayField = "QuoteNumber")]
+    public string? QuoteId { get; set; }
+
+    [DataField(Label = "Order Date", Order = 4, Required = true)]
     public DateOnly OrderDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
 
-    [DataField(Label = "Status", Order = 4, Required = true)]
+    [DataField(Label = "Status", Order = 5, Required = true)]
     [DataIndex]
     public string Status { get; set; } = "Open";
 
-    [DataField(Label = "Currency", Order = 5, Required = true)]
+    [DataField(Label = "Currency", Order = 6, Required = true)]
     [DataLookup(typeof(Currency), DisplayField = "IsoCode", SortField = "IsoCode", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
     [DataIndex]
     public string CurrencyId { get; set; } = string.Empty;
 
-    [DataField(Label = "Notes", Order = 6)]
+    [DataField(Label = "Notes", Order = 7)]
     public string Notes { get; set; } = string.Empty;
 
-    [DataField(Label = "Is Open", Order = 7)]
+    [DataField(Label = "Is Open", Order = 8)]
     public bool IsOpen { get; set; } = true;
 
-    [DataField(Label = "Order Rows", Order = 8)]
+    [DataField(Label = "Order Rows", Order = 9)]
     public List<OrderRow> OrderRows { get; set; } = new();
 
     [RemoteCommand(Label = "Approve", Icon = "bi-check-circle", ConfirmMessage = "Approve this order?", Order = 1)]

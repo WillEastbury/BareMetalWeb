@@ -133,6 +133,7 @@ public static class VirtualEntityLoader
             "orgchart" or "org" => Data.ViewType.OrgChart,
             "timeline" => Data.ViewType.Timeline,
             "timetable" => Data.ViewType.Timetable,
+            "sankey" => Data.ViewType.Sankey,
             _ => Data.ViewType.Table
         };
 
