@@ -7089,4 +7089,154 @@ public sealed class RouteHandlers : IRouteHandlers
             await WriteJsonResponseAsync(context, new { success = false, message = $"Command failed: {ex.InnerException?.Message ?? ex.Message}" });
         }
     }
+
+    // ── Data & Index Sizing ───────────────────────────────────────────────────
+
+    public async ValueTask DataSizingHandler(HttpContext context)
+    {
+        await BuildPageHandler(ctx =>
+        {
+            ctx.SetStringValue("title", "Data & Index Sizing");
+
+            var dataRoot = _dataRootFolder;
+            var walDir   = Path.Combine(dataRoot, "wal");
+            var html     = new StringBuilder();
+
+            // ── WAL store ──────────────────────────────────────────────────
+            long walSegBytes = 0, walSnapshotBytes = 0, walIdMapBytes = 0;
+            int  walSegCount = 0;
+            var  idMapSizes  = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
+
+            if (Directory.Exists(walDir))
+            {
+                foreach (var fi in new DirectoryInfo(walDir).EnumerateFiles())
+                {
+                    var  name = fi.Name;
+                    long size = fi.Length;
+
+                    if (name.StartsWith("wal_seg_", StringComparison.OrdinalIgnoreCase) && name.EndsWith(".log", StringComparison.OrdinalIgnoreCase))
+                    {
+                        walSegBytes += size;
+                        walSegCount++;
+                    }
+                    else if (string.Equals(name, "snapshot.bin", StringComparison.OrdinalIgnoreCase))
+                    {
+                        walSnapshotBytes = size;
+                    }
+                    else if (name.EndsWith("_idmap.bin", StringComparison.OrdinalIgnoreCase))
+                    {
+                        walIdMapBytes += size;
+                        var typeName = name[..^"_idmap.bin".Length];
+                        idMapSizes[typeName] = size;
+                    }
+                }
+            }
+
+            long walTotalBytes = walSegBytes + walSnapshotBytes + walIdMapBytes;
+
+            // ── Per-entity ─────────────────────────────────────────────────
+            var entities         = DataScaffold.Entities;
+            long totalSchemaBytes = 0;
+            long totalIndexBytes  = 0;
+
+            var rows = new List<(string Name, string Slug, long SchemaBytes, long IdMapBytes, long IndexBytes)>();
+
+            foreach (var entity in entities)
+            {
+                var typeName     = entity.Type?.Name ?? entity.Name;
+                var entityFolder = Path.Combine(dataRoot, typeName);
+
+                // Schema / direct files (top-level only — no subfolders)
+                long schemaBytes = 0;
+                if (Directory.Exists(entityFolder))
+                {
+                    foreach (var fi in new DirectoryInfo(entityFolder).EnumerateFiles("*", SearchOption.TopDirectoryOnly))
+                        schemaBytes += fi.Length;
+                }
+
+                idMapSizes.TryGetValue(typeName, out long idMapBytes);
+
+                // Index / paged files in subfolders
+                long indexBytes  = 0;
+                foreach (var sub in new[] { "Paged", "Index" })
+                {
+                    var subDir = Path.Combine(entityFolder, sub);
+                    if (Directory.Exists(subDir))
+                    {
+                        foreach (var fi in new DirectoryInfo(subDir).EnumerateFiles("*", SearchOption.AllDirectories))
+                            indexBytes += fi.Length;
+                    }
+                }
+
+                totalSchemaBytes += schemaBytes;
+                totalIndexBytes  += indexBytes;
+
+                rows.Add((entity.Name, entity.Slug, schemaBytes, idMapBytes, indexBytes));
+            }
+
+            // ── Summary cards ──────────────────────────────────────────────
+            long grandTotal = walTotalBytes + totalSchemaBytes + totalIndexBytes;
+
+            html.Append("<div class=\"row g-3 mb-4\">");
+            html.Append(DataSizeCard("WAL Segments",  walSegBytes,      $"{walSegCount} file{(walSegCount == 1 ? "" : "s")}",        "bi-journals"));
+            html.Append(DataSizeCard("WAL Snapshot",  walSnapshotBytes, "compact checkpoint",                                        "bi-bookmark-check"));
+            html.Append(DataSizeCard("ID Maps",       walIdMapBytes,    $"{idMapSizes.Count} table{(idMapSizes.Count == 1 ? "" : "s")}", "bi-key"));
+            html.Append(DataSizeCard("Index Files",   totalIndexBytes,  "in-memory index store on disk",                             "bi-lightning-charge"));
+            html.Append(DataSizeCard("Schema Files",  totalSchemaBytes, "per-entity versioned schemas",                              "bi-file-binary"));
+            html.Append(DataSizeCard("Grand Total",   grandTotal,       "all data on disk",                                          "bi-hdd-stack"));
+            html.Append("</div>");
+
+            // ── Per-entity table ───────────────────────────────────────────
+            html.Append("<h5 class=\"mb-3\">Per-Table Breakdown</h5>");
+            html.Append("<div class=\"table-responsive\">");
+            html.Append("<table class=\"table table-sm table-striped table-hover align-middle\">");
+            html.Append("<thead class=\"table-dark\"><tr>");
+            html.Append("<th>Table</th>");
+            html.Append("<th class=\"text-end\">Schema Files</th>");
+            html.Append("<th class=\"text-end\">ID Map</th>");
+            html.Append("<th class=\"text-end\">Index Files</th>");
+            html.Append("<th class=\"text-end\">Table Total</th>");
+            html.Append("</tr></thead><tbody>");
+
+            foreach (var (name, slug, schemaBytes, idMapBytes, indexBytes) in rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                long tableTotal = schemaBytes + idMapBytes + indexBytes;
+                html.Append("<tr>");
+                html.Append($"<td><a href=\"/ssr/admin/data/{WebUtility.HtmlEncode(slug)}\">{WebUtility.HtmlEncode(name)}</a></td>");
+                html.Append($"<td class=\"text-end\">{FormatSizeBytes(schemaBytes)}</td>");
+                html.Append($"<td class=\"text-end\">{FormatSizeBytes(idMapBytes)}</td>");
+                html.Append($"<td class=\"text-end\">{FormatSizeBytes(indexBytes)}</td>");
+                html.Append($"<td class=\"text-end fw-semibold\">{FormatSizeBytes(tableTotal)}</td>");
+                html.Append("</tr>");
+            }
+
+            // Totals row
+            long perTableTotal = totalSchemaBytes + walIdMapBytes + totalIndexBytes;
+            html.Append("<tr class=\"table-secondary fw-bold\">");
+            html.Append($"<td>TOTAL — {rows.Count} table{(rows.Count == 1 ? "" : "s")}</td>");
+            html.Append($"<td class=\"text-end\">{FormatSizeBytes(totalSchemaBytes)}</td>");
+            html.Append($"<td class=\"text-end\">{FormatSizeBytes(walIdMapBytes)}</td>");
+            html.Append($"<td class=\"text-end\">{FormatSizeBytes(totalIndexBytes)}</td>");
+            html.Append($"<td class=\"text-end\">{FormatSizeBytes(perTableTotal)}</td>");
+            html.Append("</tr>");
+
+            html.Append("</tbody></table></div>");
+            html.Append($"<p class=\"text-muted small mt-2\">WAL store (segments + snapshot + id maps): <strong>{FormatSizeBytes(walTotalBytes)}</strong> in {walSegCount} segment{(walSegCount == 1 ? "" : "s")}. " +
+                        $"Sizes read from <code>{WebUtility.HtmlEncode(dataRoot)}</code>.</p>");
+
+            ctx.SetStringValue("html_message", html.ToString());
+        })(context);
+    }
+
+    private static string DataSizeCard(string label, long bytes, string subtitle, string icon)
+    {
+        return $"<div class=\"col-12 col-sm-6 col-xl-4\">" +
+               $"<div class=\"card h-100\">" +
+               $"<div class=\"card-body d-flex align-items-center gap-3\">" +
+               $"<i class=\"bi {WebUtility.HtmlEncode(icon)} fs-2 text-secondary\"></i>" +
+               $"<div><div class=\"fs-5 fw-semibold\">{FormatSizeBytes(bytes)}</div>" +
+               $"<div class=\"fw-semibold\">{WebUtility.HtmlEncode(label)}</div>" +
+               $"<div class=\"text-muted small\">{WebUtility.HtmlEncode(subtitle)}</div>" +
+               $"</div></div></div></div>";
+    }
 }

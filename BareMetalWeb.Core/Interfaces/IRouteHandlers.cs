@@ -72,4 +72,5 @@ public interface IRouteHandlers
     ValueTask DataApiDeleteHandler(HttpContext context);
     ValueTask DataApiFileGetHandler(HttpContext context);
     ValueTask DataCommandHandler(HttpContext context);
+    ValueTask DataSizingHandler(HttpContext context);
 }
