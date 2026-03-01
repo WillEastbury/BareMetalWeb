@@ -190,6 +190,12 @@ public static class DataScaffold
         {
             DomainEventDispatcher.Invalidate();
         }
+
+        // Invalidate module registry cache
+        if (string.Equals(slug, "modules", StringComparison.OrdinalIgnoreCase))
+        {
+            ModuleRegistry.Invalidate();
+        }
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _sequenceSeeded = new(StringComparer.OrdinalIgnoreCase);
