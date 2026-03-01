@@ -478,6 +478,233 @@ const BareMetalBinary = (() => {
     return payload.buffer.slice(0, payload.length);
   }
 
+  // ────────── Delta Change Tracking ──────────
+
+  /**
+   * Fetch the EntityLayout for a given entity type (field ordinals, types, flags, schema hash).
+   * Cached by slug.
+   */
+  const _layoutCache = {};
+  async function fetchLayout(slug) {
+    if (_layoutCache[slug]) return _layoutCache[slug];
+    const resp = await fetch(`/api/_binary/${slug}/_layout`);
+    if (!resp.ok) throw new Error(`Failed to fetch layout for ${slug}: ${resp.status}`);
+    const layout = await resp.json();
+    // Build name→field lookup
+    layout._byName = {};
+    for (const f of layout.fields) layout._byName[f.name] = f;
+    _layoutCache[slug] = layout;
+    return layout;
+  }
+
+  /**
+   * Create a change tracker that monitors field modifications.
+   * Returns a proxy that records which fields have changed.
+   * @param {Object} entity — the original entity object (from deserialize or JSON)
+   * @param {Object} layout — from fetchLayout()
+   */
+  function createTracker(entity, layout) {
+    const original = {};
+    const changed = {};
+    // Snapshot original values
+    for (const f of layout.fields) {
+      original[f.name] = entity[f.name];
+    }
+    const proxy = new Proxy(entity, {
+      set(target, prop, value) {
+        target[prop] = value;
+        if (prop in original) {
+          if (value !== original[prop]) {
+            changed[prop] = true;
+          } else {
+            delete changed[prop];
+          }
+        }
+        return true;
+      }
+    });
+    return {
+      entity: proxy,
+      original,
+      /** Get list of changed field names */
+      changedFields() { return Object.keys(changed); },
+      /** Check if any fields have changed */
+      hasChanges() { return Object.keys(changed).length > 0; },
+      /** Reset tracking (e.g. after save) */
+      reset() {
+        for (const f of layout.fields) original[f.name] = entity[f.name];
+        for (const k of Object.keys(changed)) delete changed[k];
+      }
+    };
+  }
+
+  /**
+   * Build a binary MutationDelta from a change tracker.
+   * Wire format: [RowId(4)][ExpectedVersion(4)][SchemaHash(8)][Count(2)][per-field: Ordinal(2)+Len(4)+Value(N)]
+   */
+  function buildDelta(tracker, layout) {
+    const entity = tracker.entity;
+    const fields = tracker.changedFields();
+    if (fields.length === 0) return null;
+
+    const schemaHash = BigInt(layout.schemaHash);
+    const rowId = entity.Key || 0;
+    const expectedVersion = entity.Version || 0;
+
+    // Encode each changed field value
+    const encodedChanges = [];
+    for (const name of fields) {
+      const field = layout._byName[name];
+      if (!field) continue;
+      if (field.readOnly) continue;
+      const value = entity[name];
+      const encoded = encodeFieldValue(field, value);
+      encodedChanges.push({ ordinal: field.ordinal, data: encoded });
+    }
+
+    // Calculate total size
+    let totalSize = 18; // header
+    for (const c of encodedChanges) totalSize += 6 + c.data.byteLength;
+
+    // Write delta
+    const buf = new ArrayBuffer(totalSize);
+    const view = new DataView(buf);
+    let off = 0;
+    view.setUint32(off, rowId, true); off += 4;
+    view.setUint32(off, expectedVersion, true); off += 4;
+    // Write schema hash as two uint32s (LE)
+    view.setUint32(off, Number(schemaHash & 0xFFFFFFFFn), true); off += 4;
+    view.setUint32(off, Number((schemaHash >> 32n) & 0xFFFFFFFFn), true); off += 4;
+    view.setUint16(off, encodedChanges.length, true); off += 2;
+
+    for (const c of encodedChanges) {
+      view.setUint16(off, c.ordinal, true); off += 2;
+      view.setInt32(off, c.data.byteLength, true); off += 4;
+      new Uint8Array(buf, off, c.data.byteLength).set(new Uint8Array(c.data));
+      off += c.data.byteLength;
+    }
+
+    return buf;
+  }
+
+  /**
+   * Encode a single field value to binary using its codec.
+   * Returns an ArrayBuffer.
+   */
+  function encodeFieldValue(field, value) {
+    if (value === null || value === undefined) return new ArrayBuffer(0);
+    const type = field.type;
+    switch (type) {
+      case 'Bool': { const b = new ArrayBuffer(1); new DataView(b).setUint8(0, value ? 1 : 0); return b; }
+      case 'Byte': { const b = new ArrayBuffer(1); new DataView(b).setUint8(0, value); return b; }
+      case 'SByte': { const b = new ArrayBuffer(1); new DataView(b).setInt8(0, value); return b; }
+      case 'Int16': { const b = new ArrayBuffer(2); new DataView(b).setInt16(0, value, true); return b; }
+      case 'UInt16': { const b = new ArrayBuffer(2); new DataView(b).setUint16(0, value, true); return b; }
+      case 'Int32': case 'EnumInt32': { const b = new ArrayBuffer(4); new DataView(b).setInt32(0, value, true); return b; }
+      case 'UInt32': { const b = new ArrayBuffer(4); new DataView(b).setUint32(0, value, true); return b; }
+      case 'Int64': { const b = new ArrayBuffer(8); new DataView(b).setBigInt64(0, BigInt(value), true); return b; }
+      case 'UInt64': { const b = new ArrayBuffer(8); new DataView(b).setBigUint64(0, BigInt(value), true); return b; }
+      case 'Float32': { const b = new ArrayBuffer(4); new DataView(b).setFloat32(0, value, true); return b; }
+      case 'Float64': { const b = new ArrayBuffer(8); new DataView(b).setFloat64(0, value, true); return b; }
+      case 'Decimal': {
+        // Encode as 16 bytes (lo, mid, hi, flags) — simplified
+        const b = new ArrayBuffer(16);
+        const v = new DataView(b);
+        v.setFloat64(0, value, true); // approximate
+        return b;
+      }
+      case 'DateTime': case 'DateTimeOffset': {
+        const b = new ArrayBuffer(8);
+        const ticks = BigInt(new Date(value).getTime()) * 10000n + 621355968000000000n;
+        new DataView(b).setBigInt64(0, ticks, true);
+        return b;
+      }
+      case 'DateOnly': {
+        const b = new ArrayBuffer(4);
+        const d = new Date(value);
+        const dayNumber = Math.floor(d.getTime() / 86400000) + 719162;
+        new DataView(b).setInt32(0, dayNumber, true);
+        return b;
+      }
+      case 'TimeOnly': case 'TimeSpan': {
+        const b = new ArrayBuffer(8);
+        new DataView(b).setBigInt64(0, BigInt(value) * 10000n, true);
+        return b;
+      }
+      case 'Guid': {
+        const hex = String(value).replace(/-/g, '');
+        const b = new ArrayBuffer(16);
+        const u8 = new Uint8Array(b);
+        for (let i = 0; i < 16; i++) u8[i] = parseInt(hex.substr(i * 2, 2), 16);
+        return b;
+      }
+      case 'StringUtf8': {
+        const encoded = utf8.encode(String(value));
+        const b = new ArrayBuffer(4 + encoded.length);
+        new DataView(b).setInt32(0, encoded.length, true);
+        new Uint8Array(b, 4).set(encoded);
+        return b;
+      }
+      case 'Identifier': {
+        // IdentifierValue is 16 bytes — encode from string
+        const b = new ArrayBuffer(16);
+        // Simplified: store as UTF-8 padded
+        const enc = utf8.encode(String(value).substring(0, 16));
+        new Uint8Array(b).set(enc);
+        return b;
+      }
+      default: {
+        const encoded = utf8.encode(String(value));
+        const b = new ArrayBuffer(4 + encoded.length);
+        new DataView(b).setInt32(0, encoded.length, true);
+        new Uint8Array(b, 4).set(encoded);
+        return b;
+      }
+    }
+  }
+
+  /**
+   * Send a delta mutation to the server.
+   * @param {string} slug — entity type slug
+   * @param {number} entityId — entity key
+   * @param {ArrayBuffer} deltaBuffer — from buildDelta()
+   * @param {Object} [options] — { json: false } to send as JSON instead
+   * @returns {Promise<Object>} — updated entity
+   */
+  async function applyDelta(slug, entityId, deltaBuffer, options = {}) {
+    const resp = await fetch(`/api/_binary/${slug}/${entityId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/octet-stream', 'Accept': 'application/json' },
+      body: deltaBuffer,
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ result: 'Error', message: resp.statusText }));
+      throw new Error(`Delta failed (${resp.status}): ${err.result} - ${err.message}`);
+    }
+    return resp.json();
+  }
+
+  /**
+   * Send a delta mutation as JSON.
+   * @param {string} slug — entity type slug
+   * @param {number} entityId — entity key
+   * @param {Object} changes — { fieldName: newValue, ... }
+   * @param {number} [expectedVersion] — for optimistic concurrency
+   * @returns {Promise<Object>} — updated entity
+   */
+  async function applyDeltaJson(slug, entityId, changes, expectedVersion = 0) {
+    const resp = await fetch(`/api/_binary/${slug}/${entityId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify({ expectedVersion, changes }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ result: 'Error', message: resp.statusText }));
+      throw new Error(`Delta failed (${resp.status}): ${err.result} - ${err.message}`);
+    }
+    return resp.json();
+  }
+
   // ────────── Public API ──────────
 
   return {
@@ -489,6 +716,12 @@ const BareMetalBinary = (() => {
     deserializeList,
     serialize,
     verifySignature,
+    // Delta mutations
+    fetchLayout,
+    createTracker,
+    buildDelta,
+    applyDelta,
+    applyDeltaJson,
     // Expose for testing
     SpanReader,
     SpanWriter,

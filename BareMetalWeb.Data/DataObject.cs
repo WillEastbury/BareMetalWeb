@@ -16,6 +16,8 @@ public abstract class BaseDataObject : IBaseDataObject
     public string CreatedBy { get; set; } = string.Empty;
     public string UpdatedBy { get; set; } = string.Empty;
     public string ETag { get; set; } = string.Empty;
+    /// <summary>Monotonic version counter for optimistic concurrency. Incremented on every save.</summary>
+    public uint Version { get; set; }
 
     protected BaseDataObject()
     {
@@ -35,5 +37,6 @@ public abstract class BaseDataObject : IBaseDataObject
         UpdatedBy = updatedBy ?? string.Empty;
         UpdatedOnUtc = DateTime.UtcNow;
         ETag = Guid.NewGuid().ToString("N");
+        Version++;
     }
 }

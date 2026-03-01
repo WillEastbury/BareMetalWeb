@@ -232,7 +232,7 @@ public sealed class AuditService
             .Where(p => p.CanRead && p.CanWrite);
 
         // Fields to skip (metadata fields that always change)
-        var skipFields = new HashSet<string> { "UpdatedOnUtc", "UpdatedBy", "ETag" };
+        var skipFields = new HashSet<string> { "UpdatedOnUtc", "UpdatedBy", "ETag", "Version" };
 
         foreach (var prop in properties)
         {
