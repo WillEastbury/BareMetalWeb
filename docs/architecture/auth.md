@@ -172,3 +172,7 @@ Every response includes the following security headers:
 | `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
 
 The CSP `nonce` is generated fresh for each request and embedded in the page; it is not reused across requests.
+
+---
+
+_Status: Verified against codebase @ commit e38d19057e1a55fc1d9a563f5ec6228bb991a0b5_

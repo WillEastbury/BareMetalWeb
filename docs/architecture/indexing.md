@@ -154,3 +154,7 @@ Each `.idx` file is an append-only binary log:
 ```
 
 Compaction (rewriting the file to remove superseded entries) is not currently implemented; the append-only log is replayed on each startup.
+
+---
+
+_Status: Verified against codebase @ commit e38d19057e1a55fc1d9a563f5ec6228bb991a0b5_
