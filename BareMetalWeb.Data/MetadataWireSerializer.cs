@@ -693,4 +693,251 @@ public sealed class MetadataWireSerializer
         public required bool IsNullable { get; init; }
         public string? EnumUnderlying { get; init; }
     }
+
+    // ────────────── JSON serialization (metadata-driven) ──────────────
+
+    /// <summary>
+    /// Writes a single entity as a JSON object to a Utf8JsonWriter using the field plan.
+    /// No reflection — uses compiled getter delegates.
+    /// </summary>
+    public static void WriteEntityJson(System.Text.Json.Utf8JsonWriter writer, object entity, FieldPlan[] plan)
+    {
+        writer.WriteStartObject();
+        for (int i = 0; i < plan.Length; i++)
+        {
+            var fp = plan[i];
+            var value = fp.Getter(entity);
+            writer.WritePropertyName(fp.Name);
+            WriteJsonValue(writer, fp, value);
+        }
+        writer.WriteEndObject();
+    }
+
+    /// <summary>
+    /// Writes a list of entities as a JSON object { data: [...], count: N }.
+    /// </summary>
+    public static void WriteEntityListJson(System.Text.Json.Utf8JsonWriter writer, IEnumerable items, FieldPlan[] plan, int count)
+    {
+        writer.WriteStartObject();
+        writer.WritePropertyName("data");
+        writer.WriteStartArray();
+        foreach (var item in items)
+        {
+            if (item is null) { writer.WriteNullValue(); continue; }
+            WriteEntityJson(writer, item, plan);
+        }
+        writer.WriteEndArray();
+        writer.WriteNumber("count", count);
+        writer.WriteEndObject();
+    }
+
+    private static void WriteJsonValue(System.Text.Json.Utf8JsonWriter writer, FieldPlan fp, object? value)
+    {
+        if (value is null)
+        {
+            writer.WriteNullValue();
+            return;
+        }
+
+        switch (fp.WireType)
+        {
+            case WireFieldType.Bool:
+                writer.WriteBooleanValue((bool)value);
+                break;
+            case WireFieldType.Byte:
+                writer.WriteNumberValue((byte)value);
+                break;
+            case WireFieldType.SByte:
+                writer.WriteNumberValue((sbyte)value);
+                break;
+            case WireFieldType.Int16:
+                writer.WriteNumberValue((short)value);
+                break;
+            case WireFieldType.UInt16:
+                writer.WriteNumberValue((ushort)value);
+                break;
+            case WireFieldType.Int32:
+                writer.WriteNumberValue((int)value);
+                break;
+            case WireFieldType.UInt32:
+                writer.WriteNumberValue((uint)value);
+                break;
+            case WireFieldType.Int64:
+                writer.WriteNumberValue((long)value);
+                break;
+            case WireFieldType.UInt64:
+                writer.WriteNumberValue((ulong)value);
+                break;
+            case WireFieldType.Float32:
+                writer.WriteNumberValue((float)value);
+                break;
+            case WireFieldType.Float64:
+                writer.WriteNumberValue((double)value);
+                break;
+            case WireFieldType.Decimal:
+                writer.WriteNumberValue((decimal)value);
+                break;
+            case WireFieldType.Char:
+                writer.WriteStringValue(((char)value).ToString());
+                break;
+            case WireFieldType.String:
+                writer.WriteStringValue((string)value);
+                break;
+            case WireFieldType.Guid:
+                writer.WriteStringValue(((Guid)value).ToString("D"));
+                break;
+            case WireFieldType.DateTime:
+                writer.WriteStringValue(((DateTime)value).ToString("O"));
+                break;
+            case WireFieldType.DateOnly:
+                writer.WriteStringValue(((System.DateOnly)value).ToString("yyyy-MM-dd"));
+                break;
+            case WireFieldType.TimeOnly:
+                writer.WriteStringValue(((System.TimeOnly)value).ToString("HH:mm:ss"));
+                break;
+            case WireFieldType.DateTimeOffset:
+                writer.WriteStringValue(((DateTimeOffset)value).ToString("O"));
+                break;
+            case WireFieldType.TimeSpan:
+                writer.WriteStringValue(((TimeSpan)value).ToString("c"));
+                break;
+            case WireFieldType.Identifier:
+                writer.WriteStringValue(((IdentifierValue)value).ToString());
+                break;
+            case WireFieldType.Enum:
+                writer.WriteNumberValue(Convert.ToInt32(value));
+                break;
+            default:
+                writer.WriteStringValue(value.ToString());
+                break;
+        }
+    }
+
+    // ────────────── JSON deserialization (metadata-driven) ──────────────
+
+    /// <summary>
+    /// Deserializes a JSON object into an entity using the field plan.
+    /// No reflection — uses compiled setter delegates.
+    /// </summary>
+    public static object DeserializeFromJson(System.Text.Json.JsonElement root, FieldPlan[] plan, Type entityType)
+    {
+        var instance = Activator.CreateInstance(entityType)
+            ?? throw new InvalidOperationException($"Cannot create instance of {entityType.Name}.");
+
+        // Build a name→plan lookup for JSON property matching (case-insensitive)
+        // This is O(N) at call time but avoids dictionary allocation for small entities.
+        foreach (var prop in root.EnumerateObject())
+        {
+            FieldPlan? fp = null;
+            for (int i = 0; i < plan.Length; i++)
+            {
+                if (string.Equals(plan[i].Name, prop.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    fp = plan[i];
+                    break;
+                }
+            }
+            if (fp == null) continue;
+
+            var value = ParseJsonValue(prop.Value, fp);
+            if (value is not null || !fp.ClrType.IsValueType || fp.IsNullable)
+                fp.Setter(instance, value);
+        }
+
+        return instance;
+    }
+
+    private static object? ParseJsonValue(System.Text.Json.JsonElement element, FieldPlan fp)
+    {
+        if (element.ValueKind == System.Text.Json.JsonValueKind.Null ||
+            element.ValueKind == System.Text.Json.JsonValueKind.Undefined)
+            return null;
+
+        switch (fp.WireType)
+        {
+            case WireFieldType.Bool:
+                return element.ValueKind == System.Text.Json.JsonValueKind.True ||
+                       (element.ValueKind == System.Text.Json.JsonValueKind.String && bool.TryParse(element.GetString(), out var b) && b);
+            case WireFieldType.Byte:
+                return element.TryGetByte(out var byteVal) ? byteVal : (byte)0;
+            case WireFieldType.SByte:
+                return element.TryGetSByte(out var sbyteVal) ? sbyteVal : (sbyte)0;
+            case WireFieldType.Int16:
+                return element.TryGetInt16(out var i16) ? i16 : (short)0;
+            case WireFieldType.UInt16:
+                return element.TryGetUInt16(out var u16) ? u16 : (ushort)0;
+            case WireFieldType.Int32:
+                return element.TryGetInt32(out var i32) ? i32 : 0;
+            case WireFieldType.UInt32:
+                return element.TryGetUInt32(out var u32) ? u32 : 0u;
+            case WireFieldType.Int64:
+                return element.TryGetInt64(out var i64) ? i64 : 0L;
+            case WireFieldType.UInt64:
+                return element.TryGetUInt64(out var u64) ? u64 : 0UL;
+            case WireFieldType.Float32:
+                return element.TryGetSingle(out var f32) ? f32 : 0f;
+            case WireFieldType.Float64:
+                return element.TryGetDouble(out var f64) ? f64 : 0d;
+            case WireFieldType.Decimal:
+                return element.TryGetDecimal(out var dec) ? dec : 0m;
+            case WireFieldType.Char:
+            {
+                var s = element.GetString();
+                return s?.Length > 0 ? s[0] : '\0';
+            }
+            case WireFieldType.String:
+                return element.GetString();
+            case WireFieldType.Guid:
+            {
+                var s = element.GetString();
+                return s != null && Guid.TryParse(s, out var g) ? g : Guid.Empty;
+            }
+            case WireFieldType.DateTime:
+            {
+                if (element.TryGetDateTime(out var dt)) return dt;
+                var s = element.GetString();
+                return s != null && DateTime.TryParse(s, out var parsed) ? parsed : default;
+            }
+            case WireFieldType.DateOnly:
+            {
+                var s = element.GetString();
+                return s != null && System.DateOnly.TryParse(s, out var d) ? d : default;
+            }
+            case WireFieldType.TimeOnly:
+            {
+                var s = element.GetString();
+                return s != null && System.TimeOnly.TryParse(s, out var t) ? t : default;
+            }
+            case WireFieldType.DateTimeOffset:
+            {
+                if (element.TryGetDateTimeOffset(out var dto)) return dto;
+                var s = element.GetString();
+                return s != null && DateTimeOffset.TryParse(s, out var parsed) ? parsed : default;
+            }
+            case WireFieldType.TimeSpan:
+            {
+                var s = element.GetString();
+                return s != null && TimeSpan.TryParse(s, out var ts) ? ts : default;
+            }
+            case WireFieldType.Identifier:
+            {
+                var s = element.GetString();
+                return IdentifierValue.TryParse(s, out var id) ? id : IdentifierValue.Empty;
+            }
+            case WireFieldType.Enum:
+            {
+                if (element.ValueKind == System.Text.Json.JsonValueKind.Number && element.TryGetInt32(out var enumInt))
+                    return Enum.ToObject(fp.ClrType, enumInt);
+                if (element.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var s = element.GetString();
+                    if (s != null && Enum.TryParse(fp.ClrType, s, true, out var enumVal))
+                        return enumVal;
+                }
+                return Enum.ToObject(fp.ClrType, 0);
+            }
+            default:
+                return element.GetString();
+        }
+    }
 }
