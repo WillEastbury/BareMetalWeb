@@ -1470,6 +1470,21 @@ public static class RouteRegistrationExtensions
                 context.Response.ContentType = "application/json";
                 await context.Response.WriteAsync(JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = false }));
             }));
+
+        // GET /api/reports/_distinct/{entity}/{field} — distinct field values for dropdown population
+        host.RegisterRoute("GET /api/reports/_distinct/{entity}/{field}", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var entitySlug = GetRouteParam(context, "entity") ?? string.Empty;
+                var fieldName = GetRouteParam(context, "field") ?? string.Empty;
+
+                var values = ReportHtmlRenderer.ResolveDistinctValues($"{entitySlug}.{fieldName}");
+
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(values, new JsonSerializerOptions { WriteIndented = false }));
+            }));
     }
 
     private static string CsvCell(string value)
