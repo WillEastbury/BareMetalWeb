@@ -478,7 +478,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.Equal(12, _server.routes.Count);
+        Assert.Equal(13, _server.routes.Count);
     }
 
     [Fact]
@@ -500,6 +500,18 @@ public class RouteRegistrationExtensionsTests : IDisposable
 
         // Assert
         var route = _server.routes["GET /admin/wipe-data"];
+        Assert.Equal("admin", route.PageInfo!.PageMetaData.PermissionsNeeded);
+    }
+
+    [Fact]
+    public void RegisterAdminRoutes_DataSizingRoute_IsRegistered()
+    {
+        // Arrange & Act
+        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
+
+        // Assert
+        Assert.True(_server.routes.ContainsKey("GET /admin/data-sizes"));
+        var route = _server.routes["GET /admin/data-sizes"];
         Assert.Equal("admin", route.PageInfo!.PageMetaData.PermissionsNeeded);
     }
 
@@ -945,7 +957,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterData > afterAdmin);
         Assert.True(afterLookup > afterData);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 16 + 4 + 12 + 21 + 5 + 9, total); // 3+16+4+12+21+5+9=70
+        Assert.Equal(staticCount + 16 + 4 + 13 + 21 + 5 + 9, total); // 3+16+4+13+21+5+9=71
     }
 
     [Fact]
@@ -1129,6 +1141,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask DataApiPatchHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiDeleteHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataCommandHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask DataSizingHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataListExportHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataViewExportHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataBulkDeleteHandler(HttpContext context) => ValueTask.CompletedTask;
