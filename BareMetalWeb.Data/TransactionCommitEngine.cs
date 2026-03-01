@@ -14,20 +14,26 @@ namespace BareMetalWeb.Data;
 public sealed class TransactionCommitEngine
 {
     private readonly AggregateLockManager _lockManager;
+    private Func<string, ActionDef?>? _actionResolver;
 
     public TransactionCommitEngine(AggregateLockManager lockManager)
     {
         _lockManager = lockManager;
     }
 
+    /// <summary>Set the action resolver (called once during initialization from Host layer).</summary>
+    public void SetActionResolver(Func<string, ActionDef?> resolver) => _actionResolver = resolver;
+
     /// <summary>
     /// Commit a transaction envelope.
     /// All validation occurs inside lock scope.
+    /// Domain event subscriptions fire after save, inside the same lock scope.
     /// </summary>
     public async ValueTask<TransactionResult> CommitAsync(
         TransactionEnvelope envelope,
         string userName,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool allowEventDispatch = true)
     {
         // 1. Acquire all locks in sorted order
         using var lockHandle = _lockManager.AcquireAll(
@@ -52,6 +58,13 @@ public sealed class TransactionCommitEngine
 
                 var layout = EntityLayoutCompiler.GetOrCompile(meta);
                 loadedEntities[key] = (meta, entity, layout);
+            }
+
+            // Snapshot before-state for domain event detection
+            var beforeSnapshots = new Dictionary<string, BaseDataObject>();
+            foreach (var (key, (meta, entity, _)) in loadedEntities)
+            {
+                beforeSnapshots[key] = CloneEntity(entity, meta);
             }
 
             // 3. Apply mutations to working copies
@@ -126,7 +139,31 @@ public sealed class TransactionCommitEngine
                 await DataScaffold.SaveAsync(meta, entity, cancellationToken);
             }
 
-            // 6. Success
+            // 6. Dispatch domain event subscriptions (flat only — no nested events)
+            if (allowEventDispatch && _actionResolver != null)
+            {
+                var entityStates = new Dictionary<string, (DataEntityMetadata, BaseDataObject, BaseDataObject, EntityLayout)>();
+                foreach (var (key, (meta, entity, layout)) in loadedEntities)
+                {
+                    if (beforeSnapshots.TryGetValue(key, out var before))
+                        entityStates[key] = (meta, before, entity, layout);
+                }
+
+                var eventResults = await DomainEventDispatcher.DispatchAsync(
+                    envelope, entityStates, _actionResolver,
+                    this, userName, cancellationToken);
+
+                // Collect event warnings/errors
+                foreach (var er in eventResults)
+                {
+                    if (!er.Success)
+                        warnings.Add(new TransactionWarning(
+                            er.ErrorCode ?? "EVENT_FAILED",
+                            $"[Event:{er.SubscriptionName}] {er.ErrorMessage}"));
+                }
+            }
+
+            // 7. Success
             return new TransactionResult(
                 Success: true,
                 ErrorCode: null,
@@ -169,4 +206,22 @@ public sealed class TransactionCommitEngine
 
     private static TransactionResult Fail(string code, string message)
         => new(Success: false, ErrorCode: code, ErrorMessage: message, Warnings: null);
+
+    /// <summary>
+    /// Shallow clone an entity to capture before-state for event comparison.
+    /// Copies all field values via the layout getter/setter pairs.
+    /// </summary>
+    private static BaseDataObject CloneEntity(BaseDataObject source, DataEntityMetadata meta)
+    {
+        var clone = (BaseDataObject)Activator.CreateInstance(source.GetType())!;
+        clone.Key = source.Key;
+
+        var layout = EntityLayoutCompiler.GetOrCompile(meta);
+        foreach (var field in layout.Fields)
+        {
+            try { field.Setter(clone, field.Getter(source)); }
+            catch { /* skip non-clonable fields */ }
+        }
+        return clone;
+    }
 }

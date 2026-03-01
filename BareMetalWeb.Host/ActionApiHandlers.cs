@@ -22,6 +22,7 @@ public static class ActionApiHandlers
     {
         _lockManager = new AggregateLockManager();
         _commitEngine = new TransactionCommitEngine(_lockManager);
+        _commitEngine.SetActionResolver(ResolveAction);
     }
 
     /// <summary>Register an action definition.</summary>

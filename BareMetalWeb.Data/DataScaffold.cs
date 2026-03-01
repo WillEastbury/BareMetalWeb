@@ -184,6 +184,12 @@ public static class DataScaffold
         {
             PermissionResolver.Invalidate();
         }
+
+        // Invalidate domain event subscription cache
+        if (string.Equals(slug, "domain-event-subscriptions", StringComparison.OrdinalIgnoreCase))
+        {
+            DomainEventDispatcher.Invalidate();
+        }
     }
 
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool> _sequenceSeeded = new(StringComparer.OrdinalIgnoreCase);
