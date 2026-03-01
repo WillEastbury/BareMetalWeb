@@ -2998,10 +2998,6 @@ public sealed class RouteHandlers : IRouteHandlers
         var format = context.Request.Query["format"].ToString().ToLowerInvariant();
         var acceptCsv = context.Request.Headers["Accept"].ToString().Contains("text/csv", StringComparison.OrdinalIgnoreCase);
 
-        // When no pagination params provided, apply a default page size to avoid loading all records
-        if (!query.Top.HasValue)
-            query.Top = 25;
-
         // When pagination parameters are present, run the data and count queries concurrently
         // and return { items, total } so the VNext UI can render page controls correctly.
         if (query.Skip.HasValue || query.Top.HasValue)

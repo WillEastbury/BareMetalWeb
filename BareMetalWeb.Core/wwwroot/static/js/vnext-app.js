@@ -350,7 +350,7 @@
             // Hierarchy/calendar views need all items (no pagination)
             var vt = meta.viewType || '';
             var activeView = query.view || '';
-            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' || meta.canShowTimetable ||
+            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' ||
                 activeView === 'TreeView' || activeView === 'OrgChart' || activeView === 'Timeline' || activeView === 'Timetable');
 
             var effectiveSkip = isHierarchyView ? 0 : skip;
