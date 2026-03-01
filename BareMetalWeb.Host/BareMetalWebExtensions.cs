@@ -54,6 +54,42 @@ public static class BareMetalWebExtensions
             dataRoot);
         IDataObjectStore dataStore = ProgramSetup.CreateDataStore(app, serializer, queryEvaluator, logger);
 
+        // ── Multitenancy ──────────────────────────────────────────────────────
+        // Build the TenantRegistry and wire up additional per-tenant stores.
+        // When multitenancy is disabled this is a no-op and the single system store
+        // created above is used for every request, exactly as before.
+        var multitenancyOptions = app.Configuration.GetSection("Multitenancy").Get<MultitenancyOptions>()
+            ?? new MultitenancyOptions();
+        var tenantRegistry = new TenantRegistry(multitenancyOptions, contentRoot);
+
+        // Register the system tenant so that it can be used as a fallback.
+        var systemProvider = DataStoreProvider.PrimaryProvider
+            ?? throw new InvalidOperationException("PrimaryProvider was not set after CreateDataStore.");
+        var systemTenant = new TenantContext(
+            multitenancyOptions.DefaultTenantId,
+            dataRoot,
+            app.Configuration.GetValue("Logging:LogFolder", "Logs"),
+            dataStore,
+            systemProvider);
+        tenantRegistry.RegisterSystemTenant(systemTenant);
+
+        if (multitenancyOptions.Enabled)
+        {
+            // Factory creates an isolated WalDataProvider + DataObjectStore for each tenant.
+            // Returns both as an explicit tuple to avoid relying on side-effects.
+            tenantRegistry.Initialize(
+                storeFactory: (tenantId, tenantDataRoot) =>
+                {
+                    LegacyDataWipeGuard.WipeIfLegacyDetected(tenantDataRoot, logger);
+                    var tenantSerializer = BinaryObjectSerializer.CreateDefault(tenantDataRoot);
+                    var tenantProvider   = new WalDataProvider(tenantDataRoot, tenantSerializer, queryEvaluator, logger);
+                    var tenantStore      = new DataObjectStore();
+                    tenantStore.RegisterProvider(tenantProvider);
+                    return (tenantStore, tenantProvider);
+                },
+                systemLogger: logger);
+        }
+
         // Configure high-cardinality lookup threshold
         DataScaffold.LargeListThreshold = app.Configuration.GetValue("LookupSearch:LargeListThreshold", 20);
 
@@ -129,6 +165,10 @@ public static class BareMetalWebExtensions
         appInfo.CompanyDescription = SettingsService.GetValue(WellKnownSettings.AppCompany,        appInfo.CompanyDescription);
         appInfo.CopyrightYear      = SettingsService.GetValue(WellKnownSettings.AppCopyright,      appInfo.CopyrightYear);
         appInfo.PrivacyPolicyUrl   = SettingsService.GetValue(WellKnownSettings.AppPrivacyPolicyUrl, "");
+
+        // Wire up the tenant registry so RequestHandler can resolve tenants per-request.
+        if (multitenancyOptions.Enabled)
+            appInfo.TenantRegistry = tenantRegistry;
 
         // Keep in-memory server state in sync whenever a setting is edited via the admin UI.
         // Assign (not append) so that if UseBareMetalWeb is ever called more than once only the
