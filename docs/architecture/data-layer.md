@@ -6,6 +6,10 @@ This document covers BareMetalWeb's data storage, entity registration, CRUD life
 
 ## Storage Stack
 
+Two `IDataProvider` implementations ship out of the box.  `Program.cs` (`CreateDataStore`) selects one at startup.
+
+### LocalFolderBinaryDataProvider (classic)
+
 ```mermaid
 graph TD
     Consumer["Route handler / service"] -->|IDataObjectStore| DSP["DataStoreProvider<br/>(static singleton)"]
@@ -18,10 +22,25 @@ graph TD
     BOS -->|schema versioning| SHA["Field hash registry<br/>(schema evolution)"]
 ```
 
+### WalDataProvider (WAL-backed)
+
+```mermaid
+graph TD
+    Consumer["Route handler / service"] -->|IDataObjectStore| DSP["DataStoreProvider<br/>(static singleton)"]
+    DSP -->|PrimaryProvider| WAL["WalDataProvider<br/>(IDataProvider)"]
+    WAL -->|write/read| WS["WalStore<br/>({dataRoot}/wal/)"]
+    WS -->|segment files| SEG["WalSegmentWriter / WalSegmentReader<br/>(append-only segments)"]
+    WAL -->|id mapping| IDMap["Per-entity _idmap.bin<br/>(string ID → packed ulong WAL key)"]
+    WAL -->|schema files| BOS["BinaryObjectSerializer<br/>(shared with LocalFolderBinaryDataProvider)"]
+    WAL -->|secondary indexes| SIM["SearchIndexManager"]
+```
+
 **Key points:**
 - `DataStoreProvider.Current` is the one-stop shop for all data access.
-- `LocalFolderBinaryDataProvider` stores each entity instance as a single binary file, grouped by entity type.
-- Schema evolution is handled via `SchemaReadMode.BestEffort`: old records with extra/missing fields still load; new fields receive default values.
+- `LocalFolderBinaryDataProvider` stores each entity instance as a single binary file, grouped by entity type.  Used when WAL is not configured.
+- `WalDataProvider` stores all records as commit-log payloads inside a `WalStore` at `{dataRoot}/wal/`.  Each entity type gets a stable `uint32` table-ID derived from the type name; each string record-ID is mapped to a monotonic `uint32` record-ID via a per-entity `_idmap.bin` file, giving a packed `ulong` key consumed by the WAL store.
+- Schema evolution is handled via `SchemaReadMode.BestEffort` in both providers: old records with extra/missing fields still load; new fields receive default values.
+- Schema files are shared between the two providers so they can coexist in the same data root.
 
 ---
 
@@ -153,6 +172,8 @@ Sequential IDs are persisted so they survive restarts:
 
 ## Storage Layout Summary
 
+### LocalFolderBinaryDataProvider layout
+
 ```
 {dataRoot}/
 ├── {EntityType}/
@@ -166,3 +187,21 @@ Sequential IDs are persisted so they survive restarts:
 └── sessions/
     └── {sessionId}.bin   ← binary-serialized UserSession
 ```
+
+### WalDataProvider layout
+
+```
+{dataRoot}/
+├── wal/                          ← WalStore root
+│   ├── {segmentId}.seg           ← append-only WAL segment files
+│   └── head.map                  ← WalHeadMap (latest record key per entity+id)
+├── {EntityType}/
+│   ├── _idmap.bin                ← string ID → packed ulong WAL key
+│   └── _idx/
+│       └── {FieldName}.idx       ← append-only binary index file (same as above)
+└── {EntityType}/schema           ← BinaryObjectSerializer schema hash (shared)
+```
+
+---
+
+_Status: Verified against codebase @ commit e38d19057e1a55fc1d9a563f5ec6228bb991a0b5_
