@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -11,6 +12,7 @@ public sealed class DataObjectStore : IDataObjectStore
 {
     private readonly List<IDataProvider> _providersList = new();
     private IDataProvider? _fallbackProvider;
+    private readonly ConcurrentDictionary<Type, IDataProvider> _providerCache = new();
 
     public IReadOnlyList<IDataProvider> Providers => _providersList;
 
@@ -24,15 +26,18 @@ public sealed class DataObjectStore : IDataObjectStore
 
         if (provider is LocalFolderBinaryDataProvider && _fallbackProvider is null)
             _fallbackProvider = provider;
+
+        _providerCache.Clear();
     }
 
     public void RegisterFallbackProvider(IDataProvider provider)
     {
         if (provider is null) throw new ArgumentNullException(nameof(provider));
         _fallbackProvider = provider;
+        _providerCache.Clear();
     }
 
-    public void ClearProviders() => _providersList.Clear();
+    public void ClearProviders() { _providersList.Clear(); _providerCache.Clear(); }
 
     public void Save<T>(T obj) where T : BaseDataObject
     {
@@ -100,13 +105,16 @@ public sealed class DataObjectStore : IDataObjectStore
 
     private IDataProvider ResolveProvider(Type type)
     {
-        var provider = _providersList.FirstOrDefault(p => p.CanHandle(type));
-        if (provider is not null)
-            return provider;
+        return _providerCache.GetOrAdd(type, t =>
+        {
+            var provider = _providersList.FirstOrDefault(p => p.CanHandle(t));
+            if (provider is not null)
+                return provider;
 
-        if (_fallbackProvider is not null)
-            return _fallbackProvider;
+            if (_fallbackProvider is not null)
+                return _fallbackProvider;
 
-        throw new InvalidOperationException($"No IDataProvider registered for type {type.Name} and no fallback provider configured.");
+            throw new InvalidOperationException($"No IDataProvider registered for type {t.Name} and no fallback provider configured.");
+        });
     }
 }

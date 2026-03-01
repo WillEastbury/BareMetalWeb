@@ -573,14 +573,11 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                         if (fieldIndex.TryGetValue(fieldValue, out var candidateIds))
                         {
                             var loaded = new List<T>(candidateIds.Count);
-                            foreach (var candidateId in candidateIds)
+                            foreach (var candidateKey in candidateIds)
                             {
-                                if (uint.TryParse(candidateId, out var candidateKey))
-                                {
-                                    var obj = Load<T>(candidateKey);
-                                    if (obj != null)
-                                        loaded.Add(obj);
-                                }
+                                var obj = Load<T>(candidateKey);
+                                if (obj != null)
+                                    loaded.Add(obj);
                             }
                             candidates = loaded;
                         }
@@ -782,7 +779,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                     var value = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
                     _indexStore.AppendEntry(type.Name, prop.Name, value, keyStr, 'D');
                 }
-                _searchIndexManager.RemoveObject(type, keyStr);
+                _searchIndexManager.RemoveObject(type, key);
             }
         }
     }

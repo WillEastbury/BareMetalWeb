@@ -86,11 +86,11 @@ public sealed class IndexStore
         }
     }
 
-    public Dictionary<string, HashSet<string>> ReadIndex(string entityName, string fieldName, bool normalizeKey = true)
+    public Dictionary<string, HashSet<uint>> ReadIndex(string entityName, string fieldName, bool normalizeKey = true)
     {
         var map = new Dictionary<string, Dictionary<string, long>>(StringComparer.OrdinalIgnoreCase);
         if (!_provider.PagedFileExists(entityName, GetPagedFileName(fieldName)))
-            return new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+            return new Dictionary<string, HashSet<uint>>(StringComparer.OrdinalIgnoreCase);
 
         var nowTicks = DateTime.UtcNow.Ticks;
 
@@ -979,19 +979,22 @@ public sealed class IndexStore
     {
         return (key ?? string.Empty).Trim().ToLowerInvariant();
     }
-    private static Dictionary<string, HashSet<string>> BuildIdMap(Dictionary<string, Dictionary<string, long>> map, long nowTicks)
+    private static Dictionary<string, HashSet<uint>> BuildIdMap(Dictionary<string, Dictionary<string, long>> map, long nowTicks)
     {
-        var result = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, HashSet<uint>>(StringComparer.OrdinalIgnoreCase);
         foreach (var pair in map)
         {
-            HashSet<string>? set = null;
+            HashSet<uint>? set = null;
             foreach (var idEntry in pair.Value)
             {
                 if (IsExpired(idEntry.Value, nowTicks))
                     continue;
 
-                set ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                set.Add(idEntry.Key);
+                if (uint.TryParse(idEntry.Key, out var key))
+                {
+                    set ??= new HashSet<uint>();
+                    set.Add(key);
+                }
             }
 
             if (set != null && set.Count > 0)
