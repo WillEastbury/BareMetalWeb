@@ -11,7 +11,9 @@ namespace BareMetalWeb.Runtime;
 /// <param name="Icon">Optional Bootstrap icon class.</param>
 /// <param name="Permission">Optional permission token required to invoke this action.</param>
 /// <param name="EnabledWhen">Optional boolean expression for client-side button state.</param>
-/// <param name="Operations">Ordered list of "SetField:Field=Value" operation strings.</param>
+/// <param name="Operations">Ordered list of legacy "SetField:Field=Value" operation strings (v1.0 compat).</param>
+/// <param name="Commands">Structured v1.1 command primitives. When non-empty these take precedence over <paramref name="Operations"/>.</param>
+/// <param name="Version">Schema version of the action definition.</param>
 public sealed record RuntimeActionModel(
     string ActionId,
     string EntityId,
@@ -20,5 +22,7 @@ public sealed record RuntimeActionModel(
     string? Icon,
     string? Permission,
     string? EnabledWhen,
-    IReadOnlyList<string> Operations
+    IReadOnlyList<string> Operations,
+    IReadOnlyList<ActionCommand> Commands,
+    int Version = 1
 );

@@ -122,6 +122,7 @@ public sealed class RuntimeEntityRegistry
         var allFields = (await store.QueryAsync<FieldDefinition>().ConfigureAwait(false)).ToList();
         var allIndexes = (await store.QueryAsync<IndexDefinition>().ConfigureAwait(false)).ToList();
         var allActions = (await store.QueryAsync<ActionDefinition>().ConfigureAwait(false)).ToList();
+        var allActionCommands = (await store.QueryAsync<ActionCommandDefinition>().ConfigureAwait(false)).ToList();
 
         foreach (var entityDef in entityDefs)
         {
@@ -144,8 +145,16 @@ public sealed class RuntimeEntityRegistry
                 if (string.IsNullOrWhiteSpace(f.FieldId))
                     f.FieldId = f.Key.ToString();
 
+            // Gather all ActionCommandDefinitions whose ActionId belongs to this entity
+            var entityActionKeys = new HashSet<string>(
+                entityActions.Select(a => a.Key.ToString()),
+                StringComparer.OrdinalIgnoreCase);
+            var entityActionCommands = allActionCommands
+                .Where(c => entityActionKeys.Contains(c.ActionId))
+                .ToList();
+
             var model = compiler.Compile(entityDef, entityFields, entityIndexes, entityActions,
-                out var warnings);
+                entityActionCommands, out var warnings);
 
             foreach (var w in warnings)
                 logger?.Invoke(w);
