@@ -64,23 +64,83 @@ public static class ReportHtmlRenderer
             Write(writer, "</p>");
         }
 
-        // Parameter form (if any)
+        // Parameter form (if any) — rendered as a dropdown bar above the report
         if (parameters != null && parameters.Count > 0)
         {
-            Write(writer, "<form class=\"row g-3 mb-4\" method=\"get\">");
+            Write(writer, "<div class=\"card bg-body-tertiary mb-4\"><div class=\"card-body py-2\">");
+            Write(writer, "<form class=\"row g-2 align-items-end\" method=\"get\">");
             foreach (var p in parameters)
             {
-                Write(writer, "<div class=\"col-auto\"><label class=\"form-label fw-semibold\">");
-                WriteEncoded(writer, p.Label);
-                Write(writer, "</label><input type=\"text\" class=\"form-control\" name=\"");
-                WriteEncoded(writer, p.Name);
-                Write(writer, "\" value=\"");
                 var val = parameterValues != null && parameterValues.TryGetValue(p.Name, out var pv) ? pv : p.DefaultValue;
-                WriteEncoded(writer, val);
-                Write(writer, "\"></div>");
+                Write(writer, "<div class=\"col-auto\"><label class=\"form-label fw-semibold mb-1 small\">");
+                WriteEncoded(writer, p.Label);
+                Write(writer, "</label>");
+
+                var isDropdown = p.Type == "select" || p.Options is { Count: > 0 } || !string.IsNullOrEmpty(p.FieldSource);
+
+                if (isDropdown)
+                {
+                    Write(writer, "<select class=\"form-select form-select-sm\" name=\"");
+                    WriteEncoded(writer, p.Name);
+                    Write(writer, "\">");
+                    Write(writer, "<option value=\"\">— All —</option>");
+                    if (p.Options is { Count: > 0 })
+                    {
+                        foreach (var opt in p.Options)
+                        {
+                            var parts = opt.Split('|', 2);
+                            var optVal = parts[0];
+                            var optLabel = parts.Length > 1 ? parts[1] : parts[0];
+                            Write(writer, "<option value=\"");
+                            WriteEncoded(writer, optVal);
+                            Write(writer, "\"");
+                            if (string.Equals(optVal, val, StringComparison.OrdinalIgnoreCase))
+                                Write(writer, " selected");
+                            Write(writer, ">");
+                            WriteEncoded(writer, optLabel);
+                            Write(writer, "</option>");
+                        }
+                    }
+                    else if (!string.IsNullOrEmpty(p.FieldSource))
+                    {
+                        // Dynamic options loaded server-side at render time
+                        var distinctValues = ResolveDistinctValues(p.FieldSource);
+                        foreach (var dv in distinctValues)
+                        {
+                            Write(writer, "<option value=\"");
+                            WriteEncoded(writer, dv);
+                            Write(writer, "\"");
+                            if (string.Equals(dv, val, StringComparison.OrdinalIgnoreCase))
+                                Write(writer, " selected");
+                            Write(writer, ">");
+                            WriteEncoded(writer, dv);
+                            Write(writer, "</option>");
+                        }
+                    }
+                    Write(writer, "</select>");
+                }
+                else
+                {
+                    var inputType = p.Type switch
+                    {
+                        "date" => "date",
+                        "number" => "number",
+                        "datetime" => "datetime-local",
+                        _ => "text"
+                    };
+                    Write(writer, "<input type=\"");
+                    Write(writer, inputType);
+                    Write(writer, "\" class=\"form-control form-control-sm\" name=\"");
+                    WriteEncoded(writer, p.Name);
+                    Write(writer, "\" value=\"");
+                    WriteEncoded(writer, val);
+                    Write(writer, "\">");
+                }
+
+                Write(writer, "</div>");
             }
-            Write(writer, "<div class=\"col-auto align-self-end\"><button type=\"submit\" class=\"btn btn-primary\"><i class=\"bi bi-play-fill\"></i> Run Report</button></div>");
-            Write(writer, "</form>");
+            Write(writer, "<div class=\"col-auto\"><button type=\"submit\" class=\"btn btn-primary btn-sm\"><i class=\"bi bi-funnel-fill\"></i> Filter</button></div>");
+            Write(writer, "</form></div></div>");
         }
 
         // Results table
@@ -244,5 +304,44 @@ public static class ReportHtmlRenderer
     {
         if (string.IsNullOrEmpty(text)) return;
         Write(writer, WebUtility.HtmlEncode(text));
+    }
+
+    /// <summary>
+    /// Resolves distinct field values for a dynamic dropdown.
+    /// FieldSource format: "entitySlug.fieldName"
+    /// </summary>
+    internal static IReadOnlyList<string> ResolveDistinctValues(string fieldSource)
+    {
+        var dot = fieldSource.IndexOf('.');
+        if (dot < 0) return Array.Empty<string>();
+
+        var entitySlug = fieldSource[..dot];
+        var fieldName = fieldSource[(dot + 1)..];
+
+        if (!BareMetalWeb.Core.DataScaffold.TryGetEntity(entitySlug, out var meta))
+            return Array.Empty<string>();
+
+        var field = meta.Fields.FirstOrDefault(f =>
+            string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        if (field == null) return Array.Empty<string>();
+
+        // Load all records and extract distinct non-null values
+        var getter = field.GetValueFn;
+        if (getter == null) return Array.Empty<string>();
+
+        var distinct = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        var allItems = meta.Handlers.QueryAsync(null, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+        foreach (var item in allItems)
+        {
+            var val = getter(item);
+            if (val != null)
+            {
+                var str = val.ToString();
+                if (!string.IsNullOrWhiteSpace(str))
+                    distinct.Add(str);
+            }
+        }
+
+        return distinct.ToArray();
     }
 }
