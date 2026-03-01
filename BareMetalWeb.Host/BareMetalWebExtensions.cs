@@ -213,6 +213,12 @@ public static class BareMetalWebExtensions
         appInfo.RegisterRuntimeApiRoutes(pageInfoFactory);       // /meta/entity/{name}, POST /query, POST /intent
         appInfo.RegisterLookupApiRoutes(pageInfoFactory);       // must be before RegisterApiRoutes
         ActionApiHandlers.Initialize();                           // action engine lock manager
+
+        // Initialize cluster state with local lease (single-instance default)
+        var clusterState = new BareMetalWeb.Data.ClusterState(new BareMetalWeb.Data.LocalLeaseAuthority());
+        _ = clusterState.TryBecomeLeaderAsync(CancellationToken.None);
+        ClusterApiHandlers.Initialize(clusterState);
+
         appInfo.RegisterBinaryApiRoutes(pageInfoFactory);       // binary wire-format API
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
         appInfo.RegisterVNextRoutes(pageInfoFactory, templateStore);
