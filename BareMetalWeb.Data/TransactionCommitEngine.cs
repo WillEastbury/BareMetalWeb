@@ -35,6 +35,8 @@ public sealed class TransactionCommitEngine
         CancellationToken cancellationToken = default,
         bool allowEventDispatch = true)
     {
+        var commitStart = EngineMetrics.StartTiming();
+
         // 1. Acquire all locks in sorted order
         using var lockHandle = _lockManager.AcquireAll(
             envelope.TouchedAggregateKeys, envelope.TransactionId);
@@ -119,6 +121,7 @@ public sealed class TransactionCommitEngine
                     switch (assert.Severity)
                     {
                         case Severity.Error:
+                            EngineMetrics.RecordCommit(EngineMetrics.ElapsedUs(commitStart), false);
                             return Fail(assert.Code, assert.Message);
                         case Severity.Warning:
                             warnings.Add(new TransactionWarning(assert.Code, assert.Message));
@@ -164,6 +167,7 @@ public sealed class TransactionCommitEngine
             }
 
             // 7. Success
+            EngineMetrics.RecordCommit(EngineMetrics.ElapsedUs(commitStart), true);
             return new TransactionResult(
                 Success: true,
                 ErrorCode: null,
@@ -172,6 +176,7 @@ public sealed class TransactionCommitEngine
         }
         catch (TimeoutException)
         {
+            EngineMetrics.RecordCommit(EngineMetrics.ElapsedUs(commitStart), false);
             return Fail("LOCK_TIMEOUT", "Failed to acquire locks for transaction.");
         }
     }

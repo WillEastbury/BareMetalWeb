@@ -23,11 +23,20 @@ public sealed class AggregateLockManager
     /// </summary>
     public LockHandle AcquireAll(IReadOnlyList<string> aggregateKeys, string transactionId)
     {
+        var startTicks = EngineMetrics.StartTiming();
+        bool contended = false;
+
         // Sort deterministically to prevent deadlocks
         var sorted = aggregateKeys.OrderBy(k => k, StringComparer.Ordinal).Distinct().ToArray();
 
         for (int attempt = 0; attempt <= MaxRetries; attempt++)
         {
+            if (attempt > 0)
+            {
+                contended = true;
+                EngineMetrics.RecordCommitRetry();
+            }
+
             var acquired = new List<string>();
             bool success = true;
 
@@ -48,13 +57,17 @@ public sealed class AggregateLockManager
             }
 
             if (success)
+            {
+                EngineMetrics.RecordLockAcquire(EngineMetrics.ElapsedUs(startTicks), contended);
                 return new LockHandle(this, acquired, transactionId);
+            }
 
             // Exponential backoff
             if (attempt < MaxRetries)
                 Thread.Sleep(BaseBackoffMs * (1 << attempt));
         }
 
+        EngineMetrics.RecordLockAcquire(EngineMetrics.ElapsedUs(startTicks), true);
         throw new TimeoutException(
             $"Failed to acquire locks for transaction {transactionId} after {MaxRetries} retries. " +
             $"Keys: {string.Join(", ", sorted)}");

@@ -481,6 +481,7 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/_binary/{type}/_layout", new RouteHandlerData(raw, DeltaApiHandlers.LayoutHandler));
         host.RegisterRoute("GET /api/_binary/{type}/_actions", new RouteHandlerData(raw, ActionApiHandlers.ListActionsHandler));
         host.RegisterRoute("POST /api/_binary/{type}/_action/{actionId}", new RouteHandlerData(raw, ActionApiHandlers.ExecuteActionHandler));
+        host.RegisterRoute("GET /api/_metrics", new RouteHandlerData(raw, EngineMetricsHandler));
         host.RegisterRoute("GET /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.GetHandler));
         host.RegisterRoute("GET /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.ListHandler));
         host.RegisterRoute("POST /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.CreateHandler));
@@ -1978,5 +1979,64 @@ public static class RouteRegistrationExtensions
         }
 
         return query;
+    }
+
+    /// <summary>GET /api/_metrics — returns engine telemetry snapshot as JSON.</summary>
+    private static async ValueTask EngineMetricsHandler(HttpContext context)
+    {
+        var snapshot = BareMetalWeb.Data.EngineMetrics.GetSnapshot();
+
+        context.Response.StatusCode = 200;
+        context.Response.ContentType = "application/json";
+        await using var w = new System.Text.Json.Utf8JsonWriter(context.Response.Body);
+        w.WriteStartObject();
+
+        w.WriteStartObject("wal");
+        w.WriteNumber("appendCount", snapshot.WalAppendCount);
+        w.WriteNumber("appendAvgUs", Math.Round(snapshot.WalAppendAvgUs, 1));
+        w.WriteNumber("appendMaxUs", snapshot.WalAppendMaxUs);
+        w.WriteNumber("appendBytesTotal", snapshot.WalAppendBytesTotal);
+        w.WriteEndObject();
+
+        w.WriteStartObject("locks");
+        w.WriteNumber("acquireCount", snapshot.LockAcquireCount);
+        w.WriteNumber("acquireAvgUs", Math.Round(snapshot.LockAcquireAvgUs, 1));
+        w.WriteNumber("acquireMaxUs", snapshot.LockAcquireMaxUs);
+        w.WriteNumber("contentions", snapshot.LockContentions);
+        w.WriteNumber("contentionRate", Math.Round(snapshot.LockContentionRate, 4));
+        w.WriteEndObject();
+
+        w.WriteStartObject("commits");
+        w.WriteNumber("count", snapshot.CommitCount);
+        w.WriteNumber("successCount", snapshot.CommitSuccessCount);
+        w.WriteNumber("failCount", snapshot.CommitFailCount);
+        w.WriteNumber("avgUs", Math.Round(snapshot.CommitAvgUs, 1));
+        w.WriteNumber("maxUs", snapshot.CommitMaxUs);
+        w.WriteNumber("retries", snapshot.CommitRetryCount);
+        w.WriteNumber("successRate", Math.Round(snapshot.CommitSuccessRate, 4));
+        w.WriteEndObject();
+
+        w.WriteStartObject("deltas");
+        w.WriteNumber("count", snapshot.DeltaSizeCount);
+        w.WriteNumber("avgBytes", Math.Round(snapshot.DeltaSizeAvg, 1));
+        w.WriteNumber("maxBytes", snapshot.DeltaSizeMax);
+        w.WriteNumber("minBytes", snapshot.DeltaSizeMin);
+        w.WriteNumber("totalBytes", snapshot.DeltaSizeTotal);
+        w.WriteEndObject();
+
+        w.WriteStartObject("compaction");
+        w.WriteNumber("count", snapshot.CompactionCount);
+        w.WriteNumber("totalUs", snapshot.CompactionTotalUs);
+        w.WriteNumber("bytesReclaimed", snapshot.CompactionBytesReclaimed);
+        w.WriteEndObject();
+
+        w.WriteStartObject("replay");
+        w.WriteNumber("count", snapshot.ReplayCount);
+        w.WriteNumber("totalUs", snapshot.ReplayTotalUs);
+        w.WriteNumber("opsTotal", snapshot.ReplayOpsTotal);
+        w.WriteEndObject();
+
+        w.WriteEndObject();
+        await w.FlushAsync(context.RequestAborted);
     }
 }
