@@ -123,6 +123,83 @@ public class DataStoreProviderTests
         }
     }
 
+    // ── Multitenancy: per-request tenant scope ──────────────────────────────
+
+    [Fact]
+    public void SetCurrentTenant_MakesCurrent_ReturnTenantStore()
+    {
+        // Arrange
+        var tenantStore    = new DataObjectStore();
+        var tenantProvider = new TestDataProvider();
+        var ctx = new TenantContext("t1", "/data/t1", "/logs/t1", tenantStore, tenantProvider);
+
+        var originalSystem = DataStoreProvider.SystemStore;
+
+        try
+        {
+            // Act
+            using var scope = DataStoreProvider.SetCurrentTenant(ctx);
+
+            // Assert — Current now points at the tenant store
+            Assert.Same(tenantStore, DataStoreProvider.Current);
+            Assert.Same(ctx, DataStoreProvider.CurrentTenant);
+        }
+        finally
+        {
+            DataStoreProvider.SystemStore = originalSystem;
+        }
+    }
+
+    [Fact]
+    public void SetCurrentTenant_Dispose_RestoresToSystemStore()
+    {
+        // Arrange
+        var systemStore    = new DataObjectStore();
+        var tenantStore    = new DataObjectStore();
+        var tenantProvider = new TestDataProvider();
+        var ctx = new TenantContext("t1", "/data/t1", "/logs/t1", tenantStore, tenantProvider);
+
+        var originalSystem = DataStoreProvider.SystemStore;
+        DataStoreProvider.SystemStore = systemStore;
+
+        try
+        {
+            // Act
+            var scope = DataStoreProvider.SetCurrentTenant(ctx);
+            Assert.Same(tenantStore, DataStoreProvider.Current); // verify set
+
+            scope.Dispose(); // should restore to system store
+
+            // Assert
+            Assert.Same(systemStore, DataStoreProvider.Current);
+            Assert.Null(DataStoreProvider.CurrentTenant);
+        }
+        finally
+        {
+            DataStoreProvider.SystemStore = originalSystem;
+        }
+    }
+
+    [Fact]
+    public void Current_WhenNoTenantSet_ReturnsSystemStore()
+    {
+        // Arrange — no tenant scope active
+        var systemStore = new DataObjectStore();
+        var original    = DataStoreProvider.SystemStore;
+        DataStoreProvider.SystemStore = systemStore;
+
+        try
+        {
+            // Act / Assert
+            Assert.Same(systemStore, DataStoreProvider.Current);
+            Assert.Null(DataStoreProvider.CurrentTenant);
+        }
+        finally
+        {
+            DataStoreProvider.SystemStore = original;
+        }
+    }
+
     private class TestDataProvider : IDataProvider
     {
         public string Name => "Test";

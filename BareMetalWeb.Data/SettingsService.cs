@@ -8,11 +8,22 @@ namespace BareMetalWeb.Data;
 /// object store. Settings are read on first access and cached in memory.
 /// Use <see cref="InvalidateCache()"/> or <see cref="InvalidateCache(string)"/> after
 /// saving a setting to ensure subsequent reads return the updated value.
+///
+/// When multitenancy is enabled each tenant has its own isolated cache keyed by
+/// <see cref="TenantContext.TenantId"/>.  Settings for the active tenant are
+/// resolved automatically via <see cref="DataStoreProvider.CurrentTenant"/>.
 /// </summary>
 public static class SettingsService
 {
-    private static readonly ConcurrentDictionary<string, string> _cache =
+    // Per-tenant caches: tenantId → (settingId → value)
+    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _tenantCaches =
         new(StringComparer.OrdinalIgnoreCase);
+
+    // Convenience accessor for the cache belonging to the currently active tenant (or "_system").
+    private static ConcurrentDictionary<string, string> CurrentCache =>
+        _tenantCaches.GetOrAdd(
+            DataStoreProvider.CurrentTenant?.TenantId ?? "_system",
+            _ => new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase));
 
     /// <summary>
     /// Gets the value of a setting by its ID.
@@ -21,7 +32,8 @@ public static class SettingsService
     /// </summary>
     public static string GetValue(string settingId, string defaultValue = "")
     {
-        if (_cache.TryGetValue(settingId, out var cached))
+        var cache = CurrentCache;
+        if (cache.TryGetValue(settingId, out var cached))
             return cached;
 
         var query = new QueryDefinition
@@ -37,7 +49,7 @@ public static class SettingsService
         var setting = settings.FirstOrDefault(s => string.Equals(s.SettingId, settingId, StringComparison.OrdinalIgnoreCase));
         if (setting != null)
         {
-            _cache[settingId] = setting.Value;
+            cache[settingId] = setting.Value;
             return setting.Value;
         }
 
@@ -51,13 +63,17 @@ public static class SettingsService
     /// </summary>
     public static Action<string>? OnSettingInvalidated { get; set; }
 
-    /// <summary>Clears all cached settings so the next read hits the store.</summary>
-    public static void InvalidateCache() => _cache.Clear();
+    /// <summary>Clears all cached settings for the currently active tenant so the next read hits the store.</summary>
+    public static void InvalidateCache()
+    {
+        var tenantId = DataStoreProvider.CurrentTenant?.TenantId ?? "_system";
+        _tenantCaches.TryRemove(tenantId, out _);
+    }
 
-    /// <summary>Removes a single setting from the cache and notifies any registered listener.</summary>
+    /// <summary>Removes a single setting from the active tenant's cache and notifies any registered listener.</summary>
     public static void InvalidateCache(string settingId)
     {
-        _cache.TryRemove(settingId, out _);
+        CurrentCache.TryRemove(settingId, out _);
         OnSettingInvalidated?.Invoke(settingId);
     }
 

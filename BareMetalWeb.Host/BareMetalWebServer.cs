@@ -73,6 +73,13 @@ public class BareMetalWebServer : IBareWebHost
     public bool HttpsEndpointAvailable { get; set; } = false;
     public string? HttpsRedirectHost { get; set; }
     public int? HttpsRedirectPort { get; set; }
+
+    /// <summary>
+    /// When multitenancy is enabled, this registry resolves the correct per-tenant
+    /// data store at the start of each request based on the HTTP Host header.
+    /// Null (default) means multitenancy is disabled and the system store is used for all requests.
+    /// </summary>
+    public TenantRegistry? TenantRegistry { get; set; }
     private readonly Dictionary<string, MenuCacheEntry> _menuCache = new(StringComparer.Ordinal);
     private int _routesVersion = 0;
     private readonly Dictionary<string, CompiledRoute> _compiledRoutes = new(StringComparer.Ordinal);
@@ -312,6 +319,11 @@ public class BareMetalWebServer : IBareWebHost
         string path = method + " " + requestPath;
         string sourceIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         context.SetApp(this);
+
+        // ── Multitenancy: resolve tenant from Host header ─────────────────────
+        // When enabled, sets DataStoreProvider.CurrentTenant for the duration of
+        // this async call chain. Disposed at the end of the request.
+        using var tenantScope = TenantRegistry?.ResolveForRequest(context);
 
         bool isHttps = IsHttpsRequest(context, TrustForwardedHeaders);
         context.Response.Headers["X-BareMetal-IsHttps"] = isHttps ? "true" : "false";
