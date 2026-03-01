@@ -16,6 +16,11 @@
         return el ? el.getAttribute('content') : '';
     }
 
+    // ── Background job tracking ───────────────────────────────────────────────
+    var _trackedJobs  = {};   // jobId → latest JobStatusSnapshot (only jobs started this session)
+    var _jobPollTimer = null; // setInterval handle while there are active tracked jobs
+    var _jobsPageRefreshCallback = null; // set by renderJobsPage when the jobs page is open
+
     // ── Metadata cache ────────────────────────────────────────────────────────
     var _metaObjects = null;
     var _metaCache   = {};
@@ -144,7 +149,12 @@
                 });
             }
             if (r.status === 204) return null;
-            return r.json();
+            var httpStatus = r.status;
+            return r.json().then(function (data) {
+                if (httpStatus === 202 && data && data.jobId)
+                    trackJob(data.jobId, data.operationName || 'Background Job');
+                return data;
+            });
         });
     }
 
@@ -176,7 +186,7 @@
         var container = document.getElementById('vnext-toast-container');
         if (!container) return;
         var id = 'toast-' + Date.now();
-        var cls = type === 'error' ? 'bg-danger text-white' : type === 'warning' ? 'bg-warning' : 'bg-success text-white';
+        var cls = type === 'error' ? 'bg-danger text-white' : type === 'warning' ? 'bg-warning' : type === 'info' ? 'bg-info text-dark' : 'bg-success text-white';
         container.insertAdjacentHTML('beforeend',
             '<div id="' + id + '" class="toast align-items-center ' + cls + ' border-0" role="alert" aria-live="assertive">' +
             '<div class="d-flex"><div class="toast-body">' + escHtml(message) + '</div>' +
@@ -188,6 +198,59 @@
             toast.show();
             el.addEventListener('hidden.bs.toast', function () { el.remove(); });
         }
+    }
+
+    // ── Background job tracking ───────────────────────────────────────────────
+
+    function trackJob(jobId, operationName) {
+        _trackedJobs[jobId] = { jobId: jobId, operationName: operationName, status: 'queued', percentComplete: 0, description: '' };
+        showToast('\u23F3 Job queued: ' + operationName, 'info');
+        _startJobPolling();
+        _updateJobBadge();
+        if (_jobsPageRefreshCallback) _jobsPageRefreshCallback(); // refresh jobs page if open
+    }
+
+    function _startJobPolling() {
+        if (_jobPollTimer) return;
+        _jobPollTimer = setInterval(_pollJobs, 3000);
+    }
+
+    function _stopJobPolling() {
+        if (_jobPollTimer) { clearInterval(_jobPollTimer); _jobPollTimer = null; }
+    }
+
+    function _pollJobs() {
+        apiFetch(API + '/jobs').then(function (jobs) {
+            if (!Array.isArray(jobs)) return;
+            jobs.forEach(function (j) {
+                var prev = _trackedJobs[j.jobId];
+                if (!prev) return; // not a job we started this session
+                var wasActive = prev.status === 'queued' || prev.status === 'running';
+                _trackedJobs[j.jobId] = j;
+                if (wasActive && j.status === 'succeeded')
+                    showToast('\u2705 ' + j.operationName + ': completed successfully.', 'success');
+                else if (wasActive && j.status === 'failed')
+                    showToast('\u274C ' + j.operationName + ': failed. ' + (j.error || ''), 'error');
+            });
+            _updateJobBadge();
+            if (_jobsPageRefreshCallback) _jobsPageRefreshCallback();
+            var hasActive = Object.keys(_trackedJobs).some(function (id) {
+                var s = _trackedJobs[id].status;
+                return s === 'queued' || s === 'running';
+            });
+            if (!hasActive) _stopJobPolling();
+        }).catch(function () {}); // silent — don't disrupt the user
+    }
+
+    function _updateJobBadge() {
+        var badge = document.getElementById('vnext-jobs-badge');
+        if (!badge) return;
+        var active = Object.keys(_trackedJobs).filter(function (id) {
+            var s = _trackedJobs[id].status;
+            return s === 'queued' || s === 'running';
+        }).length;
+        badge.textContent = String(active);
+        badge.style.display = active > 0 ? '' : 'none';
     }
 
     function escHtml(str) {
@@ -3163,7 +3226,95 @@
     });
 
     nav.appendChild(ul);
+
+    // Right-side: bell icon linking to background jobs page
+    const rightUl = el('ul', { className: 'navbar-nav ms-auto' });
+    const jobsLi  = el('li', { className: 'nav-item' });
+    const jobsA   = el('a', {
+      className: 'nav-link position-relative' + (activeSlug === '_jobs' ? ' active' : ''),
+      href: BASE + '/_jobs',
+      title: 'Background Jobs'
+    });
+    jobsA.setAttribute('data-go', '');
+    jobsA.innerHTML = '<i class="bi bi-bell"></i>' +
+      '<span id="vnext-jobs-badge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="display:none">0</span>';
+    jobsLi.appendChild(jobsA);
+    rightUl.appendChild(jobsLi);
+    nav.appendChild(rightUl);
+
+    // Sync badge after DOM insertion
+    setTimeout(_updateJobBadge, 0);
+
     return nav;
+  }
+
+  function renderJobsPage(container) {
+    var hdr = el('div', { className: 'd-flex align-items-center gap-3 mb-3 flex-wrap' });
+    hdr.appendChild(el('h2', { className: 'mb-0', textContent: '\uD83D\uDD14 Background Jobs' }));
+    var refreshBtn = el('button', { className: 'btn btn-outline-secondary btn-sm', textContent: '\u21BB Refresh' });
+    hdr.appendChild(refreshBtn);
+    container.appendChild(hdr);
+
+    var tableWrap = el('div');
+    container.appendChild(tableWrap);
+
+    function statusBadge(status) {
+      if (status === 'succeeded') return '<span class="badge bg-success">Succeeded</span>';
+      if (status === 'failed')    return '<span class="badge bg-danger">Failed</span>';
+      if (status === 'running')   return '<span class="badge bg-primary">Running</span>';
+      return '<span class="badge bg-secondary">Queued</span>';
+    }
+
+    function progressBar(j) {
+      if (j.status !== 'running' && j.status !== 'succeeded') return '';
+      var pct = j.percentComplete || 0;
+      return '<div class="progress bm-job-progress"><div class="progress-bar" role="progressbar" style="width:' + pct + '%" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100">' + pct + '%</div></div>';
+    }
+
+    function loadJobs() {
+      apiFetch(API + '/jobs').then(function (jobs) {
+        if (!Array.isArray(jobs) || jobs.length === 0) {
+          tableWrap.innerHTML = '<p class="text-muted">No background jobs in the last hour.</p>';
+          return;
+        }
+        var html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
+        html += '<thead class="table-dark"><tr>' +
+          '<th>Operation</th><th>Status</th><th>Progress</th>' +
+          '<th>Started</th><th>Completed</th><th>Details</th></tr></thead><tbody>';
+        jobs.forEach(function (j) {
+          var started   = j.startedAt   ? new Date(j.startedAt).toLocaleTimeString()   : '';
+          var completed = j.completedAt ? new Date(j.completedAt).toLocaleTimeString() : '';
+          var details   = j.error
+            ? '<span class="text-danger">' + escHtml(j.error) + '</span>'
+            : escHtml(j.description || '');
+          html += '<tr>' +
+            '<td>' + escHtml(j.operationName) + '</td>' +
+            '<td>' + statusBadge(j.status) + '</td>' +
+            '<td>' + progressBar(j) + '</td>' +
+            '<td class="text-nowrap">' + escHtml(started) + '</td>' +
+            '<td class="text-nowrap">' + escHtml(completed) + '</td>' +
+            '<td>' + details + '</td>' +
+            '</tr>';
+        });
+        html += '</tbody></table></div>';
+        tableWrap.innerHTML = html;
+      }).catch(function (err) {
+        tableWrap.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';
+      });
+    }
+
+    refreshBtn.addEventListener('click', loadJobs);
+    loadJobs();
+
+    // Register with the global poller so auto-refresh works whenever polling runs
+    _jobsPageRefreshCallback = loadJobs;
+    // Clear callback when navigating away
+    var cleanupTimer = setInterval(function () {
+      if (!document.contains(container)) {
+        _jobsPageRefreshCallback = null;
+        clearInterval(cleanupTimer);
+      }
+    }, 1000);
   }
 
   async function route() {
@@ -3196,6 +3347,15 @@
         });
         container.appendChild(row);
         R.appendChild(container);
+        wire(); return;
+      }
+
+      // ── Background Jobs page ──────────────────────────────────────────────
+      if (slug === '_jobs') {
+        R.replaceChildren(navbar('_jobs'));
+        const main = el('div', { className: 'container mt-3' });
+        R.appendChild(main);
+        renderJobsPage(main);
         wire(); return;
       }
 
