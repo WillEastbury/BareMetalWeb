@@ -357,6 +357,34 @@
             }
         });
         navEl.innerHTML = html;
+
+        // Elevation toggle for users with elevated permissions
+        if (window.__BMW_HAS_ELEVATED__) {
+            var rightNav = document.querySelector('.navbar-nav.ms-auto');
+            if (rightNav) {
+                var elevLi = document.createElement('li');
+                elevLi.className = 'nav-item ms-2';
+                var elevBtn = document.createElement('button');
+                elevBtn.className = 'btn btn-sm btn-outline-warning';
+                elevBtn.id = 'bm-elevation-toggle';
+                var isElevated = sessionStorage.getItem('bm-elevated') === 'true';
+                elevBtn.innerHTML = isElevated
+                    ? '<i class="bi bi-shield-fill-check"></i> Elevated'
+                    : '<i class="bi bi-shield-lock"></i> Elevate';
+                if (isElevated) elevBtn.classList.replace('btn-outline-warning', 'btn-warning');
+                elevBtn.onclick = function () {
+                    var nowElevated = sessionStorage.getItem('bm-elevated') !== 'true';
+                    sessionStorage.setItem('bm-elevated', nowElevated ? 'true' : 'false');
+                    elevBtn.innerHTML = nowElevated
+                        ? '<i class="bi bi-shield-fill-check"></i> Elevated'
+                        : '<i class="bi bi-shield-lock"></i> Elevate';
+                    if (nowElevated) elevBtn.classList.replace('btn-outline-warning', 'btn-warning');
+                    else elevBtn.classList.replace('btn-warning', 'btn-outline-warning');
+                };
+                elevLi.appendChild(elevBtn);
+                rightNav.insertBefore(elevLi, rightNav.firstChild);
+            }
+        }
     }
 
     // ── Home view ─────────────────────────────────────────────────────────────

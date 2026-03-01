@@ -1047,8 +1047,21 @@ public static class RouteRegistrationExtensions
         if (string.Equals(perms, "Authenticated", StringComparison.OrdinalIgnoreCase))
             return user != null;
 
+        // Legacy flat check
         var required = perms.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return required.Any(r => userPermissions.Any(p => string.Equals(p, r, StringComparison.OrdinalIgnoreCase)));
+        if (required.Any(r => userPermissions.Any(p => string.Equals(p, r, StringComparison.OrdinalIgnoreCase))))
+            return true;
+
+        // RBAC check via resolved permission set
+        if (user != null)
+        {
+            var resolved = PermissionResolver.ResolveAsync(user, CancellationToken.None)
+                .AsTask().GetAwaiter().GetResult();
+            if (resolved.CanAccess(entity.Slug))
+                return true;
+        }
+
+        return false;
     }
 
     private static string? GetMetaRouteParam(HttpContext context, string key)
@@ -1632,8 +1645,22 @@ public static class RouteRegistrationExtensions
                 })
                 .ToArray();
 
+            // Check if user has any elevated permissions
+            bool hasElevated = false;
+            if (user != null)
+            {
+                var resolved = PermissionResolver.ResolveAsync(user, CancellationToken.None)
+                    .AsTask().GetAwaiter().GetResult();
+                hasElevated = resolved.HasElevatedPermissions;
+            }
+
             var json = EscapeJsonForInlineScript(JsonSerializer.Serialize(entities, new JsonSerializerOptions { WriteIndented = false }));
-            return $"<script nonce=\"{safeNonce}\">window.__BMW_META_OBJECTS__={json};</script>";
+            var sb = new StringBuilder();
+            sb.Append($"<script nonce=\"{safeNonce}\">window.__BMW_META_OBJECTS__={json};");
+            if (hasElevated)
+                sb.Append("window.__BMW_HAS_ELEVATED__=true;");
+            sb.Append("</script>");
+            return sb.ToString();
         }
         catch
         {
