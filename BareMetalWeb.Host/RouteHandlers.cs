@@ -3866,164 +3866,149 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (clearExisting)
-        {
-            await DeleteAllAsync<Customer>();
-            await DeleteAllAsync<Product>();
-            await DeleteAllAsync<Address>();
-            await DeleteAllAsync<UnitOfMeasure>();
-            await DeleteAllAsync<Employee>();
-            await DeleteAllAsync<Order>();
-            await DeleteAllAsync<ToDo>();
-            await DeleteAllAsync<TimeTablePlan>();
-            await DeleteAllAsync<LessonLog>();
-        }
-
-        var addresses_query = await DataStoreProvider.Current.QueryAsync<Address>(null).ConfigureAwait(false);
-        var usedAddressIds = new HashSet<string>(
-            addresses_query.Select(address => address.Key.ToString()),
-            StringComparer.OrdinalIgnoreCase);
-        var units_query = await DataStoreProvider.Current.QueryAsync<UnitOfMeasure>(null).ConfigureAwait(false);
-        var usedUnitIds = new HashSet<string>(
-            units_query.Select(unit => unit.Key.ToString()),
-            StringComparer.OrdinalIgnoreCase);
-        var customers_query = await DataStoreProvider.Current.QueryAsync<Customer>(null).ConfigureAwait(false);
-        var usedCustomerIds = new HashSet<string>(
-            customers_query.Select(customer => customer.Key.ToString()),
-            StringComparer.OrdinalIgnoreCase);
-        var products_query = await DataStoreProvider.Current.QueryAsync<Product>(null).ConfigureAwait(false);
-        var usedProductIds = new HashSet<string>(
-            products_query.Select(product => product.Key.ToString()),
-            StringComparer.OrdinalIgnoreCase);
-        var employees_query = await DataStoreProvider.Current.QueryAsync<Employee>(null).ConfigureAwait(false);
-        var usedEmployeeIds = new HashSet<string>(
-            employees_query.Select(e => e.Key.ToString()),
-            StringComparer.OrdinalIgnoreCase);
-        var orders_query = await DataStoreProvider.Current.QueryAsync<Order>(null).ConfigureAwait(false);
-        var usedOrderIds = new HashSet<string>(
-            orders_query.Select(o => o.Key.ToString()),
-            StringComparer.OrdinalIgnoreCase);
-        var todos_query = await DataStoreProvider.Current.QueryAsync<ToDo>(null).ConfigureAwait(false);
-        var usedTodoIds = new HashSet<string>(
-            todos_query.Select(t => t.Key.ToString()),
-            StringComparer.OrdinalIgnoreCase);
-        var ttpQuery = await DataStoreProvider.Current.QueryAsync<TimeTablePlan>(null).ConfigureAwait(false);
-        var usedTtpIds = new HashSet<string>(
-            ttpQuery.Select(t => t.Key.ToString()),
-            StringComparer.OrdinalIgnoreCase);
-        var llQuery = await DataStoreProvider.Current.QueryAsync<LessonLog>(null).ConfigureAwait(false);
-        var usedLessonLogIds = new HashSet<string>(
-            llQuery.Select(l => l.Key.ToString()),
-            StringComparer.OrdinalIgnoreCase);
-
-        var addresses = GenerateAddresses(addressCount, usedAddressIds);
-        var units = GenerateUnits(unitCount, usedUnitIds);
-        var customers = GenerateCustomers(customerCount, addresses, usedCustomerIds);
-        var products = GenerateProducts(productCount, units, usedProductIds);
-        var employees = GenerateEmployees(employeeCount, usedEmployeeIds);
-
-        // Ensure at least one currency exists when generating orders
-        var existingCurrencies = (await DataStoreProvider.Current.QueryAsync<Currency>(null).ConfigureAwait(false)).ToList();
-        var usedCurrencyIds = new HashSet<string>(existingCurrencies.Select(c => c.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-        List<Currency> seedCurrencies = new();
-        if (orderCount > 0 && existingCurrencies.Count == 0)
-            seedCurrencies = GenerateSeedCurrencies(usedCurrencyIds);
-
-        var allCurrencies = existingCurrencies.Concat(seedCurrencies).ToList();
-        var allCustomers = customers_query.ToList().Concat(customers).ToList();
-        var allProducts = products_query.ToList().Concat(products).ToList();
-
-        var orders = GenerateOrders(orderCount, allCustomers, allProducts, allCurrencies, usedOrderIds);
-
-        // Ensure subjects exist for timetable and lesson log generation
-        var existingSubjects = (await DataStoreProvider.Current.QueryAsync<Subject>(null).ConfigureAwait(false)).ToList();
-        var usedSubjectIds = new HashSet<string>(existingSubjects.Select(s => s.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-        List<Subject> seedSubjects = new();
-        if ((timeTablePlanCount > 0 || lessonLogCount > 0) && existingSubjects.Count == 0)
-            seedSubjects = GenerateSeedSubjects(usedSubjectIds);
-
-        var allSubjects = existingSubjects.Concat(seedSubjects).ToList();
-
-        var todos = GenerateToDos(todoCount, usedTodoIds);
-        var timeTablePlans = GenerateTimeTablePlans(timeTablePlanCount, allSubjects, usedTtpIds);
-        var lessonLogs = GenerateLessonLogs(lessonLogCount, allSubjects, usedLessonLogIds);
-
         var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
 
-        foreach (var address in addresses)
-        {
-            ApplyAuditInfo(address, userName, isCreate: true);
-            await DataStoreProvider.Current.SaveAsync(address).ConfigureAwait(false);
-        }
+        // Capture parameters so the background task doesn't reference HttpContext.
+        var capturedAddressCount  = addressCount;  var capturedCustomerCount  = customerCount;
+        var capturedUnitCount     = unitCount;      var capturedProductCount   = productCount;
+        var capturedEmployeeCount = employeeCount;  var capturedOrderCount     = orderCount;
+        var capturedTodoCount     = todoCount;      var capturedTtpCount       = timeTablePlanCount;
+        var capturedLlCount       = lessonLogCount; var capturedClearExisting  = clearExisting;
+        var capturedUserName      = userName;
 
-        foreach (var unit in units)
-        {
-            ApplyAuditInfo(unit, userName, isCreate: true);
-            await DataStoreProvider.Current.SaveAsync(unit).ConfigureAwait(false);
-        }
+        var jobId = BackgroundJobService.Instance.StartJob(
+            "Generate Sample Data",
+            "/admin/sample-data",
+            async (progress, ct) =>
+            {
+                progress.Report(0, "Starting sample data generation…");
 
-        foreach (var customer in customers)
-        {
-            ApplyAuditInfo(customer, userName, isCreate: true);
-            await DataStoreProvider.Current.SaveAsync(customer).ConfigureAwait(false);
-        }
+                if (capturedClearExisting)
+                {
+                    progress.Report(2, "Clearing existing data…");
+                    await DeleteAllAsync<Customer>(ct);
+                    await DeleteAllAsync<Product>(ct);
+                    await DeleteAllAsync<Address>(ct);
+                    await DeleteAllAsync<UnitOfMeasure>(ct);
+                    await DeleteAllAsync<Employee>(ct);
+                    await DeleteAllAsync<Order>(ct);
+                    await DeleteAllAsync<ToDo>(ct);
+                    await DeleteAllAsync<TimeTablePlan>(ct);
+                    await DeleteAllAsync<LessonLog>(ct);
+                }
 
-        foreach (var product in products)
-        {
-            ApplyAuditInfo(product, userName, isCreate: true);
-            await DataStoreProvider.Current.SaveAsync(product).ConfigureAwait(false);
-        }
+                progress.Report(5, "Querying existing records…");
+                var addresses_query = await DataStoreProvider.Current.QueryAsync<Address>(null, ct).ConfigureAwait(false);
+                var usedAddressIds = new HashSet<string>(addresses_query.Select(a => a.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var units_query = await DataStoreProvider.Current.QueryAsync<UnitOfMeasure>(null, ct).ConfigureAwait(false);
+                var usedUnitIds = new HashSet<string>(units_query.Select(u => u.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var customers_query = await DataStoreProvider.Current.QueryAsync<Customer>(null, ct).ConfigureAwait(false);
+                var usedCustomerIds = new HashSet<string>(customers_query.Select(c => c.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var products_query = await DataStoreProvider.Current.QueryAsync<Product>(null, ct).ConfigureAwait(false);
+                var usedProductIds = new HashSet<string>(products_query.Select(p => p.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var employees_query = await DataStoreProvider.Current.QueryAsync<Employee>(null, ct).ConfigureAwait(false);
+                var usedEmployeeIds = new HashSet<string>(employees_query.Select(e => e.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var orders_query = await DataStoreProvider.Current.QueryAsync<Order>(null, ct).ConfigureAwait(false);
+                var usedOrderIds = new HashSet<string>(orders_query.Select(o => o.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var todos_query = await DataStoreProvider.Current.QueryAsync<ToDo>(null, ct).ConfigureAwait(false);
+                var usedTodoIds = new HashSet<string>(todos_query.Select(t => t.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var ttpQuery = await DataStoreProvider.Current.QueryAsync<TimeTablePlan>(null, ct).ConfigureAwait(false);
+                var usedTtpIds = new HashSet<string>(ttpQuery.Select(t => t.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var llQuery = await DataStoreProvider.Current.QueryAsync<LessonLog>(null, ct).ConfigureAwait(false);
+                var usedLessonLogIds = new HashSet<string>(llQuery.Select(l => l.Key.ToString()), StringComparer.OrdinalIgnoreCase);
 
-        foreach (var employee in employees)
-        {
-            ApplyAuditInfo(employee, userName, isCreate: true);
-            await DataStoreProvider.Current.SaveAsync(employee).ConfigureAwait(false);
-        }
+                progress.Report(10, "Generating addresses and units…");
+                var addresses = GenerateAddresses(capturedAddressCount, usedAddressIds);
+                var units = GenerateUnits(capturedUnitCount, usedUnitIds);
 
-        foreach (var currency in seedCurrencies)
-        {
-            ApplyAuditInfo(currency, userName, isCreate: true);
-            await DataStoreProvider.Current.SaveAsync(currency).ConfigureAwait(false);
-        }
+                progress.Report(20, "Generating customers and products…");
+                var customers = GenerateCustomers(capturedCustomerCount, addresses, usedCustomerIds);
+                var products = GenerateProducts(capturedProductCount, units, usedProductIds);
+                var employees = GenerateEmployees(capturedEmployeeCount, usedEmployeeIds);
 
-        foreach (var order in orders)
-        {
-            ApplyAuditInfo(order, userName, isCreate: true);
-            await DataStoreProvider.Current.SaveAsync(order).ConfigureAwait(false);
-        }
+                progress.Report(30, "Generating currencies and orders…");
+                var existingCurrencies = (await DataStoreProvider.Current.QueryAsync<Currency>(null, ct).ConfigureAwait(false)).ToList();
+                var usedCurrencyIds = new HashSet<string>(existingCurrencies.Select(c => c.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                List<Currency> seedCurrencies = new();
+                if (capturedOrderCount > 0 && existingCurrencies.Count == 0)
+                    seedCurrencies = GenerateSeedCurrencies(usedCurrencyIds);
 
-        foreach (var subject in seedSubjects)
-        {
-            ApplyAuditInfo(subject, userName, isCreate: true);
-            await DataStoreProvider.Current.SaveAsync(subject).ConfigureAwait(false);
-        }
+                var allCurrencies = existingCurrencies.Concat(seedCurrencies).ToList();
+                var allCustomers = customers_query.ToList().Concat(customers).ToList();
+                var allProducts = products_query.ToList().Concat(products).ToList();
+                var orders = GenerateOrders(capturedOrderCount, allCustomers, allProducts, allCurrencies, usedOrderIds);
 
-        foreach (var todo in todos)
-        {
-            ApplyAuditInfo(todo, userName, isCreate: true);
-            await DataStoreProvider.Current.SaveAsync(todo).ConfigureAwait(false);
-        }
+                progress.Report(40, "Generating subjects, todos and timetable plans…");
+                var existingSubjects = (await DataStoreProvider.Current.QueryAsync<Subject>(null, ct).ConfigureAwait(false)).ToList();
+                var usedSubjectIds = new HashSet<string>(existingSubjects.Select(s => s.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                List<Subject> seedSubjects = new();
+                if ((capturedTtpCount > 0 || capturedLlCount > 0) && existingSubjects.Count == 0)
+                    seedSubjects = GenerateSeedSubjects(usedSubjectIds);
 
-        foreach (var ttp in timeTablePlans)
-        {
-            ApplyAuditInfo(ttp, userName, isCreate: true);
-            await DataStoreProvider.Current.SaveAsync(ttp).ConfigureAwait(false);
-        }
+                var allSubjects = existingSubjects.Concat(seedSubjects).ToList();
+                var todos = GenerateToDos(capturedTodoCount, usedTodoIds);
+                var timeTablePlans = GenerateTimeTablePlans(capturedTtpCount, allSubjects, usedTtpIds);
+                var lessonLogs = GenerateLessonLogs(capturedLlCount, allSubjects, usedLessonLogIds);
 
-        foreach (var ll in lessonLogs)
-        {
-            ApplyAuditInfo(ll, userName, isCreate: true);
-            await DataStoreProvider.Current.SaveAsync(ll).ConfigureAwait(false);
-        }
+                // Calculate total items to save for per-item progress reporting.
+                // Progress range: 50 (start of save phase) to 95 (end of save phase) = 45 points.
+                const int saveProgressStart = 50;
+                const int saveProgressRange = 45;
+                int totalItems = addresses.Count + units.Count + customers.Count + products.Count +
+                                 employees.Count + seedCurrencies.Count + orders.Count +
+                                 seedSubjects.Count + todos.Count + timeTablePlans.Count + lessonLogs.Count;
+                int saved = 0;
 
-        var message = $"<div class=\"alert alert-success\">" +
-                      $"Created {addresses.Count} addresses, {customers.Count} customers, {units.Count} units, {products.Count} products, " +
-                      $"{employees.Count} employees, {orders.Count} orders, {todos.Count} to-dos, {timeTablePlans.Count} time table plans, {lessonLogs.Count} lesson logs." +
-                      (seedCurrencies.Count > 0 ? $" Also seeded {seedCurrencies.Count} default currencies." : string.Empty) +
-                      (seedSubjects.Count > 0 ? $" Also seeded {seedSubjects.Count} default subjects." : string.Empty) +
-                      "</div>";
-        RenderSampleDataForm(context, message, addressCount, customerCount, unitCount, productCount, employeeCount, orderCount, todoCount, timeTablePlanCount, lessonLogCount, clearExisting);
-        await _renderer.RenderPage(context);
+                async Task SaveItemsWithProgress<T>(List<T> items, string label) where T : BaseDataObject
+                {
+                    foreach (var item in items)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        ApplyAuditInfo(item, capturedUserName, isCreate: true);
+                        await DataStoreProvider.Current.SaveAsync(item, ct).ConfigureAwait(false);
+                        saved++;
+                        if (totalItems > 0)
+                            progress.Report(
+                                saveProgressStart + (int)(saved * (double)saveProgressRange / totalItems),
+                                $"Saving {label}… ({saved}/{totalItems})");
+                    }
+                }
+
+                progress.Report(saveProgressStart, "Saving generated records…");
+                await SaveItemsWithProgress(addresses, "addresses");
+                await SaveItemsWithProgress(units, "units");
+                await SaveItemsWithProgress(customers, "customers");
+                await SaveItemsWithProgress(products, "products");
+                await SaveItemsWithProgress(employees, "employees");
+                await SaveItemsWithProgress(seedCurrencies, "currencies");
+                await SaveItemsWithProgress(orders, "orders");
+                await SaveItemsWithProgress(seedSubjects, "subjects");
+                await SaveItemsWithProgress(todos, "to-dos");
+                await SaveItemsWithProgress(timeTablePlans, "timetable plans");
+                await SaveItemsWithProgress(lessonLogs, "lesson logs");
+
+                progress.Report(100, $"Done. Created {addresses.Count} addresses, {customers.Count} customers, " +
+                    $"{units.Count} units, {products.Count} products, {employees.Count} employees, " +
+                    $"{orders.Count} orders, {todos.Count} to-dos, {timeTablePlans.Count} timetable plans, " +
+                    $"{lessonLogs.Count} lesson logs." +
+                    (seedCurrencies.Count > 0 ? $" Seeded {seedCurrencies.Count} currencies." : "") +
+                    (seedSubjects.Count > 0 ? $" Seeded {seedSubjects.Count} subjects." : ""));
+            });
+
+        var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
+        var statusUrl = $"{baseUrl}/api/jobs/{jobId}";
+        context.Response.StatusCode = StatusCodes.Status202Accepted;
+        context.Response.Headers["Location"] = statusUrl;
+        context.Response.Headers["Retry-After"] = "2";
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(
+            JsonSerializer.Serialize(new
+            {
+                jobId,
+                status = "queued",
+                operationName = "Generate Sample Data",
+                statusUrl
+            })).ConfigureAwait(false);
     }
 
     public async ValueTask WipeDataHandler(HttpContext context)
@@ -4090,22 +4075,49 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var entities = DataScaffold.Entities;
-        var wiped = new List<string>();
-        foreach (var entity in entities)
-        {
-            var items = (await entity.Handlers.QueryAsync(null, context.RequestAborted).ConfigureAwait(false)).ToList();
-            foreach (var item in items)
-            {
-                if (item == null || item.Key == 0)
-                    continue;
-                await entity.Handlers.DeleteAsync(item.Key, context.RequestAborted).ConfigureAwait(false);
-            }
-            wiped.Add(WebUtility.HtmlEncode(entity.Name));
-        }
+        int totalEntities = entities.Count;
 
-        var message = $"<div class=\"alert alert-success\"><strong>All data has been wiped.</strong> The following entity stores were cleared: {string.Join(", ", wiped)}.</div>";
-        RenderWipeDataForm(context, message, wipeToken);
-        await _renderer.RenderPage(context);
+        var jobId = BackgroundJobService.Instance.StartJob(
+            "Wipe All Data",
+            "/admin/wipe-data",
+            async (progress, ct) =>
+            {
+                progress.Report(0, "Starting wipe…");
+                int done = 0;
+                foreach (var entity in entities)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    progress.Report(
+                        totalEntities == 0 ? 0 : (int)(done * 95.0 / totalEntities),
+                        $"Wiping {entity.Name}…");
+
+                    var items = (await entity.Handlers.QueryAsync(null, ct).ConfigureAwait(false)).ToList();
+                    foreach (var item in items)
+                    {
+                        if (item == null || item.Key == 0)
+                            continue;
+                        ct.ThrowIfCancellationRequested();
+                        await entity.Handlers.DeleteAsync(item.Key, ct).ConfigureAwait(false);
+                    }
+                    done++;
+                }
+                progress.Report(100, $"Done. Wiped {done} entity store{(done == 1 ? "" : "s")}.");
+            });
+
+        var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
+        var statusUrl = $"{baseUrl}/api/jobs/{jobId}";
+        context.Response.StatusCode = StatusCodes.Status202Accepted;
+        context.Response.Headers["Location"] = statusUrl;
+        context.Response.Headers["Retry-After"] = "2";
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(
+            JsonSerializer.Serialize(new
+            {
+                jobId,
+                status = "queued",
+                operationName = "Wipe All Data",
+                statusUrl
+            })).ConfigureAwait(false);
     }
 
     private void RenderWipeDataForm(HttpContext context, string? message, string wipeToken)
@@ -5706,14 +5718,15 @@ public sealed class RouteHandlers : IRouteHandlers
             || string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static async ValueTask DeleteAllAsync<T>() where T : BaseDataObject
+    private static async ValueTask DeleteAllAsync<T>(CancellationToken ct = default) where T : BaseDataObject
     {
-        var items = (await DataStoreProvider.Current.QueryAsync<T>(null).ConfigureAwait(false)).ToList();
+        var items = (await DataStoreProvider.Current.QueryAsync<T>(null, ct).ConfigureAwait(false)).ToList();
         foreach (var item in items)
         {
             if (item == null || item.Key == 0)
                 continue;
-            await DataStoreProvider.Current.DeleteAsync<T>(item.Key);
+            ct.ThrowIfCancellationRequested();
+            await DataStoreProvider.Current.DeleteAsync<T>(item.Key, ct);
         }
     }
 
@@ -7238,5 +7251,72 @@ public sealed class RouteHandlers : IRouteHandlers
                $"<div class=\"fw-semibold\">{WebUtility.HtmlEncode(label)}</div>" +
                $"<div class=\"text-muted small\">{WebUtility.HtmlEncode(subtitle)}</div>" +
                $"</div></div></div></div>";
+    }
+
+    // ──────────────────────────────────────────────────────────────
+    // Background job status endpoint (Azure async-request-reply)
+    // ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// GET /api/jobs/{jobId}
+    /// Returns the status of a background job following the Azure async-request-reply pattern:
+    ///   - 202 Accepted (+ Retry-After header) while the job is still running.
+    ///   - 200 OK (+ Location header when a resultUrl was provided) when the job completes.
+    ///   - 404 if the job ID is unknown or has been pruned.
+    /// </summary>
+    public async ValueTask JobStatusHandler(HttpContext context)
+    {
+        var jobId = GetRouteValue(context, "jobId") ?? string.Empty;
+
+        if (string.IsNullOrEmpty(jobId) ||
+            !BackgroundJobService.Instance.TryGetJob(jobId, out var snapshot) ||
+            snapshot == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Job not found.\"}").ConfigureAwait(false);
+            return;
+        }
+
+        var isComplete = snapshot.Status is BackgroundJobStatus.Succeeded or BackgroundJobStatus.Failed;
+
+        context.Response.StatusCode = isComplete
+            ? StatusCodes.Status200OK
+            : StatusCodes.Status202Accepted;
+
+        if (!isComplete)
+            context.Response.Headers["Retry-After"] = "2";
+
+        if (snapshot.Status == BackgroundJobStatus.Succeeded &&
+            !string.IsNullOrEmpty(snapshot.ResultUrl))
+        {
+            context.Response.Headers["Location"] = snapshot.ResultUrl;
+        }
+
+        context.Response.ContentType = "application/json";
+
+        var statusStr = snapshot.Status switch
+        {
+            BackgroundJobStatus.Queued    => "queued",
+            BackgroundJobStatus.Running   => "running",
+            BackgroundJobStatus.Succeeded => "succeeded",
+            BackgroundJobStatus.Failed    => "failed",
+            _                             => "unknown"
+        };
+
+        var json = JsonSerializer.Serialize(new
+        {
+            jobId            = snapshot.JobId,
+            operationName    = snapshot.OperationName,
+            status           = statusStr,
+            percentComplete  = snapshot.PercentComplete,
+            description      = snapshot.Description,
+            startedAt        = snapshot.StartedAt.ToString("O"),
+            completedAt      = snapshot.CompletedAt?.ToString("O"),
+            error            = snapshot.Error,
+            resultUrl        = snapshot.ResultUrl
+        });
+
+        await context.Response.WriteAsync(json).ConfigureAwait(false);
     }
 }
