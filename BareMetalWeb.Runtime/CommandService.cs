@@ -121,7 +121,14 @@ public sealed class CommandService : ICommandService
         if (obj == null)
             return CommandResult.Fail($"Entity '{intent.EntitySlug}' with id '{intent.EntityId}' not found.");
 
-        // Execute SetField operations declaratively
+        // ── v1.1 structured command pipeline ──────────────────────────────────
+        if (action.Commands.Count > 0)
+        {
+            return await ExecuteStructuredActionAsync(meta, intent, action, obj, ct)
+                .ConfigureAwait(false);
+        }
+
+        // ── Legacy: pipe-separated "SetField:Field=Value" operations ──────────
         foreach (var operation in action.Operations)
         {
             if (!operation.StartsWith("SetField:", StringComparison.OrdinalIgnoreCase))
@@ -141,4 +148,103 @@ public sealed class CommandService : ICommandService
         await meta.Handlers.SaveAsync(obj, ct).ConfigureAwait(false);
         return CommandResult.Ok(obj.Key.ToString(), QueryService.SerializeObject(obj, meta));
     }
+
+    // ── v1.1 structured action execution ──────────────────────────────────────
+
+    private static async ValueTask<CommandResult> ExecuteStructuredActionAsync(
+        DataEntityMetadata meta,
+        CommandIntent intent,
+        RuntimeActionModel action,
+        BaseDataObject obj,
+        CancellationToken ct)
+    {
+        // Build evaluation context from current field values
+        var context = BuildContext(meta, obj);
+
+        // §8 — server re-expands the action; never trusts client-supplied deltas
+        TransactionEnvelope envelope;
+        try
+        {
+            envelope = ActionExpander.Expand(action, intent.EntitySlug, intent.EntityId!, context);
+        }
+        catch (Exception ex)
+        {
+            return CommandResult.Fail($"Action expansion failed: {ex.Message}");
+        }
+
+        // §6.3 — validate assertions before acquiring locks
+        if (!envelope.IsValid)
+        {
+            var err = envelope.FirstError!;
+            return CommandResult.Fail($"[{err.Code}] {err.Message}");
+        }
+
+        // §6.2 — collect touched aggregates and acquire locks in sorted order
+        var touchedIds = envelope.AggregateMutations
+            .Select(m => $"{m.AggregateType}:{m.AggregateId}")
+            .ToList();
+
+        var transactionId = envelope.TransactionId;
+        var lockTimeout = TimeSpan.FromSeconds(5);
+        const int maxRetries = 3;
+
+        for (int attempt = 0; attempt < maxRetries; attempt++)
+        {
+            if (AggregateLockManager.Instance.TryAcquireAll(touchedIds, transactionId, lockTimeout))
+                break;
+
+            if (attempt == maxRetries - 1)
+                return CommandResult.Fail("Could not acquire aggregate locks — try again.");
+
+            await Task.Delay(50 * (attempt + 1), ct).ConfigureAwait(false);
+        }
+
+        try
+        {
+            // Apply mutations for the primary aggregate to the loaded object
+            var primaryMutation = envelope.AggregateMutations
+                .FirstOrDefault(m => string.Equals(m.AggregateType, intent.EntitySlug,
+                    StringComparison.OrdinalIgnoreCase));
+
+            if (primaryMutation != null)
+            {
+                foreach (var change in primaryMutation.Changes)
+                {
+                    // Convert typed value to string using invariant culture for correct parsing downstream
+                    var strValue = change.NewValue switch
+                    {
+                        null => null,
+                        bool b => b ? "true" : "false",
+                        IFormattable f => f.ToString(null, System.Globalization.CultureInfo.InvariantCulture),
+                        _ => change.NewValue.ToString()
+                    };
+                    var patch = new Dictionary<string, string?> { [change.FieldId] = strValue };
+                    DataScaffold.ApplyValuesFromForm(meta, obj, patch, forCreate: false);
+                }
+            }
+
+            await meta.Handlers.SaveAsync(obj, ct).ConfigureAwait(false);
+        }
+        finally
+        {
+            AggregateLockManager.Instance.ReleaseAll(touchedIds, transactionId);
+        }
+
+        return CommandResult.Ok(obj.Key.ToString(), QueryService.SerializeObject(obj, meta));
+    }
+
+    /// <summary>Builds an expression evaluation context from an entity's current field values.</summary>
+    private static IReadOnlyDictionary<string, object?> BuildContext(DataEntityMetadata meta, BaseDataObject obj)
+    {
+        var context = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        var serialized = QueryService.SerializeObject(obj, meta);
+        if (serialized != null)
+        {
+            foreach (var (key, value) in serialized)
+                context[key] = value;
+        }
+
+        return context;
+    }
 }
+

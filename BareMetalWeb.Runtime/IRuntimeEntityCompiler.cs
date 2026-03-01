@@ -16,11 +16,13 @@ public interface IRuntimeEntityCompiler
     /// <param name="fields">All field definitions belonging to this entity.</param>
     /// <param name="indexes">All index definitions belonging to this entity.</param>
     /// <param name="actions">All action definitions belonging to this entity.</param>
+    /// <param name="actionCommands">All v1.1 command definitions belonging to actions of this entity.</param>
     /// <param name="warnings">Populated with non-fatal validation messages.</param>
     RuntimeEntityModel? Compile(
         EntityDefinition entity,
         IReadOnlyList<FieldDefinition> fields,
         IReadOnlyList<IndexDefinition> indexes,
         IReadOnlyList<ActionDefinition> actions,
+        IReadOnlyList<ActionCommandDefinition> actionCommands,
         out IReadOnlyList<string> warnings);
 }

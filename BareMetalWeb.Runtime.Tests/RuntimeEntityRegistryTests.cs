@@ -73,7 +73,7 @@ public class RuntimeEntityRegistryTests : IDisposable
         ((FieldDefinition)fields[1]).EnumValues = "Low|Medium|High";
 
         var model = compiler.Compile(entity, fields, Array.Empty<IndexDefinition>(),
-            Array.Empty<ActionDefinition>(), out var warnings);
+            Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out var warnings);
 
         Assert.NotNull(model);
         Assert.Equal("Ticket", model!.Name);
@@ -91,7 +91,7 @@ public class RuntimeEntityRegistryTests : IDisposable
         var entity = MakeEntity("");
 
         var model = compiler.Compile(entity, Array.Empty<FieldDefinition>(),
-            Array.Empty<IndexDefinition>(), Array.Empty<ActionDefinition>(), out var warnings);
+            Array.Empty<IndexDefinition>(), Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out var warnings);
 
         Assert.Null(model);
         Assert.NotEmpty(warnings);
@@ -110,7 +110,7 @@ public class RuntimeEntityRegistryTests : IDisposable
         };
 
         var model = compiler.Compile(entity, fields, Array.Empty<IndexDefinition>(),
-            Array.Empty<ActionDefinition>(), out _);
+            Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _);
 
         Assert.NotNull(model);
         // Fields with ordinal=0 should be ordered alphabetically and assigned ordinals
@@ -129,11 +129,11 @@ public class RuntimeEntityRegistryTests : IDisposable
         var fields = new[] { MakeField(entity.Key.ToString(), "Name", "string", ordinal: 1) };
 
         var model1 = compiler.Compile(entity, fields, Array.Empty<IndexDefinition>(),
-            Array.Empty<ActionDefinition>(), out _);
+            Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _);
 
         // Same input → same hash
         var model2 = compiler.Compile(entity, fields, Array.Empty<IndexDefinition>(),
-            Array.Empty<ActionDefinition>(), out _);
+            Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _);
 
         Assert.Equal(model1!.SchemaHash, model2!.SchemaHash);
         Assert.NotEmpty(model1.SchemaHash);
@@ -153,9 +153,9 @@ public class RuntimeEntityRegistryTests : IDisposable
         };
 
         var model1 = compiler.Compile(entity, fields1, Array.Empty<IndexDefinition>(),
-            Array.Empty<ActionDefinition>(), out _);
+            Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _);
         var model2 = compiler.Compile(entity, fields2, Array.Empty<IndexDefinition>(),
-            Array.Empty<ActionDefinition>(), out _);
+            Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _);
 
         Assert.NotEqual(model1!.SchemaHash, model2!.SchemaHash);
     }
@@ -167,7 +167,7 @@ public class RuntimeEntityRegistryTests : IDisposable
         var entity = MakeEntity("SalesOrder");  // No explicit slug
 
         var model = compiler.Compile(entity, Array.Empty<FieldDefinition>(),
-            Array.Empty<IndexDefinition>(), Array.Empty<ActionDefinition>(), out _);
+            Array.Empty<IndexDefinition>(), Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _);
 
         Assert.NotNull(model);
         // ToSlug(Pluralize("SalesOrder")) → ToSlug("SalesOrders") → "salesorders"
@@ -188,7 +188,7 @@ public class RuntimeEntityRegistryTests : IDisposable
         };
 
         var model = compiler.Compile(entity, Array.Empty<FieldDefinition>(),
-            new[] { index }, Array.Empty<ActionDefinition>(), out _);
+            new[] { index }, Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _);
 
         Assert.Single(model!.Indexes);
         Assert.Equal(2, model.Indexes[0].FieldNames.Count);
@@ -213,7 +213,7 @@ public class RuntimeEntityRegistryTests : IDisposable
         };
 
         var model = compiler.Compile(entity, Array.Empty<FieldDefinition>(),
-            Array.Empty<IndexDefinition>(), new[] { action }, out _);
+            Array.Empty<IndexDefinition>(), new[] { action }, Array.Empty<ActionCommandDefinition>(), out _);
 
         Assert.Single(model!.Actions);
         var compiled = model.Actions[0];
@@ -247,7 +247,7 @@ public class RuntimeEntityRegistryTests : IDisposable
         var field = MakeField(entity.Key.ToString(), "TestField", typeStr, ordinal: 1);
 
         var model = compiler.Compile(entity, new[] { field }, Array.Empty<IndexDefinition>(),
-            Array.Empty<ActionDefinition>(), out _);
+            Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _);
 
         Assert.Single(model!.Fields);
         Assert.Equal(expected, model.Fields[0].FieldType);
@@ -262,7 +262,7 @@ public class RuntimeEntityRegistryTests : IDisposable
         field.Multiline = true;
 
         var model = compiler.Compile(entity, new[] { field }, Array.Empty<IndexDefinition>(),
-            Array.Empty<ActionDefinition>(), out _);
+            Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _);
 
         Assert.Equal(BareMetalWeb.Rendering.Models.FormFieldType.TextArea, model!.Fields[0].FieldType);
     }
@@ -275,7 +275,7 @@ public class RuntimeEntityRegistryTests : IDisposable
         var compiler = new RuntimeEntityCompiler();
         var entity = MakeEntity("RegistryGetTest", $"registry-get-{Guid.NewGuid():N}");
         var model = compiler.Compile(entity, Array.Empty<FieldDefinition>(),
-            Array.Empty<IndexDefinition>(), Array.Empty<ActionDefinition>(), out _)!;
+            Array.Empty<IndexDefinition>(), Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _)!;
 
         var registry = new RuntimeEntityRegistry();
         registry.Register(model);
@@ -292,7 +292,7 @@ public class RuntimeEntityRegistryTests : IDisposable
         var compiler = new RuntimeEntityCompiler();
         var entity = MakeEntity("ByIdTest", $"by-id-{Guid.NewGuid():N}");
         var model = compiler.Compile(entity, Array.Empty<FieldDefinition>(),
-            Array.Empty<IndexDefinition>(), Array.Empty<ActionDefinition>(), out _)!;
+            Array.Empty<IndexDefinition>(), Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _)!;
 
         var registry = new RuntimeEntityRegistry();
         registry.Register(model);
@@ -308,7 +308,7 @@ public class RuntimeEntityRegistryTests : IDisposable
         var compiler = new RuntimeEntityCompiler();
         var entity = MakeEntity("FreezeTest", $"freeze-{Guid.NewGuid():N}");
         var model = compiler.Compile(entity, Array.Empty<FieldDefinition>(),
-            Array.Empty<IndexDefinition>(), Array.Empty<ActionDefinition>(), out _)!;
+            Array.Empty<IndexDefinition>(), Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _)!;
 
         var registry = new RuntimeEntityRegistry();
         registry.Freeze();
@@ -333,7 +333,7 @@ public class RuntimeEntityRegistryTests : IDisposable
             var e = MakeEntity(name, slug);
             e.NavOrder = order;
             var model = compiler.Compile(e, Array.Empty<FieldDefinition>(),
-                Array.Empty<IndexDefinition>(), Array.Empty<ActionDefinition>(), out _)!;
+                Array.Empty<IndexDefinition>(), Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _)!;
             registry.Register(model);
         }
 
@@ -354,7 +354,7 @@ public class RuntimeEntityRegistryTests : IDisposable
         var entity = MakeEntity("ToMetaTest", $"to-meta-{Guid.NewGuid():N}");
         var fields = new[] { MakeField(entity.Key.ToString(), "Title", "string", ordinal: 1) };
         var model = compiler.Compile(entity, fields, Array.Empty<IndexDefinition>(),
-            Array.Empty<ActionDefinition>(), out _)!;
+            Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _)!;
 
         var store = new VirtualEntityJsonStore(_tempDir);
         var metadata = model.ToEntityMetadata(store);

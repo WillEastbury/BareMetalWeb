@@ -43,5 +43,13 @@ public class ActionDefinition : RenderableDataObject
     [DataField(Label = "Operations", Order = 7)]
     public string? Operations { get; set; }
 
+    /// <summary>
+    /// Schema version of this action definition.
+    /// Increment when the command set changes to invalidate any cached expansions.
+    /// Once published, the <see cref="Name"/> (ActionId) is immutable per spec §2.
+    /// </summary>
+    [DataField(Label = "Version", Order = 8, ReadOnly = true)]
+    public int Version { get; set; } = 1;
+
     public override string ToString() => Label ?? Name;
 }

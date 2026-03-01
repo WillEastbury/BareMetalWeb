@@ -18,6 +18,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
         IReadOnlyList<FieldDefinition> fields,
         IReadOnlyList<IndexDefinition> indexes,
         IReadOnlyList<ActionDefinition> actions,
+        IReadOnlyList<ActionCommandDefinition> actionCommands,
         out IReadOnlyList<string> warnings)
     {
         var warnList = new List<string>();
@@ -116,16 +117,31 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
 
         var compiledActions = actions
             .Where(a => !string.IsNullOrWhiteSpace(a.Name))
-            .Select(a => new RuntimeActionModel(
-                ActionId: a.Key.ToString(),
-                EntityId: a.EntityId,
-                Name: a.Name,
-                Label: a.Label ?? a.Name,
-                Icon: a.Icon,
-                Permission: a.Permission,
-                EnabledWhen: a.EnabledWhen,
-                Operations: ParsePipeList(a.Operations)
-            ))
+            .Select(a =>
+            {
+                var actionKey = a.Key.ToString();
+                // Load top-level commands for this action (ParentCommandId == null)
+                var topLevel = actionCommands
+                    .Where(c => string.Equals(c.ActionId, actionKey, StringComparison.OrdinalIgnoreCase)
+                             && string.IsNullOrWhiteSpace(c.ParentCommandId))
+                    .OrderBy(c => c.Order)
+                    .ToList();
+
+                var compiled = CompileCommands(topLevel, actionCommands, warnList);
+
+                return new RuntimeActionModel(
+                    ActionId: actionKey,
+                    EntityId: a.EntityId,
+                    Name: a.Name,
+                    Label: a.Label ?? a.Name,
+                    Icon: a.Icon,
+                    Permission: a.Permission,
+                    EnabledWhen: a.EnabledWhen,
+                    Operations: ParsePipeList(a.Operations),
+                    Commands: compiled,
+                    Version: a.Version
+                );
+            })
             .ToList();
 
         // ── Schema hash ────────────────────────────────────────────────────────
@@ -331,5 +347,168 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
         }
 
         return hash.ToString("x8");
+    }
+
+    // ── Command compilation ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Recursively compiles a flat list of <see cref="ActionCommandDefinition"/> records
+    /// (pre-filtered to the correct parent scope) into typed <see cref="ActionCommand"/> objects.
+    /// </summary>
+    private static IReadOnlyList<ActionCommand> CompileCommands(
+        IReadOnlyList<ActionCommandDefinition> definitions,
+        IReadOnlyList<ActionCommandDefinition> allCommands,
+        List<string> warnings)
+    {
+        var result = new List<ActionCommand>(definitions.Count);
+
+        foreach (var def in definitions)
+        {
+            var cmd = CompileCommand(def, allCommands, warnings);
+            if (cmd != null)
+                result.Add(cmd);
+        }
+
+        return result.AsReadOnly();
+    }
+
+    private static ActionCommand? CompileCommand(
+        ActionCommandDefinition def,
+        IReadOnlyList<ActionCommandDefinition> allCommands,
+        List<string> warnings)
+    {
+        var defKey = def.Key.ToString();
+        var type = (def.CommandType ?? string.Empty).Trim();
+
+        switch (type.ToLowerInvariant())
+        {
+            case "assertif":
+            {
+                if (string.IsNullOrWhiteSpace(def.Condition))
+                {
+                    warnings.Add($"ActionCommand {defKey}: AssertIf has no Condition — skipped.");
+                    return null;
+                }
+
+                var severity = ParseSeverity(def.Severity);
+                return new AssertIfCommand(
+                    Order: def.Order,
+                    Condition: def.Condition!,
+                    Code: def.ErrorCode ?? defKey,
+                    Severity: severity,
+                    Message: def.Message ?? string.Empty);
+            }
+
+            case "setif":
+            {
+                if (string.IsNullOrWhiteSpace(def.FieldId))
+                {
+                    warnings.Add($"ActionCommand {defKey}: SetIf has no FieldId — skipped.");
+                    return null;
+                }
+
+                return new SetIfCommand(
+                    Order: def.Order,
+                    Condition: def.Condition ?? "true",
+                    FieldId: def.FieldId!,
+                    ValueExpression: def.ValueExpression ?? string.Empty);
+            }
+
+            case "calculateandsetif":
+            {
+                if (string.IsNullOrWhiteSpace(def.FieldId))
+                {
+                    warnings.Add($"ActionCommand {defKey}: CalculateAndSetIf has no FieldId — skipped.");
+                    return null;
+                }
+
+                return new CalculateAndSetIfCommand(
+                    Order: def.Order,
+                    Condition: def.Condition ?? "true",
+                    FieldId: def.FieldId!,
+                    ValueExpression: def.ValueExpression ?? string.Empty);
+            }
+
+            case "forset":
+            case "forsetsequential":
+            {
+                if (string.IsNullOrWhiteSpace(def.ListFieldId))
+                {
+                    warnings.Add($"ActionCommand {defKey}: {type} has no ListFieldId — skipped.");
+                    return null;
+                }
+
+                // Load sub-commands
+                var subDefs = allCommands
+                    .Where(c => string.Equals(c.ParentCommandId, defKey, StringComparison.OrdinalIgnoreCase))
+                    .OrderBy(c => c.Order)
+                    .ToList();
+
+                var subCommands = CompileCommands(subDefs, allCommands, warnings);
+
+                if (type.Equals("forsetsequential", StringComparison.OrdinalIgnoreCase))
+                    return new ForSetSequentialCommand(
+                        Order: def.Order,
+                        ListFieldId: def.ListFieldId!,
+                        ItemCondition: def.Condition ?? "true",
+                        SubCommands: subCommands);
+
+                return new ForSetCommand(
+                    Order: def.Order,
+                    ListFieldId: def.ListFieldId!,
+                    ItemCondition: def.Condition ?? "true",
+                    SubCommands: subCommands);
+            }
+
+            case "invokeif":
+            {
+                if (string.IsNullOrWhiteSpace(def.TargetActionId))
+                {
+                    warnings.Add($"ActionCommand {defKey}: InvokeIf has no TargetActionId — skipped.");
+                    return null;
+                }
+
+                var paramMap = ParseJsonStringMap(def.ParameterMap, defKey, warnings);
+
+                return new InvokeIfCommand(
+                    Order: def.Order,
+                    Condition: def.Condition ?? "true",
+                    TargetEntityType: def.TargetEntityType ?? string.Empty,
+                    TargetActionId: def.TargetActionId!,
+                    ParameterMap: paramMap);
+            }
+
+            default:
+                warnings.Add($"ActionCommand {defKey}: unknown CommandType '{type}' — skipped.");
+                return null;
+        }
+    }
+
+    private static AssertSeverity ParseSeverity(string? severity)
+        => (severity ?? "error").ToLowerInvariant() switch
+        {
+            "warning" or "warn" => AssertSeverity.Warning,
+            "info" or "information" => AssertSeverity.Info,
+            _ => AssertSeverity.Error,
+        };
+
+    private static IReadOnlyDictionary<string, string> ParseJsonStringMap(
+        string? json,
+        string defKey,
+        List<string> warnings)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json);
+            return dict ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"ActionCommand {defKey}: ParameterMap is not valid JSON — {ex.Message}");
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
     }
 }
