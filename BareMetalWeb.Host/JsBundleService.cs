@@ -46,6 +46,7 @@ public static class JsBundleService
         "bootstrap.bundle.min.js",
         "BareMetalRouting.js",
         "BareMetalRest.js",
+        "BareMetalBinary.js",
         "BareMetalBind.js",
         "BareMetalTemplate.js",
         "BareMetalRendering.js",

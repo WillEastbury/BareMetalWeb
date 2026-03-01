@@ -50,6 +50,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 
     private readonly byte[] _signingKey;
 
+    /// <summary>Returns a copy of the signing key for use by other serializers (e.g. MetadataWireSerializer).</summary>
+    public byte[] GetSigningKeyCopy() => (byte[])_signingKey.Clone();
+
     public BinaryObjectSerializer()
         : this(LoadOrCreateSigningKey(DefaultSigningKeyPath))
     {

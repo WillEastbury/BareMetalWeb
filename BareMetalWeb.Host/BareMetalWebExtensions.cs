@@ -43,6 +43,10 @@ public static class BareMetalWebExtensions
         // Data store
         ISchemaAwareObjectSerializer serializer = BinaryObjectSerializer.CreateDefault(dataRoot);
         IDataQueryEvaluator queryEvaluator = new DataQueryEvaluator();
+
+        // Initialize binary wire API with the same signing key
+        if (serializer is BinaryObjectSerializer bos)
+            BinaryApiHandlers.Initialize(bos.GetSigningKeyCopy());
         try { _ = Assembly.Load("BareMetalWeb.UserClasses"); } catch { }
         DataEntityRegistry.RegisterAllEntities();
         DataEntityRegistry.RegisterVirtualEntitiesFromFile(
@@ -168,6 +172,7 @@ public static class BareMetalWebExtensions
         appInfo.RegisterEntityMetadataRoute(pageInfoFactory);  // must be before RegisterApiRoutes
         appInfo.RegisterRuntimeApiRoutes(pageInfoFactory);       // /meta/entity/{name}, POST /query, POST /intent
         appInfo.RegisterLookupApiRoutes(pageInfoFactory);       // must be before RegisterApiRoutes
+        appInfo.RegisterBinaryApiRoutes(pageInfoFactory);       // binary wire-format API
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
         appInfo.RegisterVNextRoutes(pageInfoFactory, templateStore);
         appInfo.RegisterReportRoutes(pageInfoFactory);
