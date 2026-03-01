@@ -423,6 +423,7 @@ public sealed class ReportExecutor
                     AggregateFunction.Min => MinColumn(group, idx),
                     AggregateFunction.Max => MaxColumn(group, idx),
                     AggregateFunction.Average => AvgColumn(group, idx),
+                    AggregateFunction.StdDev => StdDevColumn(group, idx),
                     _ => null
                 };
             }
@@ -472,6 +473,24 @@ public sealed class ReportExecutor
         foreach (var row in rows)
             if (decimal.TryParse(row[idx], out var v)) { sum += v; count++; }
         return count == 0 ? "0" : (sum / count).ToString(System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static string StdDevColumn(List<string?[]> rows, int idx)
+    {
+        // Welford's online algorithm for population stddev
+        int count = 0;
+        double mean = 0, m2 = 0;
+        foreach (var row in rows)
+        {
+            if (!double.TryParse(row[idx], out var v)) continue;
+            count++;
+            double delta = v - mean;
+            mean += delta / count;
+            double delta2 = v - mean;
+            m2 += delta * delta2;
+        }
+        if (count < 2) return "0";
+        return Math.Sqrt(m2 / count).ToString(System.Globalization.CultureInfo.InvariantCulture);
     }
 
     // ── Utility ──────────────────────────────────────────────────────────────

@@ -477,13 +477,14 @@ public static class RouteRegistrationExtensions
         var raw = pageInfoFactory.RawPage("Public", false);
         host.RegisterRoute("GET /api/_binary/_key", new RouteHandlerData(raw, BinaryApiHandlers.KeyHandler));
         host.RegisterRoute("GET /api/_binary/{type}/_schema", new RouteHandlerData(raw, BinaryApiHandlers.SchemaHandler));
+        host.RegisterRoute("GET /api/_binary/{type}/_aggregate", new RouteHandlerData(raw, BinaryApiHandlers.AggregateHandler));
+        host.RegisterRoute("GET /api/_binary/{type}/_layout", new RouteHandlerData(raw, DeltaApiHandlers.LayoutHandler));
         host.RegisterRoute("GET /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.GetHandler));
         host.RegisterRoute("GET /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.ListHandler));
         host.RegisterRoute("POST /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.CreateHandler));
         host.RegisterRoute("PUT /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.UpdateHandler));
         host.RegisterRoute("DELETE /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.DeleteHandler));
         host.RegisterRoute("PATCH /api/_binary/{type}/{id}", new RouteHandlerData(raw, DeltaApiHandlers.DeltaHandler));
-        host.RegisterRoute("GET /api/_binary/{type}/_layout", new RouteHandlerData(raw, DeltaApiHandlers.LayoutHandler));
     }
 
     /// <summary>
