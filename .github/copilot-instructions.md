@@ -122,6 +122,28 @@ dotnet run --project BareMetalWeb.PerformanceTests
 4. For data entity changes, update all registries (see Data and Storage section)
 5. Store useful codebase facts using the memory tool for future reference
 
+## Documentation Requirements (MANDATORY)
+
+When making code changes, you **MUST** update the corresponding architecture documentation in `docs/architecture/` if your changes affect any of the following:
+
+1. **New components or subsystems** — Add to `system-overview.md` component diagram
+2. **New API routes or endpoints** — Add to `system-overview.md` route divergence diagram and `rendering.md` endpoint tables
+3. **Storage or data layer changes** — Update `data-layer.md` (storage stack, CRUD lifecycle, serializer format, storage layout)
+4. **Index changes** — Update `indexing.md` (file format, data types, index types)
+5. **Auth or security changes** — Update `auth.md` (cookie settings, API key methods, permission model)
+6. **UI/rendering changes** — Update `rendering.md` (new JS modules, view types, client libraries)
+7. **Transaction, action, or mutation engine changes** — Update `docs/architecture/` transaction/action documentation
+8. **New project dependencies** — Update project dependency table in `system-overview.md`
+
+**Architecture docs location:** `docs/architecture/`
+- `system-overview.md` — Component diagram, project dependencies, request lifecycle, route divergence
+- `data-layer.md` — Storage stack, entity registration, CRUD lifecycle, binary serializer, storage layout
+- `indexing.md` — Search index types, file format, lookup mechanism
+- `auth.md` — Login flow, session validation, permission model, API keys
+- `rendering.md` — SSR pipeline, VNext SPA, JS libraries, view types
+
+**Rule:** If you add a new class, endpoint, or subsystem, ask yourself: "Does any architecture doc describe this area?" If yes, update it. If no doc exists for the area, create one in `docs/architecture/`.
+
 ## Pre-Commit Requirements (MANDATORY)
 
 **BEFORE making any commits or checking in ANY code changes:**
