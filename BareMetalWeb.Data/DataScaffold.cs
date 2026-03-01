@@ -978,22 +978,34 @@ public static class DataScaffold
     public static IReadOnlyList<string[]> BuildListRows(DataEntityMetadata metadata, IEnumerable items, string basePath, bool includeActions, Func<DataEntityMetadata, bool>? canRenderLookupLink = null, string? cloneToken = null, string? cloneReturnUrl = null, bool includeBulkSelection = false)
     {
         var rows = new List<string[]>();
+        // Pre-build lookup maps once per field (not per row)
+        var listFields = metadata.Fields.Where(f => f.List).OrderBy(f => f.Order).ToArray();
+        var lookupMaps = new Dictionary<string, string>?[listFields.Length];
+        for (int fi = 0; fi < listFields.Length; fi++)
+        {
+            if (listFields[fi].Lookup != null)
+            {
+                var opts = GetLookupOptions(listFields[fi].Lookup!);
+                lookupMaps[fi] = opts.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+
         foreach (var item in items)
         {
             if (item == null)
                 continue;
 
             var values = new List<string>();
-            foreach (var field in metadata.Fields.Where(f => f.List).OrderBy(f => f.Order))
+            for (int fi = 0; fi < listFields.Length; fi++)
             {
+                var field = listFields[fi];
                 var rawValue = field.GetValueFn(item);
-                if (field.Lookup != null)
+                if (lookupMaps[fi] != null)
                 {
-                    var lookupOptions = GetLookupOptions(field.Lookup);
-                    var lookupMap = lookupOptions.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                    var lookupMap = lookupMaps[fi]!;
                     var key = rawValue?.ToString() ?? string.Empty;
                     var display = lookupMap.TryGetValue(key, out var resolved) ? resolved : key;
-                    var relatedUrl = TryBuildLookupUrl(field.Lookup, key, canRenderLookupLink);
+                    var relatedUrl = TryBuildLookupUrl(field.Lookup!, key, canRenderLookupLink);
                     var safeKey = WebUtility.HtmlEncode(key);
                     var safeDisplay = WebUtility.HtmlEncode(FormatLookupDisplay(key, display));
                     var linkHtml = BuildLookupLinkHtml(relatedUrl);
@@ -1999,13 +2011,21 @@ public static class DataScaffold
     {
         var options = new List<KeyValuePair<string, string>>();
         var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        PropertyInfo? valueProp = null;
+        PropertyInfo? displayProp = null;
+        Type? cachedType = null;
         foreach (var item in items)
         {
             if (item == null)
                 continue;
 
-            var valueProp = item.GetType().GetProperty(valueField, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            var displayProp = item.GetType().GetProperty(displayField, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            var itemType = item.GetType();
+            if (itemType != cachedType)
+            {
+                cachedType = itemType;
+                valueProp = itemType.GetProperty(valueField, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                displayProp = itemType.GetProperty(displayField, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            }
             if (valueProp == null || displayProp == null)
                 continue;
 

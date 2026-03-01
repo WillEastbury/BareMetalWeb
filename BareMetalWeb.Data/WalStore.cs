@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
@@ -341,9 +342,21 @@ public sealed class WalStore : IDisposable
             if (key == targetKey)
             {
                 if (compressedLen == 0) { payload = ReadOnlyMemory<byte>.Empty; return true; }
-                var buf = new byte[compressedLen];
-                if (fs.Read(buf) != (int)compressedLen) return false;
-                payload = buf;
+                var buf = ArrayPool<byte>.Shared.Rent((int)compressedLen);
+                try
+                {
+                    if (fs.Read(buf, 0, (int)compressedLen) != (int)compressedLen)
+                    {
+                        ArrayPool<byte>.Shared.Return(buf);
+                        return false;
+                    }
+                    // Copy to owned array since caller holds the memory beyond this scope
+                    payload = buf.AsMemory(0, (int)compressedLen).ToArray();
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buf);
+                }
                 return true;
             }
 
