@@ -38,6 +38,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private readonly ConcurrentDictionary<Type, SchemaCache> _schemaCache = new();
     private readonly ConcurrentDictionary<Type, object> _schemaLocks = new();
     private readonly ConcurrentDictionary<string, object> _seqIdLocks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<(Type, int), MemberSignature[]> _schemaMemberCache = new();
 
     private sealed class SchemaCache
     {
@@ -254,37 +255,37 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
 
     private static uint IncrementAndReadSeqKeyFile(string path)
     {
-        var buf = new byte[4];
+        Span<byte> buf = stackalloc byte[4];
         using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         uint current = 0;
         if (file.Length >= 4)
         {
-            file.ReadExactly(buf, 0, 4);
+            file.ReadExactly(buf);
             current = BinaryPrimitives.ReadUInt32LittleEndian(buf);
         }
         var next = current + 1;
         BinaryPrimitives.WriteUInt32LittleEndian(buf, next);
         file.Position = 0;
-        file.Write(buf, 0, 4);
+        file.Write(buf);
         file.Flush(true);
         return next;
     }
 
     private static void SeedSeqKeyFileIfLower(string path, uint floor)
     {
-        var buf = new byte[4];
+        Span<byte> buf = stackalloc byte[4];
         using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         uint current = 0;
         if (file.Length >= 4)
         {
-            file.ReadExactly(buf, 0, 4);
+            file.ReadExactly(buf);
             current = BinaryPrimitives.ReadUInt32LittleEndian(buf);
         }
         if (current < floor)
         {
             BinaryPrimitives.WriteUInt32LittleEndian(buf, floor);
             file.Position = 0;
-            file.Write(buf, 0, 4);
+            file.Write(buf);
             file.Flush(true);
         }
     }
@@ -520,9 +521,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                 return default;
             }
 
-            var schemaMembers = schemaFile.Members
-                .Select(m => new MemberSignature(m.Name, m.TypeName, AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)), m.BlittableSize))
-                .ToArray();
+            var schemaMembers = GetCachedSchemaMembers(type, schemaFile);
             var schemaArchitecture = ParseArchitecture(schemaFile.Architecture);
             var schema = _serializer.CreateSchema(schemaFile.Version, schemaMembers, schemaArchitecture, schemaFile.Hash);
 
@@ -621,9 +620,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                         continue;
                     }
 
-                    var schemaMembers = schemaFile.Members
-                        .Select(m => new MemberSignature(m.Name, m.TypeName, AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)), m.BlittableSize))
-                        .ToArray();
+                    var schemaMembers = GetCachedSchemaMembers(type, schemaFile);
                     var schemaArchitecture = ParseArchitecture(schemaFile.Architecture);
                     var schema = _serializer.CreateSchema(schemaFile.Version, schemaMembers, schemaArchitecture, schemaFile.Hash);
                     var obj = DeserializeFor<T>(_serializer, bytes, schema);
@@ -673,9 +670,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                     continue;
                 }
 
-                var schemaMembers = schemaFile.Members
-                    .Select(m => new MemberSignature(m.Name, m.TypeName, AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)), m.BlittableSize))
-                    .ToArray();
+                var schemaMembers = GetCachedSchemaMembers(type, schemaFile);
                 var schemaArchitecture = ParseArchitecture(schemaFile.Architecture);
                 var schema = _serializer.CreateSchema(schemaFile.Version, schemaMembers, schemaArchitecture, schemaFile.Hash);
                 var obj = DeserializeFor<T>(_serializer, bytes, schema);
@@ -727,9 +722,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                     continue;
                 }
 
-                var schemaMembers = schemaFile.Members
-                    .Select(m => new MemberSignature(m.Name, m.TypeName, AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)), m.BlittableSize))
-                    .ToArray();
+                var schemaMembers = GetCachedSchemaMembers(type, schemaFile);
                 var schemaArchitecture = ParseArchitecture(schemaFile.Architecture);
                 var schema = _serializer.CreateSchema(schemaFile.Version, schemaMembers, schemaArchitecture, schemaFile.Hash);
                 var obj = DeserializeFor<T>(_serializer, bytes, schema);
@@ -1214,6 +1207,12 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     }
 
     private static Type AssumePublicMembers(Type type) => type;
+
+    private MemberSignature[] GetCachedSchemaMembers(Type type, SchemaDefinitionFile schemaFile)
+        => _schemaMemberCache.GetOrAdd((type, schemaFile.Version), _ =>
+            schemaFile.Members
+                .Select(m => new MemberSignature(m.Name, m.TypeName, AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)), m.BlittableSize))
+                .ToArray());
 
     private static SchemaDefinition BuildSchemaFor(ISchemaAwareObjectSerializer serializer, Type type)
         => serializer.BuildSchema(type);
