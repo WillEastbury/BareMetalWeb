@@ -47,6 +47,16 @@ public sealed class ProxyRouteConfig
     public double FailurePercentageThreshold { get; set; } = 50;
     public int MinimumRequestsInWindow { get; set; } = 10;
     public int OfflineSeconds { get; set; } = 60;
+
+    /// <summary>
+    /// When true, the proxy injects an ARRAffinity cookie into outgoing requests
+    /// using a SHA-256 hash of the current lease owner's InstanceId.
+    /// This pins proxied requests to the backend instance that holds the cluster lease.
+    /// </summary>
+    public bool LeaseAffinityCookieEnabled { get; set; } = false;
+
+    /// <summary>Cookie name for lease affinity (default: ARRAffinity).</summary>
+    public string LeaseAffinityCookieName { get; set; } = "ARRAffinity";
 }
 
 public sealed class ProxyTargetState
