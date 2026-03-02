@@ -87,9 +87,46 @@ flowchart TD
 
 ---
 
+## Commerce & CMS SSR Views
+
+The public-facing commerce storefront and CMS page views are fully server-side rendered.  They reuse the same SSR pipeline as the rest of the application — the route handler populates context values (`title`, `html_message`) and `HtmlRenderer` streams the platform screenchrome (nav, header, footer) together with the page-specific content fragment in a single pass.
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant Host as BareMetalWeb.Host
+    participant PR as ProductRenderer / PageRenderer
+    participant DS as DataStoreProvider
+    participant HR as HtmlRenderer (main template)
+    participant PW as PipeWriter (response)
+
+    Browser->>Host: GET /products  (or /products/{category}  or /page/{slug})
+    Host->>PR: ConfigureCategoryBrowseAsync / ConfigureProductGridAsync / ConfigurePageAsync
+    PR->>DS: QueryAsync(entity)
+    DS-->>PR: entity objects
+    PR->>PR: Build HTML fragment (Bootstrap cards / product grid / page body)
+    PR->>Host: context.SetStringValue("title", …) + ("html_message", fragment)
+    Host->>HR: RenderAsync(mainTemplate, replacements)
+    HR->>PW: Stream screenchrome + content (sub-0.15 ms)
+    PW-->>Browser: 200 text/html — fully rendered page
+```
+
+**Route table — Commerce & CMS SSR endpoints:**
+
+| Route | Handler | Description |
+|-------|---------|-------------|
+| `GET /products` | `ProductRenderer.ConfigureCategoryBrowseAsync` | Category listing wrapped in platform screenchrome |
+| `GET /products/{category}` | `ProductRenderer.ConfigureProductGridAsync` | Product grid with search/tag filter, inside screenchrome |
+| `GET /page/{slug}` | `PageRenderer.ConfigurePageAsync` | CMS page body rendered server-side inside screenchrome |
+| `GET /api/pages` | `PageRenderer.ListPagesHandler` | Raw JSON list of published pages |
+
+All four routes are registered with a `TemplatedPage` `PageInfo` (using the main `IHtmlTemplate`), so the full platform screenchrome — navigation bar, header, and footer — is server-rendered on every request.
+
+---
+
 ## VNext SPA Path
 
-VNext is the default admin UI served at `/admin` (and `/admin/{*path}`).
+VNext is the default admin UI served at `/UI` (and `/UI/{*path}`).  The shell itself is server-rendered (nav bar extracted from the main template) but **all content is rendered client-side** by `vnext-app.js` after loading entity schemas and data from the JSON API.
 
 ```mermaid
 sequenceDiagram
@@ -100,8 +137,8 @@ sequenceDiagram
     participant MetaObj as GET /api/_meta
     participant JsBundle as /static/js bundle
 
-    Browser->>Host: GET /admin
-    Host-->>Browser: SPA shell HTML<br/>(vnext-app.js + BareMetalRouting.js)
+    Browser->>Host: GET /UI
+    Host-->>Browser: SPA shell HTML<br/>(nav from SSR template + vnext-bundle.js)
     Browser->>JsBundle: Load JS libraries<br/>(BareMetalRest/Bind/Template/Rendering)
     Browser->>MetaObj: GET /api/_meta
     MetaObj-->>Browser: [{slug, displayName, …}]<br/>(all registered entities)
@@ -111,6 +148,8 @@ sequenceDiagram
     ApiEP-->>Browser: JSON entity list
     Browser->>Browser: Client-side render<br/>(BareMetalRendering.js)
 ```
+
+**Key distinction from commerce/CMS SSR views:** The VNext shell reuses only the `<nav>` and `<footer>` sections of the main template.  The `#vnext-content` `<div>` is populated entirely by client-side JavaScript — no server-side HTML fragment is injected for the page body.
 
 ### VNext JS Library Responsibilities
 
@@ -169,4 +208,4 @@ CSV export is available via `GET /api/reports/{id}` (returns `text/csv`).
 
 ---
 
-_Status: Verified against codebase @ commit e38d19057e1a55fc1d9a563f5ec6228bb991a0b5_
+_Status: Updated to clarify VNext (client-side, `/UI`) vs SSR screenchrome rendering (commerce & CMS pages). Verified against codebase @ commit e38d19057e1a55fc1d9a563f5ec6228bb991a0b5_
