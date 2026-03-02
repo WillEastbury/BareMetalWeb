@@ -79,6 +79,11 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private readonly ConcurrentDictionary<string, int> _liveCounts
         = new(StringComparer.OrdinalIgnoreCase);
 
+    // Deserialization cache — avoids repeated binary→object for unchanged WAL entries.
+    // Keyed by (typeName, objKey, walPointer). Invalidated on Save (walPtr changes).
+    private const int DeserCacheMaxSize = 4096;
+    private readonly ConcurrentDictionary<(string TypeName, uint Key, ulong WalPtr), object> _deserCache = new();
+
     // Sequential-ID file locks
     private readonly ConcurrentDictionary<string, SeqIdRange> _seqIdRanges
         = new(StringComparer.OrdinalIgnoreCase);
@@ -229,6 +234,13 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             if (isInsert)
                 _liveCounts.AddOrUpdate(type.Name, 1, (_, c) => c + 1);
 
+            // Evict stale deserialization cache entry (WAL pointer has changed)
+            foreach (var ck in _deserCache.Keys)
+            {
+                if (ck.TypeName == type.Name && ck.Key == obj.Key)
+                    _deserCache.TryRemove(ck, out _);
+            }
+
             // ── Update secondary field indexes ────────────────────────────
             if (indexedFields.Count > 0)
             {
@@ -272,10 +284,36 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
         if (!idMap.TryGetValue(key, out var walKey)) return default;
         if (!_walStore.TryGetHead(walKey, out var ptr)) return default;
-        if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) return default;
-        if (payload.IsEmpty) return default;  // tombstone
 
-        return DeserializePayload<T>(payload, key);
+        // Check deserialization cache — hit if WAL pointer unchanged
+        var cacheKey = (typeName, key, ptr);
+        if (_deserCache.TryGetValue(cacheKey, out var cachedObj))
+            return cachedObj as T;
+
+        if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) return default;
+        if (payload.IsEmpty) return default;
+
+        var result = DeserializePayload<T>(payload, key);
+        if (result != null)
+        {
+            // Evict oldest entries when cache is full (simple size cap)
+            if (_deserCache.Count >= DeserCacheMaxSize)
+                EvictDeserCache();
+            _deserCache[cacheKey] = result;
+        }
+        return result;
+    }
+
+    private void EvictDeserCache()
+    {
+        // Remove ~25% of entries to amortize eviction cost
+        int toRemove = _deserCache.Count / 4;
+        int removed = 0;
+        foreach (var key in _deserCache.Keys)
+        {
+            if (removed >= toRemove) break;
+            if (_deserCache.TryRemove(key, out _)) removed++;
+        }
     }
 
     public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default)
@@ -293,67 +331,94 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         if (skip < 0) skip = 0;
         if (top <= 0) return Array.Empty<T>();
 
-        // ── Index-accelerated path: use secondary field index for simple Equals clauses ──
-        // If a [DataIndex]-decorated field with an Equals clause is found in the index,
-        // load only the candidate IDs rather than deserializing every WAL record.
-        // Falls through to the full scan below when no usable index entry exists yet.
+        // ── Index-accelerated path: use secondary field index for Equals/StartsWith clauses ──
+        // Intersects candidate sets from ALL indexed Equals clauses (#758), supports
+        // StartsWith via prefix scan on cached index keys (#757), and uses cached
+        // index reads (#756).
         if (query != null && query.Clauses.Count > 0 && query.Groups.Count == 0
             && _searchIndexManager.HasIndexedFields(typeof(T), out var indexedFields))
         {
+            HashSet<uint>? candidateIds = null;
+            int indexedClauseCount = 0;
+
             foreach (var clause in query.Clauses)
             {
-                if (clause.Operator == QueryOperator.Equals && clause.Value != null)
+                if (clause.Value == null) continue;
+                var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
+                if (prop == null) continue;
+
+                HashSet<uint>? clauseCandidates = null;
+
+                if (clause.Operator == QueryOperator.Equals)
                 {
-                    var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
-                    if (prop != null)
+                    var fieldValue = clause.Value.ToString() ?? string.Empty;
+                    var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
+                    if (fieldIndex.Count == 0) break;
+                    clauseCandidates = fieldIndex.TryGetValue(fieldValue, out var ids) ? ids : new HashSet<uint>();
+                }
+                else if (clause.Operator == QueryOperator.StartsWith)
+                {
+                    var prefix = clause.Value.ToString() ?? string.Empty;
+                    var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
+                    if (fieldIndex.Count == 0) break;
+                    clauseCandidates = new HashSet<uint>();
+                    foreach (var kvp in fieldIndex)
                     {
-                        var fieldValue = clause.Value.ToString() ?? string.Empty;
-                        var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
-                        if (fieldIndex.Count == 0)
-                            break; // No index entries yet; fall through to full scan
-
-                        if (!fieldIndex.TryGetValue(fieldValue, out var candidateIds))
-                            return Array.Empty<T>();
-
-                        var hasSorts = query.Sorts.Count > 0;
-
-                        // No sorts — short-circuit: skip/take directly from candidates
-                        // to avoid loading all matching records when only a page is needed.
-                        if (!hasSorts)
-                        {
-                            var needExtra = query.Clauses.Count > 1; // multi-clause needs re-check
-                            var limit = skip + top;
-                            var results = new List<T>(Math.Min(top, candidateIds.Count));
-                            int matched = 0;
-                            foreach (var candidateKey in candidateIds)
-                            {
-                                var obj = Load<T>(candidateKey);
-                                if (obj == null) continue;
-                                if (needExtra && !_queryEvaluator.Matches(obj, query)) continue;
-                                if (matched < skip) { matched++; continue; }
-                                results.Add(obj);
-                                matched++;
-                                if (results.Count >= top) break;
-                            }
-                            return results;
-                        }
-
-                        // Has sorts — load all candidates, sort, then slice
-                        var loaded = new List<T>(candidateIds.Count);
-                        foreach (var candidateKey in candidateIds)
-                        {
-                            var obj = Load<T>(candidateKey);
-                            if (obj != null)
-                                loaded.Add(obj);
-                        }
-
-                        var filtered = loaded.Where(item => _queryEvaluator.Matches(item, query));
-                        var sorted   = _queryEvaluator.ApplySorts(filtered, query);
-                        if (skip > 0 || top != DefaultQueryLimit)
-                            sorted = sorted.Skip(skip).Take(top);
-                        return sorted.ToList();
+                        if (kvp.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                            clauseCandidates.UnionWith(kvp.Value);
                     }
                 }
+
+                if (clauseCandidates == null) continue;
+                indexedClauseCount++;
+
+                if (candidateIds == null)
+                    candidateIds = new HashSet<uint>(clauseCandidates);
+                else
+                    candidateIds.IntersectWith(clauseCandidates);
+
+                if (candidateIds.Count == 0)
+                    return Array.Empty<T>();
+            }
+
+            if (candidateIds != null && indexedClauseCount > 0)
+            {
+                var hasSorts = query.Sorts.Count > 0;
+                bool needRecheck = indexedClauseCount < query.Clauses.Count;
+
+                if (!hasSorts)
+                {
+                    var results = new List<T>(Math.Min(top, candidateIds.Count));
+                    int matched = 0;
+                    foreach (var candidateKey in candidateIds)
+                    {
+                        var obj = Load<T>(candidateKey);
+                        if (obj == null) continue;
+                        if (needRecheck && !_queryEvaluator.Matches(obj, query)) continue;
+                        if (matched < skip) { matched++; continue; }
+                        results.Add(obj);
+                        matched++;
+                        if (results.Count >= top) break;
+                    }
+                    return results;
+                }
+
+                // Has sorts — load intersected candidates, sort, then slice
+                var loaded = new List<T>(candidateIds.Count);
+                foreach (var candidateKey in candidateIds)
+                {
+                    var obj = Load<T>(candidateKey);
+                    if (obj != null)
+                        loaded.Add(obj);
+                }
+
+                IEnumerable<T> filtered = needRecheck
+                    ? loaded.Where(item => _queryEvaluator.Matches(item, query))
+                    : loaded;
+                var sorted = _queryEvaluator.ApplySorts(filtered, query);
+                if (skip > 0 || top != DefaultQueryLimit)
+                    sorted = sorted.Skip(skip).Take(top);
+                return sorted.ToList();
             }
         }
         // ── Full scan (no usable index) ───────────────────────────────────────
@@ -526,40 +591,67 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             });
         }
 
-        // ── Index-accelerated count: Equals on indexed field ──
+        // ── Index-accelerated count: Equals/StartsWith with compound intersection ──
         if (query.Clauses.Count > 0 && query.Groups.Count == 0
             && _searchIndexManager.HasIndexedFields(typeof(T), out var indexedFields))
         {
+            HashSet<uint>? candidateIds = null;
+            int indexedClauseCount = 0;
+
             foreach (var clause in query.Clauses)
             {
-                if (clause.Operator == QueryOperator.Equals && clause.Value != null)
+                if (clause.Value == null) continue;
+                var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
+                if (prop == null) continue;
+
+                HashSet<uint>? clauseCandidates = null;
+
+                if (clause.Operator == QueryOperator.Equals)
                 {
-                    var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
-                    if (prop != null)
+                    var fieldValue = clause.Value.ToString() ?? string.Empty;
+                    var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
+                    if (fieldIndex.Count == 0) break;
+                    clauseCandidates = fieldIndex.TryGetValue(fieldValue, out var ids) ? ids : new HashSet<uint>();
+                }
+                else if (clause.Operator == QueryOperator.StartsWith)
+                {
+                    var prefix = clause.Value.ToString() ?? string.Empty;
+                    var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
+                    if (fieldIndex.Count == 0) break;
+                    clauseCandidates = new HashSet<uint>();
+                    foreach (var kvp in fieldIndex)
                     {
-                        var fieldValue = clause.Value.ToString() ?? string.Empty;
-                        var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
-                        if (fieldIndex.Count == 0)
-                            break; // No index entries yet; fall through to full scan
-
-                        if (!fieldIndex.TryGetValue(fieldValue, out var candidateIds))
-                            return 0;
-
-                        // Single clause — candidate count is exact
-                        if (query.Clauses.Count == 1)
-                            return candidateIds.Count;
-
-                        // Multiple clauses — load candidates and match remaining filters
-                        int count = 0;
-                        foreach (var candidateKey in candidateIds)
-                        {
-                            var obj = Load<T>(candidateKey);
-                            if (obj != null && _queryEvaluator.Matches(obj, query))
-                                count++;
-                        }
-                        return count;
+                        if (kvp.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                            clauseCandidates.UnionWith(kvp.Value);
                     }
                 }
+
+                if (clauseCandidates == null) continue;
+                indexedClauseCount++;
+
+                if (candidateIds == null)
+                    candidateIds = new HashSet<uint>(clauseCandidates);
+                else
+                    candidateIds.IntersectWith(clauseCandidates);
+
+                if (candidateIds.Count == 0) return 0;
+            }
+
+            if (candidateIds != null && indexedClauseCount > 0)
+            {
+                // All clauses indexed — direct count
+                if (indexedClauseCount == query.Clauses.Count)
+                    return candidateIds.Count;
+
+                // Partial — load intersected set, match remaining
+                int count = 0;
+                foreach (var candidateKey in candidateIds)
+                {
+                    var obj = Load<T>(candidateKey);
+                    if (obj != null && _queryEvaluator.Matches(obj, query))
+                        count++;
+                }
+                return count;
             }
         }
 
@@ -612,6 +704,13 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
         // Decrement live count
         _liveCounts.AddOrUpdate(typeName, 0, (_, c) => Math.Max(0, c - 1));
+
+        // Evict deserialization cache entry
+        foreach (var ck in _deserCache.Keys)
+        {
+            if (ck.TypeName == typeName && ck.Key == key)
+                _deserCache.TryRemove(ck, out _);
+        }
 
         // ── Remove from secondary field indexes ────────────────────────────
         if (indexedFields.Count > 0 && oldObj != null)

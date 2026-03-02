@@ -1,6 +1,7 @@
 using System;
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -33,6 +34,11 @@ public sealed class IndexStore
     private const string RegistryFileName = "index.registry";
     private readonly IDataProvider _provider;
     private readonly IBufferedLogger _logger;
+
+    // In-memory index caches — invalidated on AppendEntry/AppendEntries
+    private readonly ConcurrentDictionary<(string Entity, string Field), Dictionary<string, HashSet<uint>>> _invertedCache = new();
+    private readonly ConcurrentDictionary<(string Entity, string Field), Dictionary<string, string>> _forwardCache = new();
+
     public IndexStore(IDataProvider provider, IBufferedLogger logger = null!)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
@@ -55,6 +61,7 @@ public sealed class IndexStore
 
         var line = FormatEntry(DateTime.UtcNow.Ticks, op, normalizedKey, id, expiresAtUtcTicks);
         AppendPagedLine(entityName, fieldName, line);
+        InvalidateCache(entityName, fieldName);
     }
     public void AppendEntry(string entityName, string fieldName, string key, string id, char op, DateTime? expiresAtUtc, bool normalizeKey = true)
     {
@@ -84,9 +91,21 @@ public sealed class IndexStore
             var line = FormatEntry(DateTime.UtcNow.Ticks, entry.op, normalizedKey, entry.id, entry.expiresAtUtcTicks);
             AppendPagedLine(entityName, fieldName, line);
         }
+        InvalidateCache(entityName, fieldName);
     }
 
     public Dictionary<string, HashSet<uint>> ReadIndex(string entityName, string fieldName, bool normalizeKey = true)
+    {
+        var cacheKey = (entityName, fieldName);
+        if (_invertedCache.TryGetValue(cacheKey, out var cached))
+            return cached;
+
+        var result = ReadIndexCore(entityName, fieldName, normalizeKey);
+        _invertedCache[cacheKey] = result;
+        return result;
+    }
+
+    private Dictionary<string, HashSet<uint>> ReadIndexCore(string entityName, string fieldName, bool normalizeKey = true)
     {
         var map = new Dictionary<string, Dictionary<string, long>>(StringComparer.OrdinalIgnoreCase);
         if (!_provider.PagedFileExists(entityName, GetPagedFileName(fieldName)))
@@ -111,6 +130,17 @@ public sealed class IndexStore
     }
     public Dictionary<string, string> ReadLatestValueIndex(string entityName, string fieldName, bool normalizeKey = true)
     {
+        var cacheKey = (entityName, fieldName);
+        if (_forwardCache.TryGetValue(cacheKey, out var cached))
+            return cached;
+
+        var result = ReadLatestValueIndexCore(entityName, fieldName, normalizeKey);
+        _forwardCache[cacheKey] = result;
+        return result;
+    }
+
+    private Dictionary<string, string> ReadLatestValueIndexCore(string entityName, string fieldName, bool normalizeKey = true)
+    {
         var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (!_provider.PagedFileExists(entityName, GetPagedFileName(fieldName)))
             return map;
@@ -132,6 +162,13 @@ public sealed class IndexStore
 
         return map;
     }
+    private void InvalidateCache(string entityName, string fieldName)
+    {
+        var key = (entityName, fieldName);
+        _invertedCache.TryRemove(key, out _);
+        _forwardCache.TryRemove(key, out _);
+    }
+
     public bool TryGetLatestValue(string entityName, string fieldName, string key, out string value, bool normalizeKey = true)
     {
         value = string.Empty;
