@@ -7268,11 +7268,11 @@ public sealed class RouteHandlers : IRouteHandlers
 
                 idMapSizes.TryGetValue(typeName, out long idMapBytes);
 
-                // Index / paged files in subfolders
+                // Index / paged files — stored under <dataRoot>/Index/<entity> and <dataRoot>/Paged/<entity>
                 long indexBytes  = 0;
                 foreach (var sub in new[] { "Paged", "Index" })
                 {
-                    var subDir = Path.Combine(entityFolder, sub);
+                    var subDir = Path.Combine(dataRoot, sub, typeName);
                     if (Directory.Exists(subDir))
                     {
                         foreach (var fi in new DirectoryInfo(subDir).EnumerateFiles("*", SearchOption.AllDirectories))
