@@ -631,14 +631,14 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void RegisterDataRoutes_EntityBrowsingRoute_ShowsOnNavBar()
+    public void RegisterDataRoutes_EntityBrowsingRoute_HiddenFromNavBar()
     {
-        // Arrange & Act
+        // Arrange & Act — SSR data route hidden from nav (VNext /UI is primary)
         _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
         var route = _server.routes["GET /ssr/admin/data"];
-        Assert.True(route.PageInfo!.PageMetaData.ShowOnNavBar);
+        Assert.False(route.PageInfo!.PageMetaData.ShowOnNavBar);
     }
 
     [Fact]
