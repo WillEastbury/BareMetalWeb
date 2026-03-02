@@ -54,4 +54,12 @@ public interface IDataProvider
     /// on first use after an upgrade or initial deployment.
     /// </summary>
     void SeedSequentialKey(string entityName, uint floor);
+
+    /// <summary>
+    /// Permanently removes all stored records, index files, schema files, and any other
+    /// on-disk artefacts managed by this provider, then reinitialises the provider so it
+    /// is ready for new writes immediately after this call returns.
+    /// </summary>
+    ValueTask WipeStorageAsync(CancellationToken cancellationToken = default)
+        => ValueTask.CompletedTask;
 }

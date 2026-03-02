@@ -4110,8 +4110,8 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var entities = DataScaffold.Entities;
-        int totalEntities = entities.Count;
+        var providers = DataStoreProvider.Current.Providers.ToList();
+        int totalProviders = providers.Count;
 
         var jobId = BackgroundJobService.Instance.StartJob(
             "Wipe All Data",
@@ -4120,24 +4120,16 @@ public sealed class RouteHandlers : IRouteHandlers
             {
                 progress.Report(0, "Starting wipe…");
                 int done = 0;
-                foreach (var entity in entities)
+                foreach (var provider in providers)
                 {
                     ct.ThrowIfCancellationRequested();
                     progress.Report(
-                        totalEntities == 0 ? 0 : (int)(done * 95.0 / totalEntities),
-                        $"Wiping {entity.Name}…");
-
-                    var items = (await entity.Handlers.QueryAsync(null, ct).ConfigureAwait(false)).ToList();
-                    foreach (var item in items)
-                    {
-                        if (item == null || item.Key == 0)
-                            continue;
-                        ct.ThrowIfCancellationRequested();
-                        await entity.Handlers.DeleteAsync(item.Key, ct).ConfigureAwait(false);
-                    }
+                        totalProviders == 0 ? 0 : (int)(done * 95.0 / totalProviders),
+                        $"Wiping storage ({provider.Name})…");
+                    await provider.WipeStorageAsync(ct).ConfigureAwait(false);
                     done++;
                 }
-                progress.Report(100, $"Done. Wiped {done} entity store{(done == 1 ? "" : "s")}.");
+                progress.Report(100, $"Done. Wiped storage for {done} provider{(done == 1 ? "" : "s")}.");
             });
 
         var statusUrl = $"/api/jobs/{jobId}";
@@ -4467,33 +4459,26 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        var providers = DataStoreProvider.Current.Providers.ToList();
+        int totalProviders = providers.Count;
+
         var jobId = BackgroundJobService.Instance.StartJob(
             "Wipe All Data",
             "/admin/wipe-data",
             async (progress, ct) =>
             {
                 progress.Report(0, "Starting wipe…");
-                var entities = DataScaffold.Entities;
-                int totalEntities = entities.Count;
                 int done = 0;
-                foreach (var entity in entities)
+                foreach (var provider in providers)
                 {
                     ct.ThrowIfCancellationRequested();
                     progress.Report(
-                        totalEntities == 0 ? 0 : (int)(done * 95.0 / totalEntities),
-                        $"Wiping {entity.Name}…");
-
-                    var items = (await entity.Handlers.QueryAsync(null, ct).ConfigureAwait(false)).ToList();
-                    foreach (var item in items)
-                    {
-                        if (item == null || item.Key == 0)
-                            continue;
-                        ct.ThrowIfCancellationRequested();
-                        await entity.Handlers.DeleteAsync(item.Key, ct).ConfigureAwait(false);
-                    }
+                        totalProviders == 0 ? 0 : (int)(done * 95.0 / totalProviders),
+                        $"Wiping storage ({provider.Name})…");
+                    await provider.WipeStorageAsync(ct).ConfigureAwait(false);
                     done++;
                 }
-                progress.Report(100, $"Done. Wiped {done} entity store{(done == 1 ? "" : "s")}.");
+                progress.Report(100, $"Done. Wiped storage for {done} provider{(done == 1 ? "" : "s")}.");
             });
 
         var baseUrl   = $"{context.Request.Scheme}://{context.Request.Host}";
