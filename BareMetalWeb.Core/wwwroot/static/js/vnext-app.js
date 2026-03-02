@@ -335,6 +335,7 @@
         var groups = {};
         entities.forEach(function (e) {
             if (!e.showOnNav) return;
+            if (e.rightAligned) return; // already rendered in the right-hand system menu
             var g = e.navGroup || 'Other';
             if (!groups[g]) groups[g] = [];
             groups[g].push(e);
