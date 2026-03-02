@@ -521,6 +521,15 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.JobStatusHandler));
 
+        // Admin JSON endpoints for VNext SPA (no CSRF form token required — validated via X-CSRF-Token header)
+        host.RegisterRoute("POST /api/admin/sample-data", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            routeHandlers.AdminSampleDataJsonHandler));
+
+        host.RegisterRoute("POST /api/admin/wipe-data", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            routeHandlers.AdminWipeDataJsonHandler));
+
         // Document chain — must be before the generic GET /api/{type}/{id} route
         host.RegisterRoute("GET /api/{type}/{id}/_related-chain", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),

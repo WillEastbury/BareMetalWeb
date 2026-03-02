@@ -4194,6 +4194,291 @@ public sealed class RouteHandlers : IRouteHandlers
         context.AddFormDefinition(new FormDefinition("/admin/wipe-data", "post", "WIPE ALL DATA", fields));
     }
 
+    /// <summary>
+    /// JSON API endpoint for the VNext SPA to start a sample-data background job.
+    /// Accepts a JSON body: { addresses, customers, units, products, employees, orders, todos, timeTablePlans, lessonLogs, clearExisting }
+    /// Returns 202 Accepted with job info.
+    /// </summary>
+    public async ValueTask AdminSampleDataJsonHandler(HttpContext context)
+    {
+        if (!CsrfProtection.ValidateApiToken(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"CSRF validation failed.\"}").ConfigureAwait(false);
+            return;
+        }
+
+        string body;
+        using (var reader = new System.IO.StreamReader(context.Request.Body))
+            body = await reader.ReadToEndAsync().ConfigureAwait(false);
+
+        int addresses = 100, customers = 50, units = 25, products = 25, employees = 10, orders = 25, todos = 20, timeTablePlans = 10, lessonLogs = 10;
+        bool clearExisting = false;
+
+        try
+        {
+            var doc = System.Text.Json.JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("addresses",      out var v)) addresses      = v.GetInt32();
+            if (root.TryGetProperty("customers",      out v))     customers      = v.GetInt32();
+            if (root.TryGetProperty("units",          out v))     units          = v.GetInt32();
+            if (root.TryGetProperty("products",       out v))     products       = v.GetInt32();
+            if (root.TryGetProperty("employees",      out v))     employees      = v.GetInt32();
+            if (root.TryGetProperty("orders",         out v))     orders         = v.GetInt32();
+            if (root.TryGetProperty("todos",          out v))     todos          = v.GetInt32();
+            if (root.TryGetProperty("timeTablePlans", out v))     timeTablePlans = v.GetInt32();
+            if (root.TryGetProperty("lessonLogs",     out v))     lessonLogs     = v.GetInt32();
+            if (root.TryGetProperty("clearExisting",  out v))     clearExisting  = v.GetBoolean();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Invalid JSON body.\"}").ConfigureAwait(false);
+            return;
+        }
+
+        var errors = new List<string>();
+
+        // Bounds validation (mirrors ParseSampleCount in the SSR handler)
+        static bool IsOutOfRange(int v) => v < 0 || v > 100000;
+        if (IsOutOfRange(addresses))      errors.Add("addresses must be between 0 and 100000.");
+        if (IsOutOfRange(customers))      errors.Add("customers must be between 0 and 100000.");
+        if (IsOutOfRange(units))          errors.Add("units must be between 0 and 100000.");
+        if (IsOutOfRange(products))       errors.Add("products must be between 0 and 100000.");
+        if (IsOutOfRange(employees))      errors.Add("employees must be between 0 and 100000.");
+        if (IsOutOfRange(orders))         errors.Add("orders must be between 0 and 100000.");
+        if (IsOutOfRange(todos))          errors.Add("todos must be between 0 and 100000.");
+        if (IsOutOfRange(timeTablePlans)) errors.Add("timeTablePlans must be between 0 and 100000.");
+        if (IsOutOfRange(lessonLogs))     errors.Add("lessonLogs must be between 0 and 100000.");
+
+        if (customers > 0 && addresses == 0) errors.Add("Customers require at least one address.");
+        if (products > 0 && units == 0)      errors.Add("Products require at least one unit of measure.");
+        if (orders > 0 && customers == 0)    errors.Add("Orders require at least one customer.");
+
+        if (errors.Count > 0)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(
+                JsonSerializer.Serialize(new { error = string.Join(" ", errors) })).ConfigureAwait(false);
+            return;
+        }
+
+        var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
+
+        var capturedAddresses = addresses; var capturedCustomers = customers; var capturedUnits = units;
+        var capturedProducts  = products;  var capturedEmployees = employees; var capturedOrders = orders;
+        var capturedTodos     = todos;     var capturedTtps = timeTablePlans; var capturedLls = lessonLogs;
+        var capturedClear     = clearExisting; var capturedUser = userName;
+
+        var jobId = BackgroundJobService.Instance.StartJob(
+            "Generate Sample Data",
+            "/admin/sample-data",
+            async (progress, ct) =>
+            {
+                progress.Report(0, "Starting sample data generation…");
+                if (capturedClear)
+                {
+                    progress.Report(2, "Clearing existing data…");
+                    await DeleteAllAsync<Customer>(ct);   await DeleteAllAsync<Product>(ct);
+                    await DeleteAllAsync<Address>(ct);    await DeleteAllAsync<UnitOfMeasure>(ct);
+                    await DeleteAllAsync<Employee>(ct);   await DeleteAllAsync<Order>(ct);
+                    await DeleteAllAsync<ToDo>(ct);       await DeleteAllAsync<TimeTablePlan>(ct);
+                    await DeleteAllAsync<LessonLog>(ct);
+                }
+
+                progress.Report(5, "Querying existing records…");
+                var addresses_q    = (await DataStoreProvider.Current.QueryAsync<Address>(null, ct).ConfigureAwait(false)).ToList();
+                var units_q        = (await DataStoreProvider.Current.QueryAsync<UnitOfMeasure>(null, ct).ConfigureAwait(false)).ToList();
+                var customers_q    = (await DataStoreProvider.Current.QueryAsync<Customer>(null, ct).ConfigureAwait(false)).ToList();
+                var products_q     = (await DataStoreProvider.Current.QueryAsync<Product>(null, ct).ConfigureAwait(false)).ToList();
+                var usedAddressIds  = new HashSet<string>(addresses_q.Select(a => a.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var usedUnitIds     = new HashSet<string>(units_q.Select(u => u.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var usedCustomerIds = new HashSet<string>(customers_q.Select(c => c.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var usedProductIds  = new HashSet<string>(products_q.Select(p => p.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var usedEmployeeIds = new HashSet<string>((await DataStoreProvider.Current.QueryAsync<Employee>(null, ct).ConfigureAwait(false)).Select(e => e.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var usedOrderIds    = new HashSet<string>((await DataStoreProvider.Current.QueryAsync<Order>(null, ct).ConfigureAwait(false)).Select(o => o.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var usedTodoIds     = new HashSet<string>((await DataStoreProvider.Current.QueryAsync<ToDo>(null, ct).ConfigureAwait(false)).Select(t => t.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var usedTtpIds      = new HashSet<string>((await DataStoreProvider.Current.QueryAsync<TimeTablePlan>(null, ct).ConfigureAwait(false)).Select(t => t.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var usedLessonLogIds= new HashSet<string>((await DataStoreProvider.Current.QueryAsync<LessonLog>(null, ct).ConfigureAwait(false)).Select(l => l.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+
+                progress.Report(10, "Generating addresses and units…");
+                var addresses2   = GenerateAddresses(capturedAddresses, usedAddressIds);
+                var units2       = GenerateUnits(capturedUnits, usedUnitIds);
+
+                progress.Report(20, "Generating customers and products…");
+                var customers2   = GenerateCustomers(capturedCustomers, addresses2, usedCustomerIds);
+                var products2    = GenerateProducts(capturedProducts, units2, usedProductIds);
+                var employees2   = GenerateEmployees(capturedEmployees, usedEmployeeIds);
+
+                progress.Report(30, "Generating currencies and orders…");
+                var existingCurrencies = (await DataStoreProvider.Current.QueryAsync<Currency>(null, ct).ConfigureAwait(false)).ToList();
+                var usedCurrencyIds = new HashSet<string>(existingCurrencies.Select(c => c.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                List<Currency> seedCurrencies = new();
+                if (capturedOrders > 0 && existingCurrencies.Count == 0)
+                    seedCurrencies = GenerateSeedCurrencies(usedCurrencyIds);
+
+                var allCurrencies = existingCurrencies.Concat(seedCurrencies).ToList();
+                var allCustomers2 = customers_q.Concat(customers2).ToList();
+                var allProducts2  = products_q.Concat(products2).ToList();
+                var orders2       = GenerateOrders(capturedOrders, allCustomers2, allProducts2, allCurrencies, usedOrderIds);
+
+                progress.Report(40, "Generating subjects, todos and timetable plans…");
+                var existingSubjects = (await DataStoreProvider.Current.QueryAsync<Subject>(null, ct).ConfigureAwait(false)).ToList();
+                var usedSubjectIds   = new HashSet<string>(existingSubjects.Select(s => s.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                List<Subject> seedSubjects = new();
+                if ((capturedTtps > 0 || capturedLls > 0) && existingSubjects.Count == 0)
+                    seedSubjects = GenerateSeedSubjects(usedSubjectIds);
+
+                var allSubjects    = existingSubjects.Concat(seedSubjects).ToList();
+                var todos2         = GenerateToDos(capturedTodos, usedTodoIds);
+                var timeTablePlans2= GenerateTimeTablePlans(capturedTtps, allSubjects, usedTtpIds);
+                var lessonLogs2    = GenerateLessonLogs(capturedLls, allSubjects, usedLessonLogIds);
+
+                const int saveProgressStart = 50, saveProgressRange = 45;
+                int totalItems = addresses2.Count + units2.Count + customers2.Count + products2.Count +
+                                 employees2.Count + seedCurrencies.Count + orders2.Count +
+                                 seedSubjects.Count + todos2.Count + timeTablePlans2.Count + lessonLogs2.Count;
+                int saved = 0;
+
+                async Task SaveItemsWithProgress2<T>(List<T> items, string label) where T : BaseDataObject
+                {
+                    foreach (var item in items)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        ApplyAuditInfo(item, capturedUser, isCreate: true);
+                        await DataStoreProvider.Current.SaveAsync(item, ct).ConfigureAwait(false);
+                        saved++;
+                        if (totalItems > 0)
+                            progress.Report(
+                                saveProgressStart + (int)(saved * (double)saveProgressRange / totalItems),
+                                $"Saving {label}… ({saved}/{totalItems})");
+                    }
+                }
+
+                progress.Report(saveProgressStart, "Saving generated records…");
+                await SaveItemsWithProgress2(addresses2,    "addresses");
+                await SaveItemsWithProgress2(units2,         "units");
+                await SaveItemsWithProgress2(customers2,     "customers");
+                await SaveItemsWithProgress2(products2,      "products");
+                await SaveItemsWithProgress2(employees2,     "employees");
+                await SaveItemsWithProgress2(seedCurrencies, "currencies");
+                await SaveItemsWithProgress2(orders2,        "orders");
+                await SaveItemsWithProgress2(seedSubjects,   "subjects");
+                await SaveItemsWithProgress2(todos2,         "to-dos");
+                await SaveItemsWithProgress2(timeTablePlans2,"timetable plans");
+                await SaveItemsWithProgress2(lessonLogs2,    "lesson logs");
+
+                progress.Report(100, $"Done. Created {addresses2.Count} addresses, {customers2.Count} customers, " +
+                    $"{units2.Count} units, {products2.Count} products, {employees2.Count} employees, " +
+                    $"{orders2.Count} orders, {todos2.Count} to-dos, {timeTablePlans2.Count} timetable plans, " +
+                    $"{lessonLogs2.Count} lesson logs." +
+                    (seedCurrencies.Count > 0 ? $" Seeded {seedCurrencies.Count} currencies." : "") +
+                    (seedSubjects.Count > 0 ? $" Seeded {seedSubjects.Count} subjects." : ""));
+            });
+
+        var baseUrl   = $"{context.Request.Scheme}://{context.Request.Host}";
+        var statusUrl = $"{baseUrl}/api/jobs/{jobId}";
+        context.Response.StatusCode = StatusCodes.Status202Accepted;
+        context.Response.Headers["Location"] = statusUrl;
+        context.Response.Headers["Retry-After"] = "2";
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(
+            JsonSerializer.Serialize(new { jobId, status = "queued", operationName = "Generate Sample Data", statusUrl })).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// JSON API endpoint for the VNext SPA to start a wipe-all-data background job.
+    /// Accepts a JSON body: { confirmToken }
+    /// Returns 202 Accepted with job info.
+    /// </summary>
+    public async ValueTask AdminWipeDataJsonHandler(HttpContext context)
+    {
+        if (!CsrfProtection.ValidateApiToken(context))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"CSRF validation failed.\"}").ConfigureAwait(false);
+            return;
+        }
+
+        var wipeToken = SettingsService.GetValue(WellKnownSettings.AllowWipeData);
+        if (string.IsNullOrEmpty(wipeToken))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Wipe-data endpoint is disabled (AllowWipeData setting is empty).\"}").ConfigureAwait(false);
+            return;
+        }
+
+        string body;
+        using (var reader = new System.IO.StreamReader(context.Request.Body))
+            body = await reader.ReadToEndAsync().ConfigureAwait(false);
+
+        string confirmToken = string.Empty;
+        try
+        {
+            var doc  = System.Text.Json.JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            if (root.TryGetProperty("confirmToken", out var v)) confirmToken = v.GetString() ?? string.Empty;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Invalid JSON body.\"}").ConfigureAwait(false);
+            return;
+        }
+
+        if (!string.Equals(confirmToken, wipeToken, StringComparison.Ordinal))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Confirmation token did not match.\"}").ConfigureAwait(false);
+            return;
+        }
+
+        var jobId = BackgroundJobService.Instance.StartJob(
+            "Wipe All Data",
+            "/admin/wipe-data",
+            async (progress, ct) =>
+            {
+                progress.Report(0, "Starting wipe…");
+                var entities = DataScaffold.Entities;
+                int totalEntities = entities.Count;
+                int done = 0;
+                foreach (var entity in entities)
+                {
+                    ct.ThrowIfCancellationRequested();
+                    progress.Report(
+                        totalEntities == 0 ? 0 : (int)(done * 95.0 / totalEntities),
+                        $"Wiping {entity.Name}…");
+
+                    var items = (await entity.Handlers.QueryAsync(null, ct).ConfigureAwait(false)).ToList();
+                    foreach (var item in items)
+                    {
+                        if (item == null || item.Key == 0)
+                            continue;
+                        ct.ThrowIfCancellationRequested();
+                        await entity.Handlers.DeleteAsync(item.Key, ct).ConfigureAwait(false);
+                    }
+                    done++;
+                }
+                progress.Report(100, $"Done. Wiped {done} entity store{(done == 1 ? "" : "s")}.");
+            });
+
+        var baseUrl   = $"{context.Request.Scheme}://{context.Request.Host}";
+        var statusUrl = $"{baseUrl}/api/jobs/{jobId}";
+        context.Response.StatusCode = StatusCodes.Status202Accepted;
+        context.Response.Headers["Location"] = statusUrl;
+        context.Response.Headers["Retry-After"] = "2";
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(
+            JsonSerializer.Serialize(new { jobId, status = "queued", operationName = "Wipe All Data", statusUrl })).ConfigureAwait(false);
+    }
+
     public async ValueTask EntityDesignerHandler(HttpContext context)
     {
         await BuildPageHandler(ctx =>

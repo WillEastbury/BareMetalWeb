@@ -742,10 +742,12 @@ public class RouteRegistrationExtensionsTests : IDisposable
         // Arrange & Act
         _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
 
-        // Assert
+        // Assert — most routes require "Authenticated"; admin-only routes require "admin"
         foreach (var kvp in _server.routes)
         {
-            Assert.Equal("Authenticated", kvp.Value.PageInfo!.PageMetaData.PermissionsNeeded);
+            var perm = kvp.Value.PageInfo!.PageMetaData.PermissionsNeeded;
+            Assert.True(perm is "Authenticated" or "admin",
+                $"Route {kvp.Key} has unexpected permission '{perm}'");
         }
     }
 
@@ -769,7 +771,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
 
         // Assert
-        Assert.Equal(13, _server.routes.Count);
+        Assert.Equal(15, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -957,7 +959,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterData > afterAdmin);
         Assert.True(afterLookup > afterData);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 16 + 4 + 13 + 21 + 5 + 13, total); // 3+16+4+13+21+5+13=75
+        Assert.Equal(staticCount + 16 + 4 + 13 + 21 + 5 + 15, total); // 3+16+4+13+21+5+15=77
     }
 
     [Fact]
@@ -1144,6 +1146,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask DataSizingHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask JobStatusHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask JobsListHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask AdminSampleDataJsonHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask AdminWipeDataJsonHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataListExportHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataViewExportHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataBulkDeleteHandler(HttpContext context) => ValueTask.CompletedTask;
