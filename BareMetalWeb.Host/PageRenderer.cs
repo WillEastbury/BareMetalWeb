@@ -7,8 +7,10 @@ using Microsoft.AspNetCore.Http;
 namespace BareMetalWeb.Host;
 
 /// <summary>
-/// Renders Page entities (Markdown or HTML) inside the platform chrome shell.
-/// Handles GET /page/{slug} route.
+/// Utility methods for Page content rendering (Markdown → HTML conversion)
+/// and the list API handler for published pages.
+/// The actual page HTML rendering is handled by <see cref="RouteHandlers.PageContentHandler"/>
+/// which uses the standard <c>IHtmlRenderer</c> for proper platform chrome and theming.
 /// </summary>
 public static partial class PageRenderer
 {
@@ -20,82 +22,6 @@ public static partial class PageRenderer
     private static partial Regex CodeRegex();
     [GeneratedRegex(@"\[(.+?)\]\((.+?)\)")]
     private static partial Regex LinkRegex();
-
-    /// <summary>Handler for GET /page/{slug}.</summary>
-    public static async ValueTask RenderPageHandler(HttpContext context)
-    {
-        var slug = BinaryApiHandlers.GetRouteValue(context, "slug") ?? string.Empty;
-
-        if (string.IsNullOrWhiteSpace(slug))
-        {
-            context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Page slug is required.");
-            return;
-        }
-
-        if (!DataScaffold.TryGetEntity("pages", out var meta))
-        {
-            context.Response.StatusCode = 500;
-            await context.Response.WriteAsync("Page entity not configured.");
-            return;
-        }
-
-        // Find published page by slug
-        var pages = await meta.Handlers.QueryAsync(null, context.RequestAborted);
-        BaseDataObject? pageObj = null;
-
-        foreach (var p in pages)
-        {
-            var pageSlug = GetField(p, meta, "Slug");
-            var status = GetField(p, meta, "Status");
-
-            if (string.Equals(pageSlug, slug, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(status, "published", StringComparison.OrdinalIgnoreCase))
-            {
-                pageObj = p;
-                break;
-            }
-        }
-
-        if (pageObj == null)
-        {
-            context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("Page not found.");
-            return;
-        }
-
-        var title = GetField(pageObj, meta, "Title");
-        var content = GetField(pageObj, meta, "Content");
-        var format = GetField(pageObj, meta, "Format");
-        var metaDesc = GetField(pageObj, meta, "MetaDescription");
-
-        // Convert markdown to HTML if needed
-        var htmlContent = string.Equals(format, "markdown", StringComparison.OrdinalIgnoreCase)
-            ? ConvertMarkdownToHtml(content)
-            : content;
-
-        context.Response.StatusCode = 200;
-        context.Response.ContentType = "text/html; charset=utf-8";
-
-        var sb = new StringBuilder(4096);
-        AppendChromeHead(sb, title, metaDesc);
-        AppendChromeNavbar(sb, title);
-
-        sb.AppendLine("""<div class="container-fluid py-4 px-4 bm-content">""");
-        sb.AppendLine("""  <div class="card shadow-sm bm-page-card">""");
-        sb.AppendLine("""    <div class="card-body">""");
-        sb.AppendLine($"""      <h1 class="mb-4">{System.Net.WebUtility.HtmlEncode(title)}</h1>""");
-        sb.AppendLine("""      <div class="page-content">""");
-        sb.AppendLine(htmlContent);
-        sb.AppendLine("      </div>");
-        sb.AppendLine("    </div>");
-        sb.AppendLine("  </div>");
-        sb.AppendLine("</div>");
-
-        AppendChromeFooter(sb);
-
-        await context.Response.WriteAsync(sb.ToString(), context.RequestAborted);
-    }
 
     /// <summary>API handler: GET /api/pages — list published pages for navigation.</summary>
     public static async ValueTask ListPagesHandler(HttpContext context)
@@ -142,9 +68,10 @@ public static partial class PageRenderer
         await w.FlushAsync(context.RequestAborted);
     }
 
-    // ── Minimal Markdown → HTML conversion ──────────────────────────────────
+    // ── Markdown → HTML conversion ──────────────────────────────────────────
 
-    private static string ConvertMarkdownToHtml(string markdown)
+    /// <summary>Converts a minimal subset of Markdown to HTML.</summary>
+    internal static string ConvertMarkdownToHtml(string markdown)
     {
         if (string.IsNullOrWhiteSpace(markdown)) return string.Empty;
 
@@ -168,8 +95,8 @@ public static partial class PageRenderer
 
             // Headers
             if (line.StartsWith("### ")) { CloseLi(sb, ref inList); sb.AppendLine($"<h3>{InlineFormat(line[4..])}</h3>"); continue; }
-            if (line.StartsWith("## ")) { CloseLi(sb, ref inList); sb.AppendLine($"<h2>{InlineFormat(line[3..])}</h2>"); continue; }
-            if (line.StartsWith("# ")) { CloseLi(sb, ref inList); sb.AppendLine($"<h1>{InlineFormat(line[2..])}</h1>"); continue; }
+            if (line.StartsWith("## "))  { CloseLi(sb, ref inList); sb.AppendLine($"<h2>{InlineFormat(line[3..])}</h2>"); continue; }
+            if (line.StartsWith("# "))   { CloseLi(sb, ref inList); sb.AppendLine($"<h1>{InlineFormat(line[2..])}</h1>"); continue; }
 
             // Horizontal rule
             if (line.StartsWith("---") || line.StartsWith("***")) { CloseLi(sb, ref inList); sb.AppendLine("<hr/>"); continue; }
@@ -206,48 +133,11 @@ public static partial class PageRenderer
     private static string InlineFormat(string text)
     {
         var encoded = System.Net.WebUtility.HtmlEncode(text);
-        // Bold
         encoded = BoldRegex().Replace(encoded, "<strong>$1</strong>");
-        // Italic
         encoded = ItalicRegex().Replace(encoded, "<em>$1</em>");
-        // Code
         encoded = CodeRegex().Replace(encoded, "<code>$1</code>");
-        // Links [text](url)
         encoded = LinkRegex().Replace(encoded, """<a href="$2">$1</a>""");
         return encoded;
-    }
-
-    // ── Chrome helpers ──────────────────────────────────────────────────────
-
-    private static void AppendChromeHead(StringBuilder sb, string title, string metaDesc)
-    {
-        sb.AppendLine("<!DOCTYPE html><html lang=\"en\"><head>");
-        sb.AppendLine("<meta charset=\"utf-8\"/>");
-        sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>");
-        sb.AppendLine($"<title>{System.Net.WebUtility.HtmlEncode(title)}</title>");
-        if (!string.IsNullOrWhiteSpace(metaDesc))
-            sb.AppendLine($"<meta name=\"description\" content=\"{System.Net.WebUtility.HtmlEncode(metaDesc)}\"/>");
-        sb.AppendLine("""<link rel="stylesheet" href="/static/css/bootstrap.min.css"/>""");
-        sb.AppendLine("""<link rel="stylesheet" href="/static/css/bootstrap-icons.min.css"/>""");
-        sb.AppendLine("<style>.page-content { line-height: 1.8; font-size: 1.05rem; } .page-content pre { background: #f8f9fa; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; } .page-content code { color: #d63384; } .page-content pre code { color: inherit; }</style>");
-        sb.AppendLine("</head><body class=\"bg-light\">");
-    }
-
-    private static void AppendChromeNavbar(StringBuilder sb, string title)
-    {
-        sb.AppendLine("""<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-0">""");
-        sb.AppendLine("""  <div class="container-fluid">""");
-        sb.AppendLine("""    <a class="navbar-brand" href="/">BareMetalWeb</a>""");
-        sb.AppendLine("""    <span class="navbar-text text-light">""");
-        sb.Append(System.Net.WebUtility.HtmlEncode(title));
-        sb.AppendLine("</span>");
-        sb.AppendLine("  </div></nav>");
-    }
-
-    private static void AppendChromeFooter(StringBuilder sb)
-    {
-        sb.AppendLine("""<script src="/static/js/bootstrap.bundle.min.js"></script>""");
-        sb.AppendLine("</body></html>");
     }
 
     private static string GetField(BaseDataObject obj, DataEntityMetadata meta, string fieldName)

@@ -50,6 +50,12 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /statusRaw", new RouteHandlerData(
             pageInfoFactory.RawPage("Public", false),
             routeHandlers.TimeRawHandler));
+
+        // Content page routes — use the standard template renderer for proper chrome and theming.
+        // Per-page authorization is enforced inside PageContentHandler via the RequiredPermission field.
+        host.RegisterRoute("GET /page/{slug}", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "", "" }, "Public", false, 0),
+            routeHandlers.PageContentHandler));
     }
 
     /// <summary>
@@ -489,7 +495,6 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/_cluster", new RouteHandlerData(adminOnly, ClusterApiHandlers.ClusterStatusHandler));
         host.RegisterRoute("GET /api/_cluster/replicate", new RouteHandlerData(adminOnly, ClusterApiHandlers.ReplicationHandler));
         host.RegisterRoute("POST /api/_cluster/stepdown", new RouteHandlerData(adminOnly, ClusterApiHandlers.StepDownHandler));
-        host.RegisterRoute("GET /page/{slug}", new RouteHandlerData(raw, PageRenderer.RenderPageHandler));
         host.RegisterRoute("GET /api/pages", new RouteHandlerData(raw, PageRenderer.ListPagesHandler));
         host.RegisterRoute("GET /products", new RouteHandlerData(raw, ProductRenderer.CategoryBrowseHandler));
         host.RegisterRoute("GET /products/{category}", new RouteHandlerData(raw, ProductRenderer.ProductGridHandler));

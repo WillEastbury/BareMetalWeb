@@ -129,8 +129,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         // Arrange & Act
         _server.RegisterStaticRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
-        // Assert
-        Assert.Equal(3, _server.routes.Count);
+        // Assert — 3 static routes + 1 content page route (/page/{slug})
+        Assert.Equal(4, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -1148,6 +1148,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask JobsListHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask AdminSampleDataJsonHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask AdminWipeDataJsonHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask PageContentHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataListExportHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataViewExportHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataBulkDeleteHandler(HttpContext context) => ValueTask.CompletedTask;

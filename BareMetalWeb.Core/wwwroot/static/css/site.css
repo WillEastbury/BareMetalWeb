@@ -881,3 +881,24 @@ body {
     padding-top: 0.75rem;
     margin-top: 0.5rem;
 }
+
+/* ── Page content renderer ────────────────────────────────────────────── */
+.page-content {
+    line-height: 1.8;
+    font-size: 1.05rem;
+}
+
+.page-content pre {
+    background: var(--bs-tertiary-bg, #f8f9fa);
+    padding: 1rem;
+    border-radius: 0.5rem;
+    overflow-x: auto;
+}
+
+.page-content code {
+    color: var(--bs-danger, #d63384);
+}
+
+.page-content pre code {
+    color: inherit;
+}

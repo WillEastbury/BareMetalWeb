@@ -7739,4 +7739,111 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(items)).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Renders a published <see cref="BareMetalWeb.Data.DataObjects.Page"/> entity inside the
+    /// standard platform chrome (theme, navbar, card shell).
+    /// Per-page authorization is enforced via the <c>RequiredPermission</c> field.
+    /// </summary>
+    public async ValueTask PageContentHandler(HttpContext context)
+    {
+        var slug = BinaryApiHandlers.GetRouteValue(context, "slug") ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(slug))
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync("Page slug is required.").ConfigureAwait(false);
+            return;
+        }
+
+        if (!DataScaffold.TryGetEntity("pages", out var meta))
+        {
+            context.Response.StatusCode = 500;
+            await context.Response.WriteAsync("Page entity not configured.").ConfigureAwait(false);
+            return;
+        }
+
+        // Locate the published page matching the slug
+        var pages = await meta.Handlers.QueryAsync(null, context.RequestAborted).ConfigureAwait(false);
+        BaseDataObject? pageObj = null;
+
+        foreach (var p in pages)
+        {
+            var pageSlug  = GetMetaFieldValue(p, meta, "Slug");
+            var status    = GetMetaFieldValue(p, meta, "Status");
+
+            if (string.Equals(pageSlug, slug, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(status, "published", StringComparison.OrdinalIgnoreCase))
+            {
+                pageObj = p;
+                break;
+            }
+        }
+
+        if (pageObj == null)
+        {
+            context.Response.StatusCode = 404;
+            await context.Response.WriteAsync("Page not found.").ConfigureAwait(false);
+            return;
+        }
+
+        // Per-page authorization
+        var requiredPermission = GetMetaFieldValue(pageObj, meta, "RequiredPermission");
+        if (string.IsNullOrWhiteSpace(requiredPermission))
+            requiredPermission = "Public";
+
+        if (!string.Equals(requiredPermission, "Public", StringComparison.OrdinalIgnoreCase))
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null)
+            {
+                // Redirect unauthenticated users to login
+                var returnUrl = Uri.EscapeDataString($"/page/{slug}");
+                context.Response.Redirect($"/login?returnUrl={returnUrl}");
+                return;
+            }
+
+            if (!string.Equals(requiredPermission, "Authenticated", StringComparison.OrdinalIgnoreCase))
+            {
+                var required     = requiredPermission.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                var userPerms    = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                bool hasAll = true;
+                for (int i = 0; i < required.Length; i++)
+                {
+                    if (!userPerms.Contains(required[i]))
+                    {
+                        hasAll = false;
+                        break;
+                    }
+                }
+                if (!hasAll)
+                {
+                    context.Response.StatusCode = 403;
+                    await context.Response.WriteAsync("Access denied.").ConfigureAwait(false);
+                    return;
+                }
+            }
+        }
+
+        var title   = GetMetaFieldValue(pageObj, meta, "Title");
+        var content = GetMetaFieldValue(pageObj, meta, "Content");
+        var format  = GetMetaFieldValue(pageObj, meta, "Format");
+
+        var htmlContent = string.Equals(format, "markdown", StringComparison.OrdinalIgnoreCase)
+            ? PageRenderer.ConvertMarkdownToHtml(content)
+            : content;
+
+        context.SetStringValue("title", title);
+        context.SetStringValue("html_message", $"<div class=\"page-content\">{htmlContent}</div>");
+
+        await _renderer.RenderPage(context).ConfigureAwait(false);
+    }
+
+    /// <summary>Gets a field value from a data object by field name using the entity metadata.</summary>
+    private static string GetMetaFieldValue(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    {
+        var field = meta.Fields.FirstOrDefault(f =>
+            string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        return field?.GetValueFn?.Invoke(obj)?.ToString() ?? string.Empty;
+    }
 }

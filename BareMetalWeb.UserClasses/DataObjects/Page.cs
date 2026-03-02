@@ -46,5 +46,13 @@ public class Page : RenderableDataObject
     [DataField(Label = "Show in Nav", Order = 8)]
     public bool ShowInNav { get; set; }
 
+    /// <summary>
+    /// Required permission to view this page.
+    /// Use "Public" for everyone, "Authenticated" for logged-in users only,
+    /// or a comma-separated list of role names for role-based access.
+    /// </summary>
+    [DataField(Label = "Required Permission", Order = 9)]
+    public string RequiredPermission { get; set; } = "Public";
+
     public override string ToString() => Title;
 }
