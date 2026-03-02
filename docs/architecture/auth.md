@@ -165,14 +165,13 @@ Every response includes the following security headers:
 
 | Header | Value |
 |--------|-------|
-| `Content-Security-Policy` | `default-src 'self'; script-src 'self' cdn.jsdelivr.net 'nonce-{n}'; …` |
-| `X-Content-Type-Options` | `nosniff` |
-| `X-Frame-Options` | `DENY` |
-| `Referrer-Policy` | `strict-origin-when-cross-origin` |
-| `Permissions-Policy` | `camera=(), microphone=(), geolocation=()` |
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self' 'nonce-{n}'; style-src 'self' 'nonce-{n}'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'` |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` (HTTPS requests only) |
 
 The CSP `nonce` is generated fresh for each request and embedded in the page; it is not reused across requests.
 
+The `Strict-Transport-Security` (HSTS) header is only emitted when the request is served over HTTPS (including requests where HTTPS is determined via trusted `X-Forwarded-Proto` headers). This prevents browsers from downgrading to plain HTTP on subsequent visits.
+
 ---
 
-_Status: Verified against codebase @ commit e38d19057e1a55fc1d9a563f5ec6228bb991a0b5_
+_Status: Verified against codebase @ commit c9a5bdc (HSTS header and data query timeout added)_
