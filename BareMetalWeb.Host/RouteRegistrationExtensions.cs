@@ -22,6 +22,9 @@ namespace BareMetalWeb.Host;
 /// </summary>
 public static class RouteRegistrationExtensions
 {
+    private static readonly JsonSerializerOptions JsonCompact = new() { WriteIndented = false };
+    private static readonly JsonSerializerOptions JsonIndented = new() { WriteIndented = true };
+
     /// <summary>
     /// Register static/public page routes (home, status).
     /// </summary>
@@ -403,7 +406,7 @@ public static class RouteRegistrationExtensions
 
                 context.Response.ContentType = "application/json";
                 await context.Response.WriteAsync(
-                    JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = false }));
+                    JsonSerializer.Serialize(result, JsonCompact));
             }));
     }
 
@@ -482,9 +485,10 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/_binary/{type}/_actions", new RouteHandlerData(raw, ActionApiHandlers.ListActionsHandler));
         host.RegisterRoute("POST /api/_binary/{type}/_action/{actionId}", new RouteHandlerData(raw, ActionApiHandlers.ExecuteActionHandler));
         host.RegisterRoute("GET /api/_metrics", new RouteHandlerData(raw, EngineMetricsHandler));
-        host.RegisterRoute("GET /api/_cluster", new RouteHandlerData(raw, ClusterApiHandlers.ClusterStatusHandler));
-        host.RegisterRoute("GET /api/_cluster/replicate", new RouteHandlerData(raw, ClusterApiHandlers.ReplicationHandler));
-        host.RegisterRoute("POST /api/_cluster/stepdown", new RouteHandlerData(raw, ClusterApiHandlers.StepDownHandler));
+        var adminOnly = pageInfoFactory.RawPage("admin", false);
+        host.RegisterRoute("GET /api/_cluster", new RouteHandlerData(adminOnly, ClusterApiHandlers.ClusterStatusHandler));
+        host.RegisterRoute("GET /api/_cluster/replicate", new RouteHandlerData(adminOnly, ClusterApiHandlers.ReplicationHandler));
+        host.RegisterRoute("POST /api/_cluster/stepdown", new RouteHandlerData(adminOnly, ClusterApiHandlers.StepDownHandler));
         host.RegisterRoute("GET /page/{slug}", new RouteHandlerData(raw, PageRenderer.RenderPageHandler));
         host.RegisterRoute("GET /api/pages", new RouteHandlerData(raw, PageRenderer.ListPagesHandler));
         host.RegisterRoute("GET /products", new RouteHandlerData(raw, ProductRenderer.CategoryBrowseHandler));
@@ -533,7 +537,7 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var jsonOpts = new JsonSerializerOptions { WriteIndented = false };
+                var jsonOpts = JsonCompact;
 
                 // ── Upstream: walk RelatedDocument fields to find parent documents ──────────
                 var upstream = new List<object>();
@@ -639,7 +643,7 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("Authenticated", false),
             async context =>
             {
-                var jsonOpts = new JsonSerializerOptions { WriteIndented = false };
+                var jsonOpts = JsonCompact;
 
                 var nodes = new List<object>();
                 var links = new List<object>();
@@ -758,7 +762,7 @@ public static class RouteRegistrationExtensions
                 context.Response.ContentType = "application/json";
                 context.Response.Headers["Cache-Control"] = "private, max-age=300";
                 await context.Response.WriteAsync(
-                    JsonSerializer.Serialize(entities, new JsonSerializerOptions { WriteIndented = false }));
+                    JsonSerializer.Serialize(entities, JsonCompact));
             }));
 
         // Full schema for a single entity, including fields, lookups, computed, and commands
@@ -779,7 +783,7 @@ public static class RouteRegistrationExtensions
                 context.Response.ContentType = "application/json";
                 context.Response.Headers["Cache-Control"] = "private, max-age=300";
                 await context.Response.WriteAsync(
-                    JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = false }));
+                    JsonSerializer.Serialize(result, JsonCompact));
             }));
 
         // VNext SPA shell — serve for all /UI and /UI/{*path} routes (default UI).
@@ -810,7 +814,7 @@ public static class RouteRegistrationExtensions
     {
         var queryService = new BareMetalWeb.Runtime.QueryService();
         var commandService = new BareMetalWeb.Runtime.CommandService();
-        var jsonOptions = new JsonSerializerOptions { WriteIndented = false };
+        var jsonOptions = JsonCompact;
 
         // GET /meta/entity/{name} — RuntimeEntityModel schema + DataEntityMetadata fields
         host.RegisterRoute("GET /meta/entity/{name}", new RouteHandlerData(
@@ -1489,7 +1493,7 @@ public static class RouteRegistrationExtensions
                         .ToArray()
                 };
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = false }));
+                await context.Response.WriteAsync(JsonSerializer.Serialize(json, JsonCompact));
             }));
 
         // GET /api/reports/_distinct/{entity}/{field} — distinct field values for dropdown population
@@ -1504,7 +1508,7 @@ public static class RouteRegistrationExtensions
 
                 context.Response.StatusCode = 200;
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(values, new JsonSerializerOptions { WriteIndented = false }));
+                await context.Response.WriteAsync(JsonSerializer.Serialize(values, JsonCompact));
             }));
     }
 
@@ -1662,7 +1666,7 @@ public static class RouteRegistrationExtensions
                 hasElevated = resolved.HasElevatedPermissions;
             }
 
-            var json = EscapeJsonForInlineScript(JsonSerializer.Serialize(entities, new JsonSerializerOptions { WriteIndented = false }));
+            var json = EscapeJsonForInlineScript(JsonSerializer.Serialize(entities, JsonCompact));
             var sb = new StringBuilder();
             sb.Append($"<script nonce=\"{safeNonce}\">window.__BMW_META_OBJECTS__={json};");
             if (hasElevated)
@@ -1690,7 +1694,7 @@ public static class RouteRegistrationExtensions
                 return null;
 
             var schema = BuildEntitySchema(meta);
-            var schemaJson = EscapeJsonForInlineScript(JsonSerializer.Serialize(schema, new JsonSerializerOptions { WriteIndented = false }));
+            var schemaJson = EscapeJsonForInlineScript(JsonSerializer.Serialize(schema, JsonCompact));
 
             var safeSlug = JsonSerializer.Serialize(slug);
             return $"<script nonce=\"{safeNonce}\">window.__BMW_META_SLUG__=window.__BMW_META_SLUG__||{{}};window.__BMW_META_SLUG__[{safeSlug}]={schemaJson};</script>";
@@ -1766,14 +1770,14 @@ public static class RouteRegistrationExtensions
                 ["total"] = total
             };
 
-            var initialJson = EscapeJsonForInlineScript(JsonSerializer.Serialize(initialData, new JsonSerializerOptions { WriteIndented = false }));
+            var initialJson = EscapeJsonForInlineScript(JsonSerializer.Serialize(initialData, JsonCompact));
 
             // Pre-resolve FK lookup values for all lookup fields visible in the list view.
             // This allows the client to skip the /api/_lookup/{slug}/_batch round-trips.
             var lookupPrefetch = await BuildLookupPrefetchAsync(meta, payload, cancellationToken).ConfigureAwait(false);
             string? prefetchJson = null;
             if (lookupPrefetch != null)
-                prefetchJson = EscapeJsonForInlineScript(JsonSerializer.Serialize(lookupPrefetch, new JsonSerializerOptions { WriteIndented = false }));
+                prefetchJson = EscapeJsonForInlineScript(JsonSerializer.Serialize(lookupPrefetch, JsonCompact));
 
             var scriptContent = $"window.__BMW_INITIAL_DATA__={initialJson};";
             if (prefetchJson != null)

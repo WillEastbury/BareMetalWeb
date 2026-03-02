@@ -61,8 +61,9 @@ public sealed class ClusterState : IDisposable
     /// Validate that this instance is allowed to write.
     /// Must be called before every WAL append.
     /// Throws if not leader or lease expired.
+    /// Returns the current epoch for the fence token.
     /// </summary>
-    public void ValidateWritePermission()
+    public long ValidateWritePermission()
     {
         if (!IsLeader)
             throw new InvalidOperationException(
@@ -75,6 +76,9 @@ public sealed class ClusterState : IDisposable
             throw new InvalidOperationException(
                 "Write rejected: leader lease lost. Instance demoted to follower.");
         }
+
+        // Capture epoch atomically with validation — prevents stale epoch in WAL entries
+        return _lease.CurrentEpoch;
     }
 
     /// <summary>
@@ -83,9 +87,9 @@ public sealed class ClusterState : IDisposable
     /// </summary>
     public (long Epoch, long Lsn) AssignLsn()
     {
-        ValidateWritePermission();
+        var epoch = ValidateWritePermission();
         var lsn = Interlocked.Increment(ref _lastLsn);
-        return (_lease.CurrentEpoch, lsn);
+        return (epoch, lsn);
     }
 
     /// <summary>Set the LSN watermark during recovery/replay.</summary>

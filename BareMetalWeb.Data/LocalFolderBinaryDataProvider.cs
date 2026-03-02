@@ -197,26 +197,23 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var lockObj = _seqIdLocks.GetOrAdd(entityName, _ => new object());
 
-        lock (lockObj)
+        const int maxRetries = 4;
+        const int initialDelayMs = 10;
+
+        for (int attempt = 0; attempt < maxRetries; attempt++)
         {
-            const int maxRetries = 4;
-            const int initialDelayMs = 10;
-
-            for (int attempt = 0; attempt < maxRetries; attempt++)
+            try
             {
-                try
-                {
-                    return IncrementAndReadSeqKeyFile(path);
-                }
-                catch (IOException)
-                {
-                    Thread.Sleep(initialDelayMs * (1 << attempt));
-                }
+                lock (lockObj) { return IncrementAndReadSeqKeyFile(path); }
             }
-
-            // Final attempt – let any IOException propagate.
-            return IncrementAndReadSeqKeyFile(path);
+            catch (IOException)
+            {
+                Thread.Sleep(initialDelayMs * (1 << attempt));
+            }
         }
+
+        // Final attempt – let any IOException propagate.
+        lock (lockObj) { return IncrementAndReadSeqKeyFile(path); }
     }
 
     public void SeedSequentialKey(string entityName, uint floor)
@@ -230,27 +227,24 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var lockObj = _seqIdLocks.GetOrAdd(entityName, _ => new object());
 
-        lock (lockObj)
+        const int maxRetries = 4;
+        const int initialDelayMs = 10;
+
+        for (int attempt = 0; attempt < maxRetries; attempt++)
         {
-            const int maxRetries = 4;
-            const int initialDelayMs = 10;
-
-            for (int attempt = 0; attempt < maxRetries; attempt++)
+            try
             {
-                try
-                {
-                    SeedSeqKeyFileIfLower(path, floor);
-                    return;
-                }
-                catch (IOException)
-                {
-                    Thread.Sleep(initialDelayMs * (1 << attempt));
-                }
+                lock (lockObj) { SeedSeqKeyFileIfLower(path, floor); }
+                return;
             }
-
-            // Final attempt – let any IOException propagate.
-            SeedSeqKeyFileIfLower(path, floor);
+            catch (IOException)
+            {
+                Thread.Sleep(initialDelayMs * (1 << attempt));
+            }
         }
+
+        // Final attempt – let any IOException propagate.
+        lock (lockObj) { SeedSeqKeyFileIfLower(path, floor); }
     }
 
     private static uint IncrementAndReadSeqKeyFile(string path)
@@ -373,32 +367,33 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         {
             var bytes = SerializeFor(_serializer, obj, schemaVersion);
             var store = GetClusteredStore(type.Name);
+            var keyStr = obj.Key.ToString();
 
             // Load existing object only on updates (existing location found) to track previous indexed field values.
             // New inserts skip this load since there are no prior index entries to clean up.
             T? oldObj = null;
             List<PropertyInfo> indexedFields = new();
-            if (_searchIndexManager.HasIndexedFields(type, out indexedFields) && TryGetClusteredLocation(type.Name, obj.Key.ToString(), out _))
+            if (_searchIndexManager.HasIndexedFields(type, out indexedFields) && TryGetClusteredLocation(type.Name, keyStr, out _))
                 oldObj = Load<T>(obj.Key);
 
-            var location = store.Write(obj.Key.ToString(), bytes);
+            var location = store.Write(keyStr, bytes);
             var map = GetClusteredLocationMap(type.Name);
-            map.TryGetValue(obj.Key.ToString(), out var existingLocation);
+            map.TryGetValue(keyStr, out var existingLocation);
 
             // Batch append operations to avoid lock contention
             var entries = new List<(string key, string id, char op, long? expiresAtUtcTicks)>
             {
-                (obj.Key.ToString(), location, 'A', null)
+                (keyStr, location, 'A', null)
             };
 
             if (!string.IsNullOrWhiteSpace(existingLocation)
                 && !string.Equals(existingLocation, location, StringComparison.OrdinalIgnoreCase))
             {
-                entries.Add((obj.Key.ToString(), existingLocation, 'D', null));
+                entries.Add((keyStr, existingLocation, 'D', null));
             }
 
             _indexStore.AppendEntries(type.Name, ClusteredIndexFieldName, entries, normalizeKey: false);
-            map[obj.Key.ToString()] = location;
+            map[keyStr] = location;
 
             if (!string.IsNullOrWhiteSpace(existingLocation)
                 && !string.Equals(existingLocation, location, StringComparison.OrdinalIgnoreCase))
@@ -417,9 +412,9 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                         var oldValue = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
                         if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
                             continue; // value unchanged — existing index entry is still valid
-                        _indexStore.AppendEntry(type.Name, prop.Name, oldValue, obj.Key.ToString(), 'D');
+                        _indexStore.AppendEntry(type.Name, prop.Name, oldValue, keyStr, 'D');
                     }
-                    _indexStore.AppendEntry(type.Name, prop.Name, newValue, obj.Key.ToString(), 'A');
+                    _indexStore.AppendEntry(type.Name, prop.Name, newValue, keyStr, 'A');
                 }
                 _searchIndexManager.IndexObject(obj);
             }
@@ -484,7 +479,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             throw new ArgumentException("Key cannot be zero.", nameof(key));
 
         var type = typeof(T);
-        if (!TryGetClusteredLocation(type.Name, key.ToString(), out var location))
+        var keyStr = key.ToString();
+        if (!TryGetClusteredLocation(type.Name, keyStr, out var location))
             return default;
 
         var store = GetClusteredStore(type.Name);
@@ -495,8 +491,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             // Evict the cache entry and retry once using the index store as the authoritative source.
             if (_clusteredLocationMaps.TryGetValue(type.Name, out var locationMap))
             {
-                locationMap.TryRemove(key.ToString(), out _);
-                bool foundFresh = _indexStore.TryGetLatestValue(type.Name, ClusteredIndexFieldName, key.ToString(), out var freshLocation, normalizeKey: false);
+                locationMap.TryRemove(keyStr, out _);
+                bool foundFresh = _indexStore.TryGetLatestValue(type.Name, ClusteredIndexFieldName, keyStr, out var freshLocation, normalizeKey: false);
                 bool isDifferentLocation = foundFresh
                     && !string.IsNullOrWhiteSpace(freshLocation)
                     && !string.Equals(freshLocation, location, StringComparison.OrdinalIgnoreCase);
@@ -504,7 +500,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                 {
                     bytes = store.Read(freshLocation);
                     if (bytes != null)
-                        locationMap[key.ToString()] = freshLocation;
+                        locationMap[keyStr] = freshLocation;
                 }
             }
             if (bytes == null)

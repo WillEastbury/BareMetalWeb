@@ -358,7 +358,7 @@ public static class CssBundleService
             return Regex.Replace(raw,
                 @"url\(\s*[""']?\.?/?fonts/bootstrap-icons\.woff2[^""')]*[""']?\s*\)",
                 "url('/static/fonts/bootstrap-icons.woff2')",
-                RegexOptions.IgnoreCase);
+                RegexOptions.IgnoreCase | RegexOptions.Compiled);
         }
         catch (Exception ex)
         {
@@ -381,7 +381,7 @@ public static class CssBundleService
         themeCss = Regex.Replace(themeCss,
             @"@import\s+url\(\s*[""']?https://fonts\.googleapis\.com[^""')]*[""']?\s*\)\s*;?",
             string.Empty,
-            RegexOptions.IgnoreCase);
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         return $"/* bootstrap-icons@{BootstrapIconsVersion} */\n{iconsCss}\n\n/* bootswatch@{BootswatchVersion} theme: {themeName} */\n{themeCss}";
     }

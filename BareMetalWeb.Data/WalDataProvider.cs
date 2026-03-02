@@ -164,8 +164,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             var bytes  = _serializer.Serialize(obj, schemaVersion);
             var walKey = GetOrAllocateKey(type.Name, obj.Key);
 
-            _walStore.CommitAsync(new[] { WalOp.Upsert(walKey, bytes) })
-                     .GetAwaiter().GetResult();
+            var commitTask = _walStore.CommitAsync(new[] { WalOp.Upsert(walKey, bytes) });
+            if (!commitTask.IsCompleted)
+                commitTask.GetAwaiter().GetResult();
 
             PersistIdMap(type.Name);
         }
@@ -301,8 +302,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var idMap    = GetOrLoadIdMap(typeName);
         if (!idMap.TryGetValue(key, out var walKey)) return;
 
-        _walStore.CommitAsync(new[] { WalOp.Delete(walKey) })
-                 .GetAwaiter().GetResult();
+        var commitTask = _walStore.CommitAsync(new[] { WalOp.Delete(walKey) });
+        if (!commitTask.IsCompleted)
+            commitTask.GetAwaiter().GetResult();
 
         idMap.TryRemove(key, out _);
         PersistIdMap(typeName);

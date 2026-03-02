@@ -15,6 +15,8 @@ namespace BareMetalWeb.Host;
 /// </summary>
 public static class LookupApiHandlers
 {
+    private static readonly JsonSerializerOptions JsonCamelCase = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false };
+
     /// <summary>
     /// GET /api/_lookup/{EntityType}/{Id}
     /// Fetches a single entity by ID.
@@ -369,7 +371,7 @@ public static class LookupApiHandlers
         var queryDef = new QueryDefinition();
 
         var viewableFields = new HashSet<string>(
-            meta.Fields.Where(f => f.View).Select(f => f.Name),
+            meta.ViewFields.Select(f => f.Name),
             StringComparer.OrdinalIgnoreCase);
 
         // Parse filters from query string: ?filter=field:value
@@ -474,7 +476,7 @@ public static class LookupApiHandlers
             ["id"] = entity.Key.ToString()
         };
 
-        foreach (var field in meta.Fields.Where(f => f.View))
+        foreach (var field in meta.ViewFields)
         {
             var value = field.Property.GetValue(entity);
             result[field.Name] = value;
@@ -541,11 +543,7 @@ public static class LookupApiHandlers
     {
         context.Response.ContentType = "application/json";
         context.Response.StatusCode = StatusCodes.Status200OK;
-        await JsonSerializer.SerializeAsync(context.Response.Body, data, new JsonSerializerOptions
-        {
-            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-            WriteIndented = false
-        });
+        await JsonSerializer.SerializeAsync(context.Response.Body, data, JsonCamelCase);
     }
 
     private static async ValueTask WriteJsonErrorAsync(HttpContext context, int statusCode, string message)

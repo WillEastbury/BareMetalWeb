@@ -92,7 +92,7 @@ public sealed class FileLeaseAuthority : ILeaseAuthority, IDisposable
             writer.Write(InstanceId);
             writer.Flush();
 
-            // Increment epoch atomically
+            // Increment epoch atomically (write to temp, then rename)
             _epoch = IncrementEpoch();
             _leaseExpiryUtc = DateTime.UtcNow + _leaseDuration;
 
@@ -100,18 +100,32 @@ public sealed class FileLeaseAuthority : ILeaseAuthority, IDisposable
         }
         catch (IOException)
         {
-            // Lease file already exists — check if stale
+            // Lease file already exists — check if stale via last-write time.
+            // If stale, attempt a single CreateNew retry (if another instance beats us
+            // to the delete+create, the retry will harmlessly fail with IOException).
             try
             {
                 var info = new FileInfo(_leaseFilePath);
                 if (info.Exists && DateTime.UtcNow - info.LastWriteTimeUtc > _leaseDuration * 2)
                 {
-                    // Stale lease — delete and retry
-                    File.Delete(_leaseFilePath);
-                    return TryAcquireAsync(ct);
+                    try { File.Delete(_leaseFilePath); } catch { /* lost race — OK */ }
+
+                    // Single retry (no recursion) — if another instance already re-created, we lose cleanly.
+                    try
+                    {
+                        _leaseFile = new FileStream(_leaseFilePath, FileMode.CreateNew, FileAccess.ReadWrite,
+                            FileShare.None, 4096, FileOptions.DeleteOnClose);
+                        using var w = new StreamWriter(_leaseFile, leaveOpen: true);
+                        w.Write(InstanceId);
+                        w.Flush();
+                        _epoch = IncrementEpoch();
+                        _leaseExpiryUtc = DateTime.UtcNow + _leaseDuration;
+                        return ValueTask.FromResult(true);
+                    }
+                    catch (IOException) { /* another instance won the race */ }
                 }
             }
-            catch { /* ignore */ }
+            catch { /* ignore stat errors */ }
 
             return ValueTask.FromResult(false);
         }
@@ -123,6 +137,13 @@ public sealed class FileLeaseAuthority : ILeaseAuthority, IDisposable
 
         try
         {
+            // Verify the lease file on disk is still ours (same path, still locked by us)
+            if (!File.Exists(_leaseFilePath))
+            {
+                Demote();
+                return ValueTask.FromResult(false);
+            }
+
             // Touch the file to update LastWriteTime
             _leaseFile.Seek(0, SeekOrigin.Begin);
             _leaseFile.SetLength(0);
@@ -165,7 +186,10 @@ public sealed class FileLeaseAuthority : ILeaseAuthority, IDisposable
         }
         catch { /* start at 1 */ }
 
-        File.WriteAllText(_epochFilePath, epoch.ToString());
+        // Atomic write: temp file then rename (atomic on POSIX, near-atomic on Windows)
+        var tempPath = _epochFilePath + ".tmp";
+        File.WriteAllText(tempPath, epoch.ToString());
+        File.Move(tempPath, _epochFilePath, overwrite: true);
         return epoch;
     }
 

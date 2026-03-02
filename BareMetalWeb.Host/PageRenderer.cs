@@ -10,8 +10,17 @@ namespace BareMetalWeb.Host;
 /// Renders Page entities (Markdown or HTML) inside the platform chrome shell.
 /// Handles GET /page/{slug} route.
 /// </summary>
-public static class PageRenderer
+public static partial class PageRenderer
 {
+    [GeneratedRegex(@"\*\*(.+?)\*\*")]
+    private static partial Regex BoldRegex();
+    [GeneratedRegex(@"\*(.+?)\*")]
+    private static partial Regex ItalicRegex();
+    [GeneratedRegex(@"`(.+?)`")]
+    private static partial Regex CodeRegex();
+    [GeneratedRegex(@"\[(.+?)\]\((.+?)\)")]
+    private static partial Regex LinkRegex();
+
     /// <summary>Handler for GET /page/{slug}.</summary>
     public static async ValueTask RenderPageHandler(HttpContext context)
     {
@@ -198,13 +207,13 @@ public static class PageRenderer
     {
         var encoded = System.Net.WebUtility.HtmlEncode(text);
         // Bold
-        encoded = Regex.Replace(encoded, @"\*\*(.+?)\*\*", "<strong>$1</strong>");
+        encoded = BoldRegex().Replace(encoded, "<strong>$1</strong>");
         // Italic
-        encoded = Regex.Replace(encoded, @"\*(.+?)\*", "<em>$1</em>");
+        encoded = ItalicRegex().Replace(encoded, "<em>$1</em>");
         // Code
-        encoded = Regex.Replace(encoded, @"`(.+?)`", "<code>$1</code>");
+        encoded = CodeRegex().Replace(encoded, "<code>$1</code>");
         // Links [text](url)
-        encoded = Regex.Replace(encoded, @"\[(.+?)\]\((.+?)\)", """<a href="$2">$1</a>""");
+        encoded = LinkRegex().Replace(encoded, """<a href="$2">$1</a>""");
         return encoded;
     }
 

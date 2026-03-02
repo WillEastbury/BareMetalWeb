@@ -44,6 +44,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private static readonly TimeSpan MfaBaseBlockDuration = TimeSpan.FromSeconds(10);
     private static readonly ConcurrentDictionary<string, AttemptTracker> MfaAttempts = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<Type, System.Reflection.PropertyInfo[]> JsonPropertyCache = new();
+    private static readonly JsonSerializerOptions JsonIndented = new() { WriteIndented = true };
 
     public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, AuditService auditService,
         IReadOnlyList<(string SettingId, string Value, string Description)>? settingDefaults = null)
@@ -2814,13 +2815,15 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
+    private static readonly System.Text.RegularExpressions.Regex HtmlTagRegex = new("<[^>]+>", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private static string StripHtmlTags(string html)
     {
         if (string.IsNullOrWhiteSpace(html))
             return string.Empty;
         
         // Simple HTML tag removal (for checkbox and link elements in list rows)
-        var text = System.Text.RegularExpressions.Regex.Replace(html, "<[^>]+>", string.Empty);
+        var text = HtmlTagRegex.Replace(html, string.Empty);
         return WebUtility.HtmlDecode(text);
     }
 
@@ -4387,7 +4390,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!string.IsNullOrWhiteSpace(id))
             data["id"] = id;
 
-        foreach (var field in meta.Fields.Where(f => f.View))
+        foreach (var field in meta.ViewFields)
         {
             var value = field.GetValueFn(instance);
             if (value is StoredFileData fileData && instance is BaseDataObject obj)
@@ -5027,13 +5030,42 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string BuildCsv(string[] headers, string[][] rows)
     {
         var sb = new StringBuilder();
-        sb.AppendLine(string.Join(",", headers.Select(CsvEscape)));
+        AppendCsvRow(sb, headers);
         foreach (var row in rows)
         {
-            sb.AppendLine(string.Join(",", row.Select(CsvEscape)));
+            AppendCsvRow(sb, row);
         }
 
         return sb.ToString();
+    }
+
+    private static void AppendCsvRow(StringBuilder sb, string[] cells)
+    {
+        for (int i = 0; i < cells.Length; i++)
+        {
+            if (i > 0) sb.Append(',');
+            CsvEscapeTo(sb, cells[i]);
+        }
+        sb.AppendLine();
+    }
+
+    private static void CsvEscapeTo(StringBuilder sb, string value)
+    {
+        var safe = value ?? string.Empty;
+        if (safe.Contains('"') || safe.Contains(',') || safe.Contains('\n') || safe.Contains('\r'))
+        {
+            sb.Append('"');
+            foreach (char c in safe)
+            {
+                if (c == '"') sb.Append('"');
+                sb.Append(c);
+            }
+            sb.Append('"');
+        }
+        else
+        {
+            sb.Append(safe);
+        }
     }
 
     private static string CsvEscape(string value)
@@ -5052,7 +5084,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private async ValueTask ExportHierarchicalJson(HttpContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
     {
-        var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+        var jsonOptions = JsonIndented;
         #pragma warning disable IL2026 // Serializing IReadOnlyList<object?> — all entity types preserved via TrimmerRootAssembly
         var json = JsonSerializer.Serialize(items, jsonOptions);
         #pragma warning restore IL2026
@@ -5063,7 +5095,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private async ValueTask ExportSingleHierarchicalJson(HttpContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
     {
-        var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
+        var jsonOptions = JsonIndented;
         #pragma warning disable IL2026 // Serializing entity instance — all entity types preserved via TrimmerRootAssembly
         var json = JsonSerializer.Serialize(instance, jsonOptions);
         #pragma warning restore IL2026
@@ -6878,7 +6910,7 @@ public sealed class RouteHandlers : IRouteHandlers
             html.Append(@"<th scope=""col"">Actions</th>");
         }
 
-        foreach (var field in metadata.Fields.Where(f => f.List).OrderBy(f => f.Order))
+        foreach (var field in metadata.ListFields)
         {
             var isSorted = string.Equals(field.Name, currentSort, StringComparison.OrdinalIgnoreCase);
             var nextDir = isSorted && string.Equals(currentDir, "asc", StringComparison.OrdinalIgnoreCase) ? "desc" : "asc";
@@ -6938,7 +6970,7 @@ public sealed class RouteHandlers : IRouteHandlers
             columnTitles.Add("");
         if (includeActions)
             columnTitles.Add("Actions");
-        columnTitles.AddRange(metadata.Fields.Where(f => f.List).OrderBy(f => f.Order).Select(f => f.Label));
+        columnTitles.AddRange(metadata.ListFields.Select(f => f.Label));
         
         foreach (var row in rows)
         {
