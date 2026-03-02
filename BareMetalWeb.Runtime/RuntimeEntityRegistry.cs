@@ -14,8 +14,10 @@ public sealed class RuntimeEntityRegistry
 {
     private static RuntimeEntityRegistry _current = new RuntimeEntityRegistry();
 
+    private readonly object _sync = new();
     private readonly Dictionary<string, RuntimeEntityModel> _bySlug;
     private readonly Dictionary<string, RuntimeEntityModel> _byEntityId;
+    private RuntimeEntityModel[]? _sortedAll;
     private bool _frozen;
 
     /// <summary>Creates a new, empty, unfrozen registry instance.</summary>
@@ -26,7 +28,7 @@ public sealed class RuntimeEntityRegistry
     }
 
     /// <summary>Global singleton. Replaced atomically by <see cref="BuildAsync"/>.</summary>
-    public static RuntimeEntityRegistry Current => _current;
+    public static RuntimeEntityRegistry Current => Volatile.Read(ref _current);
 
     /// <summary>
     /// Returns all registered models in nav-order.
@@ -35,9 +37,12 @@ public sealed class RuntimeEntityRegistry
     {
         get
         {
-            lock (_bySlug)
+            var cached = _sortedAll;
+            if (cached != null) return cached;
+            lock (_sync)
             {
-                return _bySlug.Values.OrderBy(e => e.NavOrder).ThenBy(e => e.Name).ToList();
+                _sortedAll ??= _bySlug.Values.OrderBy(e => e.NavOrder).ThenBy(e => e.Name).ToArray();
+                return _sortedAll;
             }
         }
     }
@@ -47,7 +52,7 @@ public sealed class RuntimeEntityRegistry
     /// </summary>
     public bool TryGet(string slug, out RuntimeEntityModel model)
     {
-        lock (_bySlug)
+        lock (_sync)
         {
             return _bySlug.TryGetValue(slug, out model!);
         }
@@ -58,7 +63,7 @@ public sealed class RuntimeEntityRegistry
     /// </summary>
     public bool TryGetById(string entityId, out RuntimeEntityModel model)
     {
-        lock (_byEntityId)
+        lock (_sync)
         {
             return _byEntityId.TryGetValue(entityId, out model!);
         }
@@ -72,10 +77,11 @@ public sealed class RuntimeEntityRegistry
         if (_frozen)
             throw new InvalidOperationException("RuntimeEntityRegistry is frozen — no further registrations allowed.");
 
-        lock (_bySlug)
+        lock (_sync)
         {
             _bySlug[model.Slug] = model;
             _byEntityId[model.EntityId] = model;
+            _sortedAll = null;
         }
     }
 
@@ -115,7 +121,7 @@ public sealed class RuntimeEntityRegistry
         if (entityDefs.Count == 0)
         {
             registry.Freeze();
-            _current = registry;
+            Volatile.Write(ref _current, registry);
             return registry;
         }
 
@@ -186,7 +192,7 @@ public sealed class RuntimeEntityRegistry
         }
 
         registry.Freeze();
-        _current = registry;
+        Volatile.Write(ref _current, registry);
         return registry;
     }
 }
