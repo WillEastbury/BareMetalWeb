@@ -67,7 +67,31 @@ public sealed record DataEntityMetadata(
     string? DefaultSortField = null,
     SortDirection DefaultSortDirection = SortDirection.Asc,
     IReadOnlyList<DataFieldMetadata>? DocumentRelationFields = null
-);
+)
+{
+    // Fields is already ordered by Order at build time, so no re-sort is needed.
+    // These cached arrays avoid repeated Where/OrderBy LINQ allocations in render hot paths.
+    private DataFieldMetadata[]? _listFields;
+    private DataFieldMetadata[]? _viewFields;
+
+    /// <summary>Fields where List=true, in Order sequence. Cached after first access.</summary>
+    public DataFieldMetadata[] ListFields => _listFields ??= BuildFilteredArray(f => f.List);
+
+    /// <summary>Fields where View=true, in Order sequence. Cached after first access.</summary>
+    public DataFieldMetadata[] ViewFields => _viewFields ??= BuildFilteredArray(f => f.View);
+
+    private DataFieldMetadata[] BuildFilteredArray(Func<DataFieldMetadata, bool> predicate)
+    {
+        int count = 0;
+        for (int i = 0; i < Fields.Count; i++)
+            if (predicate(Fields[i])) count++;
+        var arr = new DataFieldMetadata[count];
+        int idx = 0;
+        for (int i = 0; i < Fields.Count; i++)
+            if (predicate(Fields[i])) arr[idx++] = Fields[i];
+        return arr;
+    }
+}
 
 public sealed record DataEntityHandlers(
     Func<BaseDataObject> Create,
@@ -88,6 +112,7 @@ public static class DataScaffold
     private static readonly Dictionary<string, LookupCacheEntry> LookupCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, (bool IsLarge, DateTime ExpiresUtc)> LargeListCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly IIdGenerator IdGenerator = new DefaultIdGenerator();
+    private static IReadOnlyList<DataEntityMetadata>? _sortedEntities;
 
     /// <summary>
     /// Fallback JSON AST (serialized) used when expression parsing fails.
@@ -124,7 +149,20 @@ public static class DataScaffold
         {
             lock (Sync)
             {
-                return EntitiesBySlug.Values.OrderBy(e => e.NavOrder).ThenBy(e => e.Name).ToList();
+                if (_sortedEntities != null)
+                    return _sortedEntities;
+                var values = EntitiesBySlug.Values;
+                var arr = new DataEntityMetadata[values.Count];
+                int idx = 0;
+                foreach (var e in values)
+                    arr[idx++] = e;
+                Array.Sort(arr, (a, b) =>
+                {
+                    int cmp = a.NavOrder.CompareTo(b.NavOrder);
+                    return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.Ordinal);
+                });
+                _sortedEntities = arr;
+                return arr;
             }
         }
     }
@@ -140,6 +178,7 @@ public static class DataScaffold
         {
             EntitiesBySlug[metadata.Slug] = metadata;
             EntitiesByType[type] = metadata;
+            _sortedEntities = null;
         }
 
         return true;
@@ -158,6 +197,7 @@ public static class DataScaffold
         lock (Sync)
         {
             EntitiesBySlug[metadata.Slug] = metadata;
+            _sortedEntities = null;
         }
 
         return true;
@@ -321,7 +361,7 @@ public static class DataScaffold
         if (query.TryGetValue("q", out var queryText) && !string.IsNullOrWhiteSpace(queryText))
         {
             var group = new QueryGroup { Logic = QueryGroupLogic.Or };
-            foreach (var field in metadata.Fields.Where(f => f.List))
+            foreach (var field in metadata.ListFields)
             {
                 group.Clauses.Add(new QueryClause
                 {
@@ -454,7 +494,7 @@ public static class DataScaffold
     public static IReadOnlyList<FormField> BuildFormFields(DataEntityMetadata metadata, object? instance, bool forCreate, string? cspNonce = null)
     {
         var fields = new List<FormField>();
-        foreach (var field in metadata.Fields.OrderBy(f => f.Order))
+        foreach (var field in metadata.Fields)
         {
             if (forCreate && !field.Create)
                 continue;
@@ -703,7 +743,7 @@ public static class DataScaffold
     public static IReadOnlyList<(string Label, string Value)> BuildViewRows(DataEntityMetadata metadata, object instance)
     {
         var rows = new List<(string Label, string Value)>();
-        foreach (var field in metadata.Fields.Where(f => f.View).OrderBy(f => f.Order))
+        foreach (var field in metadata.ViewFields)
         {
             var value = field.GetValueFn(instance);
             if (field.Lookup != null)
@@ -731,7 +771,7 @@ public static class DataScaffold
     public static IReadOnlyList<(string Label, string Value, bool IsHtml)> BuildViewRowsHtml(DataEntityMetadata metadata, object instance, Func<DataEntityMetadata, bool>? canRenderLookupLink = null)
     {
         var rows = new List<(string Label, string Value, bool IsHtml)>();
-        foreach (var field in metadata.Fields.Where(f => f.View).OrderBy(f => f.Order))
+        foreach (var field in metadata.ViewFields)
         {
             var value = field.GetValueFn(instance);
             if (field.Lookup != null)
@@ -789,11 +829,10 @@ public static class DataScaffold
 
     public static IReadOnlyList<string> BuildListHeaders(DataEntityMetadata metadata, bool includeActions, bool includeBulkSelection = false)
     {
-        var headers = metadata.Fields
-            .Where(f => f.List)
-            .OrderBy(f => f.Order)
-            .Select(f => f.Label)
-            .ToList();
+        var listFields = metadata.ListFields;
+        var headers = new List<string>(listFields.Length + 2);
+        for (int i = 0; i < listFields.Length; i++)
+            headers.Add(listFields[i].Label);
 
         if (includeActions)
             headers.Insert(0, "Actions");
@@ -810,7 +849,7 @@ public static class DataScaffold
     public static IReadOnlyList<(DataFieldMetadata Field, Type ChildType)> GetNestedComponents(DataEntityMetadata metadata)
     {
         var nested = new List<(DataFieldMetadata, Type)>();
-        foreach (var field in metadata.Fields.Where(f => f.View))
+        foreach (var field in metadata.ViewFields)
         {
             if (IsChildListType(field.Property.PropertyType, out var childType))
             {
@@ -941,7 +980,7 @@ public static class DataScaffold
     {
         var result = new List<(string, string[], string[][])>();
         
-        foreach (var field in metadata.Fields.Where(f => f.View))
+        foreach (var field in metadata.ViewFields)
         {
             if (!IsChildListType(field.Property.PropertyType, out var childType))
                 continue;
@@ -1004,7 +1043,7 @@ public static class DataScaffold
     {
         var rows = new List<string[]>();
         // Pre-build lookup maps once per field (not per row)
-        var listFields = metadata.Fields.Where(f => f.List).OrderBy(f => f.Order).ToArray();
+        var listFields = metadata.ListFields;
         var lookupMaps = new Dictionary<string, string>?[listFields.Length];
         for (int fi = 0; fi < listFields.Length; fi++)
         {
@@ -1459,8 +1498,9 @@ public static class DataScaffold
             html.Append($"<th scope=\"col\">{WebUtility.HtmlEncode(timeField.Label)}</th>");
             
             // Add other list fields
-            foreach (var field in metadata.Fields.Where(f => f.List && f != dayField && f != timeField))
+            foreach (var field in metadata.ListFields)
             {
+                if (field == dayField || field == timeField) continue;
                 html.Append($"<th scope=\"col\">{WebUtility.HtmlEncode(field.Label)}</th>");
             }
             
@@ -1501,8 +1541,9 @@ public static class DataScaffold
                 html.Append($"<td>{WebUtility.HtmlEncode(timeDisplay)}</td>");
 
                 // Other list fields
-                foreach (var field in metadata.Fields.Where(f => f.List && f != dayField && f != timeField))
+                foreach (var field in metadata.ListFields)
                 {
+                    if (field == dayField || field == timeField) continue;
                     var rawValue = field.GetValueFn(item);
                     string displayValue;
 
@@ -1617,7 +1658,7 @@ public static class DataScaffold
     public static List<string> ApplyValuesFromForm(DataEntityMetadata metadata, object instance, IDictionary<string, string?> values, bool forCreate)
     {
         var errors = new List<string>();
-        foreach (var field in metadata.Fields.OrderBy(f => f.Order))
+        foreach (var field in metadata.Fields)
         {
             if (field.ReadOnly)
                 continue;
@@ -1722,7 +1763,7 @@ public static class DataScaffold
     public static List<string> ApplyValuesFromJson(DataEntityMetadata metadata, object instance, IDictionary<string, JsonElement> values, bool forCreate, bool allowMissing)
     {
         var errors = new List<string>();
-        foreach (var field in metadata.Fields.OrderBy(f => f.Order))
+        foreach (var field in metadata.Fields)
         {
             if (field.ReadOnly)
                 continue;

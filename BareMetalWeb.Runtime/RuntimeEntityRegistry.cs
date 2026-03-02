@@ -17,6 +17,7 @@ public sealed class RuntimeEntityRegistry
     private readonly Dictionary<string, RuntimeEntityModel> _bySlug;
     private readonly Dictionary<string, RuntimeEntityModel> _byEntityId;
     private bool _frozen;
+    private IReadOnlyList<RuntimeEntityModel>? _sortedAll;
 
     /// <summary>Creates a new, empty, unfrozen registry instance.</summary>
     public RuntimeEntityRegistry()
@@ -37,7 +38,20 @@ public sealed class RuntimeEntityRegistry
         {
             lock (_bySlug)
             {
-                return _bySlug.Values.OrderBy(e => e.NavOrder).ThenBy(e => e.Name).ToList();
+                if (_sortedAll != null)
+                    return _sortedAll;
+                var values = _bySlug.Values;
+                var arr = new RuntimeEntityModel[values.Count];
+                int idx = 0;
+                foreach (var e in values)
+                    arr[idx++] = e;
+                Array.Sort(arr, (a, b) =>
+                {
+                    int cmp = a.NavOrder.CompareTo(b.NavOrder);
+                    return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.Ordinal);
+                });
+                _sortedAll = arr;
+                return arr;
             }
         }
     }
@@ -76,6 +90,7 @@ public sealed class RuntimeEntityRegistry
         {
             _bySlug[model.Slug] = model;
             _byEntityId[model.EntityId] = model;
+            _sortedAll = null;
         }
     }
 

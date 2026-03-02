@@ -404,25 +404,29 @@ public class HtmlRenderer : IHtmlRenderer
         string[]? existingKeys,
         string[]? existingValues)
     {
-        var keys = new List<string>(newValues.Count + (existingKeys?.Length ?? 0));
-        var values = new List<string>(newValues.Count + (existingValues?.Length ?? 0));
+        int total = newValues.Count + (existingKeys?.Length ?? 0);
+        var keys = new string[total];
+        var values = new string[total];
 
+        int idx = 0;
         foreach (var kvp in newValues)
         {
-            keys.Add(kvp.Key);
-            values.Add(kvp.Value);
+            keys[idx] = kvp.Key;
+            values[idx] = kvp.Value;
+            idx++;
         }
 
         if (existingKeys != null && existingValues != null)
         {
             for (int i = 0; i < existingKeys.Length; i++)
             {
-                keys.Add(existingKeys[i]);
-                values.Add(existingValues[i]);
+                keys[idx] = existingKeys[i];
+                values[idx] = existingValues[i];
+                idx++;
             }
         }
 
-        return (keys.ToArray(), values.ToArray());
+        return (keys, values);
     }
 
     private static void Write(PipeWriter writer, string text)
