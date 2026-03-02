@@ -6,8 +6,8 @@ namespace BareMetalWeb.Data;
 /// Full transaction commit pipeline:
 /// 1. Acquire locks (sorted, deadlock-free)
 /// 2. Load canonical state for all aggregates
-/// 3. Apply envelope mutations to working copies
-/// 4. Run all AssertIf validations
+/// 3. Run all AssertIf validations against canonical state
+/// 4. Apply envelope mutations to working copies
 /// 5. If valid: save all mutations atomically, release locks, return success
 /// 6. If invalid: release locks, return rejected
 /// </summary>
@@ -69,7 +69,37 @@ public sealed class TransactionCommitEngine
                 beforeSnapshots[key] = CloneEntity(entity, meta);
             }
 
-            // 3. Apply mutations to working copies
+            // 3. Validate all AssertIf assertions against canonical (pre-mutation) state
+            var warnings = new List<TransactionWarning>();
+            foreach (var assert in envelope.Assertions)
+            {
+                // Evaluate against the first (root) mutation's entity
+                if (envelope.Mutations.Count == 0) continue;
+                var rootMut = envelope.Mutations[0];
+                var rootKey = $"{rootMut.AggregateType}:{rootMut.AggregateId}";
+                if (!loadedEntities.TryGetValue(rootKey, out var root)) continue;
+
+                var eval = new ExpressionEvaluator(root.Layout);
+                bool conditionMet = eval.EvaluateBool(assert.Condition, root.Entity);
+
+                if (!conditionMet)
+                {
+                    switch (assert.Severity)
+                    {
+                        case Severity.Error:
+                            EngineMetrics.RecordCommit(EngineMetrics.ElapsedUs(commitStart), false);
+                            return Fail(assert.Code, assert.Message);
+                        case Severity.Warning:
+                            warnings.Add(new TransactionWarning(assert.Code, assert.Message));
+                            break;
+                        case Severity.Info:
+                            warnings.Add(new TransactionWarning(assert.Code, assert.Message));
+                            break;
+                    }
+                }
+            }
+
+            // 4. Apply mutations to working copies (only reached if assertions passed)
             foreach (var mutation in envelope.Mutations)
             {
                 var key = $"{mutation.AggregateType}:{mutation.AggregateId}";
@@ -100,36 +130,6 @@ public sealed class TransactionCommitEngine
                         value = Enum.ToObject(field.ClrType, intVal);
 
                     field.Setter(entity, value);
-                }
-            }
-
-            // 4. Run all AssertIf validations
-            var warnings = new List<TransactionWarning>();
-            foreach (var assert in envelope.Assertions)
-            {
-                // Evaluate against the first (root) mutation's entity
-                if (envelope.Mutations.Count == 0) continue;
-                var rootMut = envelope.Mutations[0];
-                var rootKey = $"{rootMut.AggregateType}:{rootMut.AggregateId}";
-                if (!loadedEntities.TryGetValue(rootKey, out var root)) continue;
-
-                var eval = new ExpressionEvaluator(root.Layout);
-                bool conditionMet = eval.EvaluateBool(assert.Condition, root.Entity);
-
-                if (!conditionMet)
-                {
-                    switch (assert.Severity)
-                    {
-                        case Severity.Error:
-                            EngineMetrics.RecordCommit(EngineMetrics.ElapsedUs(commitStart), false);
-                            return Fail(assert.Code, assert.Message);
-                        case Severity.Warning:
-                            warnings.Add(new TransactionWarning(assert.Code, assert.Message));
-                            break;
-                        case Severity.Info:
-                            warnings.Add(new TransactionWarning(assert.Code, assert.Message));
-                            break;
-                    }
                 }
             }
 
