@@ -75,7 +75,11 @@ public sealed class SystemPrincipal : User
     }
 
     public static string GenerateRawApiKey()
-        => Guid.NewGuid().ToString("N");
+    {
+        Span<byte> bytes = stackalloc byte[32];
+        System.Security.Cryptography.RandomNumberGenerator.Fill(bytes);
+        return Convert.ToHexString(bytes).ToLowerInvariant();
+    }
 
     private string EncodeApiKey(string apiKey)
     {
