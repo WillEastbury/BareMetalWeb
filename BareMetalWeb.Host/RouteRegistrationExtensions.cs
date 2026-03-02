@@ -475,7 +475,9 @@ public static class RouteRegistrationExtensions
     /// </summary>
     public static void RegisterBinaryApiRoutes(
         this IBareWebHost host,
-        IPageInfoFactory pageInfoFactory)
+        IRouteHandlers routeHandlers,
+        IPageInfoFactory pageInfoFactory,
+        IHtmlTemplate mainTemplate)
     {
         var raw = pageInfoFactory.RawPage("Public", false);
         host.RegisterRoute("GET /api/_binary/_key", new RouteHandlerData(raw, BinaryApiHandlers.KeyHandler));
@@ -489,10 +491,11 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/_cluster", new RouteHandlerData(adminOnly, ClusterApiHandlers.ClusterStatusHandler));
         host.RegisterRoute("GET /api/_cluster/replicate", new RouteHandlerData(adminOnly, ClusterApiHandlers.ReplicationHandler));
         host.RegisterRoute("POST /api/_cluster/stepdown", new RouteHandlerData(adminOnly, ClusterApiHandlers.StepDownHandler));
-        host.RegisterRoute("GET /page/{slug}", new RouteHandlerData(raw, PageRenderer.RenderPageHandler));
+        var templated = pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "", "" }, "Public", false, 1);
+        host.RegisterRoute("GET /page/{slug}", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(PageRenderer.ConfigurePageAsync)));
         host.RegisterRoute("GET /api/pages", new RouteHandlerData(raw, PageRenderer.ListPagesHandler));
-        host.RegisterRoute("GET /products", new RouteHandlerData(raw, ProductRenderer.CategoryBrowseHandler));
-        host.RegisterRoute("GET /products/{category}", new RouteHandlerData(raw, ProductRenderer.ProductGridHandler));
+        host.RegisterRoute("GET /products", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(ProductRenderer.ConfigureCategoryBrowseAsync)));
+        host.RegisterRoute("GET /products/{category}", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(ProductRenderer.ConfigureProductGridAsync)));
         host.RegisterRoute("GET /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.GetHandler));
         host.RegisterRoute("GET /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.ListHandler));
         host.RegisterRoute("POST /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.CreateHandler));

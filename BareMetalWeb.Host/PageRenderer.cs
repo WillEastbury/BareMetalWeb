@@ -21,22 +21,24 @@ public static partial class PageRenderer
     [GeneratedRegex(@"\[(.+?)\]\((.+?)\)")]
     private static partial Regex LinkRegex();
 
-    /// <summary>Handler for GET /page/{slug}.</summary>
-    public static async ValueTask RenderPageHandler(HttpContext context)
+    /// <summary>Configures context for GET /page/{slug} inside platform chrome.</summary>
+    public static async ValueTask ConfigurePageAsync(HttpContext context)
     {
         var slug = BinaryApiHandlers.GetRouteValue(context, "slug") ?? string.Empty;
 
         if (string.IsNullOrWhiteSpace(slug))
         {
             context.Response.StatusCode = 400;
-            await context.Response.WriteAsync("Page slug is required.");
+            context.SetStringValue("title", "Page");
+            context.SetStringValue("html_message", "<p>Page slug is required.</p>");
             return;
         }
 
         if (!DataScaffold.TryGetEntity("pages", out var meta))
         {
             context.Response.StatusCode = 500;
-            await context.Response.WriteAsync("Page entity not configured.");
+            context.SetStringValue("title", "Page");
+            context.SetStringValue("html_message", "<p>Page entity not configured.</p>");
             return;
         }
 
@@ -60,27 +62,21 @@ public static partial class PageRenderer
         if (pageObj == null)
         {
             context.Response.StatusCode = 404;
-            await context.Response.WriteAsync("Page not found.");
+            context.SetStringValue("title", "Page Not Found");
+            context.SetStringValue("html_message", "<p>Page not found.</p>");
             return;
         }
 
         var title = GetField(pageObj, meta, "Title");
         var content = GetField(pageObj, meta, "Content");
         var format = GetField(pageObj, meta, "Format");
-        var metaDesc = GetField(pageObj, meta, "MetaDescription");
 
         // Convert markdown to HTML if needed
         var htmlContent = string.Equals(format, "markdown", StringComparison.OrdinalIgnoreCase)
             ? ConvertMarkdownToHtml(content)
             : content;
 
-        context.Response.StatusCode = 200;
-        context.Response.ContentType = "text/html; charset=utf-8";
-
         var sb = new StringBuilder(4096);
-        AppendChromeHead(sb, title, metaDesc);
-        AppendChromeNavbar(sb, title);
-
         sb.AppendLine("""<div class="container-fluid py-4 px-4 bm-content">""");
         sb.AppendLine("""  <div class="card shadow-sm bm-page-card">""");
         sb.AppendLine("""    <div class="card-body">""");
@@ -92,9 +88,8 @@ public static partial class PageRenderer
         sb.AppendLine("  </div>");
         sb.AppendLine("</div>");
 
-        AppendChromeFooter(sb);
-
-        await context.Response.WriteAsync(sb.ToString(), context.RequestAborted);
+        context.SetStringValue("title", title);
+        context.SetStringValue("html_message", sb.ToString());
     }
 
     /// <summary>API handler: GET /api/pages — list published pages for navigation.</summary>
@@ -215,39 +210,6 @@ public static partial class PageRenderer
         // Links [text](url)
         encoded = LinkRegex().Replace(encoded, """<a href="$2">$1</a>""");
         return encoded;
-    }
-
-    // ── Chrome helpers ──────────────────────────────────────────────────────
-
-    private static void AppendChromeHead(StringBuilder sb, string title, string metaDesc)
-    {
-        sb.AppendLine("<!DOCTYPE html><html lang=\"en\"><head>");
-        sb.AppendLine("<meta charset=\"utf-8\"/>");
-        sb.AppendLine("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>");
-        sb.AppendLine($"<title>{System.Net.WebUtility.HtmlEncode(title)}</title>");
-        if (!string.IsNullOrWhiteSpace(metaDesc))
-            sb.AppendLine($"<meta name=\"description\" content=\"{System.Net.WebUtility.HtmlEncode(metaDesc)}\"/>");
-        sb.AppendLine("""<link rel="stylesheet" href="/static/css/bootstrap.min.css"/>""");
-        sb.AppendLine("""<link rel="stylesheet" href="/static/css/bootstrap-icons.min.css"/>""");
-        sb.AppendLine("<style>.page-content { line-height: 1.8; font-size: 1.05rem; } .page-content pre { background: #f8f9fa; padding: 1rem; border-radius: 0.5rem; overflow-x: auto; } .page-content code { color: #d63384; } .page-content pre code { color: inherit; }</style>");
-        sb.AppendLine("</head><body class=\"bg-light\">");
-    }
-
-    private static void AppendChromeNavbar(StringBuilder sb, string title)
-    {
-        sb.AppendLine("""<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-0">""");
-        sb.AppendLine("""  <div class="container-fluid">""");
-        sb.AppendLine("""    <a class="navbar-brand" href="/">BareMetalWeb</a>""");
-        sb.AppendLine("""    <span class="navbar-text text-light">""");
-        sb.Append(System.Net.WebUtility.HtmlEncode(title));
-        sb.AppendLine("</span>");
-        sb.AppendLine("  </div></nav>");
-    }
-
-    private static void AppendChromeFooter(StringBuilder sb)
-    {
-        sb.AppendLine("""<script src="/static/js/bootstrap.bundle.min.js"></script>""");
-        sb.AppendLine("</body></html>");
     }
 
     private static string GetField(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
