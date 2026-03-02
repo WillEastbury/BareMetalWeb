@@ -209,13 +209,39 @@ body {
 .bm-data-tree-list {
     list-style: none;
     margin: 0;
-    padding-left: 1.5rem;
+    padding-left: 1.25rem;
     position: relative;
 }
 
+/* Remove left padding on the root-level list */
+.bm-data-tree-sidebar > .bm-data-tree-list {
+    padding-left: 0;
+}
+
 .bm-data-tree-list > li {
-    margin-bottom: 0.25rem;
+    margin-bottom: 0.15rem;
     position: relative;
+}
+
+/* Tree connector lines */
+.bm-data-tree-list .bm-data-tree-list > li::before {
+    content: '';
+    position: absolute;
+    left: -0.75rem;
+    top: 0;
+    height: 100%;
+    border-left: 1px solid var(--bs-border-color, rgba(0, 0, 0, 0.15));
+}
+.bm-data-tree-list .bm-data-tree-list > li:last-child::before {
+    height: 0.95rem;
+}
+.bm-data-tree-list .bm-data-tree-list > li::after {
+    content: '';
+    position: absolute;
+    left: -0.75rem;
+    top: 0.95rem;
+    width: 0.5rem;
+    border-top: 1px solid var(--bs-border-color, rgba(0, 0, 0, 0.15));
 }
 
 /* Tree item wrapper */
@@ -232,18 +258,18 @@ body {
 
 /* Expand/collapse toggle button */
 .bm-tree-toggle {
-    width: 1.2rem;
-    height: 1.2rem;
+    width: 1.4rem;
+    height: 1.4rem;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
     user-select: none;
-    font-size: 0.7rem;
+    font-size: 0.85rem;
     flex-shrink: 0;
     color: var(--bs-secondary-color, #6c757d);
     transition: color 0.15s ease;
-    border-radius: 0.15rem;
+    border-radius: 0.25rem;
 }
 
 .bm-tree-toggle:hover {

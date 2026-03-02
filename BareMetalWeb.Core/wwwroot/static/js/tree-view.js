@@ -20,19 +20,19 @@
                 const childList = li.querySelector(':scope > .bm-data-tree-list');
                 if (!childList) return;
                 
-                // Toggle visibility
+                const icon = this.querySelector('i');
+                if (!icon) return;
+
                 const isCurrentlyExpanded = !childList.classList.contains('d-none');
                 
                 if (isCurrentlyExpanded) {
-                    // Collapse
                     childList.classList.add('d-none');
-                    this.textContent = '▸';
+                    icon.className = 'bi bi-chevron-right';
                     this.classList.remove('bm-tree-expanded');
                     this.classList.add('bm-tree-collapsed');
                 } else {
-                    // Expand
                     childList.classList.remove('d-none');
-                    this.textContent = '▾';
+                    icon.className = 'bi bi-chevron-down';
                     this.classList.remove('bm-tree-collapsed');
                     this.classList.add('bm-tree-expanded');
                 }
