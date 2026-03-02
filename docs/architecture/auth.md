@@ -175,3 +175,50 @@ The `Strict-Transport-Security` (HSTS) header is only emitted when the request i
 ---
 
 _Status: Verified against codebase @ commit c9a5bdc (HSTS header and data query timeout added)_
+
+---
+
+## Rate Limiting
+
+Several endpoints are rate-limited to prevent brute-force and abuse:
+
+| Endpoint | Limit | Window | Key |
+|----------|-------|--------|-----|
+| `POST /account/login` | 5 attempts | 60 s | IP address |
+| `POST /register` | 5 attempts | 60 s | IP address |
+| `POST /api/device/code` | 10 requests | 60 s | IP address |
+| `POST /api/device/token` | 10 requests | 60 s | IP address |
+| `POST /account/mfa` | 5 attempts | 60 s | User ID |
+
+When the rate limit is exceeded, the server returns **429 Too Many Requests** with a `Retry-After` header indicating how many seconds to wait.
+
+The rate limiter uses `ConcurrentDictionary<string, AttemptTracker>` with lock-free `AddOrUpdate` semantics. Stale entries are cleaned up on a sliding window.
+
+---
+
+## API Endpoint Authentication
+
+### MCP (Model Context Protocol)
+
+All MCP requests require authentication. The MCP handler checks `UserAuth.GetRequestUserAsync()` at entry and returns **401 Unauthorized** if no valid session or API key is present.
+
+### Cluster Endpoints
+
+All cluster management endpoints (`/api/cluster/*`) require the **admin** or **monitoring** permission. The handler uses `RequireAdminAsync()` which returns **401** for unauthenticated users and **403** for users lacking the required permissions.
+
+### Binary/Delta API Content-Type
+
+Binary and delta API write endpoints (`POST`, `PUT`, `PATCH`) validate the `Content-Type` header. Requests with a `Content-Type` that matches simple CORS types (`application/x-www-form-urlencoded`, `multipart/form-data`, `text/plain`) are rejected with **415 Unsupported Media Type**. This prevents CSRF via form submissions — non-simple content types trigger a CORS preflight that the browser will block if the origin isn't allowed.
+
+### Request Body Size Limits
+
+Write endpoints enforce a **10 MB** body size limit. Requests with a `Content-Length` exceeding this limit are rejected with **413 Request Entity Too Large** before reading the body.
+
+---
+
+## Error Information Disclosure Protection
+
+API error responses are sanitized to prevent information leakage:
+
+- **Exception messages** (`ex.Message`) are never exposed in HTTP responses — generic error text is returned instead
+- **Entity type names** are stripped from 404 responses to prevent entity enumeration attacks
