@@ -1123,11 +1123,17 @@ public static class RouteRegistrationExtensions
             if (f.Lookup != null)
             {
                 var targetMeta = DataScaffold.GetEntityByType(f.Lookup.TargetType);
+                // The generic /api/{slug} endpoint serialises the entity key as "id".
+                // When the lookup's ValueField is the C# key property ("Key"), map it to
+                // "id" so the VNext SPA's loadLookupSelect correctly matches options.
+                var clientValueField = string.Equals(f.Lookup.ValueField,
+                    nameof(BaseDataObject.Key),
+                    StringComparison.OrdinalIgnoreCase) ? "id" : f.Lookup.ValueField;
                 fd["lookup"] = new Dictionary<string, object?>
                 {
                     ["targetSlug"] = targetMeta?.Slug,
                     ["targetName"] = targetMeta?.Name,
-                    ["valueField"] = f.Lookup.ValueField,
+                    ["valueField"] = clientValueField,
                     ["displayField"] = f.Lookup.DisplayField,
                     ["queryField"] = f.Lookup.QueryField,
                     ["queryOperator"] = f.Lookup.QueryOperator.ToString(),

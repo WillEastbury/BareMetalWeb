@@ -1184,6 +1184,43 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.Equal("LookupList", (string?)addressField["type"]);
     }
 
+    /// <summary>
+    /// Regression test for "TTP Editor missing Subject Lookup":
+    /// When a lookup field's ValueField is "Key" (the C# entity key property), the schema
+    /// sent to the VNext SPA must use "id" — the JSON key that /api/{slug} returns — so
+    /// that loadLookupSelect can match options to the saved value instead of falling back
+    /// to showing the raw numeric ID in the dropdown.
+    /// </summary>
+    [Fact]
+    public void BuildEntitySchema_LookupWithKeyValueField_EmitsIdAsValueField()
+    {
+        // Arrange — SubjectId on TimeTablePlan has [DataLookup(typeof(Subject))] which
+        // defaults ValueField to nameof(BaseDataObject.Key) = "Key".
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.Subject>();
+        DataScaffold.RegisterEntity<BareMetalWeb.Data.DataObjects.TimeTablePlan>();
+        Assert.True(DataScaffold.TryGetEntity("time-table-plans", out var meta));
+
+        // Act
+        var method = typeof(RouteRegistrationExtensions).GetMethod(
+            "BuildEntitySchema",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+        var schema = (Dictionary<string, object?>)method.Invoke(null, new object[] { meta! })!;
+        var fields = (object[])schema["fields"]!;
+        var subjectField = fields
+            .Cast<Dictionary<string, object?>>()
+            .FirstOrDefault(f => string.Equals((string?)f["name"], "SubjectId", StringComparison.Ordinal));
+
+        Assert.NotNull(subjectField);
+        var lookup = subjectField["lookup"] as Dictionary<string, object?>;
+        Assert.NotNull(lookup);
+
+        // The valueField must be "id" (matching the JSON key produced by BuildApiModel),
+        // NOT "Key" (the C# property name), so the dropdown can correctly pre-select
+        // the saved Subject when editing a TimeTablePlan.
+        Assert.Equal("id", (string?)lookup["valueField"]);
+    }
+
     [Fact]
     public void BuildEntitySchema_NonLookupField_ReturnsOriginalFieldType()
     {
