@@ -296,7 +296,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         // ── Full scan (no usable index) ───────────────────────────────────────
 
         var canShortCircuit = query == null || query.Sorts.Count == 0;
-        var results         = new List<T>();
+        var results         = new List<T>(Math.Min(top, idMap.Count));
         int matched         = 0;
 
         foreach (var (objKey, walKey) in idMap)  // ConcurrentDictionary supports safe concurrent enumeration
