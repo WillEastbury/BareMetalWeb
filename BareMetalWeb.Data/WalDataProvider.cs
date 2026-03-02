@@ -41,6 +41,8 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private const uint   IdMapMagic            = 0x494D4150u; // "IMAP"
     private const ushort IdMapVersion          = 2;
     private const int    DefaultQueryLimit     = int.MaxValue;
+    private const string PagedFolderName       = "Paged";
+    private const string PagedFileExtension    = ".page";
 
     // Monotonic ETag counter — cheaper than Guid.NewGuid() per save
     private static long _etagCounter = DateTime.UtcNow.Ticks;
@@ -52,6 +54,8 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private readonly IDataQueryEvaluator       _queryEvaluator;
     private readonly IBufferedLogger?          _logger;
     private readonly WalStore                  _walStore;
+    private readonly IndexStore                _indexStore;
+    private readonly SearchIndexManager        _searchIndexManager;
 
     // Per-entity uint-key → packed-ulong-WAL-key map (loaded lazily from the id-map file)
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<uint, ulong>> _idMaps
@@ -92,6 +96,8 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var walDir = Path.Combine(rootPath, WalSubFolder);
         Directory.CreateDirectory(walDir);
         _walStore = new WalStore(walDir);
+        _indexStore = new IndexStore(this, logger);
+        _searchIndexManager = new SearchIndexManager(rootPath, logger);
     }
 
     public void Dispose()
@@ -161,6 +167,13 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         // ── Serialize and commit to WAL ────────────────────────────────────
         try
         {
+            // Load the existing object before overwriting, so we can remove stale index entries
+            var idMap    = GetOrLoadIdMap(type.Name);
+            T? oldObj    = null;
+            List<PropertyInfo> indexedFields = new();
+            if (_searchIndexManager.HasIndexedFields(type, out indexedFields) && idMap.ContainsKey(obj.Key))
+                oldObj = Load<T>(obj.Key);
+
             var bytes  = _serializer.Serialize(obj, schemaVersion);
             var walKey = GetOrAllocateKey(type.Name, obj.Key);
 
@@ -169,6 +182,25 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                 commitTask.GetAwaiter().GetResult();
 
             PersistIdMap(type.Name);
+
+            // ── Update secondary field indexes ────────────────────────────
+            if (indexedFields.Count > 0)
+            {
+                var keyStr = obj.Key.ToString();
+                foreach (var prop in indexedFields)
+                {
+                    var newValue = prop.GetValue(obj)?.ToString() ?? string.Empty;
+                    if (oldObj != null)
+                    {
+                        var oldValue = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
+                        if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
+                            continue; // value unchanged — existing index entry is still valid
+                        _indexStore.AppendEntry(type.Name, prop.Name, oldValue, keyStr, 'D');
+                    }
+                    _indexStore.AppendEntry(type.Name, prop.Name, newValue, keyStr, 'A');
+                }
+                _searchIndexManager.IndexObject(obj);
+            }
         }
         catch (Exception ex)
         {
@@ -214,6 +246,53 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var top  = query?.Top  ?? DefaultQueryLimit;
         if (skip < 0) skip = 0;
         if (top <= 0) return Array.Empty<T>();
+
+        // ── Index-accelerated path: use secondary field index for simple Equals clauses ──
+        // If a [DataIndex]-decorated field with an Equals clause is found in the index,
+        // load only the candidate IDs rather than deserializing every WAL record.
+        // Falls through to the full scan below when no usable index entry exists yet.
+        if (query != null && query.Clauses.Count > 0 && query.Groups.Count == 0
+            && _searchIndexManager.HasIndexedFields(typeof(T), out var indexedFields))
+        {
+            foreach (var clause in query.Clauses)
+            {
+                if (clause.Operator == QueryOperator.Equals && clause.Value != null)
+                {
+                    var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
+                    if (prop != null)
+                    {
+                        var fieldValue = clause.Value.ToString() ?? string.Empty;
+                        var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
+                        if (fieldIndex.Count == 0)
+                            break; // No index entries yet; fall through to full scan
+
+                        IEnumerable<T> candidates;
+                        if (fieldIndex.TryGetValue(fieldValue, out var candidateIds))
+                        {
+                            var loaded = new List<T>(candidateIds.Count);
+                            foreach (var candidateKey in candidateIds)
+                            {
+                                var obj = Load<T>(candidateKey);
+                                if (obj != null)
+                                    loaded.Add(obj);
+                            }
+                            candidates = loaded;
+                        }
+                        else
+                        {
+                            return Array.Empty<T>();
+                        }
+
+                        var filtered = candidates.Where(item => _queryEvaluator.Matches(item, query));
+                        var sorted   = _queryEvaluator.ApplySorts(filtered, query);
+                        if (skip > 0 || top != DefaultQueryLimit)
+                            sorted = sorted.Skip(skip).Take(top);
+                        return sorted.ToList();
+                    }
+                }
+            }
+        }
+        // ── Full scan (no usable index) ───────────────────────────────────────
 
         var canShortCircuit = query == null || query.Sorts.Count == 0;
         var results         = new List<T>();
@@ -298,9 +377,16 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         if (key == 0)
             throw new ArgumentException("Key cannot be zero.", nameof(key));
 
-        var typeName = typeof(T).Name;
+        var type     = typeof(T);
+        var typeName = type.Name;
         var idMap    = GetOrLoadIdMap(typeName);
         if (!idMap.TryGetValue(key, out var walKey)) return;
+
+        // Load the old object before deleting so we can remove its index entries
+        T? oldObj = null;
+        List<PropertyInfo> indexedFields = new();
+        if (_searchIndexManager.HasIndexedFields(type, out indexedFields))
+            oldObj = Load<T>(key);
 
         var commitTask = _walStore.CommitAsync(new[] { WalOp.Delete(walKey) });
         if (!commitTask.IsCompleted)
@@ -308,6 +394,18 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
         idMap.TryRemove(key, out _);
         PersistIdMap(typeName);
+
+        // ── Remove from secondary field indexes ────────────────────────────
+        if (indexedFields.Count > 0 && oldObj != null)
+        {
+            var keyStr = key.ToString();
+            foreach (var prop in indexedFields)
+            {
+                var value = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
+                _indexStore.AppendEntry(typeName, prop.Name, value, keyStr, 'D');
+            }
+            _searchIndexManager.RemoveObject(type, key);
+        }
     }
 
     public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default)
@@ -380,8 +478,31 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
     public IDisposable AcquireIndexLock(string entityName, string fieldName)
     {
-        // WalDataProvider does not use the legacy IndexStore; return a no-op handle.
-        return new NoOpDisposable();
+        if (string.IsNullOrWhiteSpace(entityName))
+            throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
+        if (string.IsNullOrWhiteSpace(fieldName))
+            throw new ArgumentException("Field name cannot be empty.", nameof(fieldName));
+
+        var lockPath = Path.Combine(_rootPath, IndexFolderName, SanitizeFilePart(entityName),
+                                    SanitizeFilePart(fieldName) + IndexLogExtension + ".lock");
+        Directory.CreateDirectory(Path.GetDirectoryName(lockPath) ?? _rootPath);
+
+        const int maxRetries    = 5;
+        const int initialDelayMs = 10;
+
+        for (int attempt = 0; attempt <= maxRetries; attempt++)
+        {
+            try
+            {
+                return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            }
+            catch (IOException) when (attempt < maxRetries)
+            {
+                Thread.Sleep(initialDelayMs * (1 << attempt));
+            }
+        }
+
+        return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
     }
 
     public bool IndexFileExists(string entityName, string fieldName, IndexFileKind kind)
@@ -402,15 +523,55 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         => throw new NotSupportedException("WalDataProvider does not use legacy index files.");
 
     public bool PagedFileExists(string entityName, string fileName)
-        => false;
+    {
+        var path = GetPagedFilePath(entityName, fileName);
+        return File.Exists(path);
+    }
 
     public IPagedFile OpenPagedFile(string entityName, string fileName, int pageSize,
         FileAccess access)
-        => throw new NotSupportedException("WalDataProvider does not use paged files.");
+    {
+        if (string.IsNullOrWhiteSpace(entityName))
+            throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
+        if (string.IsNullOrWhiteSpace(fileName))
+            throw new ArgumentException("File name cannot be empty.", nameof(fileName));
+        if (pageSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(pageSize), "Page size must be greater than zero.");
+
+        var path = GetPagedFilePath(entityName, fileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? _rootPath);
+
+        var options = FileOptions.RandomAccess | FileOptions.Asynchronous;
+        var exists  = File.Exists(path);
+
+        if (access == FileAccess.Read && !exists)
+        {
+            using (var initStream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read, 4096, options))
+            {
+                using var initializer = new LocalPagedFile(initStream, pageSize);
+                initializer.Flush();
+            }
+        }
+
+        var fileShare = access == FileAccess.Read ? FileShare.ReadWrite : FileShare.Read;
+        var stream    = new FileStream(path, FileMode.OpenOrCreate, access, fileShare, 4096, options);
+        return new LocalPagedFile(stream, pageSize);
+    }
 
     public ValueTask DeletePagedFileAsync(string entityName, string fileName,
         CancellationToken cancellationToken = default)
-        => ValueTask.CompletedTask;  // no-op — no paged files to delete
+    {
+        var path = GetPagedFilePath(entityName, fileName);
+        if (File.Exists(path))
+            File.Delete(path);
+        return ValueTask.CompletedTask;
+    }
+
+    private string GetPagedFilePath(string entityName, string fileName)
+    {
+        var folder = Path.Combine(_rootPath, PagedFolderName, SanitizeFilePart(entityName));
+        return Path.Combine(folder, SanitizeFilePart(fileName) + PagedFileExtension);
+    }
 
     // ── WAL key management ────────────────────────────────────────────────────
 
@@ -773,10 +934,5 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         foreach (var c in Path.GetInvalidFileNameChars())
             name = name.Replace(c, '_');
         return name;
-    }
-
-    private sealed class NoOpDisposable : IDisposable
-    {
-        public void Dispose() { }
     }
 }

@@ -359,4 +359,156 @@ public sealed class WalDataProviderTests : IDisposable
         Assert.True(provider.CanHandle(typeof(AppSetting)));
         Assert.True(provider.CanHandle(typeof(object)));
     }
+
+    // ── Secondary index acceleration ──────────────────────────────────────────
+
+    [Fact]
+    public void Query_IndexedFieldEquals_UsesIndexNotFullScan()
+    {
+        // AppSetting.SettingId is decorated with [DataIndex], so WalDataProvider
+        // must populate the secondary index on Save and consult it on Query.
+        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        using var provider = new WalDataProvider(_dir);
+
+        const int total = 20;
+        for (int i = 0; i < total; i++)
+        {
+            var s = MakeSetting("sid_" + i, "val_" + i);
+            s.Key = provider.NextSequentialKey("AppSetting");
+            provider.Save(s);
+        }
+
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "sid_5" }
+            }
+        };
+
+        var results = provider.Query<AppSetting>(query).ToList();
+
+        Assert.Single(results);
+        Assert.Equal("sid_5", results[0].SettingId);
+    }
+
+    [Fact]
+    public void Query_IndexedFieldEquals_NoMatch_ReturnsEmpty()
+    {
+        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        using var provider = new WalDataProvider(_dir);
+        for (int i = 0; i < 5; i++)
+        {
+            var s = MakeSetting("x_" + i);
+            s.Key = provider.NextSequentialKey("AppSetting");
+            provider.Save(s);
+        }
+
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "does_not_exist" }
+            }
+        };
+
+        var results = provider.Query<AppSetting>(query).ToList();
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public void Query_IndexedField_AfterDelete_ExcludesDeletedRecord()
+    {
+        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        using var provider = new WalDataProvider(_dir);
+
+        var s1 = MakeSetting("del_target", "to_be_deleted");
+        s1.Key = provider.NextSequentialKey("AppSetting");
+        provider.Save(s1);
+
+        var s2 = MakeSetting("del_target2", "to_keep");
+        s2.Key = provider.NextSequentialKey("AppSetting");
+        provider.Save(s2);
+
+        // Delete the first record — the index entry must be cleaned up
+        provider.Delete<AppSetting>(s1.Key);
+
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "del_target" }
+            }
+        };
+
+        var results = provider.Query<AppSetting>(query).ToList();
+        Assert.Empty(results);
+    }
+
+    [Fact]
+    public void Query_IndexedField_AfterUpdate_ReflectsNewValue()
+    {
+        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        using var provider = new WalDataProvider(_dir);
+
+        var s = MakeSetting("old_id", "v");
+        s.Key = provider.NextSequentialKey("AppSetting");
+        provider.Save(s);
+
+        // Update the indexed field
+        s.SettingId = "new_id";
+        provider.Save(s);
+
+        // old value must no longer be found
+        var queryOld = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "old_id" }
+            }
+        };
+        Assert.Empty(provider.Query<AppSetting>(queryOld).ToList());
+
+        // new value must be found
+        var queryNew = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = "new_id" }
+            }
+        };
+        var results = provider.Query<AppSetting>(queryNew).ToList();
+        Assert.Single(results);
+        Assert.Equal("new_id", results[0].SettingId);
+    }
+
+    [Fact]
+    public void Query_IndexedField_SurvivesProviderRestart()
+    {
+        // Ensure that the secondary index paged files are persisted so a fresh
+        // WalDataProvider instance can still accelerate queries.
+        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
+        string settingId;
+
+        using (var p1 = new WalDataProvider(_dir))
+        {
+            var s = MakeSetting("persist_idx", "v");
+            s.Key = p1.NextSequentialKey("AppSetting");
+            p1.Save(s);
+            settingId = s.SettingId;
+        }
+
+        using var p2 = new WalDataProvider(_dir);
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = settingId }
+            }
+        };
+
+        var results = p2.Query<AppSetting>(query).ToList();
+        Assert.Single(results);
+        Assert.Equal(settingId, results[0].SettingId);
+    }
 }
