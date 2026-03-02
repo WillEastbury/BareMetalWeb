@@ -845,6 +845,30 @@ public class BareMetalWebServerTests : IDisposable
     }
 
     [Fact]
+    public async Task RequestHandler_NoRootUser_AllowsApiPaths()
+    {
+        // Arrange — simulates the state after a wipe-all-data job: no users exist but the SPA
+        // is still polling /api/jobs/{jobId} to track the background job's completion.
+        EnsureStore();
+        ((_testStore as InMemoryDataStore)!).Clear();
+
+        var handlerExecuted = false;
+        _server.RegisterRoute("GET /api/jobs/test-job", new RouteHandlerData(
+            CreatePageInfo("Jobs"),
+            async (ctx) => { handlerExecuted = true; await Task.CompletedTask; }
+        ));
+
+        var context = CreateHttpContext("GET", "/api/jobs/test-job");
+
+        // Act
+        await _server.RequestHandler(context);
+
+        // Assert — API call must not be redirected to /setup
+        Assert.True(handlerExecuted, "API endpoint should be reachable even when no root user exists");
+        Assert.NotEqual(302, context.Response.StatusCode);
+    }
+
+    [Fact]
     public async Task RequestHandler_RootUserExists_NoRedirectToSetup()
     {
         // Arrange

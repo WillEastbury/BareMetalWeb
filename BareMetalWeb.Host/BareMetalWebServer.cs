@@ -613,6 +613,11 @@ public class BareMetalWebServer : IBareWebHost
         if (requestPath.StartsWith("/setup", StringComparison.OrdinalIgnoreCase))
             return false;
 
+        // Allow API calls through so background-job polling (and other API requests)
+        // continue to work even when all users have been wiped (e.g. wipe-all-data job).
+        if (requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
+            return false;
+
         var staticPrefix = StaticFiles?.NormalizedRequestPathPrefix;
         if (string.IsNullOrWhiteSpace(staticPrefix))
             staticPrefix = StaticFiles?.RequestPathPrefix;
