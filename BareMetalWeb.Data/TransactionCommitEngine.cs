@@ -54,9 +54,11 @@ public sealed class TransactionCommitEngine
                 if (!DataScaffold.TryGetEntity(mutation.AggregateType, out var meta))
                     return Fail("ENTITY_NOT_FOUND", $"Unknown entity type '{mutation.AggregateType}'.");
 
-                var entity = await DataScaffold.LoadAsync(meta, mutation.AggregateId, cancellationToken) as BaseDataObject;
-                if (entity == null)
+                var loaded = await DataScaffold.LoadAsync(meta, mutation.AggregateId, cancellationToken);
+                if (loaded is null)
                     return Fail("ENTITY_NOT_FOUND", $"Entity {mutation.AggregateType}:{mutation.AggregateId} not found.");
+                if (loaded is not BaseDataObject entity)
+                    return Fail("TYPE_MISMATCH", $"Expected BaseDataObject for {mutation.AggregateType}:{mutation.AggregateId}, got {loaded.GetType().Name}.");
 
                 var layout = EntityLayoutCompiler.GetOrCompile(meta);
                 loadedEntities[key] = (meta, entity, layout);
@@ -196,9 +198,11 @@ public sealed class TransactionCommitEngine
         if (!DataScaffold.TryGetEntity(action.AggregateType, out var meta))
             return Fail("ENTITY_NOT_FOUND", $"Unknown entity type '{action.AggregateType}'.");
 
-        var entity = await DataScaffold.LoadAsync(meta, aggregateId, cancellationToken) as BaseDataObject;
-        if (entity == null)
+        var loaded = await DataScaffold.LoadAsync(meta, aggregateId, cancellationToken);
+        if (loaded is null)
             return Fail("ENTITY_NOT_FOUND", $"Entity {action.AggregateType}:{aggregateId} not found.");
+        if (loaded is not BaseDataObject entity)
+            return Fail("TYPE_MISMATCH", $"Expected BaseDataObject for {action.AggregateType}:{aggregateId}, got {loaded.GetType().Name}.");
 
         var layout = EntityLayoutCompiler.GetOrCompile(meta);
 

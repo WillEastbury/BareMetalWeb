@@ -119,4 +119,5 @@ public enum MutationResult : byte
     EntityNotFound = 3,
     ValidationFailed = 4,
     InvalidOrdinal = 5,
+    TypeMismatch = 6,
 }
