@@ -47,6 +47,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private const int LoginUserMaxAttempts = 5;
     private static readonly ConcurrentDictionary<Type, System.Reflection.PropertyInfo[]> JsonPropertyCache = new();
     private static readonly JsonSerializerOptions JsonIndented = new() { WriteIndented = true };
+    private static readonly TimeSpan DataQueryTimeout = TimeSpan.FromSeconds(30);
 
     public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, AuditService auditService,
         IReadOnlyList<(string SettingId, string Value, string Description)>? settingDefaults = null)
@@ -3043,14 +3044,17 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // When pagination parameters are present, run the data and count queries concurrently
         // and return { items, total } so the VNext UI can render page controls correctly.
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted);
+        cts.CancelAfter(DataQueryTimeout);
+
         if (query.Skip.HasValue || query.Top.HasValue)
         {
             var countQuery = DataScaffold.BuildQueryDefinition(queryDict, meta);
             countQuery.Skip = null;
             countQuery.Top = null;
 
-            var dataTask  = DataScaffold.QueryAsync(meta, query, context.RequestAborted).AsTask();
-            var countTask = DataScaffold.CountAsync(meta, countQuery, context.RequestAborted).AsTask();
+            var dataTask  = DataScaffold.QueryAsync(meta, query, cts.Token).AsTask();
+            var countTask = DataScaffold.CountAsync(meta, countQuery, cts.Token).AsTask();
             await Task.WhenAll(dataTask, countTask).ConfigureAwait(false);
 
             var results = await dataTask;
@@ -3075,7 +3079,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var allResults = await DataScaffold.QueryAsync(meta, query, context.RequestAborted).ConfigureAwait(false);
+        var allResults = await DataScaffold.QueryAsync(meta, query, cts.Token).ConfigureAwait(false);
 
         if (format == "csv" || acceptCsv)
         {

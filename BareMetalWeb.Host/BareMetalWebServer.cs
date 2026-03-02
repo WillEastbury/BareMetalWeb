@@ -337,7 +337,7 @@ public class BareMetalWebServer : IBareWebHost
             BufferedLogger.LogInfo($"{path}|301|{sourceIp}|redirect={httpsUrl}|mode={HttpsRedirectMode}|httpsAvailable={HttpsEndpointAvailable}|trustForwarded={TrustForwardedHeaders}|host={context.Request.Host}");
             return;
         }
-        ApplySecurityHeaders(context);
+        ApplySecurityHeaders(context, isHttps);
 
         if (ApplyCors(context))
         {
@@ -634,10 +634,12 @@ public class BareMetalWebServer : IBareWebHost
         BufferedLogger.LogInfo($"{path}|403|{sourceIp}|user={userName}|required={required}");
     }
 
-    private static void ApplySecurityHeaders(HttpContext context)
+    private static void ApplySecurityHeaders(HttpContext context, bool isHttps)
     {
         var nonce = context.GenerateCspNonce();
         context.Response.Headers["Content-Security-Policy"] = string.Format(ContentSecurityPolicyTemplate, nonce);
+        if (isHttps)
+            context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
         // HTTP/1.x keep-alive hint so clients reuse TCP connections across requests
         if (context.Request.Protocol is "HTTP/1.0" or "HTTP/1.1")
             context.Response.Headers["Keep-Alive"] = "timeout=60, max=1000";
