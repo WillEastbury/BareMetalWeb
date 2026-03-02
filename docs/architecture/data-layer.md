@@ -32,15 +32,18 @@ graph TD
     WS -->|segment files| SEG["WalSegmentWriter / WalSegmentReader<br/>(append-only segments)"]
     WAL -->|id mapping| IDMap["Per-entity _idmap.bin<br/>(string ID → packed ulong WAL key)"]
     WAL -->|schema files| BOS["BinaryObjectSerializer<br/>(shared with LocalFolderBinaryDataProvider)"]
-    WAL -->|secondary indexes| SIM["SearchIndexManager"]
+    WAL -->|secondary field indexes| IS["IndexStore<br/>({dataRoot}/Paged/{Entity}/{field}_index.page)"]
+    WAL -->|full-text search| SIM["SearchIndexManager<br/>({dataRoot}/indexes/)"]
 ```
 
 **Key points:**
 - `DataStoreProvider.Current` is the one-stop shop for all data access.
 - `LocalFolderBinaryDataProvider` stores each entity instance as a single binary file, grouped by entity type.  Used when WAL is not configured.
 - `WalDataProvider` stores all records as commit-log payloads inside a `WalStore` at `{dataRoot}/wal/`.  Each entity type gets a stable `uint32` table-ID derived from the type name; each string record-ID is mapped to a monotonic `uint32` record-ID via a per-entity `_idmap.bin` file, giving a packed `ulong` key consumed by the WAL store.
+- `WalDataProvider` maintains secondary field indexes via `IndexStore` (paged files under `{dataRoot}/Paged/`) and `SearchIndexManager` for full-text search. `Query<T>` consults `IndexStore` for `Equals` clauses on `[DataIndex]`-decorated fields before falling back to a full WAL scan, reducing deserializations from O(n) to O(matches).
 - Schema evolution is handled via `SchemaReadMode.BestEffort` in both providers: old records with extra/missing fields still load; new fields receive default values.
 - Schema files are shared between the two providers so they can coexist in the same data root.
+- `LocalPagedFile` is a shared `internal` class (extracted from `LocalFolderBinaryDataProvider`) used by both providers to implement `IPagedFile` paged file storage for `IndexStore`.
 
 ---
 
@@ -193,15 +196,22 @@ Sequential IDs are persisted so they survive restarts:
 ```
 {dataRoot}/
 ├── wal/                          ← WalStore root
-│   ├── {segmentId}.seg           ← append-only WAL segment files
-│   └── head.map                  ← WalHeadMap (latest record key per entity+id)
+│   ├── {EntityType}_idmap.bin    ← string ID → packed ulong WAL key
+│   └── wal_seg_*.log             ← append-only WAL segment files
 ├── {EntityType}/
-│   ├── _idmap.bin                ← string ID → packed ulong WAL key
-│   └── _idx/
-│       └── {FieldName}.idx       ← append-only binary index file (same as above)
-└── {EntityType}/schema           ← BinaryObjectSerializer schema hash (shared)
+│   ├── schema-{EntityType}-*.json ← schema version files (shared with LocalFolderBinaryDataProvider)
+│   └── _seqid.dat                ← sequential ID counter
+├── Index/
+│   ├── index.registry            ← IndexStore tracked-index registry
+│   └── {EntityType}/
+│       └── {FieldName}.log.lock  ← per-field exclusive lock file
+├── Paged/
+│   └── {EntityType}/
+│       └── {FieldName}_index.page ← IndexStore secondary field index (LocalPagedFile format)
+└── indexes/
+    └── {EntityType}.idx          ← SearchIndexManager full-text index
 ```
 
 ---
 
-_Status: Verified against codebase @ commit e38d19057e1a55fc1d9a563f5ec6228bb991a0b5_
+_Status: Verified against codebase @ commit bd580ba_
