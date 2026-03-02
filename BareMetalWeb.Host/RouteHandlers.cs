@@ -1594,6 +1594,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (effectiveViewType == ViewType.TreeView || effectiveViewType == ViewType.OrgChart || effectiveViewType == ViewType.Timeline || effectiveViewType == ViewType.Timetable)
         {
             var allQuery = DataScaffold.BuildQueryDefinition(queryDictionary, meta);
+            allQuery.Top ??= 10000; // Cap to prevent unbounded memory usage
             var allResults = (await DataScaffold.QueryAsync(meta, allQuery)).Cast<BaseDataObject>().ToList();
             
             var basePath = $"/ssr/admin/data/{typeSlug}";

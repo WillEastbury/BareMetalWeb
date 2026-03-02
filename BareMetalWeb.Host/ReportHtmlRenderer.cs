@@ -325,12 +325,13 @@ public static class ReportHtmlRenderer
             string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
         if (field == null) return Array.Empty<string>();
 
-        // Load all records and extract distinct non-null values
         var getter = field.GetValueFn;
         if (getter == null) return Array.Empty<string>();
 
+        // Use capped query to avoid loading entire table; async-safe via Task.Run
         var distinct = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
-        var allItems = meta.Handlers.QueryAsync(null, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+        var queryDef = new BareMetalWeb.Data.QueryDefinition { Top = 10000 };
+        var allItems = Task.Run(async () => await meta.Handlers.QueryAsync(queryDef, CancellationToken.None)).GetAwaiter().GetResult();
         foreach (var item in allItems)
         {
             var val = getter(item);

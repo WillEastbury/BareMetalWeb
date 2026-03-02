@@ -22,6 +22,15 @@ public static class DeltaApiHandlers
     /// </summary>
     public static async ValueTask DeltaHandler(HttpContext context)
     {
+        // Content-Type and body size validation (CSRF mitigation + DoS prevention)
+        if (!BinaryApiHandlers.HasValidApiContentType(context)
+            && !(context.Request.ContentType ?? "").Contains(BinaryContentType, StringComparison.OrdinalIgnoreCase))
+        {
+            await WriteResult(context, 415, MutationResult.EntityNotFound, "Unsupported Content-Type.");
+            return;
+        }
+        if (!await BinaryApiHandlers.CheckBodySizeAsync(context)) return;
+
         // Resolve entity type + auth
         var typeSlug = BinaryApiHandlers.GetRouteValue(context, "type") ?? string.Empty;
         if (string.IsNullOrWhiteSpace(typeSlug))

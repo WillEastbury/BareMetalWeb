@@ -42,6 +42,13 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
     }));
     appInfo.RegisterRoute("POST /api/device/token", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
     {
+        // Validate Content-Type (CSRF mitigation)
+        if (!(context.Request.ContentType ?? "").Contains("application/json", StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = 415;
+            await context.Response.WriteAsync("{\"error\":\"Unsupported Content-Type\"}");
+            return;
+        }
         string body;
         using (var reader = new System.IO.StreamReader(context.Request.Body))
             body = await reader.ReadToEndAsync();
@@ -54,8 +61,8 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
             await context.Response.WriteAsync("{\"error\":\"missing device_code\"}");
             return;
         }
-        var all = DataStoreProvider.Current.Query<DeviceCodeAuth>(null).ToList();
-        var dc = all.FirstOrDefault(d => d.DeviceCode == deviceCode);
+        var queryDef = new BareMetalWeb.Data.QueryDefinition { Clauses = new() { new BareMetalWeb.Data.QueryClause { Field = "DeviceCode", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = deviceCode } }, Top = 1 };
+        var dc = (await DataStoreProvider.Current.QueryAsync<DeviceCodeAuth>(queryDef)).FirstOrDefault();
         if (dc == null || dc.IsExpired(DateTime.UtcNow))
         {
             context.Response.ContentType = "application/json";
@@ -132,6 +139,12 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
         if (context.Request.HasFormContentType)
         {
             var form = await context.Request.ReadFormAsync();
+            // CSRF validation for form-based POST
+            if (!BareMetalWeb.Host.CsrfProtection.ValidateFormToken(context, form))
+            {
+                context.Response.Redirect("/device?msg=Error:+Invalid+security+token.+Please+try+again.");
+                return;
+            }
             code = form["code"].ToString().Trim().ToUpperInvariant();
         }
         if (string.IsNullOrEmpty(code) || user == null)
@@ -139,8 +152,9 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
             context.Response.Redirect("/device?msg=Error:+Invalid+request");
             return;
         }
-        var all = DataStoreProvider.Current.Query<DeviceCodeAuth>(null).ToList();
-        var dc = all.FirstOrDefault(d => d.UserCode == code && d.Status == "pending" && !d.IsExpired(DateTime.UtcNow));
+        var queryDef = new BareMetalWeb.Data.QueryDefinition { Clauses = new() { new BareMetalWeb.Data.QueryClause { Field = "UserCode", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = code } }, Top = 10 };
+        var candidates = await DataStoreProvider.Current.QueryAsync<DeviceCodeAuth>(queryDef);
+        var dc = candidates.FirstOrDefault(d => d.Status == "pending" && !d.IsExpired(DateTime.UtcNow));
         if (dc == null)
         {
             context.Response.Redirect($"/device?msg=Error:+Invalid+or+expired+code&code={System.Net.WebUtility.UrlEncode(code)}");

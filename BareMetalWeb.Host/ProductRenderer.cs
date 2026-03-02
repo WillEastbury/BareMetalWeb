@@ -23,7 +23,9 @@ public static class ProductRenderer
             return;
         }
 
-        var categories = await catMeta.Handlers.QueryAsync(null, context.RequestAborted);
+        // Load categories with cap to prevent unbounded queries
+        var catQuery = new BareMetalWeb.Data.QueryDefinition { Top = 1000 };
+        var categories = await catMeta.Handlers.QueryAsync(catQuery, context.RequestAborted);
         var catList = new List<(string Slug, string Name, string Desc, string Icon, int Order)>();
 
         foreach (var c in categories)
@@ -76,22 +78,28 @@ public static class ProductRenderer
             return;
         }
 
-        // Find category name
+        // Find category by slug — filtered query instead of full scan
         string categoryName = categorySlug;
         uint categoryKey = 0;
-        var cats = await catMeta.Handlers.QueryAsync(null, context.RequestAborted);
+        var catQueryDef = new BareMetalWeb.Data.QueryDefinition
+        {
+            Clauses = new() { new BareMetalWeb.Data.QueryClause { Field = "Slug", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = categorySlug } },
+            Top = 1
+        };
+        var cats = await catMeta.Handlers.QueryAsync(catQueryDef, context.RequestAborted);
         foreach (var c in cats)
         {
-            if (string.Equals(GetField(c, catMeta, "Slug"), categorySlug, StringComparison.OrdinalIgnoreCase))
-            {
-                categoryName = GetField(c, catMeta, "Name");
-                categoryKey = c.Key;
-                break;
-            }
+            categoryName = GetField(c, catMeta, "Name");
+            categoryKey = c.Key;
         }
 
-        // Load products, filter by category
-        var products = await prodMeta.Handlers.QueryAsync(null, context.RequestAborted);
+        // Load products — filter by category via query, cap results
+        var prodQueryDef = new BareMetalWeb.Data.QueryDefinition
+        {
+            Clauses = new() { new BareMetalWeb.Data.QueryClause { Field = "Category", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = categoryName } },
+            Top = 10000
+        };
+        var products = await prodMeta.Handlers.QueryAsync(prodQueryDef, context.RequestAborted);
         var filtered = new List<ProductView>();
 
         // Parse query filter

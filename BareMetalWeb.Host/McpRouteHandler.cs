@@ -52,6 +52,16 @@ internal static class McpRouteHandler
             return;
         }
 
+        // Body size limit
+        if (context.Request.ContentLength.HasValue && context.Request.ContentLength.Value > 10 * 1024 * 1024)
+        {
+            context.Response.StatusCode = 413;
+            await context.Response.WriteAsync(
+                "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"Request body too large\"}}",
+                context.RequestAborted).ConfigureAwait(false);
+            return;
+        }
+
         string body;
         using (var reader = new System.IO.StreamReader(context.Request.Body))
             body = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
