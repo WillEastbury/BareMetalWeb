@@ -762,12 +762,13 @@ public static class RouteRegistrationExtensions
                     .Where(e => IsEntityAccessible(e, user, userPermissions))
                     .Select(e => (object)new Dictionary<string, object?>
                     {
-                        ["slug"] = e.Slug,
-                        ["name"] = e.Name,
-                        ["navGroup"] = e.NavGroup,
-                        ["showOnNav"] = e.ShowOnNav,
-                        ["navOrder"] = e.NavOrder,
-                        ["viewType"] = e.ViewType.ToString()
+                        ["slug"]         = e.Slug,
+                        ["name"]         = e.Name,
+                        ["navGroup"]     = e.NavGroup,
+                        ["showOnNav"]    = e.ShowOnNav,
+                        ["navOrder"]     = e.NavOrder,
+                        ["viewType"]     = e.ViewType.ToString(),
+                        ["rightAligned"] = string.Equals(e.NavGroup, "Admin", StringComparison.OrdinalIgnoreCase)
                     })
                     .ToArray();
 
@@ -1666,12 +1667,13 @@ public static class RouteRegistrationExtensions
                 .Where(e => IsEntityAccessible(e, user, userPermissions))
                 .Select(e => (object)new Dictionary<string, object?>
                 {
-                    ["slug"]      = e.Slug,
-                    ["name"]      = e.Name,
-                    ["navGroup"]  = e.NavGroup,
-                    ["showOnNav"] = e.ShowOnNav,
-                    ["navOrder"]  = e.NavOrder,
-                    ["viewType"]  = e.ViewType.ToString()
+                    ["slug"]         = e.Slug,
+                    ["name"]         = e.Name,
+                    ["navGroup"]     = e.NavGroup,
+                    ["showOnNav"]    = e.ShowOnNav,
+                    ["navOrder"]     = e.NavOrder,
+                    ["viewType"]     = e.ViewType.ToString(),
+                    ["rightAligned"] = string.Equals(e.NavGroup, "Admin", StringComparison.OrdinalIgnoreCase)
                 })
                 .ToArray();
 
