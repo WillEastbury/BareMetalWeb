@@ -295,6 +295,80 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         }
         // ── Full scan (no usable index) ───────────────────────────────────────
 
+        // ── Index-accelerated sort path ──────────────────────────────────────
+        // When the only reason we can't short-circuit is a sort, and the sort
+        // field is either "Key" or an indexed field, pre-sort the keys without
+        // deserializing all entities, then load only the page (skip+top).
+        if (query != null && query.Sorts.Count > 0 && query.Clauses.Count == 0 && query.Groups.Count == 0)
+        {
+            var sort = query.Sorts[0];
+
+            // Sort by Key — sort uint32 keys directly from idMap
+            if (string.Equals(sort.Field, "Key", StringComparison.OrdinalIgnoreCase))
+            {
+                var liveKeys = new List<uint>(idMap.Count);
+                foreach (var (objKey, walKey) in idMap)
+                {
+                    if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
+                    if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
+                    if (!payload.IsEmpty) liveKeys.Add(objKey);
+                }
+                liveKeys.Sort();
+                if (sort.Direction == SortDirection.Desc)
+                    liveKeys.Reverse();
+
+                var keyPage = liveKeys.Skip(skip).Take(top).ToList();
+                var keyResults = new List<T>(keyPage.Count);
+                foreach (var key in keyPage)
+                {
+                    var obj = Load<T>(key);
+                    if (obj != null)
+                        keyResults.Add(obj);
+                }
+                return keyResults;
+            }
+
+            // Sort by an indexed field — use forward index to sort keys by value
+            if (_searchIndexManager.HasIndexedFields(typeof(T), out var sortIndexedFields))
+            {
+                var sortProp = sortIndexedFields.Find(p => string.Equals(p.Name, sort.Field, StringComparison.OrdinalIgnoreCase));
+                if (sortProp != null)
+                {
+                    var forwardIndex = _indexStore.ReadLatestValueIndex(typeName, sortProp.Name);
+                    if (forwardIndex.Count > 0)
+                    {
+                        // Build (key, fieldValue) pairs for all live entities
+                        var keysWithValues = new List<(uint Key, string Value)>(idMap.Count);
+                        foreach (var (objKey, walKey) in idMap)
+                        {
+                            if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
+                            if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
+                            if (payload.IsEmpty) continue;
+                            var keyStr = objKey.ToString();
+                            forwardIndex.TryGetValue(keyStr, out var fieldVal);
+                            keysWithValues.Add((objKey, fieldVal ?? string.Empty));
+                        }
+
+                        keysWithValues.Sort((a, b) =>
+                        {
+                            var cmp = string.Compare(a.Value, b.Value, StringComparison.OrdinalIgnoreCase);
+                            return sort.Direction == SortDirection.Desc ? -cmp : cmp;
+                        });
+
+                        var sortPage = keysWithValues.Skip(skip).Take(top).ToList();
+                        var sortResults = new List<T>(sortPage.Count);
+                        foreach (var (key, _) in sortPage)
+                        {
+                            var obj = Load<T>(key);
+                            if (obj != null)
+                                sortResults.Add(obj);
+                        }
+                        return sortResults;
+                    }
+                }
+            }
+        }
+
         var canShortCircuit = query == null || query.Sorts.Count == 0;
         var results         = new List<T>(Math.Min(top, idMap.Count));
         int matched         = 0;
@@ -366,7 +440,28 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             return live;
         }
 
-        return Query<T>(query).Count();
+        // Count matching items without sorting — deserialize and match only
+        int count = 0;
+        foreach (var (objKey, walKey) in idMap)
+        {
+            if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
+            if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
+            if (payload.IsEmpty) continue;
+
+            T? obj;
+            try
+            {
+                obj = DeserializePayload<T>(payload, objKey);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (obj != null && _queryEvaluator.Matches(obj, query))
+                count++;
+        }
+        return count;
     }
 
     public ValueTask<int> CountAsync<T>(QueryDefinition? query = null,
