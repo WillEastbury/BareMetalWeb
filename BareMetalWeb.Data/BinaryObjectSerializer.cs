@@ -1085,6 +1085,11 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             throw new InvalidOperationException($"String byte length {length} exceeds MaxStringBytes {MaxStringBytes}.");
         if (length == 0) return string.Empty;
 
+        // Guard against corrupted length that exceeds remaining stream data
+        var remaining = reader.BaseStream.Length - reader.BaseStream.Position;
+        if (length > remaining)
+            throw new InvalidOperationException($"String byte length {length} exceeds remaining payload ({remaining} bytes). Data may be corrupt.");
+
         const int StackLimit = 512;
         if (length <= StackLimit)
         {
@@ -1113,6 +1118,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (length > MaxStringBytes)
             throw new InvalidOperationException($"String byte length {length} exceeds MaxStringBytes {MaxStringBytes}.");
         if (length == 0) return string.Empty;
+
+        if (length > reader.Remaining)
+            throw new InvalidOperationException($"String byte length {length} exceeds remaining payload ({reader.Remaining} bytes). Data may be corrupt.");
 
         const int StackLimit = 512;
         if (length <= StackLimit)

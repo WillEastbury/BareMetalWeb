@@ -102,6 +102,8 @@ namespace BareMetalWeb.Data;
             _offset += destination.Length;
         }
 
+        public int Remaining => _buffer.Length - _offset;
+
         private void EnsureAvailable(int size)
         {
             if (_offset + size > _buffer.Length)

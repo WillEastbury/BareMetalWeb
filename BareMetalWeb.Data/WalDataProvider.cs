@@ -300,7 +300,16 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) return default;
         if (payload.IsEmpty) return default;
 
-        var result = DeserializePayload<T>(payload, key);
+        T? result;
+        try
+        {
+            result = DeserializePayload<T>(payload, key);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError($"Corrupt payload for {typeName} Key={key} WalPtr={ptr}: {ex.Message}", ex);
+            return default;
+        }
         if (result != null)
         {
             if (_deserCache.Count >= DeserCacheMaxSize)
