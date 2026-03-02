@@ -1492,6 +1492,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask DataListHandler(HttpContext context)
     {
+        context.Response.Headers["Cache-Control"] = "no-store";
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
         {
@@ -5020,6 +5021,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         context.Response.ContentType = contentType;
         context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{fileName}\"";
+        context.Response.Headers["Cache-Control"] = "no-store";
         await context.Response.WriteAsync(content);
     }
 

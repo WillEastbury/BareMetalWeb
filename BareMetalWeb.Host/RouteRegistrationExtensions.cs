@@ -1342,6 +1342,7 @@ public static class RouteRegistrationExtensions
                 sb.Append("</div></div></div>");
                 ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host);
                 context.Response.ContentType = "text/html; charset=utf-8";
+                context.Response.Headers["Cache-Control"] = "no-store";
                 await context.Response.WriteAsync(sb.ToString());
             }));
 
@@ -1395,6 +1396,7 @@ public static class RouteRegistrationExtensions
                 }
 
                 context.Response.ContentType = "text/html; charset=utf-8";
+                context.Response.Headers["Cache-Control"] = "no-store";
                 var pipeWriter = System.IO.Pipelines.PipeWriter.Create(context.Response.Body);
                 await ReportHtmlRenderer.RenderAsync(
                     pipeWriter,
@@ -1466,6 +1468,7 @@ public static class RouteRegistrationExtensions
                 if (string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase))
                 {
                     context.Response.ContentType = "text/csv";
+                    context.Response.Headers["Cache-Control"] = "no-store";
                     context.Response.Headers.ContentDisposition = $"attachment; filename=\"{Uri.EscapeDataString(def.Name)}.csv\"";
                     var csvSb = new StringBuilder();
                     csvSb.AppendLine(string.Join(",", result.ColumnLabels.Select(CsvCell)));
@@ -1489,6 +1492,7 @@ public static class RouteRegistrationExtensions
                         .ToArray()
                 };
                 context.Response.ContentType = "application/json";
+                context.Response.Headers["Cache-Control"] = "no-store";
                 await context.Response.WriteAsync(JsonSerializer.Serialize(json, new JsonSerializerOptions { WriteIndented = false }));
             }));
 
@@ -1504,6 +1508,7 @@ public static class RouteRegistrationExtensions
 
                 context.Response.StatusCode = 200;
                 context.Response.ContentType = "application/json";
+                context.Response.Headers["Cache-Control"] = "no-store";
                 await context.Response.WriteAsync(JsonSerializer.Serialize(values, new JsonSerializerOptions { WriteIndented = false }));
             }));
     }

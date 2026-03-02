@@ -541,6 +541,7 @@ public static class LookupApiHandlers
     {
         context.Response.ContentType = "application/json";
         context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.Headers["Cache-Control"] = "no-store";
         await JsonSerializer.SerializeAsync(context.Response.Body, data, new JsonSerializerOptions
         {
             PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -552,6 +553,7 @@ public static class LookupApiHandlers
     {
         context.Response.ContentType = "application/json";
         context.Response.StatusCode = statusCode;
+        context.Response.Headers["Cache-Control"] = "no-store";
         await JsonSerializer.SerializeAsync(context.Response.Body, new Dictionary<string, object>
         {
             ["error"] = message,
