@@ -43,6 +43,8 @@ public sealed class RouteHandlers : IRouteHandlers
     private static readonly TimeSpan MfaAttemptWindow = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan MfaBaseBlockDuration = TimeSpan.FromSeconds(10);
     private static readonly ConcurrentDictionary<string, AttemptTracker> MfaAttempts = new(StringComparer.Ordinal);
+    private const int LoginIpMaxAttempts = 10;
+    private const int LoginUserMaxAttempts = 5;
     private static readonly ConcurrentDictionary<Type, System.Reflection.PropertyInfo[]> JsonPropertyCache = new();
     private static readonly JsonSerializerOptions JsonIndented = new() { WriteIndented = true };
 
@@ -112,6 +114,19 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        // IP-based rate limit — before any DB work
+        var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        var ipKey = BuildMfaAttemptKey("login:ip", remoteIp);
+        if (IsThrottled(ipKey, LoginIpMaxAttempts, out var ipRetry))
+        {
+            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            if (ipRetry.HasValue)
+                context.Response.Headers.RetryAfter = ((int)Math.Ceiling(ipRetry.Value.TotalSeconds)).ToString();
+            RenderLoginForm(context, FormatThrottleMessage(ipRetry), string.Empty);
+            await _renderer.RenderPage(context);
+            return;
+        }
+
         var form = await context.Request.ReadFormAsync();
         var identifier = form["email"].ToString().Trim();
         var password = form["password"].ToString();
@@ -137,7 +152,20 @@ public sealed class RouteHandlers : IRouteHandlers
         var user = await Users.FindByEmailOrUserNameAsync(identifier, context.RequestAborted).ConfigureAwait(false);
         if (user == null || !user.IsActive)
         {
+            RegisterFailure(ipKey, LoginIpMaxAttempts);
             RenderLoginForm(context, "Invalid credentials.", identifier);
+            await _renderer.RenderPage(context);
+            return;
+        }
+
+        // Per-user rate limit — after user is found, before password check
+        var userKey = BuildMfaAttemptKey("login:user", user.Key.ToString());
+        if (IsThrottled(userKey, LoginUserMaxAttempts, out var userRetry))
+        {
+            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            if (userRetry.HasValue)
+                context.Response.Headers.RetryAfter = ((int)Math.Ceiling(userRetry.Value.TotalSeconds)).ToString();
+            RenderLoginForm(context, FormatThrottleMessage(userRetry), identifier);
             await _renderer.RenderPage(context);
             return;
         }
@@ -151,6 +179,8 @@ public sealed class RouteHandlers : IRouteHandlers
 
         if (!user.VerifyPassword(password))
         {
+            RegisterFailure(ipKey, LoginIpMaxAttempts);
+            RegisterFailure(userKey, LoginUserMaxAttempts);
             user.RegisterFailedLogin();
             await Users.SaveAsync(user);
             RenderLoginForm(context, "Invalid credentials.", identifier);
@@ -186,10 +216,14 @@ public sealed class RouteHandlers : IRouteHandlers
                 SameSite = SameSiteMode.Lax,
                 Expires = challenge.ExpiresUtc
             });
+            RegisterSuccess(ipKey);
+            RegisterSuccess(userKey);
             context.Response.Redirect("/mfa");
             return;
         }
 
+        RegisterSuccess(ipKey);
+        RegisterSuccess(userKey);
         user.RegisterSuccessfulLogin();
         await Users.SaveAsync(user);
         await UserAuth.SignInAsync(context, user, rememberMe);
