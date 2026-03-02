@@ -49,7 +49,7 @@ The `idMap` (`uint objKey → ulong walKey`) is filtered at load time — tombst
 
 ### Deserialization Cache
 
-`Load<T>(key)` uses an in-memory deserialization cache keyed by `(typeName, key, walPointer)`. When the WAL pointer hasn't changed (same version), the cached deserialized object is returned without binary parsing. The cache holds up to 4096 entries with 25% batch eviction when full. Entries are invalidated on `Save()` and `Delete()`.
+`Load<T>(key)` uses an in-memory deserialization cache keyed by `(typeName, key, walPointer)`. When the WAL pointer hasn't changed (same version), the cached deserialized object is returned without binary parsing. The cache holds up to 4096 entries with **LRU eviction** — when full, the oldest 25% by last-access timestamp are evicted. Access timestamps are tracked via `Environment.TickCount64` on each cache hit. Entries are invalidated on `Save()` and `Delete()`.
 
 ## Query Acceleration Paths
 
@@ -126,7 +126,7 @@ For queries with non-indexed filters, complex operators (Contains, GreaterThan, 
 |-------|----------|-----|--------------|------|
 | **Inverted index** | `IndexStore._invertedCache` | `(entity, field)` | On `AppendEntry()` | Unbounded (one per indexed field) |
 | **Forward index** | `IndexStore._forwardCache` | `(entity, field)` | On `AppendEntry()` | Unbounded (one per indexed field) |
-| **Deserialization** | `WalDataProvider._deserCache` | `(typeName, key, walPtr)` | On `Save()` / `Delete()` | 4096 entries, 25% eviction |
+| **Deserialization** | `WalDataProvider._deserCache` | `(typeName, key, walPtr)` | On `Save()` / `Delete()` | 4096 entries, LRU eviction (oldest 25%) |
 | **Live count** | `WalDataProvider._liveCounts` | `typeName` | `Save()` increments, `Delete()` decrements | One per entity type |
 | **Schema members** | `WalDataProvider._schemaMemberCache` | `(type, version)` | Never (immutable) | One per schema version |
 

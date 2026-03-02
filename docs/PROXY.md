@@ -133,3 +133,19 @@ GET /proxy/status
 ```
 
 Returns JSON with the health and traffic stats for each proxy route and target.
+
+## Security
+
+### SSRF Protection
+
+The proxy blocks requests to private, loopback, and cloud metadata IP ranges:
+
+- **RFC 1918**: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
+- **Link-local**: `169.254.0.0/16` (includes AWS/Azure/GCP metadata at `169.254.169.254`)
+- **Loopback**: `127.0.0.0/8`, `::1`
+
+If the resolved target falls within any of these ranges, the proxy returns **502 Bad Gateway** without forwarding the request. This prevents attackers from using the proxy to reach internal services or cloud metadata endpoints.
+
+### Path Traversal Protection
+
+The proxy strips `..` segments from the request path before constructing the upstream URL, preventing directory traversal attacks against upstream targets.
