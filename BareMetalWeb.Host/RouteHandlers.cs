@@ -43,6 +43,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private static readonly TimeSpan MfaAttemptWindow = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan MfaBaseBlockDuration = TimeSpan.FromSeconds(10);
     private static readonly ConcurrentDictionary<string, AttemptTracker> MfaAttempts = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<Type, System.Reflection.PropertyInfo[]> JsonPropertyCache = new();
 
     public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, AuditService auditService,
         IReadOnlyList<(string SettingId, string Value, string Description)>? settingDefaults = null)
@@ -3518,7 +3519,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (field.Property.GetValue(instance) is not StoredFileData fileData || string.IsNullOrWhiteSpace(fileData.StorageKey))
+        if (field.GetValueFn(instance) is not StoredFileData fileData || string.IsNullOrWhiteSpace(fileData.StorageKey))
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("File not found.");
@@ -4278,13 +4279,13 @@ public sealed class RouteHandlers : IRouteHandlers
             var deleteKey = $"{field.Name}__delete";
             var deleteRequested = form.TryGetValue(deleteKey, out var deleteValue) && DataScaffold.IsTruthy(deleteValue.ToString());
             var uploadedFile = form.Files.GetFile(field.Name);
-            var existingFile = field.Property.GetValue(instance) as StoredFileData;
+            var existingFile = field.GetValueFn(instance) as StoredFileData;
 
             if (deleteRequested && uploadedFile == null)
             {
                 if (existingFile != null)
                     DeleteStoredFile(context, existingFile);
-                field.Property.SetValue(instance, null);
+                field.SetValueFn(instance, null);
                 continue;
             }
 
@@ -4337,7 +4338,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 IsImage = field.FieldType == FormFieldType.Image
             };
 
-            field.Property.SetValue(instance, storedFile);
+            field.SetValueFn(instance, storedFile);
         }
     }
 
@@ -4388,7 +4389,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         foreach (var field in meta.Fields.Where(f => f.View))
         {
-            var value = field.Property.GetValue(instance);
+            var value = field.GetValueFn(instance);
             if (value is StoredFileData fileData && instance is BaseDataObject obj)
             {
                 data[field.Name] = new Dictionary<string, object?>
@@ -5676,14 +5677,14 @@ public sealed class RouteHandlers : IRouteHandlers
 
         if (DataScaffold.TryConvertValue(value, field.Property.PropertyType, out var converted) && converted != null)
         {
-            field.Property.SetValue(instance, converted);
+            field.SetValueFn(instance, converted);
             return;
         }
 
         var effectiveType = Nullable.GetUnderlyingType(field.Property.PropertyType) ?? field.Property.PropertyType;
         if (effectiveType == typeof(string))
         {
-            field.Property.SetValue(instance, value);
+            field.SetValueFn(instance, value);
         }
     }
 
@@ -6267,11 +6268,15 @@ public sealed class RouteHandlers : IRouteHandlers
         if (valueType.IsClass)
         {
             writer.WriteStartObject();
-            #pragma warning disable IL2075 // Child entity types are preserved via TrimmerRootAssembly
-            foreach (var prop in valueType.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
-            #pragma warning restore IL2075
+            var props = JsonPropertyCache.GetOrAdd(valueType, static t =>
             {
-                if (!prop.CanRead || prop.GetIndexParameters().Length != 0) continue;
+                #pragma warning disable IL2070, IL2075
+                return t.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+                        .Where(p => p.CanRead && p.GetIndexParameters().Length == 0).ToArray();
+                #pragma warning restore IL2070, IL2075
+            });
+            foreach (var prop in props)
+            {
                 writer.WritePropertyName(prop.Name);
                 WriteJsonValue(writer, prop.GetValue(value));
             }

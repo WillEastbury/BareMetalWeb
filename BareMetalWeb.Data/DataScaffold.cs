@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
@@ -88,6 +89,7 @@ public static class DataScaffold
     private static readonly Dictionary<string, LookupCacheEntry> LookupCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, (bool IsLarge, DateTime ExpiresUtc)> LargeListCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly IIdGenerator IdGenerator = new DefaultIdGenerator();
+    private static readonly ConcurrentDictionary<(Type, string), PropertyInfo?> PropertyCache = new();
 
     /// <summary>
     /// Fallback JSON AST (serialized) used when expression parsing fails.
@@ -1933,27 +1935,35 @@ public static class DataScaffold
 
     private static IEnumerable QueryByType(Type type, QueryDefinition? query)
     {
-        // Note: This uses sync-over-async for scaffolding/reflection scenarios called from synchronous UI rendering.
-        // QueryAsync<T> returns ValueTask<IEnumerable<T>> which cannot be cast directly to
-        // ValueTask<IEnumerable> (ValueTask is not covariant). We must use reflection to
-        // extract the result from the concrete ValueTask<IEnumerable<T>>.
+        var meta = GetEntityByType(type);
+        if (meta != null)
+        {
+            var vt = meta.Handlers.QueryAsync(query, CancellationToken.None);
+            return vt.IsCompleted ? (IEnumerable)vt.Result : (IEnumerable)vt.AsTask().GetAwaiter().GetResult();
+        }
+
+        // Fallback for unmapped types
         var method = typeof(IDataObjectStore).GetMethod(nameof(IDataObjectStore.QueryAsync))!;
         var generic = method.MakeGenericMethod(type);
         var result = generic.Invoke(DataStoreProvider.Current, new object?[] { query, CancellationToken.None })!;
 
-        // result is a ValueTask<IEnumerable<T>>; convert to Task then await synchronously
         var asTaskMethod = result.GetType().GetMethod(nameof(ValueTask<int>.AsTask))!;
         var task = (Task)asTaskMethod.Invoke(result, null)!;
         task.GetAwaiter().GetResult();
 
-        // Get the Result property from the completed Task<IEnumerable<T>>
         var resultProp = task.GetType().GetProperty(nameof(Task<object>.Result))!;
         return (IEnumerable)resultProp.GetValue(task)!;
     }
 
     private static int CountByType(Type type, QueryDefinition? query)
     {
-        // Note: This uses sync-over-async, consistent with QueryByType — see that method for rationale.
+        var meta = GetEntityByType(type);
+        if (meta != null)
+        {
+            var vt = meta.Handlers.CountAsync(query, CancellationToken.None);
+            return vt.IsCompleted ? vt.Result : vt.AsTask().GetAwaiter().GetResult();
+        }
+
         var method = typeof(IDataObjectStore).GetMethod(nameof(IDataObjectStore.CountAsync))!;
         var generic = method.MakeGenericMethod(type);
         var result = generic.Invoke(DataStoreProvider.Current, new object?[] { query, CancellationToken.None })!;
@@ -1966,11 +1976,18 @@ public static class DataScaffold
 
     private static object? LoadByIdForType(Type type, string id)
     {
-        // Note: This uses sync-over-async, consistent with QueryByType — see that method for rationale.
+        var meta = GetEntityByType(type);
+        if (meta != null)
+        {
+            var key = uint.Parse(id);
+            var vt = meta.Handlers.LoadAsync(key, CancellationToken.None);
+            return vt.IsCompleted ? vt.Result : vt.AsTask().GetAwaiter().GetResult();
+        }
+
         var method = typeof(IDataObjectStore).GetMethod(nameof(IDataObjectStore.LoadAsync))!;
         var generic = method.MakeGenericMethod(type);
-        var key = uint.Parse(id);
-        var result = generic.Invoke(DataStoreProvider.Current, new object?[] { key, CancellationToken.None })!;
+        var k = uint.Parse(id);
+        var result = generic.Invoke(DataStoreProvider.Current, new object?[] { k, CancellationToken.None })!;
         var asTaskMethod = result.GetType().GetMethod(nameof(ValueTask<object>.AsTask))!;
         var task = (Task)asTaskMethod.Invoke(result, null)!;
         task.GetAwaiter().GetResult();
@@ -2030,8 +2047,10 @@ public static class DataScaffold
             if (entity == null)
                 return null;
 
-            var displayProp = lookup.TargetType.GetProperty(lookup.DisplayField,
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            var displayProp = PropertyCache.GetOrAdd(
+                (lookup.TargetType, lookup.DisplayField),
+                static key => key.Item1.GetProperty(key.Item2,
+                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase));
             var displayVal = displayProp?.GetValue(entity);
             return displayVal != null ? ToDisplayString(displayVal, displayProp!.PropertyType) : null;
         }
@@ -2057,8 +2076,10 @@ public static class DataScaffold
             if (itemType != cachedType)
             {
                 cachedType = itemType;
-                valueProp = itemType.GetProperty(valueField, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                displayProp = itemType.GetProperty(displayField, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                valueProp = PropertyCache.GetOrAdd((itemType, valueField),
+                    static key => key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase));
+                displayProp = PropertyCache.GetOrAdd((itemType, displayField),
+                    static key => key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase));
             }
             if (valueProp == null || displayProp == null)
                 continue;
@@ -2387,7 +2408,8 @@ public static class DataScaffold
             {
                 // Check if this is a lookup field (not just an enum) to add refresh/add buttons
                 // Re-extract the lookup attribute from the child type's property
-                var prop = childType.GetProperty(child.Name, BindingFlags.Public | BindingFlags.Instance);
+                var prop = PropertyCache.GetOrAdd((childType, child.Name),
+                    static key => key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance));
                 var lookupAttr = prop?.GetCustomAttribute<DataLookupAttribute>();
                 string? targetSlug = null;
                 string? targetTypeName = null;

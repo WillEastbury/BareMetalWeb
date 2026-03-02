@@ -16,6 +16,7 @@ namespace BareMetalWeb.Data;
 public static class ComputedFieldService
 {
     private static readonly ConcurrentDictionary<string, ComputedValueCacheEntry> _cache = new();
+    private static readonly ConcurrentDictionary<(Type, string), PropertyInfo?> _propertyCache = new();
 
     private sealed record ComputedValueCacheEntry(object? Value, DateTime ExpiresUtc);
 
@@ -47,7 +48,7 @@ public static class ComputedFieldService
                     continue;
 
                 var value = await ComputeValueAsync(metadata, instance, field, config, cancellationToken);
-                field.Property.SetValue(instance, value);
+                field.SetValueFn(instance, value);
             }
         }
     }
@@ -64,12 +65,12 @@ public static class ComputedFieldService
     {
         var config = field.Computed;
         if (config == null)
-            return field.Property.GetValue(instance);
+            return field.GetValueFn(instance);
 
         if (config.Strategy == ComputedStrategy.Snapshot)
         {
             // Snapshot values are stored in the property
-            return field.Property.GetValue(instance);
+            return field.GetValueFn(instance);
         }
 
         if (config.Strategy == ComputedStrategy.CachedLive)
@@ -132,6 +133,11 @@ public static class ComputedFieldService
         return null;
     }
 
+    private static PropertyInfo? GetCachedProperty(Type type, string name)
+    {
+        return _propertyCache.GetOrAdd((type, name), static key => key.Item1.GetProperty(key.Item2));
+    }
+
     private static async ValueTask<object?> ComputeLookupAsync(
         DataEntityMetadata metadata,
         BaseDataObject instance,
@@ -140,7 +146,7 @@ public static class ComputedFieldService
         CancellationToken cancellationToken)
     {
         // Get the foreign key value
-        var fkProperty = metadata.Type.GetProperty(config.ForeignKeyField!);
+        var fkProperty = GetCachedProperty(metadata.Type, config.ForeignKeyField!);
         if (fkProperty == null)
             return null;
 
@@ -158,7 +164,7 @@ public static class ComputedFieldService
             return null;
 
         // Get the source field value
-        var sourceProperty = config.SourceEntity!.GetProperty(config.SourceField!);
+        var sourceProperty = GetCachedProperty(config.SourceEntity!, config.SourceField!);
         if (sourceProperty == null)
             return null;
 
@@ -173,7 +179,7 @@ public static class ComputedFieldService
         CancellationToken cancellationToken)
     {
         // Get the child collection property
-        var collectionProperty = metadata.Type.GetProperty(config.ChildCollectionProperty!);
+        var collectionProperty = GetCachedProperty(metadata.Type, config.ChildCollectionProperty!);
         if (collectionProperty == null)
             return null;
 
@@ -197,15 +203,21 @@ public static class ComputedFieldService
             return GetDefaultValueForAggregate(config.Aggregate, field.Property.PropertyType);
         }
 
-        // Get values from the source field
+        // Get values from the source field (cache lookup per item type)
         var values = new List<object?>();
+        PropertyInfo? cachedSourceProp = null;
+        Type? cachedItemType = null;
         foreach (var item in items)
         {
             var itemType = item.GetType();
-            var sourceProperty = itemType.GetProperty(config.SourceField);
-            if (sourceProperty != null)
+            if (itemType != cachedItemType)
             {
-                values.Add(sourceProperty.GetValue(item));
+                cachedItemType = itemType;
+                cachedSourceProp = GetCachedProperty(itemType, config.SourceField);
+            }
+            if (cachedSourceProp != null)
+            {
+                values.Add(cachedSourceProp.GetValue(item));
             }
         }
 
