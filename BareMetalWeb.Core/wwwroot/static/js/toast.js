@@ -11,8 +11,5 @@ document.addEventListener('DOMContentLoaded', function () {
     if (url.searchParams.has('id')) {
         url.searchParams.delete('id');
     }
-    if (url.searchParams.has('apikey')) {
-        url.searchParams.delete('apikey');
-    }
     window.history.replaceState({}, '', url.toString());
 });

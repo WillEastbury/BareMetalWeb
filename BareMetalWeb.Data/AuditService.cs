@@ -231,8 +231,17 @@ public sealed class AuditService
         var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
             .Where(p => p.CanRead && p.CanWrite);
 
-        // Fields to skip (metadata fields that always change)
-        var skipFields = new HashSet<string> { "UpdatedOnUtc", "UpdatedBy", "ETag", "Version" };
+        // Fields to skip (metadata fields that always change + sensitive credential fields)
+        var skipFields = new HashSet<string>
+        {
+            "UpdatedOnUtc", "UpdatedBy", "ETag", "Version",
+            "PasswordHash", "PasswordSalt", "PasswordIterations",
+            "MfaSecret", "MfaSecretEncrypted",
+            "MfaPendingSecret", "MfaPendingSecretEncrypted",
+            "MfaLastVerifiedStep", "MfaPendingFailedAttempts",
+            "MfaBackupCodeHashes",
+            "ApiKeyHashes"
+        };
 
         foreach (var prop in properties)
         {
