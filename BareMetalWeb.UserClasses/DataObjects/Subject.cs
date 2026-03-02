@@ -3,7 +3,7 @@ using BareMetalWeb.Data;
 
 namespace BareMetalWeb.Data.DataObjects;
 
-[DataEntity("Subjects", ShowOnNav = false, NavGroup = "Admin", NavOrder = 10)]
+[DataEntity("Subjects", ShowOnNav = true, NavGroup = "School", NavOrder = 10)]
 public class Subject : RenderableDataObject
 {
     [DataField(Label = "Name", Order = 1, Required = true)]

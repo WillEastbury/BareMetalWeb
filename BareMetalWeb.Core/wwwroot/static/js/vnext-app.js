@@ -845,15 +845,16 @@
 
             var row = '<li class="bm-tree-item"><div class="bm-tree-node">';
             if (node.children.length > 0) {
-                var icon = isExpanded ? '&#9662;' : '&#9656;';
+                var icon = isExpanded ? '<i class="bi bi-chevron-down"></i>' : '<i class="bi bi-chevron-right"></i>';
                 var expCls = isExpanded ? 'bm-tree-expanded' : 'bm-tree-collapsed';
                 row += '<span class="bm-tree-toggle ' + expCls + '" onclick="(function(t){' +
                     'var li=t.closest(\'.bm-tree-item\');' +
                     'var ul=li&&li.querySelector(\':scope > ul\');' +
                     'if(!ul)return;' +
+                    'var ic=t.querySelector(\'i\');if(!ic)return;' +
                     'var exp=!ul.classList.contains(\'d-none\');' +
                     'ul.classList.toggle(\'d-none\',exp);' +
-                    't.innerHTML=exp?\'&#9656;\':\'&#9662;\';' +
+                    'ic.className=exp?\'bi bi-chevron-right\':\'bi bi-chevron-down\';' +
                     't.classList.toggle(\'bm-tree-expanded\',!exp);' +
                     't.classList.toggle(\'bm-tree-collapsed\',exp);' +
                     '})(this)">' + icon + '</span>';
