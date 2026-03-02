@@ -12,7 +12,7 @@ namespace BareMetalWeb.Runtime;
 /// <c>AssertIf</c>, <c>SetIf</c>, <c>CalculateAndSetIf</c>,
 /// <c>ForSet</c>, <c>ForSetSequential</c>, <c>InvokeIf</c>.
 /// </summary>
-[DataEntity("Action Commands", ShowOnNav = false, NavGroup = "System", NavOrder = 1004)]
+[DataEntity("Action Commands", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1004)]
 public class ActionCommandDefinition : RenderableDataObject
 {
     /// <summary>FK to the owning <see cref="ActionDefinition"/>.</summary>

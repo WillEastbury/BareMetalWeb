@@ -11,7 +11,7 @@ namespace BareMetalWeb.Data;
     Slug = "auditentry",
     Permissions = "admin",
     ShowOnNav = true,
-    NavGroup = "Administration",
+    NavGroup = "Admin",
     NavOrder = 30,
     IdGeneration = AutoIdStrategy.Sequential
 )]

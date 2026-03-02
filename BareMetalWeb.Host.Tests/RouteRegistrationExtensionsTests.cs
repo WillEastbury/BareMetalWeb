@@ -380,14 +380,14 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void RegisterMonitoringRoutes_MetricsRoute_HasSystemNavGroup()
+    public void RegisterMonitoringRoutes_MetricsRoute_HasAdminNavGroup()
     {
         // Arrange & Act
         _server.RegisterMonitoringRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
         var route = _server.routes["GET /metrics"];
-        Assert.Equal("System", route.PageInfo!.PageContext.NavGroup);
+        Assert.Equal("Admin", route.PageInfo!.PageContext.NavGroup);
     }
 
     [Fact]
@@ -909,7 +909,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void RegisterAdminRoutes_NavRoutes_HaveSystemNavGroup()
+    public void RegisterAdminRoutes_NavRoutes_HaveAdminNavGroup()
     {
         // Arrange & Act
         _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
@@ -920,7 +920,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
             .ToList();
 
         Assert.All(navRoutes, r =>
-            Assert.Equal("System", r.Value.PageInfo!.PageContext.NavGroup));
+            Assert.Equal("Admin", r.Value.PageInfo!.PageContext.NavGroup));
     }
 
     // ──────────────────────────────────────────────────────────────

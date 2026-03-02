@@ -6,7 +6,7 @@ namespace BareMetalWeb.Data.DataObjects;
 /// <summary>
 /// Session log — admin-only, not shown in user navigation.
 /// </summary>
-[DataEntity("Sessions", ShowOnNav = true, NavGroup = "Administration", NavOrder = 40, Permissions = "admin")]
+[DataEntity("Sessions", ShowOnNav = true, NavGroup = "Admin", NavOrder = 40, Permissions = "admin")]
 public class SessionLog : BaseDataObject
 {
     [DataField(Label = "User", Order = 1, Required = true)]
