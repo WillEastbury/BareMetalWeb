@@ -218,6 +218,7 @@ public static class BareMetalWebExtensions
         var clusterState = new BareMetalWeb.Data.ClusterState(new BareMetalWeb.Data.LocalLeaseAuthority());
         _ = clusterState.TryBecomeLeaderAsync(CancellationToken.None);
         ClusterApiHandlers.Initialize(clusterState);
+        ProxyRouteHandler.Initialize(clusterState);
 
         appInfo.RegisterBinaryApiRoutes(routeHandlers, pageInfoFactory, mainTemplate);       // binary wire-format API
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);

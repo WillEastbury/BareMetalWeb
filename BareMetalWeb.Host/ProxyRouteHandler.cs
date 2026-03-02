@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Text;
 using BareMetalWeb.Core.Interfaces;
+using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
 using Microsoft.Extensions.Primitives;
 
@@ -45,6 +47,11 @@ public sealed class ProxyRouteHandler
         HttpStatusCode.ServiceUnavailable,
         HttpStatusCode.GatewayTimeout
     };
+
+    private static ClusterState? _clusterState;
+
+    /// <summary>Set the cluster state reference so proxy handlers can inject lease-owner affinity cookies.</summary>
+    public static void Initialize(ClusterState clusterState) => _clusterState = clusterState;
 
     private readonly ProxyRouteConfig _route;
     private readonly IBufferedLogger _logger;
@@ -131,6 +138,7 @@ public sealed class ProxyRouteHandler
 
             CopyRequestHeaders(context, requestMessage);
             ApplyTraceId(context, requestMessage);
+            ApplyLeaseAffinityCookie(requestMessage);
 
             try
             {
@@ -386,6 +394,35 @@ public sealed class ProxyRouteHandler
         {
             context.Response.Headers.TryAdd(_route.TraceIdHeader, traceId);
         }
+    }
+
+    private void ApplyLeaseAffinityCookie(HttpRequestMessage requestMessage)
+    {
+        if (!_route.LeaseAffinityCookieEnabled || _clusterState == null)
+            return;
+
+        var instanceId = _clusterState.InstanceId;
+        if (string.IsNullOrEmpty(instanceId))
+            return;
+
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(instanceId));
+        var affinityValue = Convert.ToHexStringLower(hash);
+        var cookieName = string.IsNullOrWhiteSpace(_route.LeaseAffinityCookieName)
+            ? "ARRAffinity"
+            : _route.LeaseAffinityCookieName;
+
+        // Append (or create) the Cookie header with the affinity cookie
+        var existing = requestMessage.Headers.TryGetValues("Cookie", out var vals)
+            ? string.Join("; ", vals)
+            : null;
+        var affinityCookie = $"{cookieName}={affinityValue}";
+        var sameSiteCookie = $"{cookieName}SameSite={affinityValue}";
+        var combined = string.IsNullOrWhiteSpace(existing)
+            ? $"{affinityCookie}; {sameSiteCookie}"
+            : $"{existing}; {affinityCookie}; {sameSiteCookie}";
+
+        requestMessage.Headers.Remove("Cookie");
+        requestMessage.Headers.TryAddWithoutValidation("Cookie", combined);
     }
 
     private static async Task<byte[]?> TryBufferRequestBodyAsync(HttpContext context, int maxBytes)
