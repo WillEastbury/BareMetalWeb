@@ -70,8 +70,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private readonly ConcurrentDictionary<Type, object>       _schemaLocks  = new();
 
     // Sequential-ID file locks
-    private readonly ConcurrentDictionary<string, object> _seqIdLocks
+    private readonly ConcurrentDictionary<string, SeqIdRange> _seqIdRanges
         = new(StringComparer.OrdinalIgnoreCase);
+    private const int SeqIdBatchSize = 64;
 
     // ── Construction / disposal ───────────────────────────────────────────────
 
@@ -324,27 +325,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         if (string.IsNullOrWhiteSpace(entityName))
             throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
 
-        var path    = GetSeqIdFilePath(entityName);
-        var lockObj = _seqIdLocks.GetOrAdd(entityName, _ => new object());
-
-        const int maxRetries   = 5;
-        const int initialDelayMs = 10;
-
-        for (int attempt = 0; attempt <= maxRetries; attempt++)
-        {
-            try
-            {
-                lock (lockObj)
-                    return IncrementAndReadSeqKeyFile(path);
-            }
-            catch (IOException) when (attempt < maxRetries)
-            {
-                Thread.Sleep(initialDelayMs * (1 << attempt));
-            }
-        }
-
-        lock (lockObj)
-            return IncrementAndReadSeqKeyFile(path);
+        var path  = GetSeqIdFilePath(entityName);
+        var range = _seqIdRanges.GetOrAdd(entityName, _ => new SeqIdRange());
+        return range.Next(path, SeqIdBatchSize);
     }
 
     public void SeedSequentialKey(string entityName, uint floor)
@@ -352,8 +335,8 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         if (string.IsNullOrWhiteSpace(entityName))
             throw new ArgumentException("Entity name cannot be empty.", nameof(entityName));
 
-        var path    = GetSeqIdFilePath(entityName);
-        var lockObj = _seqIdLocks.GetOrAdd(entityName, _ => new object());
+        var path  = GetSeqIdFilePath(entityName);
+        var range = _seqIdRanges.GetOrAdd(entityName, _ => new SeqIdRange());
 
         const int maxRetries    = 5;
         const int initialDelayMs = 10;
@@ -362,8 +345,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         {
             try
             {
-                lock (lockObj)
+                lock (range.SyncRoot)
                     SeedSeqKeyFileIfLower(path, floor);
+                range.Invalidate();
                 return;
             }
             catch (IOException) when (attempt < maxRetries)
@@ -372,8 +356,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             }
         }
 
-        lock (lockObj)
+        lock (range.SyncRoot)
             SeedSeqKeyFileIfLower(path, floor);
+        range.Invalidate();
     }
 
     // ── IDataProvider: index / paged-file plumbing (not used by WalDataProvider) ─
@@ -726,7 +711,53 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private string GetSeqIdFilePath(string entityName)
         => Path.Combine(_rootPath, SanitizeFilePart(entityName), "_seqid.dat");
 
-    private static uint IncrementAndReadSeqKeyFile(string path)
+    private sealed class SeqIdRange
+    {
+        public readonly object SyncRoot = new();
+        private uint _next;
+        private uint _ceiling;
+
+        public uint Next(string path, int batchSize)
+        {
+            lock (SyncRoot)
+            {
+                if (_next < _ceiling)
+                    return ++_next;
+
+                const int maxRetries = 5;
+                const int initialDelayMs = 10;
+                uint baseId = 0;
+
+                for (int attempt = 0; attempt <= maxRetries; attempt++)
+                {
+                    try
+                    {
+                        baseId = AllocateBatch(path, batchSize);
+                        break;
+                    }
+                    catch (IOException) when (attempt < maxRetries)
+                    {
+                        Thread.Sleep(initialDelayMs * (1 << attempt));
+                    }
+                }
+
+                _next = baseId;
+                _ceiling = baseId + (uint)batchSize;
+                return ++_next;
+            }
+        }
+
+        public void Invalidate()
+        {
+            lock (SyncRoot)
+            {
+                _next = 0;
+                _ceiling = 0;
+            }
+        }
+    }
+
+    private static uint AllocateBatch(string path, int batchSize)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? Path.GetTempPath());
         Span<byte> buf = stackalloc byte[4];
@@ -737,12 +768,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             file.ReadExactly(buf);
             current = BinaryPrimitives.ReadUInt32LittleEndian(buf);
         }
-        var next = current + 1;
-        BinaryPrimitives.WriteUInt32LittleEndian(buf, next);
+        var ceiling = current + (uint)batchSize;
+        BinaryPrimitives.WriteUInt32LittleEndian(buf, ceiling);
         file.Position = 0;
         file.Write(buf);
         file.Flush(true);
-        return next;
+        return current;
     }
 
     private static void SeedSeqKeyFileIfLower(string path, uint floor)
