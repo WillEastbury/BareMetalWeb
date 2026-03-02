@@ -4042,20 +4042,9 @@ public sealed class RouteHandlers : IRouteHandlers
                     (seedSubjects.Count > 0 ? $" Seeded {seedSubjects.Count} subjects." : ""));
             });
 
-        var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
-        var statusUrl = $"{baseUrl}/api/jobs/{jobId}";
-        context.Response.StatusCode = StatusCodes.Status202Accepted;
-        context.Response.Headers["Location"] = statusUrl;
-        context.Response.Headers["Retry-After"] = "2";
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(
-            JsonSerializer.Serialize(new
-            {
-                jobId,
-                status = "queued",
-                operationName = "Generate Sample Data",
-                statusUrl
-            })).ConfigureAwait(false);
+        var statusUrl = $"/api/jobs/{jobId}";
+        var returnUrl = "/admin/sample-data";
+        await RenderJobProgressPage(context, jobId, statusUrl, returnUrl, "Generate Sample Data");
     }
 
     public async ValueTask WipeDataHandler(HttpContext context)
@@ -4151,20 +4140,58 @@ public sealed class RouteHandlers : IRouteHandlers
                 progress.Report(100, $"Done. Wiped {done} entity store{(done == 1 ? "" : "s")}.");
             });
 
-        var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
-        var statusUrl = $"{baseUrl}/api/jobs/{jobId}";
-        context.Response.StatusCode = StatusCodes.Status202Accepted;
-        context.Response.Headers["Location"] = statusUrl;
-        context.Response.Headers["Retry-After"] = "2";
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(
-            JsonSerializer.Serialize(new
-            {
-                jobId,
-                status = "queued",
-                operationName = "Wipe All Data",
-                statusUrl
-            })).ConfigureAwait(false);
+        var statusUrl = $"/api/jobs/{jobId}";
+        var returnUrl = "/admin/wipe-data";
+        await RenderJobProgressPage(context, jobId, statusUrl, returnUrl, "Wipe All Data");
+    }
+
+    private async ValueTask RenderJobProgressPage(HttpContext context, string jobId, string statusUrl, string returnUrl, string operationName)
+    {
+        var nonce = context.GetCspNonce();
+        var nonceAttr = string.IsNullOrEmpty(nonce) ? string.Empty : $" nonce=\"{WebUtility.HtmlEncode(nonce)}\"";
+
+        var html = new StringBuilder();
+        html.Append("<div class=\"card\">");
+        html.Append("<div class=\"card-body\">");
+        html.Append($"<h5 class=\"card-title\" id=\"job-title\">{WebUtility.HtmlEncode(operationName)}</h5>");
+        html.Append("<div class=\"progress mb-3\" style=\"height:1.5rem;\">");
+        html.Append("<div class=\"progress-bar progress-bar-striped progress-bar-animated\" id=\"job-progress\" role=\"progressbar\" style=\"width:0%\" aria-valuenow=\"0\" aria-valuemin=\"0\" aria-valuemax=\"100\">0%</div>");
+        html.Append("</div>");
+        html.Append("<p id=\"job-description\" class=\"text-muted mb-2\">Starting\u2026</p>");
+        html.Append("<div id=\"job-result\" class=\"d-none\"></div>");
+        html.Append($"<a id=\"job-return\" class=\"btn btn-primary d-none\" href=\"{WebUtility.HtmlEncode(returnUrl)}\"><i class=\"bi bi-arrow-left\" aria-hidden=\"true\"></i> Back</a>");
+        html.Append("</div></div>");
+
+        html.Append($"<script{nonceAttr}>");
+        html.Append("(function(){");
+        html.Append($"var url='{statusUrl.Replace("'", "\\'")}';");
+        html.Append("var bar=document.getElementById('job-progress');");
+        html.Append("var desc=document.getElementById('job-description');");
+        html.Append("var result=document.getElementById('job-result');");
+        html.Append("var ret=document.getElementById('job-return');");
+        html.Append("function poll(){");
+        html.Append("fetch(url).then(function(r){return r.json();}).then(function(d){");
+        html.Append("var pct=d.percentComplete||0;");
+        html.Append("bar.style.width=pct+'%';bar.textContent=pct+'%';bar.setAttribute('aria-valuenow',pct);");
+        html.Append("desc.textContent=d.description||d.status||'';");
+        html.Append("if(d.status==='succeeded'){");
+        html.Append("bar.classList.remove('progress-bar-animated','progress-bar-striped');bar.classList.add('bg-success');");
+        html.Append("result.className='alert alert-success mt-3';result.textContent=d.description||'Completed successfully.';");
+        html.Append("ret.classList.remove('d-none');");
+        html.Append("}else if(d.status==='failed'){");
+        html.Append("bar.classList.remove('progress-bar-animated','progress-bar-striped');bar.classList.add('bg-danger');");
+        html.Append("result.className='alert alert-danger mt-3';result.textContent=d.error||'Job failed.';");
+        html.Append("ret.classList.remove('d-none');");
+        html.Append("}else{setTimeout(poll,2000);}");
+        html.Append("}).catch(function(){setTimeout(poll,3000);});");
+        html.Append("}");
+        html.Append("poll();");
+        html.Append("})();");
+        html.Append("</script>");
+
+        context.SetStringValue("title", operationName);
+        context.SetStringValue("html_message", html.ToString());
+        await _renderer.RenderPage(context);
     }
 
     private void RenderWipeDataForm(HttpContext context, string? message, string wipeToken)
