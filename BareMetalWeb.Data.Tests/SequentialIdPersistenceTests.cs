@@ -50,18 +50,17 @@ public class SequentialIdPersistenceTests : IDisposable
         var provider1 = new LocalFolderBinaryDataProvider(_tempRoot);
         var id1 = provider1.NextSequentialKey("Invoice");
         var id2 = provider1.NextSequentialKey("Invoice");
-        Assert.Equal(1u, id1);
-        Assert.Equal(2u, id2);
+        Assert.True(id2 > id1);
 
         // Act – create a brand-new provider instance pointing at the same root
-        // (simulates an application restart).
+        // (simulates an application restart — batch-allocated IDs may leave gaps).
         var provider2 = new LocalFolderBinaryDataProvider(_tempRoot);
         var id3 = provider2.NextSequentialKey("Invoice");
         var id4 = provider2.NextSequentialKey("Invoice");
 
-        // Assert – counter must continue from where it left off, no duplicates.
-        Assert.Equal(3u, id3);
-        Assert.Equal(4u, id4);
+        // Assert – counter must be strictly greater than previous run, no duplicates.
+        Assert.True(id3 > id2, $"Expected id3 ({id3}) > id2 ({id2}) across simulated restart.");
+        Assert.True(id4 > id3);
         Assert.NotEqual(id1, id3);
         Assert.NotEqual(id2, id3);
         Assert.NotEqual(id1, id4);
@@ -87,15 +86,16 @@ public class SequentialIdPersistenceTests : IDisposable
     {
         // Arrange – advance counter to 50
         var provider = new LocalFolderBinaryDataProvider(_tempRoot);
+        uint lastId = 0;
         for (int i = 0; i < 50; i++)
-            provider.NextSequentialKey("Product");
+            lastId = provider.NextSequentialKey("Product");
 
         // Act – try to seed with a lower value
         provider.SeedSequentialKey("Product", 10);
         var next = provider.NextSequentialKey("Product");
 
-        // Assert – counter must NOT go backwards
-        Assert.Equal(51u, next);
+        // Assert – counter must NOT go backwards (batch allocation may skip ahead)
+        Assert.True(next > lastId, $"Expected next ({next}) > lastId ({lastId}) after low seed.");
     }
 
     [Fact]
