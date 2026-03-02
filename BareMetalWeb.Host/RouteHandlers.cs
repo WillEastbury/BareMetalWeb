@@ -4388,11 +4388,30 @@ public sealed class RouteHandlers : IRouteHandlers
     private string ResolveUploadPath(HttpContext context, string storageKey)
     {
         var rootPath = GetUploadRootPath(context);
+        return ResolveUploadPathFromRoot(rootPath, storageKey);
+    }
+
+    /// <summary>
+    /// Resolves and validates the full path for an upload storage key within the given root directory.
+    /// Prevents path traversal via "../", null byte injection, and directory-name prefix bypass.
+    /// </summary>
+    internal static string ResolveUploadPathFromRoot(string rootPath, string storageKey)
+    {
+        if (storageKey.Contains('\0'))
+            throw new InvalidOperationException("Invalid upload storage key.");
+
         var sanitizedKey = storageKey.Replace('\\', '/').TrimStart('/');
         var combined = Path.Combine(rootPath, sanitizedKey.Replace('/', Path.DirectorySeparatorChar));
         var full = Path.GetFullPath(combined);
-        if (!full.StartsWith(Path.GetFullPath(rootPath), StringComparison.Ordinal))
+
+        // Resolve root once and append a separator so that "/uploads_evil" cannot match "/uploads"
+        var resolvedRoot = Path.GetFullPath(rootPath);
+        if (!Path.EndsInDirectorySeparator(resolvedRoot))
+            resolvedRoot += Path.DirectorySeparatorChar;
+
+        if (!full.StartsWith(resolvedRoot, StringComparison.Ordinal))
             throw new InvalidOperationException("Invalid upload storage key.");
+
         return full;
     }
 

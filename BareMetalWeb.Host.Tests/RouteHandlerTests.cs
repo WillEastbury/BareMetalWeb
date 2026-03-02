@@ -1350,6 +1350,68 @@ public class RouteHandlerTests : IDisposable
     }
 
     // ──────────────────────────────────────────────────────────────
+    //  ResolveUploadPathFromRoot – path traversal security tests
+    // ──────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ResolveUploadPathFromRoot_ValidKey_ReturnsPathInsideRoot()
+    {
+        var root = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar);
+        var key = "myslug/123/photo.jpg";
+        var result = RouteHandlers.ResolveUploadPathFromRoot(root, key);
+        Assert.StartsWith(root + Path.DirectorySeparatorChar, result, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("../secret.txt")]
+    [InlineData("../../etc/passwd")]
+    [InlineData("subdir/../../outside.txt")]
+    [InlineData("subdir/../../../root.txt")]
+    public void ResolveUploadPathFromRoot_DotDotTraversal_Throws(string key)
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"uploads-{Guid.NewGuid():N}");
+        Assert.Throws<InvalidOperationException>(() =>
+            RouteHandlers.ResolveUploadPathFromRoot(root, key));
+    }
+
+    [Fact]
+    public void ResolveUploadPathFromRoot_NullByteInKey_Throws()
+    {
+        var root = Path.GetTempPath();
+        Assert.Throws<InvalidOperationException>(() =>
+            RouteHandlers.ResolveUploadPathFromRoot(root, "valid\0evil"));
+    }
+
+    [Fact]
+    public void ResolveUploadPathFromRoot_DirectoryNamePrefixBypass_Throws()
+    {
+        // Root is "/tmp/uploads"; key should not resolve to "/tmp/uploads_evil/file.txt"
+        var baseDir = Path.GetTempPath();
+        var root = Path.Combine(baseDir, "uploads");
+        var evilPath = $"..{Path.DirectorySeparatorChar}uploads_evil{Path.DirectorySeparatorChar}file.txt";
+        Assert.Throws<InvalidOperationException>(() =>
+            RouteHandlers.ResolveUploadPathFromRoot(root, evilPath));
+    }
+
+    [Fact]
+    public void ResolveUploadPathFromRoot_DirectoryNamePrefixBypassForwardSlash_Throws()
+    {
+        // Same bypass via forward-slash notation (works on all platforms after normalization)
+        var baseDir = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar, '/');
+        var root = baseDir + Path.DirectorySeparatorChar + "uploads";
+        Assert.Throws<InvalidOperationException>(() =>
+            RouteHandlers.ResolveUploadPathFromRoot(root, "../uploads_evil/file.txt"));
+    }
+
+    [Fact]
+    public void ResolveUploadPathFromRoot_BackslashTraversal_Throws()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"uploads-{Guid.NewGuid():N}");
+        Assert.Throws<InvalidOperationException>(() =>
+            RouteHandlers.ResolveUploadPathFromRoot(root, @"..\secret.txt"));
+    }
+
+    // ──────────────────────────────────────────────────────────────
     //  Helper infrastructure
     // ──────────────────────────────────────────────────────────────
 
