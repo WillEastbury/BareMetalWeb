@@ -12,13 +12,14 @@ namespace BareMetalWeb.Host;
 /// </summary>
 public static class ProductRenderer
 {
-    /// <summary>GET /products — render category browse page.</summary>
-    public static async ValueTask CategoryBrowseHandler(HttpContext context)
+    /// <summary>Configures context for GET /products — category browse inside platform chrome.</summary>
+    public static async ValueTask ConfigureCategoryBrowseAsync(HttpContext context)
     {
         if (!DataScaffold.TryGetEntity("product-categories", out var catMeta))
         {
             context.Response.StatusCode = 500;
-            await context.Response.WriteAsync("Product categories not configured.");
+            context.SetStringValue("title", "Products");
+            context.SetStringValue("html_message", "<p>Product categories not configured.</p>");
             return;
         }
 
@@ -36,13 +37,7 @@ public static class ProductRenderer
         }
         catList.Sort((a, b) => a.Order.CompareTo(b.Order));
 
-        context.Response.StatusCode = 200;
-        context.Response.ContentType = "text/html; charset=utf-8";
-
         var sb = new StringBuilder(4096);
-        AppendHead(sb, "Products");
-        AppendNavbar(sb, "Products", null);
-
         sb.AppendLine("""<div class="container py-4">""");
         sb.AppendLine("""<h2 class="mb-4">Browse Categories</h2>""");
         sb.AppendLine("""<div class="row row-cols-1 row-cols-md-3 row-cols-lg-4 g-4">""");
@@ -62,13 +57,13 @@ public static class ProductRenderer
         }
 
         sb.AppendLine("</div></div>");
-        AppendFooter(sb);
 
-        await context.Response.WriteAsync(sb.ToString(), context.RequestAborted);
+        context.SetStringValue("title", "Products");
+        context.SetStringValue("html_message", sb.ToString());
     }
 
-    /// <summary>GET /products/{category} — render product grid for a category.</summary>
-    public static async ValueTask ProductGridHandler(HttpContext context)
+    /// <summary>Configures context for GET /products/{category} — product grid inside platform chrome.</summary>
+    public static async ValueTask ConfigureProductGridAsync(HttpContext context)
     {
         var categorySlug = BinaryApiHandlers.GetRouteValue(context, "category") ?? string.Empty;
 
@@ -76,7 +71,8 @@ public static class ProductRenderer
             !DataScaffold.TryGetEntity("product-categories", out var catMeta))
         {
             context.Response.StatusCode = 500;
-            await context.Response.WriteAsync("Product entities not configured.");
+            context.SetStringValue("title", "Products");
+            context.SetStringValue("html_message", "<p>Product entities not configured.</p>");
             return;
         }
 
@@ -137,14 +133,11 @@ public static class ProductRenderer
                 Tags: tags));
         }
 
-        context.Response.StatusCode = 200;
-        context.Response.ContentType = "text/html; charset=utf-8";
-
         var sb = new StringBuilder(8192);
-        AppendHead(sb, categoryName);
-        AppendNavbar(sb, categoryName, "/products");
-
         sb.AppendLine("""<div class="container py-4">""");
+
+        // Breadcrumb back to categories
+        sb.AppendLine($"""<nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="/products">Categories</a></li><li class="breadcrumb-item active">{Enc(categoryName)}</li></ol></nav>""");
 
         // Filter bar
         sb.AppendLine("""<div class="card shadow-sm mb-4"><div class="card-body">""");
@@ -205,38 +198,9 @@ public static class ProductRenderer
         }
 
         sb.AppendLine("</div></div>");
-        AppendFooter(sb);
 
-        await context.Response.WriteAsync(sb.ToString(), context.RequestAborted);
-    }
-
-    // ── Chrome ──────────────────────────────────────────────────────────────
-
-    private static void AppendHead(StringBuilder sb, string title)
-    {
-        sb.AppendLine("<!DOCTYPE html><html lang=\"en\"><head>");
-        sb.AppendLine("<meta charset=\"utf-8\"/><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>");
-        sb.AppendLine($"<title>{Enc(title)} — BareMetalWeb</title>");
-        sb.AppendLine("""<link rel="stylesheet" href="/static/css/bootstrap.min.css"/>""");
-        sb.AppendLine("""<link rel="stylesheet" href="/static/css/bootstrap-icons.min.css"/>""");
-        sb.AppendLine("</head><body class=\"bg-light\">");
-    }
-
-    private static void AppendNavbar(StringBuilder sb, string title, string? backUrl)
-    {
-        sb.AppendLine("""<nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-0">""");
-        sb.AppendLine("""<div class="container-fluid">""");
-        sb.AppendLine("""<a class="navbar-brand" href="/">BareMetalWeb</a>""");
-        if (backUrl != null)
-            sb.AppendLine($"""<a href="{backUrl}" class="btn btn-outline-light btn-sm me-2"><i class="bi bi-arrow-left"></i> Back</a>""");
-        sb.AppendLine($"""<span class="navbar-text text-light">{Enc(title)}</span>""");
-        sb.AppendLine("</div></nav>");
-    }
-
-    private static void AppendFooter(StringBuilder sb)
-    {
-        sb.AppendLine("""<script src="/static/js/bootstrap.bundle.min.js"></script>""");
-        sb.AppendLine("</body></html>");
+        context.SetStringValue("title", categoryName);
+        context.SetStringValue("html_message", sb.ToString());
     }
 
     private static string Enc(string s) => System.Net.WebUtility.HtmlEncode(s);
