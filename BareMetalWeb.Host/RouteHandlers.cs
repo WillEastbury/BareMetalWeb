@@ -1196,19 +1196,13 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var maskedSecret = MaskSecret(secret);
-        var revealSecret = string.IsNullOrWhiteSpace(secret)
-            ? string.Empty
-            : $"<details class=\"mb-2\"><summary>Reveal secret</summary><p><code>{WebUtility.HtmlEncode(secret)}</code></p></details>";
-        var revealOtpAuth = string.IsNullOrWhiteSpace(otpauthUrl)
-            ? string.Empty
-            : $"<details class=\"mb-2\"><summary>Show otpauth URI</summary><p class=\"small text-break\">{WebUtility.HtmlEncode(otpauthUrl)}</p></details>";
 
+        // Show QR code and masked secret only — never render plaintext secret in HTML
         var payload = string.IsNullOrWhiteSpace(secret)
             ? string.Empty
             : $"<p><strong>Secret:</strong> <code>{WebUtility.HtmlEncode(maskedSecret)}</code></p>" +
               qrHtml +
-              revealSecret +
-              revealOtpAuth;
+              "<p class=\"text-muted small\">Can't scan the QR code? Use the masked secret above with your authenticator app's manual entry option.</p>";
 
         context.SetStringValue("html_message", intro + payload + BuildOtpClientScript(context, "/account/mfa/setup"));
         context.AddFormDefinition(new FormDefinition(
@@ -2296,7 +2290,6 @@ public sealed class RouteHandlers : IRouteHandlers
         }
         
         var newId = instance is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) : null;
-        var keyQuery = string.IsNullOrWhiteSpace(newApiKey) ? string.Empty : $"&apikey={WebUtility.UrlEncode(newApiKey)}";
 
         if (isPopup)
         {
@@ -2305,7 +2298,22 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        context.Response.Redirect($"/ssr/admin/data/{typeSlug}?toast=created&id={WebUtility.UrlEncode(newId ?? string.Empty)}{keyQuery}");
+        // If a new API key was generated, show it once in a secure page (never in URLs)
+        if (!string.IsNullOrWhiteSpace(newApiKey))
+        {
+            context.Response.ContentType = "text/html";
+            var safeKey = WebUtility.HtmlEncode(newApiKey);
+            await context.Response.WriteAsync(
+                $"<!DOCTYPE html><html><head><title>API Key Created</title></head><body style=\"font-family:sans-serif;max-width:600px;margin:40px auto;\">" +
+                $"<h2>API Key Created</h2>" +
+                $"<p><strong>Copy this key now — it will not be shown again.</strong></p>" +
+                $"<pre style=\"background:#f0f0f0;padding:12px;border-radius:4px;font-size:1.1em;user-select:all;\">{safeKey}</pre>" +
+                $"<p><a href=\"/ssr/admin/data/{WebUtility.HtmlEncode(typeSlug)}\">← Back to list</a></p>" +
+                $"</body></html>").ConfigureAwait(false);
+            return;
+        }
+
+        context.Response.Redirect($"/ssr/admin/data/{typeSlug}?toast=created&id={WebUtility.UrlEncode(newId ?? string.Empty)}");
     }
 
     public async ValueTask DataEditHandler(HttpContext context)
@@ -2953,10 +2961,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var id = context.Request.Query["id"].ToString();
         var idSuffix = string.IsNullOrWhiteSpace(id) ? string.Empty : $" (ID: {WebUtility.HtmlEncode(id)})";
         var name = WebUtility.HtmlEncode(entityName);
-        var apiKey = context.Request.Query["apikey"].ToString();
-        var apiKeyNote = string.IsNullOrWhiteSpace(apiKey)
-            ? string.Empty
-            : $"<div class=\"small mt-2\"><strong>API Key:</strong> {WebUtility.HtmlEncode(apiKey)}<br/><strong>STORE THIS IN A SECURE PLACE - you will not see it again.</strong></div>";
+        var apiKeyNote = string.Empty;
         var message = action switch
         {
             "created" => $"{name} created successfully{idSuffix}.{apiKeyNote}",

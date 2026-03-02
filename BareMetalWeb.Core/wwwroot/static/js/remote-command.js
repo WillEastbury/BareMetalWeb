@@ -23,7 +23,7 @@
                 button.disabled = false;
                 button.innerHTML = originalHtml;
                 showCommandToast(data.success, data.message);
-                if (data.success && data.redirectUrl) {
+                if (data.success && data.redirectUrl && /^\/[a-zA-Z0-9\/_\-?&=%.#~+:@!$()',;]*$/.test(data.redirectUrl)) {
                     window.location.href = data.redirectUrl;
                 } else if (data.success) {
                     window.location.reload();
