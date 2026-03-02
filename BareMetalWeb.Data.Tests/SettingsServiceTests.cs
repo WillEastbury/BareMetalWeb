@@ -480,6 +480,29 @@ public class SettingsServiceTests : IDisposable
         Assert.Equal("admin-chosen-token", stored.Value);
     }
 
+    [Fact]
+    public async Task EnsureDefaultsAsync_HandlesExistingDuplicateSettingIds_DoesNotThrowOrCreateMore()
+    {
+        // Arrange — two records with the same SettingId exist (data corruption scenario)
+        var dup1 = new AppSetting { SettingId = WellKnownSettings.AllowWipeData, Value = "first" };
+        var dup2 = new AppSetting { SettingId = WellKnownSettings.AllowWipeData, Value = "second" };
+        _testStore.Save(dup1);
+        _testStore.Save(dup2);
+
+        var defaults = new[]
+        {
+            (WellKnownSettings.AllowWipeData, "config-token", "Wipe token"),
+        };
+
+        // Act — must not throw even though the store already has two records for the same key
+        await SettingsService.EnsureDefaultsAsync(_testStore, defaults, "system");
+
+        // Assert — no additional records created
+        var all = _testStore.Query<AppSetting>().ToList();
+        Assert.Equal(2, all.Count);
+        Assert.All(all, s => Assert.Equal(WellKnownSettings.AllowWipeData, s.SettingId));
+    }
+
     // ── DataScaffold.SaveAsync cache invalidation ───────────────────────────
 
     [Fact]
