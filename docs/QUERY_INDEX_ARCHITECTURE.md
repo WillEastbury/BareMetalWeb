@@ -34,38 +34,65 @@ Each indexed field gets an append-only paged file at `<dataRoot>/Index/<Entity>/
 
 | View | Method | Structure | Used For |
 |------|--------|-----------|----------|
-| **Inverted index** | `IndexStore.ReadIndex()` | `fieldValue → Set<uint keys>` | Filtering (Equals) |
+| **Inverted index** | `IndexStore.ReadIndex()` | `fieldValue → Set<uint keys>` | Filtering (Equals, StartsWith) |
 | **Forward index** | `IndexStore.ReadLatestValueIndex()` | `uint key → fieldValue` | Sorting |
+
+Both views are cached in-memory (`ConcurrentDictionary`) and invalidated on every write via `AppendEntry()` / `AppendEntries()`.
 
 ### Write Path
 
-On every `Save()`, the `SearchIndexManager` detects `[DataIndex]` properties and calls `IndexStore.AppendEntry()` with the new value. Old values get a delete (`D`) entry; new values get an add (`A`) entry. The index file is append-only — no in-place updates.
+On every `Save()`, the `SearchIndexManager` detects `[DataIndex]` properties and calls `IndexStore.AppendEntry()` with the new value. Old values get a delete (`D`) entry; new values get an add (`A`) entry. The index file is append-only — no in-place updates. Each write invalidates the in-memory cache for that `(entity, field)` pair.
+
+### IdMap and Tombstone Handling
+
+The `idMap` (`uint objKey → ulong walKey`) is filtered at load time — tombstoned (deleted) WAL entries are excluded. This means **query and count paths never need to check tombstones during iteration**. If stale tombstone entries are found on load, a compacted idMap is re-persisted in the background.
+
+### Deserialization Cache
+
+`Load<T>(key)` uses an in-memory deserialization cache keyed by `(typeName, key, walPointer)`. When the WAL pointer hasn't changed (same version), the cached deserialized object is returned without binary parsing. The cache holds up to 4096 entries with 25% batch eviction when full. Entries are invalidated on `Save()` and `Delete()`.
 
 ## Query Acceleration Paths
 
 `WalDataProvider.Query<T>()` uses indexes in this priority order:
 
-### 1. Index-Accelerated Filter (Equals)
+### 1. Index-Accelerated Filter (Equals / StartsWith)
 
-When a query has an `Equals` clause on an indexed field:
+When a query has `Equals` or `StartsWith` clauses on indexed fields:
 
 ```
 GET /api/orders?Status=Active
+GET /api/orders?Name__startswith=Wid
 ```
 
-→ Reads the inverted index for `Status`, gets `Set<uint>` of keys where Status="Active", loads only those entities. **O(k)** where k = matching records instead of O(n) full scan.
+→ Reads the cached inverted index for each indexed clause, gets `Set<uint>` candidate keys. **Multiple indexed clauses are intersected** before loading any entities (`Status[Active] ∩ CustomerId[123]`). Non-indexed clauses are applied as a post-filter on the intersected set.
 
-### 2. Index-Accelerated Sort (Key)
+**StartsWith** iterates the cached index keys with a case-insensitive prefix match, unioning all matching candidate sets.
+
+**Pagination**: When no sorts are present, short-circuits after `skip + top` matches — does not load all candidates.
+
+### 2. No Filter, No Sort (Sequential Scan)
+
+When there are no clauses and no sorts, or a null query:
+
+```
+GET /api/orders?top=25&skip=50
+```
+
+→ Walks the idMap sequentially (keys are in insertion order, idMap is tombstone-free), skips `N` entries without deserializing, loads only the `top` records. **O(skip) iteration + O(top) deserialization.**
+
+### 3. Index-Accelerated Sort (Key)
 
 When sorting by `Key` with no filters:
 
 ```
-GET /api/orders?sort=Key&direction=Asc&top=25
+GET /api/orders?sort=Key&direction=Asc&top=25&skip=50
 ```
 
-→ Collects live uint32 keys from the idMap, sorts them (O(n log n) on integers), loads only the page (25 items). No deserialization for sorting.
+→ **Asc**: Streams idMap sequentially, skips `N` entries, loads `top` records. No sorting needed — keys are already sequential. **O(skip + top).**
 
-### 3. Index-Accelerated Sort (Indexed Field)
+→ **Desc**: Collects all live keys from idMap, reverses, slices, loads page. **O(n) collect + O(top) load.**
+
+### 4. Index-Accelerated Sort (Indexed Field)
 
 When sorting by an indexed field with no filters:
 
@@ -73,23 +100,35 @@ When sorting by an indexed field with no filters:
 GET /api/orders?sort=Status&direction=Asc&top=25
 ```
 
-→ Reads the forward index to get `(key, fieldValue)` pairs, sorts by fieldValue (O(n log n) on strings), loads only the page. No deserialization for sorting.
+→ Reads the cached forward index to get `(key, fieldValue)` pairs for all live entities, sorts by fieldValue, loads only the page. No entity deserialization for sorting. **O(n log n) sort + O(top) load.**
 
-### 4. Index-Accelerated Count
+### 5. Index-Accelerated Count
 
-When counting with an `Equals` filter on an indexed field:
+Counting with filters on indexed fields:
 
 ```
 GET /api/orders?Status=Active  (count header)
 ```
 
-→ Reads the inverted index, returns `candidateIds.Count` directly. **O(1)** after index read — zero deserialization.
+→ Reads cached inverted indexes for all indexed `Equals`/`StartsWith` clauses, intersects candidate sets. If ALL clauses are indexed, returns `candidateIds.Count` directly — **O(1)** after cache hit, zero deserialization. If some clauses are non-indexed, loads only the intersected set and applies remaining filters.
 
-### 5. Full Scan (Fallback)
+**Unfiltered count** uses a cached `_liveCounts` dictionary — **O(1)** after first call. Maintained atomically on `Save()` (increment on insert) and `Delete()` (decrement).
 
-For queries with non-indexed filters, complex operators (Contains, GreaterThan), or grouped clauses:
+### 6. Full Scan (Fallback)
 
-→ Iterates all WAL entries, deserializes each entity, applies filter/sort in memory. Short-circuits after `top` matches when no sort is needed.
+For queries with non-indexed filters, complex operators (Contains, GreaterThan, LessThan), or grouped clauses:
+
+→ Iterates all idMap entries (tombstone-free), calls `Load<T>()` (hits deser cache when possible), applies filter/sort in memory. Short-circuits after `top` matches when no sort is needed.
+
+## Caching Summary
+
+| Cache | Location | Key | Invalidation | Size |
+|-------|----------|-----|--------------|------|
+| **Inverted index** | `IndexStore._invertedCache` | `(entity, field)` | On `AppendEntry()` | Unbounded (one per indexed field) |
+| **Forward index** | `IndexStore._forwardCache` | `(entity, field)` | On `AppendEntry()` | Unbounded (one per indexed field) |
+| **Deserialization** | `WalDataProvider._deserCache` | `(typeName, key, walPtr)` | On `Save()` / `Delete()` | 4096 entries, 25% eviction |
+| **Live count** | `WalDataProvider._liveCounts` | `typeName` | `Save()` increments, `Delete()` decrements | One per entity type |
+| **Schema members** | `WalDataProvider._schemaMemberCache` | `(type, version)` | Never (immutable) | One per schema version |
 
 ## Indexed Fields by Entity
 
@@ -122,12 +161,19 @@ For queries with non-indexed filters, complex operators (Contains, GreaterThan),
 
 ## Performance Characteristics
 
-| Query Pattern | With Index | Without Index |
-|---------------|-----------|---------------|
-| Filter (Equals) | O(k) load k matches | O(n) deserialize all |
-| Sort (no filter) | O(n log n) keys + O(p) load page | O(n) deserialize + O(n log n) sort |
-| Count (no filter) | O(n) tombstone check | O(n) tombstone check |
-| Count (Equals filter) | O(1) after index read | O(n) deserialize + match |
-| Filter + Sort | O(k) load + O(k log k) sort | O(n) deserialize + O(n log n) sort |
+| Query Pattern | Complexity | Notes |
+|---------------|-----------|-------|
+| No filter, no sort + Skip/Top | O(skip + top) | Sequential idMap walk, zero deser for skipped |
+| Filter (Equals, indexed) | O(k) | k = matching records, from cached index |
+| Filter (StartsWith, indexed) | O(keys + k) | Prefix scan on cached index keys |
+| Multi-filter (all indexed) | O(k₁ ∩ k₂) | Intersect cached index sets |
+| Sort by Key Asc (no filter) | O(skip + top) | Stream sequential idMap |
+| Sort by Key Desc (no filter) | O(n + top) | Collect all keys, reverse, load page |
+| Sort by indexed field | O(n log n + top) | Forward index sort, load page only |
+| Count (no filter) | O(1) | Cached `_liveCounts` |
+| Count (Equals, indexed) | O(1) | Cached index `.Count` |
+| Count (multi-filter, all indexed) | O(1) | Intersect cached sets, `.Count` |
+| Filter + Sort | O(k log k + top) | Index filter → sort candidates → load page |
+| Full scan fallback | O(n) | Deser cache reduces per-entity cost |
 
-Where n = total entities, k = matching entities, p = page size (typically 25).
+Where n = total entities, k = matching entities, top = page size (typically 25).

@@ -114,6 +114,26 @@ dotnet run --project BareMetalWeb.PerformanceTests
 
 - **Sub-entity (List&lt;T&gt;) rendering**: Fields that are `List<T>` on a parent entity (e.g. `Order.OrderRows` where `T` is `OrderRow`) represent sub-entities that are rendered as inline sub-grids or sub-list editors. These sub-grids MUST respect all the same field constraints, validation rules, lookup resolution, and rendering logic that apply to top-level entities. In particular: lookup/FK fields inside sub-entity rows must also display their resolved display values (not raw IDs), required fields must be validated, and the sub-grid must honour any `[DataLookup]`, `[CopyFromParent]`, and `[CalculatedField]` attributes on the sub-entity type.
 
+## Documentation Sync Pass (MANDATORY — End of Every Session)
+
+> **At the end of every coding session (before the final commit), perform a documentation sync pass.**
+
+**Steps:**
+1. Review all files modified in this session (use `git diff --name-only main`)
+2. For each modified file, check whether any `docs/` file describes the affected area
+3. If a doc exists and is now stale, update it to match the actual code
+4. If a new subsystem/feature was added with no existing doc, create one in `docs/` or `docs/architecture/`
+5. **Read the code, not the old doc** — rewrite sections from what the code actually does, not what the doc previously said
+
+**Key docs to check:**
+- `docs/QUERY_INDEX_ARCHITECTURE.md` — Query paths, index usage, caching, performance characteristics
+- `docs/PROXY.md` — Proxy configuration, load balancing, affinity cookies
+- `docs/architecture/data-layer.md` — Storage stack, WAL, serialization, idMap
+- `docs/architecture/rendering.md` — SSR, VNext, screen chrome, template syntax
+- `docs/architecture/system-overview.md` — Component diagram, route divergence
+
+**A session is considered incomplete if code was changed but affected docs were not updated.**
+
 ## Documentation Invariants
 
 > **The codebase is always canonical over documentation. When discrepancies exist, correct the docs — do not extend or preserve stale text.**
