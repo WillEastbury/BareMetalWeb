@@ -189,7 +189,8 @@ public sealed class WalStore : IDisposable
                 FileShare.ReadWrite, 4096);
             return TryReadOpPayloadFromStream(fs, offset32, key, out payload);
         }
-        catch (IOException) { return false; }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
     }
 
     // ── IDisposable ───────────────────────────────────────────────────────────
@@ -205,7 +206,10 @@ public sealed class WalStore : IDisposable
             if (_visibleCommitPtr != WalConstants.NullPtr)
             {
                 try { WalSnapshot.Write(_directory, _visibleCommitPtr, HeadMap); }
-                catch { /* best-effort snapshot on shutdown */ }
+                catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+                {
+                    System.Diagnostics.Debug.WriteLine($"WalStore: snapshot on shutdown failed: {ex.GetType().Name}: {ex.Message}");
+                }
             }
 
             _activeWriter?.WriteFooterAndClose();

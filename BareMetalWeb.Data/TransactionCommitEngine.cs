@@ -225,7 +225,10 @@ public sealed class TransactionCommitEngine
         foreach (var field in layout.Fields)
         {
             try { field.Setter(clone, field.Getter(source)); }
-            catch { /* skip non-clonable fields */ }
+            catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+            {
+                System.Diagnostics.Debug.WriteLine($"CloneEntity: skipping field {field.Name}: {ex.GetType().Name}");
+            }
         }
         return clone;
     }
