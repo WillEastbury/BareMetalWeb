@@ -4240,6 +4240,19 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var errors = new List<string>();
+
+        // Bounds validation (mirrors ParseSampleCount in the SSR handler)
+        static bool IsOutOfRange(int v) => v < 0 || v > 100000;
+        if (IsOutOfRange(addresses))      errors.Add("addresses must be between 0 and 100000.");
+        if (IsOutOfRange(customers))      errors.Add("customers must be between 0 and 100000.");
+        if (IsOutOfRange(units))          errors.Add("units must be between 0 and 100000.");
+        if (IsOutOfRange(products))       errors.Add("products must be between 0 and 100000.");
+        if (IsOutOfRange(employees))      errors.Add("employees must be between 0 and 100000.");
+        if (IsOutOfRange(orders))         errors.Add("orders must be between 0 and 100000.");
+        if (IsOutOfRange(todos))          errors.Add("todos must be between 0 and 100000.");
+        if (IsOutOfRange(timeTablePlans)) errors.Add("timeTablePlans must be between 0 and 100000.");
+        if (IsOutOfRange(lessonLogs))     errors.Add("lessonLogs must be between 0 and 100000.");
+
         if (customers > 0 && addresses == 0) errors.Add("Customers require at least one address.");
         if (products > 0 && units == 0)      errors.Add("Products require at least one unit of measure.");
         if (orders > 0 && customers == 0)    errors.Add("Orders require at least one customer.");
