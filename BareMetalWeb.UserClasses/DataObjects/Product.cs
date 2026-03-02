@@ -12,6 +12,7 @@ public class Product : RenderableDataObject
     public string Sku { get; set; } = string.Empty;
 
     [DataField(Label = "Category", Order = 3)]
+    [DataLookup(typeof(ProductCategory), DisplayField = "Name", SortField = "Name", SortDirection = SortDirection.Asc, CacheSeconds = 120)]
     [DataIndex]
     public string Category { get; set; } = string.Empty;
 

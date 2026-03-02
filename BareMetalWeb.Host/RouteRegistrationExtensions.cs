@@ -246,9 +246,9 @@ public static class RouteRegistrationExtensions
         IPageInfoFactory pageInfoFactory,
         IHtmlTemplate mainTemplate)
     {
-        // Entity browsing
+        // Entity browsing (SSR legacy — hidden from nav; VNext /UI is the primary entry point)
         host.RegisterRoute("GET /ssr/admin/data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Data", "" }, "Authenticated", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Data", "" }, "Authenticated", false, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
             routeHandlers.DataEntitiesHandler));
 
         host.RegisterRoute("GET /ssr/admin/data/{type}", new RouteHandlerData(
