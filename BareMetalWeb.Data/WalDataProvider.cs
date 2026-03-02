@@ -73,6 +73,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private readonly ConcurrentDictionary<Type, SchemaCache>  _schemaCache  = new();
     private readonly ConcurrentDictionary<Type, object>       _schemaLocks  = new();
 
+    // Live record counts maintained on Save/Delete to avoid tombstone walks.
+    // Initialised lazily from the id-map (only non-tombstone entries) on first
+    // Count() call with no filter; updated atomically on Save (insert) / Delete.
+    private readonly ConcurrentDictionary<string, int> _liveCounts
+        = new(StringComparer.OrdinalIgnoreCase);
+
     // Sequential-ID file locks
     private readonly ConcurrentDictionary<string, SeqIdRange> _seqIdRanges
         = new(StringComparer.OrdinalIgnoreCase);
@@ -204,9 +210,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         {
             // Load the existing object before overwriting, so we can remove stale index entries
             var idMap    = GetOrLoadIdMap(type.Name);
+            bool isInsert = !idMap.ContainsKey(obj.Key);
             T? oldObj    = null;
             List<PropertyInfo> indexedFields = new();
-            if (_searchIndexManager.HasIndexedFields(type, out indexedFields) && idMap.ContainsKey(obj.Key))
+            if (_searchIndexManager.HasIndexedFields(type, out indexedFields) && !isInsert)
                 oldObj = Load<T>(obj.Key);
 
             var bytes  = _serializer.Serialize(obj, schemaVersion);
@@ -217,6 +224,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                 commitTask.GetAwaiter().GetResult();
 
             PersistIdMap(type.Name);
+
+            // Bump live count on insert (updates don't change count)
+            if (isInsert)
+                _liveCounts.AddOrUpdate(type.Name, 1, (_, c) => c + 1);
 
             // ── Update secondary field indexes ────────────────────────────
             if (indexedFields.Count > 0)
@@ -301,24 +312,42 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                         if (fieldIndex.Count == 0)
                             break; // No index entries yet; fall through to full scan
 
-                        IEnumerable<T> candidates;
-                        if (fieldIndex.TryGetValue(fieldValue, out var candidateIds))
+                        if (!fieldIndex.TryGetValue(fieldValue, out var candidateIds))
+                            return Array.Empty<T>();
+
+                        var hasSorts = query.Sorts.Count > 0;
+
+                        // No sorts — short-circuit: skip/take directly from candidates
+                        // to avoid loading all matching records when only a page is needed.
+                        if (!hasSorts)
                         {
-                            var loaded = new List<T>(candidateIds.Count);
+                            var needExtra = query.Clauses.Count > 1; // multi-clause needs re-check
+                            var limit = skip + top;
+                            var results = new List<T>(Math.Min(top, candidateIds.Count));
+                            int matched = 0;
                             foreach (var candidateKey in candidateIds)
                             {
                                 var obj = Load<T>(candidateKey);
-                                if (obj != null)
-                                    loaded.Add(obj);
+                                if (obj == null) continue;
+                                if (needExtra && !_queryEvaluator.Matches(obj, query)) continue;
+                                if (matched < skip) { matched++; continue; }
+                                results.Add(obj);
+                                matched++;
+                                if (results.Count >= top) break;
                             }
-                            candidates = loaded;
-                        }
-                        else
-                        {
-                            return Array.Empty<T>();
+                            return results;
                         }
 
-                        var filtered = candidates.Where(item => _queryEvaluator.Matches(item, query));
+                        // Has sorts — load all candidates, sort, then slice
+                        var loaded = new List<T>(candidateIds.Count);
+                        foreach (var candidateKey in candidateIds)
+                        {
+                            var obj = Load<T>(candidateKey);
+                            if (obj != null)
+                                loaded.Add(obj);
+                        }
+
+                        var filtered = loaded.Where(item => _queryEvaluator.Matches(item, query));
                         var sorted   = _queryEvaluator.ApplySorts(filtered, query);
                         if (skip > 0 || top != DefaultQueryLimit)
                             sorted = sorted.Skip(skip).Take(top);
@@ -329,6 +358,23 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         }
         // ── Full scan (no usable index) ───────────────────────────────────────
 
+        // ── No filter, no sort — idMap is tombstone-free, keys are sequential,
+        //    just skip N entries and deserialize only the page ───────────────
+        if (query == null || (query.Clauses.Count == 0 && query.Groups.Count == 0 && query.Sorts.Count == 0))
+        {
+            var pageResults = new List<T>(Math.Min(top, idMap.Count));
+            int seen = 0;
+            foreach (var (objKey, _) in idMap)
+            {
+                if (seen < skip) { seen++; continue; }
+                var obj = Load<T>(objKey);
+                if (obj != null) pageResults.Add(obj);
+                seen++;
+                if (pageResults.Count >= top) break;
+            }
+            return pageResults;
+        }
+
         // ── Index-accelerated sort path ──────────────────────────────────────
         // When the only reason we can't short-circuit is a sort, and the sort
         // field is either "Key" or an indexed field, pre-sort the keys without
@@ -337,29 +383,39 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         {
             var sort = query.Sorts[0];
 
-            // Sort by Key — sort uint32 keys directly from idMap
+            // Sort by Key — idMap is tombstone-free, keys are sequential uint32s.
+            // Asc: stream skip/take directly. Desc: collect, reverse, slice.
             if (string.Equals(sort.Field, "Key", StringComparison.OrdinalIgnoreCase))
             {
-                var liveKeys = new List<uint>(idMap.Count);
-                foreach (var (objKey, walKey) in idMap)
-                {
-                    if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
-                    if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
-                    if (!payload.IsEmpty) liveKeys.Add(objKey);
-                }
-                liveKeys.Sort();
                 if (sort.Direction == SortDirection.Desc)
-                    liveKeys.Reverse();
-
-                var keyPage = liveKeys.Skip(skip).Take(top).ToList();
-                var keyResults = new List<T>(keyPage.Count);
-                foreach (var key in keyPage)
                 {
-                    var obj = Load<T>(key);
-                    if (obj != null)
-                        keyResults.Add(obj);
+                    var allKeys = new List<uint>(idMap.Count);
+                    foreach (var (objKey, _) in idMap)
+                        allKeys.Add(objKey);
+                    allKeys.Reverse();
+                    var descPage = allKeys.Skip(skip).Take(top).ToList();
+                    var descResults = new List<T>(descPage.Count);
+                    foreach (var key in descPage)
+                    {
+                        var obj = Load<T>(key);
+                        if (obj != null) descResults.Add(obj);
+                    }
+                    return descResults;
                 }
-                return keyResults;
+                else
+                {
+                    var ascResults = new List<T>(Math.Min(top, idMap.Count));
+                    int ascSeen = 0;
+                    foreach (var (objKey, _) in idMap)
+                    {
+                        if (ascSeen < skip) { ascSeen++; continue; }
+                        var obj = Load<T>(objKey);
+                        if (obj != null) ascResults.Add(obj);
+                        ascSeen++;
+                        if (ascResults.Count >= top) break;
+                    }
+                    return ascResults;
+                }
             }
 
             // Sort by an indexed field — use forward index to sort keys by value
@@ -371,13 +427,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                     var forwardIndex = _indexStore.ReadLatestValueIndex(typeName, sortProp.Name);
                     if (forwardIndex.Count > 0)
                     {
-                        // Build (key, fieldValue) pairs for all live entities
                         var keysWithValues = new List<(uint Key, string Value)>(idMap.Count);
-                        foreach (var (objKey, walKey) in idMap)
+                        foreach (var (objKey, _) in idMap)
                         {
-                            if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
-                            if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
-                            if (payload.IsEmpty) continue;
                             var keyStr = objKey.ToString();
                             forwardIndex.TryGetValue(keyStr, out var fieldVal);
                             keysWithValues.Add((objKey, fieldVal ?? string.Empty));
@@ -403,20 +455,17 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             }
         }
 
+        // ── Fallback: filter/sort on non-indexed fields ─────────────────────
         var canShortCircuit = query == null || query.Sorts.Count == 0;
-        var results         = new List<T>(Math.Min(top, idMap.Count));
-        int matched         = 0;
+        var scanResults     = new List<T>(Math.Min(top, idMap.Count));
+        int scanMatched     = 0;
 
-        foreach (var (objKey, walKey) in idMap)  // ConcurrentDictionary supports safe concurrent enumeration
+        foreach (var (objKey, _) in idMap)
         {
-            if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
-            if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
-            if (payload.IsEmpty) continue;  // tombstone
-
             T? obj;
             try
             {
-                obj = DeserializePayload<T>(payload, objKey);
+                obj = Load<T>(objKey);
             }
             catch (Exception ex)
             {
@@ -429,26 +478,26 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
             if (canShortCircuit)
             {
-                if (matched < skip) { matched++; continue; }
-                results.Add(obj);
-                matched++;
-                if (results.Count >= top) break;
+                if (scanMatched < skip) { scanMatched++; continue; }
+                scanResults.Add(obj);
+                scanMatched++;
+                if (scanResults.Count >= top) break;
             }
             else
             {
-                results.Add(obj);
+                scanResults.Add(obj);
             }
         }
 
         if (!canShortCircuit)
         {
-            IEnumerable<T> sorted = _queryEvaluator.ApplySorts(results, query);
+            IEnumerable<T> sorted = _queryEvaluator.ApplySorts(scanResults, query);
             if (skip > 0 || top != int.MaxValue)
                 sorted = sorted.Skip(skip).Take(top);
             return sorted.ToList();
         }
 
-        return results;
+        return scanResults;
     }
 
     public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null,
@@ -461,17 +510,20 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var idMap    = GetOrLoadIdMap(typeName);
         if (idMap.Count == 0) return 0;
 
-        // Fast-path: no filter, just count non-tombstone keys
+        // Fast-path: no filter — use cached live count (O(1)), seed on first call
         if (query == null || (query.Clauses.Count == 0 && query.Groups.Count == 0))
         {
-            int live = 0;
-            foreach (var (_, walKey) in idMap)  // ConcurrentDictionary supports safe concurrent enumeration
+            return _liveCounts.GetOrAdd(typeName, _ =>
             {
-                if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
-                if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
-                if (!payload.IsEmpty) live++;
-            }
-            return live;
+                int live = 0;
+                foreach (var (__, walKey) in idMap)
+                {
+                    if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
+                    if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
+                    if (!payload.IsEmpty) live++;
+                }
+                return live;
+            });
         }
 
         // ── Index-accelerated count: Equals on indexed field ──
@@ -511,18 +563,14 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             }
         }
 
-        // Count matching items without sorting — deserialize and match only
+        // Count matching items — idMap is tombstone-free, deserialize and match
         int fullCount = 0;
-        foreach (var (objKey, walKey) in idMap)
+        foreach (var (objKey, _) in idMap)
         {
-            if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
-            if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
-            if (payload.IsEmpty) continue;
-
             T? obj;
             try
             {
-                obj = DeserializePayload<T>(payload, objKey);
+                obj = Load<T>(objKey);
             }
             catch
             {
@@ -561,6 +609,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
         idMap.TryRemove(key, out _);
         PersistIdMap(typeName);
+
+        // Decrement live count
+        _liveCounts.AddOrUpdate(typeName, 0, (_, c) => Math.Max(0, c - 1));
 
         // ── Remove from secondary field indexes ────────────────────────────
         if (indexedFields.Count > 0 && oldObj != null)
@@ -778,13 +829,33 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             if (storedCrc != computedCrc) return map;
 
             int offset = 12;
+            int liveCount = 0;
+            bool needsCompaction = false;
             for (int i = 0; i < entryCount; i++)
             {
                 if (offset + 12 > bytes.Length - 4) break;
                 uint objKey  = BinaryPrimitives.ReadUInt32LittleEndian(span[offset..]); offset += 4;
                 ulong walKey = BinaryPrimitives.ReadUInt64LittleEndian(span[offset..]); offset += 8;
-                map[objKey] = walKey;
+
+                // Skip tombstoned entries — no point loading keys for deleted records
+                if (_walStore.TryGetHead(walKey, out var ptr)
+                    && _walStore.TryReadOpPayload(ptr, walKey, out var payload)
+                    && !payload.IsEmpty)
+                {
+                    map[objKey] = walKey;
+                    liveCount++;
+                }
+                else
+                {
+                    needsCompaction = true;
+                }
             }
+
+            _liveCounts[typeName] = liveCount;
+
+            // Re-persist without tombstoned entries so future loads are clean
+            if (needsCompaction)
+                Task.Run(() => PersistIdMap(typeName));
         }
         catch (IOException) { /* treat file as missing */ }
 
