@@ -6,7 +6,7 @@ namespace BareMetalWeb.Data.DataObjects;
 /// A named permission that can be assigned to roles.
 /// Permissions can contain expressions for dynamic evaluation.
 /// </summary>
-[DataEntity("Permissions", ShowOnNav = true, NavGroup = "Security", NavOrder = 10, Permissions = "admin")]
+[DataEntity("Permissions", ShowOnNav = true, NavGroup = "Admin", NavOrder = 10, Permissions = "admin")]
 public class Permission : RenderableDataObject
 {
     [DataField(Label = "Permission Code", Order = 1, Required = true)]
@@ -42,7 +42,7 @@ public class Permission : RenderableDataObject
 /// A role is a named collection of permissions.
 /// Roles are assigned to groups.
 /// </summary>
-[DataEntity("Roles", ShowOnNav = true, NavGroup = "Security", NavOrder = 20, Permissions = "admin")]
+[DataEntity("Roles", ShowOnNav = true, NavGroup = "Admin", NavOrder = 20, Permissions = "admin")]
 public class SecurityRole : RenderableDataObject
 {
     [DataField(Label = "Role Name", Order = 1, Required = true)]
@@ -63,7 +63,7 @@ public class SecurityRole : RenderableDataObject
 /// A security group containing principals (users/service principals).
 /// Groups can have roles assigned and can nest other groups.
 /// </summary>
-[DataEntity("Security Groups", ShowOnNav = true, NavGroup = "Security", NavOrder = 30, Permissions = "admin")]
+[DataEntity("Security Groups", ShowOnNav = true, NavGroup = "Admin", NavOrder = 30, Permissions = "admin")]
 public class SecurityGroup : RenderableDataObject
 {
     [DataField(Label = "Group Name", Order = 1, Required = true)]

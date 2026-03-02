@@ -5,7 +5,7 @@ using System.Text;
 
 namespace BareMetalWeb.Data;
 
-[DataEntity("System Principals", ShowOnNav = true, NavGroup = "Administration", NavOrder = 20, Permissions = "admin")]
+[DataEntity("System Principals", ShowOnNav = true, NavGroup = "Admin", NavOrder = 20, Permissions = "admin")]
 public sealed class SystemPrincipal : User
 {
     [DataField(Label = "API Keys", Order = 10, Required = false, List = false, View = false, Edit = true, Create = true, Placeholder = "one key per line")]

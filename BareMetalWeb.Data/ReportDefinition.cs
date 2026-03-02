@@ -7,7 +7,7 @@ namespace BareMetalWeb.Data;
 /// A stored, reusable report definition — specifies root entity, joins, columns,
 /// filters, parameters and sort for the reporting layer.
 /// </summary>
-[DataEntity("Report Definitions", Slug = "report-definitions", ShowOnNav = true, Permissions = "admin", NavGroup = "System", NavOrder = 90)]
+[DataEntity("Report Definitions", Slug = "report-definitions", ShowOnNav = true, Permissions = "admin", NavGroup = "Admin", NavOrder = 90)]
 public sealed class ReportDefinition : BaseDataObject
 {
     public ReportDefinition() : base() { }

@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// an entity instance. The metadata layer describes actions; execution is
 /// handled by <see cref="ICommandService"/>.
 /// </summary>
-[DataEntity("Action Definitions", ShowOnNav = true, NavGroup = "System", NavOrder = 1003)]
+[DataEntity("Action Definitions", ShowOnNav = true, NavGroup = "Admin", NavOrder = 1003)]
 public class ActionDefinition : RenderableDataObject
 {
     /// <summary>Foreign key to <see cref="EntityDefinition.Id"/>.</summary>

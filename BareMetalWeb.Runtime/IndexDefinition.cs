@@ -6,7 +6,7 @@ namespace BareMetalWeb.Runtime;
 /// Persisted index hint for a runtime-managed entity.
 /// Describes which fields should be indexed for efficient query filtering and sorting.
 /// </summary>
-[DataEntity("Index Definitions", ShowOnNav = true, NavGroup = "System", NavOrder = 1002)]
+[DataEntity("Index Definitions", ShowOnNav = true, NavGroup = "Admin", NavOrder = 1002)]
 public class IndexDefinition : RenderableDataObject
 {
     /// <summary>Foreign key to <see cref="EntityDefinition.Id"/>.</summary>

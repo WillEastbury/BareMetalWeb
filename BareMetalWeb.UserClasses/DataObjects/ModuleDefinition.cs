@@ -7,7 +7,7 @@ namespace BareMetalWeb.Data.DataObjects;
 /// A module groups related entities, actions, UI layouts, and permissions
 /// into a cohesive, portable unit that can be enabled/disabled and exported/imported.
 /// </summary>
-[DataEntity("Modules", ShowOnNav = true, NavGroup = "System", NavOrder = 5, Permissions = "admin")]
+[DataEntity("Modules", ShowOnNav = true, NavGroup = "Admin", NavOrder = 5, Permissions = "admin")]
 public class ModuleDefinition : RenderableDataObject
 {
     [DataField(Label = "Module ID", Order = 1, Required = true)]
