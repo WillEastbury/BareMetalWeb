@@ -42,6 +42,14 @@ public static class ActionApiHandlers
     /// </summary>
     public static async ValueTask ExecuteActionHandler(HttpContext context)
     {
+        // Content-Type and body size validation
+        if (!BinaryApiHandlers.HasValidApiContentType(context))
+        {
+            await WriteError(context, 415, "Unsupported Content-Type.");
+            return;
+        }
+        if (!await BinaryApiHandlers.CheckBodySizeAsync(context)) return;
+
         if (_commitEngine == null)
         {
             await WriteError(context, 500, "Action engine not initialized.");

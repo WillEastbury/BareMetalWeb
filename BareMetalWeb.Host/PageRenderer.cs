@@ -51,22 +51,18 @@ public static partial class PageRenderer
             return;
         }
 
-        // Find published page by slug
-        var pages = await meta.Handlers.QueryAsync(null, context.RequestAborted);
-        BaseDataObject? pageObj = null;
-
-        foreach (var p in pages)
+        // Find published page by slug — use filtered query instead of full table scan
+        var queryDef = new BareMetalWeb.Data.QueryDefinition
         {
-            var pageSlug = GetField(p, meta, "Slug");
-            var status = GetField(p, meta, "Status");
-
-            if (string.Equals(pageSlug, slug, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(status, "published", StringComparison.OrdinalIgnoreCase))
+            Clauses = new()
             {
-                pageObj = p;
-                break;
-            }
-        }
+                new BareMetalWeb.Data.QueryClause { Field = "Slug", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = slug },
+                new BareMetalWeb.Data.QueryClause { Field = "Status", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = "published" }
+            },
+            Top = 1
+        };
+        var pages = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
+        BaseDataObject? pageObj = pages.FirstOrDefault();
 
         if (pageObj == null)
         {

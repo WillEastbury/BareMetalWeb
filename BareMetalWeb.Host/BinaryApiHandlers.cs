@@ -273,6 +273,8 @@ public static class BinaryApiHandlers
     /// </summary>
     public static async ValueTask CreateHandler(HttpContext context)
     {
+        if (!HasValidApiContentType(context)) { await WriteError(context, (415, "Unsupported Content-Type.")); return; }
+        if (!await CheckBodySizeAsync(context)) return;
         var (meta, _, error) = await ValidateAsync(context);
         if (meta == null) { await WriteError(context, error!.Value); return; }
         if (_serializer == null) { await WriteError(context, (500, "Binary API not initialized.")); return; }
@@ -298,6 +300,8 @@ public static class BinaryApiHandlers
     /// </summary>
     public static async ValueTask UpdateHandler(HttpContext context)
     {
+        if (!HasValidApiContentType(context)) { await WriteError(context, (415, "Unsupported Content-Type.")); return; }
+        if (!await CheckBodySizeAsync(context)) return;
         var (meta, _, error) = await ValidateAsync(context);
         if (meta == null) { await WriteError(context, error!.Value); return; }
         if (_serializer == null) { await WriteError(context, (500, "Binary API not initialized.")); return; }
@@ -355,6 +359,27 @@ public static class BinaryApiHandlers
     }
 
     // ────────────── Shared utilities ──────────────
+
+    private const long MaxRequestBodyBytes = 10 * 1024 * 1024; // 10 MB
+
+    /// <summary>Reject requests without a recognized Content-Type (CSRF mitigation).</summary>
+    internal static bool HasValidApiContentType(HttpContext context)
+    {
+        var ct = context.Request.ContentType ?? string.Empty;
+        return ct.Contains("application/json", StringComparison.OrdinalIgnoreCase)
+            || ct.Contains(BinaryContentType, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Returns 413 if Content-Length exceeds the limit. Returns true if OK.</summary>
+    internal static async ValueTask<bool> CheckBodySizeAsync(HttpContext context, long maxBytes = MaxRequestBodyBytes)
+    {
+        if (context.Request.ContentLength.HasValue && context.Request.ContentLength.Value > maxBytes)
+        {
+            await WriteError(context, (StatusCodes.Status413PayloadTooLarge, $"Request body exceeds {maxBytes / (1024 * 1024)}MB limit."));
+            return false;
+        }
+        return true;
+    }
 
     private static bool WantsJson(HttpContext context)
     {

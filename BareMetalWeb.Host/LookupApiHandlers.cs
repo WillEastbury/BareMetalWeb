@@ -137,6 +137,7 @@ public static class LookupApiHandlers
                 .Select(e => e.GetString()!)
                 .Where(s => !string.IsNullOrWhiteSpace(s))
                 .Distinct()
+                .Take(500) // Cap batch size to prevent resource exhaustion
                 .ToList();
         }
         catch (JsonException)
@@ -504,8 +505,12 @@ public static class LookupApiHandlers
         if (!traverseRelationships)
             return result;
 
+        int traversed = 0;
+        const int MaxTraversals = 20; // Cap FK loads per entity to prevent N+1 explosion
         foreach (var field in meta.Fields.Where(f => f.View && f.Lookup != null))
         {
+            if (traversed >= MaxTraversals) break;
+
             if (!result.TryGetValue(field.Name, out var rawValue) || rawValue == null)
                 continue;
 
@@ -520,9 +525,11 @@ public static class LookupApiHandlers
             if (string.Equals(expandedKey, field.Name, StringComparison.Ordinal) || result.ContainsKey(expandedKey))
                 continue;
 
-            var related = await relatedMeta.Handlers.LoadAsync(uint.Parse(idStr), cancellationToken);
+            if (!uint.TryParse(idStr, out var relatedId)) continue;
+            var related = await relatedMeta.Handlers.LoadAsync(relatedId, cancellationToken);
             if (related != null)
                 result[expandedKey] = EntityToJson(related, relatedMeta);
+            traversed++;
         }
 
         return result;
