@@ -109,9 +109,8 @@ public sealed record DataEntityHandlers(
 
 public static class DataScaffold
 {
-    private static readonly object Sync = new();
-    private static readonly Dictionary<string, DataEntityMetadata> EntitiesBySlug = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<Type, DataEntityMetadata> EntitiesByType = new();
+    private static readonly ConcurrentDictionary<string, DataEntityMetadata> EntitiesBySlug = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<Type, DataEntityMetadata> EntitiesByType = new();
     private static readonly NullabilityInfoContext NullabilityContext = new();
     private static readonly ConcurrentDictionary<string, LookupCacheEntry> LookupCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly IIdGenerator IdGenerator = new DefaultIdGenerator();
@@ -150,10 +149,7 @@ public static class DataScaffold
     {
         get
         {
-            lock (Sync)
-            {
-                return EntitiesBySlug.Values.OrderBy(e => e.NavOrder).ThenBy(e => e.Name).ToList();
-            }
+            return EntitiesBySlug.Values.OrderBy(e => e.NavOrder).ThenBy(e => e.Name).ToList();
         }
     }
 
@@ -164,11 +160,8 @@ public static class DataScaffold
         if (metadata == null)
             return false;
 
-        lock (Sync)
-        {
-            EntitiesBySlug[metadata.Slug] = metadata;
-            EntitiesByType[type] = metadata;
-        }
+        EntitiesBySlug[metadata.Slug] = metadata;
+        EntitiesByType[type] = metadata;
 
         return true;
     }
@@ -183,10 +176,7 @@ public static class DataScaffold
         if (metadata == null)
             return false;
 
-        lock (Sync)
-        {
-            EntitiesBySlug[metadata.Slug] = metadata;
-        }
+        EntitiesBySlug[metadata.Slug] = metadata;
 
         return true;
     }
@@ -325,18 +315,12 @@ public static class DataScaffold
 
     public static bool TryGetEntity(string slug, out DataEntityMetadata metadata)
     {
-        lock (Sync)
-        {
-            return EntitiesBySlug.TryGetValue(slug, out metadata!);
-        }
+        return EntitiesBySlug.TryGetValue(slug, out metadata!);
     }
 
     public static DataEntityMetadata? GetEntityByType(Type type)
     {
-        lock (Sync)
-        {
-            return EntitiesByType.TryGetValue(type, out var metadata) ? metadata : null;
-        }
+        return EntitiesByType.TryGetValue(type, out var metadata) ? metadata : null;
     }
 
     private const int MaxPageSize = 10000;
