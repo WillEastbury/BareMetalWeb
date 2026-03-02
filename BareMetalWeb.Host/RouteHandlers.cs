@@ -3411,6 +3411,15 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        var apiPutErrors = new List<string>();
+        await ValidateUserUniquenessAsync(meta, instance, excludeId: id, apiPutErrors, context.RequestAborted).ConfigureAwait(false);
+        if (apiPutErrors.Count > 0)
+        {
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            await context.Response.WriteAsync(string.Join(" | ", apiPutErrors));
+            return;
+        }
+
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
         DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
@@ -6733,6 +6742,25 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static async ValueTask ValidateUserUniquenessAsync(DataEntityMetadata meta, object instance, string? excludeId, List<string> errors, CancellationToken cancellationToken)
     {
+        if (meta.Type == typeof(AppSetting))
+        {
+            if (instance is AppSetting appSetting && !string.IsNullOrWhiteSpace(appSetting.SettingId))
+            {
+                var query = new QueryDefinition
+                {
+                    Clauses = new List<QueryClause>
+                    {
+                        new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = appSetting.SettingId }
+                    },
+                    Top = 1
+                };
+                var existing = (await DataStoreProvider.Current.QueryAsync<AppSetting>(query, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
+                if (existing != null && !string.Equals(existing.Key.ToString(), excludeId, StringComparison.OrdinalIgnoreCase))
+                    errors.Add("A setting with this Setting ID already exists.");
+            }
+            return;
+        }
+
         if (meta.Type != typeof(User))
             return;
 

@@ -88,7 +88,8 @@ public static class SettingsService
         CancellationToken cancellationToken = default)
     {
         var existing = (await store.QueryAsync<AppSetting>(null, cancellationToken).ConfigureAwait(false))
-            .ToDictionary(s => s.SettingId, StringComparer.OrdinalIgnoreCase);
+            .GroupBy(s => s.SettingId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
 
         foreach (var (settingId, value, description) in defaults)
         {
