@@ -113,9 +113,7 @@ public static class DataScaffold
     private static readonly Dictionary<string, DataEntityMetadata> EntitiesBySlug = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<Type, DataEntityMetadata> EntitiesByType = new();
     private static readonly NullabilityInfoContext NullabilityContext = new();
-    private static readonly object LookupCacheSync = new();
-    private static readonly Dictionary<string, LookupCacheEntry> LookupCache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly Dictionary<string, (bool IsLarge, DateTime ExpiresUtc)> LargeListCache = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, LookupCacheEntry> LookupCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly IIdGenerator IdGenerator = new DefaultIdGenerator();
     private static readonly ConcurrentDictionary<(Type, string), PropertyInfo?> PropertyCache = new();
 
@@ -136,7 +134,7 @@ public static class DataScaffold
     /// </summary>
     public static int LargeListThreshold { get; set; } = 20;
 
-    private sealed record LookupCacheEntry(IReadOnlyList<KeyValuePair<string, string>> Options, DateTime ExpiresUtc);
+    private sealed record LookupCacheEntry(IReadOnlyList<KeyValuePair<string, string>> Options, bool IsLarge, DateTime ExpiresUtc);
 
     internal static class DataEntityMetadataCache<T> where T : BaseDataObject, new()
     {
@@ -1904,22 +1902,27 @@ public static class DataScaffold
     private static IReadOnlyList<KeyValuePair<string, string>> GetLookupOptions(DataLookupConfig lookup)
     {
         var cacheKey = BuildLookupCacheKey(lookup);
-        lock (LookupCacheSync)
-        {
-            if (LookupCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresUtc > DateTime.UtcNow)
-                return cached.Options;
-        }
+        var now = DateTime.UtcNow;
 
+        if (LookupCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresUtc > now)
+            return cached.Options;
+
+        // Single-flight: compute and cache atomically per key
+        var entry = LookupCache.AddOrUpdate(cacheKey,
+            _ => BuildLookupCacheEntry(lookup),
+            (_, existing) => existing.ExpiresUtc > DateTime.UtcNow ? existing : BuildLookupCacheEntry(lookup));
+
+        return entry.Options;
+    }
+
+    private static LookupCacheEntry BuildLookupCacheEntry(DataLookupConfig lookup)
+    {
         var query = BuildLookupQuery(lookup);
         var items = QueryByType(lookup.TargetType, query);
         var options = BuildLookupOptions(items, lookup.ValueField, lookup.DisplayField);
-
-        lock (LookupCacheSync)
-        {
-            LookupCache[cacheKey] = new LookupCacheEntry(options, DateTime.UtcNow.Add(lookup.CacheTtl));
-        }
-
-        return options;
+        var count = options.Count;
+        var isLarge = count > LargeListThreshold;
+        return new LookupCacheEntry(options, isLarge, DateTime.UtcNow.Add(lookup.CacheTtl));
     }
 
     private static string BuildLookupCacheKey(DataLookupConfig lookup)
@@ -2030,22 +2033,17 @@ public static class DataScaffold
     private static bool IsHighCardinalityLookup(DataLookupConfig lookup)
     {
         var cacheKey = BuildLookupCacheKey(lookup);
-        lock (LookupCacheSync)
-        {
-            if (LargeListCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresUtc > DateTime.UtcNow)
-                return cached.IsLarge;
-        }
+        var now = DateTime.UtcNow;
 
-        var query = BuildLookupQuery(lookup);
-        var count = CountByType(lookup.TargetType, query);
-        var isLarge = count > LargeListThreshold;
+        if (LookupCache.TryGetValue(cacheKey, out var cached) && cached.ExpiresUtc > now)
+            return cached.IsLarge;
 
-        lock (LookupCacheSync)
-        {
-            LargeListCache[cacheKey] = (isLarge, DateTime.UtcNow.Add(lookup.CacheTtl));
-        }
+        // Populate the unified cache entry (includes options + IsLarge)
+        var entry = LookupCache.AddOrUpdate(cacheKey,
+            _ => BuildLookupCacheEntry(lookup),
+            (_, existing) => existing.ExpiresUtc > DateTime.UtcNow ? existing : BuildLookupCacheEntry(lookup));
 
-        return isLarge;
+        return entry.IsLarge;
     }
 
     /// <summary>
