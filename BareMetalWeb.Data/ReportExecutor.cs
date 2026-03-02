@@ -108,7 +108,7 @@ public sealed class ReportExecutor
             if (toAccessor == null)
                 continue;
 
-            var hashMap = new Dictionary<string, List<BaseDataObject>>(StringComparer.OrdinalIgnoreCase);
+            var hashMap = new Dictionary<string, List<BaseDataObject>>(joinRows.Count, StringComparer.OrdinalIgnoreCase);
             foreach (var jr in joinRows)
             {
                 var key = GetStringValue(toAccessor, jr);
