@@ -37,7 +37,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _clusteredLocationMaps = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<Type, SchemaCache> _schemaCache = new();
     private readonly ConcurrentDictionary<Type, object> _schemaLocks = new();
-    private readonly ConcurrentDictionary<string, object> _seqIdLocks = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, SeqIdRange> _seqIdRanges = new(StringComparer.OrdinalIgnoreCase);
+    private const int SeqIdBatchSize = 64;
     private readonly ConcurrentDictionary<(Type, int), MemberSignature[]> _schemaMemberCache = new();
 
     private sealed class SchemaCache
@@ -195,25 +196,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
 
         var path = GetSeqIdFilePath(entityName);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var lockObj = _seqIdLocks.GetOrAdd(entityName, _ => new object());
-
-        const int maxRetries = 4;
-        const int initialDelayMs = 10;
-
-        for (int attempt = 0; attempt < maxRetries; attempt++)
-        {
-            try
-            {
-                lock (lockObj) { return IncrementAndReadSeqKeyFile(path); }
-            }
-            catch (IOException)
-            {
-                Thread.Sleep(initialDelayMs * (1 << attempt));
-            }
-        }
-
-        // Final attempt – let any IOException propagate.
-        lock (lockObj) { return IncrementAndReadSeqKeyFile(path); }
+        var range = _seqIdRanges.GetOrAdd(entityName, _ => new SeqIdRange());
+        return range.Next(path, SeqIdBatchSize);
     }
 
     public void SeedSequentialKey(string entityName, uint floor)
@@ -225,7 +209,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
 
         var path = GetSeqIdFilePath(entityName);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var lockObj = _seqIdLocks.GetOrAdd(entityName, _ => new object());
+        var range = _seqIdRanges.GetOrAdd(entityName, _ => new SeqIdRange());
 
         const int maxRetries = 4;
         const int initialDelayMs = 10;
@@ -234,7 +218,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         {
             try
             {
-                lock (lockObj) { SeedSeqKeyFileIfLower(path, floor); }
+                lock (range.SyncRoot) { SeedSeqKeyFileIfLower(path, floor); }
+                range.Invalidate();
                 return;
             }
             catch (IOException)
@@ -243,11 +228,11 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             }
         }
 
-        // Final attempt – let any IOException propagate.
-        lock (lockObj) { SeedSeqKeyFileIfLower(path, floor); }
+        lock (range.SyncRoot) { SeedSeqKeyFileIfLower(path, floor); }
+        range.Invalidate();
     }
 
-    private static uint IncrementAndReadSeqKeyFile(string path)
+    private static uint AllocateBatch(string path, int batchSize)
     {
         Span<byte> buf = stackalloc byte[4];
         using var file = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
@@ -257,12 +242,12 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             file.ReadExactly(buf);
             current = BinaryPrimitives.ReadUInt32LittleEndian(buf);
         }
-        var next = current + 1;
-        BinaryPrimitives.WriteUInt32LittleEndian(buf, next);
+        var ceiling = current + (uint)batchSize;
+        BinaryPrimitives.WriteUInt32LittleEndian(buf, ceiling);
         file.Position = 0;
         file.Write(buf);
         file.Flush(true);
-        return next;
+        return current;
     }
 
     private static void SeedSeqKeyFileIfLower(string path, uint floor)
@@ -287,6 +272,53 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private string GetSeqIdFilePath(string entityName)
     {
         return Path.Combine(_rootPath, SanitizeFilePart(entityName), "_seqid.dat");
+    }
+
+    private sealed class SeqIdRange
+    {
+        public readonly object SyncRoot = new();
+        private uint _next;
+        private uint _ceiling; // exclusive upper bound
+
+        public uint Next(string path, int batchSize)
+        {
+            lock (SyncRoot)
+            {
+                if (_next < _ceiling)
+                    return ++_next;
+
+                // Exhausted — allocate a new batch from disk (single fsync).
+                const int maxRetries = 4;
+                const int initialDelayMs = 10;
+                uint baseId = 0;
+
+                for (int attempt = 0; attempt <= maxRetries; attempt++)
+                {
+                    try
+                    {
+                        baseId = AllocateBatch(path, batchSize);
+                        break;
+                    }
+                    catch (IOException) when (attempt < maxRetries)
+                    {
+                        Thread.Sleep(initialDelayMs * (1 << attempt));
+                    }
+                }
+
+                _next = baseId;
+                _ceiling = baseId + (uint)batchSize;
+                return ++_next;
+            }
+        }
+
+        public void Invalidate()
+        {
+            lock (SyncRoot)
+            {
+                _next = 0;
+                _ceiling = 0;
+            }
+        }
     }
 
     private string GetIndexLogPath(string entityName, string fieldName)
