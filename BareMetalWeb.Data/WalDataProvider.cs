@@ -474,8 +474,45 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             return live;
         }
 
+        // ── Index-accelerated count: Equals on indexed field ──
+        if (query.Clauses.Count > 0 && query.Groups.Count == 0
+            && _searchIndexManager.HasIndexedFields(typeof(T), out var indexedFields))
+        {
+            foreach (var clause in query.Clauses)
+            {
+                if (clause.Operator == QueryOperator.Equals && clause.Value != null)
+                {
+                    var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
+                    if (prop != null)
+                    {
+                        var fieldValue = clause.Value.ToString() ?? string.Empty;
+                        var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
+                        if (fieldIndex.Count == 0)
+                            break; // No index entries yet; fall through to full scan
+
+                        if (!fieldIndex.TryGetValue(fieldValue, out var candidateIds))
+                            return 0;
+
+                        // Single clause — candidate count is exact
+                        if (query.Clauses.Count == 1)
+                            return candidateIds.Count;
+
+                        // Multiple clauses — load candidates and match remaining filters
+                        int count = 0;
+                        foreach (var candidateKey in candidateIds)
+                        {
+                            var obj = Load<T>(candidateKey);
+                            if (obj != null && _queryEvaluator.Matches(obj, query))
+                                count++;
+                        }
+                        return count;
+                    }
+                }
+            }
+        }
+
         // Count matching items without sorting — deserialize and match only
-        int count = 0;
+        int fullCount = 0;
         foreach (var (objKey, walKey) in idMap)
         {
             if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
@@ -493,9 +530,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             }
 
             if (obj != null && _queryEvaluator.Matches(obj, query))
-                count++;
+                fullCount++;
         }
-        return count;
+        return fullCount;
     }
 
     public ValueTask<int> CountAsync<T>(QueryDefinition? query = null,
