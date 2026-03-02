@@ -452,7 +452,7 @@ public static class BinaryApiHandlers
             return (null, typeSlug, (400, "Entity type not specified."));
 
         if (!DataScaffold.TryGetEntity(typeSlug, out var meta))
-            return (null, typeSlug, (404, $"Unknown entity type '{typeSlug}'."));
+            return (null, typeSlug, (404, "Not found."));
 
         // Permission check
         var permissionsNeeded = meta!.Permissions?.Trim();

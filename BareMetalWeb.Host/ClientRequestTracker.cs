@@ -71,68 +71,34 @@ public sealed class ClientRequestTracker : IClientRequestTracker
             return true;
         }
 
-        lock (_throttleLock)
+        // Use ConcurrentDictionary.AddOrUpdate for lock-free read-modify-write
+        var nowLocal = nowUtc; // capture for closure
+        var updated = _stats.AddOrUpdate(clientIp,
+            _ => new ClientRequestStats(1, nowLocal, nowLocal, 1, DateTime.MinValue, false),
+            (_, stats) =>
+            {
+                stats = stats with { Count = stats.Count + 1, LastSeenUtc = nowLocal };
+                if (stats.BlockedUntilUtc != DateTime.MinValue && stats.BlockedUntilUtc <= nowLocal)
+                    stats = stats with { BlockedUntilUtc = DateTime.MinValue, IsSuspicious = true };
+                if (nowLocal - stats.WindowStartUtc >= TimeSpan.FromSeconds(1))
+                    stats = stats with { WindowStartUtc = nowLocal, WindowCount = 1 };
+                else
+                    stats = stats with { WindowCount = stats.WindowCount + 1 };
+                var threshold = stats.IsSuspicious ? _suspiciousRpsThreshold : _normalRpsThreshold;
+                if (threshold > 0 && stats.WindowCount > threshold)
+                    stats = stats with { BlockedUntilUtc = nowLocal + _blockDuration };
+                return stats;
+            });
+
+        if (updated.BlockedUntilUtc > nowUtc)
         {
-            var stats = _stats.TryGetValue(clientIp, out var existing)
-                ? existing
-                : new ClientRequestStats(0, nowUtc, nowUtc, 0, DateTime.MinValue, false);
-
-            stats = stats with
-            {
-                Count = stats.Count + 1,
-                LastSeenUtc = nowUtc
-            };
-
-            if (stats.BlockedUntilUtc > nowUtc)
-            {
-                _stats[clientIp] = stats;
-                reason = "blocked";
-                retryAfterSeconds = Math.Max(1, (int)Math.Ceiling((stats.BlockedUntilUtc - nowUtc).TotalSeconds));
-                return true;
-            }
-
-            if (stats.BlockedUntilUtc != DateTime.MinValue && stats.BlockedUntilUtc <= nowUtc)
-            {
-                stats = stats with
-                {
-                    BlockedUntilUtc = DateTime.MinValue,
-                    IsSuspicious = true
-                };
-            }
-
-            if (nowUtc - stats.WindowStartUtc >= TimeSpan.FromSeconds(1))
-            {
-                stats = stats with
-                {
-                    WindowStartUtc = nowUtc,
-                    WindowCount = 1
-                };
-            }
-            else
-            {
-                stats = stats with
-                {
-                    WindowCount = stats.WindowCount + 1
-                };
-            }
-
-            var threshold = stats.IsSuspicious ? _suspiciousRpsThreshold : _normalRpsThreshold;
-            if (threshold > 0 && stats.WindowCount > threshold)
-            {
-                stats = stats with
-                {
-                    BlockedUntilUtc = nowUtc + _blockDuration
-                };
-                _stats[clientIp] = stats;
-                reason = stats.IsSuspicious ? "blocked-suspicious" : "blocked";
-                retryAfterSeconds = Math.Max(1, (int)Math.Ceiling((stats.BlockedUntilUtc - nowUtc).TotalSeconds));
-                return true;
-            }
-
-            _stats[clientIp] = stats;
-            reason = string.Empty;
-            return false;
+            reason = updated.IsSuspicious ? "blocked-suspicious" : "blocked";
+            retryAfterSeconds = Math.Max(1, (int)Math.Ceiling((updated.BlockedUntilUtc - nowUtc).TotalSeconds));
+            return true;
         }
+
+        reason = string.Empty;
+        return false;
     }
 
     public void RecordRequest(string clientIp)

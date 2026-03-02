@@ -83,6 +83,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     // Keyed by (typeName, objKey, walPointer). Invalidated on Save (walPtr changes).
     private const int DeserCacheMaxSize = 4096;
     private readonly ConcurrentDictionary<(string TypeName, uint Key, ulong WalPtr), object> _deserCache = new();
+    private readonly ConcurrentDictionary<(string TypeName, uint Key, ulong WalPtr), long> _deserCacheAccess = new();
 
     // Sequential-ID file locks
     private readonly ConcurrentDictionary<string, SeqIdRange> _seqIdRanges
@@ -238,7 +239,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             foreach (var ck in _deserCache.Keys)
             {
                 if (ck.TypeName == type.Name && ck.Key == obj.Key)
+                {
                     _deserCache.TryRemove(ck, out _);
+                    _deserCacheAccess.TryRemove(ck, out _);
+                }
             }
 
             // ── Update secondary field indexes ────────────────────────────
@@ -288,7 +292,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         // Check deserialization cache — hit if WAL pointer unchanged
         var cacheKey = (typeName, key, ptr);
         if (_deserCache.TryGetValue(cacheKey, out var cachedObj))
+        {
+            _deserCacheAccess[cacheKey] = Environment.TickCount64;
             return cachedObj as T;
+        }
 
         if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) return default;
         if (payload.IsEmpty) return default;
@@ -296,23 +303,27 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var result = DeserializePayload<T>(payload, key);
         if (result != null)
         {
-            // Evict oldest entries when cache is full (simple size cap)
             if (_deserCache.Count >= DeserCacheMaxSize)
                 EvictDeserCache();
             _deserCache[cacheKey] = result;
+            _deserCacheAccess[cacheKey] = Environment.TickCount64;
         }
         return result;
     }
 
     private void EvictDeserCache()
     {
-        // Remove ~25% of entries to amortize eviction cost
+        // LRU eviction — remove ~25% of entries with oldest access times
         int toRemove = _deserCache.Count / 4;
-        int removed = 0;
-        foreach (var key in _deserCache.Keys)
+        var oldest = _deserCacheAccess
+            .OrderBy(kvp => kvp.Value)
+            .Take(toRemove)
+            .Select(kvp => kvp.Key)
+            .ToList();
+        foreach (var key in oldest)
         {
-            if (removed >= toRemove) break;
-            if (_deserCache.TryRemove(key, out _)) removed++;
+            _deserCache.TryRemove(key, out _);
+            _deserCacheAccess.TryRemove(key, out _);
         }
     }
 
@@ -709,7 +720,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         foreach (var ck in _deserCache.Keys)
         {
             if (ck.TypeName == typeName && ck.Key == key)
+            {
                 _deserCache.TryRemove(ck, out _);
+                _deserCacheAccess.TryRemove(ck, out _);
+            }
         }
 
         // ── Remove from secondary field indexes ────────────────────────────

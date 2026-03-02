@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
@@ -15,11 +16,30 @@ var builder = WebApplication.CreateBuilder();
 ProgramSetup.ConfigureKestrel(builder);
 WebApplication app = builder.Build();
 
+// Simple per-IP rate limiter for device code endpoints
+var _deviceRateLimiter = new ConcurrentDictionary<string, (int Count, DateTime Window)>();
+bool DeviceRateCheck(HttpContext ctx, int maxPerMinute = 10)
+{
+    var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+    var now = DateTime.UtcNow;
+    var entry = _deviceRateLimiter.AddOrUpdate(ip,
+        _ => (1, now.AddMinutes(1)),
+        (_, old) => old.Window < now ? (1, now.AddMinutes(1)) : (old.Count + 1, old.Window));
+    return entry.Count <= maxPerMinute;
+}
+
 await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFactory, mainTemplate) =>
 {
     // Device code auth flow
     appInfo.RegisterRoute("POST /api/device/code", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
     {
+        if (!DeviceRateCheck(context))
+        {
+            context.Response.StatusCode = 429;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"rate_limited\"}");
+            return;
+        }
         var dc = new DeviceCodeAuth
         {
             UserCode = DeviceCodeAuth.GenerateUserCode(),
@@ -42,6 +62,13 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
     }));
     appInfo.RegisterRoute("POST /api/device/token", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
     {
+        if (!DeviceRateCheck(context, 30))
+        {
+            context.Response.StatusCode = 429;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"rate_limited\"}");
+            return;
+        }
         // Validate Content-Type (CSRF mitigation)
         if (!(context.Request.ContentType ?? "").Contains("application/json", StringComparison.OrdinalIgnoreCase))
         {

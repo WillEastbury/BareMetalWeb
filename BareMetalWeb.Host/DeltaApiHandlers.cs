@@ -41,7 +41,7 @@ public static class DeltaApiHandlers
 
         if (!DataScaffold.TryGetEntity(typeSlug, out var meta))
         {
-            await WriteResult(context, 404, MutationResult.EntityNotFound, $"Unknown entity type '{typeSlug}'.");
+            await WriteResult(context, 404, MutationResult.EntityNotFound, "Not found.");
             return;
         }
 
@@ -129,7 +129,7 @@ public static class DeltaApiHandlers
         }
         catch (Exception ex)
         {
-            await WriteResult(context, 500, MutationResult.ValidationFailed, $"Error applying delta: {ex.Message}");
+            await WriteResult(context, 500, MutationResult.ValidationFailed, "An internal error occurred.");
         }
     }
 

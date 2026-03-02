@@ -84,7 +84,7 @@ internal static class McpRouteHandler
         catch (JsonException ex)
         {
             context.Response.StatusCode = 400;
-            await WriteRawAsync(context, BuildErrorEnvelope(null, -32700, "Parse error", ex.Message))
+            await WriteRawAsync(context, BuildErrorEnvelope(null, -32700, "Parse error"))
                 .ConfigureAwait(false);
         }
         finally
@@ -132,7 +132,7 @@ internal static class McpRouteHandler
         }
         catch (Exception ex)
         {
-            await WriteRawAsync(context, BuildErrorEnvelope(id, -32603, "Internal error", ex.Message))
+            await WriteRawAsync(context, BuildErrorEnvelope(id, -32603, "Internal error"))
                 .ConfigureAwait(false);
         }
     }
@@ -324,7 +324,7 @@ internal static class McpRouteHandler
     {
         var slug = FromToolSegment(slugSegment);
         if (!DataScaffold.TryGetEntity(slug, out _))
-            return BuildToolErrorResult($"Entity '{slug}' not found.");
+            return BuildToolErrorResult("Entity not found.");
 
         var query = BuildQueryDefinition(arguments);
         var svc = new QueryService();
@@ -338,7 +338,7 @@ internal static class McpRouteHandler
     {
         var slug = FromToolSegment(slugSegment);
         if (!DataScaffold.TryGetEntity(slug, out _))
-            return BuildToolErrorResult($"Entity '{slug}' not found.");
+            return BuildToolErrorResult("Entity not found.");
 
         var id = GetStringArg(arguments, "id");
         if (string.IsNullOrWhiteSpace(id))
@@ -347,7 +347,7 @@ internal static class McpRouteHandler
         var svc = new QueryService();
         var item = await svc.GetByIdAsync(slug, id, ct).ConfigureAwait(false);
         if (item is null)
-            return BuildToolErrorResult($"Record '{id}' not found in '{slug}'.");
+            return BuildToolErrorResult("Record not found.");
 
         return BuildToolTextResult(JsonSerializer.Serialize(item, _jsonOptions));
     }
