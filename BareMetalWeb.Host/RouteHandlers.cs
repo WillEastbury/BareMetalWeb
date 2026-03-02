@@ -367,6 +367,16 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        // Rate limiting — same pattern as login
+        var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        var regIpKey = BuildMfaAttemptKey("register:ip", remoteIp);
+        if (IsThrottled(regIpKey, LoginIpMaxAttempts, out var regRetry))
+        {
+            RenderRegisterForm(context, $"Too many registration attempts. Try again later.", null, null, null);
+            await _renderer.RenderPage(context);
+            return;
+        }
+
         if (!context.Request.HasFormContentType)
         {
             RenderRegisterForm(context, "Invalid registration request.", null, null, null);

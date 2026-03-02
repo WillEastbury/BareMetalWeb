@@ -317,7 +317,7 @@ public static class LookupApiHandlers
 
         if (!DataScaffold.TryGetEntity(typeSlug, out var metadata))
         {
-            return (null, typeSlug, new ErrorResponse(StatusCodes.Status404NotFound, $"Unknown entity type '{typeSlug}'."));
+            return (null, typeSlug, new ErrorResponse(StatusCodes.Status404NotFound, "Not found."));
         }
 
         // Check permissions

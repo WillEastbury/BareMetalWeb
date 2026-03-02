@@ -154,7 +154,7 @@ public static class ActionApiHandlers
         }
         catch (Exception ex)
         {
-            await WriteError(context, 500, $"Error executing action: {ex.Message}");
+            await WriteError(context, 500, "An internal error occurred.");
         }
     }
 
