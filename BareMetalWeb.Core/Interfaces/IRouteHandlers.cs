@@ -75,6 +75,7 @@ public interface IRouteHandlers
     ValueTask DataSizingHandler(HttpContext context);
     ValueTask JobStatusHandler(HttpContext context);
     ValueTask JobsListHandler(HttpContext context);
+    ValueTask CancelJobHandler(HttpContext context);
     ValueTask AdminSampleDataJsonHandler(HttpContext context);
     ValueTask AdminWipeDataJsonHandler(HttpContext context);
 }

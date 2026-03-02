@@ -3691,13 +3691,17 @@
         var html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
         html += '<thead class="table-dark"><tr>' +
           '<th>Operation</th><th>Status</th><th>Progress</th>' +
-          '<th>Started</th><th>Completed</th><th>Details</th></tr></thead><tbody>';
+          '<th>Started</th><th>Completed</th><th>Details</th><th></th></tr></thead><tbody>';
         jobs.forEach(function (j) {
           var started   = j.startedAt   ? new Date(j.startedAt).toLocaleTimeString()   : '';
           var completed = j.completedAt ? new Date(j.completedAt).toLocaleTimeString() : '';
           var details   = j.error
             ? '<span class="text-danger">' + escHtml(j.error) + '</span>'
             : escHtml(j.description || '');
+          var canCancel = j.status === 'running' || j.status === 'queued';
+          var cancelBtn = canCancel
+            ? '<button class="btn btn-danger btn-sm" data-cancel-job="' + escHtml(j.jobId) + '" title="Cancel job">\u26D4 Cancel</button>'
+            : '';
           html += '<tr>' +
             '<td>' + escHtml(j.operationName) + '</td>' +
             '<td>' + statusBadge(j.status) + '</td>' +
@@ -3705,12 +3709,26 @@
             '<td class="text-nowrap">' + escHtml(started) + '</td>' +
             '<td class="text-nowrap">' + escHtml(completed) + '</td>' +
             '<td>' + details + '</td>' +
+            '<td>' + cancelBtn + '</td>' +
             '</tr>';
         });
         html += '</tbody></table></div>';
         tableWrap.innerHTML = html;
         tableWrap.querySelectorAll('[data-progress-pct]').forEach(function (el) {
           el.style.width = el.dataset.progressPct + '%';
+        });
+        tableWrap.querySelectorAll('[data-cancel-job]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var jobId = btn.dataset.cancelJob;
+            if (!confirm('Cancel this job?')) return;
+            btn.disabled = true;
+            var origText = btn.textContent;
+            btn.textContent = 'Cancelling\u2026';
+            apiDelete(API + '/jobs/' + encodeURIComponent(jobId))
+              .then(function () { loadJobs(); })
+              .catch(function (err) { alert('Failed to cancel job: ' + err.message); })
+              .finally(function () { btn.disabled = false; btn.textContent = origText; });
+          });
         });
       }).catch(function (err) {
         tableWrap.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';

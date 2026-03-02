@@ -124,6 +124,28 @@ public sealed class BackgroundJobService
     }
 
     /// <summary>
+    /// Requests cancellation of the job with the given ID.
+    /// Returns <c>true</c> if the job was found and cancellation was requested;
+    /// <c>false</c> if the job ID is unknown or the job has already completed.
+    /// <para>
+    /// Note: there is an inherent benign race between the status check and the Cancel()
+    /// call. If the job completes between those two operations, Cancel() is called on a
+    /// completed <see cref="CancellationTokenSource"/>, which is safe and idempotent.
+    /// </para>
+    /// </summary>
+    public bool CancelJob(string jobId)
+    {
+        if (!_jobs.TryGetValue(jobId, out var entry))
+            return false;
+
+        if (entry.Status is BackgroundJobStatus.Succeeded or BackgroundJobStatus.Failed)
+            return false;
+
+        entry.Cts.Cancel();
+        return true;
+    }
+
+    /// <summary>
     /// Returns point-in-time snapshots of all currently tracked jobs
     /// (both active and recently completed, up to <see cref="RetentionPeriod"/>).
     /// </summary>
