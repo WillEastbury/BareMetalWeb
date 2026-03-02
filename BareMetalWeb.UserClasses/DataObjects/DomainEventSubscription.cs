@@ -7,7 +7,7 @@ namespace BareMetalWeb.Data.DataObjects;
 /// transitions to a specific value, fire a registered action on a target aggregate.
 /// No scripting — deterministic, replay-safe, runs inside commit pipeline.
 /// </summary>
-[DataEntity("Webhooks", Slug = "domain-event-subscriptions", ShowOnNav = true, NavGroup = "Automation", NavOrder = 10, Permissions = "admin")]
+[DataEntity("Webhooks", Slug = "domain-event-subscriptions", ShowOnNav = true, NavGroup = "Admin", NavOrder = 50, Permissions = "admin")]
 public class DomainEventSubscription : RenderableDataObject
 {
     /// <summary>Human-readable label for this subscription.</summary>

@@ -3,7 +3,7 @@ using BareMetalWeb.Data;
 namespace BareMetalWeb.Data.DataObjects;
 
 /// <summary>Product category for browsing hierarchy.</summary>
-[DataEntity("Product Categories", ShowOnNav = true, NavGroup = "Commerce", NavOrder = 5)]
+[DataEntity("Product Categories", ShowOnNav = true, NavGroup = "Sales", NavOrder = 15)]
 public class ProductCategory : RenderableDataObject
 {
     [DataField(Label = "Name", Order = 1, Required = true)]
