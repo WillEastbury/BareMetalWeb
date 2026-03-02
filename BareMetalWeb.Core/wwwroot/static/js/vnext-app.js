@@ -3500,8 +3500,34 @@
 
     nav.appendChild(ul);
 
-    // Right-side: bell icon linking to background jobs page
-    const rightUl = el('ul', { className: 'navbar-nav ms-auto' });
+    // Right-side: Tools dropdown + bell icon
+    const rightUl = el('ul', { className: 'navbar-nav ms-auto d-flex align-items-center' });
+
+    // Tools dropdown (sample data, wipe data)
+    const toolsLi = el('li', { className: 'nav-item dropdown' });
+    const toolsToggle = el('a', {
+      className: 'nav-link dropdown-toggle' + (['_sample-data', '_wipe-data'].includes(activeSlug) ? ' active' : ''),
+      href: '#', role: 'button', title: 'Admin Tools'
+    });
+    toolsToggle.setAttribute('data-bs-toggle', 'dropdown');
+    toolsToggle.setAttribute('aria-expanded', 'false');
+    toolsToggle.innerHTML = '<i class="bi bi-tools"></i>';
+    toolsLi.appendChild(toolsToggle);
+    const toolsMenu = el('ul', { className: 'dropdown-menu dropdown-menu-end' });
+    [
+      { slug: '_sample-data', label: '\uD83E\uDDEA Generate Sample Data' },
+      { slug: '_wipe-data',   label: '\uD83D\uDDD1\uFE0F Wipe All Data' }
+    ].forEach(function (t) {
+      const mli = el('li');
+      const ma  = el('a', { className: 'dropdown-item' + (activeSlug === t.slug ? ' active' : ''), href: BASE + '/' + t.slug, textContent: t.label });
+      ma.setAttribute('data-go', '');
+      mli.appendChild(ma);
+      toolsMenu.appendChild(mli);
+    });
+    toolsLi.appendChild(toolsMenu);
+    rightUl.appendChild(toolsLi);
+
+    // Bell icon linking to background jobs page
     const jobsLi  = el('li', { className: 'nav-item' });
     const jobsA   = el('a', {
       className: 'nav-link position-relative' + (activeSlug === '_jobs' ? ' active' : ''),
@@ -3519,6 +3545,116 @@
     setTimeout(_updateJobBadge, 0);
 
     return nav;
+  }
+
+  function renderSampleDataPage(container) {
+    container.appendChild(el('h2', { className: 'mb-3', textContent: '\u{1F9EA} Generate Sample Data' }));
+    container.appendChild(el('p', { className: 'text-muted', textContent: 'Generate sample data for load and indexing tests. The job runs in the background; a toast notification will appear on completion.' }));
+
+    var msgDiv = el('div');
+    container.appendChild(msgDiv);
+
+    var form = el('form');
+    container.appendChild(form);
+
+    function addIntField(labelText, name, defaultVal) {
+      var grp = el('div', { className: 'mb-3' });
+      grp.appendChild(el('label', { className: 'form-label', textContent: labelText, htmlFor: 'sd_' + name }));
+      var inp = el('input', { type: 'number', className: 'form-control', id: 'sd_' + name, name: name, min: '0', max: '100000', value: String(defaultVal), required: true });
+      grp.appendChild(inp);
+      form.appendChild(grp);
+    }
+
+    addIntField('Addresses',        'addresses',      100);
+    addIntField('Customers',        'customers',       50);
+    addIntField('Units of Measure', 'units',           25);
+    addIntField('Products',         'products',        25);
+    addIntField('Employees',        'employees',       10);
+    addIntField('Orders',           'orders',          25);
+    addIntField('To-Do Items',      'todos',           20);
+    addIntField('Time Table Plans', 'timeTablePlans',  10);
+    addIntField('Lesson Logs',      'lessonLogs',      10);
+
+    var clearGrp = el('div', { className: 'mb-3 form-check' });
+    var clearChk = el('input', { type: 'checkbox', className: 'form-check-input', id: 'sd_clearExisting' });
+    clearGrp.appendChild(clearChk);
+    clearGrp.appendChild(el('label', { className: 'form-check-label text-danger', htmlFor: 'sd_clearExisting', textContent: 'Clear existing data first' }));
+    form.appendChild(clearGrp);
+
+    var submitBtn = el('button', { type: 'submit', className: 'btn btn-primary', textContent: 'Generate' });
+    form.appendChild(submitBtn);
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      msgDiv.innerHTML = '';
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting\u2026';
+
+      var body = {
+        addresses:      parseInt(form.querySelector('[name="addresses"]').value, 10) || 0,
+        customers:      parseInt(form.querySelector('[name="customers"]').value, 10) || 0,
+        units:          parseInt(form.querySelector('[name="units"]').value, 10) || 0,
+        products:       parseInt(form.querySelector('[name="products"]').value, 10) || 0,
+        employees:      parseInt(form.querySelector('[name="employees"]').value, 10) || 0,
+        orders:         parseInt(form.querySelector('[name="orders"]').value, 10) || 0,
+        todos:          parseInt(form.querySelector('[name="todos"]').value, 10) || 0,
+        timeTablePlans: parseInt(form.querySelector('[name="timeTablePlans"]').value, 10) || 0,
+        lessonLogs:     parseInt(form.querySelector('[name="lessonLogs"]').value, 10) || 0,
+        clearExisting:  clearChk.checked
+      };
+
+      apiPost('/api/admin/sample-data', body)
+        .then(function () {
+          // 202 is handled by apiFetch → trackJob(); navigate to jobs page
+          go(BASE + '/_jobs');
+        })
+        .catch(function (err) {
+          msgDiv.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Generate';
+        });
+    });
+  }
+
+  function renderWipeDataPage(container) {
+    container.appendChild(el('div', { className: 'alert alert-danger',
+      innerHTML: '<h4 class="alert-heading">&#9888; DANGER ZONE &#9888;</h4>' +
+        '<p><strong>This action will permanently delete ALL data in every entity store.</strong></p>' +
+        '<p>This operation is <strong>irreversible</strong>.</p>' +
+        '<p>Enter the configured wipe token (the <code>admin.allowWipeData</code> setting) to confirm.</p>' }));
+
+    var msgDiv = el('div');
+    container.appendChild(msgDiv);
+
+    var form = el('form');
+    container.appendChild(form);
+
+    var grp = el('div', { className: 'mb-3' });
+    grp.appendChild(el('label', { className: 'form-label', htmlFor: 'wd_token', textContent: 'Enter wipe token to confirm' }));
+    var tokenInp = el('input', { type: 'password', className: 'form-control', id: 'wd_token', required: true, autocomplete: 'off' });
+    grp.appendChild(tokenInp);
+    form.appendChild(grp);
+
+    var submitBtn = el('button', { type: 'submit', className: 'btn btn-danger', textContent: 'WIPE ALL DATA' });
+    form.appendChild(submitBtn);
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      msgDiv.innerHTML = '';
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Submitting\u2026';
+
+      apiPost('/api/admin/wipe-data', { confirmToken: tokenInp.value })
+        .then(function () {
+          // 202 is handled by apiFetch → trackJob(); navigate to jobs page
+          go(BASE + '/_jobs');
+        })
+        .catch(function (err) {
+          msgDiv.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'WIPE ALL DATA';
+        });
+    });
   }
 
   function renderJobsPage(container) {
@@ -3629,6 +3765,24 @@
         const main = el('div', { className: 'container mt-3' });
         R.appendChild(main);
         renderJobsPage(main);
+        wire(); return;
+      }
+
+      // ── Generate Sample Data page ─────────────────────────────────────────
+      if (slug === '_sample-data') {
+        R.replaceChildren(navbar('_sample-data'));
+        const main = el('div', { className: 'container mt-3' });
+        R.appendChild(main);
+        renderSampleDataPage(main);
+        wire(); return;
+      }
+
+      // ── Wipe All Data page ────────────────────────────────────────────────
+      if (slug === '_wipe-data') {
+        R.replaceChildren(navbar('_wipe-data'));
+        const main = el('div', { className: 'container mt-3' });
+        R.appendChild(main);
+        renderWipeDataPage(main);
         wire(); return;
       }
 
