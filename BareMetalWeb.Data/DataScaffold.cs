@@ -68,7 +68,35 @@ public sealed record DataEntityMetadata(
     string? DefaultSortField = null,
     SortDirection DefaultSortDirection = SortDirection.Asc,
     IReadOnlyList<DataFieldMetadata>? DocumentRelationFields = null
-);
+)
+{
+    private DataFieldMetadata[]? _listFields;
+    private DataFieldMetadata[]? _viewFields;
+    private DataFieldMetadata[]? _createFields;
+    private DataFieldMetadata[]? _editFields;
+
+    /// <summary>Fields visible in list views, pre-sorted by Order.</summary>
+    public DataFieldMetadata[] ListFields => _listFields ??= BuildFilteredFields(f => f.List);
+
+    /// <summary>Fields visible in detail views, pre-sorted by Order.</summary>
+    public DataFieldMetadata[] ViewFields => _viewFields ??= BuildFilteredFields(f => f.View);
+
+    /// <summary>Fields available during create, pre-sorted by Order.</summary>
+    public DataFieldMetadata[] CreateFields => _createFields ??= BuildFilteredFields(f => f.Create);
+
+    /// <summary>Fields available during edit, pre-sorted by Order.</summary>
+    public DataFieldMetadata[] EditFields => _editFields ??= BuildFilteredFields(f => f.Edit);
+
+    private DataFieldMetadata[] BuildFilteredFields(Func<DataFieldMetadata, bool> predicate)
+    {
+        int count = 0;
+        foreach (var f in Fields) if (predicate(f)) count++;
+        var result = new DataFieldMetadata[count];
+        int idx = 0;
+        foreach (var f in Fields) if (predicate(f)) result[idx++] = f;
+        return result;
+    }
+}
 
 public sealed record DataEntityHandlers(
     Func<BaseDataObject> Create,
@@ -323,7 +351,7 @@ public static class DataScaffold
         if (query.TryGetValue("q", out var queryText) && !string.IsNullOrWhiteSpace(queryText))
         {
             var group = new QueryGroup { Logic = QueryGroupLogic.Or };
-            foreach (var field in metadata.Fields.Where(f => f.List))
+            foreach (var field in metadata.ListFields)
             {
                 group.Clauses.Add(new QueryClause
                 {
@@ -705,7 +733,7 @@ public static class DataScaffold
     public static IReadOnlyList<(string Label, string Value)> BuildViewRows(DataEntityMetadata metadata, object instance)
     {
         var rows = new List<(string Label, string Value)>();
-        foreach (var field in metadata.Fields.Where(f => f.View).OrderBy(f => f.Order))
+        foreach (var field in metadata.ViewFields)
         {
             var value = field.GetValueFn(instance);
             if (field.Lookup != null)
@@ -733,7 +761,7 @@ public static class DataScaffold
     public static IReadOnlyList<(string Label, string Value, bool IsHtml)> BuildViewRowsHtml(DataEntityMetadata metadata, object instance, Func<DataEntityMetadata, bool>? canRenderLookupLink = null)
     {
         var rows = new List<(string Label, string Value, bool IsHtml)>();
-        foreach (var field in metadata.Fields.Where(f => f.View).OrderBy(f => f.Order))
+        foreach (var field in metadata.ViewFields)
         {
             var value = field.GetValueFn(instance);
             if (field.Lookup != null)
@@ -812,7 +840,7 @@ public static class DataScaffold
     public static IReadOnlyList<(DataFieldMetadata Field, Type ChildType)> GetNestedComponents(DataEntityMetadata metadata)
     {
         var nested = new List<(DataFieldMetadata, Type)>();
-        foreach (var field in metadata.Fields.Where(f => f.View))
+        foreach (var field in metadata.ViewFields)
         {
             if (IsChildListType(field.Property.PropertyType, out var childType))
             {
@@ -943,7 +971,7 @@ public static class DataScaffold
     {
         var result = new List<(string, string[], string[][])>();
         
-        foreach (var field in metadata.Fields.Where(f => f.View))
+        foreach (var field in metadata.ViewFields)
         {
             if (!IsChildListType(field.Property.PropertyType, out var childType))
                 continue;
@@ -1006,7 +1034,7 @@ public static class DataScaffold
     {
         var rows = new List<string[]>();
         // Pre-build lookup maps once per field (not per row)
-        var listFields = metadata.Fields.Where(f => f.List).OrderBy(f => f.Order).ToArray();
+        var listFields = metadata.ListFields;
         var lookupMaps = new Dictionary<string, string>?[listFields.Length];
         for (int fi = 0; fi < listFields.Length; fi++)
         {

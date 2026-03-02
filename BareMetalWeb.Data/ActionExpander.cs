@@ -196,7 +196,10 @@ public sealed class ActionExpander
         if (!DataScaffold.TryGetEntity(invoke.TargetAggregateType, out var targetMeta)) return;
         var targetLayout = EntityLayoutCompiler.GetOrCompile(targetMeta);
 
-        var targetEntity = DataScaffold.LoadAsync(targetMeta, targetId).AsTask().Result;
+        var loadTask = DataScaffold.LoadAsync(targetMeta, targetId);
+        var targetEntity = loadTask.IsCompleted
+            ? loadTask.Result
+            : loadTask.AsTask().GetAwaiter().GetResult();
         if (targetEntity == null) return;
 
         var targetEval = new ExpressionEvaluator(targetLayout, _aggregateReader);
