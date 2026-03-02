@@ -33,9 +33,11 @@ public static class DeltaMutationEngine
             return (null, MutationResult.SchemaHashMismatch);
 
         // Load existing entity
-        var entity = await DataScaffold.LoadAsync(meta, delta.RowId, cancellationToken) as BaseDataObject;
-        if (entity is null)
+        var loaded = await DataScaffold.LoadAsync(meta, delta.RowId, cancellationToken);
+        if (loaded is null)
             return (null, MutationResult.EntityNotFound);
+        if (loaded is not BaseDataObject entity)
+            return (null, MutationResult.TypeMismatch);
 
         // Optimistic concurrency check
         if (delta.ExpectedVersion != 0 && entity.Version != delta.ExpectedVersion)

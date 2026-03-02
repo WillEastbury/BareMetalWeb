@@ -85,6 +85,7 @@ public static class DeltaApiHandlers
                     MutationResult.EntityNotFound => 404,
                     MutationResult.ValidationFailed => 422,
                     MutationResult.InvalidOrdinal => 400,
+                    MutationResult.TypeMismatch => 500,
                     _ => 500,
                 };
                 await WriteResult(context, statusCode, result, result.ToString());
