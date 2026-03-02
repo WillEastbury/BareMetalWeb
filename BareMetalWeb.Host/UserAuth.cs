@@ -32,7 +32,13 @@ public static class UserAuth
             return null;
         }
 
-        var session = DataStoreProvider.Current.Load<UserSession>(uint.Parse(sessionId));
+        if (!uint.TryParse(sessionId, out var sessionKey))
+        {
+            context.DeleteCookie(SessionCookieName);
+            return null;
+        }
+
+        var session = DataStoreProvider.Current.Load<UserSession>(sessionKey);
         if (session == null)
             return null;
 
@@ -86,7 +92,13 @@ public static class UserAuth
             return null;
         }
 
-        var session = await DataStoreProvider.Current.LoadAsync<UserSession>(uint.Parse(sessionId), cancellationToken).ConfigureAwait(false);
+        if (!uint.TryParse(sessionId, out var sessionKey))
+        {
+            context.DeleteCookie(SessionCookieName);
+            return null;
+        }
+
+        var session = await DataStoreProvider.Current.LoadAsync<UserSession>(sessionKey, cancellationToken).ConfigureAwait(false);
         if (session == null)
             return null;
 
@@ -131,7 +143,10 @@ public static class UserAuth
         if (session == null)
             return null;
 
-        var user = await Users.GetByIdAsync(uint.Parse(session.UserId), cancellationToken).ConfigureAwait(false);
+        if (!uint.TryParse(session.UserId, out var userId))
+            return null;
+
+        var user = await Users.GetByIdAsync(userId, cancellationToken).ConfigureAwait(false);
         if (user == null || !user.IsActive)
             return null;
 
