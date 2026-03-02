@@ -222,6 +222,12 @@ dotnet test BareMetalWeb.Data.Tests/BareMetalWeb.Data.Tests.csproj --no-build -s
 
 Without this, `dotnet test` will abort with `"Test Run Aborted"` on every test project. Setting `DOTNET_ROOT` or `DOTNET_ROOT_ARM64` alone is **not** sufficient — `DotNetHostPath` in runsettings is required.
 
+**Additional ARM64/proot quirks:**
+- Test output (pass/fail counts, test names) may not appear in stdout — the test runner's console logger sometimes fails to write under proot. **Trust the exit code**: `0` = all passed, non-zero = failures.
+- If test output is needed, use `--logger "console;verbosity=detailed"` but expect intermittent blank output.
+- Integration tests requiring network listeners may fail under proot. Exclude them with `--filter "FullyQualifiedName!~IntegrationTests"`.
+- The runsettings file must exist before running tests. If `/tmp/test.runsettings` is missing (e.g. after a reboot), recreate it using the snippet above.
+
 **Why This Matters:**
 - Prevents broken code from being committed
 - Maintains code quality and stability
