@@ -730,13 +730,24 @@ body {
 .bm-col-check { width: 2rem; }
 .bm-sort-icon-dim { opacity: 0.3; }
 .bm-img-preview { max-width: 200px; max-height: 200px; }
+.bm-img-thumb { max-height: 48px; }
 #vnext-toast-container { z-index: 1100; }
 .bm-job-progress { min-width: 80px; }
+.bm-currency-input { max-width: 80px; }
+.bm-cursor-pointer { cursor: pointer; }
+.bm-tag-close { font-size: .55em; vertical-align: middle; }
 
 /* VNext SPA polish */
 .vnext-tag-container {
     border-radius: 0.75rem;
     padding: 0.35rem 0.5rem;
+    min-height: 38px;
+    cursor: text;
+}
+
+.vnext-tag-input {
+    outline: none;
+    min-width: 80px;
 }
 
 .vnext-tag-pill {

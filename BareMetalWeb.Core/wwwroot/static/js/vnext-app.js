@@ -250,7 +250,7 @@
             return s === 'queued' || s === 'running';
         }).length;
         badge.textContent = String(active);
-        badge.style.display = active > 0 ? '' : 'none';
+        badge.classList.toggle('d-none', active === 0);
     }
 
     function escHtml(str) {
@@ -285,7 +285,7 @@
             return val.map(function (t) { return '<span class="badge bg-info text-dark me-1">' + escHtml(t) + '</span>'; }).join('');
         }
         if (fieldType === 'Image') {
-            if (typeof val === 'object' && val.url) return '<img src="' + escHtml(val.url) + '" class="img-thumbnail" style="max-height:48px" alt="">';
+            if (typeof val === 'object' && val.url) return '<img src="' + escHtml(val.url) + '" class="img-thumbnail bm-img-thumb" alt="">';
             return escHtml(String(val));
         }
         if (typeof val === 'object') return '<code>' + escHtml(JSON.stringify(val)) + '</code>';
@@ -894,7 +894,7 @@
         // Left: tree sidebar
         html += '<div class="bm-data-tree-panel bm-data-tree-sidebar">';
         html += '<div class="bm-data-tree-header">' + escHtml(meta.name) + '</div>';
-        html += '<ul class="bm-data-tree-list" style="padding-left:0">';
+        html += '<ul class="bm-data-tree-list ps-0">';
         roots.forEach(function (root) { html += buildNodeHtml(root); });
         html += '</ul>';
         html += '</div>';
@@ -1302,7 +1302,7 @@
             html += '</tr></thead><tbody>';
             dayItems.forEach(function (item) {
                 var id = item.id || item.Id || '';
-                html += '<tr><td style="white-space:nowrap">' +
+                html += '<tr><td class="text-nowrap">' +
                     '<a class="btn btn-outline-info btn-sm me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '" title="View"><i class="bi bi-eye"></i></a>' +
                     '<a class="btn btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encodeURIComponent(id) + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>' +
                     '<a class="btn btn-outline-secondary btn-sm me-1" href="' + baseUrl + '/create?cloneFrom=' + encodeURIComponent(id) + '" title="Clone"><i class="bi bi-copy"></i></a>' +
@@ -1648,7 +1648,7 @@
         }
         var summary = '<div class="d-flex align-items-center gap-2 small text-muted mt-2">' +
             '<span>Records ' + startRecord + ' \u2013 ' + endRecord + ' of ' + total + '</span>' +
-            '<select class="form-select form-select-sm d-inline-block" style="width:auto" id="vnext-page-size">' + sizeOptions + '</select>' +
+            '<select class="form-select form-select-sm d-inline-block bm-w-auto" id="vnext-page-size">' + sizeOptions + '</select>' +
             '<span>per page</span></div>';
         if (total <= top) {
             // Still show size selector even when everything fits on one page
@@ -2093,12 +2093,12 @@
             var tags = Array.isArray(val) ? val : (val ? String(val).split(',').map(function(s){return s.trim();}).filter(Boolean) : []);
             var pills = tags.map(function (t) {
                 return '<span class="badge bg-info text-dark me-1 vnext-tag-pill">' + escHtml(t) +
-                    ' <button type="button" class="btn-close btn-close-sm ms-1" aria-label="Remove" style="font-size:.55em;vertical-align:middle"></button></span>';
+                    ' <button type="button" class="btn-close btn-close-sm ms-1 bm-tag-close" aria-label="Remove"></button></span>';
             }).join('');
             return '<div class="mb-3">' + label +
-                '<div class="vnext-tag-container form-control form-control-sm d-flex flex-wrap align-items-center gap-1" style="min-height:38px;cursor:text" data-field="' + escHtml(f.name) + '">' +
+                '<div class="vnext-tag-container form-control form-control-sm d-flex flex-wrap align-items-center gap-1" data-field="' + escHtml(f.name) + '">' +
                 pills +
-                '<input type="text" class="vnext-tag-input border-0 flex-grow-1" style="outline:none;min-width:80px" placeholder="Type and press Enter">' +
+                '<input type="text" class="vnext-tag-input border-0 flex-grow-1" placeholder="Type and press Enter">' +
                 '</div>' +
                 '<input type="hidden" name="' + escHtml(f.name) + '" id="' + id_ + '" value="' + escHtml(JSON.stringify(tags)) + '">' +
                 feedback + '</div>';
@@ -2145,7 +2145,7 @@
             return '<div class="mb-3">' + label +
                 '<div class="input-group input-group-sm">' +
                 '<input type="number" class="form-control" id="' + id_ + '" name="' + escHtml(f.name) + '_amount" step="0.01" value="' + escHtml(String(moneyObj.amount || '')) + '"' + req + validation + '>' +
-                '<input type="text" class="form-control" style="max-width:80px" name="' + escHtml(f.name) + '_currency" placeholder="USD" value="' + escHtml(String(moneyObj.currency || 'USD')) + '" maxlength="3">' +
+                '<input type="text" class="form-control bm-currency-input" name="' + escHtml(f.name) + '_currency" placeholder="USD" value="' + escHtml(String(moneyObj.currency || 'USD')) + '" maxlength="3">' +
                 '</div>' + feedback + '</div>';
         }
 
@@ -2621,7 +2621,7 @@
                 if (!text) return;
                 var pill = document.createElement('span');
                 pill.className = 'badge bg-info text-dark me-1 vnext-tag-pill';
-                pill.innerHTML = escHtml(text) + ' <button type="button" class="btn-close btn-close-sm ms-1" aria-label="Remove" style="font-size:.55em;vertical-align:middle"></button>';
+                pill.innerHTML = escHtml(text) + ' <button type="button" class="btn-close btn-close-sm ms-1 bm-tag-close" aria-label="Remove"></button>';
                 container.insertBefore(pill, inp);
                 inp.value = '';
                 syncTagHidden(container);
@@ -2847,7 +2847,7 @@
                 keys.forEach(function (k) { html += '<th>' + escHtml(k) + '</th>'; });
                 html += '</tr></thead><tbody>';
                 rows.forEach(function (row) {
-                    html += '<tr style="cursor:pointer" data-vnext-select-row>';
+                    html += '<tr class="bm-cursor-pointer" data-vnext-select-row>';
                     html += '<td><button type="button" class="btn btn-sm btn-primary">Select</button></td>';
                     keys.forEach(function (k) {
                         html += '<td data-field="' + escHtml(k) + '">' + escHtml(row[k] != null ? String(row[k]) : '') + '</td>';
@@ -3536,7 +3536,7 @@
     });
     jobsA.setAttribute('data-go', '');
     jobsA.innerHTML = '<i class="bi bi-bell"></i>' +
-      '<span id="vnext-jobs-badge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger" style="display:none">0</span>';
+      '<span id="vnext-jobs-badge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none">0</span>';
     jobsLi.appendChild(jobsA);
     rightUl.appendChild(jobsLi);
     nav.appendChild(rightUl);
@@ -3677,7 +3677,7 @@
     function progressBar(j) {
       if (j.status !== 'running' && j.status !== 'succeeded') return '';
       var pct = j.percentComplete || 0;
-      return '<div class="progress bm-job-progress"><div class="progress-bar" role="progressbar" style="width:' + pct + '%" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100">' + pct + '%</div></div>';
+      return '<div class="progress bm-job-progress"><div class="progress-bar" role="progressbar" data-progress-pct="' + pct + '" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100">' + pct + '%</div></div>';
     }
 
     function loadJobs() {
@@ -3707,6 +3707,9 @@
         });
         html += '</tbody></table></div>';
         tableWrap.innerHTML = html;
+        tableWrap.querySelectorAll('[data-progress-pct]').forEach(function (el) {
+          el.style.width = el.dataset.progressPct + '%';
+        });
       }).catch(function (err) {
         tableWrap.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';
       });
