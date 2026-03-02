@@ -20,6 +20,15 @@ public static partial class PageRenderer
     private static partial Regex CodeRegex();
     [GeneratedRegex(@"\[(.+?)\]\((.+?)\)")]
     private static partial Regex LinkRegex();
+    [GeneratedRegex(@"(?i)(href|src|action)\s*=\s*[""']\s*(javascript|data|vbscript)\s*:", RegexOptions.IgnoreCase)]
+    private static partial Regex DangerousAttrRegex();
+
+    /// <summary>Strip dangerous protocol handlers from raw HTML content.</summary>
+    private static string SanitizeHtml(string html)
+    {
+        if (string.IsNullOrEmpty(html)) return html;
+        return DangerousAttrRegex().Replace(html, m => $"{m.Groups[1].Value}=\"about:blank\" data-stripped=\"");
+    }
 
     /// <summary>Configures context for GET /page/{slug} inside platform chrome.</summary>
     public static async ValueTask ConfigurePageAsync(HttpContext context)
@@ -71,10 +80,10 @@ public static partial class PageRenderer
         var content = GetField(pageObj, meta, "Content");
         var format = GetField(pageObj, meta, "Format");
 
-        // Convert markdown to HTML if needed
+        // Convert markdown to HTML if needed; sanitize dangerous protocols in both paths
         var htmlContent = string.Equals(format, "markdown", StringComparison.OrdinalIgnoreCase)
             ? ConvertMarkdownToHtml(content)
-            : content;
+            : SanitizeHtml(content);
 
         var sb = new StringBuilder(4096);
         sb.AppendLine("""<div class="container-fluid py-4 px-4 bm-content">""");
@@ -207,9 +216,29 @@ public static partial class PageRenderer
         encoded = ItalicRegex().Replace(encoded, "<em>$1</em>");
         // Code
         encoded = CodeRegex().Replace(encoded, "<code>$1</code>");
-        // Links [text](url)
-        encoded = LinkRegex().Replace(encoded, """<a href="$2">$1</a>""");
+        // Links [text](url) — validate URL protocol to prevent javascript: XSS
+        encoded = LinkRegex().Replace(encoded, m =>
+        {
+            var linkText = m.Groups[1].Value;
+            var url = System.Net.WebUtility.HtmlDecode(m.Groups[2].Value).Trim();
+            if (IsSafeUrl(url))
+                return $"""<a href="{System.Net.WebUtility.HtmlEncode(url)}">{linkText}</a>""";
+            return linkText; // strip unsafe link, keep text
+        });
         return encoded;
+    }
+
+    private static bool IsSafeUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return false;
+        // Allow relative URLs
+        if (url.StartsWith('/') && !url.StartsWith("//")) return true;
+        if (url.StartsWith('#') || url.StartsWith('?')) return true;
+        // Allow safe protocols only
+        if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase)) return true;
+        if (url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)) return true;
+        if (url.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
     }
 
     private static string GetField(BaseDataObject obj, DataEntityMetadata meta, string fieldName)

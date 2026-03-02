@@ -3,6 +3,7 @@ using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Runtime;
 using BareMetalWeb.Rendering.Models;
+using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Host;
 
@@ -39,6 +40,17 @@ internal static class McpRouteHandler
     internal static async ValueTask HandleAsync(HttpContext context)
     {
         context.Response.ContentType = "application/json";
+
+        // Require authentication — MCP tools expose full CRUD operations
+        var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted);
+        if (user == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            await context.Response.WriteAsync(
+                "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32600,\"message\":\"Authentication required\"}}",
+                context.RequestAborted).ConfigureAwait(false);
+            return;
+        }
 
         string body;
         using (var reader = new System.IO.StreamReader(context.Request.Body))

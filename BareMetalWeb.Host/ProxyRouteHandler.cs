@@ -110,7 +110,17 @@ public sealed class ProxyRouteHandler
             {
                 _logger.LogInfo($"Proxy attempt {attempt}/{maxAttempts} -> {targetState.BaseUri}");
             }
-            var targetUri = BuildTargetUri(context, targetState.BaseUri);
+            Uri targetUri;
+            try
+            {
+                targetUri = BuildTargetUri(context, targetState.BaseUri);
+            }
+            catch (InvalidOperationException)
+            {
+                context.Response.StatusCode = StatusCodes.Status502BadGateway;
+                await context.Response.WriteAsync("Proxy target blocked.");
+                return;
+            }
             using var requestMessage = new HttpRequestMessage(new HttpMethod(context.Request.Method), targetUri)
             {
                 VersionPolicy = HttpVersionPolicy.RequestVersionOrLower
@@ -215,6 +225,10 @@ public sealed class ProxyRouteHandler
                 requestPath = "/" + requestPath;
         }
 
+        // Block path traversal sequences
+        if (requestPath.Contains(".."))
+            requestPath = requestPath.Replace("..", string.Empty);
+
         if (!string.IsNullOrWhiteSpace(_route.RewritePath))
         {
             builder.Path = _route.RewritePath!;
@@ -240,7 +254,30 @@ public sealed class ProxyRouteHandler
             }
         }
 
-        return builder.Uri;
+        var result = builder.Uri;
+
+        // Block requests to private/metadata IPs
+        if (IsPrivateOrMetadataHost(result.Host))
+            throw new InvalidOperationException("Proxy target resolves to a blocked address.");
+
+        return result;
+    }
+
+    /// <summary>Reject private, loopback, and cloud metadata IPs/hostnames.</summary>
+    private static bool IsPrivateOrMetadataHost(string host)
+    {
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        if (!IPAddress.TryParse(host, out var ip)) return false;
+        if (IPAddress.IsLoopback(ip)) return true;
+        var bytes = ip.GetAddressBytes();
+        if (bytes.Length == 4)
+        {
+            if (bytes[0] == 10) return true;                                    // 10.0.0.0/8
+            if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return true; // 172.16.0.0/12
+            if (bytes[0] == 192 && bytes[1] == 168) return true;                // 192.168.0.0/16
+            if (bytes[0] == 169 && bytes[1] == 254) return true;                // 169.254.0.0/16 (link-local + cloud metadata)
+        }
+        return false;
     }
 
     private static bool ShouldHaveBody(HttpRequest request)

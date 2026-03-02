@@ -65,9 +65,14 @@ public static class ActionApiHandlers
             return;
         }
 
-        // Auth
+        // Auth — require authenticated user
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted);
-        var userName = user?.UserName ?? "anonymous";
+        if (user == null)
+        {
+            await WriteError(context, 401, "Authentication required.");
+            return;
+        }
+        var userName = user.UserName ?? "anonymous";
 
         // Parse request body
         uint aggregateId;
