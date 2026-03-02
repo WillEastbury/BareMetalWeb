@@ -53,9 +53,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private readonly ISchemaAwareObjectSerializer _serializer;
     private readonly IDataQueryEvaluator       _queryEvaluator;
     private readonly IBufferedLogger?          _logger;
-    private readonly WalStore                  _walStore;
-    private readonly IndexStore                _indexStore;
-    private readonly SearchIndexManager        _searchIndexManager;
+    private WalStore                  _walStore;
+    private IndexStore                _indexStore;
+    private SearchIndexManager        _searchIndexManager;
 
     // Per-entity uint-key → packed-ulong-WAL-key map (loaded lazily from the id-map file)
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<uint, ulong>> _idMaps
@@ -104,6 +104,40 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     public void Dispose()
     {
         _walStore.Dispose();
+    }
+
+    /// <inheritdoc />
+    public ValueTask WipeStorageAsync(CancellationToken cancellationToken = default)
+    {
+        // 1. Close the active WAL segment cleanly (writes snapshot + footer, closes handles).
+        _walStore.Dispose();
+
+        // 2. Delete and recreate the entire data root so every artefact is removed:
+        //    wal/ (WAL segments + id-maps), Index/ (secondary field indexes),
+        //    indexes/ (search-index files), Paged/ (paged files), and per-entity
+        //    type folders (schema JSON files + _seqid.dat).
+        if (Directory.Exists(_rootPath))
+            Directory.Delete(_rootPath, recursive: true);
+        Directory.CreateDirectory(_rootPath);
+
+        // 3. Clear all in-memory caches so the next access starts fresh.
+        _idMaps.Clear();
+        _idMapLocks.Clear();
+        _tableIds.Clear();
+        _schemaCache.Clear();
+        _schemaLocks.Clear();
+        _seqIdRanges.Clear();
+
+        // 4. Reinitialise the WAL store on the new empty directory.
+        var walDir = Path.Combine(_rootPath, WalSubFolder);
+        Directory.CreateDirectory(walDir);
+        _walStore = new WalStore(walDir);
+
+        // 5. Reinitialise the secondary-index components.
+        _indexStore         = new IndexStore(this, _logger);
+        _searchIndexManager = new SearchIndexManager(_rootPath, _logger);
+
+        return ValueTask.CompletedTask;
     }
 
     // ── IDataProvider: identity properties ───────────────────────────────────

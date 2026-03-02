@@ -31,8 +31,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private readonly ISchemaAwareObjectSerializer _serializer;
     private readonly IDataQueryEvaluator _queryEvaluator;
     private readonly IBufferedLogger? _logger;
-    private readonly IndexStore _indexStore;
-    private readonly SearchIndexManager _searchIndexManager;
+    private IndexStore _indexStore;
+    private SearchIndexManager _searchIndexManager;
     private readonly ConcurrentDictionary<string, ClusteredPagedObjectStore> _clusteredStores = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _clusteredLocationMaps = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<Type, SchemaCache> _schemaCache = new();
@@ -230,6 +230,31 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
 
         lock (range.SyncRoot) { SeedSeqKeyFileIfLower(path, floor); }
         range.Invalidate();
+    }
+
+    /// <inheritdoc />
+    public ValueTask WipeStorageAsync(CancellationToken cancellationToken = default)
+    {
+        // 1. Delete and recreate the entire data root so every artefact is removed:
+        //    per-entity type folders (binary data files, schema JSON files, _seqid.dat),
+        //    Index/ (secondary field indexes), indexes/ (search-index files), Paged/ (paged files).
+        if (Directory.Exists(_rootPath))
+            Directory.Delete(_rootPath, recursive: true);
+        Directory.CreateDirectory(_rootPath);
+
+        // 2. Clear all in-memory caches so the next access starts fresh.
+        _schemaCache.Clear();
+        _schemaLocks.Clear();
+        _seqIdRanges.Clear();
+        _clusteredStores.Clear();
+        _clusteredLocationMaps.Clear();
+        _schemaMemberCache.Clear();
+
+        // 3. Reinitialise the secondary-index components.
+        _indexStore         = new IndexStore(this, _logger!);
+        _searchIndexManager = new SearchIndexManager(_rootPath, _logger);
+
+        return ValueTask.CompletedTask;
     }
 
     private static uint AllocateBatch(string path, int batchSize)
