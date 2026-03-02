@@ -524,6 +524,10 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.JobStatusHandler));
 
+        host.RegisterRoute("DELETE /api/jobs/{jobId}", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            routeHandlers.CancelJobHandler));
+
         // Admin JSON endpoints for VNext SPA (no CSRF form token required — validated via X-CSRF-Token header)
         host.RegisterRoute("POST /api/admin/sample-data", new RouteHandlerData(
             pageInfoFactory.RawPage("admin", false),

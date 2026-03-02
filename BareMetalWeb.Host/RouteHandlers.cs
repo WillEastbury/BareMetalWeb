@@ -7779,4 +7779,43 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(items)).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// DELETE /api/jobs/{jobId}
+    /// Cancels a running or queued background job. Returns 200 OK if cancellation was
+    /// requested, 404 if the job is unknown, or 409 Conflict if it has already completed.
+    /// Requires admin permission.
+    /// </summary>
+    public async ValueTask CancelJobHandler(HttpContext context)
+    {
+        var jobId = GetRouteValue(context, "jobId") ?? string.Empty;
+
+        if (string.IsNullOrEmpty(jobId))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Missing job ID.\"}").ConfigureAwait(false);
+            return;
+        }
+
+        if (!BackgroundJobService.Instance.TryGetJob(jobId, out var snapshot) || snapshot == null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Job not found.\"}").ConfigureAwait(false);
+            return;
+        }
+
+        if (!BackgroundJobService.Instance.CancelJob(jobId))
+        {
+            context.Response.StatusCode = StatusCodes.Status409Conflict;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Job has already completed and cannot be cancelled.\"}").ConfigureAwait(false);
+            return;
+        }
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"status\":\"cancellation requested\"}").ConfigureAwait(false);
+    }
 }
