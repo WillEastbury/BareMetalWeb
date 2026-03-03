@@ -39,7 +39,7 @@ graph TD
 **Key points:**
 - `DataStoreProvider.Current` is the one-stop shop for all data access.
 - `LocalFolderBinaryDataProvider` stores each entity instance as a single binary file, grouped by entity type.  Used when WAL is not configured.
-- `WalDataProvider` stores all records as commit-log payloads inside a `WalStore` at `{dataRoot}/wal/`.  Each entity type gets a stable `uint32` table-ID derived from the type name; each string record-ID is mapped to a monotonic `uint32` record-ID via a per-entity `_idmap.bin` file, giving a packed `ulong` key consumed by the WAL store.  Each op payload is automatically Brotli-compressed by `WalPayloadCodec` (quality 4, window 22) when the serialized size is ≥ 64 bytes and compression reduces the size; the per-op header stores the codec (`CodecNone=1` or `CodecBrotli=3`) and uncompressed length so reads decompress transparently.
+- `WalDataProvider` stores all records as commit-log payloads inside a `WalStore` at `{dataRoot}/wal/`.  Each entity type gets a stable `uint32` table-ID derived from the type name; each string record-ID is mapped to a monotonic `uint32` record-ID via a per-entity `_idmap.bin` file, giving a packed `ulong` key consumed by the WAL store.
 - `WalDataProvider` maintains secondary field indexes via `IndexStore` (paged files under `{dataRoot}/Paged/`) and `SearchIndexManager` for full-text search. `Query<T>` consults `IndexStore` for `Equals` clauses on `[DataIndex]`-decorated fields before falling back to a full WAL scan, reducing deserializations from O(n) to O(matches).
 - Schema evolution is handled via `SchemaReadMode.BestEffort` in both providers: old records with extra/missing fields still load; new fields receive default values.
 - Schema files are shared between the two providers so they can coexist in the same data root.
@@ -99,9 +99,26 @@ matching compiled C# property access and 25–50× faster than dictionary lookup
 
 **AOT-safe:** FieldPlan getter/setter closures capture the ordinal — no
 `Expression.Lambda().Compile()`, no `PropertyInfo`, fully Native AOT compatible.
+BaseDataObject structural properties (Key, timestamps, audit trail, ETag, Version)
+are serialized as a prefix via dedicated closures — no Activator.CreateInstance.
 
 `EntitySchemaFactory.FromModel(RuntimeEntityModel)` bridges the runtime
 compilation pipeline to the data layer.
+
+### WAL Storage for DataRecord
+
+`WalDataProvider` provides non-generic save/load/query/delete methods for
+`DataRecord` entities:
+
+- `SaveRecord(DataRecord, EntitySchema)` — serializes via `MetadataWireSerializer`
+  with FieldPlan closures, commits to WAL, updates secondary indexes
+- `LoadRecord(uint key, EntitySchema)` — reads WAL payload, deserializes into
+  pre-created `DataRecord` via `DeserializeInto()` (AOT-safe, no `Activator.CreateInstance`)
+- `QueryRecords(EntitySchema, QueryDefinition?)` — full scan with ordinal-based
+  clause matching, sorting, and paging
+- `DeleteRecord(uint key, EntitySchema)` — WAL tombstone, index cleanup
+- All methods share the same deser cache as generic `Load<T>`, keyed by
+  `(entityName, key, walPointer)`
 
 ---
 
@@ -244,4 +261,4 @@ Sequential IDs are persisted so they survive restarts:
 
 ---
 
-_Status: Verified against codebase @ commit 36fcf55_
+_Status: Verified against codebase @ commit bd580ba_

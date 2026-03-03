@@ -177,11 +177,15 @@ public class EntitySchemaTests
         var schema = BuildCustomerSchema();
         var descriptors = schema.BuildFieldPlanDescriptors();
 
-        Assert.Equal(4, descriptors.Length);
-        Assert.Equal("Name", descriptors[0].Name);
-        Assert.Equal("Email", descriptors[1].Name);
-        Assert.Equal("Age", descriptors[2].Name);
-        Assert.Equal("Active", descriptors[3].Name);
+        // 8 base properties + 4 schema fields = 12
+        Assert.Equal(12, descriptors.Length);
+        // Base properties come first (__Key, __CreatedOnUtc, etc.)
+        Assert.Equal("__Key", descriptors[0].Name);
+        // Schema fields start at index 8
+        Assert.Equal("Name", descriptors[8].Name);
+        Assert.Equal("Email", descriptors[9].Name);
+        Assert.Equal("Age", descriptors[10].Name);
+        Assert.Equal("Active", descriptors[11].Name);
     }
 
     [Fact]
@@ -191,21 +195,25 @@ public class EntitySchemaTests
         var descriptors = schema.BuildFieldPlanDescriptors();
         var record = schema.CreateRecord();
 
-        // Write via setter closure
-        descriptors[0].Setter(record, "Alice");
-        descriptors[1].Setter(record, "alice@example.com");
-        descriptors[2].Setter(record, 30);
-        descriptors[3].Setter(record, true);
+        // Schema fields start at offset 8
+        descriptors[8].Setter(record, "Alice");
+        descriptors[9].Setter(record, "alice@example.com");
+        descriptors[10].Setter(record, 30);
+        descriptors[11].Setter(record, true);
 
-        // Read via getter closure
-        Assert.Equal("Alice", descriptors[0].Getter(record));
-        Assert.Equal("alice@example.com", descriptors[1].Getter(record));
-        Assert.Equal(30, descriptors[2].Getter(record));
-        Assert.Equal(true, descriptors[3].Getter(record));
+        Assert.Equal("Alice", descriptors[8].Getter(record));
+        Assert.Equal("alice@example.com", descriptors[9].Getter(record));
+        Assert.Equal(30, descriptors[10].Getter(record));
+        Assert.Equal(true, descriptors[11].Getter(record));
 
         // Verify ordinal path matches
         Assert.Equal("Alice", record.GetValue(0));
         Assert.Equal(30, record.GetValue(2));
+
+        // Base property closures work too
+        descriptors[0].Setter(record, 42u); // __Key
+        Assert.Equal(42u, descriptors[0].Getter(record));
+        Assert.Equal(42u, record.Key);
     }
 
     [Fact]
@@ -214,15 +222,15 @@ public class EntitySchemaTests
         var schema = BuildCustomerSchema();
         var descriptors = schema.BuildFieldPlanDescriptors();
 
-        // Create two records, write different values via same closures
         var rec1 = schema.CreateRecord();
         var rec2 = schema.CreateRecord();
 
-        descriptors[0].Setter(rec1, "Alice");
-        descriptors[0].Setter(rec2, "Bob");
+        // Schema fields at offset 8
+        descriptors[8].Setter(rec1, "Alice");
+        descriptors[8].Setter(rec2, "Bob");
 
-        Assert.Equal("Alice", descriptors[0].Getter(rec1));
-        Assert.Equal("Bob", descriptors[0].Getter(rec2));
+        Assert.Equal("Alice", descriptors[8].Getter(rec1));
+        Assert.Equal("Bob", descriptors[8].Getter(rec2));
     }
 
     // ── Ordinal stability ──────────────────────────────────────────────────

@@ -755,6 +755,328 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         return ValueTask.CompletedTask;
     }
 
+    // ── DataRecord (non-generic, metadata-driven) ─────────────────────────────
+    //
+    // Fully AOT-safe code path for DataRecord entities. Uses EntitySchema
+    // parallel arrays and ordinal-indexed closures instead of generic type
+    // parameters and reflection-based schema building.
+
+    private readonly ConcurrentDictionary<string, MetadataWireSerializer.FieldPlan[]> _recordPlans
+        = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, int> _recordSchemaVersions
+        = new(StringComparer.OrdinalIgnoreCase);
+    private MetadataWireSerializer? _metaSerializer;
+
+    private MetadataWireSerializer GetMetaSerializer()
+    {
+        if (_metaSerializer != null) return _metaSerializer;
+        byte[] key;
+        if (_serializer is BinaryObjectSerializer bos)
+            key = bos.GetSigningKeyCopy();
+        else
+            key = new byte[32];
+        _metaSerializer = new MetadataWireSerializer(key);
+        return _metaSerializer;
+    }
+
+    private MetadataWireSerializer.FieldPlan[] GetOrBuildRecordPlan(EntitySchema schema)
+    {
+        return _recordPlans.GetOrAdd(schema.EntityName, _ =>
+        {
+            var descriptors = schema.BuildFieldPlanDescriptors();
+            return MetadataWireSerializer.BuildPlan(typeof(DataRecord), descriptors);
+        });
+    }
+
+    /// <summary>
+    /// Saves a <see cref="DataRecord"/> to WAL storage using metadata-driven serialization.
+    /// No reflection, no generic type parameter — fully AOT-safe.
+    /// </summary>
+    public void SaveRecord(DataRecord record, EntitySchema schema)
+    {
+        if (record is null) throw new ArgumentNullException(nameof(record));
+        if (record.Key == 0) throw new ArgumentException("DataRecord must have a non-zero Key.", nameof(record));
+
+        var now = DateTime.UtcNow;
+        if (record.CreatedOnUtc == default) record.CreatedOnUtc = now;
+        record.UpdatedOnUtc = now;
+        record.ETag = Interlocked.Increment(ref _etagCounter).ToString("x");
+
+        var entityName = schema.EntityName;
+        record.EntityTypeName = entityName;
+
+        var entityFolder = Path.Combine(_rootPath, entityName);
+        Directory.CreateDirectory(entityFolder);
+
+        int schemaVersion = _recordSchemaVersions.GetOrAdd(entityName, _ => 1);
+
+        try
+        {
+            var idMap = GetOrLoadIdMap(entityName);
+            bool isInsert = !idMap.ContainsKey(record.Key);
+
+            DataRecord? oldRecord = null;
+            if (!isInsert)
+            {
+                for (int i = 0; i < schema.FieldCount; i++)
+                {
+                    if (schema.IsIndexed[i]) { oldRecord = LoadRecord(record.Key, schema); break; }
+                }
+            }
+
+            var plan = GetOrBuildRecordPlan(schema);
+            var serializer = GetMetaSerializer();
+            var bytes = serializer.Serialize(record, plan, schemaVersion);
+            var walKey = GetOrAllocateKey(entityName, record.Key);
+
+            var commitTask = _walStore.CommitAsync(new[] { WalOp.Upsert(walKey, bytes) });
+            if (!commitTask.IsCompleted)
+                commitTask.GetAwaiter().GetResult();
+
+            PersistIdMap(entityName);
+
+            if (isInsert)
+                _liveCounts.AddOrUpdate(entityName, 1, (_, c) => c + 1);
+
+            foreach (var ck in _deserCache.Keys)
+            {
+                if (ck.TypeName == entityName && ck.Key == record.Key)
+                {
+                    _deserCache.TryRemove(ck, out _);
+                    _deserCacheAccess.TryRemove(ck, out _);
+                }
+            }
+
+            var keyStr = record.Key.ToString();
+            for (int i = 0; i < schema.FieldCount; i++)
+            {
+                if (!schema.IsIndexed[i]) continue;
+                var newValue = record.GetValue(i)?.ToString() ?? string.Empty;
+                if (oldRecord != null)
+                {
+                    var oldValue = oldRecord.GetValue(i)?.ToString() ?? string.Empty;
+                    if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    _indexStore.AppendEntry(entityName, schema.Names[i], oldValue, keyStr, 'D');
+                }
+                _indexStore.AppendEntry(entityName, schema.Names[i], newValue, keyStr, 'A');
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError($"SaveRecord failed for {entityName} Key={record.Key}.", ex);
+            throw;
+        }
+    }
+
+    /// <summary>Saves a <see cref="DataRecord"/> asynchronously.</summary>
+    public ValueTask SaveRecordAsync(DataRecord record, EntitySchema schema, CancellationToken cancellationToken = default)
+    {
+        SaveRecord(record, schema);
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>
+    /// Loads a <see cref="DataRecord"/> from WAL storage by key.
+    /// Returns null if not found or if the payload is corrupt.
+    /// </summary>
+    public DataRecord? LoadRecord(uint key, EntitySchema schema)
+    {
+        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
+
+        var entityName = schema.EntityName;
+        var idMap = GetOrLoadIdMap(entityName);
+
+        if (!idMap.TryGetValue(key, out var walKey)) return null;
+        if (!_walStore.TryGetHead(walKey, out var ptr)) return null;
+
+        var cacheKey = (entityName, key, ptr);
+        if (_deserCache.TryGetValue(cacheKey, out var cachedObj))
+        {
+            _deserCacheAccess[cacheKey] = Environment.TickCount64;
+            return cachedObj as DataRecord;
+        }
+
+        if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) return null;
+        if (payload.IsEmpty) return null;
+
+        DataRecord? result;
+        try
+        {
+            var plan = GetOrBuildRecordPlan(schema);
+            var serializer = GetMetaSerializer();
+            result = schema.CreateRecord();
+            result.Key = key;
+            serializer.DeserializeInto(payload.Span, plan, result);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError($"Corrupt DataRecord payload for {entityName} Key={key}: {ex.Message}", ex);
+            return null;
+        }
+
+        if (result != null)
+        {
+            if (_deserCache.Count >= DeserCacheMaxSize)
+                EvictDeserCache();
+            _deserCache[cacheKey] = result;
+            _deserCacheAccess[cacheKey] = Environment.TickCount64;
+        }
+        return result;
+    }
+
+    /// <summary>Loads a <see cref="DataRecord"/> asynchronously.</summary>
+    public ValueTask<DataRecord?> LoadRecordAsync(uint key, EntitySchema schema, CancellationToken cancellationToken = default)
+        => new(LoadRecord(key, schema));
+
+    /// <summary>
+    /// Queries <see cref="DataRecord"/> entities with optional filtering, sorting and paging.
+    /// </summary>
+    public IEnumerable<DataRecord> QueryRecords(EntitySchema schema, QueryDefinition? query = null)
+    {
+        var entityName = schema.EntityName;
+        var idMap = GetOrLoadIdMap(entityName);
+        if (idMap.Count == 0) return Array.Empty<DataRecord>();
+
+        var skip = query?.Skip ?? 0;
+        var top = query?.Top ?? DefaultQueryLimit;
+        if (skip < 0) skip = 0;
+        if (top <= 0) return Array.Empty<DataRecord>();
+
+        var results = new List<DataRecord>();
+        foreach (var kvp in idMap)
+        {
+            var record = LoadRecord(kvp.Key, schema);
+            if (record == null) continue;
+            if (query != null && query.Clauses.Count > 0 && !MatchesRecordQuery(record, schema, query))
+                continue;
+            results.Add(record);
+        }
+
+        if (query?.Sorts.Count > 0)
+        {
+            results.Sort((a, b) =>
+            {
+                foreach (var sc in query.Sorts)
+                {
+                    if (!schema.TryGetOrdinal(sc.Field, out var ord)) continue;
+                    int cmp = CompareFieldValues(a.GetValue(ord), b.GetValue(ord));
+                    if (sc.Direction == SortDirection.Desc) cmp = -cmp;
+                    if (cmp != 0) return cmp;
+                }
+                return 0;
+            });
+        }
+
+        IEnumerable<DataRecord> output = results;
+        if (skip > 0) output = output.Skip(skip);
+        if (top < DefaultQueryLimit) output = output.Take(top);
+        return output;
+    }
+
+    /// <summary>Queries <see cref="DataRecord"/> entities asynchronously.</summary>
+    public ValueTask<IEnumerable<DataRecord>> QueryRecordsAsync(EntitySchema schema, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+        => new(QueryRecords(schema, query));
+
+    /// <summary>Counts <see cref="DataRecord"/> entities with optional filtering.</summary>
+    public int CountRecords(EntitySchema schema, QueryDefinition? query = null)
+    {
+        var entityName = schema.EntityName;
+        if (query == null || query.Clauses.Count == 0)
+            return _liveCounts.TryGetValue(entityName, out var c) ? c : GetOrLoadIdMap(entityName).Count;
+        return QueryRecords(schema, query).Count();
+    }
+
+    /// <summary>Counts <see cref="DataRecord"/> entities asynchronously.</summary>
+    public ValueTask<int> CountRecordsAsync(EntitySchema schema, QueryDefinition? query = null, CancellationToken cancellationToken = default)
+        => new(CountRecords(schema, query));
+
+    /// <summary>Deletes a <see cref="DataRecord"/> from WAL storage.</summary>
+    public void DeleteRecord(uint key, EntitySchema schema)
+    {
+        if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
+
+        var entityName = schema.EntityName;
+        var idMap = GetOrLoadIdMap(entityName);
+        if (!idMap.TryGetValue(key, out var walKey)) return;
+
+        DataRecord? oldRecord = null;
+        for (int i = 0; i < schema.FieldCount; i++)
+        {
+            if (schema.IsIndexed[i]) { oldRecord = LoadRecord(key, schema); break; }
+        }
+
+        var commitTask = _walStore.CommitAsync(new[] { WalOp.Delete(walKey) });
+        if (!commitTask.IsCompleted)
+            commitTask.GetAwaiter().GetResult();
+
+        idMap.TryRemove(key, out _);
+        PersistIdMap(entityName);
+        _liveCounts.AddOrUpdate(entityName, 0, (_, c) => Math.Max(0, c - 1));
+
+        foreach (var ck in _deserCache.Keys)
+        {
+            if (ck.TypeName == entityName && ck.Key == key)
+            {
+                _deserCache.TryRemove(ck, out _);
+                _deserCacheAccess.TryRemove(ck, out _);
+            }
+        }
+
+        if (oldRecord != null)
+        {
+            var keyStr = key.ToString();
+            for (int i = 0; i < schema.FieldCount; i++)
+            {
+                if (!schema.IsIndexed[i]) continue;
+                var value = oldRecord.GetValue(i)?.ToString() ?? string.Empty;
+                _indexStore.AppendEntry(entityName, schema.Names[i], value, keyStr, 'D');
+            }
+        }
+    }
+
+    /// <summary>Deletes a <see cref="DataRecord"/> asynchronously.</summary>
+    public ValueTask DeleteRecordAsync(uint key, EntitySchema schema, CancellationToken cancellationToken = default)
+    {
+        DeleteRecord(key, schema);
+        return ValueTask.CompletedTask;
+    }
+
+    private static bool MatchesRecordQuery(DataRecord record, EntitySchema schema, QueryDefinition query)
+    {
+        foreach (var clause in query.Clauses)
+        {
+            if (!schema.TryGetOrdinal(clause.Field, out var ord)) continue;
+            var valueStr = record.GetValue(ord)?.ToString() ?? string.Empty;
+            var clauseVal = clause.Value?.ToString() ?? string.Empty;
+
+            bool match = clause.Operator switch
+            {
+                QueryOperator.Equals => string.Equals(valueStr, clauseVal, StringComparison.OrdinalIgnoreCase),
+                QueryOperator.NotEquals => !string.Equals(valueStr, clauseVal, StringComparison.OrdinalIgnoreCase),
+                QueryOperator.Contains => valueStr.Contains(clauseVal, StringComparison.OrdinalIgnoreCase),
+                QueryOperator.StartsWith => valueStr.StartsWith(clauseVal, StringComparison.OrdinalIgnoreCase),
+                QueryOperator.EndsWith => valueStr.EndsWith(clauseVal, StringComparison.OrdinalIgnoreCase),
+                QueryOperator.GreaterThan => string.Compare(valueStr, clauseVal, StringComparison.OrdinalIgnoreCase) > 0,
+                QueryOperator.LessThan => string.Compare(valueStr, clauseVal, StringComparison.OrdinalIgnoreCase) < 0,
+                QueryOperator.GreaterThanOrEqual => string.Compare(valueStr, clauseVal, StringComparison.OrdinalIgnoreCase) >= 0,
+                QueryOperator.LessThanOrEqual => string.Compare(valueStr, clauseVal, StringComparison.OrdinalIgnoreCase) <= 0,
+                _ => true,
+            };
+            if (!match) return false;
+        }
+        return true;
+    }
+
+    private static int CompareFieldValues(object? a, object? b)
+    {
+        if (a is null && b is null) return 0;
+        if (a is null) return -1;
+        if (b is null) return 1;
+        if (a is IComparable ca) return ca.CompareTo(b);
+        return string.Compare(a.ToString(), b.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
     // ── Sequential IDs ────────────────────────────────────────────────────────
 
     public uint NextSequentialKey(string entityName)
