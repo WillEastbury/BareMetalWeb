@@ -43,6 +43,7 @@ graph TD
         DynObject["DynamicDataObject"]
         ExprEngine["ExpressionEngine<br/>(CalculatedFieldService)"]
         ReportExec["ReportExecutor"]
+        PlanHistory["QueryPlanHistory<br/>(in-memory circular buffer)"]
     end
 
     subgraph Rendering["BareMetalWeb.Rendering"]

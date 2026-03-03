@@ -3,7 +3,7 @@ using BareMetalWeb.Data;
 
 namespace BareMetalWeb.Data.DataObjects;
 
-[DataEntity("Orders", ShowOnNav = true, NavGroup = "Sales", NavOrder = 40)]
+[DataEntity("Orders", ShowOnNav = true, NavGroup = "Sales", NavOrder = 40, DefaultSortField = "OrderDate", DefaultSortDirection = SortDirection.Desc)]
 public class Order : RenderableDataObject
 {
     [DataField(Label = "Order Number", Order = 1, Required = true)]
@@ -25,6 +25,7 @@ public class Order : RenderableDataObject
     public string? QuoteId { get; set; }
 
     [DataField(Label = "Order Date", Order = 4, Required = true)]
+    [DataIndex(IndexKind.BTree)]
     public DateOnly OrderDate { get; set; } = DateOnly.FromDateTime(DateTime.UtcNow);
 
     [DataField(Label = "Status", Order = 5, Required = true)]

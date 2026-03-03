@@ -3508,7 +3508,7 @@
     // Tools dropdown (sample data, wipe data)
     const toolsLi = el('li', { className: 'nav-item dropdown' });
     const toolsToggle = el('a', {
-      className: 'nav-link dropdown-toggle' + (['_sample-data', '_wipe-data'].includes(activeSlug) ? ' active' : ''),
+      className: 'nav-link dropdown-toggle' + (['_sample-data', '_wipe-data', '_query-plans'].includes(activeSlug) ? ' active' : ''),
       href: '#', role: 'button', title: 'Admin Tools'
     });
     toolsToggle.setAttribute('data-bs-toggle', 'dropdown');
@@ -3518,7 +3518,8 @@
     const toolsMenu = el('ul', { className: 'dropdown-menu dropdown-menu-end' });
     [
       { slug: '_sample-data', label: '\uD83E\uDDEA Generate Sample Data' },
-      { slug: '_wipe-data',   label: '\uD83D\uDDD1\uFE0F Wipe All Data' }
+      { slug: '_wipe-data',   label: '\uD83D\uDDD1\uFE0F Wipe All Data' },
+      { slug: '_query-plans', label: '\uD83D\uDCCA Query Plan History' }
     ].forEach(function (t) {
       const mli = el('li');
       const ma  = el('a', { className: 'dropdown-item' + (activeSlug === t.slug ? ' active' : ''), href: BASE + '/' + t.slug, textContent: t.label });
@@ -3749,6 +3750,114 @@
     }, 1000);
   }
 
+  function renderQueryPlansPage(container) {
+    var LATENCY_THRESHOLD_GREEN_MS = 10;
+    var LATENCY_THRESHOLD_AMBER_MS = 100;
+
+    var hdr = el('div', { className: 'd-flex align-items-center gap-3 mb-3 flex-wrap' });
+    hdr.appendChild(el('h2', { className: 'mb-0', textContent: '\uD83D\uDCCA Query Plan History' }));
+    var refreshBtn = el('button', { className: 'btn btn-outline-secondary btn-sm', textContent: '\u21BB Refresh' });
+    hdr.appendChild(refreshBtn);
+    container.appendChild(hdr);
+    container.appendChild(el('p', { className: 'text-muted', textContent: 'Shows the last 100 query plan executions. Each entry includes the optimised execution steps, cardinality estimates, index usage, and missing-index recommendations.' }));
+
+    var listWrap = el('div');
+    container.appendChild(listWrap);
+
+    function stepBadge(stepType) {
+      var colours = { LoadEntity: 'primary', HashJoin: 'info', PostJoinFilter: 'warning', ProjectAndSort: 'secondary' };
+      var colour = colours[stepType] || 'dark';
+      return '<span class="badge bg-' + colour + '">' + escHtml(stepType) + '</span>';
+    }
+
+    function renderPlan(entry) {
+      var wrap = el('div', { className: 'card mb-3' });
+      var body = el('div', { className: 'card-body' });
+
+      // Header row
+      var hdrRow = el('div', { className: 'd-flex flex-wrap gap-3 align-items-baseline mb-2' });
+      hdrRow.appendChild(el('strong', { textContent: entry.rootEntity || '—' }));
+      var badges = el('span');
+      badges.innerHTML =
+        '<span class="badge bg-secondary">' + (entry.joinCount || 0) + ' join(s)</span> ' +
+        '<span class="badge bg-secondary">' + (entry.resultRowCount || 0) + ' rows</span> ' +
+        '<span class="badge bg-' + (entry.elapsedMs < LATENCY_THRESHOLD_GREEN_MS ? 'success' : entry.elapsedMs < LATENCY_THRESHOLD_AMBER_MS ? 'warning' : 'danger') + '">' +
+        escHtml(String(entry.elapsedMs)) + ' ms</span>' +
+        (entry.joinOrderOptimised ? ' <span class="badge bg-info text-dark">join-order optimised</span>' : '') +
+        (entry.canStreamAggregate ? ' <span class="badge bg-info text-dark">stream aggregate</span>' : '');
+      hdrRow.appendChild(badges);
+      var ts = el('small', { className: 'text-muted ms-auto', textContent: new Date(entry.executedAt).toLocaleString() });
+      hdrRow.appendChild(ts);
+      body.appendChild(hdrRow);
+
+      // Steps graph
+      var stepsWrap = el('div', { className: 'mb-2' });
+      (entry.steps || []).forEach(function (s, i) {
+        var stepEl = el('div', { className: 'border rounded p-2 mb-1 bg-light' });
+        var stepHdr = el('div', { className: 'd-flex flex-wrap gap-2 align-items-center' });
+        stepHdr.innerHTML =
+          '<span class="fw-semibold">' + (i + 1) + '.</span> ' + stepBadge(s.stepType) +
+          ' <span class="text-muted small">' + escHtml(s.entitySlug) + '</span>' +
+          (s.estimatedRows > 0 ? ' <span class="text-muted small">~' + escHtml(String(s.estimatedRows)) + ' rows</span>' : '');
+        if (s.indexedFields && s.indexedFields.length > 0) {
+          var idxSpan = el('span', { className: 'text-muted small' });
+          idxSpan.innerHTML = '\uD83D\uDD0D indexed: ' + s.indexedFields.map(function (f) { return '<code>' + escHtml(f) + '</code>'; }).join(', ');
+          stepHdr.appendChild(idxSpan);
+        }
+        stepEl.appendChild(stepHdr);
+        if (s.join) {
+          var joinEl = el('div', { className: 'text-muted small mt-1' });
+          joinEl.innerHTML =
+            escHtml(s.join.joinType) + ' JOIN ' +
+            '<code>' + escHtml(s.join.fromEntity) + '.' + escHtml(s.join.fromField) + '</code> → ' +
+            '<code>' + escHtml(s.join.toField) + '</code>' +
+            (s.join.buildSideIndexed ? ' <span class="badge bg-success text-white">indexed build side</span>' : ' <span class="badge bg-warning text-dark">unindexed build</span>');
+          stepEl.appendChild(joinEl);
+        }
+        stepsWrap.appendChild(stepEl);
+      });
+      body.appendChild(stepsWrap);
+
+      // Missing index recommendations
+      var recs = entry.missingIndexRecommendations || [];
+      if (recs.length > 0) {
+        var recHdr = el('div', { className: 'd-flex align-items-center gap-2 mb-1' });
+        recHdr.innerHTML = '<span class="fw-semibold text-warning">\u26A0\uFE0F Missing Index Recommendations</span>';
+        body.appendChild(recHdr);
+        var recUl = el('ul', { className: 'list-group list-group-flush mb-1' });
+        recs.forEach(function (r) {
+          var li = el('li', { className: 'list-group-item list-group-item-warning py-1' });
+          li.innerHTML =
+            '<code>' + escHtml(r.entitySlug) + '.' + escHtml(r.fieldName) + '</code> — ' +
+            escHtml(r.reason);
+          recUl.appendChild(li);
+        });
+        body.appendChild(recUl);
+      }
+
+      wrap.appendChild(body);
+      return wrap;
+    }
+
+    function loadPlans() {
+      apiFetch(API + '/admin/query-plans').then(function (plans) {
+        listWrap.innerHTML = '';
+        if (!Array.isArray(plans) || plans.length === 0) {
+          listWrap.innerHTML = '<p class="text-muted">No query plans recorded yet. Run a report query to see plan history here.</p>';
+          return;
+        }
+        plans.forEach(function (entry) {
+          listWrap.appendChild(renderPlan(entry));
+        });
+      }).catch(function (err) {
+        listWrap.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';
+      });
+    }
+
+    refreshBtn.addEventListener('click', loadPlans);
+    loadPlans();
+  }
+
   async function route() {
     const p      = location.pathname.replace(/^\/UI\/?/, '').replace(/^data\/?/, '').split('/').filter(Boolean);
     const slug   = p[0], rawId = p[1], action = p[2];
@@ -3806,6 +3915,15 @@
         const main = el('div', { className: 'container mt-3' });
         R.appendChild(main);
         renderWipeDataPage(main);
+        wire(); return;
+      }
+
+      // ── Query Plan History page ───────────────────────────────────────────
+      if (slug === '_query-plans') {
+        R.replaceChildren(navbar('_query-plans'));
+        const main = el('div', { className: 'container mt-3' });
+        R.appendChild(main);
+        renderQueryPlansPage(main);
         wire(); return;
       }
 

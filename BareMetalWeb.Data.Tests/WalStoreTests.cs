@@ -760,4 +760,73 @@ public sealed class WalStoreTests : IDisposable
         Assert.True(kb.CompareTo(ka) > 0);
         Assert.Equal(0, ka.CompareTo(ka));
     }
+
+    // ── Brotli compression ───────────────────────────────────────────────────
+
+    [Fact]
+    public void WalPayloadCodec_SmallPayload_NotCompressed()
+    {
+        // Payloads below threshold should be stored as-is (CodecNone)
+        var input = new byte[] { 1, 2, 3 };
+        var result = WalPayloadCodec.TryCompress(input, out ushort codec, out uint uncompressedLen);
+        Assert.Equal(WalConstants.CodecNone, codec);
+        Assert.Equal((uint)input.Length, uncompressedLen);
+        Assert.Equal(input, result.ToArray());
+    }
+
+    [Fact]
+    public void WalPayloadCodec_LargeCompressiblePayload_UsesCodecBrotli()
+    {
+        // A highly repetitive payload compresses well with Brotli
+        var input = new byte[512];
+        for (int i = 0; i < input.Length; i++) input[i] = (byte)(i % 4);
+
+        var compressed = WalPayloadCodec.TryCompress(input, out ushort codec, out uint uncompressedLen);
+
+        Assert.Equal(WalConstants.CodecBrotli, codec);
+        Assert.Equal((uint)input.Length, uncompressedLen);
+        Assert.True(compressed.Length < input.Length, "Compressed size should be smaller than original");
+    }
+
+    [Fact]
+    public void WalPayloadCodec_RoundTrip_DecompressesCorrectly()
+    {
+        var input = new byte[512];
+        for (int i = 0; i < input.Length; i++) input[i] = (byte)(i % 8);
+
+        var compressed = WalPayloadCodec.TryCompress(input, out ushort codec, out uint uncompressedLen);
+        Assert.Equal(WalConstants.CodecBrotli, codec);
+
+        var restored = WalPayloadCodec.Decompress(compressed, codec, uncompressedLen);
+        Assert.Equal(input, restored.ToArray());
+    }
+
+    [Fact]
+    public void WalPayloadCodec_Decompress_CodecNone_ReturnsUnchanged()
+    {
+        var input = new byte[] { 10, 20, 30 };
+        var result = WalPayloadCodec.Decompress(input, WalConstants.CodecNone, (uint)input.Length);
+        Assert.Equal(input, result.ToArray());
+    }
+
+    [Fact]
+    public async Task CommitAsync_CompressiblePayload_DecompressesCorrectlyOnRead()
+    {
+        // Build a large repetitive payload that Brotli will compress
+        var original = new byte[1024];
+        for (int i = 0; i < original.Length; i++) original[i] = (byte)(i % 16);
+
+        ulong key = WalConstants.PackKey(50, 1);
+        ulong ptr;
+        {
+            using var store = new WalStore(_dir);
+            ptr = await store.CommitAsync(new[] { WalOp.Upsert(key, original) });
+        }
+
+        using var store2 = new WalStore(_dir);
+        Assert.True(store2.TryGetHead(key, out ulong recovered));
+        Assert.Equal(ptr, recovered);
+        Assert.True(store2.TryReadOpPayload(recovered, key, out var got));
+        Assert.Equal(original, got.ToArray());
+    }
 }

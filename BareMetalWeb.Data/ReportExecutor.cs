@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using BareMetalWeb.Core;
@@ -75,6 +76,7 @@ public sealed class ReportExecutor
         // Plan query — produce optimised execution plan
         var planner = new QueryPlanner();
         var plan = planner.Plan(query);
+        var sw = Stopwatch.StartNew();
 
         // Load root entity rows with pushed-down filters
         plan.PushedFilters.TryGetValue(rootSlug, out var rootPushedFilter);
@@ -245,6 +247,17 @@ public sealed class ReportExecutor
         var limit = query.QueryLimit ?? DefaultRowLimit;
         bool truncated = projected.Count > limit;
         var finalRows = truncated ? projected.Take(limit).ToList() : projected;
+
+        sw.Stop();
+        QueryPlanHistory.Record(new QueryPlanEntry
+        {
+            ExecutedAt    = DateTimeOffset.UtcNow,
+            RootEntity    = rootSlug,
+            JoinCount     = query.Joins.Count,
+            ResultRowCount = finalRows.Count,
+            ElapsedMs     = sw.Elapsed.TotalMilliseconds,
+            Plan          = plan
+        });
 
         return new ReportResult
         {

@@ -345,6 +345,13 @@ public sealed class WalStore : IDisposable
 
             if (key == targetKey)
             {
+                ushort codec          = BinaryPrimitives.ReadUInt16LittleEndian(opHdr[26..]);
+                uint   uncompressedLen = BinaryPrimitives.ReadUInt32LittleEndian(opHdr[28..]);
+
+                if (codec != WalConstants.CodecNone && codec != WalConstants.CodecBrotli)
+                    throw new System.IO.InvalidDataException(
+                        $"Unknown WAL op codec 0x{codec:X4} for key 0x{key:X16}.");
+
                 if (compressedLen == 0) { payload = ReadOnlyMemory<byte>.Empty; return true; }
                 var buf = ArrayPool<byte>.Shared.Rent((int)compressedLen);
                 try
@@ -354,8 +361,9 @@ public sealed class WalStore : IDisposable
                         ArrayPool<byte>.Shared.Return(buf);
                         return false;
                     }
-                    // Copy to owned array since caller holds the memory beyond this scope
-                    payload = buf.AsMemory(0, (int)compressedLen).ToArray();
+                    // Copy to owned array, then decompress if needed
+                    var raw = buf.AsMemory(0, (int)compressedLen).ToArray();
+                    payload = WalPayloadCodec.Decompress(raw, codec, uncompressedLen);
                 }
                 finally
                 {
