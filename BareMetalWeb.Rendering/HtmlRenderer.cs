@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 using System.IO.Pipelines;
+using System.Net;
 using System.Text;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Core;
@@ -603,6 +604,13 @@ public class HtmlRenderer : IHtmlRenderer
             page.PageContext.FormDefinition,
             page.PageContext.TemplateLoops
         );
+
+        if (ShouldShowDiagnosticBanner(context, app))
+        {
+            var bannerHtml = BuildDiagnosticBannerHtml(context, app, output.Length);
+            output = InjectBeforeBodyEnd(output, Utf8.GetBytes(bannerHtml));
+        }
+
         context.Response.StatusCode = page.PageMetaData.StatusCode;
         context.Response.ContentType = page.PageMetaData.Template.ContentTypeHeader;
 
@@ -612,6 +620,75 @@ public class HtmlRenderer : IHtmlRenderer
         context.Response.ContentLength = responseBytes.Length;
         await context.Response.BodyWriter.WriteAsync(responseBytes);
 
+    }
+
+    // ── Diagnostic banner helpers ──────────────────────────────────────────────
+
+    public static bool ShouldShowDiagnosticBanner(HttpContext context, IBareWebHost app)
+    {
+        if (!app.ShowHostDiagnostics)
+            return false;
+        var qsVal = context.Request.Query["showhst"].FirstOrDefault() ?? string.Empty;
+        return string.Equals(qsVal, "true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string BuildDiagnosticBannerHtml(HttpContext context, IBareWebHost app, int payloadBytes)
+    {
+        var initialHost = context.Request.Headers.TryGetValue("X-Forwarded-Host", out var fwdHost) && !string.IsNullOrEmpty(fwdHost)
+            ? fwdHost.ToString()
+            : context.Request.Host.Value;
+        var serverHost = System.Net.Dns.GetHostName();
+        var rttMs = app.Metrics.GetSnapshot().RecentAverageResponseTime.TotalMilliseconds;
+        return $"<div id=\"bm-diag-banner\" style=\"position:fixed;bottom:40px;right:0;background:rgba(0,0,0,0.85);color:#0f0;font-family:monospace;font-size:11px;padding:4px 8px;z-index:99999;border-radius:4px 0 0 4px\">" +
+               $"&#9670; init:{WebUtility.HtmlEncode(initialHost)} | svr:{WebUtility.HtmlEncode(serverHost)} | rtt:{rttMs:F2}ms | payload:{payloadBytes:N0}B" +
+               "</div>";
+    }
+
+    /// <summary>Inserts <paramref name="insertBytes"/> immediately before the final <c>&lt;/body&gt;</c> tag in <paramref name="source"/>.</summary>
+    public static byte[] InjectBeforeBodyEnd(byte[] source, byte[] insertBytes)
+    {
+        // </body> in UTF-8 is the 7-byte ASCII sequence 3C 2F 62 6F 64 79 3E
+        const int bodyEndTagLen = 7; // </body>
+        if (source.Length < bodyEndTagLen)
+        {
+            // Source too short to contain </body> — append at end
+            var tiny = new byte[source.Length + insertBytes.Length];
+            Array.Copy(source, 0, tiny, 0, source.Length);
+            Array.Copy(insertBytes, 0, tiny, source.Length, insertBytes.Length);
+            return tiny;
+        }
+
+        // Search backwards from the last possible position for </body>
+        int insertPos = source.Length - bodyEndTagLen;
+        while (insertPos >= 0)
+        {
+            if (source[insertPos]     == 0x3C && // '<'
+                source[insertPos + 1] == 0x2F && // '/'
+                source[insertPos + 2] == 0x62 && // 'b'
+                source[insertPos + 3] == 0x6F && // 'o'
+                source[insertPos + 4] == 0x64 && // 'd'
+                source[insertPos + 5] == 0x79 && // 'y'
+                source[insertPos + 6] == 0x3E)   // '>'
+            {
+                break;
+            }
+            insertPos--;
+        }
+
+        if (insertPos < 0)
+        {
+            // </body> not found — append the banner at the end as a fallback
+            var fallback = new byte[source.Length + insertBytes.Length];
+            Array.Copy(source, 0, fallback, 0, source.Length);
+            Array.Copy(insertBytes, 0, fallback, source.Length, insertBytes.Length);
+            return fallback;
+        }
+
+        var result = new byte[source.Length + insertBytes.Length];
+        Array.Copy(source, 0, result, 0, insertPos);
+        Array.Copy(insertBytes, 0, result, insertPos, insertBytes.Length);
+        Array.Copy(source, insertPos, result, insertPos + insertBytes.Length, source.Length - insertPos);
+        return result;
     }
 
     // ── Theme helpers ──────────────────────────────────────────────────────────

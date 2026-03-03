@@ -71,7 +71,7 @@ internal sealed class StubBareWebHost : IBareWebHost
 
     public WebApplication app { get; set; } = null!;
     public IBufferedLogger BufferedLogger => null!;
-    public IMetricsTracker Metrics => null!;
+    public IMetricsTracker Metrics { get; set; } = null!;
     public IClientRequestTracker ClientRequests => null!;
     public IHtmlRenderer HtmlRenderer => null!;
     public Dictionary<string, RouteHandlerData> routes { get; set; } = new();
@@ -94,6 +94,7 @@ internal sealed class StubBareWebHost : IBareWebHost
     public bool HttpsEndpointAvailable { get; set; }
     public string? HttpsRedirectHost { get; set; }
     public int? HttpsRedirectPort { get; set; }
+    public bool ShowHostDiagnostics { get; set; } = false;
 
     public ValueTask BuildAppInfoMenuOptionsAsync(HttpContext? context = null, CancellationToken cancellationToken = default)
         => ValueTask.CompletedTask;
@@ -493,4 +494,118 @@ public class HtmlRendererCompressionTests
         var html = Encoding.UTF8.GetString(result.ToArray());
         Assert.Contains("Test content for gzip", html);
     }
+}
+
+public class DiagnosticBannerTests
+{
+    private static StubBareWebHost CreateHost(bool showHostDiagnostics)
+    {
+        var host = new StubBareWebHost { ShowHostDiagnostics = showHostDiagnostics };
+        return host;
+    }
+
+    private static HttpContext CreateContext(string? showhst = null, string? xForwardedHost = null)
+    {
+        var ctx = new DefaultHttpContext();
+        if (showhst != null)
+            ctx.Request.QueryString = new QueryString($"?showhst={showhst}");
+        if (xForwardedHost != null)
+            ctx.Request.Headers["X-Forwarded-Host"] = xForwardedHost;
+        ctx.Request.Host = new HostString("localhost");
+        return ctx;
+    }
+
+    [Fact]
+    public void ShouldShowDiagnosticBanner_AppSettingFalse_ReturnsFalse()
+    {
+        var host = CreateHost(false);
+        var context = CreateContext("true");
+        Assert.False(HtmlRenderer.ShouldShowDiagnosticBanner(context, host));
+    }
+
+    [Fact]
+    public void ShouldShowDiagnosticBanner_QsParamMissing_ReturnsFalse()
+    {
+        var host = CreateHost(true);
+        var context = CreateContext(showhst: null);
+        Assert.False(HtmlRenderer.ShouldShowDiagnosticBanner(context, host));
+    }
+
+    [Fact]
+    public void ShouldShowDiagnosticBanner_QsParamFalse_ReturnsFalse()
+    {
+        var host = CreateHost(true);
+        var context = CreateContext("false");
+        Assert.False(HtmlRenderer.ShouldShowDiagnosticBanner(context, host));
+    }
+
+    [Fact]
+    public void ShouldShowDiagnosticBanner_BothTrue_ReturnsTrue()
+    {
+        var host = CreateHost(true);
+        var context = CreateContext("true");
+        Assert.True(HtmlRenderer.ShouldShowDiagnosticBanner(context, host));
+    }
+
+    [Fact]
+    public void ShouldShowDiagnosticBanner_QsParamCaseInsensitive_ReturnsTrue()
+    {
+        var host = CreateHost(true);
+        var context = CreateContext("True");
+        Assert.True(HtmlRenderer.ShouldShowDiagnosticBanner(context, host));
+    }
+
+    [Fact]
+    public void InjectBeforeBodyEnd_InjectsBeforeClosingBodyTag()
+    {
+        var source = Encoding.UTF8.GetBytes("<html><body><p>content</p></body></html>");
+        var insert = Encoding.UTF8.GetBytes("<div>banner</div>");
+        var result = Encoding.UTF8.GetString(HtmlRenderer.InjectBeforeBodyEnd(source, insert));
+        Assert.Equal("<html><body><p>content</p><div>banner</div></body></html>", result);
+    }
+
+    [Fact]
+    public void InjectBeforeBodyEnd_NoBodyTag_AppendsAtEnd()
+    {
+        var source = Encoding.UTF8.GetBytes("<html><p>no body tag</p></html>");
+        var insert = Encoding.UTF8.GetBytes("<div>banner</div>");
+        var result = Encoding.UTF8.GetString(HtmlRenderer.InjectBeforeBodyEnd(source, insert));
+        Assert.Equal("<html><p>no body tag</p></html><div>banner</div>", result);
+    }
+
+    [Fact]
+    public void BuildDiagnosticBannerHtml_UsesXForwardedHostWhenPresent()
+    {
+        var host = CreateHost(true);
+        host.Metrics = new StubMetricsTracker();
+        var context = CreateContext("true", "proxy.example.com");
+        var html = HtmlRenderer.BuildDiagnosticBannerHtml(context, host, 1024);
+        Assert.Contains("proxy.example.com", html);
+        Assert.Contains("bm-diag-banner", html);
+    }
+
+    [Fact]
+    public void BuildDiagnosticBannerHtml_FallsBackToRequestHostWhenNoForwardedHeader()
+    {
+        var host = CreateHost(true);
+        host.Metrics = new StubMetricsTracker();
+        var context = CreateContext("true");
+        var html = HtmlRenderer.BuildDiagnosticBannerHtml(context, host, 512);
+        Assert.Contains("localhost", html);
+        Assert.Contains("512", html);
+    }
+}
+
+internal sealed class StubMetricsTracker : IMetricsTracker
+{
+    public void RecordRequest(int statusCode, TimeSpan elapsed) { }
+    public void RecordThrottled(TimeSpan elapsed) { }
+    public void GetMetricTable(out string[] tableColumns, out string[][] tableRows)
+    {
+        tableColumns = Array.Empty<string>();
+        tableRows = Array.Empty<string[]>();
+    }
+    public MetricsSnapshot GetSnapshot() => new MetricsSnapshot(
+        0, 0, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.FromMilliseconds(1.5),
+        TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, 0, 0, 0, 0, 0, 0, 0, 0, TimeSpan.Zero);
 }

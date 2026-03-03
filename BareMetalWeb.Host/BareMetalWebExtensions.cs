@@ -165,6 +165,7 @@ public static class BareMetalWebExtensions
         appInfo.CompanyDescription = SettingsService.GetValue(WellKnownSettings.AppCompany,        appInfo.CompanyDescription);
         appInfo.CopyrightYear      = SettingsService.GetValue(WellKnownSettings.AppCopyright,      appInfo.CopyrightYear);
         appInfo.PrivacyPolicyUrl   = SettingsService.GetValue(WellKnownSettings.AppPrivacyPolicyUrl, "");
+        appInfo.ShowHostDiagnostics = app.Configuration.GetValue("Diagnostics:ShowHostInfo", false);
 
         // Wire up the tenant registry so RequestHandler can resolve tenants per-request.
         if (multitenancyOptions.Enabled)

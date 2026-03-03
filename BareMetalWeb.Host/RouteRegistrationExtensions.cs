@@ -1371,7 +1371,7 @@ public static class RouteRegistrationExtensions
                 }
 
                 sb.Append("</div></div></div>");
-                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host);
+                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context);
                 context.Response.ContentType = "text/html; charset=utf-8";
                 await context.Response.WriteAsync(sb.ToString());
             }));
@@ -1437,7 +1437,8 @@ public static class RouteRegistrationExtensions
                     id,
                     host,
                     context.GetCspNonce(),
-                    CsrfProtection.EnsureToken(context));
+                    CsrfProtection.EnsureToken(context),
+                    context);
                 await pipeWriter.CompleteAsync();
             }));
 
@@ -1655,6 +1656,8 @@ public static class RouteRegistrationExtensions
         if (initialDataScript != null)
             sb.Append(initialDataScript);
         sb.Append("<script src=\"/static/js/vnext-bundle.js\"></script>");
+        if (BareMetalWeb.Rendering.HtmlRenderer.ShouldShowDiagnosticBanner(context, host))
+            sb.Append(BareMetalWeb.Rendering.HtmlRenderer.BuildDiagnosticBannerHtml(context, host, sb.Length));
         sb.Append("</body></html>");
 
         context.Response.ContentType = "text/html; charset=utf-8";

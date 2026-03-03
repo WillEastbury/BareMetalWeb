@@ -73,6 +73,7 @@ public class BareMetalWebServer : IBareWebHost
     public bool HttpsEndpointAvailable { get; set; } = false;
     public string? HttpsRedirectHost { get; set; }
     public int? HttpsRedirectPort { get; set; }
+    public bool ShowHostDiagnostics { get; set; } = false;
 
     /// <summary>
     /// When multitenancy is enabled, this registry resolves the correct per-tenant
