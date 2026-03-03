@@ -6,19 +6,26 @@ namespace BareMetalWeb.Data;
 
 /// <summary>
 /// A <see cref="PropertyInfo"/> implementation for virtual entity fields.
-/// Reads field values from and writes field values to a <see cref="DynamicDataObject"/>
-/// string-keyed dictionary. All values are stored as strings to avoid serialization
-/// complexity; the CLR <see cref="PropertyType"/> carries type metadata for form rendering.
+/// Supports both legacy <see cref="DynamicDataObject"/> (string dictionary) and
+/// <see cref="DataRecord"/> (ordinal-indexed <c>object?[]</c>) storage.
+/// When an ordinal is provided, <see cref="DataRecord"/> access is ~1–2 ns via array index.
 /// </summary>
 internal sealed class DynamicPropertyInfo : PropertyInfo
 {
     private readonly string _fieldName;
     private readonly Type _propertyType;
+    private readonly int _ordinal;
 
+    /// <summary>Creates a property backed by dictionary lookup (legacy path).</summary>
     public DynamicPropertyInfo(string fieldName, Type propertyType)
+        : this(fieldName, propertyType, -1) { }
+
+    /// <summary>Creates a property backed by ordinal index on <see cref="DataRecord"/>.</summary>
+    public DynamicPropertyInfo(string fieldName, Type propertyType, int ordinal)
     {
         _fieldName = fieldName ?? throw new ArgumentNullException(nameof(fieldName));
         _propertyType = propertyType ?? throw new ArgumentNullException(nameof(propertyType));
+        _ordinal = ordinal;
     }
 
     // ── MemberInfo ──────────────────────────────────────────────────────────
@@ -41,22 +48,32 @@ internal sealed class DynamicPropertyInfo : PropertyInfo
     public override MethodInfo? GetSetMethod(bool nonPublic) => null;
 
     /// <summary>
-    /// Returns the field's string value from the <see cref="DynamicDataObject"/> dictionary,
-    /// or <c>null</c> if the object is not a <see cref="DynamicDataObject"/>.
+    /// Returns the field value. For <see cref="DataRecord"/>, uses ordinal array access (~1–2 ns).
+    /// For <see cref="DynamicDataObject"/>, falls back to dictionary lookup.
     /// </summary>
     public override object? GetValue(object? obj, BindingFlags invokeAttr, Binder? binder, object?[]? index, CultureInfo? culture)
     {
+        if (obj is DataRecord dr)
+        {
+            if (_ordinal >= 0) return dr.GetValue(_ordinal);
+            if (dr.Schema != null) return dr.GetField(dr.Schema, _fieldName);
+        }
         if (obj is DynamicDataObject dynamicObj)
             return dynamicObj.GetField(_fieldName);
         return null;
     }
 
     /// <summary>
-    /// Stores the value in the <see cref="DynamicDataObject"/> dictionary as a string.
-    /// Handles common CLR types (bool, DateTime, DateOnly, TimeOnly, enums, numerics).
+    /// Stores a value. For <see cref="DataRecord"/>, stores the native CLR value by ordinal.
+    /// For <see cref="DynamicDataObject"/>, converts to string and stores in dictionary.
     /// </summary>
     public override void SetValue(object? obj, object? value, BindingFlags invokeAttr, Binder? binder, object?[]? index, CultureInfo? culture)
     {
+        if (obj is DataRecord dr)
+        {
+            if (_ordinal >= 0) { dr.SetValue(_ordinal, value); return; }
+            if (dr.Schema != null) { dr.SetField(dr.Schema, _fieldName, value); return; }
+        }
         if (obj is not DynamicDataObject dynamicObj)
             return;
 

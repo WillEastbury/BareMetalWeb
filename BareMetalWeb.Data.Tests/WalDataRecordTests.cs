@@ -3,6 +3,7 @@ using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
 
+[Collection("WalDataRecord")]
 public class WalDataRecordTests : IDisposable
 {
     private readonly string _tempDir;

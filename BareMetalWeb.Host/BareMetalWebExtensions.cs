@@ -97,6 +97,7 @@ public static class BareMetalWebExtensions
         await RuntimeEntityRegistry.BuildAsync(
             dataStore,
             new RuntimeEntityCompiler(),
+            systemProvider as WalDataProvider,
             dataRoot,
             msg => logger.LogInfo($"[RuntimeEntityRegistry] {msg}")).ConfigureAwait(false);
 

@@ -784,7 +784,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         return _recordPlans.GetOrAdd(schema.EntityName, _ =>
         {
             var descriptors = schema.BuildFieldPlanDescriptors();
-            return MetadataWireSerializer.BuildPlan(typeof(DataRecord), descriptors);
+            return MetadataWireSerializer.BuildPlanUncached(descriptors);
         });
     }
 

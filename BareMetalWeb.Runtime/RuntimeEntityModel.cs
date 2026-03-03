@@ -73,6 +73,128 @@ public sealed class RuntimeEntityModel
     public IReadOnlyList<RuntimeActionModel> Actions { get; }
 
     /// <summary>
+    /// Builds a <see cref="DataEntityMetadata"/> that uses <see cref="DataRecord"/> + WAL storage.
+    /// Replaces <see cref="DynamicDataObject"/> + JSON; all field access is ordinal-based (~1–2 ns).
+    /// </summary>
+    public DataEntityMetadata ToEntityMetadata(WalDataProvider walProvider, EntitySchema schema)
+    {
+        var entityTypeName = Name;
+        var fields = new List<DataFieldMetadata>();
+
+        foreach (var f in Fields)
+        {
+            var clrType = RuntimeEntityCompiler.MapClrType(f.FieldType, f.IsNullable, f.EnumValues);
+            var prop = new DynamicPropertyInfo(f.Name, clrType, f.Ordinal);
+
+            DataLookupConfig? lookup = null;
+            if (f.FieldType == Rendering.Models.FormFieldType.LookupList
+                && !string.IsNullOrWhiteSpace(f.LookupEntitySlug)
+                && DataScaffold.TryGetEntity(f.LookupEntitySlug!, out var targetMeta))
+            {
+                lookup = new DataLookupConfig(
+                    TargetType: targetMeta.Type,
+                    ValueField: f.LookupValueField ?? "Id",
+                    DisplayField: f.LookupDisplayField ?? (f.LookupValueField ?? "Id"),
+                    QueryField: null,
+                    QueryOperator: QueryOperator.Contains,
+                    QueryValue: null,
+                    SortField: null,
+                    SortDirection: SortDirection.Asc,
+                    CacheTtl: TimeSpan.FromMinutes(5)
+                );
+            }
+
+            ValidationConfig? validation = null;
+            if (f.MinLength.HasValue || f.MaxLength.HasValue || f.RangeMin.HasValue ||
+                f.RangeMax.HasValue || !string.IsNullOrWhiteSpace(f.Pattern))
+            {
+                var validators = new List<ValidationAttribute>();
+                if (f.MinLength.HasValue) validators.Add(new MinLengthAttribute(f.MinLength.Value));
+                if (f.MaxLength.HasValue) validators.Add(new MaxLengthAttribute(f.MaxLength.Value));
+                if (f.RangeMin.HasValue && f.RangeMax.HasValue)
+                    validators.Add(new RangeAttribute(f.RangeMin.Value, f.RangeMax.Value));
+                if (!string.IsNullOrWhiteSpace(f.Pattern))
+                    validators.Add(new RegexPatternAttribute(f.Pattern!));
+
+                validation = new ValidationConfig(f.MinLength, f.MaxLength, f.RangeMin, f.RangeMax,
+                    f.Pattern, null, false, false, false,
+                    validators, Array.Empty<ValidationRuleAttribute>());
+            }
+
+            fields.Add(new DataFieldMetadata(
+                Property: prop,
+                Name: f.Name,
+                Label: f.Label,
+                FieldType: f.FieldType,
+                Order: f.Ordinal,
+                Required: f.Required,
+                List: f.List,
+                View: f.View,
+                Edit: f.Edit,
+                Create: f.Create,
+                ReadOnly: f.ReadOnly,
+                Placeholder: f.Placeholder,
+                Lookup: lookup,
+                IdGeneration: IdGenerationStrategy.None,
+                Computed: null,
+                Upload: null,
+                Calculated: null,
+                Validation: validation
+            ));
+        }
+
+        // Build action descriptors from RuntimeActionModel
+        var commands = Actions.Select((a, i) => new RemoteCommandMetadata(
+            Method: null!,
+            Name: a.Name,
+            Label: a.Label,
+            Icon: a.Icon,
+            ConfirmMessage: null,
+            Destructive: false,
+            Permission: a.Permission,
+            OverrideEntityPermissions: false,
+            Order: i
+        )).ToList();
+
+        var handlers = new DataEntityHandlers(
+            Create: () => schema.CreateRecord(),
+            LoadAsync: async (id, ct) =>
+            {
+                var rec = await walProvider.LoadRecordAsync(id, schema, ct).ConfigureAwait(false);
+                return rec;
+            },
+            SaveAsync: async (obj, ct) =>
+            {
+                if (obj is DataRecord rec)
+                    await walProvider.SaveRecordAsync(rec, schema, ct).ConfigureAwait(false);
+            },
+            DeleteAsync: (id, ct) => walProvider.DeleteRecordAsync(id, schema, ct),
+            QueryAsync: async (query, ct) =>
+            {
+                var items = await walProvider.QueryRecordsAsync(schema, query, ct).ConfigureAwait(false);
+                return items.Cast<BaseDataObject>();
+            },
+            CountAsync: (query, ct) => walProvider.CountRecordsAsync(schema, query, ct)
+        );
+
+        return new DataEntityMetadata(
+            Type: typeof(DataRecord),
+            Name: Name,
+            Slug: Slug,
+            Permissions: Permissions,
+            ShowOnNav: ShowOnNav,
+            NavGroup: NavGroup,
+            NavOrder: NavOrder,
+            IdGeneration: IdStrategy,
+            ViewType: ViewType.Table,
+            ParentField: null,
+            Fields: fields,
+            Handlers: handlers,
+            Commands: commands
+        );
+    }
+
+    /// <summary>
     /// Builds a <see cref="DataEntityMetadata"/> compatible with the existing
     /// <see cref="DataScaffold"/> registration path, so that this entity works
     /// transparently with all admin-UI routes, API routes and rendering pipelines.
