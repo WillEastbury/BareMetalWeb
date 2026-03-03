@@ -300,7 +300,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAuthRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, allowAccountCreation: false);
 
         // Assert — 14 routes without register
-        Assert.Equal(14, _server.routes.Count);
+        Assert.Equal(17, _server.routes.Count);
     }
 
     [Fact]
@@ -310,7 +310,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAuthRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, allowAccountCreation: true);
 
         // Assert — 16 routes with register
-        Assert.Equal(16, _server.routes.Count);
+        Assert.Equal(19, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -959,7 +959,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterData > afterAdmin);
         Assert.True(afterLookup > afterData);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 17 + 4 + 13 + 21 + 5 + 16, total); // 3+17+4+13+21+5+16=79
+        Assert.Equal(staticCount + 20 + 4 + 13 + 21 + 5 + 16, total); // 3+20+4+13+21+5+16=82
     }
 
     [Fact]
@@ -1096,6 +1096,9 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask RegisterPostHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask LogoutHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask LogoutPostHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask SsoLoginHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask SsoCallbackHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask SsoLogoutHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask AccountHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask MfaStatusHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask MfaSetupHandler(HttpContext context) => ValueTask.CompletedTask;

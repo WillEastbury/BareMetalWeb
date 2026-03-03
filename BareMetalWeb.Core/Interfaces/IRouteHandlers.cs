@@ -19,6 +19,9 @@ public interface IRouteHandlers
     ValueTask RegisterPostHandler(HttpContext context);
     ValueTask LogoutHandler(HttpContext context);
     ValueTask LogoutPostHandler(HttpContext context);
+    ValueTask SsoLoginHandler(HttpContext context);
+    ValueTask SsoCallbackHandler(HttpContext context);
+    ValueTask SsoLogoutHandler(HttpContext context);
     ValueTask AccountHandler(HttpContext context);
     ValueTask MfaStatusHandler(HttpContext context);
     ValueTask MfaSetupHandler(HttpContext context);
