@@ -41,6 +41,7 @@ internal static class WalConstants
     // ── Codecs ────────────────────────────────────────────────────────────────
     public const ushort CodecNone    = 1;
     public const ushort CodecDeflate = 2;
+    public const ushort CodecBrotli  = 3;
 
     // ── Op flags ─────────────────────────────────────────────────────────────
     public const uint OpFlagIsBaseImage = 1u;
