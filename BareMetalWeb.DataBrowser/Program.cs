@@ -7,7 +7,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
+using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Data.Interfaces;
+using BareMetalWeb.UserClasses.DataObjects;
 
 namespace BareMetalWeb.DataBrowser;
 
@@ -65,7 +67,28 @@ internal static class Program
         var store = new DataObjectStore();
         store.RegisterProvider(_provider);
         DataStoreProvider.Current = store;
-        DataEntityRegistry.RegisterAllEntities();
+        // Register all known entity types explicitly (AOT-safe).
+        DataEntityRegistry.RegisterEntity<ToDo>();
+        DataEntityRegistry.RegisterEntity<Product>();
+        DataEntityRegistry.RegisterEntity<ProductCategory>();
+        DataEntityRegistry.RegisterEntity<Customer>();
+        DataEntityRegistry.RegisterEntity<Order>();
+        DataEntityRegistry.RegisterEntity<Currency>();
+        DataEntityRegistry.RegisterEntity<UnitOfMeasure>();
+        DataEntityRegistry.RegisterEntity<Address>();
+        DataEntityRegistry.RegisterEntity<Employee>();
+        DataEntityRegistry.RegisterEntity<Subject>();
+        DataEntityRegistry.RegisterEntity<TimeTablePlan>();
+        DataEntityRegistry.RegisterEntity<LessonLog>();
+        DataEntityRegistry.RegisterEntity<Page>();
+        DataEntityRegistry.RegisterEntity<Quote>();
+        DataEntityRegistry.RegisterEntity<ModuleDefinition>();
+        DataEntityRegistry.RegisterEntity<DomainEventSubscription>();
+        DataEntityRegistry.RegisterEntity<SessionLog>();
+        DataEntityRegistry.RegisterEntity<Permission>();
+        DataEntityRegistry.RegisterEntity<SecurityRole>();
+        DataEntityRegistry.RegisterEntity<SecurityGroup>();
+        DataEntityRegistry.RegisterEntity<User>();
 
         WriteBanner();
 

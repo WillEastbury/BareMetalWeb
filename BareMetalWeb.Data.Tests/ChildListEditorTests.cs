@@ -26,7 +26,8 @@ public class ChildListEditorTests : IDisposable
 
         // Force UserClasses assembly to load before scanning
         _ = typeof(Customer).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        DataScaffold.RegisterEntity<Order>();
+        DataScaffold.RegisterEntity<Customer>();
     }
 
     public void Dispose()

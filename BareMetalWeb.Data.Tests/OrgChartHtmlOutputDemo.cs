@@ -20,7 +20,7 @@ public class OrgChartHtmlOutputDemo
         {
             DataStoreProvider.Current = new InMemoryDataStore();
             _ = typeof(BareMetalWeb.UserClasses.DataObjects.Employee).Assembly;
-            DataEntityRegistry.RegisterAllEntities();
+            DataScaffold.RegisterEntity<BareMetalWeb.UserClasses.DataObjects.Employee>();
 
             var metadata = DataScaffold.GetEntityByType(typeof(BareMetalWeb.UserClasses.DataObjects.Employee));
             Assert.NotNull(metadata);

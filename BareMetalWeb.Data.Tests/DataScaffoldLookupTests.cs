@@ -24,7 +24,13 @@ public class DataScaffoldLookupTests : IDisposable
 
         // Force UserClasses assembly to load before scanning
         _ = typeof(Product).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        DataScaffold.RegisterEntity<Product>();
+        DataScaffold.RegisterEntity<Order>();
+        DataScaffold.RegisterEntity<Customer>();
+        DataScaffold.RegisterEntity<UnitOfMeasure>();
+        DataScaffold.RegisterEntity<Currency>();
+        DataScaffold.RegisterEntity<Address>();
+        DataScaffold.RegisterEntity<TimeTablePlan>();
     }
 
     public void Dispose()

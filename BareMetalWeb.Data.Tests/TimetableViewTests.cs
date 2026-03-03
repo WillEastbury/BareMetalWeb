@@ -23,7 +23,8 @@ public class TimetableViewTests : IDisposable
 
         // Force UserClasses assembly to load so TimeTablePlan is registered
         _ = typeof(BareMetalWeb.UserClasses.DataObjects.Employee).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        DataScaffold.RegisterEntity<TimeTablePlan>();
+        DataScaffold.RegisterEntity<Customer>();
     }
 
     public void Dispose()

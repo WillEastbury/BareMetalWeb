@@ -25,7 +25,7 @@ public class LookupFieldButtonTests : IDisposable
 
         // Force UserClasses assembly to load before scanning
         _ = typeof(Employee).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        DataScaffold.RegisterEntity<Employee>();
     }
 
     public void Dispose()

@@ -76,9 +76,11 @@ public class LookupApiHandlerTests : IDisposable
         _testStore.Save(session);
         _testSessionId = session.Key.ToString();
 
-        // Force UserClasses assembly to load before scanning
-        _ = typeof(Product).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        // Register entity types used by lookup tests
+        DataEntityRegistry.RegisterEntity<Product>();
+        DataEntityRegistry.RegisterEntity<Customer>();
+        DataEntityRegistry.RegisterEntity<Order>();
+        DataEntityRegistry.RegisterEntity<User>();
 
         _logger = new MockBufferedLogger();
         _renderer = new MockHtmlRenderer();

@@ -32,7 +32,7 @@ public class HighCardinalityLookupTests : IDisposable
         DataStoreProvider.Current = new CountableInMemoryDataStore();
 
         _ = typeof(Employee).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        DataScaffold.RegisterEntity<Employee>();
     }
 
     public void Dispose()

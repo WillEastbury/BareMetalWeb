@@ -21,7 +21,8 @@ public class OrgChartViewTests : IDisposable
 
         // Force UserClasses assembly to load
         _ = typeof(BareMetalWeb.UserClasses.DataObjects.Employee).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        DataScaffold.RegisterEntity<BareMetalWeb.UserClasses.DataObjects.Employee>();
+        DataScaffold.RegisterEntity<Customer>();
     }
 
     public void Dispose()

@@ -26,7 +26,8 @@ public class BooleanRenderingTests : IDisposable
 
         // Force UserClasses assembly to load before scanning
         _ = typeof(Customer).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        DataScaffold.RegisterEntity<Customer>();
+        DataScaffold.RegisterEntity<Product>();
     }
 
     public void Dispose()

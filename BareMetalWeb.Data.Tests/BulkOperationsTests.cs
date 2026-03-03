@@ -22,7 +22,7 @@ public class BulkOperationsTests : IDisposable
         
         // Force UserClasses assembly to load before scanning
         _ = typeof(Product).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        DataScaffold.RegisterEntity<Product>();
     }
 
     public void Dispose()
