@@ -177,3 +177,30 @@ For queries with non-indexed filters, complex operators (Contains, GreaterThan, 
 | Full scan fallback | O(n) | Deser cache reduces per-entity cost |
 
 Where n = total entities, k = matching entities, top = page size (typically 25).
+
+## Query Plan History
+
+`QueryPlanner` produces an optimised `QueryPlan` for every `ReportExecutor.ExecuteAsync` call. After execution, the plan (plus timing and row counts) is recorded in the static `QueryPlanHistory` circular buffer (max 100 entries, newest-first).
+
+### Missing Index Recommendations
+
+The planner detects three classes of suboptimal access patterns and emits `MissingIndexRecommendation` entries in the plan:
+
+| Pattern | Recommendation trigger |
+|---------|----------------------|
+| Filter on unindexed field | Filter pushdown step touches a field with no `[DataIndex]` |
+| Unindexed hash-join build side | Join `toField` has no `[DataIndex]` (forces linear probe) |
+| Sort on unindexed field | `OrderBy` field has no `[DataIndex]` (requires full in-memory sort) |
+
+### Admin UI
+
+Navigate to **⚙ Tools → 📊 Query Plan History** in the VNext admin SPA (`/UI/_query-plans`) to see:
+- Execution timeline with latency colour-coding (green < 10 ms, amber < 100 ms, red ≥ 100 ms)
+- Per-step graph showing entity, estimated rows, indexed fields, and join strategy
+- Missing-index recommendations at the bottom of each plan card
+
+### API Endpoint
+
+`GET /api/admin/query-plans` — requires `admin` role; returns JSON array (max 100 items, newest first).
+
+_Status: current as of commit after issue #query-plan-history_
