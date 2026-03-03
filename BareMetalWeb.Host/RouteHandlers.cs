@@ -4166,8 +4166,8 @@ public sealed class RouteHandlers : IRouteHandlers
         html.Append("<div class=\"card\">");
         html.Append("<div class=\"card-body\">");
         html.Append($"<h5 class=\"card-title\" id=\"job-title\">{WebUtility.HtmlEncode(operationName)}</h5>");
-        html.Append("<div class=\"progress mb-3\" style=\"height:1.5rem;\">");
-        html.Append("<div class=\"progress-bar progress-bar-striped progress-bar-animated\" id=\"job-progress\" role=\"progressbar\" style=\"width:0%\" aria-valuenow=\"0\" aria-valuemin=\"0\" aria-valuemax=\"100\">0%</div>");
+        html.Append("<div class=\"progress mb-3 bm-progress-xl\">");
+        html.Append("<div class=\"progress-bar progress-bar-striped progress-bar-animated\" id=\"job-progress\" role=\"progressbar\" aria-valuenow=\"0\" aria-valuemin=\"0\" aria-valuemax=\"100\">0%</div>");
         html.Append("</div>");
         html.Append("<p id=\"job-description\" class=\"text-muted mb-2\">Starting\u2026</p>");
         html.Append("<div id=\"job-result\" class=\"d-none\"></div>");
@@ -4178,6 +4178,7 @@ public sealed class RouteHandlers : IRouteHandlers
         html.Append("(function(){");
         html.Append($"var url='{statusUrl.Replace("'", "\\'")}';");
         html.Append("var bar=document.getElementById('job-progress');");
+        html.Append("bar.style.width='0%';");
         html.Append("var desc=document.getElementById('job-description');");
         html.Append("var result=document.getElementById('job-result');");
         html.Append("var ret=document.getElementById('job-return');");

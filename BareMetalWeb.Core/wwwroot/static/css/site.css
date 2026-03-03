@@ -762,6 +762,7 @@ body {
 .bm-currency-input { max-width: 80px; }
 .bm-cursor-pointer { cursor: pointer; }
 .bm-tag-close { font-size: .55em; vertical-align: middle; }
+.bm-progress-xl { height: 1.5rem; }
 
 /* VNext SPA polish */
 .vnext-tag-container {
