@@ -812,7 +812,7 @@ public sealed class IndexStore
         }
         using var registryLock = lockStream!;
         using var stream = new FileStream(registryPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.ReadWrite);
-        using (var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: false, bufferSize: 1024, leaveOpen: true))
+        using (var reader = new StreamReader(stream, encoding, detectEncodingFromByteOrderMarks: false, bufferSize: 4096, leaveOpen: true))
         {
             while (!reader.EndOfStream)
             {
@@ -825,7 +825,7 @@ public sealed class IndexStore
         }
 
         stream.Seek(0, SeekOrigin.End);
-        using var writer = new StreamWriter(stream, encoding, bufferSize: 1024, leaveOpen: true);
+        using var writer = new StreamWriter(stream, encoding, bufferSize: 4096, leaveOpen: true);
         writer.WriteLine(entry);
         _logger?.LogInfo($"Tracked index {entityName}.{fieldName}.");
     }

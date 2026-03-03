@@ -3572,7 +3572,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var field = meta.Fields.FirstOrDefault(f => string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        var field = meta.FindField(fieldName);
         if (field == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -6121,7 +6121,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.IsNullOrWhiteSpace(fieldName) || string.IsNullOrWhiteSpace(value))
             return;
 
-        var field = meta.Fields.FirstOrDefault(f => string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        var field = meta.FindField(fieldName);
         if (field == null)
             return;
 

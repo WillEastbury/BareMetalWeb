@@ -96,10 +96,11 @@ public static class ComputedFieldService
     public static void ClearCache(DataEntityMetadata metadata, string instanceId)
     {
         var prefix = $"{metadata.Type.FullName}.{instanceId}.";
-        var keysToRemove = _cache.Keys.Where(k => k.StartsWith(prefix)).ToList();
-        foreach (var key in keysToRemove)
+        // Stream removal — avoid materializing all keys into a list.
+        foreach (var key in _cache.Keys)
         {
-            _cache.TryRemove(key, out _);
+            if (key.StartsWith(prefix))
+                _cache.TryRemove(key, out _);
         }
     }
 
