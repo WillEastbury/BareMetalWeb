@@ -13,6 +13,7 @@ namespace BareMetalWeb.Data.ExpressionEngine;
 public static class CalculatedFieldService
 {
     private static readonly ConcurrentDictionary<string, ExpressionNode> _compiledExpressions = new();
+    private const int MaxExpressionCacheSize = 4096;
     private static readonly ConcurrentDictionary<Type, List<CalculatedFieldInfo>> _calculatedFieldsByType = new();
     private static readonly ConcurrentDictionary<Type, Dictionary<string, HashSet<string>>> _dependencyGraph = new();
 
@@ -28,11 +29,22 @@ public static class CalculatedFieldService
     /// </summary>
     public static ExpressionNode GetCompiledExpression(string expression)
     {
-        return _compiledExpressions.GetOrAdd(expression, exp =>
+        if (_compiledExpressions.TryGetValue(expression, out var cached))
+            return cached;
+
+        var parser = new ExpressionParser();
+        var node = parser.Parse(expression);
+
+        // Evict half the cache when it exceeds the max size
+        if (_compiledExpressions.Count >= MaxExpressionCacheSize)
         {
-            var parser = new ExpressionParser();
-            return parser.Parse(exp);
-        });
+            var keysToRemove = _compiledExpressions.Keys.Take(MaxExpressionCacheSize / 2).ToArray();
+            foreach (var key in keysToRemove)
+                _compiledExpressions.TryRemove(key, out _);
+        }
+
+        _compiledExpressions[expression] = node;
+        return node;
     }
 
     /// <summary>
