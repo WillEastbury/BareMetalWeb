@@ -3,6 +3,20 @@ using System.Reflection;
 
 namespace BareMetalWeb.Data;
 
+// IsExternalInit is the compiler-synthesised modreq placed on the return parameter of every
+// init-only setter.  Expression-tree compilation rejects these setters with BadImageFormatException
+// because the JIT cannot verify the modreq at compile time.  Detecting it allows us to fall back to
+// PropertyInfo.SetValue, which honours the restriction correctly through reflection.
+file static class IsExternalInitDetector
+{
+    private const string ModreqFullName = "System.Runtime.CompilerServices.IsExternalInit";
+
+    internal static bool IsInitOnlySetter(MethodInfo setter) =>
+        setter.ReturnParameter
+              .GetRequiredCustomModifiers()
+              .Any(t => t.FullName == ModreqFullName);
+}
+
 /// <summary>
 /// Builds compiled getter and setter delegates from <see cref="PropertyInfo"/> instances using
 /// <see cref="Expression"/> trees, eliminating per-call <see cref="PropertyInfo.GetValue"/> /
@@ -36,7 +50,12 @@ public static class PropertyAccessorFactory
     /// </summary>
     public static Action<object, object?> BuildSetter(PropertyInfo property)
     {
-        if (property.GetSetMethod(nonPublic: false) == null)
+        var setter = property.GetSetMethod(nonPublic: false);
+
+        // Fall back to PropertyInfo.SetValue when there is no public setter, or when the setter is
+        // init-only.  Init-only setters carry the IsExternalInit modreq which causes the expression-tree
+        // compiler to throw BadImageFormatException (Bad binary signature, 0x80131192).
+        if (setter == null || IsExternalInitDetector.IsInitOnlySetter(setter))
             return (obj, val) => property.SetValue(obj, val);
 
         var instanceParam = Expression.Parameter(typeof(object), "instance");
