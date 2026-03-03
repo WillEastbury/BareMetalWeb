@@ -771,7 +771,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
 
         // Assert
-        Assert.Equal(16, _server.routes.Count);
+        Assert.Equal(17, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -959,7 +959,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterData > afterAdmin);
         Assert.True(afterLookup > afterData);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 16 + 4 + 13 + 21 + 5 + 16, total); // 3+16+4+13+21+5+16=78
+        Assert.Equal(staticCount + 17 + 4 + 13 + 21 + 5 + 16, total); // 3+17+4+13+21+5+16=79
     }
 
     [Fact]
@@ -1149,6 +1149,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask CancelJobHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask AdminSampleDataJsonHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask AdminWipeDataJsonHandler(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask QueryPlanHistoryHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataListExportHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataViewExportHandler(HttpContext context) => ValueTask.CompletedTask;
         public ValueTask DataBulkDeleteHandler(HttpContext context) => ValueTask.CompletedTask;

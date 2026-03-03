@@ -20,6 +20,7 @@ public sealed class QueryPlanner
     {
         var steps = new List<QueryPlanStep>();
         var pushedFilters = new Dictionary<string, QueryDefinition>(StringComparer.OrdinalIgnoreCase);
+        var missingIndexes = new List<MissingIndexRecommendation>();
 
         // 1. Classify filters by target entity (predicate pushdown)
         foreach (var filter in query.Filters)
@@ -42,6 +43,19 @@ public sealed class QueryPlanner
         pushedFilters.TryGetValue(query.RootEntity, out var rootFilter);
         var rootIndexed = GetIndexedFields(query.RootEntity, rootFilter);
 
+        // Detect missing indexes on root entity filter fields
+        if (rootFilter != null)
+        {
+            foreach (var clause in rootFilter.Clauses)
+            {
+                if (!IsFieldIndexed(query.RootEntity, clause.Field))
+                    missingIndexes.Add(new MissingIndexRecommendation(
+                        EntitySlug: query.RootEntity,
+                        FieldName: clause.Field,
+                        Reason: $"Filter on '{clause.Field}' performs a full table scan; an index would speed up predicate pushdown."));
+            }
+        }
+
         steps.Add(new QueryPlanStep(
             StepType: PlanStepType.LoadEntity,
             EntitySlug: query.RootEntity,
@@ -63,6 +77,24 @@ public sealed class QueryPlanner
 
             // Check if the join field on the TO side is indexed (hash build optimization)
             var toFieldIndexed = IsFieldIndexed(join.ToEntity, join.ToField);
+
+            if (!toFieldIndexed)
+                missingIndexes.Add(new MissingIndexRecommendation(
+                    EntitySlug: join.ToEntity,
+                    FieldName: join.ToField,
+                    Reason: $"Hash-join build side on '{join.ToEntity}.{join.ToField}' is unindexed; an index would eliminate linear probing during join."));
+
+            if (joinFilter != null)
+            {
+                foreach (var clause in joinFilter.Clauses)
+                {
+                    if (!IsFieldIndexed(join.ToEntity, clause.Field))
+                        missingIndexes.Add(new MissingIndexRecommendation(
+                            EntitySlug: join.ToEntity,
+                            FieldName: clause.Field,
+                            Reason: $"Filter on '{clause.Field}' in joined entity '{join.ToEntity}' performs a full scan; an index would speed up predicate pushdown."));
+                }
+            }
 
             steps.Add(new QueryPlanStep(
                 StepType: PlanStepType.HashJoin,
@@ -99,7 +131,19 @@ public sealed class QueryPlanner
                 JoinInfo: null));
         }
 
-        // 6. Final projection + sort step
+        // 6. Final projection + sort step — detect missing index on sort field
+        if (!string.IsNullOrEmpty(query.SortField))
+        {
+            var sortParts = query.SortField.Split('.');
+            var sortEntity = sortParts.Length == 2 ? sortParts[0] : query.RootEntity;
+            var sortField  = sortParts.Length == 2 ? sortParts[1] : query.SortField;
+            if (!IsFieldIndexed(sortEntity, sortField))
+                missingIndexes.Add(new MissingIndexRecommendation(
+                    EntitySlug: sortEntity,
+                    FieldName: sortField,
+                    Reason: $"Sort on '{sortEntity}.{sortField}' requires an in-memory sort pass; an index would allow ordered retrieval without sorting."));
+        }
+
         steps.Add(new QueryPlanStep(
             StepType: PlanStepType.ProjectAndSort,
             EntitySlug: "*",
@@ -112,7 +156,8 @@ public sealed class QueryPlanner
             Steps: steps,
             CanStreamAggregate: canStreamAggregate,
             PushedFilters: pushedFilters,
-            JoinOrderOptimised: orderedJoins.Count > 1);
+            JoinOrderOptimised: orderedJoins.Count > 1,
+            MissingIndexRecommendations: missingIndexes);
     }
 
     private static int EstimateCardinality(string entitySlug)
@@ -181,7 +226,8 @@ public sealed record QueryPlan(
     IReadOnlyList<QueryPlanStep> Steps,
     bool CanStreamAggregate,
     IReadOnlyDictionary<string, QueryDefinition> PushedFilters,
-    bool JoinOrderOptimised);
+    bool JoinOrderOptimised,
+    IReadOnlyList<MissingIndexRecommendation> MissingIndexRecommendations);
 
 /// <summary>A single step in the query execution plan.</summary>
 public sealed record QueryPlanStep(
@@ -207,3 +253,9 @@ public enum PlanStepType
     PostJoinFilter,
     ProjectAndSort
 }
+
+/// <summary>Recommendation to add a missing index that would improve query performance.</summary>
+public sealed record MissingIndexRecommendation(
+    string EntitySlug,
+    string FieldName,
+    string Reason);

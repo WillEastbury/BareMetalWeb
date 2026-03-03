@@ -4511,6 +4511,49 @@ public sealed class RouteHandlers : IRouteHandlers
             JsonSerializer.Serialize(new { jobId, status = "queued", operationName = "Wipe All Data", statusUrl })).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// GET /api/admin/query-plans — returns the in-memory query plan history as JSON.
+    /// Each entry includes timing, steps, and missing-index recommendations.
+    /// </summary>
+    public async ValueTask QueryPlanHistoryHandler(HttpContext context)
+    {
+        var entries = QueryPlanHistory.GetSnapshot();
+
+        var payload = entries.Select(e => new Dictionary<string, object?>
+        {
+            ["executedAt"]     = e.ExecutedAt.ToString("o"),
+            ["rootEntity"]     = e.RootEntity,
+            ["joinCount"]      = e.JoinCount,
+            ["resultRowCount"] = e.ResultRowCount,
+            ["elapsedMs"]      = Math.Round(e.ElapsedMs, 3),
+            ["canStreamAggregate"]   = e.Plan.CanStreamAggregate,
+            ["joinOrderOptimised"]   = e.Plan.JoinOrderOptimised,
+            ["steps"] = e.Plan.Steps.Select(s => new Dictionary<string, object?>
+            {
+                ["stepType"]     = s.StepType.ToString(),
+                ["entitySlug"]   = s.EntitySlug,
+                ["estimatedRows"] = s.EstimatedRows,
+                ["indexedFields"] = s.IndexedFields,
+                ["join"] = s.JoinInfo == null ? null : new Dictionary<string, object?>
+                {
+                    ["fromEntity"]        = s.JoinInfo.FromEntity,
+                    ["fromField"]         = s.JoinInfo.FromField,
+                    ["toField"]           = s.JoinInfo.ToField,
+                    ["joinType"]          = s.JoinInfo.JoinType.ToString(),
+                    ["buildSideIndexed"]  = s.JoinInfo.BuildSideIndexed
+                }
+            }).ToList(),
+            ["missingIndexRecommendations"] = e.Plan.MissingIndexRecommendations.Select(r => new Dictionary<string, object?>
+            {
+                ["entitySlug"] = r.EntitySlug,
+                ["fieldName"]  = r.FieldName,
+                ["reason"]     = r.Reason
+            }).ToList()
+        }).ToList();
+
+        await WriteJsonResponseAsync(context, payload);
+    }
+
     public async ValueTask EntityDesignerHandler(HttpContext context)
     {
         await BuildPageHandler(ctx =>

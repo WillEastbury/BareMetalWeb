@@ -537,6 +537,10 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("admin", false),
             routeHandlers.AdminWipeDataJsonHandler));
 
+        host.RegisterRoute("GET /api/admin/query-plans", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            routeHandlers.QueryPlanHistoryHandler));
+
         // Document chain — must be before the generic GET /api/{type}/{id} route
         host.RegisterRoute("GET /api/{type}/{id}/_related-chain", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
