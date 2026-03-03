@@ -387,7 +387,7 @@ A full entity with lookups, validation, calculated fields, indexing, and command
 ```csharp
 using BareMetalWeb.Data;
 
-[DataEntity("Orders", ShowOnNav = true, NavGroup = "Sales", NavOrder = 40)]
+[DataEntity("Orders", ShowOnNav = true, NavGroup = "Sales", NavOrder = 40, DefaultSortField = "OrderDate", DefaultSortDirection = SortDirection.Desc)]
 public class Order : RenderableDataObject
 {
     [DataField(Label = "Order Number", Order = 1, Required = true)]
