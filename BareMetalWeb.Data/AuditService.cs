@@ -49,7 +49,7 @@ public sealed class AuditService
                 Notes = "Entity created"
             };
 
-            await SaveAuditEntryAsync(auditEntry, "create", cancellationToken);
+            await SaveAuditEntryAsync(auditEntry, "create", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -82,7 +82,7 @@ public sealed class AuditService
                 Notes = $"{changes.Count} field(s) changed"
             };
 
-            await SaveAuditEntryAsync(auditEntry, "update", cancellationToken);
+            await SaveAuditEntryAsync(auditEntry, "update", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -109,7 +109,7 @@ public sealed class AuditService
                 Notes = "Entity deleted"
             };
 
-            await SaveAuditEntryAsync(auditEntry, "delete", cancellationToken);
+            await SaveAuditEntryAsync(auditEntry, "delete", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -144,7 +144,7 @@ public sealed class AuditService
                 Notes = $"Remote command '{commandName}' executed"
             };
 
-            await SaveAuditEntryAsync(auditEntry, "remote command", cancellationToken);
+            await SaveAuditEntryAsync(auditEntry, "remote command", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

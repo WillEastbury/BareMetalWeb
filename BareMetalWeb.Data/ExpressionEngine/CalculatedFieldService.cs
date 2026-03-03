@@ -200,6 +200,8 @@ public static class CalculatedFieldService
     {
         var fields = GetCalculatedFields(type);
         var graph = GetDependencyGraph(type);
+        var fieldMap = new Dictionary<string, CalculatedFieldInfo>(fields.Count);
+        foreach (var f in fields) fieldMap[f.Property.Name] = f;
 
         var sorted = new List<CalculatedFieldInfo>();
         var visited = new HashSet<string>();
@@ -222,8 +224,7 @@ public static class CalculatedFieldService
                 }
             }
 
-            var fieldInfo = fields.FirstOrDefault(f => f.Property.Name == fieldName);
-            if (fieldInfo != null)
+            if (fieldMap.TryGetValue(fieldName, out var fieldInfo))
             {
                 sorted.Add(fieldInfo);
             }

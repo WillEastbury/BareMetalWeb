@@ -246,7 +246,7 @@ public sealed class ReportExecutor
         // Apply row limit
         var limit = query.QueryLimit ?? DefaultRowLimit;
         bool truncated = projected.Count > limit;
-        var finalRows = truncated ? projected.Take(limit).ToList() : projected;
+        var finalRows = truncated ? projected.GetRange(0, limit) : projected;
 
         sw.Stop();
         QueryPlanHistory.Record(new QueryPlanEntry

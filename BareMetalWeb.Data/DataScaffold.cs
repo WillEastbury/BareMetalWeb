@@ -74,6 +74,7 @@ public sealed record DataEntityMetadata(
     private DataFieldMetadata[]? _viewFields;
     private DataFieldMetadata[]? _createFields;
     private DataFieldMetadata[]? _editFields;
+    private Dictionary<string, DataFieldMetadata>? _fieldsByName;
 
     /// <summary>Fields visible in list views, pre-sorted by Order.</summary>
     public DataFieldMetadata[] ListFields => _listFields ??= BuildFilteredFields(f => f.List);
@@ -86,6 +87,14 @@ public sealed record DataEntityMetadata(
 
     /// <summary>Fields available during edit, pre-sorted by Order.</summary>
     public DataFieldMetadata[] EditFields => _editFields ??= BuildFilteredFields(f => f.Edit);
+
+    /// <summary>O(1) field lookup by name (case-insensitive). Lazy-built on first access.</summary>
+    public Dictionary<string, DataFieldMetadata> FieldsByName =>
+        _fieldsByName ??= Fields.ToDictionary(f => f.Name, StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Try to find a field by name in O(1). Returns null if not found.</summary>
+    public DataFieldMetadata? FindField(string name) =>
+        FieldsByName.TryGetValue(name, out var field) ? field : null;
 
     private DataFieldMetadata[] BuildFilteredFields(Func<DataFieldMetadata, bool> predicate)
     {
@@ -145,13 +154,25 @@ public static class DataScaffold
         }
     }
 
+    private static volatile IReadOnlyList<DataEntityMetadata>? _cachedEntityList;
+
     public static IReadOnlyList<DataEntityMetadata> Entities
     {
         get
         {
-            return EntitiesBySlug.Values.OrderBy(e => e.NavOrder).ThenBy(e => e.Name).ToList();
+            return _cachedEntityList ?? RebuildEntityList();
         }
     }
+
+    private static IReadOnlyList<DataEntityMetadata> RebuildEntityList()
+    {
+        var list = EntitiesBySlug.Values.OrderBy(e => e.NavOrder).ThenBy(e => e.Name).ToArray();
+        _cachedEntityList = list;
+        return list;
+    }
+
+    /// <summary>Invalidates the cached entity list. Called when entities are registered.</summary>
+    private static void InvalidateEntityListCache() => _cachedEntityList = null;
 
     public static bool RegisterEntity<T>() where T : BaseDataObject, new()
     {
@@ -162,6 +183,7 @@ public static class DataScaffold
 
         EntitiesBySlug[metadata.Slug] = metadata;
         EntitiesByType[type] = metadata;
+        InvalidateEntityListCache();
 
         return true;
     }
@@ -177,6 +199,7 @@ public static class DataScaffold
             return false;
 
         EntitiesBySlug[metadata.Slug] = metadata;
+        InvalidateEntityListCache();
 
         return true;
     }

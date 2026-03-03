@@ -331,7 +331,7 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
             var meta = DataScaffold.GetEntityByType(dataObject.GetType());
             if (meta != null)
             {
-                var fieldMeta = meta.Fields.FirstOrDefault(f => string.Equals(f.Name, field, StringComparison.OrdinalIgnoreCase));
+                var fieldMeta = meta.FindField(field);
                 if (fieldMeta != null)
                 {
                     value = fieldMeta.Property.GetValue(dataObject);
