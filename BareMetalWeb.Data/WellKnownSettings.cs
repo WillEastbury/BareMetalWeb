@@ -56,4 +56,13 @@ public static class WellKnownSettings
     /// <c>POST /admin/wipe-data</c>. When empty or absent the endpoint returns 419.
     /// </summary>
     public const string AllowWipeData = "AllowWipeData";
+
+    // ── Diagnostics ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// When <c>True</c>, appends a diagnostic banner to the page if <c>?showhst=true</c>
+    /// is present on the request query string. Displays initial host, server hostname,
+    /// avg RTT and payload size. Default: False.
+    /// </summary>
+    public const string ShowHostInfo = "diagnostics.showHostInfo";
 }

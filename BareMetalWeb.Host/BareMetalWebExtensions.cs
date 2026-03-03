@@ -148,6 +148,9 @@ public static class BareMetalWebExtensions
 
             // Admin
             (WellKnownSettings.AllowWipeData, app.Configuration.GetValue("Admin:AllowWipeData", string.Empty), "Secret token required to trigger wipe-all-data. Leave empty to disable the endpoint."),
+
+            // Diagnostics
+            (WellKnownSettings.ShowHostInfo, "False", "When True, append a diagnostic banner (host, server, RTT, payload) to each page when ?showhst=true is on the request. Default: False."),
         };
         // Seed any missing settings and promote empty values when the config provides a non-empty default.
         // This runs at every startup so that changes to appsettings.json are picked up without
@@ -165,7 +168,7 @@ public static class BareMetalWebExtensions
         appInfo.CompanyDescription = SettingsService.GetValue(WellKnownSettings.AppCompany,        appInfo.CompanyDescription);
         appInfo.CopyrightYear      = SettingsService.GetValue(WellKnownSettings.AppCopyright,      appInfo.CopyrightYear);
         appInfo.PrivacyPolicyUrl   = SettingsService.GetValue(WellKnownSettings.AppPrivacyPolicyUrl, "");
-        appInfo.ShowHostDiagnostics = app.Configuration.GetValue("Diagnostics:ShowHostInfo", false);
+        appInfo.ShowHostDiagnostics = string.Equals(SettingsService.GetValue(WellKnownSettings.ShowHostInfo, "False"), "True", StringComparison.OrdinalIgnoreCase);
 
         // Wire up the tenant registry so RequestHandler can resolve tenants per-request.
         if (multitenancyOptions.Enabled)
@@ -184,6 +187,8 @@ public static class BareMetalWebExtensions
                 appInfo.CopyrightYear = SettingsService.GetValue(WellKnownSettings.AppCopyright, appInfo.CopyrightYear);
             else if (string.Equals(settingId, WellKnownSettings.AppPrivacyPolicyUrl, StringComparison.OrdinalIgnoreCase))
                 appInfo.PrivacyPolicyUrl = SettingsService.GetValue(WellKnownSettings.AppPrivacyPolicyUrl, "");
+            else if (string.Equals(settingId, WellKnownSettings.ShowHostInfo, StringComparison.OrdinalIgnoreCase))
+                appInfo.ShowHostDiagnostics = string.Equals(SettingsService.GetValue(WellKnownSettings.ShowHostInfo, "False"), "True", StringComparison.OrdinalIgnoreCase);
         };
 
         // Infrastructure configuration

@@ -213,8 +213,10 @@ CSV export is available via `GET /api/reports/{id}` (returns `text/csv`).
 A server-info overlay can be injected into any rendered HTML page for scaleout debugging.
 
 **Activation:** Two conditions must both be true:
-1. `Diagnostics:ShowHostInfo` set to `true` in `appsettings.json`
+1. System setting `diagnostics.showHostInfo` set to `True` (managed via the admin settings UI — `WellKnownSettings.ShowHostInfo`)
 2. `?showhst=true` query parameter present on the request
+
+The setting is seeded into the system settings store at startup with a default value of `False` and can be toggled at runtime from the admin settings UI without redeploying.
 
 **Content (injected before `</body>` in the response):**
 
@@ -227,7 +229,7 @@ A server-info overlay can be injected into any rendered HTML page for scaleout d
 
 **Coverage:** SSR pages (`HtmlRenderer.RenderPage`), VNext SPA shell (`ServeVNextShell`), and Report pages (`ReportHtmlRenderer.AppendChromeFooter`).
 
-**Security:** Both conditions must be met simultaneously to show the banner. Default config is `false`; never expose server hostnames in production without authentication controls.
+**Security:** Both conditions must be met simultaneously to show the banner. The default system-setting value is `False`; never enable in production without authentication controls.
 
 ---
 
