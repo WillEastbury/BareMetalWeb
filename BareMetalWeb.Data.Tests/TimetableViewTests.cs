@@ -21,10 +21,7 @@ public class TimetableViewTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        // Force UserClasses assembly to load so TimeTablePlan is registered
-        _ = typeof(BareMetalWeb.UserClasses.DataObjects.Employee).Assembly;
-        DataScaffold.RegisterEntity<TimeTablePlan>();
-        DataScaffold.RegisterEntity<Customer>();
+        TestEntityRegistration.RegisterAll();
     }
 
     public void Dispose()

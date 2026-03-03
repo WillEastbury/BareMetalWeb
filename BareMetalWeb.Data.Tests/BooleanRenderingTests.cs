@@ -24,10 +24,7 @@ public class BooleanRenderingTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        // Force UserClasses assembly to load before scanning
-        _ = typeof(Customer).Assembly;
-        DataScaffold.RegisterEntity<Customer>();
-        DataScaffold.RegisterEntity<Product>();
+        TestEntityRegistration.RegisterAll();
     }
 
     public void Dispose()

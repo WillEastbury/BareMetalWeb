@@ -22,15 +22,7 @@ public class DataScaffoldLookupTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        // Force UserClasses assembly to load before scanning
-        _ = typeof(Product).Assembly;
-        DataScaffold.RegisterEntity<Product>();
-        DataScaffold.RegisterEntity<Order>();
-        DataScaffold.RegisterEntity<Customer>();
-        DataScaffold.RegisterEntity<UnitOfMeasure>();
-        DataScaffold.RegisterEntity<Currency>();
-        DataScaffold.RegisterEntity<Address>();
-        DataScaffold.RegisterEntity<TimeTablePlan>();
+        TestEntityRegistration.RegisterAll();
     }
 
     public void Dispose()

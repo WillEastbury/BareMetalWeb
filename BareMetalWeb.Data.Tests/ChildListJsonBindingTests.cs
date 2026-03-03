@@ -24,9 +24,7 @@ public class ChildListJsonBindingTests : IDisposable
     {
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
-        _ = typeof(Customer).Assembly;
-        DataScaffold.RegisterEntity<Order>();
-        DataScaffold.RegisterEntity<Customer>();
+        TestEntityRegistration.RegisterAll();
     }
 
     public void Dispose()

@@ -31,8 +31,7 @@ public class HighCardinalityLookupTests : IDisposable
         _originalThreshold = DataScaffold.LargeListThreshold;
         DataStoreProvider.Current = new CountableInMemoryDataStore();
 
-        _ = typeof(Employee).Assembly;
-        DataScaffold.RegisterEntity<Employee>();
+        TestEntityRegistration.RegisterAll();
     }
 
     public void Dispose()

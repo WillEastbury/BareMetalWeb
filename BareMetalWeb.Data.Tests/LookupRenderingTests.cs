@@ -24,10 +24,7 @@ public class LookupRenderingTests : IDisposable
         _store = new InMemoryDataStore();
         DataStoreProvider.Current = _store;
 
-        _ = typeof(Customer).Assembly;
-        DataScaffold.RegisterEntity<Customer>();
-        DataScaffold.RegisterEntity<Order>();
-        DataScaffold.RegisterEntity<Address>();
+        TestEntityRegistration.RegisterAll();
         ClearLookupCache();
     }
 

@@ -23,9 +23,7 @@ public class LookupFieldButtonTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        // Force UserClasses assembly to load before scanning
-        _ = typeof(Employee).Assembly;
-        DataScaffold.RegisterEntity<Employee>();
+        TestEntityRegistration.RegisterAll();
     }
 
     public void Dispose()

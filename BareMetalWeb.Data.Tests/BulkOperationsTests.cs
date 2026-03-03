@@ -20,9 +20,7 @@ public class BulkOperationsTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
         
-        // Force UserClasses assembly to load before scanning
-        _ = typeof(Product).Assembly;
-        DataScaffold.RegisterEntity<Product>();
+        TestEntityRegistration.RegisterAll();
     }
 
     public void Dispose()

@@ -19,10 +19,7 @@ public class OrgChartViewTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        // Force UserClasses assembly to load
-        _ = typeof(BareMetalWeb.UserClasses.DataObjects.Employee).Assembly;
-        DataScaffold.RegisterEntity<BareMetalWeb.UserClasses.DataObjects.Employee>();
-        DataScaffold.RegisterEntity<Customer>();
+        TestEntityRegistration.RegisterAll();
     }
 
     public void Dispose()

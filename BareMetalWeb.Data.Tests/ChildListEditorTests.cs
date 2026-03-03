@@ -24,10 +24,7 @@ public class ChildListEditorTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        // Force UserClasses assembly to load before scanning
-        _ = typeof(Customer).Assembly;
-        DataScaffold.RegisterEntity<Order>();
-        DataScaffold.RegisterEntity<Customer>();
+        TestEntityRegistration.RegisterAll();
     }
 
     public void Dispose()

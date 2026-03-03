@@ -81,6 +81,9 @@ public class LookupApiHandlerTests : IDisposable
         DataEntityRegistry.RegisterEntity<Customer>();
         DataEntityRegistry.RegisterEntity<Order>();
         DataEntityRegistry.RegisterEntity<User>();
+        DataEntityRegistry.RegisterEntity<UnitOfMeasure>();
+        DataEntityRegistry.RegisterEntity<Currency>();
+        DataEntityRegistry.RegisterEntity<Address>();
 
         _logger = new MockBufferedLogger();
         _renderer = new MockHtmlRenderer();
