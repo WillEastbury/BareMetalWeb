@@ -49,17 +49,24 @@ public readonly struct WalOp
 
     // ── Convenience factories ────────────────────────────────────────────────
 
-    /// <summary>Creates a full-image upsert op with no compression.</summary>
-    public static WalOp Upsert(ulong key, ReadOnlyMemory<byte> payload, ulong schemaSignature = 0) => new()
+    /// <summary>
+    /// Creates a full-image upsert op, automatically applying Brotli compression when
+    /// the payload meets the minimum size threshold and compression reduces the size.
+    /// </summary>
+    public static WalOp Upsert(ulong key, ReadOnlyMemory<byte> payload, ulong schemaSignature = 0)
     {
-        Key             = key,
-        OpType          = WalConstants.OpTypeUpsertFullImage,
-        Codec           = WalConstants.CodecNone,
-        Flags           = WalConstants.OpFlagIsBaseImage,
-        Payload         = payload,
-        UncompressedLen = (uint)payload.Length,
-        SchemaSignature = schemaSignature,
-    };
+        var compressed = WalPayloadCodec.TryCompress(payload, out ushort codec, out uint uncompressedLen);
+        return new WalOp
+        {
+            Key             = key,
+            OpType          = WalConstants.OpTypeUpsertFullImage,
+            Codec           = codec,
+            Flags           = WalConstants.OpFlagIsBaseImage,
+            Payload         = compressed,
+            UncompressedLen = uncompressedLen,
+            SchemaSignature = schemaSignature,
+        };
+    }
 
     /// <summary>Creates a delete-tombstone op.</summary>
     public static WalOp Delete(ulong key) => new()
