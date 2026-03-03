@@ -16,7 +16,7 @@ namespace BareMetalWeb.Data;
 public static class ComputedFieldService
 {
     private static readonly ConcurrentDictionary<string, ComputedValueCacheEntry> _cache = new();
-    private static readonly ConcurrentDictionary<(Type, string), PropertyInfo?> _propertyCache = new();
+    private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> _getterCache = new();
 
     private sealed record ComputedValueCacheEntry(object? Value, DateTime ExpiresUtc);
 
@@ -134,9 +134,13 @@ public static class ComputedFieldService
         return null;
     }
 
-    private static PropertyInfo? GetCachedProperty(Type type, string name)
+    private static Func<object, object?>? GetCachedGetter(Type type, string name)
     {
-        return _propertyCache.GetOrAdd((type, name), static key => key.Item1.GetProperty(key.Item2));
+        return _getterCache.GetOrAdd((type, name), static key =>
+        {
+            var prop = key.Item1.GetProperty(key.Item2);
+            return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;
+        });
     }
 
     private static async ValueTask<object?> ComputeLookupAsync(
@@ -147,11 +151,11 @@ public static class ComputedFieldService
         CancellationToken cancellationToken)
     {
         // Get the foreign key value
-        var fkProperty = GetCachedProperty(metadata.Type, config.ForeignKeyField!);
-        if (fkProperty == null)
+        var fkGetter = GetCachedGetter(metadata.Type, config.ForeignKeyField!);
+        if (fkGetter == null)
             return null;
 
-        var foreignKeyValue = fkProperty.GetValue(instance)?.ToString();
+        var foreignKeyValue = fkGetter(instance)?.ToString();
         if (string.IsNullOrEmpty(foreignKeyValue) || !uint.TryParse(foreignKeyValue, out var foreignKey))
             return null;
 
@@ -165,11 +169,11 @@ public static class ComputedFieldService
             return null;
 
         // Get the source field value
-        var sourceProperty = GetCachedProperty(config.SourceEntity!, config.SourceField!);
-        if (sourceProperty == null)
+        var sourceGetter = GetCachedGetter(config.SourceEntity!, config.SourceField!);
+        if (sourceGetter == null)
             return null;
 
-        return sourceProperty.GetValue(relatedEntity);
+        return sourceGetter(relatedEntity);
     }
 
     private static async ValueTask<object?> ComputeAggregationAsync(
@@ -180,11 +184,11 @@ public static class ComputedFieldService
         CancellationToken cancellationToken)
     {
         // Get the child collection property
-        var collectionProperty = GetCachedProperty(metadata.Type, config.ChildCollectionProperty!);
-        if (collectionProperty == null)
+        var collectionGetter = GetCachedGetter(metadata.Type, config.ChildCollectionProperty!);
+        if (collectionGetter == null)
             return null;
 
-        var collection = collectionProperty.GetValue(instance) as IEnumerable;
+        var collection = collectionGetter(instance) as IEnumerable;
         if (collection == null)
         {
             // Try to query for child entities if the collection isn't loaded
@@ -206,7 +210,7 @@ public static class ComputedFieldService
 
         // Get values from the source field (cache lookup per item type)
         var values = new List<object?>();
-        PropertyInfo? cachedSourceProp = null;
+        Func<object, object?>? cachedSourceGetter = null;
         Type? cachedItemType = null;
         foreach (var item in items)
         {
@@ -214,11 +218,11 @@ public static class ComputedFieldService
             if (itemType != cachedItemType)
             {
                 cachedItemType = itemType;
-                cachedSourceProp = GetCachedProperty(itemType, config.SourceField);
+                cachedSourceGetter = GetCachedGetter(itemType, config.SourceField);
             }
-            if (cachedSourceProp != null)
+            if (cachedSourceGetter != null)
             {
-                values.Add(cachedSourceProp.GetValue(item));
+                values.Add(cachedSourceGetter(item));
             }
         }
 

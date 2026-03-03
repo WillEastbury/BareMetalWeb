@@ -1239,6 +1239,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     private static string GetTypeIdentifier(Type type)
         => type.AssemblyQualifiedName ?? type.FullName ?? type.Name;
 
+    [RequiresUnreferencedCode("Assembly scanning for type resolution is not AOT-safe.")]
     private static Type ResolveType(string typeName)
     {
         var resolved = Type.GetType(typeName, throwOnError: false, ignoreCase: false);

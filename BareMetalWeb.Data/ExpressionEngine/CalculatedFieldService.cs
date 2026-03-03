@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Data.ExpressionEngine;
 
@@ -20,6 +21,7 @@ public static class CalculatedFieldService
 
     private sealed record CalculatedFieldInfo(
         PropertyInfo Property,
+        Action<object, object?> SetValue,
         CalculatedFieldAttribute Attribute,
         ExpressionNode Expression,
         HashSet<string> Dependencies
@@ -66,7 +68,7 @@ public static class CalculatedFieldService
             try
             {
                 var result = fieldInfo.Expression.Evaluate(context);
-                fieldInfo.Property.SetValue(instance, ConvertToPropertyType(result, fieldInfo.Property.PropertyType));
+                fieldInfo.SetValue(instance, ConvertToPropertyType(result, fieldInfo.Property.PropertyType));
 
                 context[fieldInfo.Property.Name] = result;
             }
@@ -125,7 +127,7 @@ public static class CalculatedFieldService
             try
             {
                 var result = await fieldInfo.Expression.EvaluateAsync(context, resolver, cancellationToken);
-                fieldInfo.Property.SetValue(instance, ConvertToPropertyType(result, fieldInfo.Property.PropertyType));
+                fieldInfo.SetValue(instance, ConvertToPropertyType(result, fieldInfo.Property.PropertyType));
                 context[fieldInfo.Property.Name] = result;
             }
             catch (Exception ex)
@@ -202,7 +204,7 @@ public static class CalculatedFieldService
                 var expression = GetCompiledExpression(attr.Expression);
                 var dependencies = ExtractDependencies(expression);
 
-                fields.Add(new CalculatedFieldInfo(prop, attr, expression, dependencies));
+                fields.Add(new CalculatedFieldInfo(prop, PropertyAccessorFactory.BuildSetter(prop), attr, expression, dependencies));
             }
 
             return fields;
@@ -300,14 +302,28 @@ public static class CalculatedFieldService
 
     private static Dictionary<string, object?> BuildContext(BaseDataObject instance, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
     {
-        var context = new Dictionary<string, object?>();
-
-        foreach (var prop in type.GetProperties())
+        // Use compiled layout for efficient field access when available
+        var meta = DataScaffold.GetEntityByType(type);
+        if (meta != null)
         {
-            context[prop.Name] = prop.GetValue(instance);
+            var layout = EntityLayoutCompiler.GetOrCompile(meta);
+            var context = new Dictionary<string, object?>(layout.Fields.Length + 4);
+            context["Key"] = instance.Key;
+            foreach (var field in layout.Fields)
+            {
+                try { context[field.Name] = field.Getter(instance); }
+                catch { context[field.Name] = null; }
+            }
+            return context;
         }
 
-        return context;
+        // Fallback for unregistered types
+        var ctx = new Dictionary<string, object?>();
+        foreach (var prop in type.GetProperties())
+        {
+            ctx[prop.Name] = prop.GetValue(instance);
+        }
+        return ctx;
     }
 
     private static bool HasCycle(
