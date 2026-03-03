@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -21,6 +22,11 @@ file static class IsExternalInitDetector
 /// Builds compiled getter and setter delegates from <see cref="PropertyInfo"/> instances using
 /// <see cref="Expression"/> trees, eliminating per-call <see cref="PropertyInfo.GetValue"/> /
 /// <see cref="PropertyInfo.SetValue"/> reflection overhead.
+/// <para>
+/// <b>AOT note:</b> <c>Expression.Lambda.Compile()</c> is not supported under Native AOT.
+/// For AOT-safe access, use <see cref="DataRecord"/> with ordinal-indexed storage and
+/// <see cref="EntitySchema.BuildFieldPlanDescriptors"/> — no Expression compilation needed.
+/// </para>
 /// </summary>
 public static class PropertyAccessorFactory
 {
@@ -30,8 +36,10 @@ public static class PropertyAccessorFactory
     /// Falls back to <see cref="PropertyInfo.GetValue"/> when the property has no public getter
     /// (e.g. <see cref="DynamicPropertyInfo"/>).
     /// </summary>
+    [RequiresUnreferencedCode("Expression.Lambda.Compile() is not AOT-safe. Use DataRecord ordinal access instead.")]
     public static Func<object, object?> BuildGetter(PropertyInfo property)
     {
+        // DynamicPropertyInfo has no GetGetMethod — use its overridden GetValue directly (AOT-safe)
         if (property.GetGetMethod(nonPublic: false) == null)
             return obj => property.GetValue(obj);
 
@@ -48,6 +56,7 @@ public static class PropertyAccessorFactory
     /// on a boxed instance without going through <see cref="PropertyInfo.SetValue"/>.
     /// Falls back to <see cref="PropertyInfo.SetValue"/> when the property has no public setter.
     /// </summary>
+    [RequiresUnreferencedCode("Expression.Lambda.Compile() is not AOT-safe. Use DataRecord ordinal access instead.")]
     public static Action<object, object?> BuildSetter(PropertyInfo property)
     {
         var setter = property.GetSetMethod(nonPublic: false);
@@ -55,6 +64,7 @@ public static class PropertyAccessorFactory
         // Fall back to PropertyInfo.SetValue when there is no public setter, or when the setter is
         // init-only.  Init-only setters carry the IsExternalInit modreq which causes the expression-tree
         // compiler to throw BadImageFormatException (Bad binary signature, 0x80131192).
+        // DynamicPropertyInfo returns null here — uses its overridden SetValue directly (AOT-safe).
         if (setter == null || IsExternalInitDetector.IsInitOnlySetter(setter))
             return (obj, val) => property.SetValue(obj, val);
 

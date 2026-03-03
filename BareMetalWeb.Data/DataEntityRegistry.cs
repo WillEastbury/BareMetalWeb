@@ -15,6 +15,13 @@ public static class DataEntityRegistry
     }
 
     /// <summary>
+    /// Registers a single entity type without reflection or assembly scanning.
+    /// AOT-safe alternative to <see cref="RegisterAllEntities"/>.
+    /// </summary>
+    public static bool RegisterEntity<T>() where T : BaseDataObject, new()
+        => DataScaffold.RegisterEntity<T>();
+
+    /// <summary>
     /// Loads virtual entity definitions from <paramref name="filePath"/> and registers
     /// them with <see cref="DataScaffold"/>. If the file does not exist, the call is a no-op.
     /// </summary>
