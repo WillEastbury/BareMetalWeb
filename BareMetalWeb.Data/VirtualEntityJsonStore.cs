@@ -13,6 +13,11 @@ namespace BareMetalWeb.Data;
 /// Each instance is stored as a UTF-8 JSON file at
 /// <c>{rootPath}/virtual/{entityTypeName}/{id}.json</c>.
 /// </summary>
+/// <remarks>
+/// Deprecated: use <see cref="WalDataProvider"/> with <see cref="DataRecord"/> instead.
+/// This class is retained for backward compatibility during migration.
+/// </remarks>
+[Obsolete("Use WalDataProvider with DataRecord instead. Will be removed in a future release.")]
 public sealed class VirtualEntityJsonStore
 {
     private readonly string _rootPath;

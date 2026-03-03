@@ -4,6 +4,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Version>1.0.0</Version>
+    <!-- AOT: produce a single native binary with no JIT dependency -->
+    <PublishAot>true</PublishAot>
     <!-- Trimming: reduce memory footprint for self-contained deploys -->
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>partial</TrimMode>

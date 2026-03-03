@@ -7,6 +7,11 @@ namespace BareMetalWeb.Data;
 /// A <see cref="BaseDataObject"/> that stores field values in a string dictionary.
 /// Used as the runtime backing type for virtual entities defined in JSON metadata.
 /// </summary>
+/// <remarks>
+/// Deprecated: use <see cref="DataRecord"/> with <see cref="EntitySchema"/> instead.
+/// DataRecord provides ordinal-indexed access (~1-2ns) vs dictionary lookup (~25-50ns).
+/// </remarks>
+[Obsolete("Use DataRecord with EntitySchema instead. Will be removed in a future release.")]
 public sealed class DynamicDataObject : BaseDataObject
 {
     /// <summary>

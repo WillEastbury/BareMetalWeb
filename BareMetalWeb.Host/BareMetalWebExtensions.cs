@@ -47,8 +47,22 @@ public static class BareMetalWebExtensions
         // Initialize binary wire API with the same signing key
         if (serializer is BinaryObjectSerializer bos)
             BinaryApiHandlers.Initialize(bos.GetSigningKeyCopy());
-        try { _ = Assembly.Load("BareMetalWeb.UserClasses"); } catch { }
-        DataEntityRegistry.RegisterAllEntities();
+
+        // LoadCompiledEntities: when true (default), scan assemblies for [DataEntity] types.
+        // Set to false for gallery-first startup where entities come from metadata only.
+        bool loadCompiled = app.Configuration.GetValue("Data:LoadCompiledEntities", true);
+        if (loadCompiled)
+        {
+            try { _ = Assembly.Load("BareMetalWeb.UserClasses"); } catch { }
+            DataEntityRegistry.RegisterAllEntities();
+        }
+        else
+        {
+            // Register system entities explicitly (AOT-safe, no assembly scanning).
+            DataScaffold.RegisterEntity<AppSetting>();
+            logger.LogInfo("Gallery-first mode: skipped compiled entity scanning.");
+        }
+
         DataEntityRegistry.RegisterVirtualEntitiesFromFile(
             Path.Combine(contentRoot, "virtualEntities.json"),
             dataRoot);
