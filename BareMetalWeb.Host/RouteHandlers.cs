@@ -1080,13 +1080,16 @@ public sealed class RouteHandlers : IRouteHandlers
         user.SetPassword(password);
         await Users.SaveAsync(user);
         await SettingsService.EnsureDefaultsAsync(DataStoreProvider.Current, _settingDefaults, userName, context.RequestAborted).ConfigureAwait(false);
-        await EnsureDefaultCurrencies(userName);
-        await EnsureDefaultUnitsOfMeasure(userName);
-        await EnsureDefaultAddress(userName);
+        // Seed lookup tables only when compiled entities are loaded (not gallery-first mode)
+        if (DataScaffold.TryGetEntity("currencies", out _))
+        {
+            await EnsureDefaultCurrencies(userName);
+            await EnsureDefaultUnitsOfMeasure(userName);
+            await EnsureDefaultAddress(userName);
+        }
         await EnsureDefaultReports(userName);
-        context.SetStringValue("title", "Setup");
-        context.SetStringValue("html_message", "<p>Root user created successfully.</p>");
-        await _renderer.RenderPage(context);
+        // Redirect to gallery so the user can deploy modules
+        context.Response.Redirect("/admin/gallery");
     }
 
     private static string[] BuildRootPermissions()
@@ -4067,6 +4070,18 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask SampleDataHandler(HttpContext context)
     {
+        // Sample data generator requires compiled entity types
+        if (!DataScaffold.TryGetEntity("customers", out _))
+        {
+            await BuildPageHandler(ctx =>
+            {
+                ctx.SetStringValue("title", "Generate Sample Data");
+                ctx.SetStringValue("html_message", "<div class=\"alert alert-info\">Sample data generation requires compiled entity modules. " +
+                    "In gallery-first mode, deploy modules from the <a href=\"/admin/gallery\">Gallery</a> first, " +
+                    "or set <code>Data:LoadCompiledEntities=true</code> in appsettings.json and restart.</div>");
+            })(context);
+            return;
+        }
         await BuildPageHandler(ctx =>
         {
             RenderSampleDataForm(ctx, "<p>Generate sample data for load and indexing tests.</p>", 100, 50, 25, 25, 10, 25, 20, 10, 10, clearExisting: false);
@@ -4854,6 +4869,20 @@ public sealed class RouteHandlers : IRouteHandlers
             msg => messages.Add(msg),
             context.RequestAborted)
             .ConfigureAwait(false);
+
+        // Hot-reload the entity registry so deployed entities are immediately usable
+        if (deployed.Count > 0)
+        {
+            try
+            {
+                await RuntimeEntityRegistry.RebuildAsync().ConfigureAwait(false);
+                _logger?.LogInfo($"Gallery|deployed|{packageSlug}|entities={deployed.Count}|registry-rebuilt");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError($"Gallery|rebuild-failed|{packageSlug}", ex);
+            }
+        }
 
         var message = deployed.Count > 0
             ? $"<div class=\"alert alert-success\">Deployed <strong>{WebUtility.HtmlEncode(pkg.Name)}</strong>: {deployed.Count} entit{(deployed.Count == 1 ? "y" : "ies")} imported.</div>"

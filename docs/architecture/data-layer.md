@@ -73,6 +73,34 @@ flowchart TD
     RM --> Routes["/meta/entity/{name}<br/>POST /query<br/>POST /intent"]
 ```
 
+### Gallery-First Mode (default)
+
+Gallery-first mode (`Data:LoadCompiledEntities=false`, the default) boots the
+server with only system entities registered via metadata.  Application entities
+are deployed from gallery packages through the admin UI.
+
+```mermaid
+flowchart TD
+    Boot["Server startup"] --> Sys["Register 10 system entities<br/>(User, UserSession, AuditEntry,<br/>AppSetting, ReportDefinition, …)"]
+    Sys --> Build["RuntimeEntityRegistry.BuildAsync()"]
+    Build --> Ready["Server ready<br/>(no application entities)"]
+    Ready --> Setup["POST /setup<br/>→ redirect to /admin/gallery"]
+    Setup --> Deploy["Deploy gallery package<br/>(e.g. todo, sales, employee)"]
+    Deploy --> Rebuild["RuntimeEntityRegistry.RebuildAsync()<br/>(hot-reload, atomic swap)"]
+    Rebuild --> Live["New entities live<br/>(CRUD + admin UI)"]
+```
+
+**Key behaviours:**
+- `LoadCompiledEntities=true` restores classic mode: all `[DataEntity]`-decorated
+  classes are registered via `DataEntityRegistry.RegisterAllEntities()` at startup.
+- `RebuildAsync()` caches the init parameters from the first `BuildAsync()` call
+  and re-runs `BuildCoreAsync` to pick up newly deployed `EntityDefinition` records.
+  Entity lists are atomically swapped — no restart required.
+- Setup wizard redirects to `/admin/gallery` after creating the root user so
+  new installations are guided to deploy modules.
+- Sample data generation requires compiled entities (`LoadCompiledEntities=true`);
+  in gallery-first mode the UI directs users to deploy modules from the gallery.
+
 ### DataRecord + EntitySchema (ordinal-indexed storage)
 
 `DataRecord` is a `BaseDataObject` subclass that stores field values in an
@@ -261,4 +289,4 @@ Sequential IDs are persisted so they survive restarts:
 
 ---
 
-_Status: Verified against codebase @ commit bd580ba_
+_Status: Verified against codebase @ metadata-migration-719 branch_

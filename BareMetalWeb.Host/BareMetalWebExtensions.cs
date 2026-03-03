@@ -51,7 +51,7 @@ public static class BareMetalWebExtensions
 
         // LoadCompiledEntities: when true (default), scan assemblies for [DataEntity] types.
         // Set to false for gallery-first startup where entities come from metadata only.
-        bool loadCompiled = app.Configuration.GetValue("Data:LoadCompiledEntities", true);
+        bool loadCompiled = app.Configuration.GetValue("Data:LoadCompiledEntities", false);
         if (loadCompiled)
         {
             try { _ = Assembly.Load("BareMetalWeb.UserClasses"); } catch { }
@@ -59,9 +59,18 @@ public static class BareMetalWebExtensions
         }
         else
         {
-            // Register system entities explicitly (AOT-safe, no assembly scanning).
+            // Gallery-first mode: register system entities explicitly (AOT-safe, no assembly scanning).
             DataScaffold.RegisterEntity<AppSetting>();
-            logger.LogInfo("Gallery-first mode: skipped compiled entity scanning.");
+            DataScaffold.RegisterEntity<User>();
+            DataScaffold.RegisterEntity<SystemPrincipal>();
+            DataScaffold.RegisterEntity<AuditEntry>();
+            DataScaffold.RegisterEntity<ReportDefinition>();
+            DataScaffold.RegisterEntity<EntityDefinition>();
+            DataScaffold.RegisterEntity<FieldDefinition>();
+            DataScaffold.RegisterEntity<IndexDefinition>();
+            DataScaffold.RegisterEntity<ActionDefinition>();
+            DataScaffold.RegisterEntity<ActionCommandDefinition>();
+            logger.LogInfo("Gallery-first mode: registered system entities only.");
         }
 
         DataEntityRegistry.RegisterVirtualEntitiesFromFile(
