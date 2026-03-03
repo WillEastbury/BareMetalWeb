@@ -222,3 +222,82 @@ API error responses are sanitized to prevent information leakage:
 
 - **Exception messages** (`ex.Message`) are never exposed in HTTP responses — generic error text is returned instead
 - **Entity type names** are stripped from 404 responses to prevent entity enumeration attacks
+
+## Enterprise SSO — Microsoft Entra ID (Azure AD)
+
+BareMetalWeb supports enterprise single sign-on via Microsoft Entra ID using the OpenID Connect authorization code flow with PKCE. All OIDC logic is implemented inline (no middleware, no Identity framework) in `EntraIdService.cs`.
+
+### Architecture
+
+```
+Browser → GET /auth/sso/login → EntraIdService.BuildAuthorizeUrl()
+                                 ├─ Generates PKCE verifier + challenge (S256)
+                                 ├─ Generates state nonce (CSRF protection)
+                                 ├─ Generates OIDC nonce (token replay protection)
+                                 ├─ Stores all three in encrypted HttpOnly cookies (sso_state, sso_verifier, sso_nonce)
+                                 └─ Redirects to login.microsoftonline.com/…/authorize
+
+Entra ID → GET /auth/sso/callback?code=…&state=…
+                                 ├─ Validates state cookie (CSRF)
+                                 ├─ Exchanges code for tokens via POST to /oauth2/v2.0/token (with PKCE verifier)
+                                 ├─ Decodes id_token JWT payload
+                                 ├─ Validates nonce claim against cookie
+                                 ├─ Fetches group memberships via Microsoft Graph API
+                                 ├─ Provisions or updates local User entity
+                                 ├─ Maps Entra groups → BareMetalWeb permissions
+                                 └─ Signs in via UserAuth.SignInAsync()
+```
+
+### Endpoints
+
+| Route | Method | Handler | Purpose |
+|-------|--------|---------|---------|
+| `/auth/sso/login` | GET | `SsoLoginHandler` | Redirect to Entra authorize endpoint |
+| `/auth/sso/callback` | GET | `SsoCallbackHandler` | Handle authorization code, exchange tokens, sign in |
+| `/auth/sso/logout` | GET | `SsoLogoutHandler` | Clear local session, redirect to Entra front-channel logout |
+
+### Security Controls
+
+- **PKCE** (S256): Protects authorization code exchange against interception
+- **State nonce**: Encrypted cookie validated against callback query parameter (CSRF)
+- **OIDC nonce**: Stored in cookie, validated against `nonce` claim in id_token (token replay)
+- **Rate limiting**: SSO callback is IP-rate-limited (10 attempts per window) using the same `AttemptTracker` as login
+- **Audit logging**: All SSO events logged via `BufferedLogger` — initiations, successes, failures, provisioning
+- **Error sanitization**: Entra error descriptions are not shown to users; generic messages displayed instead
+- **Token trust model**: id_token is trusted from the TLS-protected token endpoint (direct exchange with Microsoft); not used from untrusted sources
+
+### Configuration
+
+```json
+{
+  "EntraId": {
+    "Enabled": true,
+    "TenantId": "your-tenant-id",
+    "ClientId": "your-client-id",
+    "ClientSecret": "your-client-secret",
+    "RedirectUri": "/auth/sso/callback",
+    "AutoProvisionUsers": true,
+    "DefaultPermissions": "user",
+    "GroupRoleMappings": {
+      "entra-group-object-id": "admin"
+    }
+  }
+}
+```
+
+### User Provisioning
+
+On first SSO login, a local `User` entity is created with:
+- `UserName` / `Email` from Entra claims (`email` or `preferred_username`)
+- `DisplayName` from the `name` claim
+- Empty `PasswordHash` (SSO users cannot use local login)
+- Permissions derived from `DefaultPermissions` + group-to-role mapping
+- `CreatedBy` / `UpdatedBy` = `"SSO"`
+
+On subsequent logins, the display name and group-derived permissions are refreshed.
+
+### Files
+
+- `BareMetalWeb.Host/EntraIdService.cs` — OIDC flow, token exchange, user provisioning, group mapping
+- `BareMetalWeb.Host/RouteHandlers.cs` — SSO route handlers (lines 502–615)
+- `BareMetalWeb.Host.Tests/EntraIdServiceTests.cs` — Unit tests

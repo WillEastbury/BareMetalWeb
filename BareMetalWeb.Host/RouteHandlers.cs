@@ -35,6 +35,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private readonly MfaSecretProtector _mfaProtector;
     private readonly string _dataRootFolder;
     private readonly AuditService _auditService;
+    private readonly IBufferedLogger? _logger;
     private readonly IReadOnlyList<(string SettingId, string Value, string Description)> _settingDefaults;
     private const string MfaChallengeCookieName = "mfa_challenge_id";
     private static readonly TimeSpan MfaPendingLifetime = TimeSpan.FromMinutes(5);
@@ -45,12 +46,13 @@ public sealed class RouteHandlers : IRouteHandlers
     private static readonly ConcurrentDictionary<string, AttemptTracker> MfaAttempts = new(StringComparer.Ordinal);
     private const int LoginIpMaxAttempts = 10;
     private const int LoginUserMaxAttempts = 5;
+    private const int SsoCallbackIpMaxAttempts = 10;
     private static readonly ConcurrentDictionary<Type, System.Reflection.PropertyInfo[]> JsonPropertyCache = new();
     private static readonly JsonSerializerOptions JsonIndented = new() { WriteIndented = true };
     private static readonly TimeSpan DataQueryTimeout = TimeSpan.FromSeconds(30);
 
     public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, AuditService auditService,
-        IReadOnlyList<(string SettingId, string Value, string Description)>? settingDefaults = null)
+        IReadOnlyList<(string SettingId, string Value, string Description)>? settingDefaults = null, IBufferedLogger? logger = null)
     {
         _renderer = renderer;
         _templateStore = templateStore;
@@ -58,6 +60,7 @@ public sealed class RouteHandlers : IRouteHandlers
         _mfaProtector = MfaSecretProtector.CreateDefault(mfaKeyRootFolder);
         _dataRootFolder = mfaKeyRootFolder;
         _auditService = auditService;
+        _logger = logger;
         _settingDefaults = settingDefaults ?? Array.Empty<(string, string, string)>();
     }
 
@@ -466,6 +469,182 @@ public sealed class RouteHandlers : IRouteHandlers
 
         await UserAuth.SignOutAsync(context);
         context.Response.Redirect("/");
+    }
+
+    // ── SSO (Entra ID) ────────────────────────────────────────────────
+
+    private EntraIdOptions? GetEntraIdOptions(HttpContext context)
+    {
+        var config = context.RequestServices.GetService(typeof(IConfiguration)) as IConfiguration;
+        var section = config?.GetSection("EntraId");
+        if (section == null || !section.Exists())
+            return null;
+
+        var options = new EntraIdOptions
+        {
+            Enabled = section.GetValue<bool>("Enabled"),
+            TenantId = section.GetValue<string>("TenantId") ?? string.Empty,
+            ClientId = section.GetValue<string>("ClientId") ?? string.Empty,
+            ClientSecret = section.GetValue<string>("ClientSecret") ?? string.Empty,
+            RedirectUri = section.GetValue<string>("RedirectUri") ?? "/auth/sso/callback",
+            AutoProvisionUsers = section.GetValue("AutoProvisionUsers", true),
+            DefaultPermissions = section.GetValue<string>("DefaultPermissions") ?? "user",
+        };
+
+        var mappings = section.GetSection("GroupRoleMappings");
+        if (mappings.Exists())
+        {
+            foreach (var child in mappings.GetChildren())
+                options.GroupRoleMappings[child.Key] = child.Value ?? string.Empty;
+        }
+
+        return options.Enabled && !string.IsNullOrEmpty(options.TenantId) && !string.IsNullOrEmpty(options.ClientId)
+            ? options : null;
+    }
+
+    public ValueTask SsoLoginHandler(HttpContext context)
+    {
+        var options = GetEntraIdOptions(context);
+        if (options == null)
+        {
+            context.Response.StatusCode = 404;
+            return ValueTask.CompletedTask;
+        }
+
+        var sourceIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        _logger?.LogInfo($"SSO|login-initiate|{sourceIp}");
+
+        var authorizeUrl = EntraIdService.BuildAuthorizeUrl(options, context);
+        context.Response.Redirect(authorizeUrl);
+        return ValueTask.CompletedTask;
+    }
+
+    public async ValueTask SsoCallbackHandler(HttpContext context)
+    {
+        var options = GetEntraIdOptions(context);
+        if (options == null)
+        {
+            context.Response.StatusCode = 404;
+            return;
+        }
+
+        var sourceIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        // Rate limit SSO callbacks by IP
+        var ssoIpKey = BuildMfaAttemptKey("sso:ip", sourceIp);
+        if (IsThrottled(ssoIpKey, SsoCallbackIpMaxAttempts, out var ssoRetry))
+        {
+            _logger?.LogInfo($"SSO|callback-throttled|{sourceIp}|retry={FormatThrottleMessage(ssoRetry)}");
+            await BuildPageHandler(ctx =>
+            {
+                RenderLoginForm(ctx, $"Too many SSO attempts. {FormatThrottleMessage(ssoRetry)}", null);
+                return ValueTask.FromResult(true);
+            })(context);
+            return;
+        }
+
+        var code = context.Request.Query["code"].ToString();
+        var state = context.Request.Query["state"].ToString();
+        var error = context.Request.Query["error"].ToString();
+
+        // Handle error from Entra
+        if (!string.IsNullOrEmpty(error))
+        {
+            var errorDesc = context.Request.Query["error_description"].ToString();
+            _logger?.LogInfo($"SSO|callback-error|{sourceIp}|error={error}");
+            RegisterFailure(ssoIpKey, SsoCallbackIpMaxAttempts);
+            await BuildPageHandler(ctx =>
+            {
+                RenderLoginForm(ctx, "SSO authentication was not completed. Please try again.", null);
+                return ValueTask.FromResult(true);
+            })(context);
+            return;
+        }
+
+        // Validate state
+        if (string.IsNullOrEmpty(state) || !EntraIdService.ValidateState(context, state))
+        {
+            _logger?.LogInfo($"SSO|callback-invalid-state|{sourceIp}");
+            RegisterFailure(ssoIpKey, SsoCallbackIpMaxAttempts);
+            await BuildPageHandler(ctx =>
+            {
+                RenderLoginForm(ctx, "Invalid SSO state. Please try again.", null);
+                return ValueTask.FromResult(true);
+            })(context);
+            return;
+        }
+
+        // Exchange code for tokens
+        var userInfo = await EntraIdService.ExchangeCodeAsync(options, context, code, context.RequestAborted)
+            .ConfigureAwait(false);
+
+        if (userInfo == null || string.IsNullOrEmpty(userInfo.Email))
+        {
+            _logger?.LogInfo($"SSO|callback-token-exchange-failed|{sourceIp}");
+            RegisterFailure(ssoIpKey, SsoCallbackIpMaxAttempts);
+            await BuildPageHandler(ctx =>
+            {
+                RenderLoginForm(ctx, "SSO authentication failed. Could not retrieve user information.", null);
+                return ValueTask.FromResult(true);
+            })(context);
+            return;
+        }
+
+        // Provision or update user
+        var user = await EntraIdService.ProvisionUserAsync(options, userInfo, context.RequestAborted)
+            .ConfigureAwait(false);
+
+        if (user == null)
+        {
+            _logger?.LogInfo($"SSO|callback-provision-denied|{sourceIp}|email={userInfo.Email}");
+            await BuildPageHandler(ctx =>
+            {
+                RenderLoginForm(ctx, "Your account could not be provisioned. Contact your administrator.", null);
+                return ValueTask.FromResult(true);
+            })(context);
+            return;
+        }
+
+        if (!user.IsActive)
+        {
+            _logger?.LogInfo($"SSO|callback-inactive|{sourceIp}|email={userInfo.Email}");
+            await BuildPageHandler(ctx =>
+            {
+                RenderLoginForm(ctx, "Your account has been deactivated.", null);
+                return ValueTask.FromResult(true);
+            })(context);
+            return;
+        }
+
+        // Sign in
+        RegisterSuccess(ssoIpKey);
+        _logger?.LogInfo($"SSO|callback-success|{sourceIp}|email={userInfo.Email}|user={user.Key}");
+        await UserAuth.SignInAsync(context, user, rememberMe: false, context.RequestAborted)
+            .ConfigureAwait(false);
+
+        context.Response.Redirect("/");
+    }
+
+    public async ValueTask SsoLogoutHandler(HttpContext context)
+    {
+        var options = GetEntraIdOptions(context);
+        var sourceIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        _logger?.LogInfo($"SSO|logout|{sourceIp}");
+
+        await UserAuth.SignOutAsync(context, context.RequestAborted).ConfigureAwait(false);
+
+        if (options != null)
+        {
+            var scheme = context.Request.IsHttps ? "https" : "http";
+            var host = context.Request.Host.Value;
+            var postLogoutUri = $"{scheme}://{host}/login";
+            var logoutUrl = EntraIdService.BuildLogoutUrl(options, postLogoutUri);
+            context.Response.Redirect(logoutUrl);
+        }
+        else
+        {
+            context.Response.Redirect("/login");
+        }
     }
 
     public async ValueTask AccountHandler(HttpContext context)
@@ -1114,6 +1293,16 @@ public sealed class RouteHandlers : IRouteHandlers
         if (_allowAccountCreation)
         {
             fields.Add(new FormField(FormFieldType.Link, "register", "", false, LinkUrl: "/register", LinkText: "Create Account", LinkClass: "link-secondary"));
+        }
+
+        // Add SSO button if Entra ID is configured
+        var entraOptions = GetEntraIdOptions(context);
+        if (entraOptions != null)
+        {
+            fields.Add(new FormField(FormFieldType.Link, "sso", "", false,
+                LinkUrl: "/auth/sso/login",
+                LinkText: "Sign in with Microsoft",
+                LinkClass: "btn btn-outline-primary w-100 mt-2"));
         }
 
         context.AddFormDefinition(new FormDefinition(

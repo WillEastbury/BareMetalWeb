@@ -46,7 +46,8 @@ public static class BareMetalWebExtensions
 
         // Initialize binary wire API with the same signing key
         if (serializer is BinaryObjectSerializer bos)
-            BinaryApiHandlers.Initialize(bos.GetSigningKeyCopy());
+            BinaryApiHandlers.Initialize(bos.GetSigningKeyCopy(), logger);
+            LookupApiHandlers.Init(logger);
 
         // LoadCompiledEntities: when true (default), scan assemblies for [DataEntity] types.
         // Set to false for gallery-first startup where entities come from metadata only.
@@ -172,7 +173,8 @@ public static class BareMetalWebExtensions
         // requiring a manual edit in the admin UI.
         await SettingsService.EnsureDefaultsAsync(DataStoreProvider.Current, settingDefaults, "system").ConfigureAwait(false);
 
-        IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot, auditService, settingDefaults);
+        IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot, auditService, settingDefaults, logger);
+        EntraIdService.Init(logger);
         IHtmlTemplate mainTemplate = templateStore.Get("Index");
         CancellationTokenSource cts = new CancellationTokenSource();
 

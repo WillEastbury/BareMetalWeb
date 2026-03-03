@@ -75,7 +75,7 @@ public sealed class AuditEntry : BaseDataObject
         get
         {
             try { return string.IsNullOrEmpty(FieldChangesJson) ? new() : System.Text.Json.JsonSerializer.Deserialize<List<FieldChange>>(FieldChangesJson) ?? new(); }
-            catch { return new(); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"AuditEntry.FieldChanges deserialization failed: {ex.Message}"); return new(); }
         }
         set { FieldChangesJson = System.Text.Json.JsonSerializer.Serialize(value ?? new List<FieldChange>()); }
     }

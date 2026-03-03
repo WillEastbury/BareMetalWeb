@@ -946,7 +946,7 @@ public static class DataScaffold
                     var ast    = parser.Parse(calcAttr.Expression);
                     fd["calculated"] = new Dictionary<string, object?> { ["expression"] = ast.ToJsonAst() };
                 }
-                catch { fd["calculated"] = new Dictionary<string, object?> { ["expression"] = FallbackAstObject }; }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Calculated field expression parse failed for {field.Name}: {ex.Message}"); fd["calculated"] = new Dictionary<string, object?> { ["expression"] = FallbackAstObject }; }
             }
             else
             {

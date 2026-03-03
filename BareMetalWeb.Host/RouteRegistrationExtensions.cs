@@ -97,6 +97,17 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Logout", "" }, "Authenticated", false, 1),
             routeHandlers.LogoutPostHandler));
 
+        // SSO (Entra ID)
+        host.RegisterRoute("GET /auth/sso/login", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 302, Array.Empty<string>(), Array.Empty<string>(), "AnonymousOnly", false, 0),
+            routeHandlers.SsoLoginHandler));
+        host.RegisterRoute("GET /auth/sso/callback", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "SSO Login", "" }, "AnonymousOnly", false, 0),
+            routeHandlers.SsoCallbackHandler));
+        host.RegisterRoute("GET /auth/sso/logout", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 302, Array.Empty<string>(), Array.Empty<string>(), "Authenticated", false, 0),
+            routeHandlers.SsoLogoutHandler));
+
         // Account management
         host.RegisterRoute("GET /account", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Account", "" }, "Authenticated", true, 1, navGroup: "Account", navAlignment: NavAlignment.Right),

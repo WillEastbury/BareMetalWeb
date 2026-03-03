@@ -312,7 +312,7 @@ public static class CalculatedFieldService
             foreach (var field in layout.Fields)
             {
                 try { context[field.Name] = field.Getter(instance); }
-                catch { context[field.Name] = null; }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"CalculatedFieldService: field '{field.Name}' getter failed: {ex.Message}"); context[field.Name] = null; }
             }
             return context;
         }

@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Core;
+using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 
 namespace BareMetalWeb.Host;
@@ -19,6 +20,7 @@ public static class BinaryApiHandlers
     /// <summary>Get the serializer instance for use by related handlers.</summary>
     internal static MetadataWireSerializer? GetSerializer() => _serializer;
     private static byte[]? _signingKeyRaw;
+    private static IBufferedLogger? _logger;
     private static readonly ConcurrentDictionary<string, MetadataWireSerializer.FieldPlan[]> _plans = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, MetadataWireSerializer.WireSchemaDescriptor> _schemas = new(StringComparer.OrdinalIgnoreCase);
 
@@ -28,10 +30,11 @@ public static class BinaryApiHandlers
     /// Initialise the binary API subsystem with the shared signing key.
     /// Call once at startup after data store creation.
     /// </summary>
-    public static void Initialize(byte[] signingKey)
+    public static void Initialize(byte[] signingKey, IBufferedLogger? logger = null)
     {
         _signingKeyRaw = (byte[])signingKey.Clone();
         _serializer = new MetadataWireSerializer(signingKey);
+        _logger = logger;
     }
 
     // ────────────── Helpers ──────────────
@@ -161,8 +164,9 @@ public static class BinaryApiHandlers
             var plan = GetOrBuildPlan(meta);
             await WriteListResponse(context, list, plan);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger?.LogError("BinaryAPI|list", ex);
             await WriteError(context, (500, "Error querying entities."));
         }
     }
@@ -230,8 +234,9 @@ public static class BinaryApiHandlers
             writer.WriteEndObject();
             await writer.FlushAsync(context.RequestAborted);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger?.LogError("BinaryAPI|aggregate", ex);
             await WriteError(context, (500, "Error computing aggregate."));
         }
     }
@@ -261,8 +266,9 @@ public static class BinaryApiHandlers
             var plan = GetOrBuildPlan(meta);
             await WriteEntityResponse(context, entity, plan);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger?.LogError("BinaryAPI|get", ex);
             await WriteError(context, (500, "Error loading entity."));
         }
     }
@@ -288,8 +294,9 @@ public static class BinaryApiHandlers
             await DataScaffold.SaveAsync(meta, entity, context.RequestAborted);
             await WriteEntityResponse(context, entity, plan, StatusCodes.Status201Created);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger?.LogError("BinaryAPI|create", ex);
             await WriteError(context, (500, "Error creating entity."));
         }
     }
@@ -325,8 +332,9 @@ public static class BinaryApiHandlers
             await DataScaffold.SaveAsync(meta, entity, context.RequestAborted);
             await WriteEntityResponse(context, entity, plan);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger?.LogError("BinaryAPI|update", ex);
             await WriteError(context, (500, "Error updating entity."));
         }
     }
@@ -352,8 +360,9 @@ public static class BinaryApiHandlers
             await meta.Handlers.DeleteAsync(id, context.RequestAborted);
             context.Response.StatusCode = StatusCodes.Status204NoContent;
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger?.LogError("BinaryAPI|delete", ex);
             await WriteError(context, (500, "Error deleting entity."));
         }
     }

@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Core;
+using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 
 namespace BareMetalWeb.Host;
@@ -16,6 +17,10 @@ namespace BareMetalWeb.Host;
 public static class LookupApiHandlers
 {
     private static readonly JsonSerializerOptions JsonCamelCase = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false };
+    private static IBufferedLogger? _logger;
+
+    /// <summary>Initialise with a logger for error diagnostics.</summary>
+    public static void Init(IBufferedLogger? logger) => _logger = logger;
 
     /// <summary>
     /// GET /api/_lookup/{EntityType}/{Id}
@@ -52,8 +57,9 @@ public static class LookupApiHandlers
             var result = await EntityToJsonAsync(entity, meta, traverse, context.RequestAborted);
             await WriteJsonAsync(context, result);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger?.LogError("LookupAPI|get", ex);
             await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, "Error loading entity.");
         }
     }
@@ -101,8 +107,9 @@ public static class LookupApiHandlers
                 ["count"] = results.Count
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger?.LogError("LookupAPI|query", ex);
             await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, "Error querying entities.");
         }
     }
@@ -167,8 +174,9 @@ public static class LookupApiHandlers
 
             await WriteJsonAsync(context, new Dictionary<string, object> { ["results"] = results });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger?.LogError("LookupAPI|batch", ex);
             await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, "Error loading entities.");
         }
     }
@@ -226,8 +234,9 @@ public static class LookupApiHandlers
                 ["value"] = value
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger?.LogError("LookupAPI|field", ex);
             await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, "Error loading field.");
         }
     }
@@ -299,8 +308,9 @@ public static class LookupApiHandlers
                 ["count"] = result.Count
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger?.LogError("LookupAPI|aggregate", ex);
             await WriteJsonErrorAsync(context, StatusCodes.Status500InternalServerError, "Error computing aggregate.");
         }
     }
