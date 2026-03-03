@@ -73,6 +73,36 @@ flowchart TD
     RM --> Routes["/meta/entity/{name}<br/>POST /query<br/>POST /intent"]
 ```
 
+### DataRecord + EntitySchema (ordinal-indexed storage)
+
+`DataRecord` is a `BaseDataObject` subclass that stores field values in an
+ordinal-indexed `object?[]` array. `EntitySchema` provides the parallel-array
+type descriptor (shared per entity type, not per instance).
+
+```
+EntitySchema (per type, shared):
+  string[]     Names         Names[ord] → "Email"
+  FieldType[]  Types         Types[ord] → StringUtf8
+  Type[]       ClrTypes      ClrTypes[ord] → typeof(string)
+  bool[]       IsNullable    IsNullable[ord] → false
+  bool[]       IsRequired    IsRequired[ord] → true
+  bool[]       IsIndexed     IsIndexed[ord] → true
+  int[]        MaxLengths    MaxLengths[ord] → 255
+  FrozenDictionary<string,int>  NameToOrdinal  (boundary only)
+
+DataRecord (per instance):
+  object?[]    _values       _values[ord] → "alice@x.com"
+```
+
+**Performance:** ~1–2 ns per field access (array index = base pointer + offset),
+matching compiled C# property access and 25–50× faster than dictionary lookup.
+
+**AOT-safe:** FieldPlan getter/setter closures capture the ordinal — no
+`Expression.Lambda().Compile()`, no `PropertyInfo`, fully Native AOT compatible.
+
+`EntitySchemaFactory.FromModel(RuntimeEntityModel)` bridges the runtime
+compilation pipeline to the data layer.
+
 ---
 
 ## CRUD Lifecycle
