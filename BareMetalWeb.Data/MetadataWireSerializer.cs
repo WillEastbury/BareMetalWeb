@@ -528,8 +528,7 @@ public sealed class MetadataWireSerializer
         if (hasValue == 0)
             throw new InvalidOperationException("Null entity in binary payload.");
 
-        var instance = Activator.CreateInstance(entityType)
-            ?? throw new InvalidOperationException($"Cannot create instance of {entityType.Name}.");
+        var instance = CreateEntityInstance(entityType);
 
         for (int i = 0; i < plan.Length; i++)
         {
@@ -540,6 +539,19 @@ public sealed class MetadataWireSerializer
         }
 
         return instance;
+    }
+
+    /// <summary>
+    /// AOT-safe entity instance creation. Returns a <see cref="DataRecord"/> when the
+    /// target type is DataRecord; falls back to <see cref="RuntimeHelpers.GetUninitializedObject"/>
+    /// for compiled entity types.
+    /// </summary>
+    private static object CreateEntityInstance(Type entityType)
+    {
+        if (entityType == typeof(DataRecord))
+            return new DataRecord();
+
+        return System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(entityType);
     }
 
     private static object? ReadFieldValue(ref SpanReader reader, FieldPlan fp, int depth)
@@ -872,8 +884,7 @@ public sealed class MetadataWireSerializer
     /// </summary>
     public static object DeserializeFromJson(System.Text.Json.JsonElement root, FieldPlan[] plan, Type entityType)
     {
-        var instance = Activator.CreateInstance(entityType)
-            ?? throw new InvalidOperationException($"Cannot create instance of {entityType.Name}.");
+        var instance = CreateEntityInstance(entityType);
 
         // Build a name→plan lookup for JSON property matching (case-insensitive)
         // This is O(N) at call time but avoids dictionary allocation for small entities.

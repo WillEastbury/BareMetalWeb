@@ -222,7 +222,19 @@ public sealed class TransactionCommitEngine
     /// </summary>
     private static BaseDataObject CloneEntity(BaseDataObject source, DataEntityMetadata meta)
     {
-        var clone = (BaseDataObject)Activator.CreateInstance(source.GetType())!;
+        // AOT-safe: DataRecord clones via schema-aware constructor; compiled entities
+        // fall back to RuntimeHelpers (no parameterless-ctor requirement).
+        BaseDataObject clone;
+        if (source is DataRecord dr && dr.Schema is { } schema)
+        {
+            clone = new DataRecord(schema);
+        }
+        else
+        {
+            clone = (BaseDataObject)System.Runtime.CompilerServices.RuntimeHelpers
+                .GetUninitializedObject(source.GetType());
+        }
+
         clone.Key = source.Key;
 
         var layout = EntityLayoutCompiler.GetOrCompile(meta);

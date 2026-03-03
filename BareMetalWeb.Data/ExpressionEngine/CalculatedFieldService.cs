@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace BareMetalWeb.Data.ExpressionEngine;
 
@@ -326,13 +327,30 @@ public static class CalculatedFieldService
         return false;
     }
 
-    private static object? ConvertToPropertyType(object? value, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type targetType)
+    private static object? ConvertToPropertyType(object? value, Type targetType)
     {
         if (value == null)
         {
             if (Nullable.GetUnderlyingType(targetType) != null || !targetType.IsValueType)
                 return null;
-            return Activator.CreateInstance(targetType);
+
+            // AOT-safe default values for known value types (no Activator.CreateInstance).
+            if (targetType == typeof(int)) return 0;
+            if (targetType == typeof(long)) return 0L;
+            if (targetType == typeof(decimal)) return 0m;
+            if (targetType == typeof(double)) return 0.0;
+            if (targetType == typeof(float)) return 0f;
+            if (targetType == typeof(bool)) return false;
+            if (targetType == typeof(uint)) return 0u;
+            if (targetType == typeof(DateTime)) return default(DateTime);
+            if (targetType == typeof(DateTimeOffset)) return default(DateTimeOffset);
+            if (targetType == typeof(Guid)) return Guid.Empty;
+            if (targetType == typeof(byte)) return (byte)0;
+            if (targetType == typeof(short)) return (short)0;
+            if (targetType == typeof(TimeSpan)) return TimeSpan.Zero;
+
+            // Fallback for unknown value types — still needed for user-defined structs.
+            return RuntimeHelpers.GetUninitializedObject(targetType);
         }
 
         var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;
