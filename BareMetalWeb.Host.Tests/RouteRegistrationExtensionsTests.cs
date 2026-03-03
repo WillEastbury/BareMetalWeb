@@ -737,6 +737,27 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
+    public void RegisterApiRoutes_RegistersQueryPlanHistoryRoute()
+    {
+        // Arrange & Act
+        _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
+
+        // Assert
+        Assert.True(_server.routes.ContainsKey("GET /api/admin/query-plans"));
+    }
+
+    [Fact]
+    public void RegisterApiRoutes_QueryPlanHistoryRoute_RequiresAdminPermission()
+    {
+        // Arrange & Act
+        _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
+
+        // Assert
+        var route = _server.routes["GET /api/admin/query-plans"];
+        Assert.Equal("admin", route.PageInfo!.PageMetaData.PermissionsNeeded);
+    }
+
+    [Fact]
     public void RegisterApiRoutes_AllRoutes_HaveAuthenticatedPermission()
     {
         // Arrange & Act
