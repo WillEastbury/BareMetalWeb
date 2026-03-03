@@ -99,9 +99,26 @@ matching compiled C# property access and 25–50× faster than dictionary lookup
 
 **AOT-safe:** FieldPlan getter/setter closures capture the ordinal — no
 `Expression.Lambda().Compile()`, no `PropertyInfo`, fully Native AOT compatible.
+BaseDataObject structural properties (Key, timestamps, audit trail, ETag, Version)
+are serialized as a prefix via dedicated closures — no Activator.CreateInstance.
 
 `EntitySchemaFactory.FromModel(RuntimeEntityModel)` bridges the runtime
 compilation pipeline to the data layer.
+
+### WAL Storage for DataRecord
+
+`WalDataProvider` provides non-generic save/load/query/delete methods for
+`DataRecord` entities:
+
+- `SaveRecord(DataRecord, EntitySchema)` — serializes via `MetadataWireSerializer`
+  with FieldPlan closures, commits to WAL, updates secondary indexes
+- `LoadRecord(uint key, EntitySchema)` — reads WAL payload, deserializes into
+  pre-created `DataRecord` via `DeserializeInto()` (AOT-safe, no `Activator.CreateInstance`)
+- `QueryRecords(EntitySchema, QueryDefinition?)` — full scan with ordinal-based
+  clause matching, sorting, and paging
+- `DeleteRecord(uint key, EntitySchema)` — WAL tombstone, index cleanup
+- All methods share the same deser cache as generic `Load<T>`, keyed by
+  `(entityName, key, walPointer)`
 
 ---
 

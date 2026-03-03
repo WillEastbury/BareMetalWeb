@@ -471,6 +471,48 @@ public sealed class MetadataWireSerializer
         return ReadEntity(ref reader, plan, entityType);
     }
 
+    /// <summary>
+    /// Deserializes a signed binary payload into a pre-created instance.
+    /// Avoids <c>Activator.CreateInstance</c> — fully AOT-safe.
+    /// The caller creates the instance (e.g. <see cref="DataRecord"/>)
+    /// and this method populates it via the field plan setters.
+    /// </summary>
+    public void DeserializeInto(ReadOnlySpan<byte> data, FieldPlan[] plan, object instance)
+    {
+        ValidateSignature(data);
+        var reader = new SpanReader(data);
+
+        // Skip header
+        reader.ReadInt32(); // magic
+        reader.ReadInt32(); // version
+        reader.ReadInt32(); // schema version
+        reader.ReadByte();  // architecture
+        Span<byte> sigBuf = stackalloc byte[SignatureSize];
+        reader.ReadBytes(sigBuf); // signature
+
+        var hasValue = reader.ReadByte();
+        if (hasValue == 0)
+            throw new InvalidOperationException("Null entity in binary payload.");
+
+        for (int i = 0; i < plan.Length; i++)
+        {
+            var fp = plan[i];
+            var value = ReadFieldValue(ref reader, fp, 0);
+            if (value is not null || !fp.ClrType.IsValueType)
+                fp.Setter(instance, value);
+        }
+    }
+
+    /// <summary>
+    /// Reads the schema version from a binary payload header without full validation.
+    /// </summary>
+    public int ReadSchemaVersionFromPayload(ReadOnlySpan<byte> data)
+    {
+        if (data.Length < HeaderSize)
+            throw new InvalidOperationException("Payload too short for BSO1 header.");
+        return BinaryPrimitives.ReadInt32LittleEndian(data.Slice(8, 4));
+    }
+
     private static object ReadEntity(ref SpanReader reader, FieldPlan[] plan, Type entityType)
     {
         var hasValue = reader.ReadByte();

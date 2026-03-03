@@ -116,18 +116,50 @@ public sealed class EntitySchema
 
     /// <summary>
     /// Builds <see cref="MetadataWireSerializer.FieldPlanDescriptor"/> entries
-    /// for this schema. Getters/setters are simple ordinal closures — no
-    /// <c>Expression.Compile</c>, no reflection, fully AOT-safe.
+    /// for this schema. Includes BaseDataObject structural fields (Key, timestamps,
+    /// audit, ETag, Version, EntityTypeName) followed by schema-defined fields.
+    /// All getters/setters are simple closures — no reflection, fully AOT-safe.
     /// </summary>
     public MetadataWireSerializer.FieldPlanDescriptor[] BuildFieldPlanDescriptors()
     {
-        var descriptors = new MetadataWireSerializer.FieldPlanDescriptor[FieldCount];
+        // Base properties: Key, CreatedOnUtc, UpdatedOnUtc, CreatedBy, UpdatedBy, ETag, Version, EntityTypeName
+        var basePlans = new MetadataWireSerializer.FieldPlanDescriptor[]
+        {
+            MakeDescriptor("__Key", typeof(uint), false,
+                obj => ((DataRecord)obj).Key,
+                (obj, val) => ((DataRecord)obj).Key = val is uint u ? u : 0u),
+            MakeDescriptor("__CreatedOnUtc", typeof(DateTime), false,
+                obj => ((DataRecord)obj).CreatedOnUtc,
+                (obj, val) => ((DataRecord)obj).CreatedOnUtc = val is DateTime dt ? dt : default),
+            MakeDescriptor("__UpdatedOnUtc", typeof(DateTime), false,
+                obj => ((DataRecord)obj).UpdatedOnUtc,
+                (obj, val) => ((DataRecord)obj).UpdatedOnUtc = val is DateTime dt ? dt : default),
+            MakeDescriptor("__CreatedBy", typeof(string), true,
+                obj => ((DataRecord)obj).CreatedBy,
+                (obj, val) => ((DataRecord)obj).CreatedBy = val?.ToString() ?? string.Empty),
+            MakeDescriptor("__UpdatedBy", typeof(string), true,
+                obj => ((DataRecord)obj).UpdatedBy,
+                (obj, val) => ((DataRecord)obj).UpdatedBy = val?.ToString() ?? string.Empty),
+            MakeDescriptor("__ETag", typeof(string), true,
+                obj => ((DataRecord)obj).ETag,
+                (obj, val) => ((DataRecord)obj).ETag = val?.ToString() ?? string.Empty),
+            MakeDescriptor("__Version", typeof(uint), false,
+                obj => ((DataRecord)obj).Version,
+                (obj, val) => ((DataRecord)obj).Version = val is uint u ? u : 0u),
+            MakeDescriptor("__EntityTypeName", typeof(string), true,
+                obj => ((DataRecord)obj).EntityTypeName,
+                (obj, val) => ((DataRecord)obj).EntityTypeName = val?.ToString() ?? string.Empty),
+        };
+
+        var descriptors = new MetadataWireSerializer.FieldPlanDescriptor[basePlans.Length + FieldCount];
+        basePlans.CopyTo(descriptors, 0);
+
         for (int i = 0; i < FieldCount; i++)
         {
             int ord = i; // capture for closure
             var (wireType, wireNullable, enumUnderlying) =
                 MetadataWireSerializer.ResolveWireType(ClrTypes[i]);
-            descriptors[i] = new MetadataWireSerializer.FieldPlanDescriptor
+            descriptors[basePlans.Length + i] = new MetadataWireSerializer.FieldPlanDescriptor
             {
                 Name = Names[i],
                 WireType = wireType,
@@ -139,6 +171,23 @@ public sealed class EntitySchema
             };
         }
         return descriptors;
+    }
+
+    private static MetadataWireSerializer.FieldPlanDescriptor MakeDescriptor(
+        string name, Type clrType, bool nullable,
+        Func<object, object?> getter, Action<object, object?> setter)
+    {
+        var (wireType, wireNullable, enumUnderlying) = MetadataWireSerializer.ResolveWireType(clrType);
+        return new MetadataWireSerializer.FieldPlanDescriptor
+        {
+            Name = name,
+            WireType = wireType,
+            IsNullable = wireNullable || nullable,
+            Getter = getter,
+            Setter = setter,
+            ClrType = clrType,
+            EnumUnderlying = enumUnderlying,
+        };
     }
 
     // ── Builder ────────────────────────────────────────────────────────────
