@@ -26,6 +26,7 @@ public interface IBareWebHost
     PageInfo NotFoundPageInfo { get; }
     PageInfo ErrorPageInfo { get; }
     CancellationTokenSource cts { get; }
+    bool ShowHostDiagnostics { get; }
     string[] CorsAllowedOrigins { get; set; }
     string[] CorsAllowedMethods { get; set; }
     string[] CorsAllowedHeaders { get; set; }

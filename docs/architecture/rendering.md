@@ -208,4 +208,29 @@ CSV export is available via `GET /api/reports/{id}` (returns `text/csv`).
 
 ---
 
+## Diagnostic Host Banner
+
+A server-info overlay can be injected into any rendered HTML page for scaleout debugging.
+
+**Activation:** Two conditions must both be true:
+1. System setting `diagnostics.showHostInfo` set to `True` (managed via the admin settings UI — `WellKnownSettings.ShowHostInfo`)
+2. `?showhst=true` query parameter present on the request
+
+The setting is seeded into the system settings store at startup with a default value of `False` and can be toggled at runtime from the admin settings UI without redeploying.
+
+**Content (injected before `</body>` in the response):**
+
+| Field | Source |
+|---|---|
+| `init` | `X-Forwarded-Host` header (when behind a proxy) or `Request.Host` |
+| `svr` | `Dns.GetHostName()` — the machine serving the request |
+| `rtt` | `MetricsTracker.GetSnapshot().RecentAverageResponseTime` (last 5-min avg) |
+| `payload` | Response HTML byte count before banner injection |
+
+**Coverage:** SSR pages (`HtmlRenderer.RenderPage`), VNext SPA shell (`ServeVNextShell`), and Report pages (`ReportHtmlRenderer.AppendChromeFooter`).
+
+**Security:** Both conditions must be met simultaneously to show the banner. The default system-setting value is `False`; never enable in production without authentication controls.
+
+---
+
 _Status: Updated to clarify VNext (client-side, `/UI`) vs SSR screenchrome rendering (commerce & CMS pages). Verified against codebase @ commit e38d19057e1a55fc1d9a563f5ec6228bb991a0b5_

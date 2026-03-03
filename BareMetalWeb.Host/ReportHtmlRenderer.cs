@@ -4,6 +4,7 @@ using System.Text;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
+using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Host;
 
@@ -29,7 +30,8 @@ public static class ReportHtmlRenderer
         string reportId = "",
         IBareWebHost? host = null,
         string? nonce = null,
-        string? csrfToken = null)
+        string? csrfToken = null,
+        HttpContext? context = null)
     {
         var safeNonce = WebUtility.HtmlEncode(nonce ?? string.Empty);
         var safeToken = WebUtility.HtmlEncode(csrfToken ?? string.Empty);
@@ -190,7 +192,7 @@ public static class ReportHtmlRenderer
 
         // Chrome footer
         var footerSb = new StringBuilder(512);
-        AppendChromeFooter(footerSb, safeNonce, host);
+        AppendChromeFooter(footerSb, safeNonce, host, context);
         Write(writer, footerSb.ToString());
 
         await writer.FlushAsync();
@@ -235,8 +237,9 @@ public static class ReportHtmlRenderer
     }
 
     /// <summary>Appends the standard site footer element, closing Bootstrap scripts, and body/html tags to <paramref name="sb"/>.
-    /// When <paramref name="host"/> is provided the footer includes the copyright bar and theme selector matching index.footer.html.</summary>
-    internal static void AppendChromeFooter(StringBuilder sb, string safeNonce, IBareWebHost? host = null)
+    /// When <paramref name="host"/> is provided the footer includes the copyright bar and theme selector matching index.footer.html.
+    /// When <paramref name="context"/> is provided and both the <c>showhst=true</c> query parameter and <see cref="IBareWebHost.ShowHostDiagnostics"/> are set, a diagnostic banner is also appended.</summary>
+    internal static void AppendChromeFooter(StringBuilder sb, string safeNonce, IBareWebHost? host = null, HttpContext? context = null)
     {
         if (host != null)
         {
@@ -286,6 +289,8 @@ public static class ReportHtmlRenderer
         }
 
         sb.Append($"<script src=\"/static/js/bundle.js\" nonce=\"{safeNonce}\" defer></script>");
+        if (context != null && host != null && BareMetalWeb.Rendering.HtmlRenderer.ShouldShowDiagnosticBanner(context, host))
+            sb.Append(BareMetalWeb.Rendering.HtmlRenderer.BuildDiagnosticBannerHtml(context, host, sb.Length));
         sb.Append("</body></html>");
     }
 
