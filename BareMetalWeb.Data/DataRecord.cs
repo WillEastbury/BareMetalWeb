@@ -34,6 +34,9 @@ public sealed class DataRecord : BaseDataObject
         _values = new object?[fieldCount];
     }
 
+    /// <summary>Creates an empty record. The schema and values array must be set before use.</summary>
+    public DataRecord() : this(0) { }
+
     /// <summary>Creates a new record sized to match <paramref name="schema"/>.</summary>
     public DataRecord(EntitySchema schema)
     {

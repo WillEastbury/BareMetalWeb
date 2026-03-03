@@ -2,7 +2,6 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
@@ -41,12 +40,6 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     private const int HeaderSizeV3 = HeaderFieldsSizeV3 + SignatureSize;
     private static readonly byte[] SignaturePlaceholder = new byte[SignatureSize];
     private static readonly string DefaultSigningKeyPath = Path.Combine(AppContext.BaseDirectory, ".keys", "binary-serializer.key");
-    private static readonly MethodInfo BlittableSizeMethod = typeof(BinaryObjectSerializer)
-        .GetMethod(nameof(GetBlittableSizeCore), BindingFlags.NonPublic | BindingFlags.Static)!;
-    private static readonly MethodInfo BlittableWriteMethod = typeof(BinaryObjectSerializer)
-        .GetMethod(nameof(BlittableWriteCore), BindingFlags.NonPublic | BindingFlags.Static)!;
-    private static readonly MethodInfo BlittableReadMethod = typeof(BinaryObjectSerializer)
-        .GetMethod(nameof(BlittableReadCore), BindingFlags.NonPublic | BindingFlags.Static)!;
 
     private readonly byte[] _signingKey;
 
@@ -1201,52 +1194,26 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 
     private static Func<object, object?> CreatePropertyGetter(PropertyInfo property)
     {
-        if (property.GetGetMethod(nonPublic: false) == null)
-            return instance => property.GetValue(instance);
-
-        var instanceParam = Expression.Parameter(typeof(object), "instance");
-        var declaringType = property.DeclaringType ?? typeof(object);
-        var castInstance = Expression.Convert(instanceParam, declaringType);
-        var propertyAccess = Expression.Property(castInstance, property);
-        var boxed = Expression.Convert(propertyAccess, typeof(object));
-        return Expression.Lambda<Func<object, object?>>(boxed, instanceParam).Compile();
+        // AOT-safe: use PropertyInfo.GetValue instead of Expression.Lambda.Compile.
+        return instance => property.GetValue(instance);
     }
 
     private static Action<object, object?> CreatePropertySetter(PropertyInfo property)
     {
-        if (property.GetSetMethod(nonPublic: false) == null)
-            return (instance, value) => property.SetValue(instance, value);
-
-        var instanceParam = Expression.Parameter(typeof(object), "instance");
-        var valueParam = Expression.Parameter(typeof(object), "value");
-        var declaringType = property.DeclaringType ?? typeof(object);
-        var castInstance = Expression.Convert(instanceParam, declaringType);
-        Expression castValue = Expression.Convert(valueParam, property.PropertyType);
-        var propertyAccess = Expression.Property(castInstance, property);
-        var assign = Expression.Assign(propertyAccess, castValue);
-        return Expression.Lambda<Action<object, object?>>(assign, instanceParam, valueParam).Compile();
+        // AOT-safe: use PropertyInfo.SetValue instead of Expression.Lambda.Compile.
+        return (instance, value) => property.SetValue(instance, value);
     }
 
     private static Func<object, object?> CreateFieldGetter(FieldInfo field)
     {
-        var instanceParam = Expression.Parameter(typeof(object), "instance");
-        var declaringType = field.DeclaringType ?? typeof(object);
-        var castInstance = Expression.Convert(instanceParam, declaringType);
-        var fieldAccess = Expression.Field(castInstance, field);
-        var boxed = Expression.Convert(fieldAccess, typeof(object));
-        return Expression.Lambda<Func<object, object?>>(boxed, instanceParam).Compile();
+        // AOT-safe: use FieldInfo.GetValue instead of Expression.Lambda.Compile.
+        return instance => field.GetValue(instance);
     }
 
     private static Action<object, object?> CreateFieldSetter(FieldInfo field)
     {
-        var instanceParam = Expression.Parameter(typeof(object), "instance");
-        var valueParam = Expression.Parameter(typeof(object), "value");
-        var declaringType = field.DeclaringType ?? typeof(object);
-        var castInstance = Expression.Convert(instanceParam, declaringType);
-        Expression castValue = Expression.Convert(valueParam, field.FieldType);
-        var fieldAccess = Expression.Field(castInstance, field);
-        var assign = Expression.Assign(fieldAccess, castValue);
-        return Expression.Lambda<Action<object, object?>>(assign, instanceParam, valueParam).Compile();
+        // AOT-safe: use FieldInfo.SetValue instead of Expression.Lambda.Compile.
+        return (instance, value) => field.SetValue(instance, value);
     }
 
     private static uint GetSignatureHash(MemberSignature[] members)
@@ -1300,8 +1267,23 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (type.IsEnum)
             return Enum.ToObject(type, 0);
 
+        if (type == typeof(DataRecord))
+            return new DataRecord();
+
         if (type.IsValueType)
-            return Activator.CreateInstance(type) ?? throw new InvalidOperationException($"Unable to create default value for '{type.FullName}'.");
+        {
+            // AOT-safe defaults for known value types.
+            if (type == typeof(int)) return 0;
+            if (type == typeof(uint)) return 0u;
+            if (type == typeof(long)) return 0L;
+            if (type == typeof(decimal)) return 0m;
+            if (type == typeof(double)) return 0.0;
+            if (type == typeof(float)) return 0f;
+            if (type == typeof(bool)) return false;
+            if (type == typeof(DateTime)) return default(DateTime);
+            if (type == typeof(Guid)) return Guid.Empty;
+            return RuntimeHelpers.GetUninitializedObject(type);
+        }
 
         return Activator.CreateInstance(type)
             ?? throw new InvalidOperationException($"Unable to create instance for '{type.FullName}'.");
@@ -1369,11 +1351,36 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         }
     }
 
-    private static object? GetDefaultValue([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
+    private static object? GetDefaultValue(Type type)
     {
         if (!type.IsValueType)
             return null;
-        return Activator.CreateInstance(type);
+
+        // AOT-safe default values for known value types.
+        if (type == typeof(int)) return 0;
+        if (type == typeof(uint)) return 0u;
+        if (type == typeof(long)) return 0L;
+        if (type == typeof(ulong)) return 0UL;
+        if (type == typeof(short)) return (short)0;
+        if (type == typeof(ushort)) return (ushort)0;
+        if (type == typeof(byte)) return (byte)0;
+        if (type == typeof(sbyte)) return (sbyte)0;
+        if (type == typeof(decimal)) return 0m;
+        if (type == typeof(double)) return 0.0;
+        if (type == typeof(float)) return 0f;
+        if (type == typeof(bool)) return false;
+        if (type == typeof(char)) return '\0';
+        if (type == typeof(DateTime)) return default(DateTime);
+        if (type == typeof(DateTimeOffset)) return default(DateTimeOffset);
+        if (type == typeof(DateOnly)) return default(DateOnly);
+        if (type == typeof(TimeOnly)) return default(TimeOnly);
+        if (type == typeof(TimeSpan)) return TimeSpan.Zero;
+        if (type == typeof(Guid)) return Guid.Empty;
+        if (type == typeof(Half)) return default(Half);
+        if (type == typeof(IntPtr)) return IntPtr.Zero;
+        if (type == typeof(UIntPtr)) return UIntPtr.Zero;
+
+        return RuntimeHelpers.GetUninitializedObject(type);
     }
 
     private static TypeShape GetTypeShape(Type type)
@@ -1486,7 +1493,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         {
             shape.Kind = TypeKind.List;
             shape.ElementType = AssumePublicMembers(listElementType);
-            shape.ListFactory = capacity => (System.Collections.IList)Activator.CreateInstance(type, capacity)!;
+            // AOT-safe: use parameterless constructor (capacity is just a hint).
+            var listType = type;
+            shape.ListFactory = _ => (System.Collections.IList)Activator.CreateInstance(listType)!;
             return shape;
         }
 
@@ -1495,7 +1504,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             shape.Kind = TypeKind.Dictionary;
             shape.KeyType = AssumePublicMembers(keyType);
             shape.ValueType = AssumePublicMembers(valueType);
-            shape.DictionaryFactory = capacity => (System.Collections.IDictionary)Activator.CreateInstance(type, capacity)!;
+            // AOT-safe: use parameterless constructor (capacity is just a hint).
+            var dictType = type;
+            shape.DictionaryFactory = _ => (System.Collections.IDictionary)Activator.CreateInstance(dictType)!;
             return shape;
         }
 
@@ -1850,9 +1861,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (!IsBlittable(type))
             throw new NotSupportedException($"Type '{type.FullName}' is not blittable.");
 
-        var sizeMethod = BlittableSizeMethod.MakeGenericMethod(type);
-        var func = (Func<int>)sizeMethod.CreateDelegate(typeof(Func<int>));
-        return func();
+        return Marshal.SizeOf(type);
     }
 
     private static Action<object?, byte[]> CreateBlittableWrite(Type type)
@@ -1860,8 +1869,23 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (!IsBlittable(type))
             throw new NotSupportedException($"Type '{type.FullName}' is not blittable.");
 
-        var method = BlittableWriteMethod.MakeGenericMethod(type);
-        return (Action<object?, byte[]>)method.CreateDelegate(typeof(Action<object?, byte[]>));
+        var size = Marshal.SizeOf(type);
+        return (value, buffer) =>
+        {
+            if (buffer is null) throw new ArgumentNullException(nameof(buffer));
+            if (buffer.Length < size)
+                throw new ArgumentException("Blittable buffer is too small.", nameof(buffer));
+
+            if (value is null)
+            {
+                buffer.AsSpan(0, size).Clear();
+                return;
+            }
+
+            var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+            try { Marshal.StructureToPtr(value, handle.AddrOfPinnedObject(), false); }
+            finally { handle.Free(); }
+        };
     }
 
     private static Func<byte[], object> CreateBlittableRead(Type type)
@@ -1869,41 +1893,17 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (!IsBlittable(type))
             throw new NotSupportedException($"Type '{type.FullName}' is not blittable.");
 
-        var method = BlittableReadMethod.MakeGenericMethod(type);
-        return (Func<byte[], object>)method.CreateDelegate(typeof(Func<byte[], object>));
-    }
-
-    private static int GetBlittableSizeCore<T>() where T : unmanaged
-    {
-        return Unsafe.SizeOf<T>();
-    }
-
-    private static void BlittableWriteCore<T>(object? value, byte[] buffer) where T : unmanaged
-    {
-        if (buffer is null) throw new ArgumentNullException(nameof(buffer));
-        var size = Unsafe.SizeOf<T>();
-        if (buffer.Length < size)
-            throw new ArgumentException("Blittable buffer is too small.", nameof(buffer));
-
-        var span = buffer.AsSpan(0, size);
-        if (value is null)
+        return buffer =>
         {
-            span.Clear();
-            return;
-        }
+            if (buffer is null) throw new ArgumentNullException(nameof(buffer));
+            var size = Marshal.SizeOf(type);
+            if (buffer.Length < size)
+                throw new ArgumentException("Blittable buffer is too small.", nameof(buffer));
 
-        var typed = (T)value;
-        MemoryMarshal.Write(span, in typed);
-    }
-
-    private static object BlittableReadCore<T>(byte[] buffer) where T : unmanaged
-    {
-        if (buffer is null) throw new ArgumentNullException(nameof(buffer));
-        var size = Unsafe.SizeOf<T>();
-        if (buffer.Length < size)
-            throw new ArgumentException("Blittable buffer is too small.", nameof(buffer));
-
-        return MemoryMarshal.Read<T>(buffer.AsSpan(0, size));
+            var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
+            try { return Marshal.PtrToStructure(handle.AddrOfPinnedObject(), type)!; }
+            finally { handle.Free(); }
+        };
     }
 
     private static byte[] LoadOrCreateSigningKey(string keyFilePath)

@@ -1959,17 +1959,9 @@ public static class DataScaffold
             return vt.IsCompleted ? (IEnumerable)vt.Result : (IEnumerable)vt.AsTask().GetAwaiter().GetResult();
         }
 
-        // Fallback for unmapped types
-        var method = typeof(IDataObjectStore).GetMethod(nameof(IDataObjectStore.QueryAsync))!;
-        var generic = method.MakeGenericMethod(type);
-        var result = generic.Invoke(DataStoreProvider.Current, new object?[] { query, CancellationToken.None })!;
-
-        var asTaskMethod = result.GetType().GetMethod(nameof(ValueTask<int>.AsTask))!;
-        var task = (Task)asTaskMethod.Invoke(result, null)!;
-        task.GetAwaiter().GetResult();
-
-        var resultProp = task.GetType().GetProperty(nameof(Task<object>.Result))!;
-        return (IEnumerable)resultProp.GetValue(task)!;
+        // AOT-safe: all entities should be registered via metadata handlers.
+        throw new InvalidOperationException(
+            $"Entity type '{type.Name}' is not registered. Register it via DataEntityRegistry or RuntimeEntityRegistry before querying.");
     }
 
     private static int CountByType(Type type, QueryDefinition? query)
@@ -1981,14 +1973,8 @@ public static class DataScaffold
             return vt.IsCompleted ? vt.Result : vt.AsTask().GetAwaiter().GetResult();
         }
 
-        var method = typeof(IDataObjectStore).GetMethod(nameof(IDataObjectStore.CountAsync))!;
-        var generic = method.MakeGenericMethod(type);
-        var result = generic.Invoke(DataStoreProvider.Current, new object?[] { query, CancellationToken.None })!;
-        var asTaskMethod = result.GetType().GetMethod(nameof(ValueTask<int>.AsTask))!;
-        var task = (Task)asTaskMethod.Invoke(result, null)!;
-        task.GetAwaiter().GetResult();
-        var resultProp = task.GetType().GetProperty(nameof(Task<object>.Result))!;
-        return (int)resultProp.GetValue(task)!;
+        throw new InvalidOperationException(
+            $"Entity type '{type.Name}' is not registered. Register it via DataEntityRegistry or RuntimeEntityRegistry before counting.");
     }
 
     private static object? LoadByIdForType(Type type, string id)
@@ -2001,15 +1987,8 @@ public static class DataScaffold
             return vt.IsCompleted ? vt.Result : vt.AsTask().GetAwaiter().GetResult();
         }
 
-        var method = typeof(IDataObjectStore).GetMethod(nameof(IDataObjectStore.LoadAsync))!;
-        var generic = method.MakeGenericMethod(type);
-        var k = uint.Parse(id);
-        var result = generic.Invoke(DataStoreProvider.Current, new object?[] { k, CancellationToken.None })!;
-        var asTaskMethod = result.GetType().GetMethod(nameof(ValueTask<object>.AsTask))!;
-        var task = (Task)asTaskMethod.Invoke(result, null)!;
-        task.GetAwaiter().GetResult();
-        var resultProp = task.GetType().GetProperty(nameof(Task<object>.Result))!;
-        return resultProp.GetValue(task);
+        throw new InvalidOperationException(
+            $"Entity type '{type.Name}' is not registered. Register it via DataEntityRegistry or RuntimeEntityRegistry before loading.");
     }
 
     /// <summary>
@@ -2115,7 +2094,7 @@ public static class DataScaffold
         return options;
     }
 
-    private static bool IsDefaultValue(object? value, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
+    private static bool IsDefaultValue(object? value, Type type)
     {
         if (value == null)
             return true;
@@ -2124,7 +2103,21 @@ public static class DataScaffold
         if (!effectiveType.IsValueType)
             return false;
 
-        var defaultValue = Activator.CreateInstance(effectiveType);
+        // AOT-safe default comparisons for known value types.
+        if (effectiveType == typeof(int)) return (int)value == 0;
+        if (effectiveType == typeof(uint)) return (uint)value == 0u;
+        if (effectiveType == typeof(long)) return (long)value == 0L;
+        if (effectiveType == typeof(decimal)) return (decimal)value == 0m;
+        if (effectiveType == typeof(double)) return (double)value == 0.0;
+        if (effectiveType == typeof(float)) return (float)value == 0f;
+        if (effectiveType == typeof(bool)) return (bool)value == false;
+        if (effectiveType == typeof(DateTime)) return (DateTime)value == default;
+        if (effectiveType == typeof(DateTimeOffset)) return (DateTimeOffset)value == default;
+        if (effectiveType == typeof(Guid)) return (Guid)value == Guid.Empty;
+        if (effectiveType == typeof(byte)) return (byte)value == 0;
+        if (effectiveType == typeof(short)) return (short)value == 0;
+
+        var defaultValue = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(effectiveType);
         return Equals(value, defaultValue);
     }
 
@@ -2612,6 +2605,7 @@ public static class DataScaffold
         return sb.ToString();
     }
 
+    [RequiresUnreferencedCode("Child list parsing requires compiled entity types to be preserved.")]
     private static bool TryParseChildList(string rawValue, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type childType, out object? list)
     {
         list = null;
@@ -2822,6 +2816,7 @@ public static class DataScaffold
         return sb.ToString();
     }
 
+    [RequiresUnreferencedCode("Dictionary parsing requires compiled entity types to be preserved.")]
     private static bool TryParseDictionary(string rawValue, Type valueType, out object? dictionary)
     {
         dictionary = null;
@@ -3190,6 +3185,7 @@ public static class DataScaffold
     /// Each element's properties are matched against the child type's public writable properties
     /// and individually converted with <see cref="TryConvertJson"/>.
     /// </summary>
+    [RequiresUnreferencedCode("JSON child list deserialization requires compiled entity types to be preserved.")]
     private static bool TryConvertJsonChildList(JsonElement element, Type childType, out object? list)
     {
         list = null;
@@ -3519,7 +3515,9 @@ public static class DataScaffold
         object? instance = null;
         try
         {
-            instance = Activator.CreateInstance(declaringType);
+            instance = declaringType == typeof(DataRecord)
+                ? new DataRecord()
+                : System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(declaringType);
         }
         catch
         {
@@ -3530,10 +3528,7 @@ public static class DataScaffold
             return false;
 
         var value = property.GetValue(instance);
-        var defaultValue = property.PropertyType.IsValueType
-            ? Activator.CreateInstance(property.PropertyType)
-            : null;
-        return !Equals(value, defaultValue);
+        return !IsDefaultValue(value, property.PropertyType);
     }
 
     internal static string DeCamelcase(string name) => DeCamelcaseWithId(name);

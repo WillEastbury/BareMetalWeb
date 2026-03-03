@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using BareMetalWeb.Core;
@@ -30,9 +32,13 @@ public sealed record ValidationConfig(
 /// </summary>
 public static class ValidationService
 {
+    private static readonly ConcurrentDictionary<Type, IReadOnlyList<ValidationRuleAttribute>> _entityRulesCache = new();
+
     /// <summary>
     /// Build a ValidationConfig from a property's attributes.
+    /// Called at registration time only (not per-request).
     /// </summary>
+    [RequiresUnreferencedCode("Attribute scanning requires property metadata to be preserved.")]
     public static ValidationConfig? BuildValidationConfig(PropertyInfo property)
     {
         var validators = property.GetCustomAttributes()
@@ -95,10 +101,13 @@ public static class ValidationService
 
     /// <summary>
     /// Get entity-level validation rules (applied to the class, not individual properties).
+    /// Results are cached per type to avoid repeated attribute scanning.
     /// </summary>
+    [RequiresUnreferencedCode("Attribute scanning requires entity type metadata to be preserved.")]
     public static IReadOnlyList<ValidationRuleAttribute> GetEntityRules(Type entityType)
     {
-        return entityType.GetCustomAttributes<ValidationRuleAttribute>().ToList();
+        return _entityRulesCache.GetOrAdd(entityType, static t =>
+            t.GetCustomAttributes<ValidationRuleAttribute>().ToList());
     }
 
     /// <summary>
