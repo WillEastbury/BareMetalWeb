@@ -14,6 +14,13 @@ public sealed class RuntimeEntityRegistry
 {
     private static RuntimeEntityRegistry _current = new RuntimeEntityRegistry();
 
+    // Cached init parameters for RebuildAsync
+    private static IDataObjectStore? _initStore;
+    private static IRuntimeEntityCompiler? _initCompiler;
+    private static WalDataProvider? _initWalProvider;
+    private static string? _initDataRootPath;
+    private static Action<string>? _initLogger;
+
     private readonly object _sync = new();
     private readonly Dictionary<string, RuntimeEntityModel> _bySlug;
     private readonly Dictionary<string, RuntimeEntityModel> _byEntityId;
@@ -109,6 +116,39 @@ public sealed class RuntimeEntityRegistry
     /// <param name="dataRootPath">Root path for virtual entity JSON storage (fallback).</param>
     /// <param name="logger">Optional logger for warnings.</param>
     public static async Task<RuntimeEntityRegistry> BuildAsync(
+        IDataObjectStore store,
+        IRuntimeEntityCompiler compiler,
+        WalDataProvider? walProvider,
+        string dataRootPath,
+        Action<string>? logger = null)
+    {
+        // Cache init parameters for RebuildAsync
+        _initStore = store;
+        _initCompiler = compiler;
+        _initWalProvider = walProvider;
+        _initDataRootPath = dataRootPath;
+        _initLogger = logger;
+
+        return await BuildCoreAsync(store, compiler, walProvider, dataRootPath, logger).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Rebuilds the registry from persisted metadata without requiring a server restart.
+    /// Call after deploying gallery packages to make new entities immediately usable.
+    /// </summary>
+    public static async Task<RuntimeEntityRegistry> RebuildAsync()
+    {
+        if (_initStore == null || _initCompiler == null || _initDataRootPath == null)
+            throw new InvalidOperationException("Cannot rebuild — BuildAsync has not been called yet.");
+
+        _initLogger?.Invoke("Rebuilding RuntimeEntityRegistry...");
+        var registry = await BuildCoreAsync(_initStore, _initCompiler, _initWalProvider, _initDataRootPath, _initLogger)
+            .ConfigureAwait(false);
+        _initLogger?.Invoke($"Registry rebuilt: {registry.All.Count} entities loaded.");
+        return registry;
+    }
+
+    private static async Task<RuntimeEntityRegistry> BuildCoreAsync(
         IDataObjectStore store,
         IRuntimeEntityCompiler compiler,
         WalDataProvider? walProvider,
