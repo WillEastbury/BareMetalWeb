@@ -105,16 +105,18 @@ public sealed class RuntimeEntityRegistry
     /// </summary>
     /// <param name="store">The data store to load schema records from.</param>
     /// <param name="compiler">Compiler instance to use.</param>
-    /// <param name="dataRootPath">Root path for virtual entity JSON storage.</param>
+    /// <param name="walProvider">WAL provider for DataRecord storage (pass null to fall back to JSON).</param>
+    /// <param name="dataRootPath">Root path for virtual entity JSON storage (fallback).</param>
     /// <param name="logger">Optional logger for warnings.</param>
     public static async Task<RuntimeEntityRegistry> BuildAsync(
         IDataObjectStore store,
         IRuntimeEntityCompiler compiler,
+        WalDataProvider? walProvider,
         string dataRootPath,
         Action<string>? logger = null)
     {
         var registry = new RuntimeEntityRegistry();
-        var jsonStore = new VirtualEntityJsonStore(dataRootPath);
+        var jsonStore = walProvider == null ? new VirtualEntityJsonStore(dataRootPath) : null;
 
         // Load all schema records in parallel
         var entityDefs = (await store.QueryAsync<EntityDefinition>().ConfigureAwait(false)).ToList();
@@ -171,7 +173,16 @@ public sealed class RuntimeEntityRegistry
             registry.Register(model);
 
             // Register with DataScaffold so existing admin-UI/API routes work
-            var entityMetadata = model.ToEntityMetadata(jsonStore);
+            DataEntityMetadata entityMetadata;
+            if (walProvider != null)
+            {
+                var schema = EntitySchemaFactory.FromModel(model);
+                entityMetadata = model.ToEntityMetadata(walProvider, schema);
+            }
+            else
+            {
+                entityMetadata = model.ToEntityMetadata(jsonStore!);
+            }
             DataScaffold.RegisterVirtualEntity(entityMetadata);
 
             // Persist schema hash + version back to EntityDefinition if changed

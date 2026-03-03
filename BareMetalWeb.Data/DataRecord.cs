@@ -38,8 +38,16 @@ public sealed class DataRecord : BaseDataObject
     public DataRecord(EntitySchema schema)
     {
         EntityTypeName = schema.EntityName;
+        Schema = schema;
         _values = new object?[schema.FieldCount];
     }
+
+    /// <summary>
+    /// The schema this record was created from, if any. Used by downstream code
+    /// (e.g. <see cref="DynamicPropertyInfo"/>) to resolve field names → ordinals
+    /// without requiring the schema to be passed explicitly.
+    /// </summary>
+    public EntitySchema? Schema { get; }
 
     // ── Hot-path accessors (ordinal) ───────────────────────────────────────
 

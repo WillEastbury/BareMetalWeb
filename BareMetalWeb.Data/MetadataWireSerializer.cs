@@ -100,27 +100,36 @@ public sealed class MetadataWireSerializer
     /// </summary>
     public static FieldPlan[] BuildPlan(Type entityType, IReadOnlyList<FieldPlanDescriptor> fields)
     {
-        return PlanCache.GetOrAdd(entityType, _ =>
+        return PlanCache.GetOrAdd(entityType, _ => BuildPlanCore(fields));
+    }
+
+    /// <summary>
+    /// Builds a FieldPlan[] without caching. Used when the cache key (Type) is shared
+    /// across multiple schemas (e.g. all DataRecord entities share typeof(DataRecord)).
+    /// </summary>
+    public static FieldPlan[] BuildPlanUncached(IReadOnlyList<FieldPlanDescriptor> fields)
+        => BuildPlanCore(fields);
+
+    private static FieldPlan[] BuildPlanCore(IReadOnlyList<FieldPlanDescriptor> fields)
+    {
+        var plans = new FieldPlan[fields.Count];
+        for (int i = 0; i < fields.Count; i++)
         {
-            var plans = new FieldPlan[fields.Count];
-            for (int i = 0; i < fields.Count; i++)
+            var f = fields[i];
+            plans[i] = new FieldPlan
             {
-                var f = fields[i];
-                plans[i] = new FieldPlan
-                {
-                    Name = f.Name,
-                    Ordinal = i,
-                    WireType = f.WireType,
-                    IsNullable = f.IsNullable,
-                    Getter = f.Getter,
-                    Setter = f.Setter,
-                    EnumUnderlying = f.EnumUnderlying,
-                    ElementWireType = f.ElementWireType,
-                    ClrType = f.ClrType,
-                };
-            }
-            return plans;
-        });
+                Name = f.Name,
+                Ordinal = i,
+                WireType = f.WireType,
+                IsNullable = f.IsNullable,
+                Getter = f.Getter,
+                Setter = f.Setter,
+                EnumUnderlying = f.EnumUnderlying,
+                ElementWireType = f.ElementWireType,
+                ClrType = f.ClrType,
+            };
+        }
+        return plans;
     }
 
     /// <summary>
