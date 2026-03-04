@@ -215,5 +215,43 @@
       "UpdatedBy": "",
       "ETag": ""
     }
+  ],
+  "actions": [
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "Name": "MarkComplete",
+      "Label": "\u2705 Mark Complete",
+      "Icon": "bi-check-circle",
+      "Permission": "To Do",
+      "EnabledWhen": "IsCompleted == false",
+      "Version": 1
+    },
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "Name": "Reopen",
+      "Label": "\ud83d\udd04 Reopen",
+      "Icon": "bi-arrow-counterclockwise",
+      "Permission": "To Do",
+      "EnabledWhen": "IsCompleted == true",
+      "Version": 1
+    }
+  ],
+  "actionCommands": [
+    {
+      "ActionId": "MarkComplete",
+      "CommandType": "SetIf",
+      "Order": 1,
+      "Condition": "",
+      "FieldId": "IsCompleted",
+      "ValueExpression": "true"
+    },
+    {
+      "ActionId": "Reopen",
+      "CommandType": "SetIf",
+      "Order": 1,
+      "Condition": "",
+      "FieldId": "IsCompleted",
+      "ValueExpression": "false"
+    }
   ]
 }

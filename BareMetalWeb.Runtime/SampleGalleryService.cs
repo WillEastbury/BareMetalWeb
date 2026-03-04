@@ -200,9 +200,45 @@ public static class SampleGalleryService
                 await store.SaveAsync(newIndex, cancellationToken).ConfigureAwait(false);
             }
 
+            // Import actions that belong to this entity
+            foreach (var srcAction in package.Actions.Where(a => a.EntityId == oldEntityId))
+            {
+                var newAction = new ActionDefinition
+                {
+                    EntityId = newEntity.EntityId,
+                    Name = srcAction.Name,
+                    Label = srcAction.Label,
+                    Icon = srcAction.Icon,
+                    Permission = srcAction.Permission,
+                    EnabledWhen = srcAction.EnabledWhen,
+                    Operations = srcAction.Operations,
+                    Version = srcAction.Version
+                };
+                await store.SaveAsync(newAction, cancellationToken).ConfigureAwait(false);
+
+                // Import action commands that belong to this action (matched by Name)
+                foreach (var srcCmd in package.ActionCommands.Where(c => c.ActionId == srcAction.Name))
+                {
+                    var newCmd = new ActionCommandDefinition
+                    {
+                        ActionId = newAction.Key.ToString(),
+                        CommandType = srcCmd.CommandType,
+                        Order = srcCmd.Order,
+                        Condition = srcCmd.Condition,
+                        FieldId = srcCmd.FieldId,
+                        ValueExpression = srcCmd.ValueExpression,
+                        Severity = srcCmd.Severity,
+                        ErrorCode = srcCmd.ErrorCode,
+                        Message = srcCmd.Message
+                    };
+                    await store.SaveAsync(newCmd, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
             var fieldCount = package.Fields.Count(f => f.EntityId == oldEntityId);
             var indexCount = package.Indexes.Count(ix => ix.EntityId == oldEntityId);
-            logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es).");
+            var actionCount = package.Actions.Count(a => a.EntityId == oldEntityId);
+            logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es), {actionCount} action(s).");
             deployed.Add(srcEntity.Name);
         }
 
@@ -228,5 +264,23 @@ public static class SampleGalleryService
         var idxs = (await store.QueryAsync<IndexDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
         foreach (var idx in idxs)
             await store.DeleteAsync<IndexDefinition>(idx.Key, ct).ConfigureAwait(false);
+
+        // Also delete actions and their commands
+        var actionQuery = new QueryDefinition
+        {
+            Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityDefId } }
+        };
+        var actions = (await store.QueryAsync<ActionDefinition>(actionQuery, ct).ConfigureAwait(false)).ToList();
+        foreach (var action in actions)
+        {
+            var cmdQuery = new QueryDefinition
+            {
+                Clauses = { new QueryClause { Field = "ActionId", Operator = QueryOperator.Equals, Value = action.Key } }
+            };
+            var cmds = (await store.QueryAsync<ActionCommandDefinition>(cmdQuery, ct).ConfigureAwait(false)).ToList();
+            foreach (var cmd in cmds)
+                await store.DeleteAsync<ActionCommandDefinition>(cmd.Key, ct).ConfigureAwait(false);
+            await store.DeleteAsync<ActionDefinition>(action.Key, ct).ConfigureAwait(false);
+        }
     }
 }

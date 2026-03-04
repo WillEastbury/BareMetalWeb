@@ -38,4 +38,10 @@ public sealed class SamplePackage
 
     [JsonPropertyName("indexes")]
     public List<IndexDefinition> Indexes { get; set; } = new();
+
+    [JsonPropertyName("actions")]
+    public List<ActionDefinition> Actions { get; set; } = new();
+
+    [JsonPropertyName("actionCommands")]
+    public List<ActionCommandDefinition> ActionCommands { get; set; } = new();
 }
