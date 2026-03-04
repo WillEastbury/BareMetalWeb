@@ -49,5 +49,12 @@ public class EntityDefinition : RenderableDataObject
     [DataField(Label = "Schema Hash", Order = 10, ReadOnly = true)]
     public string SchemaHash { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Form layout style: "Standard" (default) or "Wizard" (multi-step guided form).
+    /// When "Wizard", fields are grouped by FieldGroup into sequential steps.
+    /// </summary>
+    [DataField(Label = "Form Layout", Order = 11, Placeholder = "Standard | Wizard")]
+    public string FormLayout { get; set; } = "Standard";
+
     public override string ToString() => Name;
 }

@@ -36,6 +36,7 @@ public sealed class RuntimeEntityModel
         AutoIdStrategy idStrategy,
         int version,
         string schemaHash,
+        string formLayout,
         IReadOnlyList<RuntimeFieldModel> fields,
         IReadOnlyList<RuntimeIndexModel> indexes,
         IReadOnlyList<RuntimeActionModel> actions)
@@ -50,6 +51,7 @@ public sealed class RuntimeEntityModel
         IdStrategy = idStrategy;
         Version = version;
         SchemaHash = schemaHash;
+        FormLayout = formLayout;
         Fields = fields;
         Indexes = indexes;
         Actions = actions;
@@ -67,6 +69,9 @@ public sealed class RuntimeEntityModel
 
     /// <summary>FNV-1a hash of field ordinals and types — used for migration-change detection.</summary>
     public string SchemaHash { get; }
+
+    /// <summary>Form layout: "Standard" or "Wizard".</summary>
+    public string FormLayout { get; }
 
     public IReadOnlyList<RuntimeFieldModel> Fields { get; }
     public IReadOnlyList<RuntimeIndexModel> Indexes { get; }

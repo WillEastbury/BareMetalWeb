@@ -2018,22 +2018,29 @@
         html += '<form id="vnext-editor-form" novalidate>';
         html += '<input type="hidden" name="__csrf" value="' + escHtml(getCsrfToken()) + '">';
 
-        html += renderGroupedFormFields(formFields, function (f) { return item ? nestedGet(item, f.name) : null; }, meta, item);
+        var isWizard = (meta.formLayout || '').toLowerCase() === 'wizard';
+        if (isWizard) {
+            html += renderWizardFormFields(formFields, function (f) { return item ? nestedGet(item, f.name) : null; }, meta, item, commands, baseUrl, id, isCreate);
+        } else {
+            html += renderGroupedFormFields(formFields, function (f) { return item ? nestedGet(item, f.name) : null; }, meta, item);
 
-        html += '<div class="mt-4 d-flex gap-2 flex-wrap">';
-        html += '<button type="submit" class="btn btn-primary" id="vnext-save-btn"><i class="bi bi-check-lg"></i> Save</button>';
-        html += '<a class="btn btn-secondary" href="' + (id ? baseUrl + '/' + encodeURIComponent(id) : baseUrl) + '"><i class="bi bi-x-lg"></i> Cancel</a>';
-        // Command buttons (edit mode only)
-        commands.forEach(function (cmd) {
-            var cls = cmd.destructive ? 'btn-outline-danger' : 'btn-outline-secondary';
-            html += '<button type="button" class="btn btn-sm ' + cls + ' vnext-cmd-btn" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '">' +
-                (cmd.icon ? '<i class="bi ' + escHtml(cmd.icon) + ' me-1"></i>' : '') +
-                escHtml(cmd.label) + '</button>';
-        });
-        html += '</div></form></div>';
+            html += '<div class="mt-4 d-flex gap-2 flex-wrap">';
+            html += '<button type="submit" class="btn btn-primary" id="vnext-save-btn"><i class="bi bi-check-lg"></i> Save</button>';
+            html += '<a class="btn btn-secondary" href="' + (id ? baseUrl + '/' + encodeURIComponent(id) : baseUrl) + '"><i class="bi bi-x-lg"></i> Cancel</a>';
+            // Command buttons (edit mode only)
+            commands.forEach(function (cmd) {
+                var cls = cmd.destructive ? 'btn-outline-danger' : 'btn-outline-secondary';
+                html += '<button type="button" class="btn btn-sm ' + cls + ' vnext-cmd-btn" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '">' +
+                    (cmd.icon ? '<i class="bi ' + escHtml(cmd.icon) + ' me-1"></i>' : '') +
+                    escHtml(cmd.label) + '</button>';
+            });
+            html += '</div>';
+        }
+        html += '</form></div>';
 
         setContent(html);
         initFormBehaviours(meta, item, slug, id, isCreate, formFields);
+        if (isWizard) initWizardBehaviour();
 
         // Wire command buttons
         document.querySelectorAll('.vnext-cmd-btn').forEach(function (btn) {
@@ -2054,6 +2061,106 @@
                 if (confirm) showConfirm('Run command?', confirm, doRun);
                 else doRun();
             });
+        });
+    }
+
+    // ── Wizard form rendering ──────────────────────────────────────────────
+    // Groups fields by fieldGroup into sequential steps with step indicator
+    // and prev/next/finish navigation. Falls back to single step if no groups.
+    function renderWizardFormFields(fields, valueFn, meta, item, commands, baseUrl, id, isCreate) {
+        var steps = [];
+        var stepMap = {};
+        fields.forEach(function (f) {
+            var g = f.fieldGroup || 'Details';
+            if (!stepMap[g]) { stepMap[g] = []; steps.push(g); }
+            stepMap[g].push(f);
+        });
+        if (steps.length < 2) steps = ['Details'];
+
+        var html = '';
+        // Step indicator
+        html += '<div class="d-flex justify-content-center mb-4">';
+        steps.forEach(function (s, i) {
+            html += '<div class="text-center mx-3 bm-wizard-step-indicator" data-step="' + i + '">';
+            html += '<div class="rounded-circle d-inline-flex align-items-center justify-content-center border border-2 ' +
+                (i === 0 ? 'border-primary text-primary' : 'border-secondary text-muted') +
+                '" style="width:36px;height:36px;font-weight:600;">' + (i + 1) + '</div>';
+            html += '<div class="small mt-1 ' + (i === 0 ? 'text-primary fw-semibold' : 'text-muted') + '">' + escHtml(s) + '</div>';
+            html += '</div>';
+        });
+        html += '</div>';
+
+        // Step panels
+        steps.forEach(function (s, i) {
+            var stepFields = stepMap[s] || fields;
+            html += '<div class="bm-wizard-panel" data-step="' + i + '" style="' + (i > 0 ? 'display:none' : '') + '">';
+            html += '<div class="card mb-3"><div class="card-header fw-semibold"><i class="bi bi-' + (i + 1) + '-circle me-2"></i>' + escHtml(s) + '</div><div class="card-body">';
+            html += '<div class="row g-3">';
+            stepFields.forEach(function (f) {
+                var span = f.columnSpan || 12;
+                html += '<div class="col-md-' + span + '">';
+                html += renderFormField(f, valueFn(f), meta, item);
+                html += '</div>';
+            });
+            html += '</div></div></div></div>';
+        });
+
+        // Navigation buttons
+        html += '<div class="mt-4 d-flex gap-2 flex-wrap">';
+        html += '<a class="btn btn-secondary" href="' + (id ? baseUrl + '/' + encodeURIComponent(id) : baseUrl) + '"><i class="bi bi-x-lg"></i> Cancel</a>';
+        html += '<button type="button" class="btn btn-outline-primary bm-wizard-prev" style="display:none"><i class="bi bi-chevron-left"></i> Previous</button>';
+        html += '<button type="button" class="btn btn-primary bm-wizard-next"><i class="bi bi-chevron-right"></i> Next</button>';
+        html += '<button type="submit" class="btn btn-success bm-wizard-finish" style="display:none" id="vnext-save-btn"><i class="bi bi-check-lg"></i> Finish</button>';
+        commands.forEach(function (cmd) {
+            var cls = cmd.destructive ? 'btn-outline-danger' : 'btn-outline-secondary';
+            html += '<button type="button" class="btn btn-sm ' + cls + ' vnext-cmd-btn" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '">' +
+                (cmd.icon ? '<i class="bi ' + escHtml(cmd.icon) + ' me-1"></i>' : '') +
+                escHtml(cmd.label) + '</button>';
+        });
+        html += '</div>';
+        return html;
+    }
+
+    function initWizardBehaviour() {
+        var panels = document.querySelectorAll('.bm-wizard-panel');
+        var indicators = document.querySelectorAll('.bm-wizard-step-indicator');
+        var prevBtn = document.querySelector('.bm-wizard-prev');
+        var nextBtn = document.querySelector('.bm-wizard-next');
+        var finishBtn = document.querySelector('.bm-wizard-finish');
+        if (!panels.length || !nextBtn) return;
+        var current = 0;
+        var total = panels.length;
+
+        function showStep(idx) {
+            panels.forEach(function (p, i) { p.style.display = i === idx ? '' : 'none'; });
+            indicators.forEach(function (ind, i) {
+                var circle = ind.querySelector('.rounded-circle');
+                var label = ind.querySelector('.small');
+                if (i < idx) {
+                    circle.className = 'rounded-circle d-inline-flex align-items-center justify-content-center border border-2 border-success text-success';
+                    label.className = 'small mt-1 text-success';
+                } else if (i === idx) {
+                    circle.className = 'rounded-circle d-inline-flex align-items-center justify-content-center border border-2 border-primary text-primary';
+                    label.className = 'small mt-1 text-primary fw-semibold';
+                } else {
+                    circle.className = 'rounded-circle d-inline-flex align-items-center justify-content-center border border-2 border-secondary text-muted';
+                    label.className = 'small mt-1 text-muted';
+                }
+            });
+            prevBtn.style.display = idx > 0 ? '' : 'none';
+            nextBtn.style.display = idx < total - 1 ? '' : 'none';
+            finishBtn.style.display = idx === total - 1 ? '' : 'none';
+            current = idx;
+        }
+
+        prevBtn.addEventListener('click', function () { if (current > 0) showStep(current - 1); });
+        nextBtn.addEventListener('click', function () {
+            // Validate current step fields before advancing
+            var panel = panels[current];
+            var inputs = panel.querySelectorAll('input,select,textarea');
+            var valid = true;
+            inputs.forEach(function (inp) { if (!inp.checkValidity()) { inp.reportValidity(); valid = false; } });
+            if (valid && current < total - 1) showStep(current + 1);
         });
     }
 

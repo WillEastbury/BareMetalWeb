@@ -888,6 +888,7 @@ public static class RouteRegistrationExtensions
                     ["idStrategy"] = runtimeModel.IdStrategy.ToString(),
                     ["version"] = runtimeModel.Version,
                     ["schemaHash"] = runtimeModel.SchemaHash,
+                    ["formLayout"] = runtimeModel.FormLayout,
                     ["fields"] = runtimeModel.Fields.Select(f => (object)new Dictionary<string, object?>
                     {
                         ["fieldId"] = f.FieldId,

@@ -133,6 +133,7 @@ public static class SampleGalleryService
                 NavGroup = srcEntity.NavGroup,
                 NavOrder = srcEntity.NavOrder,
                 Permissions = srcEntity.Permissions,
+                FormLayout = srcEntity.FormLayout ?? "Standard",
                 Version = 1
             };
 

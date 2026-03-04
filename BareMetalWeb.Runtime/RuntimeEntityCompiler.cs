@@ -176,6 +176,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
             idStrategy: idStrategy,
             version: entity.Version,
             schemaHash: schemaHash,
+            formLayout: entity.FormLayout ?? "Standard",
             fields: compiledFields.AsReadOnly(),
             indexes: compiledIndexes.AsReadOnly(),
             actions: compiledActions.AsReadOnly()
