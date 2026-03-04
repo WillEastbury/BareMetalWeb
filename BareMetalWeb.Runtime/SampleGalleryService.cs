@@ -267,6 +267,21 @@ public static class SampleGalleryService
                 await store.SaveAsync(newAgg, cancellationToken).ConfigureAwait(false);
             }
 
+            // Import scheduled action definitions for this entity
+            foreach (var srcSched in package.ScheduledActions.Where(s => s.EntityId == oldEntityId))
+            {
+                var newSched = new ScheduledActionDefinition
+                {
+                    EntityId = newEntity.EntityId,
+                    Name = srcSched.Name,
+                    ActionName = srcSched.ActionName,
+                    Schedule = srcSched.Schedule,
+                    FilterExpression = srcSched.FilterExpression,
+                    Enabled = srcSched.Enabled
+                };
+                await store.SaveAsync(newSched, cancellationToken).ConfigureAwait(false);
+            }
+
             var fieldCount = package.Fields.Count(f => f.EntityId == oldEntityId);
             var indexCount = package.Indexes.Count(ix => ix.EntityId == oldEntityId);
             var actionCount = package.Actions.Count(a => a.EntityId == oldEntityId);
@@ -380,5 +395,10 @@ public static class SampleGalleryService
         var aggs = (await store.QueryAsync<AggregationDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
         foreach (var agg in aggs)
             await store.DeleteAsync<AggregationDefinition>(agg.Key, ct).ConfigureAwait(false);
+
+        // Delete scheduled actions
+        var scheds = (await store.QueryAsync<ScheduledActionDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
+        foreach (var sched in scheds)
+            await store.DeleteAsync<ScheduledActionDefinition>(sched.Key, ct).ConfigureAwait(false);
     }
 }

@@ -58,6 +58,9 @@ public sealed class SamplePackage
 
     [JsonPropertyName("aggregations")]
     public List<AggregationDefinition> Aggregations { get; set; } = new();
+
+    [JsonPropertyName("scheduledActions")]
+    public List<ScheduledActionDefinition> ScheduledActions { get; set; } = new();
 }
 
 /// <summary>

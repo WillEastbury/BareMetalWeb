@@ -304,11 +304,13 @@ public class BareMetalWebServer : IBareWebHost
         Task loggerTask = BufferedLogger.RunAsync(cts.Token); // Run the logging flusher loop
         Task clientPruneTask = ClientRequests.RunPruningAsync(cts.Token); // Run client pruning loop
         Task todoPeriodicityTask = new TodoPeriodicityService(BufferedLogger).RunAsync(cts.Token); // Run todo periodicity reset loop
+        Task scheduledActionTask = new ScheduledActionService(BufferedLogger).RunAsync(cts.Token); // Run scheduled action execution loop
         app.Lifetime.ApplicationStopping.Register(() => BufferedLogger.OnApplicationStopping(cts, loggerTask)); // Setup shutdown to stop the logging flusher loop
         // log it
         BufferedLogger.LogInfo($"WireUpRequestHandlingAndLoggerAsyncLifetime completed and request handling is live.");
         _ = clientPruneTask;
         _ = todoPeriodicityTask;
+        _ = scheduledActionTask;
         return Task.CompletedTask;
     }
     public async Task RequestHandler(HttpContext context)
