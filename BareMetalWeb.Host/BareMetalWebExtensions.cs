@@ -233,7 +233,12 @@ public static class BareMetalWebExtensions
         // Initialize cluster state with local lease (single-instance default)
         var clusterState = new BareMetalWeb.Data.ClusterState(new BareMetalWeb.Data.LocalLeaseAuthority());
         _ = clusterState.TryBecomeLeaderAsync(CancellationToken.None);
-        ClusterApiHandlers.Initialize(clusterState);
+
+        // Initialize compactor with its own independent lease
+        var compactorState = new BareMetalWeb.Data.CompactorState(new BareMetalWeb.Data.LocalLeaseAuthority());
+        _ = compactorState.TryBecomeCompactorAsync(CancellationToken.None);
+
+        ClusterApiHandlers.Initialize(clusterState, compactorState);
         ProxyRouteHandler.Initialize(clusterState);
 
         // Attach write fencing to the primary WAL provider

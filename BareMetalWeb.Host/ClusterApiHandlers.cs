@@ -15,9 +15,14 @@ namespace BareMetalWeb.Host;
 public static class ClusterApiHandlers
 {
     private static ClusterState? _clusterState;
+    private static CompactorState? _compactorState;
 
     /// <summary>Initialize with cluster state reference.</summary>
-    public static void Initialize(ClusterState clusterState) => _clusterState = clusterState;
+    public static void Initialize(ClusterState clusterState, CompactorState? compactorState = null)
+    {
+        _clusterState = clusterState;
+        _compactorState = compactorState;
+    }
 
     /// <summary>GET /api/_cluster — cluster state snapshot.</summary>
     public static async ValueTask ClusterStatusHandler(HttpContext context)
@@ -42,6 +47,7 @@ public static class ClusterApiHandlers
         w.WriteNumber("lastLsn", snapshot.LastLsn);
         w.WriteString("instanceId", snapshot.InstanceId);
         w.WriteBoolean("leaseValid", snapshot.IsLeaseValid);
+        w.WriteBoolean("isCompactor", _compactorState?.IsCompactor ?? false);
         w.WriteEndObject();
         await w.FlushAsync(context.RequestAborted);
     }

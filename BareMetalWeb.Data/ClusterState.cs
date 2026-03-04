@@ -167,3 +167,92 @@ public enum ClusterRole
 public sealed record ClusterStateSnapshot(
     ClusterRole Role, long Epoch, long LastLsn,
     string InstanceId, bool IsLeaseValid);
+
+/// <summary>
+/// Manages an independent compactor lease. On a single-node deployment, both
+/// the writer and compactor leases are held by the same instance. On multi-node
+/// deployments, the compactor can run on a separate node.
+/// </summary>
+public sealed class CompactorState : IDisposable
+{
+    private readonly ILeaseAuthority _lease;
+    private readonly TimeSpan _renewInterval;
+    private CancellationTokenSource? _renewCts;
+    private Task? _renewTask;
+    private volatile bool _isCompactor;
+
+    public event Action<bool>? CompactorRoleChanged;
+
+    public CompactorState(ILeaseAuthority lease, TimeSpan? renewInterval = null)
+    {
+        _lease = lease ?? throw new ArgumentNullException(nameof(lease));
+        _renewInterval = renewInterval ?? TimeSpan.FromSeconds(5);
+    }
+
+    public bool IsCompactor => _isCompactor;
+    public string InstanceId => _lease.InstanceId;
+
+    /// <summary>Attempt to acquire the compactor lease.</summary>
+    public async ValueTask<bool> TryBecomeCompactorAsync(CancellationToken ct)
+    {
+        if (_isCompactor) return true;
+        var acquired = await _lease.TryAcquireAsync(ct);
+        if (!acquired) return false;
+        _isCompactor = true;
+        CompactorRoleChanged?.Invoke(true);
+        _renewCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        _renewTask = RunRenewalLoopAsync(_renewCts.Token);
+        return true;
+    }
+
+    /// <summary>Validate that this instance may run compaction.</summary>
+    public void ValidateCompactionPermission()
+    {
+        if (!_isCompactor)
+            throw new InvalidOperationException("Compaction rejected: this instance does not hold the compactor lease.");
+        if (!_lease.IsLeader)
+        {
+            Demote();
+            throw new InvalidOperationException("Compaction rejected: compactor lease lost.");
+        }
+    }
+
+    public async ValueTask StepDownAsync(CancellationToken ct)
+    {
+        if (!_isCompactor) return;
+        _renewCts?.Cancel();
+        if (_renewTask != null)
+        {
+            try { await _renewTask; } catch (OperationCanceledException) { }
+        }
+        await _lease.ReleaseAsync(ct);
+        Demote();
+    }
+
+    private async Task RunRenewalLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(_renewInterval, ct);
+                if (!await _lease.TryRenewAsync(ct)) { Demote(); return; }
+            }
+            catch (OperationCanceledException) { return; }
+            catch { Demote(); return; }
+        }
+    }
+
+    private void Demote()
+    {
+        if (!_isCompactor) return;
+        _isCompactor = false;
+        CompactorRoleChanged?.Invoke(false);
+    }
+
+    public void Dispose()
+    {
+        _renewCts?.Cancel();
+        _renewCts?.Dispose();
+    }
+}

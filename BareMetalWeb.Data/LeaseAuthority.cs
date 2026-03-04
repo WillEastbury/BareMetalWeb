@@ -64,11 +64,12 @@ public sealed class FileLeaseAuthority : ILeaseAuthority, IDisposable
     private long _epoch;
     private DateTime _leaseExpiryUtc;
 
-    public FileLeaseAuthority(string directory, TimeSpan? leaseDuration = null, string? instanceId = null)
+    public FileLeaseAuthority(string directory, TimeSpan? leaseDuration = null, string? instanceId = null, string? leaseName = null)
     {
         Directory.CreateDirectory(directory);
-        _leaseFilePath = Path.Combine(directory, ".cluster-lease");
-        _epochFilePath = Path.Combine(directory, ".cluster-epoch");
+        var suffix = string.IsNullOrEmpty(leaseName) ? "" : $"-{leaseName}";
+        _leaseFilePath = Path.Combine(directory, $".cluster-lease{suffix}");
+        _epochFilePath = Path.Combine(directory, $".cluster-epoch{suffix}");
         _leaseDuration = leaseDuration ?? TimeSpan.FromSeconds(15);
         InstanceId = instanceId ?? Environment.MachineName;
     }
