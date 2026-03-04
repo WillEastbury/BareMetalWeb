@@ -236,6 +236,10 @@ public static class BareMetalWebExtensions
         ClusterApiHandlers.Initialize(clusterState);
         ProxyRouteHandler.Initialize(clusterState);
 
+        // Attach write fencing to the primary WAL provider
+        if (DataStoreProvider.PrimaryProvider is BareMetalWeb.Data.WalDataProvider walProvider)
+            walProvider.SetClusterState(clusterState);
+
         appInfo.RegisterBinaryApiRoutes(routeHandlers, pageInfoFactory, mainTemplate);       // binary wire-format API
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
         appInfo.RegisterVNextRoutes(pageInfoFactory, templateStore);

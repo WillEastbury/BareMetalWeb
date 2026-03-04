@@ -90,6 +90,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         = new(StringComparer.OrdinalIgnoreCase);
     private const int SeqIdBatchSize = 64;
 
+    // Optional cluster state for write fencing
+    private ClusterState? _clusterState;
+
     // ── Construction / disposal ───────────────────────────────────────────────
 
     public WalDataProvider(
@@ -112,6 +115,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         _indexStore = new IndexStore(this, logger);
         _searchIndexManager = new SearchIndexManager(rootPath, logger);
     }
+
+    /// <summary>
+    /// Attach cluster state for write fencing. When set, all writes validate
+    /// that this instance is the elected leader before proceeding.
+    /// </summary>
+    public void SetClusterState(ClusterState clusterState) => _clusterState = clusterState;
 
     public void Dispose()
     {
@@ -172,6 +181,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             throw new ArgumentException("DataObject must have a non-zero Key.", nameof(obj));
 
         ClearSingletonFlagsOnOtherRecords(obj);
+
+        // ── Write fence: validate leader lease before mutating ────────────
+        _clusterState?.ValidateWritePermission();
 
         var now = DateTime.UtcNow;
         if (obj.CreatedOnUtc == default) obj.CreatedOnUtc = now;
@@ -704,6 +716,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         if (key == 0)
             throw new ArgumentException("Key cannot be zero.", nameof(key));
 
+        // ── Write fence: validate leader lease before mutating ────────────
+        _clusterState?.ValidateWritePermission();
+
         var type     = typeof(T);
         var typeName = type.Name;
         var idMap    = GetOrLoadIdMap(typeName);
@@ -796,6 +811,8 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     {
         if (record is null) throw new ArgumentNullException(nameof(record));
         if (record.Key == 0) throw new ArgumentException("DataRecord must have a non-zero Key.", nameof(record));
+
+        _clusterState?.ValidateWritePermission();
 
         var now = DateTime.UtcNow;
         if (record.CreatedOnUtc == default) record.CreatedOnUtc = now;
@@ -995,6 +1012,8 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     public void DeleteRecord(uint key, EntitySchema schema)
     {
         if (key == 0) throw new ArgumentException("Key cannot be zero.", nameof(key));
+
+        _clusterState?.ValidateWritePermission();
 
         var entityName = schema.EntityName;
         var idMap = GetOrLoadIdMap(entityName);
