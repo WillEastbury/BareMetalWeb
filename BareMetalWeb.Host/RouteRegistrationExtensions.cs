@@ -500,6 +500,7 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/_binary/{type}/_actions", new RouteHandlerData(raw, ActionApiHandlers.ListActionsHandler));
         host.RegisterRoute("POST /api/_binary/{type}/_action/{actionId}", new RouteHandlerData(raw, ActionApiHandlers.ExecuteActionHandler));
         host.RegisterRoute("GET /api/_metrics", new RouteHandlerData(raw, EngineMetricsHandler));
+        host.RegisterRoute("POST /api/graphql", new RouteHandlerData(raw, GraphQLHandler.HandleAsync));
         var adminOnly = pageInfoFactory.RawPage("admin", false);
         host.RegisterRoute("GET /api/_cluster", new RouteHandlerData(adminOnly, ClusterApiHandlers.ClusterStatusHandler));
         host.RegisterRoute("GET /api/_cluster/replicate", new RouteHandlerData(adminOnly, ClusterApiHandlers.ReplicationHandler));
