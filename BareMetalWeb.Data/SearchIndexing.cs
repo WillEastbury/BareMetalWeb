@@ -107,6 +107,8 @@ internal sealed class SearchIndexManager
         public Dictionary<uint, HashSet<string>> IdToTokens { get; } = new();
         // Prefix tree for efficient prefix matching (token prefix -> full tokens)
         public Dictionary<string, HashSet<string>> PrefixTree { get; } = new(StringComparer.OrdinalIgnoreCase);
+        // Suffix tree for efficient suffix matching (reversed token prefix -> full tokens)
+        public Dictionary<string, HashSet<string>> SuffixTree { get; } = new(StringComparer.OrdinalIgnoreCase);
         public HashSet<string> WarnedKinds { get; } = new(StringComparer.OrdinalIgnoreCase);
         
         // BTree index data (sorted tokens for range queries)
@@ -280,6 +282,33 @@ internal sealed class SearchIndexManager
             }
             fullTokens.Add(token);
         }
+
+        // Add reversed suffixes for suffix matching (e.g. "hello" → reversed suffixes "ol", "oll", "olle", "olleh")
+        AddToSuffixTree(index, token);
+    }
+
+    private static void AddToSuffixTree(IndexData index, string token)
+    {
+        if (token.Length < 3) return;
+        // Reverse the token, then store prefixes of the reversed string
+        var reversed = ReverseString(token);
+        for (int len = 3; len <= reversed.Length; len++)
+        {
+            var suffix = reversed.Substring(0, len);
+            if (!index.SuffixTree.TryGetValue(suffix, out var fullTokens))
+            {
+                fullTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                index.SuffixTree[suffix] = fullTokens;
+            }
+            fullTokens.Add(token);
+        }
+    }
+
+    private static string ReverseString(string s)
+    {
+        var arr = s.ToCharArray();
+        Array.Reverse(arr);
+        return new string(arr);
     }
 
     public void RemoveObject(BaseDataObject obj)
@@ -314,6 +343,36 @@ internal sealed class SearchIndexManager
     public IReadOnlyCollection<uint> Search(Type type, string queryText, Func<IEnumerable<BaseDataObject>> loadAll)
     {
         return Search(type, queryText, loadAll, null);
+    }
+
+    /// <summary>
+    /// Search using only the suffix tree layer. Finds tokens that end with the query text.
+    /// Useful for searching by file extension, domain suffix, or word endings.
+    /// </summary>
+    public IReadOnlyCollection<uint> SearchSuffix(Type type, string suffixText, Func<IEnumerable<BaseDataObject>> loadAll)
+    {
+        if (string.IsNullOrWhiteSpace(suffixText) || suffixText.Length < 3)
+            return Array.Empty<uint>();
+
+        EnsureBuilt(type, loadAll);
+        var index = _indexes.GetOrAdd(type, LoadIndex);
+        var results = new HashSet<uint>();
+        lock (index.Sync)
+        {
+            var reversed = ReverseString(suffixText.ToLowerInvariant());
+            if (index.SuffixTree.TryGetValue(reversed, out var matchedTokens))
+            {
+                foreach (var token in matchedTokens)
+                {
+                    if (index.Tokens.TryGetValue(token, out var ids))
+                    {
+                        foreach (var id in ids)
+                            results.Add(id);
+                    }
+                }
+            }
+        }
+        return results;
     }
 
     public IReadOnlyCollection<uint> Search(Type type, string queryText, Func<IEnumerable<BaseDataObject>> loadAll, IndexKind? preferredKind)
@@ -381,7 +440,7 @@ internal sealed class SearchIndexManager
             return results;
         }
 
-        // Use prefix tree for substring matching if available
+        // Use prefix tree for prefix matching if available
         if (queryToken.Length >= 3 && index.PrefixTree.TryGetValue(queryToken, out var prefixMatches))
         {
             foreach (var matchedToken in prefixMatches)
@@ -393,6 +452,24 @@ internal sealed class SearchIndexManager
                 }
             }
             return results;
+        }
+
+        // Use suffix tree for suffix matching (reverse the query and look up in suffix tree)
+        if (queryToken.Length >= 3)
+        {
+            var reversed = ReverseString(queryToken);
+            if (index.SuffixTree.TryGetValue(reversed, out var suffixMatches))
+            {
+                foreach (var matchedToken in suffixMatches)
+                {
+                    if (index.Tokens.TryGetValue(matchedToken, out var ids))
+                    {
+                        foreach (var id in ids)
+                            results.Add(id);
+                    }
+                }
+                if (results.Count > 0) return results;
+            }
         }
 
         // Fallback to contains search only for short query tokens
@@ -670,6 +747,18 @@ internal sealed class SearchIndexManager
                                 fullTokens.Remove(token);
                                 if (fullTokens.Count == 0)
                                     index.PrefixTree.Remove(prefix);
+                            }
+                        }
+                        // Remove from suffix tree
+                        var reversed = ReverseString(token);
+                        for (int len = 3; len <= reversed.Length; len++)
+                        {
+                            var suffix = reversed.Substring(0, len);
+                            if (index.SuffixTree.TryGetValue(suffix, out var suffixTokens))
+                            {
+                                suffixTokens.Remove(token);
+                                if (suffixTokens.Count == 0)
+                                    index.SuffixTree.Remove(suffix);
                             }
                         }
                     }
