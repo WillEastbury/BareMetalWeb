@@ -329,5 +329,19 @@
       "description": "Full to-do module access including delete and execute actions",
       "permissionCodes": "todo.admin"
     }
+  ],
+  "aggregations": [
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "Name": "Tasks by Priority and Status",
+      "GroupByFields": "Priority|IsCompleted",
+      "Measures": "count:Title"
+    },
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "Name": "Tasks by Assignee",
+      "GroupByFields": "AssignedTo|Priority",
+      "Measures": "count:Title"
+    }
   ]
 }

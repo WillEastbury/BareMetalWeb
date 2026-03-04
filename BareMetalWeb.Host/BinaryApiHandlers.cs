@@ -233,6 +233,62 @@ public static class BinaryApiHandlers
     }
 
     /// <summary>
+    /// GET /api/_binary/{type}/_aggregations
+    /// Returns list of AggregationDefinition records for this entity type.
+    /// </summary>
+    public static async ValueTask AggregationDefsHandler(HttpContext context)
+    {
+        var (meta, typeSlug, error) = await ValidateAsync(context);
+        if (meta == null) { await WriteError(context, error!.Value); return; }
+
+        try
+        {
+            // Find aggregation definitions where EntityId matches
+            var entityDefs = await DataStoreProvider.Current
+                .QueryAsync<BareMetalWeb.Runtime.EntityDefinition>(null, context.RequestAborted);
+            var entityDef = entityDefs.FirstOrDefault(e =>
+                string.Equals(e.Slug, typeSlug, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(e.Name?.Replace(' ', '-').ToLowerInvariant(), typeSlug, StringComparison.OrdinalIgnoreCase));
+
+            if (entityDef == null)
+            {
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("[]", context.RequestAborted);
+                return;
+            }
+
+            var aggQuery = new QueryDefinition
+            {
+                Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityDef.EntityId } }
+            };
+            var aggs = (await DataStoreProvider.Current
+                .QueryAsync<BareMetalWeb.Runtime.AggregationDefinition>(aggQuery, context.RequestAborted))
+                .ToList();
+
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "application/json";
+            await using var writer = new System.Text.Json.Utf8JsonWriter(context.Response.Body);
+            writer.WriteStartArray();
+            foreach (var agg in aggs)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("name", agg.Name);
+                writer.WriteString("groupByFields", agg.GroupByFields);
+                writer.WriteString("measures", agg.Measures);
+                writer.WriteEndObject();
+            }
+            writer.WriteEndArray();
+            await writer.FlushAsync(context.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError("BinaryAPI|aggregation-defs", ex);
+            await WriteError(context, (500, "Error loading aggregation definitions."));
+        }
+    }
+
+    /// <summary>
     /// GET /api/_binary/{type}/_aggregate?fn=count|sum|avg|min|max|stddev&amp;field=FieldName
     /// Returns aggregation result. Supports multiple aggregates via repeated fn/field params.
     /// </summary>

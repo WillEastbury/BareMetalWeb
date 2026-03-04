@@ -616,6 +616,7 @@
             if (meta.canShowTimetable) html += '<a class="btn btn-outline-secondary' + (activeView === 'Timetable' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timetable' })) + '" title="Timetable"><i class="bi bi-calendar3"></i></a>';
             if (viewType === 'Sankey' || meta.canShowSankey) html += '<a class="btn btn-outline-secondary' + (activeView === 'Sankey' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Sankey' })) + '" title="Document Chain (Sankey)"><i class="bi bi-diagram-2-fill"></i></a>';
             if (viewType === 'Calendar' || meta.canShowCalendar) html += '<a class="btn btn-outline-secondary' + (activeView === 'Calendar' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar' })) + '" title="Calendar"><i class="bi bi-calendar-month"></i></a>';
+            html += '<a class="btn btn-outline-secondary' + (activeView === 'Aggregation' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Aggregation' })) + '" title="Aggregations"><i class="bi bi-bar-chart-line"></i></a>';
             html += '</div>';
         }
         html += '</div>';
@@ -632,6 +633,8 @@
             html += renderSankeyView(meta, items, slug, baseUrl);
         } else if (activeView === 'Calendar' || (activeView === '' && viewType === 'Calendar')) {
             html += renderCalendarView(meta, items, slug, baseUrl, query);
+        } else if (activeView === 'Aggregation') {
+            html += renderAggregationView(meta, items, slug, baseUrl, query);
         } else {
             // Search bar
             html += '<form class="d-flex gap-2 mb-3" id="vnext-search-form">';
@@ -1556,6 +1559,129 @@
         }
         html += '</tbody></table>';
         return html;
+    }
+
+    // ── Aggregation Browser View ────────────────────────────────────────────
+    function renderAggregationView(meta, items, slug, baseUrl, query) {
+        var html = '<div class="card mb-3"><div class="card-header"><i class="bi bi-bar-chart-line me-2"></i>Aggregations</div><div class="card-body">';
+        html += '<div id="bm-agg-container"><div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"></div> Loading aggregation definitions\u2026</div></div>';
+        html += '</div></div>';
+
+        // Load aggregation definitions and render drill-through
+        setTimeout(function () {
+            apiFetch('/api/_binary/' + encodeURIComponent(slug) + '/_aggregations')
+                .then(function (defs) {
+                    var container = document.getElementById('bm-agg-container');
+                    if (!container) return;
+                    if (!defs || defs.length === 0) {
+                        container.innerHTML = '<div class="bm-empty-state"><i class="bi bi-bar-chart-line"></i><p>No aggregation definitions</p><small>Add AggregationDefinition records for this entity</small></div>';
+                        return;
+                    }
+                    var aggHtml = '';
+                    defs.forEach(function (def, idx) {
+                        var levels = (def.groupByFields || '').split('|').filter(Boolean);
+                        var measures = (def.measures || '').split('|').filter(Boolean);
+                        aggHtml += '<div class="card mb-3"><div class="card-header fw-semibold">' + escHtml(def.name) + '</div>';
+                        aggHtml += '<div class="card-body">';
+                        aggHtml += '<div class="mb-2"><small class="text-muted">Levels: ' + levels.map(escHtml).join(' → ') + '</small></div>';
+                        aggHtml += '<div id="bm-agg-tree-' + idx + '" class="bm-agg-tree"></div>';
+                        aggHtml += '</div></div>';
+                    });
+                    container.innerHTML = aggHtml;
+
+                    // Build each aggregation tree from data
+                    defs.forEach(function (def, idx) {
+                        var levels = (def.groupByFields || '').split('|').filter(Boolean);
+                        var measures = (def.measures || '').split('|').filter(Boolean);
+                        var tree = buildAggTree(items, levels, measures, meta);
+                        var treeEl = document.getElementById('bm-agg-tree-' + idx);
+                        if (treeEl) treeEl.innerHTML = renderAggTreeNode(tree, levels, 0, measures, slug, baseUrl);
+                    });
+                })
+                .catch(function (err) {
+                    var container = document.getElementById('bm-agg-container');
+                    if (container) container.innerHTML = '<div class="text-danger">Error loading aggregations: ' + escHtml(err.message) + '</div>';
+                });
+        }, 50);
+
+        return html;
+    }
+
+    function buildAggTree(items, levels, measures, meta) {
+        var root = { _children: {}, _count: 0, _items: items };
+        items.forEach(function (item) {
+            var node = root;
+            node._count++;
+            levels.forEach(function (lvl) {
+                var val = (nestedGet(item, lvl) || '(empty)').toString();
+                if (!node._children[val]) node._children[val] = { _children: {}, _count: 0, _items: [] };
+                node._children[val]._count++;
+                node._children[val]._items.push(item);
+                node = node._children[val];
+            });
+        });
+        return root;
+    }
+
+    function renderAggTreeNode(node, levels, depth, measures, slug, baseUrl) {
+        var html = '';
+        var keys = Object.keys(node._children).sort();
+        if (keys.length === 0) return html;
+        html += '<table class="table table-sm table-hover mb-0">';
+        html += '<thead><tr><th>' + escHtml(levels[depth] || 'Value') + '</th>';
+        measures.forEach(function (m) { html += '<th class="text-end">' + escHtml(m) + '</th>'; });
+        html += '<th class="text-end">Count</th></tr></thead><tbody>';
+        keys.forEach(function (k) {
+            var child = node._children[k];
+            var hasChildren = Object.keys(child._children).length > 0;
+            html += '<tr class="' + (hasChildren ? 'bm-cursor-pointer' : '') + '" data-bm-agg-expand>';
+            html += '<td>';
+            if (hasChildren) html += '<i class="bi bi-chevron-right me-1 bm-agg-chevron"></i>';
+            html += escHtml(k) + '</td>';
+            measures.forEach(function (m) {
+                var parts = m.split(':');
+                var fn = parts[0] || 'count';
+                var field = parts[1] || '';
+                var val = computeMeasure(child._items, fn, field);
+                html += '<td class="text-end">' + val + '</td>';
+            });
+            html += '<td class="text-end"><span class="badge bg-secondary">' + child._count + '</span></td>';
+            html += '</tr>';
+            if (hasChildren) {
+                html += '<tr class="bm-agg-detail" style="display:none"><td colspan="' + (measures.length + 2) + '" class="ps-4">';
+                html += renderAggTreeNode(child, levels, depth + 1, measures, slug, baseUrl);
+                html += '</td></tr>';
+            }
+        });
+        html += '</tbody></table>';
+
+        setTimeout(function () {
+            document.querySelectorAll('[data-bm-agg-expand]').forEach(function (tr) {
+                if (tr.dataset.bmAggBound) return;
+                tr.dataset.bmAggBound = '1';
+                tr.addEventListener('click', function () {
+                    var detail = tr.nextElementSibling;
+                    if (detail && detail.classList.contains('bm-agg-detail')) {
+                        var visible = detail.style.display !== 'none';
+                        detail.style.display = visible ? 'none' : '';
+                        var chev = tr.querySelector('.bm-agg-chevron');
+                        if (chev) chev.className = visible ? 'bi bi-chevron-right me-1 bm-agg-chevron' : 'bi bi-chevron-down me-1 bm-agg-chevron';
+                    }
+                });
+            });
+        }, 100);
+
+        return html;
+    }
+
+    function computeMeasure(items, fn, field) {
+        if (fn === 'count') return items.length;
+        var vals = items.map(function (it) { return parseFloat(nestedGet(it, field)) || 0; });
+        if (fn === 'sum') return vals.reduce(function (a, b) { return a + b; }, 0).toFixed(2);
+        if (fn === 'avg') return vals.length ? (vals.reduce(function (a, b) { return a + b; }, 0) / vals.length).toFixed(2) : '0';
+        if (fn === 'min') return vals.length ? Math.min.apply(null, vals).toFixed(2) : '0';
+        if (fn === 'max') return vals.length ? Math.max.apply(null, vals).toFixed(2) : '0';
+        return items.length;
     }
 
     /**

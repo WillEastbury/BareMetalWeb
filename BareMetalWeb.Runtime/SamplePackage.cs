@@ -55,6 +55,9 @@ public sealed class SamplePackage
     /// <summary>Permission definitions to create when deploying this package.</summary>
     [JsonPropertyName("permissions")]
     public List<SamplePermission> Permissions { get; set; } = new();
+
+    [JsonPropertyName("aggregations")]
+    public List<AggregationDefinition> Aggregations { get; set; } = new();
 }
 
 /// <summary>

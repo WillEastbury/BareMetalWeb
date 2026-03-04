@@ -254,12 +254,26 @@ public static class SampleGalleryService
                 await store.SaveAsync(newReport, cancellationToken).ConfigureAwait(false);
             }
 
+            // Import aggregation definitions for this entity
+            foreach (var srcAgg in package.Aggregations.Where(a => a.EntityId == oldEntityId))
+            {
+                var newAgg = new AggregationDefinition
+                {
+                    EntityId = newEntity.EntityId,
+                    Name = srcAgg.Name,
+                    GroupByFields = srcAgg.GroupByFields,
+                    Measures = srcAgg.Measures
+                };
+                await store.SaveAsync(newAgg, cancellationToken).ConfigureAwait(false);
+            }
+
             var fieldCount = package.Fields.Count(f => f.EntityId == oldEntityId);
             var indexCount = package.Indexes.Count(ix => ix.EntityId == oldEntityId);
             var actionCount = package.Actions.Count(a => a.EntityId == oldEntityId);
             var reportCount = package.Reports.Count(r =>
                 string.Equals(r.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase));
-            logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es), {actionCount} action(s), {reportCount} report(s).");
+            var aggCount = package.Aggregations.Count(a => a.EntityId == oldEntityId);
+            logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es), {actionCount} action(s), {reportCount} report(s), {aggCount} aggregation(s).");
             deployed.Add(srcEntity.Name);
         }
 
@@ -361,5 +375,10 @@ public static class SampleGalleryService
         var reports = (await store.QueryAsync<ReportDefinition>(reportQuery, ct).ConfigureAwait(false)).ToList();
         foreach (var report in reports)
             await store.DeleteAsync<ReportDefinition>(report.Key, ct).ConfigureAwait(false);
+
+        // Delete aggregation definitions
+        var aggs = (await store.QueryAsync<AggregationDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
+        foreach (var agg in aggs)
+            await store.DeleteAsync<AggregationDefinition>(agg.Key, ct).ConfigureAwait(false);
     }
 }
