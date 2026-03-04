@@ -56,8 +56,8 @@ public static class MetadataSeeder
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            // Skip DynamicDataObject instances — they are runtime-defined, not code-first.
-            if (meta.Type == typeof(DynamicDataObject)) continue;
+            // Skip DataRecord instances — they are runtime-defined, not code-first.
+            if (meta.Type == typeof(DataRecord)) continue;
 
             // Only seed types that are explicitly annotated with [DataEntity].
             var entityAttr = meta.Type.GetCustomAttribute<DataEntityAttribute>();

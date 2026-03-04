@@ -673,8 +673,8 @@ public static class DataScaffold
             string? lookupTargetSlug = null;
             if (field.Lookup != null && effectiveFieldType == FormFieldType.LookupList)
             {
-                lookupTargetType = field.Lookup.TargetType.Name;
-                var targetMeta = GetEntityByType(field.Lookup.TargetType);
+                var targetMeta = ResolveMeta(field.Lookup.TargetType, field.Lookup.TargetSlug);
+                lookupTargetType = targetMeta?.Name ?? field.Lookup.TargetType.Name;
                 lookupTargetSlug = targetMeta?.Slug;
             }
 
@@ -798,6 +798,12 @@ public static class DataScaffold
             if (value is bool boolValue)
             {
                 rows.Add((field.Label, BuildBooleanCheckboxHtml(boolValue), true));
+                continue;
+            }
+            // Handle string representation of bool (from DataRecord / virtual entities)
+            if (value is string boolStr && field.Property.PropertyType == typeof(bool) && bool.TryParse(boolStr, out var parsedBool))
+            {
+                rows.Add((field.Label, BuildBooleanCheckboxHtml(parsedBool), true));
                 continue;
             }
 
@@ -1077,6 +1083,12 @@ public static class DataScaffold
                 if (rawValue is bool boolValue)
                 {
                     values.Add(BuildBooleanCheckboxHtml(boolValue));
+                    continue;
+                }
+                // Handle string representation of bool (from DataRecord / virtual entities)
+                if (rawValue is string boolStr && field.Property.PropertyType == typeof(bool) && bool.TryParse(boolStr, out var parsedBool))
+                {
+                    values.Add(BuildBooleanCheckboxHtml(parsedBool));
                     continue;
                 }
 
@@ -1483,7 +1495,7 @@ public static class DataScaffold
 
             // Sort items by time within this day
             var sortedItems = timeField.FieldType == FormFieldType.TimeOnly
-                ? dayGroup.OrderBy(item => (TimeOnly)(timeField.GetValueFn(item) ?? TimeOnly.MinValue)).ToList()
+                ? dayGroup.OrderBy(item => CoerceTimeOnly(timeField.GetValueFn(item))).ToList()
                 : dayGroup.OrderBy(item => (DateTime)(timeField.GetValueFn(item) ?? DateTime.MinValue)).ToList();
 
             html.Append("<table class=\"table table-striped table-hover\">");
@@ -1532,7 +1544,7 @@ public static class DataScaffold
                 var timeValue = timeField.GetValueFn(item);
                 var timeDisplay = timeValue != null
                     ? (timeField.FieldType == FormFieldType.TimeOnly
-                        ? ((TimeOnly)timeValue).ToString("HH:mm")
+                        ? CoerceTimeOnly(timeValue).ToString("HH:mm")
                         : ((DateTime)timeValue).ToString("HH:mm"))
                     : string.Empty;
                 html.Append($"<td>{WebUtility.HtmlEncode(timeDisplay)}</td>");
@@ -1600,6 +1612,14 @@ public static class DataScaffold
         return GetIdValue(item) ?? "Unknown";
     }
 
+    /// <summary>Safely converts a value (which may be a string from DataRecord) to TimeOnly.</summary>
+    private static TimeOnly CoerceTimeOnly(object? value)
+    {
+        if (value is TimeOnly t) return t;
+        if (value is string s && TimeOnly.TryParse(s, out var parsed)) return parsed;
+        return TimeOnly.MinValue;
+    }
+
     private static string FormatLookupDisplay(string key, string display)
     {
         if (string.IsNullOrWhiteSpace(key) && string.IsNullOrWhiteSpace(display))
@@ -1635,7 +1655,7 @@ public static class DataScaffold
         if (string.IsNullOrWhiteSpace(key))
             return null;
 
-        var targetMeta = GetEntityByType(lookup.TargetType);
+        var targetMeta = ResolveMeta(lookup.TargetType, lookup.TargetSlug);
         if (targetMeta == null)
             return null;
 
@@ -1927,7 +1947,7 @@ public static class DataScaffold
     private static LookupCacheEntry BuildLookupCacheEntry(DataLookupConfig lookup)
     {
         var query = BuildLookupQuery(lookup);
-        var items = QueryByType(lookup.TargetType, query);
+        var items = QueryByType(lookup.TargetType, query, lookup.TargetSlug);
         var options = BuildLookupOptions(items, lookup.ValueField, lookup.DisplayField);
         var count = options.Count;
         var isLarge = count > LargeListThreshold;
@@ -1937,7 +1957,7 @@ public static class DataScaffold
     private static string BuildLookupCacheKey(DataLookupConfig lookup)
     {
         return string.Join('|',
-            lookup.TargetType.FullName ?? lookup.TargetType.Name,
+            lookup.TargetSlug ?? lookup.TargetType.FullName ?? lookup.TargetType.Name,
             lookup.ValueField,
             lookup.DisplayField,
             lookup.QueryField ?? string.Empty,
@@ -1973,9 +1993,29 @@ public static class DataScaffold
         return query.Clauses.Count == 0 && query.Sorts.Count == 0 ? null : query;
     }
 
-    private static IEnumerable QueryByType(Type type, QueryDefinition? query)
+    private static DataEntityMetadata? ResolveMeta(Type type, string? slug)
     {
+        // Prefer slug-based resolution (exact match) over type-based
+        // because all virtual entities share typeof(DataRecord).
+        if (slug != null && TryGetEntity(slug, out var metaBySlug))
+            return metaBySlug;
+
         var meta = GetEntityByType(type);
+        if (meta != null) return meta;
+
+        // Derive slug from [DataEntity] attribute on compiled types
+        var attr = type.GetCustomAttribute(typeof(DataEntityAttribute)) as DataEntityAttribute;
+        if (attr != null)
+        {
+            var derivedSlug = !string.IsNullOrWhiteSpace(attr.Slug) ? attr.Slug! : ToSlug(attr.Name);
+            TryGetEntity(derivedSlug, out meta);
+        }
+        return meta;
+    }
+
+    private static IEnumerable QueryByType(Type type, QueryDefinition? query, string? slug = null)
+    {
+        var meta = ResolveMeta(type, slug);
         if (meta != null)
         {
             var vt = meta.Handlers.QueryAsync(query, CancellationToken.None);
@@ -1987,9 +2027,9 @@ public static class DataScaffold
             $"Entity type '{type.Name}' is not registered. Register it via DataEntityRegistry or RuntimeEntityRegistry before querying.");
     }
 
-    private static int CountByType(Type type, QueryDefinition? query)
+    private static int CountByType(Type type, QueryDefinition? query, string? slug = null)
     {
-        var meta = GetEntityByType(type);
+        var meta = ResolveMeta(type, slug);
         if (meta != null)
         {
             var vt = meta.Handlers.CountAsync(query, CancellationToken.None);
@@ -2000,9 +2040,9 @@ public static class DataScaffold
             $"Entity type '{type.Name}' is not registered. Register it via DataEntityRegistry or RuntimeEntityRegistry before counting.");
     }
 
-    private static object? LoadByIdForType(Type type, string id)
+    private static object? LoadByIdForType(Type type, string id, string? slug = null)
     {
-        var meta = GetEntityByType(type);
+        var meta = ResolveMeta(type, slug);
         if (meta != null)
         {
             var key = uint.Parse(id);
@@ -2046,27 +2086,39 @@ public static class DataScaffold
         try
         {
             object? entity;
-            if (string.Equals(lookup.ValueField, nameof(BaseDataObject.Key), StringComparison.OrdinalIgnoreCase))
+            var effectiveValueField = lookup.ValueField;
+            // DataRecord entities use "Key" instead of "Id" — normalize
+            if (string.Equals(effectiveValueField, "Id", StringComparison.OrdinalIgnoreCase))
+                effectiveValueField = nameof(BaseDataObject.Key);
+
+            if (string.Equals(effectiveValueField, nameof(BaseDataObject.Key), StringComparison.OrdinalIgnoreCase))
             {
-                entity = LoadByIdForType(lookup.TargetType, currentValue);
+                entity = LoadByIdForType(lookup.TargetType, currentValue, lookup.TargetSlug);
             }
             else
             {
                 var q = new QueryDefinition();
                 q.Clauses.Add(new QueryClause { Field = lookup.ValueField, Operator = QueryOperator.Equals, Value = currentValue });
                 q.Top = 1;
-                entity = QueryByType(lookup.TargetType, q).Cast<object>().FirstOrDefault();
+                entity = QueryByType(lookup.TargetType, q, lookup.TargetSlug).Cast<object>().FirstOrDefault();
             }
 
             if (entity == null)
                 return null;
 
+            // DataRecord: use schema-based access for virtual fields
+            if (entity is DataRecord dr && dr.Schema != null)
+            {
+                var displayVal = dr.GetField(dr.Schema, lookup.DisplayField);
+                return displayVal?.ToString();
+            }
+
             var displayProp = PropertyCache.GetOrAdd(
                 (lookup.TargetType, lookup.DisplayField),
                 static key => key.Item1.GetProperty(key.Item2,
                     BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase));
-            var displayVal = displayProp?.GetValue(entity);
-            return displayVal != null ? ToDisplayString(displayVal, displayProp!.PropertyType) : null;
+            var displayPropVal = displayProp?.GetValue(entity);
+            return displayPropVal != null ? ToDisplayString(displayPropVal, displayProp!.PropertyType) : null;
         }
         catch
         {
@@ -2081,16 +2133,42 @@ public static class DataScaffold
         PropertyInfo? valueProp = null;
         PropertyInfo? displayProp = null;
         Type? cachedType = null;
+
+        // Normalize "Id" → "Key" for DataRecord compatibility
+        var effectiveValueField = valueField;
+        if (string.Equals(effectiveValueField, "Id", StringComparison.OrdinalIgnoreCase))
+            effectiveValueField = nameof(BaseDataObject.Key);
+
         foreach (var item in items)
         {
             if (item == null)
                 continue;
 
+            // DataRecord: use schema-based ordinal access for virtual fields
+            if (item is DataRecord dr && dr.Schema != null)
+            {
+                object? value;
+                if (string.Equals(effectiveValueField, nameof(BaseDataObject.Key), StringComparison.OrdinalIgnoreCase))
+                    value = dr.Key;
+                else
+                    value = dr.GetField(dr.Schema, effectiveValueField);
+
+                if (value == null) continue;
+                var valueStr = value.ToString() ?? string.Empty;
+                if (!seenKeys.Add(valueStr)) continue;
+
+                var display = dr.GetField(dr.Schema, displayField);
+                var displayText = display?.ToString() ?? valueStr;
+                options.Add(new KeyValuePair<string, string>(valueStr, displayText));
+                continue;
+            }
+
+            // Compiled entities: use reflection
             var itemType = item.GetType();
             if (itemType != cachedType)
             {
                 cachedType = itemType;
-                valueProp = PropertyCache.GetOrAdd((itemType, valueField),
+                valueProp = PropertyCache.GetOrAdd((itemType, effectiveValueField),
                     static key => key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase));
                 displayProp = PropertyCache.GetOrAdd((itemType, displayField),
                     static key => key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase));
@@ -2098,20 +2176,20 @@ public static class DataScaffold
             if (valueProp == null || displayProp == null)
                 continue;
 
-            var value = valueProp.GetValue(item);
-            if (value == null)
+            var val = valueProp.GetValue(item);
+            if (val == null)
                 continue;
 
-            var valueStr = value.ToString() ?? string.Empty;
-            if (!seenKeys.Add(valueStr))
+            var valStr = val.ToString() ?? string.Empty;
+            if (!seenKeys.Add(valStr))
                 continue;
 
-            var display = displayProp.GetValue(item);
-            var displayText = display != null
-                ? ToDisplayString(display, displayProp.PropertyType)
-                : valueStr;
+            var disp = displayProp.GetValue(item);
+            var dispText = disp != null
+                ? ToDisplayString(disp, displayProp.PropertyType)
+                : valStr;
 
-            options.Add(new KeyValuePair<string, string>(valueStr, displayText));
+            options.Add(new KeyValuePair<string, string>(valStr, dispText));
         }
 
         return options;

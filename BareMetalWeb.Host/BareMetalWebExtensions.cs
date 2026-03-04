@@ -1,4 +1,3 @@
-using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
@@ -49,29 +48,17 @@ public static class BareMetalWebExtensions
             BinaryApiHandlers.Initialize(bos.GetSigningKeyCopy(), logger);
             LookupApiHandlers.Init(logger);
 
-        // LoadCompiledEntities: when true (default), scan assemblies for [DataEntity] types.
-        // Set to false for gallery-first startup where entities come from metadata only.
-        bool loadCompiled = app.Configuration.GetValue("Data:LoadCompiledEntities", false);
-        if (loadCompiled)
-        {
-            try { _ = Assembly.Load("BareMetalWeb.UserClasses"); } catch { }
-            DataEntityRegistry.RegisterAllEntities();
-        }
-        else
-        {
-            // Gallery-first mode: register system entities explicitly (AOT-safe, no assembly scanning).
-            DataScaffold.RegisterEntity<AppSetting>();
-            DataScaffold.RegisterEntity<User>();
-            DataScaffold.RegisterEntity<SystemPrincipal>();
-            DataScaffold.RegisterEntity<AuditEntry>();
-            DataScaffold.RegisterEntity<ReportDefinition>();
-            DataScaffold.RegisterEntity<EntityDefinition>();
-            DataScaffold.RegisterEntity<FieldDefinition>();
-            DataScaffold.RegisterEntity<IndexDefinition>();
-            DataScaffold.RegisterEntity<ActionDefinition>();
-            DataScaffold.RegisterEntity<ActionCommandDefinition>();
-            logger.LogInfo("Gallery-first mode: registered system entities only.");
-        }
+        // Register system entities explicitly (AOT-safe, no assembly scanning).
+        DataScaffold.RegisterEntity<AppSetting>();
+        DataScaffold.RegisterEntity<User>();
+        DataScaffold.RegisterEntity<SystemPrincipal>();
+        DataScaffold.RegisterEntity<AuditEntry>();
+        DataScaffold.RegisterEntity<ReportDefinition>();
+        DataScaffold.RegisterEntity<EntityDefinition>();
+        DataScaffold.RegisterEntity<FieldDefinition>();
+        DataScaffold.RegisterEntity<IndexDefinition>();
+        DataScaffold.RegisterEntity<ActionDefinition>();
+        DataScaffold.RegisterEntity<ActionCommandDefinition>();
 
         DataEntityRegistry.RegisterVirtualEntitiesFromFile(
             Path.Combine(contentRoot, "virtualEntities.json"),

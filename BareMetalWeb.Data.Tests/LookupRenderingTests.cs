@@ -3,7 +3,6 @@ using System.Net;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Data.Interfaces;
 
 namespace BareMetalWeb.Data.Tests;
@@ -24,7 +23,7 @@ public class LookupRenderingTests : IDisposable
         _store = new InMemoryDataStore();
         DataStoreProvider.Current = _store;
 
-        TestEntityRegistration.RegisterAll();
+        _ = GalleryTestFixture.State;
         ClearLookupCache();
     }
 
@@ -39,15 +38,25 @@ public class LookupRenderingTests : IDisposable
     public void BuildListRows_LookupField_ResolvesDisplayName()
     {
         // Arrange: an Address exists and a Customer references it
-        _store.Save(new Address { Key = 1, Label = "Home Office", Line1 = "1 Main St", City = "London", Country = "GB" });
+        Assert.True(DataScaffold.TryGetEntity("addresses", out var addrMeta));
+        var addr = addrMeta.Handlers.Create();
+        addr.Key = 1;
+        addrMeta.FindField("Label")!.SetValueFn(addr, "Home Office");
+        addrMeta.FindField("Line1")!.SetValueFn(addr, "1 Main St");
+        addrMeta.FindField("City")!.SetValueFn(addr, "London");
+        addrMeta.FindField("Country")!.SetValueFn(addr, "GB");
+        addrMeta.Handlers.SaveAsync(addr, CancellationToken.None).AsTask().GetAwaiter().GetResult();
         ClearLookupCache();
 
-        var meta = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(meta);
-        var customer = new Customer { Key = 1, Name = "Jane", Email = "j@x.com", AddressId = "1" };
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
+        var customer = meta.Handlers.Create();
+        customer.Key = 1;
+        meta.FindField("Name")!.SetValueFn(customer, "Jane");
+        meta.FindField("Email")!.SetValueFn(customer, "j@x.com");
+        meta.FindField("AddressId")!.SetValueFn(customer, "1");
 
         // Act
-        var rows = DataScaffold.BuildListRows(meta!, new[] { customer }, "/data/customers", includeActions: false);
+        var rows = DataScaffold.BuildListRows(meta, new[] { customer }, "/data/customers", includeActions: false);
 
         // Assert: the address cell should contain "Home Office" (the display name), not "addr-1"
         Assert.Single(rows);
@@ -61,12 +70,15 @@ public class LookupRenderingTests : IDisposable
     {
         // Arrange: a Customer with null AddressId
         ClearLookupCache();
-        var meta = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(meta);
-        var customer = new Customer { Key = 2, Name = "Null Addr", Email = "n@x.com", AddressId = "" };
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
+        var customer = meta.Handlers.Create();
+        customer.Key = 2;
+        meta.FindField("Name")!.SetValueFn(customer, "Null Addr");
+        meta.FindField("Email")!.SetValueFn(customer, "n@x.com");
+        meta.FindField("AddressId")!.SetValueFn(customer, "");
 
         // Act
-        var rows = DataScaffold.BuildListRows(meta!, new[] { customer }, "/data/customers", includeActions: false);
+        var rows = DataScaffold.BuildListRows(meta, new[] { customer }, "/data/customers", includeActions: false);
 
         // Assert: empty lookup key should show dash placeholder, not raw empty string
         Assert.Single(rows);
@@ -80,12 +92,15 @@ public class LookupRenderingTests : IDisposable
     {
         // Arrange: Customer references an Address that doesn't exist
         ClearLookupCache();
-        var meta = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(meta);
-        var customer = new Customer { Key = 3, Name = "Orphan", Email = "o@x.com", AddressId = "addr-gone" };
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
+        var customer = meta.Handlers.Create();
+        customer.Key = 3;
+        meta.FindField("Name")!.SetValueFn(customer, "Orphan");
+        meta.FindField("Email")!.SetValueFn(customer, "o@x.com");
+        meta.FindField("AddressId")!.SetValueFn(customer, "addr-gone");
 
         // Act
-        var rows = DataScaffold.BuildListRows(meta!, new[] { customer }, "/data/customers", includeActions: false);
+        var rows = DataScaffold.BuildListRows(meta, new[] { customer }, "/data/customers", includeActions: false);
 
         // Assert: should gracefully show raw ID when target entity is missing
         Assert.Single(rows);
@@ -99,15 +114,25 @@ public class LookupRenderingTests : IDisposable
     public void BuildViewRowsHtml_LookupField_ResolvesDisplayName()
     {
         // Arrange
-        _store.Save(new Address { Key = 2, Label = "View Test Address", Line1 = "42 View St", City = "Oxford", Country = "GB" });
+        Assert.True(DataScaffold.TryGetEntity("addresses", out var addrMeta));
+        var addr = addrMeta.Handlers.Create();
+        addr.Key = 2;
+        addrMeta.FindField("Label")!.SetValueFn(addr, "View Test Address");
+        addrMeta.FindField("Line1")!.SetValueFn(addr, "42 View St");
+        addrMeta.FindField("City")!.SetValueFn(addr, "Oxford");
+        addrMeta.FindField("Country")!.SetValueFn(addr, "GB");
+        addrMeta.Handlers.SaveAsync(addr, CancellationToken.None).AsTask().GetAwaiter().GetResult();
         ClearLookupCache();
 
-        var meta = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(meta);
-        var customer = new Customer { Key = 4, Name = "View Test", Email = "v@x.com", AddressId = "2" };
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
+        var customer = meta.Handlers.Create();
+        customer.Key = 4;
+        meta.FindField("Name")!.SetValueFn(customer, "View Test");
+        meta.FindField("Email")!.SetValueFn(customer, "v@x.com");
+        meta.FindField("AddressId")!.SetValueFn(customer, "2");
 
         // Act
-        var rows = DataScaffold.BuildViewRowsHtml(meta!, customer);
+        var rows = DataScaffold.BuildViewRowsHtml(meta, customer);
 
         // Assert: address row should contain resolved display name
         var addressRow = rows.FirstOrDefault(r => r.Label.Contains("Address"));
@@ -120,12 +145,15 @@ public class LookupRenderingTests : IDisposable
     {
         // Arrange
         ClearLookupCache();
-        var meta = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(meta);
-        var customer = new Customer { Key = 5, Name = "Empty Lookup", Email = "e@x.com", AddressId = "" };
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
+        var customer = meta.Handlers.Create();
+        customer.Key = 5;
+        meta.FindField("Name")!.SetValueFn(customer, "Empty Lookup");
+        meta.FindField("Email")!.SetValueFn(customer, "e@x.com");
+        meta.FindField("AddressId")!.SetValueFn(customer, "");
 
         // Act
-        var rows = DataScaffold.BuildViewRowsHtml(meta!, customer);
+        var rows = DataScaffold.BuildViewRowsHtml(meta, customer);
 
         // Assert: empty lookup should produce dash placeholder
         var addressRow = rows.FirstOrDefault(r => r.Label.Contains("Address"));
@@ -139,12 +167,15 @@ public class LookupRenderingTests : IDisposable
     {
         // Arrange: Customer references non-existent address
         ClearLookupCache();
-        var meta = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(meta);
-        var customer = new Customer { Key = 6, Name = "Deleted Ref", Email = "d@x.com", AddressId = "addr-deleted" };
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
+        var customer = meta.Handlers.Create();
+        customer.Key = 6;
+        meta.FindField("Name")!.SetValueFn(customer, "Deleted Ref");
+        meta.FindField("Email")!.SetValueFn(customer, "d@x.com");
+        meta.FindField("AddressId")!.SetValueFn(customer, "addr-deleted");
 
         // Act
-        var rows = DataScaffold.BuildViewRowsHtml(meta!, customer);
+        var rows = DataScaffold.BuildViewRowsHtml(meta, customer);
 
         // Assert: should show raw ID as fallback
         var addressRow = rows.FirstOrDefault(r => r.Label.Contains("Address"));
@@ -158,22 +189,24 @@ public class LookupRenderingTests : IDisposable
     public void BuildListRows_OrderCustomerLookup_ResolvesCustomerName()
     {
         // Arrange
-        _store.Save(new Customer { Key = 7, Name = "Acme Corp", Email = "a@acme.com" });
+        Assert.True(DataScaffold.TryGetEntity("customers", out var custMeta));
+        var cust = custMeta.Handlers.Create();
+        cust.Key = 7;
+        custMeta.FindField("Name")!.SetValueFn(cust, "Acme Corp");
+        custMeta.FindField("Email")!.SetValueFn(cust, "a@acme.com");
+        custMeta.Handlers.SaveAsync(cust, CancellationToken.None).AsTask().GetAwaiter().GetResult();
         ClearLookupCache();
 
-        var meta = DataScaffold.GetEntityByType(typeof(Order));
-        Assert.NotNull(meta);
-        var order = new Order
-        {
-            Key = 1,
-            OrderNumber = "ORD-001",
-            CustomerId = "7",
-            Status = "Open",
-            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow)
-        };
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
+        var order = meta.Handlers.Create();
+        order.Key = 1;
+        meta.FindField("OrderNumber")!.SetValueFn(order, "ORD-001");
+        meta.FindField("CustomerId")!.SetValueFn(order, "7");
+        meta.FindField("Status")!.SetValueFn(order, "Open");
+        meta.FindField("OrderDate")!.SetValueFn(order, DateOnly.FromDateTime(DateTime.UtcNow));
 
         // Act
-        var rows = DataScaffold.BuildListRows(meta!, new[] { order }, "/data/orders", includeActions: false);
+        var rows = DataScaffold.BuildListRows(meta, new[] { order }, "/data/orders", includeActions: false);
 
         // Assert
         Assert.Single(rows);
@@ -187,20 +220,39 @@ public class LookupRenderingTests : IDisposable
     public void BuildListRows_MixedLookupStates_HandlesAllGracefully()
     {
         // Arrange: some addresses exist, some don't
-        _store.Save(new Address { Key = 3, Label = "Valid Address", Line1 = "1 Test", City = "Test", Country = "GB" });
+        Assert.True(DataScaffold.TryGetEntity("addresses", out var addrMeta));
+        var addr = addrMeta.Handlers.Create();
+        addr.Key = 3;
+        addrMeta.FindField("Label")!.SetValueFn(addr, "Valid Address");
+        addrMeta.FindField("Line1")!.SetValueFn(addr, "1 Test");
+        addrMeta.FindField("City")!.SetValueFn(addr, "Test");
+        addrMeta.FindField("Country")!.SetValueFn(addr, "GB");
+        addrMeta.Handlers.SaveAsync(addr, CancellationToken.None).AsTask().GetAwaiter().GetResult();
         ClearLookupCache();
 
-        var meta = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(meta);
-        var customers = new[]
-        {
-            new Customer { Key = 8, Name = "Has Address", Email = "a@x.com", AddressId = "3" },
-            new Customer { Key = 9, Name = "No Address", Email = "b@x.com", AddressId = "" },
-            new Customer { Key = 10, Name = "Bad Address", Email = "c@x.com", AddressId = "addr-missing" },
-        };
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
+        var c1 = meta.Handlers.Create();
+        c1.Key = 8;
+        meta.FindField("Name")!.SetValueFn(c1, "Has Address");
+        meta.FindField("Email")!.SetValueFn(c1, "a@x.com");
+        meta.FindField("AddressId")!.SetValueFn(c1, "3");
+
+        var c2 = meta.Handlers.Create();
+        c2.Key = 9;
+        meta.FindField("Name")!.SetValueFn(c2, "No Address");
+        meta.FindField("Email")!.SetValueFn(c2, "b@x.com");
+        meta.FindField("AddressId")!.SetValueFn(c2, "");
+
+        var c3 = meta.Handlers.Create();
+        c3.Key = 10;
+        meta.FindField("Name")!.SetValueFn(c3, "Bad Address");
+        meta.FindField("Email")!.SetValueFn(c3, "c@x.com");
+        meta.FindField("AddressId")!.SetValueFn(c3, "addr-missing");
+
+        var customers = new[] { c1, c2, c3 };
 
         // Act
-        var rows = DataScaffold.BuildListRows(meta!, customers, "/data/customers", includeActions: false);
+        var rows = DataScaffold.BuildListRows(meta, customers, "/data/customers", includeActions: false);
 
         // Assert
         Assert.Equal(3, rows.Count);

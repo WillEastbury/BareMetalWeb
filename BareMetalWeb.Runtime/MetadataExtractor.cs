@@ -25,7 +25,7 @@ public static class MetadataExtractor
         nameof(BaseDataObject.CreatedBy),
         nameof(BaseDataObject.UpdatedBy),
         nameof(BaseDataObject.ETag),
-        // DynamicDataObject sentinel property
+        // Legacy sentinel property (from removed DynamicDataObject)
         "EntityTypeName"
     };
 

@@ -192,6 +192,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
             "enum" => FormFieldType.Enum,
             "lookup" => FormFieldType.LookupList,
             "email" => FormFieldType.Email,
+            "country" => FormFieldType.Country,
             "phone" => FormFieldType.String,
             "url" => FormFieldType.String,
             _ => FormFieldType.String

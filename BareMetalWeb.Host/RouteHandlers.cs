@@ -15,8 +15,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Primitives;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
-using BareMetalWeb.UserClasses.DataObjects;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Core.Interfaces;
@@ -1080,13 +1078,6 @@ public sealed class RouteHandlers : IRouteHandlers
         user.SetPassword(password);
         await Users.SaveAsync(user);
         await SettingsService.EnsureDefaultsAsync(DataStoreProvider.Current, _settingDefaults, userName, context.RequestAborted).ConfigureAwait(false);
-        // Seed lookup tables only when compiled entities are loaded (not gallery-first mode)
-        if (DataScaffold.TryGetEntity("currencies", out _))
-        {
-            await EnsureDefaultCurrencies(userName);
-            await EnsureDefaultUnitsOfMeasure(userName);
-            await EnsureDefaultAddress(userName);
-        }
         await EnsureDefaultReports(userName);
         // Redirect to gallery so the user can deploy modules
         context.Response.Redirect("/admin/gallery");
@@ -1114,92 +1105,6 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         return permissions.ToArray();
-    }
-
-    private async ValueTask EnsureDefaultCurrencies(string createdBy)
-    {
-        var existing = (await DataStoreProvider.Current.QueryAsync<Currency>(null).ConfigureAwait(false)).ToList();
-        var hasUsd = existing.Any(currency => string.Equals(currency.IsoCode, "USD", StringComparison.OrdinalIgnoreCase));
-        var hasGbp = existing.Any(currency => string.Equals(currency.IsoCode, "GBP", StringComparison.OrdinalIgnoreCase));
-        var hasBase = existing.Any(currency => currency.IsBase);
-
-        if (!hasUsd)
-        {
-            var usd = new Currency
-            {
-                IsoCode = "USD",
-                Description = "US Dollar",
-                Symbol = "$",
-                DecimalPlaces = 2,
-                IsEnabled = true,
-                IsBase = !hasBase,
-                CreatedBy = createdBy,
-                UpdatedBy = createdBy
-            };
-            await DataStoreProvider.Current.SaveAsync(usd);
-            hasBase = hasBase || usd.IsBase;
-        }
-
-        if (!hasGbp)
-        {
-            var gbp = new Currency
-            {
-                IsoCode = "GBP",
-                Description = "Pound Sterling",
-                Symbol = "GBP",
-                DecimalPlaces = 2,
-                IsEnabled = true,
-                IsBase = !hasBase,
-                CreatedBy = createdBy,
-                UpdatedBy = createdBy
-            };
-            await DataStoreProvider.Current.SaveAsync(gbp);
-        }
-    }
-
-    private async ValueTask EnsureDefaultUnitsOfMeasure(string createdBy)
-    {
-        var existing = (await DataStoreProvider.Current.QueryAsync<UnitOfMeasure>(null).ConfigureAwait(false)).ToList();
-        var hasEa = existing.Any(unit => string.Equals(unit.Abbreviation, "EA", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(unit.Name, "EA", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(unit.Name, "Each", StringComparison.OrdinalIgnoreCase));
-
-        if (hasEa)
-            return;
-
-        var unitOfMeasure = new UnitOfMeasure
-        {
-            Name = "Each",
-            Abbreviation = "EA",
-            Description = "Each",
-            IsActive = true,
-            CreatedBy = createdBy,
-            UpdatedBy = createdBy
-        };
-
-        await DataStoreProvider.Current.SaveAsync(unitOfMeasure);
-    }
-
-    private async ValueTask EnsureDefaultAddress(string createdBy)
-    {
-        var addresses = await DataStoreProvider.Current.QueryAsync<Address>(null).ConfigureAwait(false);
-        var hasAddress = addresses.Any();
-        if (hasAddress)
-            return;
-
-        var address = new Address
-        {
-            Label = "Main",
-            Line1 = "123 Example Street",
-            City = "London",
-            Region = "Greater London",
-            PostalCode = "SW1A 1AA",
-            Country = "GB",
-            CreatedBy = createdBy,
-            UpdatedBy = createdBy
-        };
-
-        await DataStoreProvider.Current.SaveAsync(address);
     }
 
     private async ValueTask EnsureDefaultReports(string createdBy)
@@ -4070,21 +3975,20 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask SampleDataHandler(HttpContext context)
     {
-        // Sample data generator requires compiled entity types
-        if (!DataScaffold.TryGetEntity("customers", out _))
+        var entities = RuntimeEntityRegistry.Current.All;
+        if (entities.Count == 0)
         {
             await BuildPageHandler(ctx =>
             {
                 ctx.SetStringValue("title", "Generate Sample Data");
-                ctx.SetStringValue("html_message", "<div class=\"alert alert-info\">Sample data generation requires compiled entity modules. " +
-                    "In gallery-first mode, deploy modules from the <a href=\"/admin/gallery\">Gallery</a> first, " +
-                    "or set <code>Data:LoadCompiledEntities=true</code> in appsettings.json and restart.</div>");
+                ctx.SetStringValue("html_message", "<div class=\"alert alert-info\">No entity types are registered. " +
+                    "Deploy modules from the <a href=\"/admin/gallery\">Gallery</a> first.</div>");
             })(context);
             return;
         }
         await BuildPageHandler(ctx =>
         {
-            RenderSampleDataForm(ctx, "<p>Generate sample data for load and indexing tests.</p>", 100, 50, 25, 25, 10, 25, 20, 10, 10, clearExisting: false);
+            RenderSampleDataForm(ctx, "<p>Generate sample data for load and indexing tests.</p>", entities, 10, clearExisting: false);
         })(context);
     }
 
@@ -4102,50 +4006,39 @@ public sealed class RouteHandlers : IRouteHandlers
         var form = await context.Request.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
+            var entities = RuntimeEntityRegistry.Current.All;
             context.SetStringValue("title", "Generate Sample Data");
             context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
-            RenderSampleDataForm(context, "<p>Invalid security token. Please try again.</p>", 100, 50, 25, 25, 10, 25, 20, 10, 10, clearExisting: false);
+            RenderSampleDataForm(context, "<p>Invalid security token. Please try again.</p>", entities, 10, clearExisting: false);
             await _renderer.RenderPage(context);
             return;
         }
 
         var errors = new List<string>();
-        var addressCount = ParseSampleCount(form, "addresses", errors);
-        var customerCount = ParseSampleCount(form, "customers", errors);
-        var unitCount = ParseSampleCount(form, "units", errors);
-        var productCount = ParseSampleCount(form, "products", errors);
-        var employeeCount = ParseSampleCount(form, "employees", errors);
-        var orderCount = ParseSampleCount(form, "orders", errors);
-        var todoCount = ParseSampleCount(form, "todos", errors);
-        var timeTablePlanCount = ParseSampleCount(form, "timeTablePlans", errors);
-        var lessonLogCount = ParseSampleCount(form, "lessonLogs", errors);
+        var registry = RuntimeEntityRegistry.Current;
+        var entityCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        foreach (var model in registry.All)
+        {
+            var count = ParseSampleCount(form, model.Slug, errors);
+            if (count > 0)
+                entityCounts[model.Slug] = count;
+        }
         var clearExisting = ParseSampleToggle(form, "clearExisting");
-
-        if (customerCount > 0 && addressCount == 0)
-            errors.Add("Customers require at least one address.");
-        if (productCount > 0 && unitCount == 0)
-            errors.Add("Products require at least one unit of measure.");
-        if (orderCount > 0 && customerCount == 0)
-            errors.Add("Orders require at least one customer.");
 
         if (errors.Count > 0)
         {
             context.SetStringValue("title", "Generate Sample Data");
             context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
-            RenderSampleDataForm(context, $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>", addressCount, customerCount, unitCount, productCount, employeeCount, orderCount, todoCount, timeTablePlanCount, lessonLogCount, clearExisting);
+            RenderSampleDataForm(context, $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>", registry.All, 10, clearExisting);
             await _renderer.RenderPage(context);
             return;
         }
 
         var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
 
-        // Capture parameters so the background task doesn't reference HttpContext.
-        var capturedAddressCount  = addressCount;  var capturedCustomerCount  = customerCount;
-        var capturedUnitCount     = unitCount;      var capturedProductCount   = productCount;
-        var capturedEmployeeCount = employeeCount;  var capturedOrderCount     = orderCount;
-        var capturedTodoCount     = todoCount;      var capturedTtpCount       = timeTablePlanCount;
-        var capturedLlCount       = lessonLogCount; var capturedClearExisting  = clearExisting;
-        var capturedUserName      = userName;
+        var capturedCounts = new Dictionary<string, int>(entityCounts, StringComparer.OrdinalIgnoreCase);
+        var capturedClear = clearExisting;
+        var capturedUser = userName;
 
         var jobId = BackgroundJobService.Instance.StartJob(
             "Generate Sample Data",
@@ -4153,117 +4046,74 @@ public sealed class RouteHandlers : IRouteHandlers
             async (progress, ct) =>
             {
                 progress.Report(0, "Starting sample data generation…");
-
-                if (capturedClearExisting)
+                var walProvider = DataStoreProvider.PrimaryProvider as WalDataProvider;
+                if (walProvider == null)
                 {
-                    progress.Report(2, "Clearing existing data…");
-                    await DeleteAllAsync<Customer>(ct);
-                    await DeleteAllAsync<Product>(ct);
-                    await DeleteAllAsync<Address>(ct);
-                    await DeleteAllAsync<UnitOfMeasure>(ct);
-                    await DeleteAllAsync<Employee>(ct);
-                    await DeleteAllAsync<Order>(ct);
-                    await DeleteAllAsync<ToDo>(ct);
-                    await DeleteAllAsync<TimeTablePlan>(ct);
-                    await DeleteAllAsync<LessonLog>(ct);
+                    progress.Report(100, "Error: WalDataProvider is not available.");
+                    return;
                 }
 
-                progress.Report(5, "Querying existing records…");
-                var addresses_query = await DataStoreProvider.Current.QueryAsync<Address>(null, ct).ConfigureAwait(false);
-                var usedAddressIds = new HashSet<string>(addresses_query.Select(a => a.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var units_query = await DataStoreProvider.Current.QueryAsync<UnitOfMeasure>(null, ct).ConfigureAwait(false);
-                var usedUnitIds = new HashSet<string>(units_query.Select(u => u.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var customers_query = await DataStoreProvider.Current.QueryAsync<Customer>(null, ct).ConfigureAwait(false);
-                var usedCustomerIds = new HashSet<string>(customers_query.Select(c => c.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var products_query = await DataStoreProvider.Current.QueryAsync<Product>(null, ct).ConfigureAwait(false);
-                var usedProductIds = new HashSet<string>(products_query.Select(p => p.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var employees_query = await DataStoreProvider.Current.QueryAsync<Employee>(null, ct).ConfigureAwait(false);
-                var usedEmployeeIds = new HashSet<string>(employees_query.Select(e => e.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var orders_query = await DataStoreProvider.Current.QueryAsync<Order>(null, ct).ConfigureAwait(false);
-                var usedOrderIds = new HashSet<string>(orders_query.Select(o => o.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var todos_query = await DataStoreProvider.Current.QueryAsync<ToDo>(null, ct).ConfigureAwait(false);
-                var usedTodoIds = new HashSet<string>(todos_query.Select(t => t.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var ttpQuery = await DataStoreProvider.Current.QueryAsync<TimeTablePlan>(null, ct).ConfigureAwait(false);
-                var usedTtpIds = new HashSet<string>(ttpQuery.Select(t => t.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var llQuery = await DataStoreProvider.Current.QueryAsync<LessonLog>(null, ct).ConfigureAwait(false);
-                var usedLessonLogIds = new HashSet<string>(llQuery.Select(l => l.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var slugs = capturedCounts.Keys.ToList();
+                int totalEntities = slugs.Count;
+                int entityIndex = 0;
+                int totalRecords = capturedCounts.Values.Sum();
+                int savedRecords = 0;
 
-                progress.Report(10, "Generating addresses and units…");
-                var addresses = GenerateAddresses(capturedAddressCount, usedAddressIds);
-                var units = GenerateUnits(capturedUnitCount, usedUnitIds);
-
-                progress.Report(20, "Generating customers and products…");
-                var customers = GenerateCustomers(capturedCustomerCount, addresses, usedCustomerIds);
-                var products = GenerateProducts(capturedProductCount, units, usedProductIds);
-                var employees = GenerateEmployees(capturedEmployeeCount, usedEmployeeIds);
-
-                progress.Report(30, "Generating currencies and orders…");
-                var existingCurrencies = (await DataStoreProvider.Current.QueryAsync<Currency>(null, ct).ConfigureAwait(false)).ToList();
-                var usedCurrencyIds = new HashSet<string>(existingCurrencies.Select(c => c.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                List<Currency> seedCurrencies = new();
-                if (capturedOrderCount > 0 && existingCurrencies.Count == 0)
-                    seedCurrencies = GenerateSeedCurrencies(usedCurrencyIds);
-
-                var allCurrencies = existingCurrencies.Concat(seedCurrencies).ToList();
-                var allCustomers = customers_query.ToList().Concat(customers).ToList();
-                var allProducts = products_query.ToList().Concat(products).ToList();
-                var orders = GenerateOrders(capturedOrderCount, allCustomers, allProducts, allCurrencies, usedOrderIds);
-
-                progress.Report(40, "Generating subjects, todos and timetable plans…");
-                var existingSubjects = (await DataStoreProvider.Current.QueryAsync<Subject>(null, ct).ConfigureAwait(false)).ToList();
-                var usedSubjectIds = new HashSet<string>(existingSubjects.Select(s => s.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                List<Subject> seedSubjects = new();
-                if ((capturedTtpCount > 0 || capturedLlCount > 0) && existingSubjects.Count == 0)
-                    seedSubjects = GenerateSeedSubjects(usedSubjectIds);
-
-                var allSubjects = existingSubjects.Concat(seedSubjects).ToList();
-                var todos = GenerateToDos(capturedTodoCount, usedTodoIds);
-                var timeTablePlans = GenerateTimeTablePlans(capturedTtpCount, allSubjects, usedTtpIds);
-                var lessonLogs = GenerateLessonLogs(capturedLlCount, allSubjects, usedLessonLogIds);
-
-                // Calculate total items to save for per-item progress reporting.
-                // Progress range: 50 (start of save phase) to 95 (end of save phase) = 45 points.
-                const int saveProgressStart = 50;
-                const int saveProgressRange = 45;
-                int totalItems = addresses.Count + units.Count + customers.Count + products.Count +
-                                 employees.Count + seedCurrencies.Count + orders.Count +
-                                 seedSubjects.Count + todos.Count + timeTablePlans.Count + lessonLogs.Count;
-                int saved = 0;
-
-                async Task SaveItemsWithProgress<T>(List<T> items, string label) where T : BaseDataObject
+                foreach (var slug in slugs)
                 {
-                    foreach (var item in items)
+                    ct.ThrowIfCancellationRequested();
+                    if (!registry.TryGet(slug, out var model))
+                        continue;
+
+                    var schema = EntitySchemaFactory.FromModel(model);
+                    var count = capturedCounts[slug];
+
+                    if (capturedClear)
+                    {
+                        progress.Report(
+                            (int)(entityIndex * 10.0 / totalEntities),
+                            $"Clearing existing {model.Name} records…");
+                        var existing = await walProvider.QueryRecordsAsync(schema, null, ct).ConfigureAwait(false);
+                        foreach (var rec in existing)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            if (rec.Key != 0)
+                                await walProvider.DeleteRecordAsync(rec.Key, schema, ct).ConfigureAwait(false);
+                        }
+                    }
+
+                    var rng = new Random();
+                    for (int i = 0; i < count; i++)
                     {
                         ct.ThrowIfCancellationRequested();
-                        ApplyAuditInfo(item, capturedUserName, isCreate: true);
-                        await DataStoreProvider.Current.SaveAsync(item, ct).ConfigureAwait(false);
-                        saved++;
-                        if (totalItems > 0)
+                        var record = schema.CreateRecord();
+                        record.Key = (uint)rng.Next(1, int.MaxValue);
+                        record.CreatedOnUtc = DateTime.UtcNow;
+                        record.UpdatedOnUtc = DateTime.UtcNow;
+                        record.CreatedBy = capturedUser;
+                        record.UpdatedBy = capturedUser;
+
+                        foreach (var field in model.Fields)
+                        {
+                            if (schema.TryGetOrdinal(field.Name, out var ordinal))
+                                record.SetValue(ordinal, GenerateSampleValue(field, rng));
+                        }
+
+                        await walProvider.SaveRecordAsync(record, schema, ct).ConfigureAwait(false);
+                        savedRecords++;
+                        if (totalRecords > 0)
                             progress.Report(
-                                saveProgressStart + (int)(saved * (double)saveProgressRange / totalItems),
-                                $"Saving {label}… ({saved}/{totalItems})");
+                                10 + (int)(savedRecords * 85.0 / totalRecords),
+                                $"Saving {model.Name}… ({savedRecords}/{totalRecords})");
                     }
+
+                    entityIndex++;
                 }
 
-                progress.Report(saveProgressStart, "Saving generated records…");
-                await SaveItemsWithProgress(addresses, "addresses");
-                await SaveItemsWithProgress(units, "units");
-                await SaveItemsWithProgress(customers, "customers");
-                await SaveItemsWithProgress(products, "products");
-                await SaveItemsWithProgress(employees, "employees");
-                await SaveItemsWithProgress(seedCurrencies, "currencies");
-                await SaveItemsWithProgress(orders, "orders");
-                await SaveItemsWithProgress(seedSubjects, "subjects");
-                await SaveItemsWithProgress(todos, "to-dos");
-                await SaveItemsWithProgress(timeTablePlans, "timetable plans");
-                await SaveItemsWithProgress(lessonLogs, "lesson logs");
-
-                progress.Report(100, $"Done. Created {addresses.Count} addresses, {customers.Count} customers, " +
-                    $"{units.Count} units, {products.Count} products, {employees.Count} employees, " +
-                    $"{orders.Count} orders, {todos.Count} to-dos, {timeTablePlans.Count} timetable plans, " +
-                    $"{lessonLogs.Count} lesson logs." +
-                    (seedCurrencies.Count > 0 ? $" Seeded {seedCurrencies.Count} currencies." : "") +
-                    (seedSubjects.Count > 0 ? $" Seeded {seedSubjects.Count} subjects." : ""));
+                var summary = string.Join(", ", slugs
+                    .Where(s => capturedCounts[s] > 0)
+                    .Select(s => $"{capturedCounts[s]} {s}"));
+                progress.Report(100, $"Done. Created {summary}.");
             });
 
         var statusUrl = $"/api/jobs/{jobId}";
@@ -4440,7 +4290,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     /// <summary>
     /// JSON API endpoint for the VNext SPA to start a sample-data background job.
-    /// Accepts a JSON body: { addresses, customers, units, products, employees, orders, todos, timeTablePlans, lessonLogs, clearExisting }
+    /// Accepts a JSON body: { entities: { "entity-slug": count, ... }, clearExisting: bool }
     /// Returns 202 Accepted with job info.
     /// </summary>
     public async ValueTask AdminSampleDataJsonHandler(HttpContext context)
@@ -4457,23 +4307,19 @@ public sealed class RouteHandlers : IRouteHandlers
         using (var reader = new System.IO.StreamReader(context.Request.Body))
             body = await reader.ReadToEndAsync().ConfigureAwait(false);
 
-        int addresses = 100, customers = 50, units = 25, products = 25, employees = 10, orders = 25, todos = 20, timeTablePlans = 10, lessonLogs = 10;
+        var entityCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         bool clearExisting = false;
 
         try
         {
             var doc = System.Text.Json.JsonDocument.Parse(body);
             var root = doc.RootElement;
-            if (root.TryGetProperty("addresses",      out var v)) addresses      = v.GetInt32();
-            if (root.TryGetProperty("customers",      out v))     customers      = v.GetInt32();
-            if (root.TryGetProperty("units",          out v))     units          = v.GetInt32();
-            if (root.TryGetProperty("products",       out v))     products       = v.GetInt32();
-            if (root.TryGetProperty("employees",      out v))     employees      = v.GetInt32();
-            if (root.TryGetProperty("orders",         out v))     orders         = v.GetInt32();
-            if (root.TryGetProperty("todos",          out v))     todos          = v.GetInt32();
-            if (root.TryGetProperty("timeTablePlans", out v))     timeTablePlans = v.GetInt32();
-            if (root.TryGetProperty("lessonLogs",     out v))     lessonLogs     = v.GetInt32();
-            if (root.TryGetProperty("clearExisting",  out v))     clearExisting  = v.GetBoolean();
+            if (root.TryGetProperty("clearExisting", out var cv)) clearExisting = cv.GetBoolean();
+            if (root.TryGetProperty("entities", out var entitiesEl) && entitiesEl.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                foreach (var prop in entitiesEl.EnumerateObject())
+                    entityCounts[prop.Name] = prop.Value.GetInt32();
+            }
         }
         catch (System.Text.Json.JsonException)
         {
@@ -4484,22 +4330,15 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var errors = new List<string>();
+        var registry = RuntimeEntityRegistry.Current;
 
-        // Bounds validation (mirrors ParseSampleCount in the SSR handler)
-        static bool IsOutOfRange(int v) => v < 0 || v > 100000;
-        if (IsOutOfRange(addresses))      errors.Add("addresses must be between 0 and 100000.");
-        if (IsOutOfRange(customers))      errors.Add("customers must be between 0 and 100000.");
-        if (IsOutOfRange(units))          errors.Add("units must be between 0 and 100000.");
-        if (IsOutOfRange(products))       errors.Add("products must be between 0 and 100000.");
-        if (IsOutOfRange(employees))      errors.Add("employees must be between 0 and 100000.");
-        if (IsOutOfRange(orders))         errors.Add("orders must be between 0 and 100000.");
-        if (IsOutOfRange(todos))          errors.Add("todos must be between 0 and 100000.");
-        if (IsOutOfRange(timeTablePlans)) errors.Add("timeTablePlans must be between 0 and 100000.");
-        if (IsOutOfRange(lessonLogs))     errors.Add("lessonLogs must be between 0 and 100000.");
-
-        if (customers > 0 && addresses == 0) errors.Add("Customers require at least one address.");
-        if (products > 0 && units == 0)      errors.Add("Products require at least one unit of measure.");
-        if (orders > 0 && customers == 0)    errors.Add("Orders require at least one customer.");
+        foreach (var (slug, count) in entityCounts)
+        {
+            if (!registry.TryGet(slug, out _))
+                errors.Add($"Unknown entity '{slug}'.");
+            if (count < 0 || count > 100000)
+                errors.Add($"{slug} must be between 0 and 100000.");
+        }
 
         if (errors.Count > 0)
         {
@@ -4512,10 +4351,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
 
-        var capturedAddresses = addresses; var capturedCustomers = customers; var capturedUnits = units;
-        var capturedProducts  = products;  var capturedEmployees = employees; var capturedOrders = orders;
-        var capturedTodos     = todos;     var capturedTtps = timeTablePlans; var capturedLls = lessonLogs;
-        var capturedClear     = clearExisting; var capturedUser = userName;
+        var capturedCounts = new Dictionary<string, int>(entityCounts, StringComparer.OrdinalIgnoreCase);
+        var capturedClear = clearExisting;
+        var capturedUser = userName;
 
         var jobId = BackgroundJobService.Instance.StartJob(
             "Generate Sample Data",
@@ -4523,104 +4361,74 @@ public sealed class RouteHandlers : IRouteHandlers
             async (progress, ct) =>
             {
                 progress.Report(0, "Starting sample data generation…");
-                if (capturedClear)
+                var walProvider = DataStoreProvider.PrimaryProvider as WalDataProvider;
+                if (walProvider == null)
                 {
-                    progress.Report(2, "Clearing existing data…");
-                    await DeleteAllAsync<Customer>(ct);   await DeleteAllAsync<Product>(ct);
-                    await DeleteAllAsync<Address>(ct);    await DeleteAllAsync<UnitOfMeasure>(ct);
-                    await DeleteAllAsync<Employee>(ct);   await DeleteAllAsync<Order>(ct);
-                    await DeleteAllAsync<ToDo>(ct);       await DeleteAllAsync<TimeTablePlan>(ct);
-                    await DeleteAllAsync<LessonLog>(ct);
+                    progress.Report(100, "Error: WalDataProvider is not available.");
+                    return;
                 }
 
-                progress.Report(5, "Querying existing records…");
-                var addresses_q    = (await DataStoreProvider.Current.QueryAsync<Address>(null, ct).ConfigureAwait(false)).ToList();
-                var units_q        = (await DataStoreProvider.Current.QueryAsync<UnitOfMeasure>(null, ct).ConfigureAwait(false)).ToList();
-                var customers_q    = (await DataStoreProvider.Current.QueryAsync<Customer>(null, ct).ConfigureAwait(false)).ToList();
-                var products_q     = (await DataStoreProvider.Current.QueryAsync<Product>(null, ct).ConfigureAwait(false)).ToList();
-                var usedAddressIds  = new HashSet<string>(addresses_q.Select(a => a.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var usedUnitIds     = new HashSet<string>(units_q.Select(u => u.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var usedCustomerIds = new HashSet<string>(customers_q.Select(c => c.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var usedProductIds  = new HashSet<string>(products_q.Select(p => p.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var usedEmployeeIds = new HashSet<string>((await DataStoreProvider.Current.QueryAsync<Employee>(null, ct).ConfigureAwait(false)).Select(e => e.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var usedOrderIds    = new HashSet<string>((await DataStoreProvider.Current.QueryAsync<Order>(null, ct).ConfigureAwait(false)).Select(o => o.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var usedTodoIds     = new HashSet<string>((await DataStoreProvider.Current.QueryAsync<ToDo>(null, ct).ConfigureAwait(false)).Select(t => t.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var usedTtpIds      = new HashSet<string>((await DataStoreProvider.Current.QueryAsync<TimeTablePlan>(null, ct).ConfigureAwait(false)).Select(t => t.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                var usedLessonLogIds= new HashSet<string>((await DataStoreProvider.Current.QueryAsync<LessonLog>(null, ct).ConfigureAwait(false)).Select(l => l.Key.ToString()), StringComparer.OrdinalIgnoreCase);
+                var slugs = capturedCounts.Keys.ToList();
+                int totalRecords = capturedCounts.Values.Sum();
+                int savedRecords = 0;
+                int entityIndex = 0;
+                int totalEntities = slugs.Count;
 
-                progress.Report(10, "Generating addresses and units…");
-                var addresses2   = GenerateAddresses(capturedAddresses, usedAddressIds);
-                var units2       = GenerateUnits(capturedUnits, usedUnitIds);
-
-                progress.Report(20, "Generating customers and products…");
-                var customers2   = GenerateCustomers(capturedCustomers, addresses2, usedCustomerIds);
-                var products2    = GenerateProducts(capturedProducts, units2, usedProductIds);
-                var employees2   = GenerateEmployees(capturedEmployees, usedEmployeeIds);
-
-                progress.Report(30, "Generating currencies and orders…");
-                var existingCurrencies = (await DataStoreProvider.Current.QueryAsync<Currency>(null, ct).ConfigureAwait(false)).ToList();
-                var usedCurrencyIds = new HashSet<string>(existingCurrencies.Select(c => c.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                List<Currency> seedCurrencies = new();
-                if (capturedOrders > 0 && existingCurrencies.Count == 0)
-                    seedCurrencies = GenerateSeedCurrencies(usedCurrencyIds);
-
-                var allCurrencies = existingCurrencies.Concat(seedCurrencies).ToList();
-                var allCustomers2 = customers_q.Concat(customers2).ToList();
-                var allProducts2  = products_q.Concat(products2).ToList();
-                var orders2       = GenerateOrders(capturedOrders, allCustomers2, allProducts2, allCurrencies, usedOrderIds);
-
-                progress.Report(40, "Generating subjects, todos and timetable plans…");
-                var existingSubjects = (await DataStoreProvider.Current.QueryAsync<Subject>(null, ct).ConfigureAwait(false)).ToList();
-                var usedSubjectIds   = new HashSet<string>(existingSubjects.Select(s => s.Key.ToString()), StringComparer.OrdinalIgnoreCase);
-                List<Subject> seedSubjects = new();
-                if ((capturedTtps > 0 || capturedLls > 0) && existingSubjects.Count == 0)
-                    seedSubjects = GenerateSeedSubjects(usedSubjectIds);
-
-                var allSubjects    = existingSubjects.Concat(seedSubjects).ToList();
-                var todos2         = GenerateToDos(capturedTodos, usedTodoIds);
-                var timeTablePlans2= GenerateTimeTablePlans(capturedTtps, allSubjects, usedTtpIds);
-                var lessonLogs2    = GenerateLessonLogs(capturedLls, allSubjects, usedLessonLogIds);
-
-                const int saveProgressStart = 50, saveProgressRange = 45;
-                int totalItems = addresses2.Count + units2.Count + customers2.Count + products2.Count +
-                                 employees2.Count + seedCurrencies.Count + orders2.Count +
-                                 seedSubjects.Count + todos2.Count + timeTablePlans2.Count + lessonLogs2.Count;
-                int saved = 0;
-
-                async Task SaveItemsWithProgress2<T>(List<T> items, string label) where T : BaseDataObject
+                foreach (var slug in slugs)
                 {
-                    foreach (var item in items)
+                    ct.ThrowIfCancellationRequested();
+                    if (!registry.TryGet(slug, out var model))
+                        continue;
+
+                    var schema = EntitySchemaFactory.FromModel(model);
+                    var count = capturedCounts[slug];
+
+                    if (capturedClear)
+                    {
+                        progress.Report(
+                            (int)(entityIndex * 10.0 / totalEntities),
+                            $"Clearing existing {model.Name} records…");
+                        var existing = await walProvider.QueryRecordsAsync(schema, null, ct).ConfigureAwait(false);
+                        foreach (var rec in existing)
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            if (rec.Key != 0)
+                                await walProvider.DeleteRecordAsync(rec.Key, schema, ct).ConfigureAwait(false);
+                        }
+                    }
+
+                    var rng = new Random();
+                    for (int i = 0; i < count; i++)
                     {
                         ct.ThrowIfCancellationRequested();
-                        ApplyAuditInfo(item, capturedUser, isCreate: true);
-                        await DataStoreProvider.Current.SaveAsync(item, ct).ConfigureAwait(false);
-                        saved++;
-                        if (totalItems > 0)
+                        var record = schema.CreateRecord();
+                        record.Key = (uint)rng.Next(1, int.MaxValue);
+                        record.CreatedOnUtc = DateTime.UtcNow;
+                        record.UpdatedOnUtc = DateTime.UtcNow;
+                        record.CreatedBy = capturedUser;
+                        record.UpdatedBy = capturedUser;
+
+                        foreach (var field in model.Fields)
+                        {
+                            if (schema.TryGetOrdinal(field.Name, out var ordinal))
+                                record.SetValue(ordinal, GenerateSampleValue(field, rng));
+                        }
+
+                        await walProvider.SaveRecordAsync(record, schema, ct).ConfigureAwait(false);
+                        savedRecords++;
+                        if (totalRecords > 0)
                             progress.Report(
-                                saveProgressStart + (int)(saved * (double)saveProgressRange / totalItems),
-                                $"Saving {label}… ({saved}/{totalItems})");
+                                10 + (int)(savedRecords * 85.0 / totalRecords),
+                                $"Saving {model.Name}… ({savedRecords}/{totalRecords})");
                     }
+
+                    entityIndex++;
                 }
 
-                progress.Report(saveProgressStart, "Saving generated records…");
-                await SaveItemsWithProgress2(addresses2,    "addresses");
-                await SaveItemsWithProgress2(units2,         "units");
-                await SaveItemsWithProgress2(customers2,     "customers");
-                await SaveItemsWithProgress2(products2,      "products");
-                await SaveItemsWithProgress2(employees2,     "employees");
-                await SaveItemsWithProgress2(seedCurrencies, "currencies");
-                await SaveItemsWithProgress2(orders2,        "orders");
-                await SaveItemsWithProgress2(seedSubjects,   "subjects");
-                await SaveItemsWithProgress2(todos2,         "to-dos");
-                await SaveItemsWithProgress2(timeTablePlans2,"timetable plans");
-                await SaveItemsWithProgress2(lessonLogs2,    "lesson logs");
-
-                progress.Report(100, $"Done. Created {addresses2.Count} addresses, {customers2.Count} customers, " +
-                    $"{units2.Count} units, {products2.Count} products, {employees2.Count} employees, " +
-                    $"{orders2.Count} orders, {todos2.Count} to-dos, {timeTablePlans2.Count} timetable plans, " +
-                    $"{lessonLogs2.Count} lesson logs." +
-                    (seedCurrencies.Count > 0 ? $" Seeded {seedCurrencies.Count} currencies." : "") +
-                    (seedSubjects.Count > 0 ? $" Seeded {seedSubjects.Count} subjects." : ""));
+                var summary = string.Join(", ", slugs
+                    .Where(s => capturedCounts[s] > 0)
+                    .Select(s => $"{capturedCounts[s]} {s}"));
+                progress.Report(100, $"Done. Created {summary}.");
             });
 
         var baseUrl   = $"{context.Request.Scheme}://{context.Request.Host}";
@@ -6356,7 +6164,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    private void RenderSampleDataForm(HttpContext context, string? message, int addresses, int customers, int units, int products, int employees, int orders, int todos, int timeTablePlans, int lessonLogs, bool clearExisting)
+    private void RenderSampleDataForm(HttpContext context, string? message, IReadOnlyList<RuntimeEntityModel> entities, int defaultCount, bool clearExisting)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Generate Sample Data");
@@ -6364,18 +6172,15 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var fields = new List<FormField>
         {
-            new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken),
-            new FormField(FormFieldType.Integer, "addresses", "Addresses", Required: true, Value: addresses.ToString(CultureInfo.InvariantCulture)),
-            new FormField(FormFieldType.Integer, "customers", "Customers", Required: true, Value: customers.ToString(CultureInfo.InvariantCulture)),
-            new FormField(FormFieldType.Integer, "units", "Units Of Measure", Required: true, Value: units.ToString(CultureInfo.InvariantCulture)),
-            new FormField(FormFieldType.Integer, "products", "Products", Required: true, Value: products.ToString(CultureInfo.InvariantCulture)),
-            new FormField(FormFieldType.Integer, "employees", "Employees", Required: true, Value: employees.ToString(CultureInfo.InvariantCulture)),
-            new FormField(FormFieldType.Integer, "orders", "Orders", Required: true, Value: orders.ToString(CultureInfo.InvariantCulture)),
-            new FormField(FormFieldType.Integer, "todos", "To-Do Items", Required: true, Value: todos.ToString(CultureInfo.InvariantCulture)),
-            new FormField(FormFieldType.Integer, "timeTablePlans", "Time Table Plans", Required: true, Value: timeTablePlans.ToString(CultureInfo.InvariantCulture)),
-            new FormField(FormFieldType.Integer, "lessonLogs", "Lesson Logs", Required: true, Value: lessonLogs.ToString(CultureInfo.InvariantCulture)),
-            new FormField(FormFieldType.YesNo, "clearExisting", "Clear existing data", false, SelectedValue: clearExisting ? "true" : "false")
+            new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken)
         };
+
+        foreach (var entity in entities)
+        {
+            fields.Add(new FormField(FormFieldType.Integer, entity.Slug, entity.Name, Required: true, Value: defaultCount.ToString(CultureInfo.InvariantCulture)));
+        }
+
+        fields.Add(new FormField(FormFieldType.YesNo, "clearExisting", "Clear existing data", false, SelectedValue: clearExisting ? "true" : "false"));
 
         context.AddFormDefinition(new FormDefinition("/admin/sample-data", "post", "Generate", fields));
     }
@@ -6390,18 +6195,6 @@ public sealed class RouteHandlers : IRouteHandlers
             || string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase)
             || string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase)
             || string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static async ValueTask DeleteAllAsync<T>(CancellationToken ct = default) where T : BaseDataObject
-    {
-        var items = (await DataStoreProvider.Current.QueryAsync<T>(null, ct).ConfigureAwait(false)).ToList();
-        foreach (var item in items)
-        {
-            if (item == null || item.Key == 0)
-                continue;
-            ct.ThrowIfCancellationRequested();
-            await DataStoreProvider.Current.DeleteAsync<T>(item.Key, ct);
-        }
     }
 
     private static int ParseSampleCount(IFormCollection form, string key, List<string> errors)
@@ -6422,412 +6215,23 @@ public sealed class RouteHandlers : IRouteHandlers
         return value;
     }
 
-    private static List<Address> GenerateAddresses(int count, HashSet<string> usedIds)
+    private static object? GenerateSampleValue(RuntimeFieldModel field, Random rng)
     {
-        var list = new List<Address>(count);
-        if (count <= 0)
-            return list;
-
-        var streets = new[] { "Maple", "Oak", "Cedar", "Pine", "Lake", "Hill", "River", "Sunset" };
-        var cities = new[] { "Springfield", "Riverton", "Lakeside", "Fairview", "Oakridge" };
-        var regions = new[] { "CA", "TX", "NY", "WA", "IL" };
-        var rnd = Random.Shared;
-
-        for (var i = 1; i <= count; i++)
+        return field.FieldType switch
         {
-            var street = streets[rnd.Next(streets.Length)];
-            var city = cities[rnd.Next(cities.Length)];
-            var region = regions[rnd.Next(regions.Length)];
-            var address = new Address
-            {
-                Label = $"Address {i}",
-                Line1 = $"{rnd.Next(10, 9999)} {street} St",
-                Line2 = string.Empty,
-                City = city,
-                Region = region,
-                PostalCode = rnd.Next(10000, 99999).ToString(CultureInfo.InvariantCulture),
-                Country = "US"
-            };
-            EnsureUniqueId(address, usedIds);
-            list.Add(address);
-        }
-
-        return list;
-    }
-
-    private static List<UnitOfMeasure> GenerateUnits(int count, HashSet<string> usedIds)
-    {
-        var list = new List<UnitOfMeasure>(count);
-        if (count <= 0)
-            return list;
-
-        var defaults = new (string Name, string Abbr)[]
-        {
-            ("Each", "EA"),
-            ("Box", "BOX"),
-            ("Kilogram", "KG"),
-            ("Liter", "L"),
-            ("Pack", "PK"),
-            ("Hour", "HR")
+            FormFieldType.String => $"Sample {field.Label} {rng.Next(1, 10000)}",
+            FormFieldType.Email => $"user{rng.Next(1, 10000)}@example.com",
+            FormFieldType.Integer => rng.Next(1, 1000),
+            FormFieldType.Decimal or FormFieldType.Money => Math.Round((decimal)rng.NextDouble() * 1000, 2),
+            FormFieldType.YesNo => rng.Next(2) == 1,
+            FormFieldType.DateTime => DateTime.UtcNow.AddDays(-rng.Next(365)),
+            FormFieldType.DateOnly => DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-rng.Next(365))),
+            FormFieldType.TimeOnly => TimeOnly.FromDateTime(DateTime.UtcNow.AddHours(rng.Next(24))),
+            FormFieldType.Enum => field.EnumValues.Count > 0 ? field.EnumValues[rng.Next(field.EnumValues.Count)] : null,
+            FormFieldType.TextArea => $"Sample {field.Label} text content for record {rng.Next(1, 10000)}.",
+            FormFieldType.LookupList => null,
+            _ => $"Value-{rng.Next(1, 10000)}"
         };
-
-        var index = 1;
-        foreach (var unit in defaults)
-        {
-            if (list.Count >= count)
-                break;
-            list.Add(new UnitOfMeasure
-            {
-                Name = unit.Name,
-                Abbreviation = unit.Abbr,
-                Description = string.Empty,
-                IsActive = true
-            });
-            EnsureUniqueId(list[^1], usedIds);
-        }
-
-        while (list.Count < count)
-        {
-            list.Add(new UnitOfMeasure
-            {
-                Name = $"Unit {index}",
-                Abbreviation = $"U{index}",
-                Description = string.Empty,
-                IsActive = true
-            });
-            EnsureUniqueId(list[^1], usedIds);
-            index++;
-        }
-
-        return list;
-    }
-
-    private static List<Customer> GenerateCustomers(int count, List<Address> addresses, HashSet<string> usedIds)
-    {
-        var list = new List<Customer>(count);
-        if (count <= 0)
-            return list;
-
-        var firstNames = new[] { "Alex", "Taylor", "Jordan", "Morgan", "Casey", "Riley" };
-        var lastNames = new[] { "Smith", "Lee", "Patel", "Garcia", "Nguyen", "Brown" };
-        var companies = new[] { "Acme Co", "Northwind", "Contoso", "Globex", "Initech" };
-        var rnd = Random.Shared;
-
-        for (var i = 0; i < count; i++)
-        {
-            var first = firstNames[rnd.Next(firstNames.Length)];
-            var last = lastNames[rnd.Next(lastNames.Length)];
-            var company = companies[rnd.Next(companies.Length)];
-            var name = $"{first} {last}";
-            var email = $"{first}.{last}.{i + 1}@example.com".ToLowerInvariant();
-            var address = addresses.Count > 0 ? addresses[rnd.Next(addresses.Count)] : null;
-
-            list.Add(new Customer
-            {
-                Name = name,
-                Email = email,
-                Phone = $"555-{rnd.Next(100, 999)}-{rnd.Next(1000, 9999)}",
-                Company = company,
-                AddressId = address?.Key.ToString() ?? string.Empty,
-                IsActive = true,
-                Notes = string.Empty,
-                Tags = new List<string>()
-            });
-            EnsureUniqueId(list[^1], usedIds);
-        }
-
-        return list;
-    }
-
-    private static List<Product> GenerateProducts(int count, List<UnitOfMeasure> units, HashSet<string> usedIds)
-    {
-        var list = new List<Product>(count);
-        if (count <= 0)
-            return list;
-
-        var names = new[] { "Widget", "Gadget", "Doohickey", "Contraption", "Gizmo" };
-        var categories = new[] { "Hardware", "Supplies", "Accessories", "Tools" };
-        var rnd = Random.Shared;
-
-        for (var i = 0; i < count; i++)
-        {
-            var name = $"{names[rnd.Next(names.Length)]} {i + 1}";
-            var unit = units.Count > 0 ? units[rnd.Next(units.Count)] : null;
-            var price = Math.Round((decimal)(rnd.NextDouble() * 250 + 5), 2);
-            var product = new Product
-            {
-                Name = name,
-                Sku = $"SKU-{i + 1:0000}",
-                Category = categories[rnd.Next(categories.Length)],
-                UnitOfMeasureId = unit?.Key.ToString() ?? string.Empty,
-                Price = price,
-                InventoryCount = rnd.Next(0, 5000),
-                ReorderLevel = rnd.Next(0, 200),
-                LaunchDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-rnd.Next(0, 365))),
-                IsActive = true,
-                Description = string.Empty,
-                Tags = new List<string>()
-            };
-            EnsureUniqueId(product, usedIds);
-            list.Add(product);
-        }
-
-        return list;
-    }
-
-    private static List<Employee> GenerateEmployees(int count, HashSet<string> usedIds)
-    {
-        var list = new List<Employee>(count);
-        if (count <= 0)
-            return list;
-
-        var firstNames = new[] { "Alice", "Bob", "Carol", "David", "Eve", "Frank", "Grace", "Henry", "Iris", "Jack" };
-        var lastNames = new[] { "Anderson", "Baker", "Clarke", "Davis", "Evans", "Foster", "Green", "Harris", "Ingram", "Jones" };
-        var titles = new[] { "Manager", "Senior Developer", "Developer", "Analyst", "Designer", "QA Engineer", "DevOps Engineer", "Product Owner", "Scrum Master", "Architect" };
-        var departments = new[] { "Engineering", "Sales", "Marketing", "HR", "Finance", "Operations", "Support", "Legal" };
-        var rnd = Random.Shared;
-
-        for (var i = 0; i < count; i++)
-        {
-            var first = firstNames[rnd.Next(firstNames.Length)];
-            var last = lastNames[rnd.Next(lastNames.Length)];
-            var title = titles[rnd.Next(titles.Length)];
-            var dept = departments[rnd.Next(departments.Length)];
-            var hireDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-rnd.Next(30, 3650)));
-
-            var employee = new Employee
-            {
-                Name = $"{first} {last}",
-                Title = title,
-                Email = $"{first.ToLowerInvariant()}.{last.ToLowerInvariant()}.{i + 1}@example.com",
-                Department = dept,
-                HireDate = hireDate,
-                ManagerId = list.Count > 0 ? list[rnd.Next(Math.Min(list.Count, 3))].Key.ToString() : null
-            };
-            EnsureUniqueId(employee, usedIds);
-            list.Add(employee);
-        }
-
-        return list;
-    }
-
-    private static List<Currency> GenerateSeedCurrencies(HashSet<string> usedIds)
-    {
-        var defaults = new (string IsoCode, string Description, string Symbol)[]
-        {
-            ("USD", "US Dollar", "$"),
-            ("EUR", "Euro", "€"),
-            ("GBP", "British Pound", "£"),
-            ("JPY", "Japanese Yen", "¥"),
-            ("CAD", "Canadian Dollar", "CA$")
-        };
-
-        var list = new List<Currency>(defaults.Length);
-        foreach (var (isoCode, description, symbol) in defaults)
-        {
-            var currency = new Currency
-            {
-                IsoCode = isoCode,
-                Description = description,
-                Symbol = symbol,
-                DecimalPlaces = isoCode == "JPY" ? 0 : 2,
-                IsEnabled = true,
-                IsBase = isoCode == "USD"
-            };
-            EnsureUniqueId(currency, usedIds);
-            list.Add(currency);
-        }
-
-        return list;
-    }
-
-    private static List<Order> GenerateOrders(int count, List<Customer> customers, List<Product> products, List<Currency> currencies, HashSet<string> usedIds)
-    {
-        var list = new List<Order>(count);
-        if (count <= 0 || customers.Count == 0)
-            return list;
-
-        var statuses = new[] { "Open", "Approved", "Shipped", "Closed", "Cancelled" };
-        var rnd = Random.Shared;
-
-        for (var i = 0; i < count; i++)
-        {
-            var customer = customers[rnd.Next(customers.Count)];
-            var currency = currencies.Count > 0 ? currencies[rnd.Next(currencies.Count)] : null;
-            var status = statuses[rnd.Next(statuses.Length)];
-            var orderDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-rnd.Next(0, 365)));
-
-            var order = new Order
-            {
-                OrderNumber = $"ORD-{i + 1:00000}",
-                CustomerId = customer.Key.ToString(),
-                OrderDate = orderDate,
-                Status = status,
-                CurrencyId = currency?.Key.ToString() ?? string.Empty,
-                Notes = string.Empty,
-                IsOpen = status == "Open",
-                OrderRows = new List<OrderRow>()
-            };
-
-            var rowCount = rnd.Next(1, 5);
-            for (var r = 0; r < rowCount && products.Count > 0; r++)
-            {
-                var product = products[rnd.Next(products.Count)];
-                var qty = rnd.Next(1, 20);
-                var price = product.Price;
-                var discountPct = rnd.Next(0, 3) == 0 ? rnd.Next(5, 20) : 0;
-                var subtotal = qty * price;
-                order.OrderRows.Add(new OrderRow
-                {
-                    ProductId = product.Key.ToString(),
-                    Quantity = qty,
-                    UnitPrice = price,
-                    DiscountPercent = discountPct,
-                    Subtotal = subtotal,
-                    LineTotal = Math.Round(subtotal * (1 - discountPct / 100m), 2),
-                    Notes = string.Empty
-                });
-            }
-
-            EnsureUniqueId(order, usedIds);
-            list.Add(order);
-        }
-
-        return list;
-    }
-
-    private static List<ToDo> GenerateToDos(int count, HashSet<string> usedIds)
-    {
-        var list = new List<ToDo>(count);
-        if (count <= 0)
-            return list;
-
-        var titles = new[] { "Review pull request", "Write unit tests", "Update documentation", "Fix bug", "Deploy to staging", "Team standup", "Code review", "Plan sprint", "Refactor module", "Performance audit" };
-        var periodicities = new[] { TodoPeriodicity.OneOff, TodoPeriodicity.Daily, TodoPeriodicity.Weekly, TodoPeriodicity.Monthly };
-        var rnd = Random.Shared;
-
-        for (var i = 0; i < count; i++)
-        {
-            var title = $"{titles[rnd.Next(titles.Length)]} {i + 1}";
-            var deadline = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(rnd.Next(-30, 90)));
-            var startHour = rnd.Next(8, 18);
-            var startMinute = rnd.Next(0, 4) * 15;
-
-            list.Add(new ToDo
-            {
-                Title = title,
-                Deadline = deadline,
-                StartTime = new TimeOnly(startHour, startMinute),
-                Periodicity = periodicities[rnd.Next(periodicities.Length)],
-                Notes = string.Empty,
-                Link = string.Empty,
-                IsCompleted = rnd.Next(0, 5) == 0,
-                SubItems = new List<string>()
-            });
-            EnsureUniqueId(list[^1], usedIds);
-        }
-
-        return list;
-    }
-
-    private static List<Subject> GenerateSeedSubjects(HashSet<string> usedIds)
-    {
-        var defaultSubjects = new[] { "Mathematics", "English", "Science", "History", "Geography", "Art", "Music", "Physical Education", "Computing", "Languages" };
-        var list = new List<Subject>(defaultSubjects.Length);
-
-        foreach (var name in defaultSubjects)
-        {
-            var subject = new Subject { Name = name };
-            EnsureUniqueId(subject, usedIds);
-            list.Add(subject);
-        }
-
-        return list;
-    }
-
-    private static List<TimeTablePlan> GenerateTimeTablePlans(int count, List<Subject> subjects, HashSet<string> usedIds)
-    {
-        var list = new List<TimeTablePlan>(count);
-        if (count <= 0 || subjects.Count == 0)
-            return list;
-
-        var days = new BareMetalWeb.Data.DataObjects.DayOfWeek[]
-        {
-            BareMetalWeb.Data.DataObjects.DayOfWeek.Monday,
-            BareMetalWeb.Data.DataObjects.DayOfWeek.Tuesday,
-            BareMetalWeb.Data.DataObjects.DayOfWeek.Wednesday,
-            BareMetalWeb.Data.DataObjects.DayOfWeek.Thursday,
-            BareMetalWeb.Data.DataObjects.DayOfWeek.Friday
-        };
-        var durations = new[] { 30, 45, 60, 90 };
-        var rnd = Random.Shared;
-
-        for (var i = 0; i < count; i++)
-        {
-            var subject = subjects[rnd.Next(subjects.Count)];
-            var day = days[rnd.Next(days.Length)];
-            var startHour = rnd.Next(8, 16);
-            var startMinute = rnd.Next(0, 2) * 30;
-
-            list.Add(new TimeTablePlan
-            {
-                SubjectId = subject.Key.ToString(),
-                Notes = string.Empty,
-                Day = day,
-                StartTime = new TimeOnly(startHour, startMinute),
-                Minutes = durations[rnd.Next(durations.Length)]
-            });
-            EnsureUniqueId(list[^1], usedIds);
-        }
-
-        return list;
-    }
-
-    private static List<LessonLog> GenerateLessonLogs(int count, List<Subject> subjects, HashSet<string> usedIds)
-    {
-        var list = new List<LessonLog>(count);
-        if (count <= 0 || subjects.Count == 0)
-            return list;
-
-        var durations = new[] { 30, 45, 60, 90 };
-        var rnd = Random.Shared;
-
-        for (var i = 0; i < count; i++)
-        {
-            var subject = subjects[rnd.Next(subjects.Count)];
-            var date = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-rnd.Next(0, 180)));
-            var startHour = rnd.Next(8, 16);
-            var startMinute = rnd.Next(0, 2) * 30;
-
-            list.Add(new LessonLog
-            {
-                SubjectId = subject.Key.ToString(),
-                Date = date,
-                StartTime = new TimeOnly(startHour, startMinute),
-                Minutes = durations[rnd.Next(durations.Length)],
-                Notes = string.Empty,
-                Link = string.Empty
-            });
-            EnsureUniqueId(list[^1], usedIds);
-        }
-
-        return list;
-    }
-
-    private static void EnsureUniqueId(BaseDataObject dataObject, HashSet<string> usedIds)    {
-        var id = dataObject.Key.ToString();
-        if (string.IsNullOrWhiteSpace(id) || id == "0" || usedIds.Contains(id))
-        {
-            do
-            {
-                id = ((uint)Random.Shared.Next(1, int.MaxValue)).ToString();
-            }
-            while (usedIds.Contains(id));
-
-            dataObject.Key = uint.Parse(id);
-        }
-
-        usedIds.Add(id);
     }
 
     private static async ValueTask<Dictionary<string, JsonElement>?> ReadJsonBodyAsync(HttpContext context)

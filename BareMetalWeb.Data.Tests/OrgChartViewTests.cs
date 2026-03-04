@@ -1,7 +1,6 @@
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
-using BareMetalWeb.Data.DataObjects;
 using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
@@ -19,7 +18,7 @@ public class OrgChartViewTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        TestEntityRegistration.RegisterAll();
+        _ = GalleryTestFixture.State;
     }
 
     public void Dispose()
@@ -68,37 +67,31 @@ public class OrgChartViewTests : IDisposable
     public void BuildOrgChartHtml_WithHierarchy_RendersCorrectStructure()
     {
         // Arrange: Create a simple hierarchy: Idit -> Jaime -> William
-        var ceo = new BareMetalWeb.UserClasses.DataObjects.Employee
-        {
-            Key = 1,
-            Name = "Idit",
-            Title = "Manager",
-            ManagerId = null // CEO has no manager
-        };
+        Assert.True(DataScaffold.TryGetEntity("employees", out var empMeta));
 
-        var manager = new BareMetalWeb.UserClasses.DataObjects.Employee
-        {
-            Key = 2,
-            Name = "Jaime",
-            Title = "Manager",
-            ManagerId = "1"
-        };
+        var ceo = empMeta.Handlers.Create();
+        ceo.Key = (uint)1;
+        empMeta.FindField("Name")!.SetValueFn(ceo, "Idit");
+        empMeta.FindField("Title")!.SetValueFn(ceo, "Manager");
+        empMeta.FindField("ManagerId")!.SetValueFn(ceo, "0"); // root node
 
-        var engineer = new BareMetalWeb.UserClasses.DataObjects.Employee
-        {
-            Key = 3,
-            Name = "Mr William Eastbury",
-            Title = "Solution Engineer",
-            ManagerId = "2"
-        };
+        var manager = empMeta.Handlers.Create();
+        manager.Key = (uint)2;
+        empMeta.FindField("Name")!.SetValueFn(manager, "Jaime");
+        empMeta.FindField("Title")!.SetValueFn(manager, "Manager");
+        empMeta.FindField("ManagerId")!.SetValueFn(manager, "1");
+
+        var engineer = empMeta.Handlers.Create();
+        engineer.Key = (uint)3;
+        empMeta.FindField("Name")!.SetValueFn(engineer, "Mr William Eastbury");
+        empMeta.FindField("Title")!.SetValueFn(engineer, "Solution Engineer");
+        empMeta.FindField("ManagerId")!.SetValueFn(engineer, "2");
 
         var items = new List<BaseDataObject> { ceo, manager, engineer };
-        var metadata = DataScaffold.GetEntityByType(typeof(BareMetalWeb.UserClasses.DataObjects.Employee));
-        Assert.NotNull(metadata);
-        Assert.NotNull(metadata.ParentField);
+        Assert.NotNull(empMeta.ParentField);
 
         // Act
-        var html = DataScaffold.BuildOrgChartHtml(metadata, items, selectedId: null, basePath: "/admin/data/employees");
+        var html = DataScaffold.BuildOrgChartHtml(empMeta, items, selectedId: null, basePath: "/admin/data/employees");
 
         // Assert: Verify the structure does NOT wrap each node in bm-orgchart-level
         // The root node should NOT be wrapped in bm-orgchart-level
@@ -126,13 +119,12 @@ public class OrgChartViewTests : IDisposable
     public void BuildOrgChartHtml_NoParentField_ReturnsWarning()
     {
         // Arrange: Use an entity without a parent field (Customer has no self-reference)
-        var metadata = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(metadata);
+        Assert.True(DataScaffold.TryGetEntity("customers", out var custMeta));
 
         var items = new List<BaseDataObject>();
 
         // Act
-        var html = DataScaffold.BuildOrgChartHtml(metadata, items, selectedId: null, basePath: "/admin/data/customers");
+        var html = DataScaffold.BuildOrgChartHtml(custMeta, items, selectedId: null, basePath: "/admin/data/customers");
 
         // Assert
         Assert.Contains("Org chart view requires a self-referencing parent field", html);
@@ -142,20 +134,18 @@ public class OrgChartViewTests : IDisposable
     public void BuildOrgChartHtml_SelectedNode_HighlightsCard()
     {
         // Arrange
-        var employee = new BareMetalWeb.UserClasses.DataObjects.Employee
-        {
-            Key = 4,
-            Name = "Test User",
-            Title = "Engineer",
-            ManagerId = null
-        };
+        Assert.True(DataScaffold.TryGetEntity("employees", out var empMeta));
+
+        var employee = empMeta.Handlers.Create();
+        employee.Key = (uint)4;
+        empMeta.FindField("Name")!.SetValueFn(employee, "Test User");
+        empMeta.FindField("Title")!.SetValueFn(employee, "Engineer");
+        empMeta.FindField("ManagerId")!.SetValueFn(employee, "0"); // root node
 
         var items = new List<BaseDataObject> { employee };
-        var metadata = DataScaffold.GetEntityByType(typeof(BareMetalWeb.UserClasses.DataObjects.Employee));
-        Assert.NotNull(metadata);
 
         // Act
-        var html = DataScaffold.BuildOrgChartHtml(metadata, items, selectedId: "4", basePath: "/admin/data/employees");
+        var html = DataScaffold.BuildOrgChartHtml(empMeta, items, selectedId: "4", basePath: "/admin/data/employees");
 
         // Assert
         Assert.Contains("bm-orgchart-card-selected", html);
@@ -165,36 +155,30 @@ public class OrgChartViewTests : IDisposable
     public void BuildOrgChartHtml_MultipleSiblings_AllInSameLevel()
     {
         // Arrange: One parent with two children
-        var parent = new BareMetalWeb.UserClasses.DataObjects.Employee
-        {
-            Key = 5,
-            Name = "Parent",
-            Title = "Manager",
-            ManagerId = null
-        };
+        Assert.True(DataScaffold.TryGetEntity("employees", out var empMeta));
 
-        var child1 = new BareMetalWeb.UserClasses.DataObjects.Employee
-        {
-            Key = 6,
-            Name = "Child One",
-            Title = "Engineer",
-            ManagerId = "5"
-        };
+        var parent = empMeta.Handlers.Create();
+        parent.Key = (uint)5;
+        empMeta.FindField("Name")!.SetValueFn(parent, "Parent");
+        empMeta.FindField("Title")!.SetValueFn(parent, "Manager");
+        empMeta.FindField("ManagerId")!.SetValueFn(parent, "0"); // root node
 
-        var child2 = new BareMetalWeb.UserClasses.DataObjects.Employee
-        {
-            Key = 7,
-            Name = "Child Two",
-            Title = "Engineer",
-            ManagerId = "5"
-        };
+        var child1 = empMeta.Handlers.Create();
+        child1.Key = (uint)6;
+        empMeta.FindField("Name")!.SetValueFn(child1, "Child One");
+        empMeta.FindField("Title")!.SetValueFn(child1, "Engineer");
+        empMeta.FindField("ManagerId")!.SetValueFn(child1, "5");
+
+        var child2 = empMeta.Handlers.Create();
+        child2.Key = (uint)7;
+        empMeta.FindField("Name")!.SetValueFn(child2, "Child Two");
+        empMeta.FindField("Title")!.SetValueFn(child2, "Engineer");
+        empMeta.FindField("ManagerId")!.SetValueFn(child2, "5");
 
         var items = new List<BaseDataObject> { parent, child1, child2 };
-        var metadata = DataScaffold.GetEntityByType(typeof(BareMetalWeb.UserClasses.DataObjects.Employee));
-        Assert.NotNull(metadata);
 
         // Act
-        var html = DataScaffold.BuildOrgChartHtml(metadata, items, selectedId: null, basePath: "/admin/data/employees");
+        var html = DataScaffold.BuildOrgChartHtml(empMeta, items, selectedId: null, basePath: "/admin/data/employees");
 
         // Assert: Both children should appear
         Assert.Contains("Child One", html);

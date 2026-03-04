@@ -1003,7 +1003,7 @@ public static class RouteRegistrationExtensions
             async context =>
             {
                 var types = DataScaffold.Entities
-                    .Where(m => m.Type != typeof(DynamicDataObject)
+                    .Where(m => m.Type != typeof(DataRecord)
                                 && m.Type.GetCustomAttribute<DataEntityAttribute>() != null)
                     .OrderBy(m => m.Name)
                     .Select(m => (object)new Dictionary<string, object?>

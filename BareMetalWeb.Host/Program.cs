@@ -4,7 +4,6 @@ using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Host;
 using BareMetalWeb.Interfaces;
@@ -254,28 +253,46 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
     }));
     
-    // Ideas/search page
+    // Ideas/search page (metadata-driven — works with any entity that has Title, Notes, Deadline, IsCompleted fields)
     appInfo.RegisterRoute("GET /ideas/search", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
     {
+        var walProvider = DataStoreProvider.PrimaryProvider as BareMetalWeb.Data.WalDataProvider;
+        var registry = BareMetalWeb.Runtime.RuntimeEntityRegistry.Current;
+        if (walProvider == null || !registry.TryGet("todos", out var model))
+        {
+            context.Response.ContentType = "text/html";
+            await context.Response.WriteAsync("<!DOCTYPE html><html><body><p>ToDo entity not deployed. <a href=\"/admin/gallery\">Deploy from Gallery</a>.</p></body></html>");
+            return;
+        }
+
+        var schema = BareMetalWeb.Runtime.EntitySchemaFactory.FromModel(model);
+        int titleOrd = -1, notesOrd = -1, deadlineOrd = -1, completedOrd = -1, startTimeOrd = -1;
+        foreach (var f in model.Fields)
+        {
+            if (string.Equals(f.Name, "Title", StringComparison.OrdinalIgnoreCase)) titleOrd = f.Ordinal;
+            else if (string.Equals(f.Name, "Notes", StringComparison.OrdinalIgnoreCase)) notesOrd = f.Ordinal;
+            else if (string.Equals(f.Name, "Deadline", StringComparison.OrdinalIgnoreCase)) deadlineOrd = f.Ordinal;
+            else if (string.Equals(f.Name, "IsCompleted", StringComparison.OrdinalIgnoreCase)) completedOrd = f.Ordinal;
+            else if (string.Equals(f.Name, "StartTime", StringComparison.OrdinalIgnoreCase)) startTimeOrd = f.Ordinal;
+        }
+
         var q = context.Request.Query.ContainsKey("q") ? context.Request.Query["q"].ToString() : null;
         var caller = context.Request.Query.ContainsKey("caller") ? context.Request.Query["caller"].ToString() : null;
         var source = context.Request.Query.ContainsKey("source") ? context.Request.Query["source"].ToString() : null;
 
         if (!string.IsNullOrWhiteSpace(q))
         {
-            var todo = new ToDo
-            {
-                Key = 0,
-                Title = q,
-                Notes = $"caller={caller ?? ""}, source={source ?? ""}",
-                Deadline = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7)),
-                StartTime = TimeOnly.FromDateTime(DateTime.UtcNow),
-                IsCompleted = false
-            };
-            DataStoreProvider.Current.Save(todo);
+            var record = schema.CreateRecord();
+            record.EntityTypeName = model.Name;
+            if (titleOrd >= 0) record.SetValue(titleOrd, q);
+            if (notesOrd >= 0) record.SetValue(notesOrd, $"caller={caller ?? ""}, source={source ?? ""}");
+            if (deadlineOrd >= 0) record.SetValue(deadlineOrd, DateOnly.FromDateTime(DateTime.UtcNow.AddDays(7)));
+            if (startTimeOrd >= 0) record.SetValue(startTimeOrd, TimeOnly.FromDateTime(DateTime.UtcNow));
+            if (completedOrd >= 0) record.SetValue(completedOrd, false);
+            walProvider.SaveRecord(record, schema);
         }
 
-        var todos = DataStoreProvider.Current.Query<ToDo>(null);
+        var todos = walProvider.QueryRecords(schema).ToList();
         var sb = new System.Text.StringBuilder();
         sb.Append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
         sb.Append("<title>Ideas</title><style>");
@@ -304,21 +321,24 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
         sb.Append("<button type=\"submit\">Add &amp; Search</button>");
         sb.Append("</form>");
 
-        var list = todos.ToList();
-        if (list.Count == 0)
+        if (todos.Count == 0)
         {
             sb.Append("<div class=\"empty\">No ideas yet. Add one above!</div>");
         }
         else
         {
             sb.Append("<table><thead><tr><th>Title</th><th>Notes</th><th>Deadline</th><th>Status</th></tr></thead><tbody>");
-            foreach (var t in list)
+            foreach (var t in todos)
             {
-                var css = t.IsCompleted ? " class=\"done\"" : "";
-                var badge = t.IsCompleted ? "<span class=\"badge badge-done\">Done</span>" : "<span class=\"badge badge-open\">Open</span>";
-                sb.Append($"<tr><td{css}>{System.Net.WebUtility.HtmlEncode(t.Title)}</td>");
-                sb.Append($"<td>{System.Net.WebUtility.HtmlEncode(t.Notes)}</td>");
-                sb.Append($"<td>{t.Deadline:yyyy-MM-dd}</td>");
+                var title = titleOrd >= 0 ? t.GetValue(titleOrd)?.ToString() ?? "" : "";
+                var notes = notesOrd >= 0 ? t.GetValue(notesOrd)?.ToString() ?? "" : "";
+                var deadline = deadlineOrd >= 0 && t.GetValue(deadlineOrd) is DateOnly d ? d.ToString("yyyy-MM-dd") : "";
+                var done = completedOrd >= 0 && t.GetValue(completedOrd) is true;
+                var css = done ? " class=\"done\"" : "";
+                var badge = done ? "<span class=\"badge badge-done\">Done</span>" : "<span class=\"badge badge-open\">Open</span>";
+                sb.Append($"<tr><td{css}>{System.Net.WebUtility.HtmlEncode(title)}</td>");
+                sb.Append($"<td>{System.Net.WebUtility.HtmlEncode(notes)}</td>");
+                sb.Append($"<td>{deadline}</td>");
                 sb.Append($"<td>{badge}</td></tr>");
             }
             sb.Append("</tbody></table>");

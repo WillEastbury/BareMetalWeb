@@ -253,7 +253,7 @@
       "Name": "Country",
       "Label": "Country",
       "Ordinal": 7,
-      "Type": "string",
+      "Type": "country",
       "IsNullable": false,
       "Required": true,
       "List": true,

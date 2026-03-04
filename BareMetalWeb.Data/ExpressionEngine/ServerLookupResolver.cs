@@ -160,9 +160,6 @@ public sealed class ServerLookupResolver : ILookupResolver
         if (entity is DataRecord rec && rec.Schema != null)
             return rec.GetField(rec.Schema, fieldName);
 
-        if (entity is DynamicDataObject dyn)
-            return dyn.GetField(fieldName);
-
         // Reflection for compiled entities
         var prop = entity.GetType().GetProperty(fieldName,
             BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);

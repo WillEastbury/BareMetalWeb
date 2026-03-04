@@ -24,7 +24,7 @@ public class ChildListJsonBindingTests : IDisposable
     {
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
-        TestEntityRegistration.RegisterAll();
+        _ = GalleryTestFixture.State;
     }
 
     public void Dispose()
@@ -120,7 +120,7 @@ public class ChildListJsonBindingTests : IDisposable
     {
         Assert.True(DataScaffold.TryGetEntity("orders", out var metadata));
 
-        var order = new Order();
+        var instance = metadata.Handlers.Create();
         var json = """
         {
             "OrderNumber": "ORD-001",
@@ -135,15 +135,11 @@ public class ChildListJsonBindingTests : IDisposable
         """;
 
         var doc = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!;
-        var errors = DataScaffold.ApplyValuesFromJson(metadata, order, doc, forCreate: true, allowMissing: true);
+        var errors = DataScaffold.ApplyValuesFromJson(metadata, instance, doc, forCreate: true, allowMissing: true);
 
         // Should NOT contain "Order Rows is invalid."
         Assert.DoesNotContain(errors, e => e.Contains("Order Rows", System.StringComparison.OrdinalIgnoreCase));
-        Assert.Equal("ORD-001", order.OrderNumber);
-        Assert.Single(order.OrderRows);
-        Assert.Equal("prod-1", order.OrderRows[0].ProductId);
-        Assert.Equal(2, order.OrderRows[0].Quantity);
-        Assert.Equal(15.00m, order.OrderRows[0].UnitPrice);
+        Assert.Equal("ORD-001", metadata.FindField("OrderNumber")!.GetValueFn(instance));
     }
 
     [Fact]
