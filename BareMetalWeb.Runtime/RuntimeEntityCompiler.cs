@@ -106,7 +106,9 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
                 CalculatedDisplayFormat: f.CalculatedDisplayFormat,
                 CopyFromParentField: f.CopyFromParentField,
                 CopyFromParentSlug: f.CopyFromParentSlug,
-                CopyFromParentSourceField: f.CopyFromParentSourceField
+                CopyFromParentSourceField: f.CopyFromParentSourceField,
+                RelatedDocumentSlug: f.RelatedDocumentSlug,
+                RelatedDocumentDisplayField: f.RelatedDocumentDisplayField
             ));
         }
 

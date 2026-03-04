@@ -60,5 +60,7 @@ public sealed record RuntimeFieldModel(
     string? CalculatedDisplayFormat = null,
     string? CopyFromParentField = null,
     string? CopyFromParentSlug = null,
-    string? CopyFromParentSourceField = null
+    string? CopyFromParentSourceField = null,
+    string? RelatedDocumentSlug = null,
+    string? RelatedDocumentDisplayField = null
 );

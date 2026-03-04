@@ -586,7 +586,10 @@ public static class RouteRegistrationExtensions
                                 var fkVal = rf.GetValueFn(current)?.ToString();
                                 if (string.IsNullOrEmpty(fkVal)) continue;
 
-                                var targetMeta = DataScaffold.GetEntityByType(rf.RelatedDocument.TargetType);
+                                var targetMeta = !string.IsNullOrEmpty(rf.RelatedDocument.TargetSlug)
+                                    && DataScaffold.TryGetEntity(rf.RelatedDocument.TargetSlug, out var slugMeta)
+                                    ? slugMeta
+                                    : DataScaffold.GetEntityByType(rf.RelatedDocument.TargetType);
                                 if (targetMeta == null) continue;
 
                                 // Try to load the upstream document
@@ -625,7 +628,11 @@ public static class RouteRegistrationExtensions
                     foreach (var rf in childMeta.DocumentRelationFields)
                     {
                         if (rf.RelatedDocument == null) continue;
-                        if (rf.RelatedDocument.TargetType != meta.Type) continue;
+                        // Match by slug (metadata-driven) or CLR type (compiled entities)
+                        bool matches = !string.IsNullOrEmpty(rf.RelatedDocument.TargetSlug)
+                            ? string.Equals(rf.RelatedDocument.TargetSlug, meta.Slug, StringComparison.OrdinalIgnoreCase)
+                            : rf.RelatedDocument.TargetType == meta.Type;
+                        if (!matches) continue;
 
                         // Query child records that reference this record's ID
                         var query = new QueryDefinition
@@ -693,7 +700,10 @@ public static class RouteRegistrationExtensions
                     foreach (var rf in entityMeta.DocumentRelationFields)
                     {
                         if (rf.RelatedDocument == null) continue;
-                        var targetMeta = DataScaffold.GetEntityByType(rf.RelatedDocument.TargetType);
+                        var targetMeta = !string.IsNullOrEmpty(rf.RelatedDocument.TargetSlug)
+                            && DataScaffold.TryGetEntity(rf.RelatedDocument.TargetSlug, out var slugMeta)
+                            ? slugMeta
+                            : DataScaffold.GetEntityByType(rf.RelatedDocument.TargetType);
                         if (targetMeta == null) continue;
 
                         if (seenSlugs.Add(targetMeta.Slug))
@@ -1255,7 +1265,10 @@ public static class RouteRegistrationExtensions
 
             if (f.RelatedDocument != null)
             {
-                var targetMeta = DataScaffold.GetEntityByType(f.RelatedDocument.TargetType);
+                var targetMeta = !string.IsNullOrEmpty(f.RelatedDocument.TargetSlug)
+                    && DataScaffold.TryGetEntity(f.RelatedDocument.TargetSlug, out var rdSlugMeta)
+                    ? rdSlugMeta
+                    : DataScaffold.GetEntityByType(f.RelatedDocument.TargetType);
                 fd["relatedDocument"] = new Dictionary<string, object?>
                 {
                     ["targetSlug"] = targetMeta?.Slug,

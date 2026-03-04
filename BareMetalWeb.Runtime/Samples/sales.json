@@ -1023,7 +1023,9 @@
       "UpdatedOnUtc": "2026-02-27T16:07:21.1596337Z",
       "CreatedBy": "",
       "UpdatedBy": "",
-      "ETag": ""
+      "ETag": "",
+      "RelatedDocumentSlug": "customers",
+      "RelatedDocumentDisplayField": "Name"
     },
     {
       "FieldId": "edb500f4-edd6-4a7a-89e1-72f10dd1d6f8",

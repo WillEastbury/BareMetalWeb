@@ -133,5 +133,13 @@ public class FieldDefinition : RenderableDataObject
     [DataField(Label = "Copy From Parent Source Field", Order = 32)]
     public string? CopyFromParentSourceField { get; set; }
 
+    /// <summary>Slug of the related document entity for document-chain navigation (e.g. "customers").</summary>
+    [DataField(Label = "Related Document Slug", Order = 33)]
+    public string? RelatedDocumentSlug { get; set; }
+
+    /// <summary>Display field on the related document entity (e.g. "Name").</summary>
+    [DataField(Label = "Related Document Display Field", Order = 34)]
+    public string? RelatedDocumentDisplayField { get; set; }
+
     public override string ToString() => $"{Name} ({Type})";
 }

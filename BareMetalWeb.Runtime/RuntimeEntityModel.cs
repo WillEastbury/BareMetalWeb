@@ -149,7 +149,11 @@ public sealed class RuntimeEntityModel
                 CalculatedDisplayFormat: f.CalculatedDisplayFormat,
                 CopyFromParentField: f.CopyFromParentField,
                 CopyFromParentSlug: f.CopyFromParentSlug,
-                CopyFromParentSourceField: f.CopyFromParentSourceField
+                CopyFromParentSourceField: f.CopyFromParentSourceField,
+                RelatedDocument: !string.IsNullOrWhiteSpace(f.RelatedDocumentSlug)
+                    && DataScaffold.TryGetEntity(f.RelatedDocumentSlug!, out var relMeta)
+                    ? new RelatedDocumentConfig(relMeta.Type, f.RelatedDocumentDisplayField ?? "Id", f.RelatedDocumentSlug)
+                    : null
             ));
         }
 
@@ -212,7 +216,8 @@ public sealed class RuntimeEntityModel
             ParentField: parentField,
             Fields: fields,
             Handlers: handlers,
-            Commands: commands
+            Commands: commands,
+            DocumentRelationFields: fields.Where(f => f.RelatedDocument != null).ToList()
         );
     }
 }
