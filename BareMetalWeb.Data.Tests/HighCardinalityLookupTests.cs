@@ -14,7 +14,7 @@ namespace BareMetalWeb.Data.Tests;
 /// Tests that BuildFormFields detects high-cardinality lookup fields and
 /// switches to the search dialog rendering instead of a full dropdown.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class HighCardinalityLookupTests : IDisposable
 {
     private readonly int _originalThreshold;

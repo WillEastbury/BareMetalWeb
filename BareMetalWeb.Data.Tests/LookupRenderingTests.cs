@@ -11,7 +11,7 @@ namespace BareMetalWeb.Data.Tests;
 /// Tests for lookup field rendering in list views and detail views.
 /// Covers edge cases: null FK, empty FK, missing target entity, and resolved display names.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class LookupRenderingTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;

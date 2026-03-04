@@ -25,7 +25,7 @@ namespace BareMetalWeb.Host.Tests;
 /// <summary>
 /// Tests for LookupApiHandlers endpoint behaviour via the full server pipeline.
 /// </summary>
-[Collection("CookieProtection")]
+[Collection("SharedState")]
 public class LookupApiHandlerTests : IDisposable
 {
     [DataEntity("Products", Slug = "products")]

@@ -11,6 +11,7 @@ namespace BareMetalWeb.Data.Tests;
 /// Tests for <see cref="WalDataProvider"/>: CRUD operations, cross-instance persistence,
 /// query/count, delete, sequential IDs, and the WAL recovery path.
 /// </summary>
+[Collection("SharedState")]
 public sealed class WalDataProviderTests : IDisposable
 {
     private readonly string _dir;

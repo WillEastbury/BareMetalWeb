@@ -8,7 +8,7 @@ namespace BareMetalWeb.Data.Tests;
 /// <summary>
 /// Tests for BuildOrgChartHtml to ensure proper hierarchical structure rendering
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class OrgChartViewTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;

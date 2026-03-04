@@ -10,6 +10,7 @@ using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
 
+[Collection("SharedState")]
 public class LocalFolderBinaryDataProviderTests : IDisposable
 {
     private readonly string _testRoot;

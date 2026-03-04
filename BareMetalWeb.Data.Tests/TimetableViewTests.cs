@@ -9,7 +9,7 @@ namespace BareMetalWeb.Data.Tests;
 /// Tests for BuildTimetableHtml and CanShowTimetableView to validate
 /// timetable view rendering with custom day-of-week enum types.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class TimetableViewTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;

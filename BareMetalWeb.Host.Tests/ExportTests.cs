@@ -8,6 +8,7 @@ using Xunit;
 
 namespace BareMetalWeb.Host.Tests;
 
+[Collection("SharedState")]
 public class ExportTests
 {
     [DataEntity("Test Order Rows", Slug = "test-export-order-rows")]

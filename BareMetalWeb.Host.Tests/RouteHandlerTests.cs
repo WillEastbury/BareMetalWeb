@@ -24,7 +24,7 @@ namespace BareMetalWeb.Host.Tests;
 /// Unit tests for RouteHandlers — testing pure/static logic, argument validation,
 /// and handler behaviour that can be exercised without a full HTTP server.
 /// </summary>
-[Collection("CookieProtection")]
+[Collection("SharedState")]
 public class RouteHandlerTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;

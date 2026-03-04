@@ -10,7 +10,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Host.Tests;
 
-[Collection("CookieProtection")]
+[Collection("SharedState")]
 public class UserAuthTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;

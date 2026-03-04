@@ -9,7 +9,7 @@ using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
 
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public sealed class AuditServiceTests : IDisposable
 {
     private readonly string _testFolder;

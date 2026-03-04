@@ -7,6 +7,7 @@ using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
 
+[Collection("SharedState")]
 public class DataQueryEvaluatorTests : IDisposable
 {
     private class TestItem : RenderableDataObject

@@ -14,7 +14,7 @@ namespace BareMetalWeb.Data.Tests;
 /// Tests that child list fields (e.g. Order.OrderRows) can be deserialized
 /// from JSON payloads sent by the VNext SPA.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class ChildListJsonBindingTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;

@@ -11,7 +11,7 @@ namespace BareMetalWeb.Data.Tests;
 /// Regression test for the create-route 500 bug caused by QueryByType attempting
 /// an invalid cast from ValueTask&lt;IEnumerable&lt;T&gt;&gt; to ValueTask&lt;IEnumerable&gt;.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class DataScaffoldLookupTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;

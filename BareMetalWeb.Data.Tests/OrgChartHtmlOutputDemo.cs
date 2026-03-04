@@ -8,7 +8,7 @@ namespace BareMetalWeb.Data.Tests;
 /// <summary>
 /// Demo program to output the org chart HTML for visual inspection
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class OrgChartHtmlOutputDemo
 {
     [Fact(Skip = "Demo only - outputs HTML to console")]

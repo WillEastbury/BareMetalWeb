@@ -13,7 +13,7 @@ namespace BareMetalWeb.Data.Tests;
 /// <summary>
 /// Tests for rendering boolean values as checkboxes in list and view contexts.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class BooleanRenderingTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;

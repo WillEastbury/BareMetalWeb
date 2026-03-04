@@ -26,7 +26,7 @@ namespace BareMetalWeb.Host.Tests;
 /// Unit tests for RouteRegistrationExtensions — verifying that each registration
 /// method adds the expected routes with correct verbs, paths, permissions, and nav settings.
 /// </summary>
-[Collection("CookieProtection")]
+[Collection("SharedState")]
 public class RouteRegistrationExtensionsTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
