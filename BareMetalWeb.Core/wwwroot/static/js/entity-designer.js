@@ -117,8 +117,26 @@
         html += '</div>';
         html += '</div>';
 
-        // Right panel: JSON preview
+        // Right panel: JSON preview + Camel Mode
         html += '<div class="col-lg-5">';
+
+        // Camel Mode collaboration panel
+        html += '<div class="card bm-page-card mb-3">';
+        html += '<div class="card-header d-flex justify-content-between align-items-center"><h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Camel Mode</h5></div>';
+        html += '<div class="card-body">';
+        html += '<p class="small text-muted mb-2">Collaborate on module design. Share a link so multiple people can contribute ideas.</p>';
+        html += '<div class="row g-2 mb-2">';
+        html += '<div class="col-8"><input type="text" class="form-control form-control-sm" id="ed-camel-name" placeholder="Session name" value=""></div>';
+        html += '<div class="col-4"><button class="btn btn-sm btn-primary w-100" id="ed-camel-create">Create Session</button></div>';
+        html += '</div>';
+        html += '<div class="row g-2 mb-2">';
+        html += '<div class="col-8"><input type="text" class="form-control form-control-sm" id="ed-camel-code" placeholder="Share code"></div>';
+        html += '<div class="col-4"><button class="btn btn-sm btn-outline-secondary w-100" id="ed-camel-join">Join Session</button></div>';
+        html += '</div>';
+        html += '<div id="ed-camel-status"></div>';
+        html += '<div id="ed-camel-log" class="mt-2" style="max-height:150px;overflow-y:auto;font-size:0.75rem"></div>';
+        html += '</div></div>';
+
         html += '<div class="card bm-page-card" style="position:sticky;top:70px"><div class="card-header d-flex justify-content-between align-items-center"><h5 class="mb-0"><i class="bi bi-code-square me-2"></i>JSON Preview</h5></div>';
         html += '<div class="card-body p-0"><pre id="ed-json-preview" class="p-3 mb-0" style="max-height:75vh;overflow:auto;font-size:0.8rem;background:var(--bs-tertiary-bg,#f8f9fa);border-radius:0 0 1rem 1rem"></pre></div>';
         html += '</div></div>';
@@ -310,7 +328,67 @@
             };
             render();
         });
+
+        // ── Camel Mode event wiring ───────────────────────────────────────
+        var camelCreateBtn = document.getElementById('ed-camel-create');
+        if (camelCreateBtn) camelCreateBtn.addEventListener('click', function () {
+            var sessionName = (document.getElementById('ed-camel-name') || {}).value;
+            if (!sessionName) { alert('Enter a session name'); return; }
+            syncEntityFromInputs(); syncFieldsFromInputs();
+            fetch('/api/_binary/design-sessions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionName: sessionName, designJson: JSON.stringify(buildJson()), isOpen: true })
+            }).then(function (r) { return r.json(); }).then(function (data) {
+                var code = data.shareCode || data.ShareCode || '';
+                var status = document.getElementById('ed-camel-status');
+                if (status) status.innerHTML = '<div class="alert alert-success py-1 px-2 small">Session created! Share code: <strong>' + code + '</strong> <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="navigator.clipboard.writeText(\'' + code + '\')">Copy</button></div>';
+                camelSessionCode = code;
+            }).catch(function (e) {
+                var status = document.getElementById('ed-camel-status');
+                if (status) status.innerHTML = '<div class="alert alert-danger py-1 px-2 small">Error: ' + e.message + '</div>';
+            });
+        });
+
+        var camelJoinBtn = document.getElementById('ed-camel-join');
+        if (camelJoinBtn) camelJoinBtn.addEventListener('click', function () {
+            var code = (document.getElementById('ed-camel-code') || {}).value;
+            if (!code) { alert('Enter a share code'); return; }
+            fetch('/api/_binary/design-sessions?f_shareCode=' + encodeURIComponent(code))
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    var sessions = data.items || data;
+                    if (!sessions || sessions.length === 0) {
+                        var status = document.getElementById('ed-camel-status');
+                        if (status) status.innerHTML = '<div class="alert alert-warning py-1 px-2 small">Session not found</div>';
+                        return;
+                    }
+                    var session = sessions[0];
+                    camelSessionCode = code;
+                    camelSessionKey = session.key || session.Key;
+                    try {
+                        var design = JSON.parse(session.designJson || session.DesignJson || '{}');
+                        if (design.name) entity.name = design.name;
+                        if (design.slug) entity.slug = design.slug;
+                        if (design.fields) entity.fields = design.fields.map(function (f) {
+                            return { fieldId: f.fieldId || crypto.randomUUID(), name: f.name || '', label: f.label || null, type: f.type || 'string', required: !!f.required, list: f.list !== false, view: true, edit: true, create: true, values: f.values || null, lookupEntity: f.lookupEntity || null, lookupDisplayField: f.lookupDisplayField || null };
+                        });
+                        if (design.navGroup) entity.navGroup = design.navGroup;
+                    } catch (e) {}
+                    render();
+                    var status = document.getElementById('ed-camel-status');
+                    if (status) status.innerHTML = '<div class="alert alert-info py-1 px-2 small">Joined session: ' + (session.sessionName || session.SessionName) + '</div>';
+                    var log = document.getElementById('ed-camel-log');
+                    if (log && (session.contributionsLog || session.ContributionsLog)) {
+                        var entries = (session.contributionsLog || session.ContributionsLog).split('\n').filter(Boolean);
+                        log.innerHTML = entries.map(function (e) { return '<div class="text-muted">' + e + '</div>'; }).join('');
+                    }
+                });
+        });
     }
+
+    var camelSessionCode = null;
+    var camelSessionKey = null;
 
     // Initialize on DOMContentLoaded
     if (document.readyState === 'loading') {
