@@ -205,6 +205,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
             "enum" => FormFieldType.Enum,
             "lookup" => FormFieldType.LookupList,
             "childlist" or "child-list" or "child_list" => FormFieldType.ChildList,
+            "markdown" or "md" => FormFieldType.Markdown,
             "email" => FormFieldType.Email,
             "country" => FormFieldType.Country,
             "phone" => FormFieldType.String,

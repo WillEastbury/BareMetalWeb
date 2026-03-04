@@ -273,6 +273,37 @@
         if (hidden) hidden.value = JSON.stringify(tags);
     }
 
+    // ── Lightweight Markdown → HTML ─────────────────────────────────────────
+    function renderMarkdownToHtml(md) {
+        if (!md) return '';
+        var html = escHtml(md);
+        // Code blocks (``` ... ```)
+        html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+        // Inline code
+        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+        // Headers
+        html = html.replace(/^### (.+)$/gm, '<h5>$1</h5>');
+        html = html.replace(/^## (.+)$/gm, '<h4>$1</h4>');
+        html = html.replace(/^# (.+)$/gm, '<h3>$1</h3>');
+        // Bold + italic
+        html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        // Links
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+        // Unordered lists
+        html = html.replace(/^\- (.+)$/gm, '<li>$1</li>');
+        html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+        // Horizontal rules
+        html = html.replace(/^---$/gm, '<hr>');
+        // Paragraphs (double newline)
+        html = html.replace(/\n\n/g, '</p><p>');
+        html = '<p>' + html + '</p>';
+        // Single newlines → <br>
+        html = html.replace(/\n/g, '<br>');
+        return html;
+    }
+
     function fmtValue(val, fieldType) {
         if (val == null || val === '') return '<span class="text-muted">—</span>';
         if (fieldType === 'YesNo' || fieldType === 'Boolean') {
@@ -281,6 +312,7 @@
                 : '<span class="badge bg-secondary">No</span>';
         }
         if (fieldType === 'Password') return '<span class="text-muted">••••••••</span>';
+        if (fieldType === 'Markdown') return '<div class="bm-markdown-rendered">' + renderMarkdownToHtml(String(val)) + '</div>';
         if (fieldType === 'Tags' && Array.isArray(val)) {
             return val.map(function (t) { return '<span class="badge bg-info text-dark me-1">' + escHtml(t) + '</span>'; }).join('');
         }
@@ -2129,6 +2161,17 @@
                 escHtml(taVal) + '</textarea>' + feedback + '</div>';
         }
 
+        // Markdown editor with live preview
+        if (f.type === 'Markdown') {
+            var mdVal = val != null ? String(val) : '';
+            return '<div class="mb-3">' + label +
+                '<textarea class="form-control form-control-sm bm-md-editor" id="' + id_ + '" name="' + escHtml(f.name) + '" rows="8"' + req + rdonly + placeholder + validation + '>' +
+                escHtml(mdVal) + '</textarea>' +
+                '<div class="card mt-2"><div class="card-header py-1 small text-muted">Preview</div>' +
+                '<div class="card-body bm-md-preview" id="' + id_ + '_preview">' + renderMarkdownToHtml(mdVal) + '</div></div>' +
+                feedback + '</div>';
+        }
+
         // Tags (pill-based input)
         if (f.type === 'Tags') {
             var tags = Array.isArray(val) ? val : (val ? String(val).split(',').map(function(s){return s.trim();}).filter(Boolean) : []);
@@ -2539,6 +2582,14 @@
     function initFormBehaviours(meta, item, slug, id, isCreate, formFields) {
         var form = document.getElementById('vnext-editor-form');
         if (!form) return;
+
+        // Wire markdown live preview
+        form.querySelectorAll('.bm-md-editor').forEach(function (ta) {
+            var preview = document.getElementById(ta.id + '_preview');
+            if (preview) {
+                ta.addEventListener('input', function () { preview.innerHTML = renderMarkdownToHtml(ta.value); });
+            }
+        });
 
         // Load lookup options async
         formFields.forEach(function (f) {

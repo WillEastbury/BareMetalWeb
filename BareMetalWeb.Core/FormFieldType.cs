@@ -28,5 +28,6 @@ public enum FormFieldType
     CustomHtml,
     ReadOnly,
     Tags,
-    ChildList
+    ChildList,
+    Markdown
 }
