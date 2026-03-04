@@ -163,6 +163,46 @@
     function apiDelete(url)       { return apiFetch(url, { method: 'DELETE' }); }
     function apiGet(url)          { return apiFetch(url); }
 
+    // Raw ordinal fetch — decompresses Brotli on the client and parses ordinal array
+    function apiRawFetch(slug) {
+        return fetch('/api/_binary/' + encodeURIComponent(slug) + '/_raw')
+            .then(function (res) {
+                if (!res.ok) throw new Error('Raw fetch failed: ' + res.status);
+                var fieldsHeader = res.headers.get('X-BMW-Fields') || '';
+                var fieldNames = fieldsHeader.split(',');
+                return res.arrayBuffer().then(function (compressed) {
+                    // Use DecompressionStream if available (modern browsers)
+                    if (typeof DecompressionStream !== 'undefined') {
+                        var ds = new DecompressionStream('deflate-raw');
+                        var blob = new Blob([compressed]);
+                        return new Response(blob.stream().pipeThrough(ds)).arrayBuffer()
+                            .then(function (raw) { return parseOrdinalData(new DataView(raw), fieldNames); });
+                    }
+                    // Fallback: assume server sent uncompressed if no DecompressionStream
+                    return parseOrdinalData(new DataView(compressed), fieldNames);
+                });
+            });
+    }
+
+    function parseOrdinalData(view, fieldNames) {
+        var offset = 0;
+        var rowCount = view.getUint32(offset, true); offset += 4;
+        var fieldCount = view.getUint16(offset, true); offset += 2;
+        var rows = [];
+        var decoder = new TextDecoder();
+        for (var r = 0; r < rowCount; r++) {
+            var row = {};
+            for (var f = 0; f < fieldCount; f++) {
+                var len = view.getUint16(offset, true); offset += 2;
+                var val = decoder.decode(new Uint8Array(view.buffer, offset, len));
+                offset += len;
+                if (f < fieldNames.length) row[fieldNames[f]] = val;
+            }
+            rows.push(row);
+        }
+        return { rows: rows, fieldNames: fieldNames, rowCount: rowCount };
+    }
+
     // ── UI helpers ────────────────────────────────────────────────────────────
     var content = null;
 

@@ -172,6 +172,67 @@ public static class BinaryApiHandlers
     }
 
     /// <summary>
+    /// GET /api/_binary/{type}/_raw
+    /// Returns Brotli-compressed ordinal array data — no JSON serialization.
+    /// Client decompresses with DecompressionStream, then reads field values by ordinal.
+    /// Format: [uint32 rowCount][uint16 fieldCount][rows: [field0_len][field0_bytes]...]
+    /// </summary>
+    public static async ValueTask RawListHandler(HttpContext context)
+    {
+        var (meta, _, error) = await ValidateAsync(context);
+        if (meta == null) { await WriteError(context, error!.Value); return; }
+
+        try
+        {
+            var queryDef = LookupApiHandlers.BuildQueryFromRequest(context, meta);
+            var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
+            var list = entities.Cast<object>().ToList();
+            var plan = GetOrBuildPlan(meta);
+
+            // Build raw ordinal array: each row is field values in plan order
+            using var ms = new System.IO.MemoryStream();
+            using (var bw = new System.IO.BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
+            {
+                bw.Write((uint)list.Count);
+                bw.Write((ushort)plan.Length);
+
+                foreach (var entity in list)
+                {
+                    foreach (var field in plan)
+                    {
+                        var val = field.Getter(entity)?.ToString() ?? string.Empty;
+                        var bytes = System.Text.Encoding.UTF8.GetBytes(val);
+                        bw.Write((ushort)bytes.Length);
+                        bw.Write(bytes);
+                    }
+                }
+            }
+
+            // Brotli compress the ordinal data
+            var rawData = ms.ToArray();
+            using var compressedMs = new System.IO.MemoryStream();
+            using (var brotli = new System.IO.Compression.BrotliStream(
+                compressedMs, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
+            {
+                brotli.Write(rawData);
+            }
+            var compressed = compressedMs.ToArray();
+
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "application/x-bmw-raw";
+            context.Response.Headers["Content-Encoding"] = "br";
+            context.Response.Headers["X-BMW-Fields"] = string.Join(",", plan.Select(p => p.Name));
+            context.Response.ContentLength = compressed.Length;
+            await context.Response.Body.WriteAsync(compressed, context.RequestAborted);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError("BinaryAPI|raw-list", ex);
+            await WriteError(context, (500, "Error querying entities."));
+        }
+    }
+
+    /// <summary>
     /// GET /api/_binary/{type}/_aggregate?fn=count|sum|avg|min|max|stddev&amp;field=FieldName
     /// Returns aggregation result. Supports multiple aggregates via repeated fn/field params.
     /// </summary>
