@@ -829,4 +829,72 @@ public sealed class WalStoreTests : IDisposable
         Assert.True(store2.TryReadOpPayload(recovered, key, out var got));
         Assert.Equal(original, got.ToArray());
     }
+
+    [Fact]
+    public async Task TryReadOpPayload_RejectsTamperedRecord()
+    {
+        ulong key = WalConstants.PackKey(60, 1);
+        var payload = Encoding.UTF8.GetBytes("integrity test");
+        ulong ptr;
+        {
+            using var store = new WalStore(_dir);
+            ptr = await store.CommitAsync(new[] { WalOp.Upsert(key, payload) });
+        }
+
+        // Tamper with the WAL segment file: flip a byte in the payload area
+        var (segId, offset32) = WalConstants.UnpackPtr(ptr);
+        string segPath = Path.Combine(_dir, WalConstants.SegmentFileName(segId));
+        var bytes = File.ReadAllBytes(segPath);
+        // Payload sits after record header (32) + batch header (16) + op header (44) = 92 bytes from offset
+        int payloadStart = (int)offset32 + 92;
+        Assert.True(payloadStart < bytes.Length, "Payload offset out of range");
+        bytes[payloadStart] ^= 0xFF; // flip bits
+        File.WriteAllBytes(segPath, bytes);
+
+        using var store2 = new WalStore(_dir);
+        Assert.True(store2.TryGetHead(key, out ulong recovered));
+        // CRC should now fail — TryReadOpPayload must return false
+        Assert.False(store2.TryReadOpPayload(recovered, key, out _));
+    }
+
+    [Fact]
+    public async Task LinearScanRecovery_SkipsCorruptRecord()
+    {
+        ulong key1 = WalConstants.PackKey(70, 1);
+        ulong key2 = WalConstants.PackKey(70, 2);
+        var payload1 = Encoding.UTF8.GetBytes("record one");
+        var payload2 = Encoding.UTF8.GetBytes("record two");
+        ulong ptr1, ptr2;
+        {
+            using var store = new WalStore(_dir);
+            ptr1 = await store.CommitAsync(new[] { WalOp.Upsert(key1, payload1) });
+            ptr2 = await store.CommitAsync(new[] { WalOp.Upsert(key2, payload2) });
+        }
+
+        // Find and corrupt the FIRST record (ptr1), then invalidate the footer
+        // so recovery uses linear scan. The scan should stop at the corrupt record.
+        var (segId, offset32) = WalConstants.UnpackPtr(ptr1);
+        string segPath = Path.Combine(_dir, WalConstants.SegmentFileName(segId));
+        var bytes = File.ReadAllBytes(segPath);
+
+        // Corrupt a byte inside the first record's payload
+        int payloadStart = (int)offset32 + 92;
+        Assert.True(payloadStart < bytes.Length);
+        bytes[payloadStart] ^= 0xFF;
+
+        // Wipe the footer end-magic so TryReadFooterIndex returns null → forces linear scan
+        int endMagicPos = bytes.Length - 4;
+        BinaryPrimitives.WriteUInt32LittleEndian(bytes.AsSpan(endMagicPos), 0u);
+        File.WriteAllBytes(segPath, bytes);
+
+        // Delete the snapshot so recovery can't bypass the WAL scan
+        string snapPath = Path.Combine(_dir, "wal_snapshot.bin");
+        if (File.Exists(snapPath)) File.Delete(snapPath);
+
+        // Re-open: footer is broken → linear scan → first record CRC fails → scan stops
+        using var store2 = new WalStore(_dir);
+        // Neither key should be recovered because scan stops at the first corrupt record
+        Assert.False(store2.TryGetHead(key1, out _));
+        Assert.False(store2.TryGetHead(key2, out _));
+    }
 }

@@ -112,8 +112,6 @@ internal static class WalSegmentReader
             return result;
 
         Span<byte> recHeader = stackalloc byte[WalConstants.RecordHeaderBytes];
-        Span<byte> batchHdr  = stackalloc byte[16]; // TxId(8)+OpCount(4)+PayloadFlags(4)
-        Span<byte> opHdr     = stackalloc byte[44]; // Op header (see OpHeaderSize in writer)
 
         while (fs.Position < fs.Length)
         {
@@ -130,34 +128,73 @@ internal static class WalSegmentReader
             if (totalBytes < minSize) break;
             if (recordStart + totalBytes > fs.Length) break; // truncated
 
+            // Read the entire record for CRC verification
+            fs.Seek(recordStart, SeekOrigin.Begin);
+            var recordBuf = new byte[totalBytes];
+            if (fs.Read(recordBuf) != (int)totalBytes) break;
+
+            if (!VerifyRecordCrc(recordBuf)) break; // CRC mismatch — treat as corrupt
+
             if (recType == WalConstants.RecordTypeCommitBatch)
             {
-                // Commit batch payload header: TxId(8) + OpCount(4) + PayloadFlags(4) = 16
-                if (fs.Read(batchHdr) != 16) break;
-                uint opCount = BinaryPrimitives.ReadUInt32LittleEndian(batchHdr[8..]);
+                var span = recordBuf.AsSpan();
+                int off = WalConstants.RecordHeaderBytes;
+                // Commit batch header: TxId(8) + OpCount(4) + PayloadFlags(4) = 16
+                if (off + 16 > span.Length) break;
+                uint opCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 8)..]);
+                off += 16;
 
-                // Walk each op header to collect keys; skip over each op's payload
-                // Op header: Key(8)+PrevPtr(8)+SchemaSig(8)+OpType(2)+Codec(2)+
-                //            UncompressedLen(4)+CompressedLen(4)+Flags(4)+Reserved(4) = 44
                 bool corrupt = false;
                 for (uint k = 0; k < opCount; k++)
                 {
-                    if (fs.Read(opHdr) != 44) { corrupt = true; break; }
+                    if (off + 44 > span.Length) { corrupt = true; break; }
 
-                    ulong key           = BinaryPrimitives.ReadUInt64LittleEndian(opHdr[0..]);
-                    uint  compressedLen = BinaryPrimitives.ReadUInt32LittleEndian(opHdr[32..]);
+                    ulong key           = BinaryPrimitives.ReadUInt64LittleEndian(span[off..]);
+                    uint  compressedLen = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 32)..]);
+                    off += 44;
 
                     result[key] = (uint)recordStart;
 
-                    if (fs.Seek(compressedLen, SeekOrigin.Current) < 0) { corrupt = true; break; }
+                    off += (int)compressedLen;
+                    if (off > span.Length) { corrupt = true; break; }
                 }
                 if (corrupt) break;
             }
 
-            // Seek to the start of the next record (handles unknown types too)
+            // Advance to the next record
             fs.Seek(recordStart + totalBytes, SeekOrigin.Begin);
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Verifies the CRC-32C of a complete WAL record.
+    /// The CRC is stored at header offset 24 and trailer offset +8; both must match
+    /// the CRC computed with those fields zeroed.
+    /// </summary>
+    internal static bool VerifyRecordCrc(Span<byte> record)
+    {
+        if (record.Length < WalConstants.RecordHeaderBytes + WalConstants.RecordTrailerBytes)
+            return false;
+
+        const int headerCrcOffset = 24; // offset within record header
+        int trailerStart = record.Length - WalConstants.RecordTrailerBytes;
+        int trailerCrcOffset = trailerStart + 8; // offset within trailer
+
+        uint storedHeaderCrc  = BinaryPrimitives.ReadUInt32LittleEndian(record[headerCrcOffset..]);
+        uint storedTrailerCrc = BinaryPrimitives.ReadUInt32LittleEndian(record[trailerCrcOffset..]);
+
+        // Both CRC fields must agree
+        if (storedHeaderCrc != storedTrailerCrc) return false;
+
+        // Zero both CRC fields, compute, then restore
+        BinaryPrimitives.WriteUInt32LittleEndian(record[headerCrcOffset..],  0u);
+        BinaryPrimitives.WriteUInt32LittleEndian(record[trailerCrcOffset..], 0u);
+        uint computed = WalCrc32C.Compute(record);
+        BinaryPrimitives.WriteUInt32LittleEndian(record[headerCrcOffset..],  storedHeaderCrc);
+        BinaryPrimitives.WriteUInt32LittleEndian(record[trailerCrcOffset..], storedTrailerCrc);
+
+        return computed == storedHeaderCrc;
     }
 }
