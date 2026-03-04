@@ -1153,7 +1153,9 @@ public static class RouteRegistrationExtensions
                 ["isIdField"] = f.IdGeneration != IdGenerationStrategy.None,
                 ["idGeneration"] = f.IdGeneration.ToString(),
                 ["placeholder"] = f.Placeholder,
-                ["indexed"] = f.IsIndexed
+                ["indexed"] = f.IsIndexed,
+                ["fieldGroup"] = f.FieldGroup,
+                ["columnSpan"] = f.ColumnSpan
             };
 
             if (f.Lookup != null)

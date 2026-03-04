@@ -110,7 +110,9 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
                 RelatedDocumentSlug: f.RelatedDocumentSlug,
                 RelatedDocumentDisplayField: f.RelatedDocumentDisplayField,
                 CascadeFromField: f.CascadeFromField,
-                CascadeFilterField: f.CascadeFilterField
+                CascadeFilterField: f.CascadeFilterField,
+                FieldGroup: f.FieldGroup,
+                ColumnSpan: f.ColumnSpan
             ));
         }
 

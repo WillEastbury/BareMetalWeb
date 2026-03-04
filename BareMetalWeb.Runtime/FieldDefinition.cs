@@ -156,5 +156,20 @@ public class FieldDefinition : RenderableDataObject
     [DataField(Label = "Cascade Filter Field", Order = 36)]
     public string? CascadeFilterField { get; set; }
 
+    /// <summary>
+    /// Logical group name for organising fields into sections/cards on the form.
+    /// Fields with the same FieldGroup are rendered together under a shared heading.
+    /// Null/empty means the field sits in the default (ungrouped) section.
+    /// </summary>
+    [DataField(Label = "Field Group", Order = 37)]
+    public string? FieldGroup { get; set; }
+
+    /// <summary>
+    /// Number of CSS grid columns this field should span (1–12, Bootstrap grid).
+    /// Defaults to 12 (full width). Use 6 for half-width, 4 for third-width, etc.
+    /// </summary>
+    [DataField(Label = "Column Span", Order = 38)]
+    public int ColumnSpan { get; set; } = 12;
+
     public override string ToString() => $"{Name} ({Type})";
 }

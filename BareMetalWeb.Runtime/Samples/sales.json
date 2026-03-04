@@ -998,7 +998,9 @@
       "UpdatedOnUtc": "2026-02-27T16:07:21.1594938Z",
       "CreatedBy": "",
       "UpdatedBy": "",
-      "ETag": ""
+      "ETag": "",
+      "FieldGroup": "Order Details",
+      "ColumnSpan": 6
     },
     {
       "FieldId": "f9e078aa-8fc9-4654-911e-49e072f450a2",
@@ -1025,7 +1027,9 @@
       "UpdatedBy": "",
       "ETag": "",
       "RelatedDocumentSlug": "customers",
-      "RelatedDocumentDisplayField": "Name"
+      "RelatedDocumentDisplayField": "Name",
+      "FieldGroup": "Order Details",
+      "ColumnSpan": 6
     },
     {
       "FieldId": "edb500f4-edd6-4a7a-89e1-72f10dd1d6f8",
@@ -1047,7 +1051,9 @@
       "UpdatedOnUtc": "2026-02-27T16:07:21.1596615Z",
       "CreatedBy": "",
       "UpdatedBy": "",
-      "ETag": ""
+      "ETag": "",
+      "FieldGroup": "Order Details",
+      "ColumnSpan": 6
     },
     {
       "FieldId": "0bb515ce-a2c2-4d62-bc29-a64b8c909a35",
@@ -1069,7 +1075,9 @@
       "UpdatedOnUtc": "2026-02-27T16:07:21.1596978Z",
       "CreatedBy": "",
       "UpdatedBy": "",
-      "ETag": ""
+      "ETag": "",
+      "FieldGroup": "Order Details",
+      "ColumnSpan": 6
     },
     {
       "FieldId": "4095019e-c0e8-4c65-93d3-b6108920fb7d",
@@ -1094,7 +1102,9 @@
       "UpdatedOnUtc": "2026-02-27T16:07:21.159819Z",
       "CreatedBy": "",
       "UpdatedBy": "",
-      "ETag": ""
+      "ETag": "",
+      "FieldGroup": "Order Details",
+      "ColumnSpan": 6
     },
     {
       "FieldId": "5c18d55a-e6e4-4b86-98fd-d64d66c5a892",
@@ -1116,7 +1126,9 @@
       "UpdatedOnUtc": "2026-02-27T16:07:21.1598783Z",
       "CreatedBy": "",
       "UpdatedBy": "",
-      "ETag": ""
+      "ETag": "",
+      "FieldGroup": "Additional Info",
+      "ColumnSpan": 12
     },
     {
       "FieldId": "2ce26a22-f164-471c-aeaa-7ffb7091db97",
@@ -1138,7 +1150,9 @@
       "UpdatedOnUtc": "2026-02-27T16:07:21.1598936Z",
       "CreatedBy": "",
       "UpdatedBy": "",
-      "ETag": ""
+      "ETag": "",
+      "FieldGroup": "Additional Info",
+      "ColumnSpan": 6
     },
     {
       "FieldId": "130b6f62-cf87-4fa1-b934-6632f397e6fc",

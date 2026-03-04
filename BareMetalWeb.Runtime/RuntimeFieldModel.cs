@@ -64,5 +64,7 @@ public sealed record RuntimeFieldModel(
     string? RelatedDocumentSlug = null,
     string? RelatedDocumentDisplayField = null,
     string? CascadeFromField = null,
-    string? CascadeFilterField = null
+    string? CascadeFilterField = null,
+    string? FieldGroup = null,
+    int ColumnSpan = 12
 );

@@ -1716,25 +1716,37 @@
         });
         html += '</div>';
 
-        // Fields table
-        html += '<div class="card bm-page-card"><div class="card-body"><dl class="row mb-0">';
+        // Fields — grouped into cards when fieldGroup is set
+        var viewGroups = [];
+        var viewGroupMap = {};
         viewFields.forEach(function (f) {
-            var val = nestedGet(item, f.name);
-
-            if (f.type === 'CustomHtml') {
-                var subItems = Array.isArray(val) ? val : [];
-                html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
-                html += '<dd class="col-sm-9">' + renderSubListReadonly(subItems, f) + '</dd>';
-            } else if (f.lookup && f.lookup.targetSlug && val) {
-                html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
-                html += '<dd class="col-sm-9" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
-                    '<a href="' + BASE + '/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></dd>';
-            } else {
-                html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
-                html += '<dd class="col-sm-9">' + fmtValue(val, f.type) + '</dd>';
-            }
+            var g = f.fieldGroup || '';
+            if (!viewGroupMap[g]) { viewGroupMap[g] = []; viewGroups.push(g); }
+            viewGroupMap[g].push(f);
         });
-        html += '</dl></div></div>';
+        viewGroups.forEach(function (g) {
+            var groupFields = viewGroupMap[g];
+            html += '<div class="card bm-page-card mb-3"><div class="card-body">';
+            if (g) html += '<h6 class="card-title mb-3">' + escHtml(g) + '</h6>';
+            html += '<dl class="row mb-0">';
+            groupFields.forEach(function (f) {
+                var val = nestedGet(item, f.name);
+
+                if (f.type === 'CustomHtml') {
+                    var subItems = Array.isArray(val) ? val : [];
+                    html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
+                    html += '<dd class="col-sm-9">' + renderSubListReadonly(subItems, f) + '</dd>';
+                } else if (f.lookup && f.lookup.targetSlug && val) {
+                    html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
+                    html += '<dd class="col-sm-9" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
+                        '<a href="' + BASE + '/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></dd>';
+                } else {
+                    html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
+                    html += '<dd class="col-sm-9">' + fmtValue(val, f.type) + '</dd>';
+                }
+            });
+            html += '</dl></div></div>';
+        });
 
         // Document chain panel — shown when the entity has [RelatedDocument] fields
         var relFields = meta.documentRelationFields || [];
@@ -1974,10 +1986,7 @@
         html += '<form id="vnext-editor-form" novalidate>';
         html += '<input type="hidden" name="__csrf" value="' + escHtml(getCsrfToken()) + '">';
 
-        formFields.forEach(function (f) {
-            var curVal = item ? (nestedGet(item, f.name)) : null;
-            html += renderFormField(f, curVal, meta, item);
-        });
+        html += renderGroupedFormFields(formFields, function (f) { return item ? nestedGet(item, f.name) : null; }, meta, item);
 
         html += '<div class="mt-4 d-flex gap-2 flex-wrap">';
         html += '<button type="submit" class="btn btn-primary" id="vnext-save-btn"><i class="bi bi-check-lg"></i> Save</button>';
@@ -2014,6 +2023,36 @@
                 else doRun();
             });
         });
+    }
+
+    // ── Multi-column grouped form rendering ─────────────────────────────────
+    // Groups fields by fieldGroup, renders each group in a card with a row grid.
+    // Fields use col-md-{columnSpan} (default 12 = full width).
+    function renderGroupedFormFields(fields, valueFn, meta, item) {
+        var groups = [];
+        var groupMap = {};
+        fields.forEach(function (f) {
+            var g = f.fieldGroup || '';
+            if (!groupMap[g]) { groupMap[g] = []; groups.push(g); }
+            groupMap[g].push(f);
+        });
+        var html = '';
+        groups.forEach(function (g) {
+            var items = groupMap[g];
+            if (g) {
+                html += '<div class="card mb-3"><div class="card-header fw-semibold">' + escHtml(g) + '</div><div class="card-body"><div class="row g-3">';
+            } else {
+                html += '<div class="row g-3">';
+            }
+            items.forEach(function (f) {
+                var span = f.columnSpan || 12;
+                html += '<div class="col-md-' + span + '">';
+                html += renderFormField(f, valueFn(f), meta, item);
+                html += '</div>';
+            });
+            html += g ? '</div></div></div>' : '</div>';
+        });
+        return html;
     }
 
     function renderFormField(f, val, meta, item) {

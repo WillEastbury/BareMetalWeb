@@ -43,7 +43,9 @@ public sealed record DataFieldMetadata(
     string? CopyFromParentSlug = null,
     string? CopyFromParentSourceField = null,
     string? CascadeFromField = null,
-    string? CascadeFilterField = null
+    string? CascadeFilterField = null,
+    string? FieldGroup = null,
+    int ColumnSpan = 12
 )
 {
     // Lazily compiled delegates avoid per-call PropertyInfo.GetValue / PropertyInfo.SetValue
