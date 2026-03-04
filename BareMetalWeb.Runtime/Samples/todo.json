@@ -205,15 +205,29 @@
   ],
   "indexes": [
     {
-      "EntityId": "1908a6f17dc742eeb168574ee312138e",
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
       "FieldNames": "Title",
-      "Type": "secondary",
-      "Id": "9884264a1da24ae4a32650ce3ee33abf",
-      "CreatedOnUtc": "2026-02-27T16:07:21.2481641Z",
-      "UpdatedOnUtc": "2026-02-27T16:07:21.2481641Z",
-      "CreatedBy": "",
-      "UpdatedBy": "",
-      "ETag": ""
+      "Type": "inverted"
+    },
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "FieldNames": "Priority",
+      "Type": "btree"
+    },
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "FieldNames": "DueDate",
+      "Type": "btree"
+    },
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "FieldNames": "IsCompleted",
+      "Type": "bloom"
+    },
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "FieldNames": "AssignedTo",
+      "Type": "inverted"
     }
   ],
   "actions": [

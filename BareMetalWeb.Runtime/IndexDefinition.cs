@@ -22,10 +22,12 @@ public class IndexDefinition : RenderableDataObject
     public string FieldNames { get; set; } = string.Empty;
 
     /// <summary>
-    /// Index type hint: "secondary" (single-field) or "composite" (multi-field).
+    /// Index type: "inverted" (full-text), "btree" (sorted/range),
+    /// "treap" (balanced BST), "bloom" (membership test),
+    /// "secondary" (single-field), or "composite" (multi-field).
     /// </summary>
     [DataField(Label = "Type", Order = 3)]
-    public string Type { get; set; } = "secondary";
+    public string Type { get; set; } = "inverted";
 
     public IReadOnlyList<string> GetFieldList()
         => FieldNames
