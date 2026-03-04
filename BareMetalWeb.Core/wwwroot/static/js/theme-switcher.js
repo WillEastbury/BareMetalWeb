@@ -77,6 +77,37 @@
         select.addEventListener('change', function() {
             applyTheme(this.value);
         });
+
+        // Skin switcher
+        const SKIN_KEY = 'bm-selected-skin';
+        const ALLOWED_SKINS = new Set(['default', 'sidebar', 'compact', 'focus']);
+
+        function getStoredSkin() {
+            const cookies = document.cookie ? document.cookie.split(';') : [];
+            const key = `${SKIN_KEY}=`;
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.startsWith(key)) {
+                    return decodeURIComponent(cookie.substring(key.length)) || 'default';
+                }
+            }
+            return 'default';
+        }
+
+        function applySkin(name) {
+            if (!ALLOWED_SKINS.has(name)) name = 'default';
+            if (name === 'default') document.body.removeAttribute('data-bm-skin');
+            else document.body.setAttribute('data-bm-skin', name);
+            document.cookie = `${SKIN_KEY}=${encodeURIComponent(name)}; path=/; max-age=31536000; samesite=lax`;
+        }
+
+        const skinSelect = document.getElementById('bm-skin-select');
+        if (skinSelect) {
+            const savedSkin = getStoredSkin();
+            skinSelect.value = savedSkin;
+            applySkin(savedSkin);
+            skinSelect.addEventListener('change', function() { applySkin(this.value); });
+        }
     }
 
     if (document.readyState === 'loading') {

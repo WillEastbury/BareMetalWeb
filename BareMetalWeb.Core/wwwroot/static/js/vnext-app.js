@@ -4071,6 +4071,18 @@
             }
         } catch (e) {}
 
+        // Skin restore
+        try {
+            var sm = document.cookie.match(/(?:^|;\s*)bm-selected-skin=([^;]+)/);
+            if (sm) {
+                var sk = decodeURIComponent(sm[1]);
+                var allowedSkins = ['default','sidebar','compact','focus'];
+                if (allowedSkins.indexOf(sk) >= 0 && sk !== 'default') {
+                    document.body.setAttribute('data-bm-skin', sk);
+                }
+            }
+        } catch (e) {}
+
         // Register routes
         BMRouter
             .on(BASE + '/:entity/create', function (p) { renderCreate(p.entity); })
