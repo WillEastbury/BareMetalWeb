@@ -262,10 +262,58 @@ public static class SampleGalleryService
             deployed.Add(srcEntity.Name);
         }
 
+        // Deploy package-level RBAC definitions
+        await DeployRbacAsync(package, logger, cancellationToken).ConfigureAwait(false);
+
         return deployed;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    private static async Task DeployRbacAsync(
+        SamplePackage package,
+        Action<string>? logger,
+        CancellationToken ct)
+    {
+        if (package.Permissions.Count == 0 && package.Roles.Count == 0)
+            return;
+
+        // Deploy permissions
+        if (package.Permissions.Count > 0 && DataScaffold.TryGetEntity("permissions", out var permMeta))
+        {
+            foreach (var srcPerm in package.Permissions)
+            {
+                var rec = permMeta.Handlers.Create();
+                if (rec is DataRecord dr && dr.Schema != null)
+                {
+                    dr.SetField(dr.Schema, "Code", srcPerm.Code);
+                    dr.SetField(dr.Schema, "Description", srcPerm.Description);
+                    dr.SetField(dr.Schema, "TargetEntity", srcPerm.TargetEntity);
+                    dr.SetField(dr.Schema, "Actions", srcPerm.Actions);
+                    dr.SetField(dr.Schema, "RequiresElevation", srcPerm.RequiresElevation);
+                    await DataScaffold.SaveAsync(permMeta, rec, ct).ConfigureAwait(false);
+                }
+            }
+            logger?.Invoke($"Deployed {package.Permissions.Count} permission(s).");
+        }
+
+        // Deploy roles
+        if (package.Roles.Count > 0 && DataScaffold.TryGetEntity("roles", out var roleMeta))
+        {
+            foreach (var srcRole in package.Roles)
+            {
+                var rec = roleMeta.Handlers.Create();
+                if (rec is DataRecord dr && dr.Schema != null)
+                {
+                    dr.SetField(dr.Schema, "RoleName", srcRole.RoleName);
+                    dr.SetField(dr.Schema, "Description", srcRole.Description);
+                    dr.SetField(dr.Schema, "PermissionCodes", srcRole.PermissionCodes);
+                    await DataScaffold.SaveAsync(roleMeta, rec, ct).ConfigureAwait(false);
+                }
+            }
+            logger?.Invoke($"Deployed {package.Roles.Count} role(s).");
+        }
+    }
 
     private static async Task DeleteChildRecordsAsync(
         IDataObjectStore store,

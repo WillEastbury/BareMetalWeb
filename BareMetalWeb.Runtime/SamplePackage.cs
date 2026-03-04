@@ -47,6 +47,14 @@ public sealed class SamplePackage
 
     [JsonPropertyName("reports")]
     public List<SampleReport> Reports { get; set; } = new();
+
+    /// <summary>Role definitions to create when deploying this package.</summary>
+    [JsonPropertyName("roles")]
+    public List<SampleRole> Roles { get; set; } = new();
+
+    /// <summary>Permission definitions to create when deploying this package.</summary>
+    [JsonPropertyName("permissions")]
+    public List<SamplePermission> Permissions { get; set; } = new();
 }
 
 /// <summary>
@@ -83,4 +91,47 @@ public sealed class SampleReport
     /// <summary>Permission token required to view the report.</summary>
     [JsonPropertyName("permission")]
     public string? Permission { get; set; }
+}
+
+/// <summary>
+/// A role definition shipped with a sample package.
+/// Stored as a DataRecord in the "roles" entity on deploy.
+/// </summary>
+public sealed class SampleRole
+{
+    [JsonPropertyName("roleName")]
+    public string RoleName { get; set; } = string.Empty;
+
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>Comma-separated permission codes granted by this role.</summary>
+    [JsonPropertyName("permissionCodes")]
+    public string PermissionCodes { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// A permission definition shipped with a sample package.
+/// Stored as a DataRecord in the "permissions" entity on deploy.
+/// </summary>
+public sealed class SamplePermission
+{
+    /// <summary>Machine-readable permission code, e.g. "todo.read".</summary>
+    [JsonPropertyName("code")]
+    public string Code { get; set; } = string.Empty;
+
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>Slug of the target entity, or "*" for global.</summary>
+    [JsonPropertyName("targetEntity")]
+    public string TargetEntity { get; set; } = "*";
+
+    /// <summary>Comma-separated allowed actions: Read, Create, Update, Delete, Execute, *.</summary>
+    [JsonPropertyName("actions")]
+    public string Actions { get; set; } = "*";
+
+    /// <summary>Whether this permission requires elevation (step-up auth).</summary>
+    [JsonPropertyName("requiresElevation")]
+    public bool RequiresElevation { get; set; }
 }

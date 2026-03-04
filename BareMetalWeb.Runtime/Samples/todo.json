@@ -275,5 +275,45 @@
       "sortDescending": false,
       "permission": "To Do"
     }
+  ],
+  "permissions": [
+    {
+      "code": "todo.read",
+      "description": "View to-do items",
+      "targetEntity": "to-do",
+      "actions": "Read",
+      "requiresElevation": false
+    },
+    {
+      "code": "todo.write",
+      "description": "Create and edit to-do items",
+      "targetEntity": "to-do",
+      "actions": "Read,Create,Update",
+      "requiresElevation": false
+    },
+    {
+      "code": "todo.admin",
+      "description": "Full access to to-do items including delete and actions",
+      "targetEntity": "to-do",
+      "actions": "*",
+      "requiresElevation": false
+    }
+  ],
+  "roles": [
+    {
+      "roleName": "Todo Viewer",
+      "description": "Can view to-do items but not modify them",
+      "permissionCodes": "todo.read"
+    },
+    {
+      "roleName": "Todo Editor",
+      "description": "Can create, edit and view to-do items",
+      "permissionCodes": "todo.read,todo.write"
+    },
+    {
+      "roleName": "Todo Admin",
+      "description": "Full to-do module access including delete and execute actions",
+      "permissionCodes": "todo.admin"
+    }
   ]
 }
