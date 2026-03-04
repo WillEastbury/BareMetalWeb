@@ -60,9 +60,6 @@ public static class BareMetalWebExtensions
         DataScaffold.RegisterEntity<ActionDefinition>();
         DataScaffold.RegisterEntity<ActionCommandDefinition>();
 
-        DataEntityRegistry.RegisterVirtualEntitiesFromFile(
-            Path.Combine(contentRoot, "virtualEntities.json"),
-            dataRoot);
         IDataObjectStore dataStore = ProgramSetup.CreateDataStore(app, serializer, queryEvaluator, logger);
 
         // ── Multitenancy ──────────────────────────────────────────────────────
