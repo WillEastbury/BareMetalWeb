@@ -99,7 +99,14 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
                 MaxLength: f.MaxLength,
                 RangeMin: f.RangeMin,
                 RangeMax: f.RangeMax,
-                Pattern: f.Pattern
+                Pattern: f.Pattern,
+                ChildEntitySlug: f.ChildEntitySlug,
+                LookupCopyFields: f.LookupCopyFields,
+                CalculatedExpression: f.CalculatedExpression,
+                CalculatedDisplayFormat: f.CalculatedDisplayFormat,
+                CopyFromParentField: f.CopyFromParentField,
+                CopyFromParentSlug: f.CopyFromParentSlug,
+                CopyFromParentSourceField: f.CopyFromParentSourceField
             ));
         }
 
@@ -191,6 +198,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
             "time" or "timeonly" => FormFieldType.TimeOnly,
             "enum" => FormFieldType.Enum,
             "lookup" => FormFieldType.LookupList,
+            "childlist" or "child-list" or "child_list" => FormFieldType.ChildList,
             "email" => FormFieldType.Email,
             "country" => FormFieldType.Country,
             "phone" => FormFieldType.String,
@@ -214,6 +222,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
             FormFieldType.DateOnly => isNullable ? typeof(DateOnly?) : typeof(DateOnly),
             FormFieldType.TimeOnly => isNullable ? typeof(TimeOnly?) : typeof(TimeOnly),
             FormFieldType.Enum => BuildEnumType(enumValues),
+            FormFieldType.ChildList => typeof(string), // JSON-serialized child rows
             _ => typeof(string)
         };
     }

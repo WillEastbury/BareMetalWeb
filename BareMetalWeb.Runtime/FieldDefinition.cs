@@ -105,5 +105,33 @@ public class FieldDefinition : RenderableDataObject
     [DataField(Label = "Multiline", Order = 25)]
     public bool Multiline { get; set; } = false;
 
+    /// <summary>Slug of child entity for childlist fields (e.g. "order-rows").</summary>
+    [DataField(Label = "Child Entity Slug", Order = 26)]
+    public string? ChildEntitySlug { get; set; }
+
+    /// <summary>Lookup copy-fields mapping for child entity lookup fields (e.g. "Price->UnitPrice").</summary>
+    [DataField(Label = "Lookup Copy Fields", Order = 27)]
+    public string? LookupCopyFields { get; set; }
+
+    /// <summary>Calculated expression for child entity calculated fields (e.g. "Quantity * UnitPrice").</summary>
+    [DataField(Label = "Calculated Expression", Order = 28)]
+    public string? CalculatedExpression { get; set; }
+
+    /// <summary>Display format for calculated fields (e.g. "N2").</summary>
+    [DataField(Label = "Calculated Display Format", Order = 29)]
+    public string? CalculatedDisplayFormat { get; set; }
+
+    /// <summary>Parent field name for CopyFromParent fields (e.g. "CustomerId").</summary>
+    [DataField(Label = "Copy From Parent Field", Order = 30)]
+    public string? CopyFromParentField { get; set; }
+
+    /// <summary>Entity slug for CopyFromParent resolution (e.g. "customers").</summary>
+    [DataField(Label = "Copy From Parent Slug", Order = 31)]
+    public string? CopyFromParentSlug { get; set; }
+
+    /// <summary>Source field on the parent's target entity for CopyFromParent (e.g. "DiscountPercent").</summary>
+    [DataField(Label = "Copy From Parent Source Field", Order = 32)]
+    public string? CopyFromParentSourceField { get; set; }
+
     public override string ToString() => $"{Name} ({Type})";
 }

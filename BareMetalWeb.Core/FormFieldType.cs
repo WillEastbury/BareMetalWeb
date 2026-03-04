@@ -27,5 +27,6 @@ public enum FormFieldType
     Hidden,
     CustomHtml,
     ReadOnly,
-    Tags
+    Tags,
+    ChildList
 }

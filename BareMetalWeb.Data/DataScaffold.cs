@@ -34,7 +34,14 @@ public sealed record DataFieldMetadata(
     CalculatedFieldAttribute? Calculated,
     ValidationConfig? Validation,
     bool IsIndexed = false,
-    RelatedDocumentConfig? RelatedDocument = null
+    RelatedDocumentConfig? RelatedDocument = null,
+    string? ChildEntitySlug = null,
+    string? LookupCopyFields = null,
+    string? CalculatedExpression = null,
+    string? CalculatedDisplayFormat = null,
+    string? CopyFromParentField = null,
+    string? CopyFromParentSlug = null,
+    string? CopyFromParentSourceField = null
 )
 {
     // Lazily compiled delegates avoid per-call PropertyInfo.GetValue / PropertyInfo.SetValue
@@ -588,6 +595,22 @@ public static class DataScaffold
             }
 
             var value = instance != null ? field.GetValueFn(instance) : null;
+
+            // Metadata-driven child list (ChildEntitySlug set from gallery JSON)
+            if (field.FieldType == FormFieldType.ChildList
+                && !string.IsNullOrWhiteSpace(field.ChildEntitySlug)
+                && TryGetEntity(field.ChildEntitySlug!, out var childMeta))
+            {
+                var html = BuildMetadataChildListEditorHtml(field, childMeta, value as string, cspNonce);
+                fields.Add(new FormField(
+                    FormFieldType.CustomHtml,
+                    field.Name,
+                    field.Label,
+                    field.Required,
+                    Html: html));
+                continue;
+            }
+
             if (IsChildListType(field.Property.PropertyType, out var childType))
             {
                 var html = BuildChildListEditorHtml(field, childType, value as IEnumerable, cspNonce);
@@ -2439,18 +2462,101 @@ public static class DataScaffold
         return fields;
     }
 
+    /// <summary>
+    /// Builds child list editor HTML from metadata-defined child entity fields
+    /// (gallery-deployed entities without compiled CLR types).
+    /// </summary>
+    private static string BuildMetadataChildListEditorHtml(DataFieldMetadata field, DataEntityMetadata childMeta, string? jsonValue, string? cspNonce = null)
+    {
+        var childFields = GetChildFieldMetadataFromEntity(childMeta, field);
+        var rows = new List<Dictionary<string, string>>();
+
+        // Parse existing JSON value if present
+        if (!string.IsNullOrWhiteSpace(jsonValue))
+        {
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<List<Dictionary<string, string>>>(jsonValue);
+                if (parsed != null) rows = parsed;
+            }
+            catch { /* ignore corrupt JSON */ }
+        }
+
+        return RenderChildListEditorHtml(field, childFields, rows, cspNonce);
+    }
+
+    /// <summary>
+    /// Converts a registered child entity's DataEntityMetadata fields into ChildFieldMeta
+    /// for the child list editor, using metadata from the parent field for calculated/copy features.
+    /// </summary>
+    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadataFromEntity(DataEntityMetadata childMeta, DataFieldMetadata parentField)
+    {
+        var fields = new List<ChildFieldMeta>();
+        foreach (var cf in childMeta.Fields)
+        {
+            if (!cf.Create && !cf.Edit) continue;
+
+            IReadOnlyList<KeyValuePair<string, string>>? lookupOptions = null;
+            string? lookupTargetSlug = null;
+            string? lookupCopyFields = null;
+            var formFieldType = cf.FieldType;
+
+            if (cf.Lookup != null)
+            {
+                lookupOptions = GetLookupOptions(cf.Lookup);
+                formFieldType = FormFieldType.LookupList;
+                lookupTargetSlug = cf.Lookup.TargetSlug;
+                lookupCopyFields = cf.LookupCopyFields;
+            }
+
+            CalculatedFieldAttribute? calculated = null;
+            if (!string.IsNullOrWhiteSpace(cf.CalculatedExpression))
+            {
+                calculated = new CalculatedFieldAttribute { Expression = cf.CalculatedExpression! };
+                if (!string.IsNullOrWhiteSpace(cf.CalculatedDisplayFormat))
+                    calculated.DisplayFormat = cf.CalculatedDisplayFormat;
+            }
+
+            var clrType = formFieldType switch
+            {
+                FormFieldType.YesNo => typeof(bool),
+                FormFieldType.Integer => typeof(int),
+                FormFieldType.Decimal or FormFieldType.Money => typeof(decimal),
+                FormFieldType.DateTime => typeof(DateTime),
+                FormFieldType.DateOnly => typeof(DateOnly),
+                FormFieldType.TimeOnly => typeof(TimeOnly),
+                _ => typeof(string)
+            };
+
+            fields.Add(new ChildFieldMeta(
+                Name: cf.Name,
+                Label: cf.Label,
+                FieldType: clrType,
+                Required: cf.Required,
+                FormFieldType: formFieldType,
+                LookupOptions: lookupOptions,
+                Calculated: calculated,
+                LookupTargetSlug: lookupTargetSlug,
+                LookupCopyFields: lookupCopyFields,
+                CopyFromParentField: cf.CopyFromParentField,
+                CopyFromParentSlug: cf.CopyFromParentSlug,
+                CopyFromParentSourceField: cf.CopyFromParentSourceField,
+                Getter: obj => null,
+                Setter: (obj, val) => { }));
+        }
+        return fields;
+    }
+
     private static string BuildChildListEditorHtml(DataFieldMetadata field, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType, IEnumerable? listValue, string? cspNonce = null)
     {
-        var fieldId = WebUtility.HtmlEncode(field.Name);
-        var rows = new List<Dictionary<string, string>>();
         var childFields = GetChildFieldMetadata(childType);
+        var rows = new List<Dictionary<string, string>>();
 
         if (listValue != null)
         {
             foreach (var item in listValue)
             {
-                if (item == null)
-                    continue;
+                if (item == null) continue;
                 var row = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                 foreach (var child in childFields)
                 {
@@ -2460,6 +2566,14 @@ public static class DataScaffold
                 rows.Add(row);
             }
         }
+
+        return RenderChildListEditorHtml(field, childFields, rows, cspNonce);
+    }
+
+    /// <summary>Shared rendering for child list editor HTML (used by both CLR and metadata paths).</summary>
+    private static string RenderChildListEditorHtml(DataFieldMetadata field, IReadOnlyList<ChildFieldMeta> childFields, List<Dictionary<string, string>> rows, string? cspNonce)
+    {
+        var fieldId = WebUtility.HtmlEncode(field.Name);
 
         var json = JsonSerializer.Serialize(rows);
         var modalId = $"modal_{field.Name}";
@@ -2512,19 +2626,18 @@ public static class DataScaffold
             }
             else if (child.LookupOptions != null)
             {
-                // Check if this is a lookup field (not just an enum) to add refresh/add buttons
-                // Re-extract the lookup attribute from the child type's property
-                var prop = PropertyCache.GetOrAdd((childType, child.Name),
-                    static key => key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance));
-                var lookupAttr = prop?.GetCustomAttribute<DataLookupAttribute>();
-                string? targetSlug = null;
+                // Use metadata-provided lookup target slug, or fall back to CLR attribute extraction
+                string? targetSlug = child.LookupTargetSlug;
                 string? targetTypeName = null;
-                
-                if (lookupAttr != null)
+
+                if (string.IsNullOrEmpty(targetSlug) && TryGetEntity(child.LookupTargetSlug ?? "", out var ltMeta))
                 {
-                    var targetMeta = GetEntityByType(lookupAttr.TargetType);
-                    targetSlug = targetMeta?.Slug;
-                    targetTypeName = lookupAttr.TargetType.Name;
+                    targetSlug = ltMeta.Slug;
+                    targetTypeName = ltMeta.Name;
+                }
+                else if (!string.IsNullOrEmpty(targetSlug) && TryGetEntity(targetSlug!, out var ltMeta2))
+                {
+                    targetTypeName = ltMeta2.Name;
                 }
 
                 // If we have lookup metadata, wrap in input-group for buttons

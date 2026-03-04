@@ -142,7 +142,14 @@ public sealed class RuntimeEntityModel
                 Computed: null,
                 Upload: null,
                 Calculated: null,
-                Validation: validation
+                Validation: validation,
+                ChildEntitySlug: f.ChildEntitySlug,
+                LookupCopyFields: f.LookupCopyFields,
+                CalculatedExpression: f.CalculatedExpression,
+                CalculatedDisplayFormat: f.CalculatedDisplayFormat,
+                CopyFromParentField: f.CopyFromParentField,
+                CopyFromParentSlug: f.CopyFromParentSlug,
+                CopyFromParentSourceField: f.CopyFromParentSourceField
             ));
         }
 

@@ -45,8 +45,8 @@ public class HighCardinalityLookupTests : IDisposable
     [Fact]
     public void BuildFormFields_LowCardinalityLookup_UsesDropdown()
     {
-        // Arrange: threshold = 5, add 3 employees (below threshold)
-        DataScaffold.LargeListThreshold = 5;
+        // Arrange: threshold higher than any seeded data, add 3 employees (below threshold)
+        DataScaffold.LargeListThreshold = 500;
         ClearCaches();
 
         Assert.True(DataScaffold.TryGetEntity("employees", out var meta));
