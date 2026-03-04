@@ -618,6 +618,7 @@
             if (viewType === 'Calendar' || meta.canShowCalendar) html += '<a class="btn btn-outline-secondary' + (activeView === 'Calendar' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar' })) + '" title="Calendar"><i class="bi bi-calendar-month"></i></a>';
             if (meta.canShowWorkflow) html += '<a class="btn btn-outline-secondary' + (activeView === 'Workflow' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Workflow' })) + '" title="Workflow Board"><i class="bi bi-kanban"></i></a>';
             html += '<a class="btn btn-outline-secondary' + (activeView === 'Aggregation' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Aggregation' })) + '" title="Aggregations"><i class="bi bi-bar-chart-line"></i></a>';
+            html += '<a class="btn btn-outline-secondary' + (activeView === 'Chart' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Chart' })) + '" title="Charts"><i class="bi bi-graph-up"></i></a>';
             html += '</div>';
         }
         html += '</div>';
@@ -638,6 +639,8 @@
             html += renderAggregationView(meta, items, slug, baseUrl, query);
         } else if (activeView === 'Workflow') {
             html += renderWorkflowView(meta, items, slug, baseUrl, query);
+        } else if (activeView === 'Chart') {
+            html += renderChartView(meta, items, slug, baseUrl, query);
         } else {
             // Search bar
             html += '<form class="d-flex gap-2 mb-3" id="vnext-search-form">';
@@ -1822,6 +1825,180 @@
         html += '</div>';
 
         el.innerHTML = html;
+    }
+
+    // ── Zero-dependency SVG Chart Renderer ──────────────────────────────────
+    var CHART_COLORS = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'];
+
+    function renderChartView(meta, items, slug, baseUrl, query) {
+        var numericFields = meta.fields.filter(function (f) { return f.type === 'Integer' || f.type === 'Decimal' || f.type === 'Currency'; });
+        var groupFields = meta.fields.filter(function (f) { return f.type === 'Enum' || f.type === 'Lookup' || f.type === 'String'; });
+        var dateFields = meta.fields.filter(function (f) { return f.type === 'DateOnly' || f.type === 'DateTime'; });
+        var labelField = meta.fields[0]; // first field as default label
+
+        var html = '<div class="card mb-3"><div class="card-header"><i class="bi bi-graph-up me-2"></i>Charts</div><div class="card-body">';
+        html += '<div class="row mb-3" id="bm-chart-controls">';
+        html += '<div class="col-auto"><label class="form-label form-label-sm">Type</label><select class="form-select form-select-sm" id="bm-chart-type">';
+        html += '<option value="column">Column</option><option value="stacked">Stacked Column</option><option value="line">Line</option><option value="pie">Pie</option>';
+        html += '</select></div>';
+        html += '<div class="col-auto"><label class="form-label form-label-sm">Group By</label><select class="form-select form-select-sm" id="bm-chart-group">';
+        groupFields.concat(dateFields).forEach(function (f) { html += '<option value="' + escHtml(f.name) + '">' + escHtml(f.label || f.name) + '</option>'; });
+        html += '</select></div>';
+        html += '<div class="col-auto"><label class="form-label form-label-sm">Measure</label><select class="form-select form-select-sm" id="bm-chart-measure">';
+        html += '<option value="count">Count</option>';
+        numericFields.forEach(function (f) { html += '<option value="sum:' + escHtml(f.name) + '">Sum ' + escHtml(f.label || f.name) + '</option>'; });
+        numericFields.forEach(function (f) { html += '<option value="avg:' + escHtml(f.name) + '">Avg ' + escHtml(f.label || f.name) + '</option>'; });
+        html += '</select></div>';
+        html += '<div class="col-auto d-flex align-items-end"><button class="btn btn-sm btn-primary" id="bm-chart-render">Render</button></div>';
+        html += '</div>';
+        html += '<div id="bm-chart-canvas" style="min-height:320px"></div>';
+        html += '</div></div>';
+
+        setTimeout(function () {
+            var btn = document.getElementById('bm-chart-render');
+            if (!btn) return;
+            btn.addEventListener('click', function () {
+                var chartType = document.getElementById('bm-chart-type').value;
+                var groupBy = document.getElementById('bm-chart-group').value;
+                var measure = document.getElementById('bm-chart-measure').value;
+                var canvas = document.getElementById('bm-chart-canvas');
+                if (!canvas) return;
+                var groups = {};
+                items.forEach(function (it) {
+                    var key = (nestedGet(it, groupBy) || '(empty)').toString();
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(it);
+                });
+                var labels = Object.keys(groups).sort();
+                var values = labels.map(function (k) {
+                    var parts = measure.split(':');
+                    return parseFloat(computeMeasure(groups[k], parts[0], parts[1] || '')) || 0;
+                });
+                if (chartType === 'column') canvas.innerHTML = svgColumnChart(labels, values);
+                else if (chartType === 'stacked') canvas.innerHTML = svgStackedColumnChart(labels, groups, meta, numericFields);
+                else if (chartType === 'line') canvas.innerHTML = svgLineChart(labels, values);
+                else if (chartType === 'pie') canvas.innerHTML = svgPieChart(labels, values);
+            });
+            // auto-render on load
+            document.getElementById('bm-chart-render').click();
+        }, 50);
+        return html;
+    }
+
+    function svgColumnChart(labels, values) {
+        var W = 700, H = 320, pad = 50, barGap = 4;
+        var maxV = Math.max.apply(null, values) || 1;
+        var barW = Math.max(8, (W - pad * 2) / labels.length - barGap);
+        var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;font-family:sans-serif;font-size:11px">';
+        // Y axis gridlines
+        for (var g = 0; g <= 4; g++) {
+            var yy = pad + (H - pad * 2) * (1 - g / 4);
+            svg += '<line x1="' + pad + '" y1="' + yy + '" x2="' + (W - 10) + '" y2="' + yy + '" stroke="#e0e0e0"/>';
+            svg += '<text x="' + (pad - 5) + '" y="' + (yy + 4) + '" text-anchor="end" fill="#666">' + (maxV * g / 4).toFixed(0) + '</text>';
+        }
+        labels.forEach(function (lbl, i) {
+            var barH = (values[i] / maxV) * (H - pad * 2);
+            var x = pad + i * (barW + barGap);
+            var y = H - pad - barH;
+            svg += '<rect x="' + x + '" y="' + y + '" width="' + barW + '" height="' + barH + '" fill="' + CHART_COLORS[i % CHART_COLORS.length] + '" rx="2">';
+            svg += '<title>' + escHtml(lbl) + ': ' + values[i] + '</title></rect>';
+            svg += '<text x="' + (x + barW / 2) + '" y="' + (H - pad + 14) + '" text-anchor="middle" fill="#333" style="font-size:10px">' + escHtml(lbl.length > 10 ? lbl.substring(0, 9) + '\u2026' : lbl) + '</text>';
+        });
+        svg += '</svg>';
+        return svg;
+    }
+
+    function svgStackedColumnChart(labels, groups, meta, numericFields) {
+        var W = 700, H = 320, pad = 50, barGap = 4;
+        var series = numericFields.slice(0, 5);
+        if (series.length === 0) return '<div class="text-muted">No numeric fields for stacked chart</div>';
+        var stacks = labels.map(function (k) {
+            var sums = series.map(function (f) {
+                return groups[k].reduce(function (s, it) { return s + (parseFloat(nestedGet(it, f.name)) || 0); }, 0);
+            });
+            return { label: k, values: sums, total: sums.reduce(function (a, b) { return a + b; }, 0) };
+        });
+        var maxV = Math.max.apply(null, stacks.map(function (s) { return s.total; })) || 1;
+        var barW = Math.max(8, (W - pad * 2) / labels.length - barGap);
+        var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;font-family:sans-serif;font-size:11px">';
+        for (var g = 0; g <= 4; g++) {
+            var yy = pad + (H - pad * 2) * (1 - g / 4);
+            svg += '<line x1="' + pad + '" y1="' + yy + '" x2="' + (W - 10) + '" y2="' + yy + '" stroke="#e0e0e0"/>';
+            svg += '<text x="' + (pad - 5) + '" y="' + (yy + 4) + '" text-anchor="end" fill="#666">' + (maxV * g / 4).toFixed(0) + '</text>';
+        }
+        stacks.forEach(function (s, i) {
+            var x = pad + i * (barW + barGap);
+            var cumY = H - pad;
+            s.values.forEach(function (v, si) {
+                var segH = (v / maxV) * (H - pad * 2);
+                cumY -= segH;
+                svg += '<rect x="' + x + '" y="' + cumY + '" width="' + barW + '" height="' + segH + '" fill="' + CHART_COLORS[si % CHART_COLORS.length] + '" rx="1">';
+                svg += '<title>' + escHtml(series[si].label || series[si].name) + ': ' + v.toFixed(2) + '</title></rect>';
+            });
+            svg += '<text x="' + (x + barW / 2) + '" y="' + (H - pad + 14) + '" text-anchor="middle" fill="#333" style="font-size:10px">' + escHtml(s.label.length > 10 ? s.label.substring(0, 9) + '\u2026' : s.label) + '</text>';
+        });
+        // Legend
+        series.forEach(function (f, si) {
+            svg += '<rect x="' + (pad + si * 100) + '" y="5" width="12" height="12" fill="' + CHART_COLORS[si % CHART_COLORS.length] + '" rx="2"/>';
+            svg += '<text x="' + (pad + si * 100 + 16) + '" y="15" fill="#333" style="font-size:10px">' + escHtml(f.label || f.name) + '</text>';
+        });
+        svg += '</svg>';
+        return svg;
+    }
+
+    function svgLineChart(labels, values) {
+        var W = 700, H = 320, pad = 50;
+        var maxV = Math.max.apply(null, values) || 1;
+        var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;font-family:sans-serif;font-size:11px">';
+        for (var g = 0; g <= 4; g++) {
+            var yy = pad + (H - pad * 2) * (1 - g / 4);
+            svg += '<line x1="' + pad + '" y1="' + yy + '" x2="' + (W - 10) + '" y2="' + yy + '" stroke="#e0e0e0"/>';
+            svg += '<text x="' + (pad - 5) + '" y="' + (yy + 4) + '" text-anchor="end" fill="#666">' + (maxV * g / 4).toFixed(0) + '</text>';
+        }
+        var points = labels.map(function (lbl, i) {
+            var x = pad + (i / (labels.length - 1 || 1)) * (W - pad * 2);
+            var y = H - pad - (values[i] / maxV) * (H - pad * 2);
+            return { x: x, y: y, label: lbl, value: values[i] };
+        });
+        if (points.length > 1) {
+            var pathD = 'M' + points.map(function (p) { return p.x + ',' + p.y; }).join(' L');
+            svg += '<path d="' + pathD + '" fill="none" stroke="' + CHART_COLORS[0] + '" stroke-width="2.5"/>';
+        }
+        points.forEach(function (p, i) {
+            svg += '<circle cx="' + p.x + '" cy="' + p.y + '" r="4" fill="' + CHART_COLORS[0] + '"><title>' + escHtml(p.label) + ': ' + p.value + '</title></circle>';
+            if (labels.length <= 20) svg += '<text x="' + p.x + '" y="' + (H - pad + 14) + '" text-anchor="middle" fill="#333" style="font-size:10px">' + escHtml(p.label.length > 8 ? p.label.substring(0, 7) + '\u2026' : p.label) + '</text>';
+        });
+        svg += '</svg>';
+        return svg;
+    }
+
+    function svgPieChart(labels, values) {
+        var W = 400, H = 320, cx = W / 2, cy = H / 2 - 10, R = 120;
+        var total = values.reduce(function (a, b) { return a + b; }, 0) || 1;
+        var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;font-family:sans-serif;font-size:11px">';
+        var angle = -Math.PI / 2;
+        labels.forEach(function (lbl, i) {
+            var slice = (values[i] / total) * Math.PI * 2;
+            var x1 = cx + R * Math.cos(angle);
+            var y1 = cy + R * Math.sin(angle);
+            var x2 = cx + R * Math.cos(angle + slice);
+            var y2 = cy + R * Math.sin(angle + slice);
+            var large = slice > Math.PI ? 1 : 0;
+            svg += '<path d="M' + cx + ',' + cy + ' L' + x1 + ',' + y1 + ' A' + R + ',' + R + ' 0 ' + large + ',1 ' + x2 + ',' + y2 + ' Z" fill="' + CHART_COLORS[i % CHART_COLORS.length] + '" stroke="#fff" stroke-width="1.5">';
+            svg += '<title>' + escHtml(lbl) + ': ' + values[i] + ' (' + (values[i] / total * 100).toFixed(1) + '%)</title></path>';
+            angle += slice;
+        });
+        // Legend
+        var ly = 10;
+        labels.forEach(function (lbl, i) {
+            if (i < 12) {
+                svg += '<rect x="5" y="' + ly + '" width="10" height="10" fill="' + CHART_COLORS[i % CHART_COLORS.length] + '" rx="2"/>';
+                svg += '<text x="20" y="' + (ly + 9) + '" fill="#333" style="font-size:10px">' + escHtml(lbl.length > 20 ? lbl.substring(0, 19) + '\u2026' : lbl) + ' (' + values[i] + ')</text>';
+                ly += 16;
+            }
+        });
+        svg += '</svg>';
+        return svg;
     }
 
     function openImportModal(slug, baseUrl, query) {
