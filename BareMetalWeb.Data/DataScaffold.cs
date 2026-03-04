@@ -1479,6 +1479,13 @@ public static class DataScaffold
         return metadata.DocumentRelationFields is { Count: > 0 };
     }
 
+    public static bool CanShowCalendarView(DataEntityMetadata metadata)
+    {
+        return metadata.Fields.Any(f =>
+            f.FieldType == FormFieldType.DateOnly ||
+            f.FieldType == FormFieldType.DateTime);
+    }
+
     public static string BuildTimetableHtml(
         DataEntityMetadata metadata,
         IEnumerable<BaseDataObject> allItems,

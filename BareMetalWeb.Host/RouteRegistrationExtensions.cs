@@ -1315,6 +1315,7 @@ public static class RouteRegistrationExtensions
             ["canShowTimetable"] = DataScaffold.CanShowTimetableView(meta),
             ["canShowTimeline"] = DataScaffold.CanShowTimelineView(meta),
             ["canShowSankey"] = DataScaffold.CanShowSankeyView(meta),
+            ["canShowCalendar"] = DataScaffold.CanShowCalendarView(meta),
             ["idGeneration"] = meta.IdGeneration.ToString(),
             ["defaultSortField"] = meta.DefaultSortField,
             ["defaultSortDirection"] = meta.DefaultSortDirection.ToString(),

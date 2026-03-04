@@ -567,7 +567,7 @@
         html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=json" download><i class="bi bi-filetype-json"></i> Export JSON</a>';
         html += '<button class="btn btn-outline-secondary btn-sm" id="vnext-import-btn" data-slug="' + escHtml(slug) + '"><i class="bi bi-upload"></i> Import CSV</button>';
         // View type switcher (when entity supports alternate views or has a parent field for hierarchy)
-        if (viewType !== 'Table' || meta.parentField || meta.canShowTimetable || meta.canShowTimeline || meta.canShowSankey) {
+        if (viewType !== 'Table' || meta.parentField || meta.canShowTimetable || meta.canShowTimeline || meta.canShowSankey || meta.canShowCalendar) {
             html += '<div class="btn-group btn-group-sm ms-2">';
             html += '<a class="btn btn-outline-secondary' + (activeView === 'Table' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Table' })) + '" title="Table View"><i class="bi bi-table"></i></a>';
             if (viewType === 'TreeView' || (viewType === 'OrgChart' && meta.parentField)) html += '<a class="btn btn-outline-secondary' + (activeView === 'TreeView' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'TreeView' })) + '" title="Tree View"><i class="bi bi-diagram-3"></i></a>';
@@ -575,6 +575,7 @@
             if (viewType === 'Timeline' || meta.canShowTimeline) html += '<a class="btn btn-outline-secondary' + (activeView === 'Timeline' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timeline' })) + '" title="Timeline"><i class="bi bi-calendar-range"></i></a>';
             if (meta.canShowTimetable) html += '<a class="btn btn-outline-secondary' + (activeView === 'Timetable' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timetable' })) + '" title="Timetable"><i class="bi bi-calendar3"></i></a>';
             if (viewType === 'Sankey' || meta.canShowSankey) html += '<a class="btn btn-outline-secondary' + (activeView === 'Sankey' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Sankey' })) + '" title="Document Chain (Sankey)"><i class="bi bi-diagram-2-fill"></i></a>';
+            if (viewType === 'Calendar' || meta.canShowCalendar) html += '<a class="btn btn-outline-secondary' + (activeView === 'Calendar' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar' })) + '" title="Calendar"><i class="bi bi-calendar-month"></i></a>';
             html += '</div>';
         }
         html += '</div>';
@@ -589,6 +590,8 @@
             html += renderTimetable(meta, items, slug, baseUrl);
         } else if (activeView === 'Sankey' || (activeView === '' && viewType === 'Sankey')) {
             html += renderSankeyView(meta, items, slug, baseUrl);
+        } else if (activeView === 'Calendar' || (activeView === '' && viewType === 'Calendar')) {
+            html += renderCalendarView(meta, items, slug, baseUrl, query);
         } else {
             // Search bar
             html += '<form class="d-flex gap-2 mb-3" id="vnext-search-form">';
@@ -1429,6 +1432,89 @@
                 });
         }, 50);
 
+        return html;
+    }
+
+    // ── Monthly Calendar View ───────────────────────────────────────────────
+    function renderCalendarView(meta, items, slug, baseUrl, query) {
+        var dateField = meta.fields.find(function (f) {
+            return f.type === 'DateOnly' || f.type === 'DateTime';
+        });
+        if (!dateField) return '<p class="text-warning">Calendar view requires a Date field.</p>';
+
+        var labelField = meta.fields.find(function (f) { return f.list && f.type === 'Text'; }) || meta.fields[0];
+
+        // Determine current month from query or default to today
+        var now = new Date();
+        var calYear = parseInt(query.calYear) || now.getFullYear();
+        var calMonth = parseInt(query.calMonth); // 0-based
+        if (isNaN(calMonth)) calMonth = now.getMonth();
+
+        var firstDay = new Date(calYear, calMonth, 1);
+        var daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+        var startDow = firstDay.getDay(); // 0=Sun
+
+        // Build date→items map
+        var dateMap = {};
+        items.forEach(function (item) {
+            var raw = nestedGet(item, dateField.name);
+            if (!raw) return;
+            var d = new Date(raw);
+            if (isNaN(d.getTime())) return;
+            if (d.getFullYear() === calYear && d.getMonth() === calMonth) {
+                var day = d.getDate();
+                if (!dateMap[day]) dateMap[day] = [];
+                dateMap[day].push(item);
+            }
+        });
+
+        var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        var html = '';
+
+        // Month navigation
+        var prevMonth = calMonth - 1, prevYear = calYear;
+        if (prevMonth < 0) { prevMonth = 11; prevYear--; }
+        var nextMonth = calMonth + 1, nextYear = calYear;
+        if (nextMonth > 11) { nextMonth = 0; nextYear++; }
+
+        html += '<div class="d-flex justify-content-between align-items-center mb-3">';
+        html += '<a class="btn btn-outline-secondary btn-sm" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calYear: prevYear, calMonth: prevMonth })) + '"><i class="bi bi-chevron-left"></i></a>';
+        html += '<h4 class="mb-0">' + monthNames[calMonth] + ' ' + calYear + '</h4>';
+        html += '<a class="btn btn-outline-secondary btn-sm" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calYear: nextYear, calMonth: nextMonth })) + '"><i class="bi bi-chevron-right"></i></a>';
+        html += '</div>';
+
+        // Calendar grid
+        html += '<table class="table table-bordered bm-calendar-table"><thead><tr>';
+        ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(function (d) {
+            html += '<th class="text-center small text-muted" style="width:14.28%">' + d + '</th>';
+        });
+        html += '</tr></thead><tbody>';
+
+        var day = 1;
+        var today = now.getDate();
+        var isCurrentMonth = (calYear === now.getFullYear() && calMonth === now.getMonth());
+        for (var week = 0; day <= daysInMonth; week++) {
+            html += '<tr>';
+            for (var dow = 0; dow < 7; dow++) {
+                if ((week === 0 && dow < startDow) || day > daysInMonth) {
+                    html += '<td class="bg-light" style="min-height:80px;vertical-align:top">&nbsp;</td>';
+                } else {
+                    var isToday = isCurrentMonth && day === today;
+                    html += '<td style="min-height:80px;vertical-align:top" class="' + (isToday ? 'table-primary' : '') + '">';
+                    html += '<div class="fw-bold small ' + (isToday ? 'text-primary' : 'text-muted') + '">' + day + '</div>';
+                    var dayItems = dateMap[day] || [];
+                    dayItems.forEach(function (it) {
+                        var lbl = nestedGet(it, labelField.name) || '(untitled)';
+                        var itemId = it.id || it.Id || it.key || it.Key || '';
+                        html += '<a href="' + baseUrl + '/' + encodeURIComponent(itemId) + '" class="d-block small text-truncate badge bg-primary-subtle text-primary mb-1" title="' + escHtml(lbl) + '">' + escHtml(lbl) + '</a>';
+                    });
+                    html += '</td>';
+                    day++;
+                }
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
         return html;
     }
 
