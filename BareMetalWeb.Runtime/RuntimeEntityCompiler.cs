@@ -108,7 +108,9 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
                 CopyFromParentSlug: f.CopyFromParentSlug,
                 CopyFromParentSourceField: f.CopyFromParentSourceField,
                 RelatedDocumentSlug: f.RelatedDocumentSlug,
-                RelatedDocumentDisplayField: f.RelatedDocumentDisplayField
+                RelatedDocumentDisplayField: f.RelatedDocumentDisplayField,
+                CascadeFromField: f.CascadeFromField,
+                CascadeFilterField: f.CascadeFilterField
             ));
         }
 

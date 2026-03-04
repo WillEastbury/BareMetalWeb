@@ -141,5 +141,20 @@ public class FieldDefinition : RenderableDataObject
     [DataField(Label = "Related Document Display Field", Order = 34)]
     public string? RelatedDocumentDisplayField { get; set; }
 
+    /// <summary>
+    /// Name of another field on the same entity whose value filters this lookup's options.
+    /// When the cascade-from field changes, this field's options are re-fetched with a filter.
+    /// E.g. on a Region field: CascadeFromField = "CountryId", CascadeFilterField = "CountryId".
+    /// </summary>
+    [DataField(Label = "Cascade From Field", Order = 35)]
+    public string? CascadeFromField { get; set; }
+
+    /// <summary>
+    /// Field name on the lookup target entity used to filter results in a cascade.
+    /// E.g. on a Region lookup targeting "regions": CascadeFilterField = "CountryId".
+    /// </summary>
+    [DataField(Label = "Cascade Filter Field", Order = 36)]
+    public string? CascadeFilterField { get; set; }
+
     public override string ToString() => $"{Name} ({Type})";
 }

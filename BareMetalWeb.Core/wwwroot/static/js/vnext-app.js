@@ -2521,6 +2521,30 @@
             }
         });
 
+        // ── Cascading dropdown support ─────────────────────────────────────────
+        // When a source field changes, re-load any lookup fields that cascade from it
+        formFields.forEach(function (f) {
+            if (f.type !== 'LookupList' || !f.lookup || !f.lookup.cascadeFromField || !f.lookup.cascadeFilterField) return;
+            var sourceFieldName = f.lookup.cascadeFromField;
+            var filterField = f.lookup.cascadeFilterField;
+            var sourceEl = document.querySelector('[name="' + sourceFieldName + '"]');
+            if (!sourceEl) return;
+            sourceEl.addEventListener('change', function () {
+                var sourceVal = sourceEl.value || '';
+                // Clear the lookup cache for the target slug so we get fresh results
+                clearLookupCache(f.lookup.targetSlug);
+                // Re-load with filter: set queryField and queryValue to filter by the source value
+                var cascadeField = Object.assign({}, f, {
+                    lookup: Object.assign({}, f.lookup, {
+                        queryField: filterField,
+                        queryValue: sourceVal,
+                        queryOperator: 'Equals'
+                    })
+                });
+                loadLookupSelect(cascadeField, null);
+            });
+        });
+
         // Lookup add/refresh buttons
         form.addEventListener('click', function (e) {
             // Tag pill remove button

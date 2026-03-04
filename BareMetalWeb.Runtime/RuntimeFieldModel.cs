@@ -62,5 +62,7 @@ public sealed record RuntimeFieldModel(
     string? CopyFromParentSlug = null,
     string? CopyFromParentSourceField = null,
     string? RelatedDocumentSlug = null,
-    string? RelatedDocumentDisplayField = null
+    string? RelatedDocumentDisplayField = null,
+    string? CascadeFromField = null,
+    string? CascadeFilterField = null
 );

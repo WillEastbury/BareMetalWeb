@@ -150,6 +150,8 @@ public sealed class RuntimeEntityModel
                 CopyFromParentField: f.CopyFromParentField,
                 CopyFromParentSlug: f.CopyFromParentSlug,
                 CopyFromParentSourceField: f.CopyFromParentSourceField,
+                CascadeFromField: f.CascadeFromField,
+                CascadeFilterField: f.CascadeFilterField,
                 RelatedDocument: !string.IsNullOrWhiteSpace(f.RelatedDocumentSlug)
                     && DataScaffold.TryGetEntity(f.RelatedDocumentSlug!, out var relMeta)
                     ? new RelatedDocumentConfig(relMeta.Type, f.RelatedDocumentDisplayField ?? "Id", f.RelatedDocumentSlug)
