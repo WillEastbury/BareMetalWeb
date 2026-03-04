@@ -1318,6 +1318,7 @@ public static class RouteRegistrationExtensions
             ["canShowTimeline"] = DataScaffold.CanShowTimelineView(meta),
             ["canShowSankey"] = DataScaffold.CanShowSankeyView(meta),
             ["canShowCalendar"] = DataScaffold.CanShowCalendarView(meta),
+            ["canShowWorkflow"] = meta.Fields.Any(f => f.FieldType == BareMetalWeb.Rendering.Models.FormFieldType.Enum),
             ["idGeneration"] = meta.IdGeneration.ToString(),
             ["defaultSortField"] = meta.DefaultSortField,
             ["defaultSortDirection"] = meta.DefaultSortDirection.ToString(),

@@ -607,7 +607,7 @@
         html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=json" download><i class="bi bi-filetype-json"></i> Export JSON</a>';
         html += '<button class="btn btn-outline-secondary btn-sm" id="vnext-import-btn" data-slug="' + escHtml(slug) + '"><i class="bi bi-upload"></i> Import CSV</button>';
         // View type switcher (when entity supports alternate views or has a parent field for hierarchy)
-        if (viewType !== 'Table' || meta.parentField || meta.canShowTimetable || meta.canShowTimeline || meta.canShowSankey || meta.canShowCalendar) {
+        if (viewType !== 'Table' || meta.parentField || meta.canShowTimetable || meta.canShowTimeline || meta.canShowSankey || meta.canShowCalendar || meta.canShowWorkflow) {
             html += '<div class="btn-group btn-group-sm ms-2">';
             html += '<a class="btn btn-outline-secondary' + (activeView === 'Table' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Table' })) + '" title="Table View"><i class="bi bi-table"></i></a>';
             if (viewType === 'TreeView' || (viewType === 'OrgChart' && meta.parentField)) html += '<a class="btn btn-outline-secondary' + (activeView === 'TreeView' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'TreeView' })) + '" title="Tree View"><i class="bi bi-diagram-3"></i></a>';
@@ -616,6 +616,7 @@
             if (meta.canShowTimetable) html += '<a class="btn btn-outline-secondary' + (activeView === 'Timetable' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timetable' })) + '" title="Timetable"><i class="bi bi-calendar3"></i></a>';
             if (viewType === 'Sankey' || meta.canShowSankey) html += '<a class="btn btn-outline-secondary' + (activeView === 'Sankey' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Sankey' })) + '" title="Document Chain (Sankey)"><i class="bi bi-diagram-2-fill"></i></a>';
             if (viewType === 'Calendar' || meta.canShowCalendar) html += '<a class="btn btn-outline-secondary' + (activeView === 'Calendar' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar' })) + '" title="Calendar"><i class="bi bi-calendar-month"></i></a>';
+            if (meta.canShowWorkflow) html += '<a class="btn btn-outline-secondary' + (activeView === 'Workflow' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Workflow' })) + '" title="Workflow Board"><i class="bi bi-kanban"></i></a>';
             html += '<a class="btn btn-outline-secondary' + (activeView === 'Aggregation' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Aggregation' })) + '" title="Aggregations"><i class="bi bi-bar-chart-line"></i></a>';
             html += '</div>';
         }
@@ -635,6 +636,8 @@
             html += renderCalendarView(meta, items, slug, baseUrl, query);
         } else if (activeView === 'Aggregation') {
             html += renderAggregationView(meta, items, slug, baseUrl, query);
+        } else if (activeView === 'Workflow') {
+            html += renderWorkflowView(meta, items, slug, baseUrl, query);
         } else {
             // Search bar
             html += '<form class="d-flex gap-2 mb-3" id="vnext-search-form">';
@@ -1558,6 +1561,69 @@
             html += '</tr>';
         }
         html += '</tbody></table>';
+        return html;
+    }
+
+    // ── Workflow / Kanban Board View ─────────────────────────────────────────
+    function renderWorkflowView(meta, items, slug, baseUrl, query) {
+        // Find the first enum field to use as the workflow stage
+        var flowField = query.flowField
+            ? meta.fields.find(function (f) { return f.name === query.flowField; })
+            : null;
+        if (!flowField) {
+            flowField = meta.fields.find(function (f) {
+                return f.type === 'Enum' && f.enumValues && f.enumValues.length > 0;
+            });
+        }
+        if (!flowField || !flowField.enumValues) {
+            return '<div class="bm-empty-state"><i class="bi bi-kanban"></i><p>No enum field found for workflow view</p></div>';
+        }
+
+        var labelField = meta.fields.find(function (f) { return f.list && f.type === 'Text'; }) || meta.fields[0];
+        var stages = flowField.enumValues;
+
+        // Group items by stage
+        var stageMap = {};
+        stages.forEach(function (s) { stageMap[s] = []; });
+        items.forEach(function (item) {
+            var val = (nestedGet(item, flowField.name) || '').toString();
+            if (!stageMap[val]) stageMap[val] = [];
+            stageMap[val].push(item);
+        });
+
+        var colors = ['primary', 'info', 'warning', 'success', 'secondary', 'danger'];
+        var html = '<div class="d-flex gap-3 overflow-auto pb-3" style="min-height:400px">';
+        stages.forEach(function (stage, idx) {
+            var stageItems = stageMap[stage] || [];
+            var color = colors[idx % colors.length];
+            html += '<div class="card flex-shrink-0" style="min-width:260px;max-width:320px;flex:1">';
+            html += '<div class="card-header bg-' + color + '-subtle text-' + color + '-emphasis d-flex justify-content-between align-items-center">';
+            html += '<span class="fw-semibold">' + escHtml(stage) + '</span>';
+            html += '<span class="badge bg-' + color + '">' + stageItems.length + '</span>';
+            html += '</div>';
+            html += '<div class="card-body p-2" style="max-height:60vh;overflow-y:auto">';
+            if (stageItems.length === 0) {
+                html += '<div class="text-center text-muted small py-3"><i class="bi bi-inbox"></i><br>Empty</div>';
+            }
+            stageItems.forEach(function (item) {
+                var id = item.id || item.Id || item.key || item.Key || '';
+                var label = nestedGet(item, labelField.name) || '(untitled)';
+                html += '<a href="' + baseUrl + '/' + encodeURIComponent(id) + '" class="card mb-2 text-decoration-none bm-entity-card">';
+                html += '<div class="card-body p-2">';
+                html += '<div class="fw-semibold small">' + escHtml(label) + '</div>';
+                // Show a secondary field if available
+                var secondaryField = meta.fields.find(function (f) {
+                    return f.list && f.name !== labelField.name && f.name !== flowField.name && f.type !== 'YesNo';
+                });
+                if (secondaryField) {
+                    var secVal = nestedGet(item, secondaryField.name);
+                    if (secVal) html += '<div class="text-muted small text-truncate">' + escHtml(secVal.toString()) + '</div>';
+                }
+                html += '</div></a>';
+            });
+            html += '</div></div>';
+        });
+        html += '</div>';
         return html;
     }
 
