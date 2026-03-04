@@ -514,6 +514,8 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("POST /api/basket/add", new RouteHandlerData(raw, BasketApiHandlers.AddItemHandler));
         host.RegisterRoute("POST /api/basket/remove", new RouteHandlerData(raw, BasketApiHandlers.RemoveItemHandler));
         host.RegisterRoute("POST /api/basket/clear", new RouteHandlerData(raw, BasketApiHandlers.ClearBasketHandler));
+        host.RegisterRoute("POST /api/checkout", new RouteHandlerData(raw, CheckoutApiHandlers.CheckoutHandler));
+        host.RegisterRoute("POST /api/checkout/confirm", new RouteHandlerData(raw, CheckoutApiHandlers.ConfirmPaymentHandler));
         host.RegisterRoute("GET /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.GetHandler));
         host.RegisterRoute("GET /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.ListHandler));
         host.RegisterRoute("POST /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.CreateHandler));
