@@ -253,5 +253,27 @@
       "FieldId": "IsCompleted",
       "ValueExpression": "false"
     }
+  ],
+  "reports": [
+    {
+      "name": "Completed Tasks",
+      "description": "Lists all completed to-do items with completion date",
+      "rootEntity": "to-do",
+      "columnsJson": "[{\"Field\": \"Title\", \"Label\": \"Task\"}, {\"Field\": \"IsCompleted\", \"Label\": \"Done\"}, {\"Field\": \"DueDate\", \"Label\": \"Due Date\"}, {\"Field\": \"UpdatedOnUtc\", \"Label\": \"Completed At\"}]",
+      "filtersJson": "[{\"Field\": \"IsCompleted\", \"Operator\": \"Equals\", \"Value\": \"true\"}]",
+      "sortField": "UpdatedOnUtc",
+      "sortDescending": true,
+      "permission": "To Do"
+    },
+    {
+      "name": "Overdue Tasks",
+      "description": "Tasks past their due date that are not yet completed",
+      "rootEntity": "to-do",
+      "columnsJson": "[{\"Field\": \"Title\", \"Label\": \"Task\"}, {\"Field\": \"Priority\", \"Label\": \"Priority\"}, {\"Field\": \"DueDate\", \"Label\": \"Due Date\"}, {\"Field\": \"AssignedTo\", \"Label\": \"Assigned To\"}]",
+      "filtersJson": "[{\"Field\": \"IsCompleted\", \"Operator\": \"Equals\", \"Value\": \"false\"}]",
+      "sortField": "DueDate",
+      "sortDescending": false,
+      "permission": "To Do"
+    }
   ]
 }

@@ -44,4 +44,43 @@ public sealed class SamplePackage
 
     [JsonPropertyName("actionCommands")]
     public List<ActionCommandDefinition> ActionCommands { get; set; } = new();
+
+    [JsonPropertyName("reports")]
+    public List<SampleReport> Reports { get; set; } = new();
+}
+
+/// <summary>
+/// Lightweight report definition within a sample package.
+/// Converted to <see cref="BareMetalWeb.Data.ReportDefinition"/> on deploy.
+/// </summary>
+public sealed class SampleReport
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("description")]
+    public string Description { get; set; } = string.Empty;
+
+    /// <summary>Slug of the root entity (resolved at deploy time).</summary>
+    [JsonPropertyName("rootEntity")]
+    public string RootEntity { get; set; } = string.Empty;
+
+    [JsonPropertyName("columnsJson")]
+    public string ColumnsJson { get; set; } = "[]";
+
+    [JsonPropertyName("filtersJson")]
+    public string FiltersJson { get; set; } = "[]";
+
+    [JsonPropertyName("parametersJson")]
+    public string ParametersJson { get; set; } = "[]";
+
+    [JsonPropertyName("sortField")]
+    public string SortField { get; set; } = string.Empty;
+
+    [JsonPropertyName("sortDescending")]
+    public bool SortDescending { get; set; }
+
+    /// <summary>Permission token required to view the report.</summary>
+    [JsonPropertyName("permission")]
+    public string? Permission { get; set; }
 }

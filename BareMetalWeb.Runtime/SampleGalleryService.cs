@@ -142,7 +142,7 @@ public static class SampleGalleryService
                 newEntity.Key = existing.Key;
                 newEntity.EntityId = existing.EntityId;
                 newEntity.Version = existing.Version + 1;
-                await DeleteChildRecordsAsync(store, existing.EntityId, cancellationToken).ConfigureAwait(false);
+                await DeleteChildRecordsAsync(store, existing.EntityId, existing.Slug, cancellationToken).ConfigureAwait(false);
 
                 // Use preserved EntityId for remapping child records
                 oldEntityId = existing.EntityId;
@@ -235,10 +235,30 @@ public static class SampleGalleryService
                 }
             }
 
+            // Import reports that reference this entity slug
+            foreach (var srcReport in package.Reports.Where(r =>
+                string.Equals(r.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)))
+            {
+                var newReport = new ReportDefinition
+                {
+                    Name = srcReport.Name,
+                    Description = srcReport.Description,
+                    RootEntity = newEntity.Slug,
+                    ColumnsJson = srcReport.ColumnsJson,
+                    FiltersJson = srcReport.FiltersJson,
+                    ParametersJson = srcReport.ParametersJson,
+                    SortField = srcReport.SortField,
+                    SortDescending = srcReport.SortDescending
+                };
+                await store.SaveAsync(newReport, cancellationToken).ConfigureAwait(false);
+            }
+
             var fieldCount = package.Fields.Count(f => f.EntityId == oldEntityId);
             var indexCount = package.Indexes.Count(ix => ix.EntityId == oldEntityId);
             var actionCount = package.Actions.Count(a => a.EntityId == oldEntityId);
-            logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es), {actionCount} action(s).");
+            var reportCount = package.Reports.Count(r =>
+                string.Equals(r.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase));
+            logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es), {actionCount} action(s), {reportCount} report(s).");
             deployed.Add(srcEntity.Name);
         }
 
@@ -250,6 +270,7 @@ public static class SampleGalleryService
     private static async Task DeleteChildRecordsAsync(
         IDataObjectStore store,
         string entityDefId,
+        string entitySlug,
         CancellationToken ct)
     {
         var entityIdQuery = new QueryDefinition
@@ -282,5 +303,14 @@ public static class SampleGalleryService
                 await store.DeleteAsync<ActionCommandDefinition>(cmd.Key, ct).ConfigureAwait(false);
             await store.DeleteAsync<ActionDefinition>(action.Key, ct).ConfigureAwait(false);
         }
+
+        // Delete reports whose root entity matches this entity's slug
+        var reportQuery = new QueryDefinition
+        {
+            Clauses = { new QueryClause { Field = "RootEntity", Operator = QueryOperator.Equals, Value = entitySlug } }
+        };
+        var reports = (await store.QueryAsync<ReportDefinition>(reportQuery, ct).ConfigureAwait(false)).ToList();
+        foreach (var report in reports)
+            await store.DeleteAsync<ReportDefinition>(report.Key, ct).ConfigureAwait(false);
     }
 }
