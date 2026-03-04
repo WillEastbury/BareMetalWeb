@@ -63,6 +63,7 @@ internal sealed class StubMenuOption : IMenuOption
     public string[] RequiredPermissions { get; set; } = Array.Empty<string>();
     public string? ColorClass { get; set; }
     public string? Group { get; set; }
+    public string? SubGroup { get; set; }
 }
 
 internal sealed class StubBareWebHost : IBareWebHost

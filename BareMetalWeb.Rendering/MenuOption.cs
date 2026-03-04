@@ -15,6 +15,7 @@ public class MenuOption : IMenuOption
     public string[] RequiredPermissions { get; set; }
     public string? ColorClass { get; set; }
     public string? Group { get; set; }
+    public string? SubGroup { get; set; }
 
     public MenuOption(
         string href,
@@ -27,7 +28,8 @@ public class MenuOption : IMenuOption
         bool requiresLoggedIn = false,
         string[]? requiredPermissions = null,
         string? colorClass = null,
-        string? group = null)
+        string? group = null,
+        string? subGroup = null)
     {
         Href = href;
         Label = label;
@@ -40,6 +42,7 @@ public class MenuOption : IMenuOption
         RequiredPermissions = requiredPermissions ?? Array.Empty<string>();
         ColorClass = colorClass;
         Group = group;
+        SubGroup = subGroup;
     }
 
 }

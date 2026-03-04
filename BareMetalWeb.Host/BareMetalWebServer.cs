@@ -200,7 +200,8 @@ public class BareMetalWebServer : IBareWebHost
                 requiresLoggedIn: requiresLoggedIn,
                 requiredPermissions: requiredPermissions,
                 colorClass: pageInfo.PageContext.NavColorClass,
-                group: group));
+                group: group,
+                subGroup: pageInfo.PageContext.NavSubGroup));
         }
 
         foreach (var entity in DataScaffold.Entities.Where(e => e.ShowOnNav))

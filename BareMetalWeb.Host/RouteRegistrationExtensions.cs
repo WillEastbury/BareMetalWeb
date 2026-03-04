@@ -149,7 +149,7 @@ public static class RouteRegistrationExtensions
     {
         // Metrics
         host.RegisterRoute("GET /metrics", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Metric Viewer", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Metric Viewer", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
             routeHandlers.BuildPageHandler(context =>
             {
                 var app = context.GetApp()!;
@@ -164,7 +164,7 @@ public static class RouteRegistrationExtensions
 
         // IP tracking
         host.RegisterRoute("GET /topips", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Top IPs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Top IPs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
             routeHandlers.BuildPageHandler(context =>
             {
                 var app = context.GetApp()!;
@@ -174,7 +174,7 @@ public static class RouteRegistrationExtensions
             })));
 
         host.RegisterRoute("GET /suspiciousips", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Suspicious IPs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Suspicious IPs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
             routeHandlers.BuildPageHandler(context =>
             {
                 var app = context.GetApp()!;
@@ -195,7 +195,7 @@ public static class RouteRegistrationExtensions
     {
         // Log management
         host.RegisterRoute("GET /admin/logs", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Logs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Logs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
             routeHandlers.LogsViewerHandler));
         host.RegisterRoute("GET /admin/logs/prune", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Prune Logs", "" }, "monitoring", false, 1),
@@ -209,7 +209,7 @@ public static class RouteRegistrationExtensions
 
         // Sample data generation
         host.RegisterRoute("GET /admin/sample-data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Generate Sample Data", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Generate Sample Data", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.SampleDataHandler));
         host.RegisterRoute("POST /admin/sample-data", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Generate Sample Data", "" }, "admin", false, 1),
@@ -217,12 +217,12 @@ public static class RouteRegistrationExtensions
 
         // Template management
         host.RegisterRoute("GET /admin/reload-templates", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.ReloadTemplatesHandler));
 
         // Wipe all data — always registered; returns 419 if admin.allowWipeData setting is not configured
         host.RegisterRoute("GET /admin/wipe-data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", true, 0, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", true, 0, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "⚠️ Danger"),
             routeHandlers.WipeDataHandler));
         host.RegisterRoute("POST /admin/wipe-data", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", false, 0),
@@ -230,12 +230,12 @@ public static class RouteRegistrationExtensions
 
         // Entity designer — visual editor for creating virtual entity JSON definitions
         host.RegisterRoute("GET /admin/entity-designer", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Entity Designer", "" }, "admin", true, 2, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Entity Designer", "" }, "admin", true, 2, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.EntityDesignerHandler));
 
         // Gallery — browse and deploy pre-built sample entity schema packages
         host.RegisterRoute("GET /admin/gallery", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Sample Gallery", "" }, "admin", true, 3, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Sample Gallery", "" }, "admin", true, 3, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.GalleryHandler));
         host.RegisterRoute("POST /admin/gallery/deploy/{package}", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Sample Gallery", "" }, "admin", false, 0),
@@ -243,7 +243,7 @@ public static class RouteRegistrationExtensions
 
         // Data & Index Sizing — disk and in-memory index footprint per table
         host.RegisterRoute("GET /admin/data-sizes", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Data & Index Sizing", "" }, "admin", true, 4, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Data & Index Sizing", "" }, "admin", true, 4, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.DataSizingHandler));
     }
 
@@ -830,7 +830,7 @@ public static class RouteRegistrationExtensions
 
         // VNext SPA shell — nav entry visible in the Admin dropdown.
         host.RegisterRoute("GET /d", new RouteHandlerData(
-            pageInfoFactory.RawPage("Authenticated", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Data"),
+            pageInfoFactory.RawPage("Authenticated", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Data", navSubGroup: "🔧 Tools"),
             context => ServeVNextShell(context, host, templateStore)));
 
         // Catch-all fallback: serves the VNext SPA shell for any unmatched path
@@ -1352,7 +1352,7 @@ public static class RouteRegistrationExtensions
     {
         // List all reports
         host.RegisterRoute("GET /reports", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Reports"),
+            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Reports", navSubGroup: "🔧 Tools"),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
