@@ -6,16 +6,17 @@ namespace BareMetalWeb.Data;
 
 /// <summary>
 /// Helpers for compressing and decompressing per-op WAL payloads using Brotli.
+/// Quality 1 gives LZ4-class throughput (~2-3 GB/s) with zero external dependencies.
 /// Payloads smaller than <see cref="MinCompressThreshold"/> bytes are stored as-is.
 /// When encryption is enabled, payloads are compressed first, then encrypted.
 /// </summary>
 internal static class WalPayloadCodec
 {
-    /// <summary>Minimum uncompressed size (bytes) before Brotli compression is attempted.</summary>
+    /// <summary>Minimum uncompressed size (bytes) before compression is attempted.</summary>
     private const int MinCompressThreshold = 64;
 
-    /// <summary>Brotli quality level (0–11). 4 balances speed and compression ratio well.</summary>
-    private const int BrotliQuality = 4;
+    /// <summary>Brotli quality level (0–11). 1 prioritises throughput over ratio — comparable to LZ4.</summary>
+    private const int BrotliQuality = 1;
 
     /// <summary>Brotli window size (10–24). 22 ≈ 4 MiB, good for typical record sizes.</summary>
     private const int BrotliWindow = 22;
@@ -61,9 +62,9 @@ internal static class WalPayloadCodec
     }
 
     /// <summary>
-    /// Tries to Brotli-compress <paramref name="input"/>, then encrypts if enabled.
-    /// Returns the (possibly compressed and/or encrypted) payload, setting
-    /// <paramref name="codec"/> and <paramref name="uncompressedLen"/> accordingly.
+    /// Tries to Brotli-compress <paramref name="input"/> at quality 1 (fast),
+    /// then encrypts if enabled. Returns the (possibly compressed and/or encrypted)
+    /// payload, setting <paramref name="codec"/> and <paramref name="uncompressedLen"/>.
     /// </summary>
     public static ReadOnlyMemory<byte> TryCompress(
         ReadOnlyMemory<byte> input,
