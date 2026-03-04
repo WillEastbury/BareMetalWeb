@@ -42,6 +42,8 @@ internal static class WalConstants
     public const ushort CodecNone    = 1;
     public const ushort CodecDeflate = 2;
     public const ushort CodecBrotli  = 3;
+    public const ushort CodecEncryptedNone   = 4; // AES-GCM envelope, inner payload uncompressed
+    public const ushort CodecEncryptedBrotli = 5; // AES-GCM envelope, inner payload Brotli-compressed
 
     // ── Op flags ─────────────────────────────────────────────────────────────
     public const uint OpFlagIsBaseImage = 1u;

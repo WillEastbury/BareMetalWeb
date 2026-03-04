@@ -30,6 +30,7 @@ public sealed class WalStore : IDisposable
     private readonly string _directory;
     private readonly uint   _maxSegmentBytes;
     private readonly object _writeLock = new();
+    internal readonly WalEnvelopeEncryption Encryption;
 
     private WalSegmentWriter? _activeWriter;
     private uint _nextSegmentId;
@@ -79,11 +80,13 @@ public sealed class WalStore : IDisposable
     ///   Rotate to a new segment when the active segment reaches this size.
     ///   Defaults to <see cref="DefaultMaxSegmentBytes"/> (64 MiB).
     /// </param>
-    public WalStore(string directory, uint maxSegmentBytes = DefaultMaxSegmentBytes)
+    public WalStore(string directory, uint maxSegmentBytes = DefaultMaxSegmentBytes,
+        WalEnvelopeEncryption? encryption = null)
     {
         ArgumentNullException.ThrowIfNull(directory);
         _directory       = directory;
         _maxSegmentBytes = maxSegmentBytes;
+        Encryption       = encryption ?? WalPayloadCodec.GetDefaultEncryption();
         Directory.CreateDirectory(directory);
         KeyAllocator = WalTableKeyAllocator.Load(directory);
         Recover();
@@ -186,7 +189,7 @@ public sealed class WalStore : IDisposable
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite, 4096);
-            return TryReadOpPayloadFromStream(fs, offset32, key, out payload);
+            return TryReadOpPayloadFromStream(fs, offset32, key, out payload, Encryption);
         }
         catch (FileNotFoundException) { return false; }
         catch (DirectoryNotFoundException) { return false; }
@@ -313,7 +316,7 @@ public sealed class WalStore : IDisposable
     // ── Read-back internals ───────────────────────────────────────────────────
 
     private static bool TryReadOpPayloadFromStream(FileStream fs, uint offset32,
-        ulong targetKey, out ReadOnlyMemory<byte> payload)
+        ulong targetKey, out ReadOnlyMemory<byte> payload, WalEnvelopeEncryption? encryption = null)
     {
         payload = default;
 
@@ -361,7 +364,8 @@ public sealed class WalStore : IDisposable
                 uint   uncompressedLen = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 28)..]);
                 off += 44;
 
-                if (codec != WalConstants.CodecNone && codec != WalConstants.CodecBrotli)
+                if (codec != WalConstants.CodecNone && codec != WalConstants.CodecBrotli
+                    && codec != WalConstants.CodecEncryptedNone && codec != WalConstants.CodecEncryptedBrotli)
                     throw new System.IO.InvalidDataException(
                         $"Unknown WAL op codec 0x{codec:X4} for key 0x{key:X16}.");
 
@@ -369,7 +373,7 @@ public sealed class WalStore : IDisposable
                 if (off + compressedLen > span.Length) return false;
 
                 var raw = span.Slice(off, (int)compressedLen).ToArray();
-                payload = WalPayloadCodec.Decompress(raw, codec, uncompressedLen);
+                payload = WalPayloadCodec.Decompress(raw, codec, uncompressedLen, encryption);
                 return true;
             }
 

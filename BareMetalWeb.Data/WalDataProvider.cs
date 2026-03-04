@@ -225,7 +225,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             var bytes  = _serializer.Serialize(obj, schemaVersion);
             var walKey = GetOrAllocateKey(type.Name, obj.Key);
 
-            var commitTask = _walStore.CommitAsync(new[] { WalOp.Upsert(walKey, bytes) });
+            var commitTask = _walStore.CommitAsync(new[] { WalOp.Upsert(walKey, bytes, encryption: _walStore.Encryption) });
             if (!commitTask.IsCompleted)
                 commitTask.GetAwaiter().GetResult();
 
@@ -829,7 +829,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             var bytes = serializer.Serialize(record, plan, schemaVersion);
             var walKey = GetOrAllocateKey(entityName, record.Key);
 
-            var commitTask = _walStore.CommitAsync(new[] { WalOp.Upsert(walKey, bytes) });
+            var commitTask = _walStore.CommitAsync(new[] { WalOp.Upsert(walKey, bytes, encryption: _walStore.Encryption) });
             if (!commitTask.IsCompleted)
                 commitTask.GetAwaiter().GetResult();
 
