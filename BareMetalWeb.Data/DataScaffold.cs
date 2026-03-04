@@ -41,7 +41,9 @@ public sealed record DataFieldMetadata(
     string? CalculatedDisplayFormat = null,
     string? CopyFromParentField = null,
     string? CopyFromParentSlug = null,
-    string? CopyFromParentSourceField = null
+    string? CopyFromParentSourceField = null,
+    string? CascadeFromField = null,
+    string? CascadeFilterField = null
 )
 {
     // Lazily compiled delegates avoid per-call PropertyInfo.GetValue / PropertyInfo.SetValue
@@ -1689,7 +1691,7 @@ public static class DataScaffold
             return null;
 
         var safeId = Uri.EscapeDataString(key);
-        return $"/UI/data/{targetMeta.Slug}/{safeId}";
+        return $"/{targetMeta.Slug}/{safeId}";
     }
 
 

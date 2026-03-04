@@ -234,7 +234,7 @@ public class BareMetalWebServer : IBareWebHost
             bool entityRightAligned = string.Equals(entity.NavGroup, "Admin", StringComparison.OrdinalIgnoreCase);
 
             MenuOptionsList.Add(new MenuOption(
-                href: $"/UI/data/{entity.Slug}",
+                href: $"/{entity.Slug}",
                 label: entity.Name,
                 showOnNavBar: true,
                 permissionsNeeded: permissionsNeeded,

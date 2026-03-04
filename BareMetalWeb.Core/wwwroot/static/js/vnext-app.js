@@ -5,7 +5,7 @@
     'use strict';
 
     // ── Configuration ─────────────────────────────────────────────────────────
-    var BASE = '/UI';
+    var BASE = '';
     var API  = '/api';
     var META = '/meta';
     var LOOKUP_CARDINALITY_THRESHOLD = 20; // above this count, show a search dialog
@@ -345,14 +345,14 @@
         Object.keys(groups).sort().forEach(function (groupName) {
             var items = groups[groupName];
             if (items.length === 1) {
-                html += '<li class="nav-item"><a class="nav-link" href="' + BASE + '/data/' + escHtml(items[0].slug) + '">' + escHtml(items[0].name) + '</a></li>';
+                html += '<li class="nav-item"><a class="nav-link" href="' + BASE + '/' + escHtml(items[0].slug) + '">' + escHtml(items[0].name) + '</a></li>';
             } else {
                 html += '<li class="nav-item dropdown">';
                 html += '<a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">' + escHtml(groupName) + '</a>';
                 html += '<ul class="dropdown-menu dropdown-menu-dark">';
                 items.sort(function (a, b) { return (a.navOrder || 0) - (b.navOrder || 0) || a.name.localeCompare(b.name); })
                      .forEach(function (e) {
-                        html += '<li><a class="dropdown-item" href="' + BASE + '/data/' + escHtml(e.slug) + '">' + escHtml(e.name) + '</a></li>';
+                        html += '<li><a class="dropdown-item" href="' + BASE + '/' + escHtml(e.slug) + '">' + escHtml(e.name) + '</a></li>';
                      });
                 html += '</ul></li>';
             }
@@ -409,7 +409,7 @@
                         '<h5 class="card-title">' + escHtml(e.name) + '</h5>' +
                         '</div>' +
                         '<div class="card-footer">' +
-                        '<a class="btn btn-primary btn-sm" href="' + BASE + '/data/' + escHtml(e.slug) + '">Open</a>' +
+                        '<a class="btn btn-primary btn-sm" href="' + BASE + '/' + escHtml(e.slug) + '">Open</a>' +
                         '</div></div></div>';
                 });
                 html += '</div>';
@@ -480,7 +480,7 @@
         var listFields = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; });
         var commands   = meta.commands || [];
 
-        var baseUrl = BASE + '/data/' + encodeURIComponent(slug);
+        var baseUrl = BASE + '/' + encodeURIComponent(slug);
 
         function buildSortUrl(fieldName) {
             var newDir = (sort === fieldName && dir === 'asc') ? 'desc' : 'asc';
@@ -688,7 +688,7 @@
                             html += '<td data-label="' + escHtml(f.label) + '"><span class="badge bg-secondary">' + val.length + ' item' + (val.length !== 1 ? 's' : '') + '</span></td>';
                         } else if (f.lookup && f.lookup.targetSlug && val) {
                             html += '<td data-label="' + escHtml(f.label) + '" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
-                                '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
+                                '<a href="' + BASE + '/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
                         } else {
                             html += '<td data-label="' + escHtml(f.label) + '">' + fmtValue(val, f.type) + '</td>';
                         }
@@ -914,7 +914,7 @@
                     html += '<dd class="col-sm-9">' + renderSubListReadonly(val, f) + '</dd>';
                 } else if (f.lookup && f.lookup.targetSlug && val) {
                     html += '<dd class="col-sm-9" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
-                        '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></dd>';
+                        '<a href="' + BASE + '/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></dd>';
                 } else {
                     html += '<dd class="col-sm-9">' + fmtValue(val, f.type) + '</dd>';
                 }
@@ -1314,7 +1314,7 @@
                     var val = nestedGet(item, f.name);
                     if (f.lookup && f.lookup.targetSlug && val) {
                         html += '<td data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
-                            '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
+                            '<a href="' + BASE + '/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
                     } else {
                         html += '<td>' + fmtValue(val, f.type) + '</td>';
                     }
@@ -1373,7 +1373,7 @@
                 relFields.forEach(function (rf) {
                     var fkVal = nestedGet(item, rf.name);
                     if (fkVal && rf.targetSlug) {
-                        var href = BASE + '/data/' + encodeURIComponent(rf.targetSlug) + '/' + encodeURIComponent(String(fkVal));
+                        var href = BASE + '/' + encodeURIComponent(rf.targetSlug) + '/' + encodeURIComponent(String(fkVal));
                         html += '<td><a href="' + href + '" class="badge bg-primary text-decoration-none">' + escHtml(String(fkVal)) + '</a></td>';
                     } else {
                         html += '<td><span class="text-muted small">—</span></td>';
@@ -1688,7 +1688,7 @@
     }
 
     function renderViewResult(meta, item, slug, id) {
-        var baseUrl  = BASE + '/data/' + encodeURIComponent(slug);
+        var baseUrl  = BASE + '/' + encodeURIComponent(slug);
         var viewFields = meta.fields.filter(function (f) { return f.view; }).sort(function (a, b) { return a.order - b.order; });
         var commands   = meta.commands || [];
 
@@ -1728,7 +1728,7 @@
             } else if (f.lookup && f.lookup.targetSlug && val) {
                 html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
                 html += '<dd class="col-sm-9" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
-                    '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></dd>';
+                    '<a href="' + BASE + '/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></dd>';
             } else {
                 html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
                 html += '<dd class="col-sm-9">' + fmtValue(val, f.type) + '</dd>';
@@ -1805,7 +1805,7 @@
             html += '<div class="bm-doc-chain-section">';
             html += '<div class="bm-doc-chain-label text-muted small fw-semibold mb-1"><i class="bi bi-arrow-up-circle me-1"></i>Source Documents</div>';
             upstream.forEach(function (doc) {
-                var href = BASE + '/data/' + encodeURIComponent(doc.targetSlug) + '/' + encodeURIComponent(doc.id);
+                var href = BASE + '/' + encodeURIComponent(doc.targetSlug) + '/' + encodeURIComponent(doc.id);
                 html += '<div class="bm-doc-chain-node bm-doc-chain-upstream">' +
                     '<span class="badge bg-secondary me-2">' + escHtml(doc.targetName || doc.targetSlug) + '</span>' +
                     '<a href="' + href + '">' + escHtml(doc.label || doc.id) + '</a>' +
@@ -1823,7 +1823,7 @@
             html += '<div class="bm-doc-chain-section">';
             html += '<div class="bm-doc-chain-label text-muted small fw-semibold mt-2 mb-1"><i class="bi bi-arrow-down-circle me-1"></i>Derived Documents</div>';
             downstream.forEach(function (doc) {
-                var href = BASE + '/data/' + encodeURIComponent(doc.targetSlug) + '/' + encodeURIComponent(doc.id);
+                var href = BASE + '/' + encodeURIComponent(doc.targetSlug) + '/' + encodeURIComponent(doc.id);
                 html += '<div class="bm-doc-chain-node bm-doc-chain-downstream">' +
                     '<span class="badge bg-primary me-2">' + escHtml(doc.targetName || doc.targetSlug) + '</span>' +
                     '<a href="' + href + '">' + escHtml(doc.label || doc.id) + '</a>' +
@@ -1858,7 +1858,7 @@
                 var obj = results[value];
                 if (obj) {
                     var display = nestedGet(obj, displayField) || value;
-                    var href = BASE + '/data/' + encodeURIComponent(el.dataset.targetSlug) + '/' + encodeURIComponent(value);
+                    var href = BASE + '/' + encodeURIComponent(el.dataset.targetSlug) + '/' + encodeURIComponent(value);
                     el.innerHTML = '<a href="' + escHtml(href) + '">' + escHtml(String(display)) + '</a>';
                 }
             });
@@ -1958,7 +1958,7 @@
 
     function renderFormView(meta, item, slug, id) {
         var isCreate = id == null;
-        var baseUrl  = BASE + '/data/' + encodeURIComponent(slug);
+        var baseUrl  = BASE + '/' + encodeURIComponent(slug);
         var formFields = meta.fields.filter(function (f) { return isCreate ? f.create : f.edit; })
                                     .sort(function (a, b) { return a.order - b.order; });
         var commands   = (!isCreate && meta.commands) ? meta.commands : [];
@@ -2704,7 +2704,7 @@
                 showToast('Saved successfully.', 'success');
                 clearLookupCache(slug);
                 var savedId = (result && (result.id || result.Id)) || id || '';
-                var dest = savedId ? BASE + '/data/' + encodeURIComponent(slug) + '/' + encodeURIComponent(savedId) : BASE + '/data/' + encodeURIComponent(slug);
+                var dest = savedId ? BASE + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(savedId) : BASE + '/' + encodeURIComponent(slug);
                 BMRouter.navigate(dest);
             }).catch(function (err) {
                 showToast('Save failed: ' + err.message, 'error');
@@ -3169,7 +3169,7 @@
         Promise.all([fetchMeta(slug), apiFetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id))])
             .then(function (r) {
                 var meta = r[0]; var item = r[1];
-                var baseUrl = BASE + '/data/' + encodeURIComponent(slug);
+                var baseUrl = BASE + '/' + encodeURIComponent(slug);
                 var html = '<div class="p-3">' +
                     '<div class="alert alert-danger">' +
                     '<h4 class="alert-heading"><i class="bi bi-exclamation-triangle-fill"></i> Confirm Delete</h4>' +
@@ -3381,12 +3381,12 @@
 
         // Register routes
         BMRouter
-            .on(BASE + '/data/:entity/create', function (p) { renderCreate(p.entity); })
-            .on(BASE + '/data/:entity/:id/edit',   function (p) { renderEdit(p.entity, p.id); })
-            .on(BASE + '/data/:entity/:id/delete', function (p) { renderDelete(p.entity, p.id); })
-            .on(BASE + '/data/:entity/:id',        function (p, q) { renderView(p.entity, p.id); })
-            .on(BASE + '/data/:entity',            function (p, q) { renderList(p.entity, q); })
-            .on(BASE + '/data',                    function () { renderHome(); })
+            .on(BASE + '/:entity/create', function (p) { renderCreate(p.entity); })
+            .on(BASE + '/:entity/:id/edit',   function (p) { renderEdit(p.entity, p.id); })
+            .on(BASE + '/:entity/:id/delete', function (p) { renderDelete(p.entity, p.id); })
+            .on(BASE + '/:entity/:id',        function (p, q) { renderView(p.entity, p.id); })
+            .on(BASE + '/:entity',            function (p, q) { renderList(p.entity, q); })
+            .on(BASE + '/',                           function () { renderHome(); })
             .on(BASE,                                    function () { renderHome(); })
             .notFound(function (path) {
                 showError('Page not found: ' + path);
@@ -3446,7 +3446,7 @@
 
 })(window);
 // VNext Router — thin SPA router powered by BareMetalRendering
-// Parses /UI/[{slug}[/{id}[/edit|/delete]|/create]]
+// Parses /{slug}[/{id}[/edit|/delete]|/create]
 // Depends on: BareMetalRest, BareMetalBind, BareMetalTemplate, BareMetalRendering
 (async function () {
   'use strict';
@@ -3883,7 +3883,7 @@
   }
 
   async function route() {
-    const p      = location.pathname.replace(/^\/UI\/?/, '').replace(/^data\/?/, '').split('/').filter(Boolean);
+    const p      = location.pathname.replace(/^\//, '').split('/').filter(Boolean);
     const slug   = p[0], rawId = p[1], action = p[2];
     const id     = (rawId && rawId !== 'create') ? rawId : null;
 

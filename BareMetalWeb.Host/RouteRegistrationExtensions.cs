@@ -772,7 +772,7 @@ public static class RouteRegistrationExtensions
     /// <summary>
     /// Register the VNext JS SPA shell and metadata API endpoints.
     /// Metadata routes at /meta/objects and /meta/{object} provide schema info to the client.
-    /// The SPA shell at /UI and /UI/{*path} serves the client-side application (default UI).
+    /// The SPA shell at /{*path} serves the client-side application as a catch-all fallback.
     /// </summary>
     public static void RegisterVNextRoutes(
         this IBareWebHost host,
@@ -828,13 +828,16 @@ public static class RouteRegistrationExtensions
                     JsonSerializer.Serialize(result, JsonCompact));
             }));
 
-        // VNext SPA shell — serve for all /UI and /UI/{*path} routes (default UI).
-        // The root /UI route is the "Admin > Data" nav entry for the metadata-driven admin interface.
-        host.RegisterRoute("GET /UI", new RouteHandlerData(
+        // VNext SPA shell — nav entry visible in the Admin dropdown.
+        host.RegisterRoute("GET /d", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Data"),
             context => ServeVNextShell(context, host, templateStore)));
 
-        host.RegisterRoute("GET /UI/{*path}", new RouteHandlerData(
+        // Catch-all fallback: serves the VNext SPA shell for any unmatched path
+        // (e.g. /{slug}, /{slug}/{id}, /{slug}/{id}/edit).
+        // Registered last and has 0 literal segments so the route sorter tries
+        // all specific routes first.
+        host.RegisterRoute("GET /{*path}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             context => ServeVNextShell(context, host, templateStore)));
     }
@@ -1174,7 +1177,9 @@ public static class RouteRegistrationExtensions
                     ["sortField"] = f.Lookup.SortField,
                     ["sortDirection"] = f.Lookup.SortDirection.ToString(),
                     ["sourceSlug"] = meta.Slug,
-                    ["sourceFieldName"] = f.Name
+                    ["sourceFieldName"] = f.Name,
+                    ["cascadeFromField"] = f.CascadeFromField,
+                    ["cascadeFilterField"] = f.CascadeFilterField
                 };
             }
             else
@@ -1368,12 +1373,12 @@ public static class RouteRegistrationExtensions
                 sb.Append("<div class=\"card shadow-sm bm-page-card\">");
                 sb.Append("<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
                 sb.Append("<h1 class=\"h5 mb-0\"><i class=\"bi bi-bar-chart-fill\"></i> Reports</h1>");
-                sb.Append("<a href=\"/UI/report-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New Report</a>");
+                sb.Append("<a href=\"/report-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New Report</a>");
                 sb.Append("</div><div class=\"card-body\">");
 
                 if (reports.Count == 0)
                 {
-                    sb.Append("<div class=\"text-center py-5 text-muted\">No reports defined yet. Create one via <a href=\"/UI/report-definitions/create\">Report Definitions</a>.</div>");
+                    sb.Append("<div class=\"text-center py-5 text-muted\">No reports defined yet. Create one via <a href=\"/report-definitions/create\">Report Definitions</a>.</div>");
                 }
                 else
                 {
@@ -1608,11 +1613,8 @@ public static class RouteRegistrationExtensions
         var navbarSection = navEndIdx >= 0
             ? template.Body.Substring(0, navEndIdx + 6)
             : template.Body;
-        // Point the brand at the VNext root (default UI)
-        navbarSection = navbarSection.Replace(
-            "class=\"navbar-brand\" href=\"/\"",
-            "class=\"navbar-brand\" href=\"/UI\"",
-            StringComparison.Ordinal);
+        // Brand link stays at the VNext root (/)
+        // (navbarSection already has href="/", no override needed)
 
         // Extract only the <footer>…</footer> block from the footer template
         var footerEndIdx = template.Footer.IndexOf("</footer>", StringComparison.OrdinalIgnoreCase);
@@ -1626,19 +1628,17 @@ public static class RouteRegistrationExtensions
 
         // Inline /meta/objects (and optionally /meta/{slug}) to eliminate client-side round-trips
         var metaObjectsScript = TryBuildMetaObjectsScript(user, userPermissions, safeNonce);
-        // For any /UI/data/{slug}[/...] path, inline /meta/{slug} to eliminate the schema round-trip
+        // For any /{slug}[/...] path, inline /meta/{slug} to eliminate the schema round-trip
         string? metaSlugScript = null;
         string? initialDataScript = null;
-        // Extract the entity slug for /UI/data/{slug} pages
+        // Extract the entity slug for /{slug} pages
         var reqPath = context.Request.Path.Value ?? string.Empty;
-        const string dataPrefix = "/UI/data/";
         string? dataSlug = null;
-        if (reqPath.StartsWith(dataPrefix, StringComparison.OrdinalIgnoreCase))
         {
-            var pathAfterData = reqPath.Substring(dataPrefix.Length);
-            // Extract slug — it is the first path segment (before any '/')
-            var slashIdx = pathAfterData.IndexOf('/');
-            var entitySlug = slashIdx >= 0 ? pathAfterData.Substring(0, slashIdx) : pathAfterData;
+            var trimmed = reqPath.TrimStart('/');
+            // Extract slug — first path segment (before any '/')
+            var slashIdx = trimmed.IndexOf('/');
+            var entitySlug = slashIdx >= 0 ? trimmed.Substring(0, slashIdx) : trimmed;
             if (!string.IsNullOrEmpty(entitySlug))
                 metaSlugScript = TryBuildMetaSlugScript(entitySlug, safeNonce);
 
@@ -1654,7 +1654,7 @@ public static class RouteRegistrationExtensions
                     initialDataScript = await TryBuildInitialDataScriptAsync(
                         context, entitySlug, safeNonce, user, context.RequestAborted).ConfigureAwait(false);
             }
-            var slugCandidate = reqPath.Substring(dataPrefix.Length);
+            var slugCandidate = trimmed;
             // Only for simple slug paths (not /create, /123, /123/edit etc.)
             if (!string.IsNullOrEmpty(slugCandidate) && !slugCandidate.Contains('/'))
                 dataSlug = slugCandidate;
@@ -1665,7 +1665,7 @@ public static class RouteRegistrationExtensions
         sb.Append("<head>");
         sb.Append(ReplaceTemplateTokens(template.Head, tokens));
         sb.Append($"<meta name=\"csrf-token\" content=\"{safeToken}\">");
-        sb.Append("<meta name=\"vnext-base\" content=\"/UI\">");
+        sb.Append("<meta name=\"vnext-base\" content=\"\">");
         sb.Append("</head>");
         sb.Append("<body>");
         sb.Append(ReplaceTemplateTokens(navbarSection, tokens));
