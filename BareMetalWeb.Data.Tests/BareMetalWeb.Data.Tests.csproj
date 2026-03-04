@@ -21,7 +21,6 @@
   <ItemGroup>
     <ProjectReference Include="..\BareMetalWeb.Data\BareMetalWeb.Data.csproj" />
     <ProjectReference Include="..\BareMetalWeb.Runtime\BareMetalWeb.Runtime.csproj" />
-    <ProjectReference Include="..\BareMetalWeb.UserClasses\BareMetalWeb.UserClasses.csproj" />
   </ItemGroup>
 
 </Project>

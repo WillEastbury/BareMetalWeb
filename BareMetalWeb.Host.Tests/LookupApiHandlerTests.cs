@@ -9,7 +9,6 @@ using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
@@ -29,6 +28,31 @@ namespace BareMetalWeb.Host.Tests;
 [Collection("CookieProtection")]
 public class LookupApiHandlerTests : IDisposable
 {
+    [DataEntity("Products", Slug = "products")]
+    private class Product : BaseDataObject
+    {
+        [DataField(Label = "Name", Order = 1)] public string Name { get; set; } = "";
+        [DataField(Label = "Description", Order = 2)] public string Description { get; set; } = "";
+        [DataField(Label = "Sku", Order = 3)] public string Sku { get; set; } = "";
+    }
+
+    [DataEntity("Customers", Slug = "customers")]
+    private class Customer : BaseDataObject
+    {
+        [DataField(Label = "Name", Order = 1)] public string Name { get; set; } = "";
+        [DataField(Label = "Email", Order = 2)] public string Email { get; set; } = "";
+    }
+
+    [DataEntity("Orders", Slug = "orders")]
+    private class Order : BaseDataObject
+    {
+        [DataField(Label = "Order Number", Order = 1)] public string OrderNumber { get; set; } = "";
+        [DataField(Label = "Customer", Order = 2)]
+        [DataLookup(typeof(Customer))]
+        public string CustomerId { get; set; } = "";
+        [DataField(Label = "Status", Order = 3)] public string Status { get; set; } = "";
+    }
+
     private readonly IDataObjectStore _originalStore;
     private readonly InMemoryDataStore _testStore;
     private readonly BareMetalWebServer _server;
@@ -77,13 +101,10 @@ public class LookupApiHandlerTests : IDisposable
         _testSessionId = session.Key.ToString();
 
         // Register entity types used by lookup tests
-        DataEntityRegistry.RegisterEntity<Product>();
-        DataEntityRegistry.RegisterEntity<Customer>();
-        DataEntityRegistry.RegisterEntity<Order>();
-        DataEntityRegistry.RegisterEntity<User>();
-        DataEntityRegistry.RegisterEntity<UnitOfMeasure>();
-        DataEntityRegistry.RegisterEntity<Currency>();
-        DataEntityRegistry.RegisterEntity<Address>();
+        DataScaffold.RegisterEntity<Product>();
+        DataScaffold.RegisterEntity<Customer>();
+        DataScaffold.RegisterEntity<Order>();
+        DataScaffold.RegisterEntity<User>();
 
         _logger = new MockBufferedLogger();
         _renderer = new MockHtmlRenderer();

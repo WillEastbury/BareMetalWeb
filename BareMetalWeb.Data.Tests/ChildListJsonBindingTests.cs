@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Data.Interfaces;
 using Xunit;
 
@@ -19,6 +18,16 @@ namespace BareMetalWeb.Data.Tests;
 public class ChildListJsonBindingTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
+
+    [DataEntity("Test Order Rows", Slug = "test-order-rows")]
+    private class TestOrderRow : BaseDataObject
+    {
+        [DataField(Label = "Product", Order = 1)] public string ProductId { get; set; } = "";
+        [DataField(Label = "Quantity", Order = 2)] public int Quantity { get; set; }
+        [DataField(Label = "Unit Price", Order = 3)] public decimal UnitPrice { get; set; }
+        [DataField(Label = "Notes", Order = 4)] public string Notes { get; set; } = "";
+        [DataField(Label = "Line Total", Order = 5)] public decimal LineTotal { get; set; }
+    }
 
     public ChildListJsonBindingTests()
     {
@@ -44,10 +53,10 @@ public class ChildListJsonBindingTests : IDisposable
         """;
         var element = JsonDocument.Parse(json).RootElement;
 
-        var result = DataScaffold.TryConvertJson(element, typeof(List<OrderRow>), out var converted);
+        var result = DataScaffold.TryConvertJson(element, typeof(List<TestOrderRow>), out var converted);
 
-        Assert.True(result, "TryConvertJson should succeed for List<OrderRow>");
-        var list = Assert.IsType<List<OrderRow>>(converted);
+        Assert.True(result, "TryConvertJson should succeed for List<TestOrderRow>");
+        var list = Assert.IsType<List<TestOrderRow>>(converted);
         Assert.Equal(2, list.Count);
 
         Assert.Equal("prod-1", list[0].ProductId);
@@ -65,10 +74,10 @@ public class ChildListJsonBindingTests : IDisposable
     {
         var element = JsonDocument.Parse("[]").RootElement;
 
-        var result = DataScaffold.TryConvertJson(element, typeof(List<OrderRow>), out var converted);
+        var result = DataScaffold.TryConvertJson(element, typeof(List<TestOrderRow>), out var converted);
 
         Assert.True(result);
-        var list = Assert.IsType<List<OrderRow>>(converted);
+        var list = Assert.IsType<List<TestOrderRow>>(converted);
         Assert.Empty(list);
     }
 
@@ -77,10 +86,10 @@ public class ChildListJsonBindingTests : IDisposable
     {
         var element = JsonDocument.Parse("null").RootElement;
 
-        var result = DataScaffold.TryConvertJson(element, typeof(List<OrderRow>), out var converted);
+        var result = DataScaffold.TryConvertJson(element, typeof(List<TestOrderRow>), out var converted);
 
         Assert.True(result);
-        var list = Assert.IsType<List<OrderRow>>(converted);
+        var list = Assert.IsType<List<TestOrderRow>>(converted);
         Assert.Empty(list);
     }
 
@@ -90,10 +99,10 @@ public class ChildListJsonBindingTests : IDisposable
         var json = """[{ "ProductId": "x", "Quantity": 1, "UnitPrice": 5, "Bogus": "ignored" }]""";
         var element = JsonDocument.Parse(json).RootElement;
 
-        var result = DataScaffold.TryConvertJson(element, typeof(List<OrderRow>), out var converted);
+        var result = DataScaffold.TryConvertJson(element, typeof(List<TestOrderRow>), out var converted);
 
         Assert.True(result);
-        var list = Assert.IsType<List<OrderRow>>(converted);
+        var list = Assert.IsType<List<TestOrderRow>>(converted);
         Assert.Single(list);
         Assert.Equal("x", list[0].ProductId);
     }
@@ -105,10 +114,10 @@ public class ChildListJsonBindingTests : IDisposable
         var json = """[{ "productId": "p1", "quantity": 2, "unitPrice": 10.5 }]""";
         var element = JsonDocument.Parse(json).RootElement;
 
-        var result = DataScaffold.TryConvertJson(element, typeof(List<OrderRow>), out var converted);
+        var result = DataScaffold.TryConvertJson(element, typeof(List<TestOrderRow>), out var converted);
 
         Assert.True(result);
-        var list = Assert.IsType<List<OrderRow>>(converted);
+        var list = Assert.IsType<List<TestOrderRow>>(converted);
         Assert.Single(list);
         Assert.Equal("p1", list[0].ProductId);
         Assert.Equal(2, list[0].Quantity);

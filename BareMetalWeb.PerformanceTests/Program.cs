@@ -1,9 +1,59 @@
 ﻿using System.Diagnostics;
 using System.Globalization;
+using BareMetalWeb.Core;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
 
 namespace BareMetalWeb.PerformanceTests;
+
+[DataEntity("Perf Addresses", Slug = "perf-addresses")]
+class Address : BaseDataObject
+{
+    [DataField(Label = "Label", Order = 1)] public string Label { get; set; } = "";
+    [DataField(Label = "Line1", Order = 2)] public string Line1 { get; set; } = "";
+    [DataField(Label = "Line2", Order = 3)] public string Line2 { get; set; } = "";
+    [DataField(Label = "City", Order = 4)] public string City { get; set; } = "";
+    [DataField(Label = "Region", Order = 5)] public string Region { get; set; } = "";
+    [DataField(Label = "PostalCode", Order = 6)] public string PostalCode { get; set; } = "";
+    [DataField(Label = "Country", Order = 7)] public string Country { get; set; } = "";
+}
+
+[DataEntity("Perf Customers", Slug = "perf-customers")]
+class Customer : BaseDataObject
+{
+    [DataField(Label = "Name", Order = 1)] public string Name { get; set; } = "";
+    [DataField(Label = "Email", Order = 2)] public string Email { get; set; } = "";
+    [DataField(Label = "Phone", Order = 3)] public string Phone { get; set; } = "";
+    [DataField(Label = "Company", Order = 4)] public string Company { get; set; } = "";
+    [DataField(Label = "Address", Order = 5)] public string AddressId { get; set; } = "";
+    [DataField(Label = "Active", Order = 6)] public bool IsActive { get; set; }
+    [DataField(Label = "Notes", Order = 7)] public string Notes { get; set; } = "";
+    [DataField(Label = "Tags", Order = 8)] public List<string> Tags { get; set; } = new();
+}
+
+[DataEntity("Perf Products", Slug = "perf-products")]
+class Product : BaseDataObject
+{
+    [DataField(Label = "Name", Order = 1)] public string Name { get; set; } = "";
+    [DataField(Label = "Sku", Order = 2)] public string Sku { get; set; } = "";
+    [DataField(Label = "Category", Order = 3)] public string Category { get; set; } = "";
+    [DataField(Label = "UOM", Order = 4)] public string UnitOfMeasureId { get; set; } = "";
+    [DataField(Label = "Price", Order = 5)] public decimal Price { get; set; }
+    [DataField(Label = "Inventory", Order = 6)] public int InventoryCount { get; set; }
+    [DataField(Label = "Reorder Level", Order = 7)] public int ReorderLevel { get; set; }
+    [DataField(Label = "Launch Date", Order = 8, FieldType = Rendering.Models.FormFieldType.DateOnly)] public DateOnly LaunchDate { get; set; }
+    [DataField(Label = "Active", Order = 9)] public bool IsActive { get; set; }
+    [DataField(Label = "Description", Order = 10)] public string Description { get; set; } = "";
+    [DataField(Label = "Tags", Order = 11)] public List<string> Tags { get; set; } = new();
+}
+
+[DataEntity("Perf UOM", Slug = "perf-units-of-measure")]
+class UnitOfMeasure : BaseDataObject
+{
+    [DataField(Label = "Name", Order = 1)] public string Name { get; set; } = "";
+    [DataField(Label = "Abbreviation", Order = 2)] public string Abbreviation { get; set; } = "";
+    [DataField(Label = "Description", Order = 3)] public string Description { get; set; } = "";
+    [DataField(Label = "Active", Order = 4)] public bool IsActive { get; set; }
+}
 
 /// <summary>
 /// Performance test application that benchmarks:

@@ -1853,7 +1853,9 @@ public static class RouteRegistrationExtensions
 
         foreach (var field in lookupFields)
         {
-            var targetMeta = DataScaffold.GetEntityByType(field.Lookup!.TargetType);
+            var targetMeta = field.Lookup!.TargetSlug != null
+                ? (DataScaffold.TryGetEntity(field.Lookup.TargetSlug, out var bySlug) ? bySlug : null)
+                : DataScaffold.GetEntityByType(field.Lookup!.TargetType);
             if (targetMeta == null) continue;
 
             // Collect unique non-null IDs for this field across all payload rows
