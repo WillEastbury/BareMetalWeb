@@ -436,7 +436,7 @@
                 html += '<h4 class="mt-4 mb-3 border-bottom pb-1">' + escHtml(groupName) + '</h4>';
                 html += '<div class="row row-cols-1 row-cols-md-3 g-3 mb-3">';
                 groups[groupName].forEach(function (e) {
-                    html += '<div class="col"><div class="card h-100">' +
+                    html += '<div class="col"><div class="card h-100 bm-entity-card">' +
                         '<div class="card-body">' +
                         '<h5 class="card-title">' + escHtml(e.name) + '</h5>' +
                         '</div>' +
@@ -641,7 +641,7 @@
             // Card layout for narrow viewports
             html += '<div class="d-md-none vnext-card-list">';
             if (items.length === 0) {
-                html += '<p class="text-center text-muted py-4">No records found.</p>';
+                html += '<div class="bm-empty-state"><i class="bi bi-inbox"></i><p>No records found</p><small>Create one to get started</small></div>';
             } else {
                 items.forEach(function (item) {
                     var id = item.id || item.Id || '';
@@ -710,7 +710,7 @@
             html += '<tbody>';
 
             if (items.length === 0) {
-                html += '<tr><td colspan="' + (listFields.length + 2) + '" class="text-center text-muted py-4">No records found.</td></tr>';
+                html += '<tr><td colspan="' + (listFields.length + 2) + '"><div class="bm-empty-state"><i class="bi bi-inbox"></i><p>No records found</p><small>Create one to get started</small></div></td></tr>';
             } else {
                 items.forEach(function (item) {
                     var id = item.id || item.Id || '';
