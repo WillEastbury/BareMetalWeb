@@ -46,7 +46,13 @@ public enum IndexKind
     Inverted,
     BTree,
     Treap,
-    Bloom
+    Bloom,
+    /// <summary>
+    /// Graph index stores nodes and typed edges as adjacency lists.
+    /// Enables efficient traversal queries: neighbours, paths, multi-hop exploration.
+    /// Apply to a lookup/FK field to auto-build edges from parent→child relationships.
+    /// </summary>
+    Graph
 }
 
 /// <summary>
@@ -120,6 +126,9 @@ internal sealed class SearchIndexManager
         
         // Bloom filter data
         public BloomFilterData? BloomFilter { get; set; }
+
+        // Graph index data (adjacency lists for relationship traversal)
+        public GraphIndexData? GraphIndex { get; set; }
     }
     
     // BTree uses SortedDictionary, so no additional node class needed
@@ -151,6 +160,77 @@ internal sealed class SearchIndexManager
             TokenToIds = new Dictionary<string, HashSet<uint>>(StringComparer.OrdinalIgnoreCase);
         }
     }
+
+    /// <summary>
+    /// Graph index data: adjacency lists for efficient relationship traversal.
+    /// Each node (uint ID) maps to a set of typed edges (target ID + edge type).
+    /// </summary>
+    private sealed class GraphIndexData
+    {
+        /// <summary>Forward adjacency: nodeId → set of (targetId, edgeType).</summary>
+        public Dictionary<uint, HashSet<GraphEdge>> Forward { get; } = new();
+        /// <summary>Reverse adjacency: targetId → set of (sourceId, edgeType).</summary>
+        public Dictionary<uint, HashSet<GraphEdge>> Reverse { get; } = new();
+
+        public void AddEdge(uint from, uint to, string edgeType)
+        {
+            if (!Forward.TryGetValue(from, out var fwd))
+            {
+                fwd = new HashSet<GraphEdge>();
+                Forward[from] = fwd;
+            }
+            fwd.Add(new GraphEdge(to, edgeType));
+
+            if (!Reverse.TryGetValue(to, out var rev))
+            {
+                rev = new HashSet<GraphEdge>();
+                Reverse[to] = rev;
+            }
+            rev.Add(new GraphEdge(from, edgeType));
+        }
+
+        public void RemoveNode(uint nodeId)
+        {
+            if (Forward.TryGetValue(nodeId, out var fwd))
+            {
+                foreach (var e in fwd)
+                    Reverse.GetValueOrDefault(e.TargetId)?.RemoveWhere(x => x.TargetId == nodeId);
+                Forward.Remove(nodeId);
+            }
+            if (Reverse.TryGetValue(nodeId, out var rev))
+            {
+                foreach (var e in rev)
+                    Forward.GetValueOrDefault(e.TargetId)?.RemoveWhere(x => x.TargetId == nodeId);
+                Reverse.Remove(nodeId);
+            }
+        }
+
+        /// <summary>BFS/DFS neighbours within N hops.</summary>
+        public HashSet<uint> Traverse(uint startId, int maxHops, string? edgeType = null)
+        {
+            var visited = new HashSet<uint>();
+            var queue = new Queue<(uint Id, int Depth)>();
+            queue.Enqueue((startId, 0));
+            visited.Add(startId);
+            while (queue.Count > 0)
+            {
+                var (current, depth) = queue.Dequeue();
+                if (depth >= maxHops) continue;
+                if (Forward.TryGetValue(current, out var edges))
+                {
+                    foreach (var e in edges)
+                    {
+                        if (edgeType != null && !string.Equals(e.EdgeType, edgeType, StringComparison.OrdinalIgnoreCase)) continue;
+                        if (visited.Add(e.TargetId))
+                            queue.Enqueue((e.TargetId, depth + 1));
+                    }
+                }
+            }
+            return visited;
+        }
+    }
+
+    private readonly record struct GraphEdge(uint TargetId, string EdgeType);
 
     private readonly string _indexRoot;
     private readonly IBufferedLogger? _logger;
@@ -258,6 +338,9 @@ internal sealed class SearchIndexManager
                 
                 if (metadata.IndexKinds.Contains(IndexKind.Bloom))
                     AddToBloomFilter(index, token, obj.Key);
+
+                if (metadata.IndexKinds.Contains(IndexKind.Graph) && uint.TryParse(token, out var targetId))
+                    AddToGraphIndex(index, obj.Key, targetId, type.Name);
             }
 
             index.IsBuilt = true;
@@ -412,6 +495,14 @@ internal sealed class SearchIndexManager
                     
                     case IndexKind.Bloom:
                         tokenResults = SearchBloomFilter(index, queryToken);
+                        break;
+
+                    case IndexKind.Graph:
+                        // For graph, treat query as a node ID and return neighbours
+                        if (uint.TryParse(queryToken, out var nodeId) && index.GraphIndex != null)
+                            tokenResults = index.GraphIndex.Traverse(nodeId, 1);
+                        else
+                            tokenResults = SearchInverted(index, queryToken);
                         break;
                     
                     case IndexKind.Inverted:
@@ -775,6 +866,10 @@ internal sealed class SearchIndexManager
             if (metadata.IndexKinds.Contains(IndexKind.Bloom))
                 RemoveFromBloomFilter(index, token, id);
         }
+
+        // Remove graph index entries for this node
+        if (metadata.IndexKinds.Contains(IndexKind.Graph))
+            RemoveFromGraphIndex(index, id);
 
         index.IdToTokens.Remove(id);
     }
@@ -1198,5 +1293,63 @@ internal sealed class SearchIndexManager
         }
         
         return results;
+    }
+
+    // ── Graph Index ──────────────────────────────────────────────────────────
+
+    private static void AddToGraphIndex(IndexData index, uint sourceId, uint targetId, string edgeType)
+    {
+        index.GraphIndex ??= new GraphIndexData();
+        index.GraphIndex.AddEdge(sourceId, targetId, edgeType);
+    }
+
+    private static void RemoveFromGraphIndex(IndexData index, uint nodeId)
+    {
+        index.GraphIndex?.RemoveNode(nodeId);
+    }
+
+    /// <summary>
+    /// Traverse the graph index starting from a node, returning all reachable nodes
+    /// within the specified number of hops. Use for org-chart ancestry, document chains, etc.
+    /// </summary>
+    public IReadOnlyCollection<uint> TraverseGraph(Type type, uint startId, int maxHops, Func<IEnumerable<BaseDataObject>> loadAll, string? edgeType = null)
+    {
+        EnsureBuilt(type, loadAll);
+        var index = _indexes.GetOrAdd(type, LoadIndex);
+        lock (index.Sync)
+        {
+            if (index.GraphIndex == null) return Array.Empty<uint>();
+            return index.GraphIndex.Traverse(startId, maxHops, edgeType);
+        }
+    }
+
+    /// <summary>
+    /// Get direct neighbours (1-hop) from the graph index.
+    /// </summary>
+    public IReadOnlyCollection<uint> GetNeighbours(Type type, uint nodeId, Func<IEnumerable<BaseDataObject>> loadAll)
+    {
+        EnsureBuilt(type, loadAll);
+        var index = _indexes.GetOrAdd(type, LoadIndex);
+        lock (index.Sync)
+        {
+            if (index.GraphIndex == null) return Array.Empty<uint>();
+            if (!index.GraphIndex.Forward.TryGetValue(nodeId, out var edges)) return Array.Empty<uint>();
+            return edges.Select(e => e.TargetId).ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Get reverse neighbours (who points to this node).
+    /// </summary>
+    public IReadOnlyCollection<uint> GetReverseNeighbours(Type type, uint nodeId, Func<IEnumerable<BaseDataObject>> loadAll)
+    {
+        EnsureBuilt(type, loadAll);
+        var index = _indexes.GetOrAdd(type, LoadIndex);
+        lock (index.Sync)
+        {
+            if (index.GraphIndex == null) return Array.Empty<uint>();
+            if (!index.GraphIndex.Reverse.TryGetValue(nodeId, out var edges)) return Array.Empty<uint>();
+            return edges.Select(e => e.TargetId).ToArray();
+        }
     }
 }
