@@ -74,6 +74,49 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
         return EvaluateClause(memberValue, memberType, clause);
     }
 
+    /// <summary>
+    /// Filters a pre-loaded batch of rows against <paramref name="query"/>, honouring
+    /// <paramref name="skip"/> and <paramref name="top"/> for pagination.
+    ///
+    /// <para>When the batch is large enough and the query shape qualifies (flat AND
+    /// clauses, no nested groups), this delegates to <see cref="ColumnQueryExecutor"/>
+    /// for vectorised SIMD column scanning. Otherwise the scalar per-row path is used.</para>
+    /// </summary>
+    public IReadOnlyList<T> FilterBatch<T>(
+        IReadOnlyList<T> candidates,
+        QueryDefinition? query,
+        int skip = 0,
+        int top  = int.MaxValue)
+        where T : BaseDataObject
+    {
+        if (query == null || (query.Clauses.Count == 0 && query.Groups.Count == 0))
+        {
+            // No filter — return a sliced copy using GetRange when available.
+            int start = Math.Min(skip, candidates.Count);
+            int end   = Math.Min(start + top, candidates.Count);
+            if (candidates is List<T> asList)
+                return asList.GetRange(start, end - start);
+            var slice = new List<T>(end - start);
+            for (int i = start; i < end; i++) slice.Add(candidates[i]);
+            return slice;
+        }
+
+        if (ColumnQueryExecutor.IsEligible(candidates, query))
+            return ColumnQueryExecutor.Filter(candidates, query, skip, top);
+
+        // Scalar fallback.
+        var result  = new List<T>(Math.Min(top, candidates.Count));
+        int matched = 0;
+        foreach (var item in candidates)
+        {
+            if (!Matches(item, query)) continue;
+            if (matched++ < skip) continue;
+            result.Add(item);
+            if (result.Count >= top) break;
+        }
+        return result;
+    }
+
     public IEnumerable<T> ApplySorts<T>(IEnumerable<T> source, QueryDefinition? query)
     {
         if (query == null || query.Sorts.Count == 0)
