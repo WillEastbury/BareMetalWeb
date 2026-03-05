@@ -7,9 +7,16 @@ namespace BareMetalWeb.Host;
 /// on <see cref="ReadOnlySpan{T}"/> to avoid allocations.
 /// </summary>
 /// <remarks>
+/// <para>
 /// FNV-1a is chosen over xxHash for simplicity — the input sizes (short route
 /// strings) don't benefit from SIMD acceleration, and FNV-1a has excellent
 /// distribution for string keys.
+/// </para>
+/// <para>
+/// The seeded overloads (<see cref="Hash(string, uint)"/>) mix a seed into the
+/// offset basis, allowing the perfect-hash builder to try different hash
+/// functions without changing the algorithm.
+/// </para>
 /// </remarks>
 public static class RouteHash
 {
@@ -34,6 +41,36 @@ public static class RouteHash
     public static uint Hash(ReadOnlySpan<char> key)
     {
         uint hash = FnvOffsetBasis;
+        for (int i = 0; i < key.Length; i++)
+        {
+            hash ^= key[i];
+            hash *= FnvPrime;
+        }
+        return hash;
+    }
+
+    /// <summary>
+    /// Compute a seeded FNV-1a hash. The seed is XORed into the offset basis,
+    /// producing a different hash function per seed value. Used by the
+    /// perfect-hash builder to search for a collision-free mapping.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static uint Hash(string key, uint seed)
+    {
+        uint hash = FnvOffsetBasis ^ seed;
+        for (int i = 0; i < key.Length; i++)
+        {
+            hash ^= key[i];
+            hash *= FnvPrime;
+        }
+        return hash;
+    }
+
+    /// <summary>Seeded FNV-1a hash over a span.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static uint Hash(ReadOnlySpan<char> key, uint seed)
+    {
+        uint hash = FnvOffsetBasis ^ seed;
         for (int i = 0; i < key.Length; i++)
         {
             hash ^= key[i];
