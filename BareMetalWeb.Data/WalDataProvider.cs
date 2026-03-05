@@ -43,6 +43,8 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private const string PagedFolderName       = "Paged";
     private const string PagedFileExtension    = ".page";
 
+    private static readonly HashSet<uint> s_emptyUintSet = new();
+
     // Monotonic ETag counter — cheaper than Guid.NewGuid() per save
     private static long _etagCounter = DateTime.UtcNow.Ticks;
 
@@ -412,14 +414,14 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                     var fieldValue = clause.Value.ToString() ?? string.Empty;
                     var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
                     if (fieldIndex.Count == 0) break;
-                    clauseCandidates = fieldIndex.TryGetValue(fieldValue, out var ids) ? ids : new HashSet<uint>();
+                    clauseCandidates = fieldIndex.TryGetValue(fieldValue, out var ids) ? ids : s_emptyUintSet;
                 }
                 else if (clause.Operator == QueryOperator.StartsWith)
                 {
                     var prefix = clause.Value.ToString() ?? string.Empty;
                     var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
                     if (fieldIndex.Count == 0) break;
-                    clauseCandidates = new HashSet<uint>();
+                    clauseCandidates = new HashSet<uint>(16);
                     foreach (var kvp in fieldIndex)
                     {
                         if (kvp.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -599,6 +601,46 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
         // ── Fallback: filter/sort on non-indexed fields ─────────────────────
         var canShortCircuit = query == null || query.Sorts.Count == 0;
+
+        // ── Vectorised path: pre-load all objects, then apply SIMD column scan ──
+        // Activated when the entity set is large enough to amortise column-extraction
+        // overhead and the query has no nested OR groups.
+        if (query != null
+            && idMap.Count >= ColumnQueryExecutor.VectorizationThreshold
+            && query.Groups.Count == 0
+            && query.Clauses.Count > 0)
+        {
+            var allObjects = new List<T>(idMap.Count);
+            foreach (var (objKey, _) in idMap)
+            {
+                T? obj;
+                try { obj = Load<T>(objKey); }
+                catch (Exception ex)
+                {
+                    _logger?.LogError($"Deserialization failed for {typeName} with Key {objKey}.", ex);
+                    continue;
+                }
+                if (obj != null) allObjects.Add(obj);
+            }
+
+            if (canShortCircuit)
+            {
+                return ColumnQueryExecutor.Filter(allObjects, query, skip, top);
+            }
+
+            // With sorts: filter first (vectorised), then sort, then slice.
+            var filtered = ColumnQueryExecutor.Filter(allObjects, query);
+            var sortedList = new List<T>(_queryEvaluator.ApplySorts(filtered, query));
+            if (skip > 0 || top != int.MaxValue)
+            {
+                int end = Math.Min(skip + top, sortedList.Count);
+                var paged = new List<T>(Math.Max(0, end - skip));
+                for (int i = skip; i < end; i++) paged.Add(sortedList[i]);
+                return paged;
+            }
+            return sortedList;
+        }
+
         var scanResults     = new List<T>(Math.Min(top, idMap.Count));
         int scanMatched     = 0;
 
@@ -696,14 +738,14 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                     var fieldValue = clause.Value.ToString() ?? string.Empty;
                     var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
                     if (fieldIndex.Count == 0) break;
-                    clauseCandidates = fieldIndex.TryGetValue(fieldValue, out var ids) ? ids : new HashSet<uint>();
+                    clauseCandidates = fieldIndex.TryGetValue(fieldValue, out var ids) ? ids : s_emptyUintSet;
                 }
                 else if (clause.Operator == QueryOperator.StartsWith)
                 {
                     var prefix = clause.Value.ToString() ?? string.Empty;
                     var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
                     if (fieldIndex.Count == 0) break;
-                    clauseCandidates = new HashSet<uint>();
+                    clauseCandidates = new HashSet<uint>(16);
                     foreach (var kvp in fieldIndex)
                     {
                         if (kvp.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -1619,11 +1661,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var arch   = ParseArchitecture(schemaFile.Architecture);
         var schema = _serializer.CreateSchema(schemaFile.Version, schemaMembers, arch, schemaFile.Hash);
 
-        // Materialize to array only at the serializer boundary
-        var arr = memory.ToArray();
+        // Use .Span to avoid allocating an intermediate byte[] copy
         if (_serializer is BinaryObjectSerializer bin)
-            return bin.Deserialize<T>(arr, schema, SchemaReadMode.BestEffort);
-        return _serializer.Deserialize<T>(arr, schema);
+            return bin.Deserialize<T>(memory.Span, schema, SchemaReadMode.BestEffort);
+        return _serializer.Deserialize<T>(memory.Span, schema);
     }
 
     // ── Singleton-flag enforcement ────────────────────────────────────────────

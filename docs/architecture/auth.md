@@ -139,6 +139,8 @@ sequenceDiagram
 
 CSRF tokens are tied to the authenticated session ID.  Requests without a valid session always fail CSRF validation.  Token expiry is 1 hour by default.
 
+> **CSRF check order**: All form POST handlers (login, MFA challenge, setup) always run the CSRF check, regardless of whether the request has a valid form `Content-Type`. Non-form requests use an empty form collection that produces no CSRF token, causing the validation to fail immediately. This prevents user-controlled bypass of the CSRF check via Content-Type manipulation.
+
 ---
 
 ## Service Principal API Keys
@@ -276,6 +278,7 @@ Entra ID → GET /auth/sso/callback?code=…&state=…
     "ClientId": "your-client-id",
     "ClientSecret": "your-client-secret",
     "RedirectUri": "/auth/sso/callback",
+    "BaseUrl": "https://myapp.example.com",
     "AutoProvisionUsers": true,
     "DefaultPermissions": "user",
     "GroupRoleMappings": {
@@ -284,6 +287,9 @@ Entra ID → GET /auth/sso/callback?code=…&state=…
   }
 }
 ```
+
+> **`BaseUrl`** (optional): Canonical absolute base URL of the application (e.g. `"https://myapp.example.com"`). When set, all OAuth redirect URIs are built from this value instead of the HTTP `Host` header, preventing Host-header injection attacks. When not set, falls back to the request `Host` header.
+
 
 ### User Provisioning
 

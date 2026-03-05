@@ -212,14 +212,14 @@ public sealed class SearchIndexManager
         {
             if (!Forward.TryGetValue(from, out var fwd))
             {
-                fwd = new HashSet<GraphEdge>();
+                fwd = new HashSet<GraphEdge>(4);
                 Forward[from] = fwd;
             }
             fwd.Add(new GraphEdge(to, edgeType));
 
             if (!Reverse.TryGetValue(to, out var rev))
             {
-                rev = new HashSet<GraphEdge>();
+                rev = new HashSet<GraphEdge>(4);
                 Reverse[to] = rev;
             }
             rev.Add(new GraphEdge(from, edgeType));
@@ -244,7 +244,7 @@ public sealed class SearchIndexManager
         /// <summary>BFS/DFS neighbours within N hops.</summary>
         public HashSet<uint> Traverse(uint startId, int maxHops, string? edgeType = null)
         {
-            var visited = new HashSet<uint>();
+            var visited = new HashSet<uint>(16);
             var queue = new Queue<(uint Id, int Depth)>();
             queue.Enqueue((startId, 0));
             visited.Add(startId);
@@ -313,7 +313,7 @@ public sealed class SearchIndexManager
         /// <summary>Returns all point IDs within the given bounding box.</summary>
         public HashSet<uint> SearchBoundingBox(double minLat, double maxLat, double minLng, double maxLng)
         {
-            var results = new HashSet<uint>();
+            var results = new HashSet<uint>(16);
             var minCell = GetCell(minLat, minLng);
             var maxCell = GetCell(maxLat, maxLng);
             for (int latC = minCell.LatCell; latC <= maxCell.LatCell; latC++)
@@ -344,7 +344,7 @@ public sealed class SearchIndexManager
                 centerLng - lngDelta, centerLng + lngDelta);
 
             // Refine with Haversine distance
-            var results = new HashSet<uint>();
+            var results = new HashSet<uint>(8);
             foreach (var id in candidates)
             {
                 if (_points.TryGetValue(id, out var pt) && HaversineKm(centerLat, centerLng, pt.Lat, pt.Lng) <= radiusKm)
@@ -417,7 +417,7 @@ public sealed class SearchIndexManager
             var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance);
             var indexedProps = new List<PropertyInfo>(props.Length);
             var attrs = new List<DataIndexAttribute>(props.Length);
-            var kinds = new HashSet<IndexKind>();
+            var kinds = new HashSet<IndexKind>(4);
 
             foreach (var prop in props)
             {
@@ -482,7 +482,7 @@ public sealed class SearchIndexManager
                 // Add to Inverted index (always present for backward compatibility)
                 if (!index.Tokens.TryGetValue(token, out var ids))
                 {
-                    ids = new HashSet<uint>();
+                    ids = new HashSet<uint>(8);
                     index.Tokens[token] = ids;
                 }
                 ids.Add(obj.Key);
@@ -522,7 +522,7 @@ public sealed class SearchIndexManager
             var prefix = token.Substring(0, len);
             if (!index.PrefixTree.TryGetValue(prefix, out var fullTokens))
             {
-                fullTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                fullTokens = new HashSet<string>(8, StringComparer.OrdinalIgnoreCase);
                 index.PrefixTree[prefix] = fullTokens;
             }
             fullTokens.Add(token);
@@ -542,7 +542,7 @@ public sealed class SearchIndexManager
             var suffix = reversed.Substring(0, len);
             if (!index.SuffixTree.TryGetValue(suffix, out var fullTokens))
             {
-                fullTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                fullTokens = new HashSet<string>(8, StringComparer.OrdinalIgnoreCase);
                 index.SuffixTree[suffix] = fullTokens;
             }
             fullTokens.Add(token);
@@ -601,7 +601,7 @@ public sealed class SearchIndexManager
 
         EnsureBuilt(type, loadAll);
         var index = _indexes.GetOrAdd(type, LoadIndex);
-        var results = new HashSet<uint>();
+        var results = new HashSet<uint>(8);
         lock (index.Sync)
         {
             var reversed = ReverseString(suffixText.ToLowerInvariant());
@@ -645,7 +645,7 @@ public sealed class SearchIndexManager
             }
         }
         
-        var results = new HashSet<uint>();
+        var results = new HashSet<uint>(8);
         lock (index.Sync)
         {
             // Use Span-based tokenization for zero allocations during query parsing
@@ -700,7 +700,7 @@ public sealed class SearchIndexManager
 
     private IEnumerable<uint> SearchInverted(IndexData index, string queryToken)
     {
-        var results = new HashSet<uint>();
+        var results = new HashSet<uint>(8);
         
         // Check for exact match first (fastest path)
         if (index.Tokens.TryGetValue(queryToken, out var exactIds))
@@ -926,7 +926,7 @@ public sealed class SearchIndexManager
                 // Build inverted index
                 if (!index.Tokens.TryGetValue(token, out var ids))
                 {
-                    ids = new HashSet<uint>();
+                    ids = new HashSet<uint>(8);
                     index.Tokens[token] = ids;
                 }
                 ids.Add(obj.Key);
@@ -947,7 +947,7 @@ public sealed class SearchIndexManager
 
     private HashSet<string> BuildTokens(BaseDataObject obj, IndexData index)
     {
-        var tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var tokens = new HashSet<string>(8, StringComparer.OrdinalIgnoreCase);
         var type = obj.GetType();
         var metadata = GetOrCreateTypeMetadata(type);
 
@@ -1073,7 +1073,7 @@ public sealed class SearchIndexManager
     // High-performance tokenization using Span<char> to minimize allocations
     private static void TokenizeToHashSet(ReadOnlySpan<char> value, out HashSet<string> tokens)
     {
-        tokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        tokens = new HashSet<string>(8, StringComparer.OrdinalIgnoreCase);
         
         if (value.IsEmpty)
             return;
@@ -1190,7 +1190,7 @@ public sealed class SearchIndexManager
         InitializeBTreeIndex(index);
         if (!index.BTreeTokens!.TryGetValue(token, out var ids))
         {
-            ids = new HashSet<uint>();
+            ids = new HashSet<uint>(8);
             index.BTreeTokens[token] = ids;
         }
         ids.Add(id);
@@ -1214,7 +1214,7 @@ public sealed class SearchIndexManager
         if (index.BTreeTokens == null)
             return Array.Empty<uint>();
 
-        var results = new HashSet<uint>();
+        var results = new HashSet<uint>(8);
         
         // Exact match
         if (index.BTreeTokens.TryGetValue(queryToken, out var exactIds))
@@ -1257,7 +1257,7 @@ public sealed class SearchIndexManager
         
         if (!index.TreapTokenToIds!.TryGetValue(token, out var ids))
         {
-            ids = new HashSet<uint>();
+            ids = new HashSet<uint>(8);
             index.TreapTokenToIds[token] = ids;
         }
         ids.Add(id);
@@ -1370,7 +1370,7 @@ public sealed class SearchIndexManager
         if (index.TreapTokenToIds == null)
             return Array.Empty<uint>();
 
-        var results = new HashSet<uint>();
+        var results = new HashSet<uint>(8);
         
         // Exact match
         if (index.TreapTokenToIds.TryGetValue(queryToken, out var exactIds))
@@ -1428,7 +1428,7 @@ public sealed class SearchIndexManager
         // Store in backing dictionary for retrieval
         if (!bloom.TokenToIds.TryGetValue(token, out var ids))
         {
-            ids = new HashSet<uint>();
+            ids = new HashSet<uint>(8);
             bloom.TokenToIds[token] = ids;
         }
         ids.Add(id);
@@ -1462,7 +1462,7 @@ public sealed class SearchIndexManager
             return Array.Empty<uint>();
 
         var bloom = index.BloomFilter;
-        var results = new HashSet<uint>();
+        var results = new HashSet<uint>(8);
         
         // Check if token might be in the bloom filter using packed ulong[] bit test
         bool mightExist = true;
@@ -1588,32 +1588,50 @@ public sealed class SearchIndexManager
     private static bool TryParseCoordinate(string token, out double lat, out double lng)
     {
         lat = lng = 0;
-        var parts = token.Split(',');
-        if (parts.Length < 2) return false;
-        return double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float,
+        var span = token.AsSpan();
+        int sep = span.IndexOf(',');
+        if (sep < 0) return false;
+        return double.TryParse(span[..sep].Trim(), System.Globalization.NumberStyles.Float,
                    System.Globalization.CultureInfo.InvariantCulture, out lat) &&
-               double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float,
+               double.TryParse(span[(sep + 1)..].Trim(), System.Globalization.NumberStyles.Float,
                    System.Globalization.CultureInfo.InvariantCulture, out lng);
     }
 
     private static IEnumerable<uint> SearchSpatialFromToken(IndexData index, string queryToken)
     {
         if (index.SpatialIndex == null) return Array.Empty<uint>();
-        var parts = queryToken.Split(',');
-        if (parts.Length == 3 &&
-            double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var lat) &&
-            double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var lng) &&
-            double.TryParse(parts[2].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var radius))
+
+        var span = queryToken.AsSpan();
+        // Count commas to determine format
+        int commaCount = 0;
+        foreach (var c in span) { if (c == ',') commaCount++; }
+
+        const System.Globalization.NumberStyles floatStyle = System.Globalization.NumberStyles.Float;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+
+        if (commaCount == 2)
         {
-            return index.SpatialIndex.SearchRadius(lat, lng, radius);
+            int c1 = span.IndexOf(',');
+            int c2 = span[(c1 + 1)..].IndexOf(',') + c1 + 1;
+            if (double.TryParse(span[..c1].Trim(), floatStyle, inv, out var lat) &&
+                double.TryParse(span[(c1 + 1)..c2].Trim(), floatStyle, inv, out var lng) &&
+                double.TryParse(span[(c2 + 1)..].Trim(), floatStyle, inv, out var radius))
+            {
+                return index.SpatialIndex.SearchRadius(lat, lng, radius);
+            }
         }
-        if (parts.Length == 4 &&
-            double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var minLat) &&
-            double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var maxLat) &&
-            double.TryParse(parts[2].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var minLng) &&
-            double.TryParse(parts[3].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var maxLng))
+        if (commaCount == 3)
         {
-            return index.SpatialIndex.SearchBoundingBox(minLat, maxLat, minLng, maxLng);
+            int c1 = span.IndexOf(',');
+            int c2 = span[(c1 + 1)..].IndexOf(',') + c1 + 1;
+            int c3 = span[(c2 + 1)..].IndexOf(',') + c2 + 1;
+            if (double.TryParse(span[..c1].Trim(), floatStyle, inv, out var minLat) &&
+                double.TryParse(span[(c1 + 1)..c2].Trim(), floatStyle, inv, out var maxLat) &&
+                double.TryParse(span[(c2 + 1)..c3].Trim(), floatStyle, inv, out var minLng) &&
+                double.TryParse(span[(c3 + 1)..].Trim(), floatStyle, inv, out var maxLng))
+            {
+                return index.SpatialIndex.SearchBoundingBox(minLat, maxLat, minLng, maxLng);
+            }
         }
         return Array.Empty<uint>();
     }

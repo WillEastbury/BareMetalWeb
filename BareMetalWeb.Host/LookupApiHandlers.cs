@@ -370,12 +370,17 @@ public static class LookupApiHandlers
             return false;
 
         var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-        var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (required.Length == 0)
-            return true;
-        foreach (var perm in required)
+        var altLookup = userPermissions.GetAlternateLookup<ReadOnlySpan<char>>();
+        var remaining = permissionsNeeded.AsSpan();
+        while (remaining.Length > 0)
         {
-            if (!userPermissions.Contains(perm))
+            int idx = remaining.IndexOf(',');
+            ReadOnlySpan<char> segment;
+            if (idx < 0) { segment = remaining; remaining = default; }
+            else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+            var trimmed = segment.Trim();
+            if (trimmed.IsEmpty) continue;
+            if (!altLookup.Contains(trimmed))
                 return false;
         }
         return true;
@@ -410,17 +415,17 @@ public static class LookupApiHandlers
             if (string.IsNullOrWhiteSpace(filter))
                 continue;
 
-            var parts = filter.Split(':', 2);
-            if (parts.Length == 2)
+            var parts_idx = filter.IndexOf(':');
+            if (parts_idx >= 0)
             {
-                var fieldName = parts[0].Trim();
+                var fieldName = filter.AsSpan(0, parts_idx).Trim().ToString();
                 if (!viewableFields.Contains(fieldName))
                     continue; // reject unknown or non-viewable fields
                 queryDef.Clauses.Add(new QueryClause
                 {
                     Field = fieldName,
                     Operator = QueryOperator.Equals,
-                    Value = parts[1].Trim()
+                    Value = filter.AsSpan(parts_idx + 1).Trim().ToString()
                 });
             }
         }

@@ -199,7 +199,7 @@ public sealed class ExpressionParser
     private ExpressionNode ParseStringLiteral()
     {
         var quote = _currentChar;
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(64);
         Advance();
 
         while (_position < _expression.Length && _currentChar != quote)
@@ -226,7 +226,7 @@ public sealed class ExpressionParser
 
     private ExpressionNode ParseNumber()
     {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(16);
 
         while (_position < _expression.Length && (char.IsDigit(_currentChar) || _currentChar == '.'))
         {
@@ -244,7 +244,7 @@ public sealed class ExpressionParser
 
     private string ParseIdentifier()
     {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(32);
 
         while (_position < _expression.Length && (char.IsLetterOrDigit(_currentChar) || _currentChar == '_'))
         {

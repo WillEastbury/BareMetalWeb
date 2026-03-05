@@ -302,7 +302,7 @@ public static class GraphQLHandler
         if (s[pos] == '"')
         {
             pos++;
-            var sb = new StringBuilder();
+            var sb = new StringBuilder(64);
             while (pos < s.Length && s[pos] != '"')
             {
                 if (s[pos] == '\\' && pos + 1 < s.Length) { pos++; sb.Append(s[pos]); pos++; }
@@ -329,7 +329,7 @@ public static class GraphQLHandler
     private static string ToPascal(string slug)
     {
         if (string.IsNullOrEmpty(slug)) return slug;
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(slug.Length);
         bool upper = true;
         foreach (var c in slug)
         {
@@ -343,7 +343,7 @@ public static class GraphQLHandler
     private static string ToKebab(string pascalCase)
     {
         if (string.IsNullOrEmpty(pascalCase)) return pascalCase;
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(pascalCase.Length + 4);
         for (int i = 0; i < pascalCase.Length; i++)
         {
             if (char.IsUpper(pascalCase[i]) && i > 0) sb.Append('-');

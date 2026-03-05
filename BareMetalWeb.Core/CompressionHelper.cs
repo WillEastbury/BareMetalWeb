@@ -25,9 +25,14 @@ public static class CompressionHelper
 
         double brQ = 0, gzQ = 0, starQ = 0;
 
-        foreach (var token in acceptEncodingHeader.Split(','))
+        var remaining = acceptEncodingHeader.AsSpan();
+        while (remaining.Length > 0)
         {
-            var p = token.Trim().AsSpan();
+            int commaIdx = remaining.IndexOf(',');
+            ReadOnlySpan<char> token;
+            if (commaIdx < 0) { token = remaining; remaining = default; }
+            else { token = remaining[..commaIdx]; remaining = remaining[(commaIdx + 1)..]; }
+            var p = token.Trim();
             var semiIdx = p.IndexOf(';');
             var enc = (semiIdx < 0 ? p : p[..semiIdx]).Trim();
             double q = 1.0;

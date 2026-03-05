@@ -22,6 +22,12 @@ public sealed class EntraIdOptions
     public string ClientId { get; set; } = string.Empty;
     public string ClientSecret { get; set; } = string.Empty;
     public string RedirectUri { get; set; } = "/auth/sso/callback";
+    /// <summary>
+    /// Canonical base URL of the application (e.g. "https://myapp.example.com").
+    /// Used to build absolute redirect URIs for SSO flows without relying on the HTTP Host header.
+    /// When not set, the request Host header is used as a fallback.
+    /// </summary>
+    public string BaseUrl { get; set; } = string.Empty;
     public bool AutoProvisionUsers { get; set; } = true;
     public string DefaultPermissions { get; set; } = "user";
     public Dictionary<string, string> GroupRoleMappings { get; set; } = new();
@@ -81,7 +87,7 @@ public static class EntraIdService
         context.SetCookie(VerifierCookieName, CookieProtection.Protect(verifier), cookieOptions);
         context.SetCookie(NonceCookieName, CookieProtection.Protect(nonce), cookieOptions);
 
-        var redirectUri = BuildAbsoluteRedirectUri(context, options.RedirectUri);
+        var redirectUri = BuildAbsoluteRedirectUri(options, context, options.RedirectUri);
 
         var authorizeUrl = $"https://login.microsoftonline.com/{options.TenantId}/oauth2/v2.0/authorize"
             + $"?client_id={Uri.EscapeDataString(options.ClientId)}"
@@ -130,7 +136,7 @@ public static class EntraIdService
         if (string.IsNullOrEmpty(verifier))
             return null;
 
-        var redirectUri = BuildAbsoluteRedirectUri(context, options.RedirectUri);
+        var redirectUri = BuildAbsoluteRedirectUri(options, context, options.RedirectUri);
 
         // Token exchange
         var tokenEndpoint = $"https://login.microsoftonline.com/{options.TenantId}/oauth2/v2.0/token";
@@ -274,6 +280,15 @@ public static class EntraIdService
     }
 
     /// <summary>
+    /// Builds the post-logout redirect URI using the configured BaseUrl when available,
+    /// avoiding reliance on the user-controlled HTTP Host header.
+    /// </summary>
+    public static string BuildPostLogoutRedirectUri(EntraIdOptions options, Microsoft.AspNetCore.Http.HttpContext context)
+    {
+        return BuildAbsoluteRedirectUri(options, context, "/login");
+    }
+
+    /// <summary>
     /// Builds the Entra front-channel logout URL.
     /// </summary>
     public static string BuildLogoutUrl(EntraIdOptions options, string postLogoutRedirectUri)
@@ -285,9 +300,14 @@ public static class EntraIdService
     // ── Private helpers ────────────────────────────────────────────
 
     private static string BuildAbsoluteRedirectUri(
+        EntraIdOptions options,
         Microsoft.AspNetCore.Http.HttpContext context,
         string relativePath)
     {
+        // Use configured BaseUrl when available to avoid relying on user-controlled Host header
+        if (!string.IsNullOrWhiteSpace(options.BaseUrl))
+            return options.BaseUrl.TrimEnd('/') + relativePath;
+
         var scheme = context.Request.IsHttps ? "https" : "http";
         var host = context.Request.Host.Value;
         return $"{scheme}://{host}{relativePath}";

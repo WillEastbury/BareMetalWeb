@@ -135,8 +135,17 @@ async function localiseGoogleFonts(googleFontsCssUrl) {
     });
 
     // Download each .woff2 referenced in the CSS
+    // Only allow URLs from trusted Google Fonts hostnames to prevent SSRF via crafted CSS
+    const TRUSTED_FONT_HOSTS = new Set(['fonts.gstatic.com', 'fonts.googleapis.com']);
     let localCss = fontCss;
-    const woff2Urls = extractCssUrls(fontCss).filter(u => u.includes('.woff2') || u.includes('gstatic.com'));
+    const woff2Urls = extractCssUrls(fontCss).filter(u => {
+        try {
+            const parsed = new URL(u, googleFontsCssUrl);
+            return parsed.pathname.endsWith('.woff2') || TRUSTED_FONT_HOSTS.has(parsed.hostname);
+        } catch {
+            return false;
+        }
+    });
 
     for (const woff2Url of woff2Urls) {
         const absUrl = new URL(woff2Url, googleFontsCssUrl).href;

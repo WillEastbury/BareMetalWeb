@@ -439,7 +439,7 @@ public class RouteHandlerTests : IDisposable
     // ──────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task LoginPostHandler_NonFormContentType_Returns415()
+    public async Task LoginPostHandler_NonFormContentType_RendersCsrfError()
     {
         // Arrange
         EnsureStore();
@@ -449,8 +449,13 @@ public class RouteHandlerTests : IDisposable
         // Act
         await _handlers.LoginPostHandler(context);
 
-        // Assert
-        Assert.Equal(StatusCodes.Status415UnsupportedMediaType, context.Response.StatusCode);
+        // Assert — non-form requests fail CSRF validation and render login page with an error;
+        // the request is NOT processed as a login attempt (no redirect to home)
+        var pc = context.GetPageContext();
+        Assert.NotNull(pc);
+        var msgIndex = Array.IndexOf(pc.PageMetaDataKeys, "html_message");
+        Assert.True(msgIndex >= 0);
+        Assert.Contains("Invalid security token", pc.PageMetaDataValues[msgIndex]);
     }
 
     // ──────────────────────────────────────────────────────────────

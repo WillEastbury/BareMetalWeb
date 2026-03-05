@@ -59,7 +59,7 @@ public static class TableActionRenderer
         if (actions == null || actions.Actions.Count == 0)
             return string.Empty;
 
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(256);
         foreach (var action in actions.Actions)
         {
             sb.Append(RenderAction(action, csrfToken));

@@ -196,6 +196,148 @@ public sealed class WalStoreTests : IDisposable
         Assert.Equal(50uL, v);
     }
 
+    // ── WalHeadMap: striped (sharded) behaviour ──────────────────────────────
+
+    [Fact]
+    public void HeadMap_Striped_DefaultShardCountIsPowerOfTwo()
+    {
+        int n = WalHeadMap.DefaultShardCount;
+        Assert.True(n > 0 && (n & (n - 1)) == 0, $"DefaultShardCount {n} is not a positive power of two.");
+    }
+
+    [Fact]
+    public void HeadMap_Striped_InvalidShardCount_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new WalHeadMap(0).Dispose());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new WalHeadMap(3).Dispose());
+        Assert.Throws<ArgumentOutOfRangeException>(() => new WalHeadMap(-1).Dispose());
+    }
+
+    [Fact]
+    public void HeadMap_Striped_KeysAcrossDifferentTables_AllReadable()
+    {
+        using var map = new WalHeadMap(shardCount: 4);
+
+        // Insert keys for 8 different tableIds — they fan out across the 4 shards
+        for (uint tableId = 0; tableId < 8; tableId++)
+        {
+            ulong key = WalConstants.PackKey(tableId, 1);
+            ulong ptr = WalConstants.PackPtr(0, tableId * 16 + 16);
+            map.SetHead(key, ptr);
+        }
+
+        Assert.Equal(8, map.Count);
+
+        for (uint tableId = 0; tableId < 8; tableId++)
+        {
+            ulong key = WalConstants.PackKey(tableId, 1);
+            ulong expected = WalConstants.PackPtr(0, tableId * 16 + 16);
+            Assert.True(map.TryGetHead(key, out ulong got));
+            Assert.Equal(expected, got);
+        }
+    }
+
+    [Fact]
+    public void HeadMap_Striped_BulkLoad_DistributesAcrossShards()
+    {
+        using var map = new WalHeadMap(shardCount: 4);
+
+        // Build a globally sorted array spanning 16 tableIds
+        var sortedKeys  = new ulong[16];
+        var sortedHeads = new ulong[16];
+        for (uint t = 0; t < 16; t++)
+        {
+            sortedKeys[t]  = WalConstants.PackKey(t, 1);
+            sortedHeads[t] = WalConstants.PackPtr(0, t * 8 + 8);
+        }
+
+        map.BulkLoad(sortedKeys, sortedHeads);
+
+        Assert.Equal(16, map.Count);
+        for (uint t = 0; t < 16; t++)
+        {
+            Assert.True(map.TryGetHead(WalConstants.PackKey(t, 1), out ulong ptr));
+            Assert.Equal(WalConstants.PackPtr(0, t * 8 + 8), ptr);
+        }
+    }
+
+    [Fact]
+    public void HeadMap_Striped_CopyArrays_MergesShardsIntoSortedOutput()
+    {
+        using var map = new WalHeadMap(shardCount: 4);
+
+        // Insert keys that will land in at least two different shards
+        // tableId 0 → shard 0,  tableId 1 → shard 1
+        ulong k0 = WalConstants.PackKey(0, 10);
+        ulong k1 = WalConstants.PackKey(1, 5);
+        map.SetHead(k0, WalConstants.PackPtr(0, 100));
+        map.SetHead(k1, WalConstants.PackPtr(0, 200));
+
+        map.CopyArrays(out ulong[] keys, out ulong[] heads);
+
+        Assert.Equal(2, keys.Length);
+        Assert.Equal(2, heads.Length);
+
+        // Output must be sorted ascending by key
+        for (int i = 1; i < keys.Length; i++)
+            Assert.True(keys[i] > keys[i - 1], "CopyArrays output is not sorted.");
+
+        // Both keys must appear with correct pointers
+        for (int i = 0; i < keys.Length; i++)
+        {
+            if (keys[i] == k0) Assert.Equal(WalConstants.PackPtr(0, 100), heads[i]);
+            else if (keys[i] == k1) Assert.Equal(WalConstants.PackPtr(0, 200), heads[i]);
+            else Assert.Fail($"Unexpected key 0x{keys[i]:X16} in CopyArrays output.");
+        }
+    }
+
+    [Fact]
+    public void HeadMap_Striped_BatchSetHeads_CrossShardKeys_AllUpdated()
+    {
+        using var map = new WalHeadMap(shardCount: 4);
+
+        // Keys across all 4 shards (tableIds 0,1,2,3)
+        ulong[] keys = [
+            WalConstants.PackKey(0, 1),
+            WalConstants.PackKey(1, 1),
+            WalConstants.PackKey(2, 1),
+            WalConstants.PackKey(3, 1),
+        ];
+        ulong ptr = WalConstants.PackPtr(0, 512);
+
+        map.BatchSetHeads(keys.AsSpan(), ptr);
+
+        Assert.Equal(4, map.Count);
+        foreach (var k in keys)
+        {
+            Assert.True(map.TryGetHead(k, out ulong got));
+            Assert.Equal(ptr, got);
+        }
+    }
+
+    [Fact]
+    public void HeadMap_Striped_BatchSetHeads_PerKeyPtrs_CrossShard()
+    {
+        using var map = new WalHeadMap(shardCount: 4);
+
+        // Keys sorted ascending, spanning two shards
+        ulong[] keys = [
+            WalConstants.PackKey(0, 1),
+            WalConstants.PackKey(1, 1),
+        ];
+        ulong[] ptrs = [
+            WalConstants.PackPtr(0, 100),
+            WalConstants.PackPtr(1, 200),
+        ];
+
+        map.BatchSetHeads(keys.AsSpan(), ptrs);
+
+        Assert.True(map.TryGetHead(keys[0], out ulong p0));
+        Assert.True(map.TryGetHead(keys[1], out ulong p1));
+        Assert.Equal(ptrs[0], p0);
+        Assert.Equal(ptrs[1], p1);
+    }
+
     // ── WalStore: basic commit ────────────────────────────────────────────────
 
     [Fact]

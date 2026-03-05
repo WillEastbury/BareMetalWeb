@@ -1201,7 +1201,7 @@ public static class DataScaffold
         if (metadata.ParentField == null)
             return "<p class=\"text-warning\">Tree view requires a self-referencing parent field.</p>";
 
-        var html = new StringBuilder();
+        var html = new StringBuilder(2048);
         var itemsList = new List<BaseDataObject>();
         foreach (var item in allItems)
             itemsList.Add(item);
@@ -1383,7 +1383,7 @@ public static class DataScaffold
         if (metadata.ParentField == null)
             return "<p class=\"text-warning\">Org chart view requires a self-referencing parent field.</p>";
 
-        var html = new StringBuilder();
+        var html = new StringBuilder(2048);
         var itemsList = new List<BaseDataObject>();
         foreach (var item in allItems)
             itemsList.Add(item);
@@ -1595,7 +1595,7 @@ public static class DataScaffold
         if (dayField == null || timeField == null)
             return "<p class=\"text-warning\">Timetable view requires a Day (DayOfWeek) field and a Time field.</p>";
 
-        var html = new StringBuilder();
+        var html = new StringBuilder(2048);
         var itemsList = new List<BaseDataObject>();
         foreach (var item in allItems)
             itemsList.Add(item);
@@ -2720,7 +2720,7 @@ public static class DataScaffold
         var tableId = $"table_{field.Name}";
         var formId = $"form_{field.Name}";
 
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(4096);
         sb.Append($"<textarea class=\"d-none\" id=\"{fieldId}\" name=\"{fieldId}\">{WebUtility.HtmlEncode(json)}</textarea>");
         sb.Append("<div class=\"mb-3\">");
         sb.Append("<div class=\"d-flex align-items-center justify-content-between mb-2\">");
@@ -2927,7 +2927,7 @@ public static class DataScaffold
     private static string BuildChildListViewHtml(DataFieldMetadata field, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType, IEnumerable? listValue)
     {
         var childFields = GetChildFieldMetadata(childType);
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(2048);
         sb.Append("<div class=\"mt-3\">");
         sb.Append($"<h2 class=\"h6\">{WebUtility.HtmlEncode(field.Label)}</h2>");
         sb.Append("<div class=\"table-responsive\"><table class=\"table table-striped table-sm align-middle mb-0 bm-table\">");
@@ -3106,7 +3106,7 @@ public static class DataScaffold
         var inputType = MapChildInputType(valueType, out var step);
         var stepAttr = string.IsNullOrWhiteSpace(step) ? string.Empty : $" step=\"{step}\"";
 
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(4096);
         sb.Append($"<textarea class=\"d-none\" id=\"{WebUtility.HtmlEncode(field.Name)}\" name=\"{WebUtility.HtmlEncode(field.Name)}\">{WebUtility.HtmlEncode(json)}</textarea>");
         sb.Append("<div class=\"mb-3\">");
         sb.Append("<div class=\"d-flex align-items-center justify-content-between mb-2\">");
@@ -3160,7 +3160,7 @@ public static class DataScaffold
 
     private static string BuildDictionaryViewHtml(DataFieldMetadata field, Type valueType, IEnumerable? dictValue)
     {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(1024);
         sb.Append("<div class=\"mt-3\">");
         sb.Append($"<h2 class=\"h6\">{WebUtility.HtmlEncode(field.Label)}</h2>");
         sb.Append("<div class=\"table-responsive\"><table class=\"table table-striped table-sm align-middle mb-0 bm-table\"><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>");

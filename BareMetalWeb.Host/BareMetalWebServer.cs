@@ -621,22 +621,42 @@ public class BareMetalWebServer : IBareWebHost
         if (string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
             return !isAnonymous;
 
-        // Parse required permissions and check if empty after splitting
-        var requiredPermissions = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (requiredPermissions.Length == 0)
-            return true; // No actual permissions after parsing, treat as public
-
-        // If we reach here, specific permissions are required
+        // Parse required permissions with span-based iteration to avoid string[] allocation
         if (isAnonymous)
-            return false;
+        {
+            // Quick check: if there are any non-empty segments, anonymous users can't pass
+            var check = permissionsNeeded.AsSpan();
+            bool hasAnyPerm = false;
+            while (check.Length > 0)
+            {
+                int ci = check.IndexOf(',');
+                ReadOnlySpan<char> seg;
+                if (ci < 0) { seg = check; check = default; }
+                else { seg = check[..ci]; check = check[(ci + 1)..]; }
+                if (!seg.Trim().IsEmpty) { hasAnyPerm = true; break; }
+            }
+            return !hasAnyPerm;
+        }
 
         var userPermissions = new HashSet<string>(user!.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        var altLookup = userPermissions.GetAlternateLookup<ReadOnlySpan<char>>();
 
-        for (int i = 0; i < requiredPermissions.Length; i++)
+        var remaining = permissionsNeeded.AsSpan();
+        bool foundAny = false;
+        while (remaining.Length > 0)
         {
-            if (!userPermissions.Contains(requiredPermissions[i]))
+            int idx = remaining.IndexOf(',');
+            ReadOnlySpan<char> segment;
+            if (idx < 0) { segment = remaining; remaining = default; }
+            else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+            var trimmed = segment.Trim();
+            if (trimmed.IsEmpty) continue;
+            foundAny = true;
+            if (!altLookup.Contains(trimmed))
                 return false;
         }
+        if (!foundAny)
+            return true; // No actual permissions after parsing, treat as public
         return true;
     }
 
@@ -899,18 +919,25 @@ public class BareMetalWebServer : IBareWebHost
             return false;
 
         var first = GetFirstForwardedValue(forwarded);
-        var parts = first.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var part in parts)
+        var remaining = first.AsSpan();
+        while (remaining.Length > 0)
         {
-            var idx = part.IndexOf('=');
+            int semiIdx = remaining.IndexOf(';');
+            ReadOnlySpan<char> part;
+            if (semiIdx < 0) { part = remaining; remaining = default; }
+            else { part = remaining[..semiIdx]; remaining = remaining[(semiIdx + 1)..]; }
+            var trimmedPart = part.Trim();
+            if (trimmedPart.IsEmpty) continue;
+
+            var idx = trimmedPart.IndexOf('=');
             if (idx <= 0)
                 continue;
 
-            var key = part.Substring(0, idx).Trim();
-            if (!key.Equals("proto", StringComparison.OrdinalIgnoreCase))
+            var key = trimmedPart[..idx].Trim();
+            if (!key.Equals("proto".AsSpan(), StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            proto = part.Substring(idx + 1).Trim().Trim('"');
+            proto = trimmedPart[(idx + 1)..].Trim().Trim('"').ToString();
             return !string.IsNullOrWhiteSpace(proto);
         }
 

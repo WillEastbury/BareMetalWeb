@@ -1172,14 +1172,20 @@ public static class RouteRegistrationExtensions
         if (string.Equals(perms, "Authenticated", StringComparison.OrdinalIgnoreCase))
             return user != null;
 
-        // Legacy flat check
-        var required = perms.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        // Legacy flat check — span-based iteration to avoid string[] allocation
+        var remaining = perms.AsSpan();
         bool hasMatchingPermission = false;
-        foreach (var r in required)
+        while (remaining.Length > 0)
         {
+            int idx = remaining.IndexOf(',');
+            ReadOnlySpan<char> segment;
+            if (idx < 0) { segment = remaining; remaining = default; }
+            else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+            var trimmed = segment.Trim();
+            if (trimmed.IsEmpty) continue;
             foreach (var p in userPermissions)
             {
-                if (string.Equals(p, r, StringComparison.OrdinalIgnoreCase))
+                if (trimmed.Equals(p.AsSpan(), StringComparison.OrdinalIgnoreCase))
                 {
                     hasMatchingPermission = true;
                     break;
@@ -1656,7 +1662,7 @@ public static class RouteRegistrationExtensions
                 {
                     context.Response.ContentType = "text/csv";
                     context.Response.Headers.ContentDisposition = $"attachment; filename=\"{Uri.EscapeDataString(def.Name)}.csv\"";
-                    var csvSb = new StringBuilder();
+                    var csvSb = new StringBuilder(1024);
                     {
                         var headerCells = new string[result.ColumnLabels.Length];
                         for (int ci = 0; ci < result.ColumnLabels.Length; ci++)
@@ -1733,7 +1739,7 @@ public static class RouteRegistrationExtensions
         var template = templateStore.Get("index");
 
         // Build right-nav items string
-        var rightNavSb = new StringBuilder();
+        var rightNavSb = new StringBuilder(512);
         AppendVNextRightNavItems(rightNavSb, host.MenuOptionsList);
 
         // Token map: covers all {{tokens}} in the head, navbar, and footer sections
@@ -1882,7 +1888,7 @@ public static class RouteRegistrationExtensions
             }
 
             var json = EscapeJsonForInlineScript(JsonSerializer.Serialize(entities, JsonCompact));
-            var sb = new StringBuilder();
+            var sb = new StringBuilder(256);
             sb.Append($"<script nonce=\"{safeNonce}\">window.__BMW_META_OBJECTS__={json};");
             if (hasElevated)
                 sb.Append("window.__BMW_HAS_ELEVATED__=true;");
@@ -1947,21 +1953,27 @@ public static class RouteRegistrationExtensions
                 if (!string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
                 {
                     var userPerms = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                    var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                    if (required.Length > 0)
+                    var altLookup = userPerms.GetAlternateLookup<ReadOnlySpan<char>>();
+                    var remaining = permissionsNeeded.AsSpan();
+                    bool hasRequired = false;
+                    bool allMatch = true;
+                    while (remaining.Length > 0)
                     {
-                        bool allMatch = true;
-                        foreach (var r in required)
+                        int idx = remaining.IndexOf(',');
+                        ReadOnlySpan<char> segment;
+                        if (idx < 0) { segment = remaining; remaining = default; }
+                        else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+                        var trimmed = segment.Trim();
+                        if (trimmed.IsEmpty) continue;
+                        hasRequired = true;
+                        if (!altLookup.Contains(trimmed))
                         {
-                            if (!userPerms.Contains(r))
-                            {
-                                allMatch = false;
-                                break;
-                            }
+                            allMatch = false;
+                            break;
                         }
-                        if (!allMatch)
-                            return null;
                     }
+                    if (hasRequired && !allMatch)
+                            return null;
                 }
             }
 

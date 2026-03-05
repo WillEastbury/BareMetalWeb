@@ -216,15 +216,15 @@ public sealed class ClusteredPagedObjectStore
             brotli.Write(payload);
         }
 
-        var compressed = output.ToArray();
-        if (compressed.Length >= payload.Length)
+        // Compare sizes using the internal buffer — avoids allocating when compression doesn't help
+        if ((int)output.Length >= payload.Length)
         {
             compressionKind = CompressionNone;
             return payload.ToArray();
         }
 
         compressionKind = CompressionBrotli;
-        return compressed;
+        return output.GetBuffer().AsSpan(0, (int)output.Length).ToArray();
     }
 
     private static byte[] DecompressPayload(ReadOnlySpan<byte> payload, byte compressionKind, int uncompressedLength)
@@ -232,11 +232,12 @@ public sealed class ClusteredPagedObjectStore
         if (compressionKind == CompressionNone)
             return payload.ToArray();
 
-        using var input = new MemoryStream(payload.ToArray());
-        using var brotli = new BrotliStream(input, CompressionMode.Decompress);
-        using var output = new MemoryStream(uncompressedLength > 0 ? uncompressedLength : 0);
-        brotli.CopyTo(output);
-        return output.ToArray();
+        // Use span-based Brotli API — avoids 2 MemoryStream allocations + 2 ToArray copies
+        var result = new byte[uncompressedLength];
+        if (!BrotliDecoder.TryDecompress(payload, result, out int written) || written != uncompressedLength)
+            throw new InvalidDataException(
+                $"Clustered Brotli decompression failed: expected={uncompressedLength}, got={written}.");
+        return result;
     }
 
     private static string FormatLocation(long pageIndex, ushort slotIndex)
@@ -259,13 +260,14 @@ public sealed class ClusteredPagedObjectStore
         if (value.StartsWith("o:", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var parts = value.Split(':');
-        if (parts.Length != 2)
+        var span = value.AsSpan();
+        int sep = span.IndexOf(':');
+        if (sep < 0 || span[(sep + 1)..].IndexOf(':') >= 0)
             return false;
 
-        if (!long.TryParse(parts[0], out pageIndex))
+        if (!long.TryParse(span[..sep], out pageIndex))
             return false;
-        if (!ushort.TryParse(parts[1], out slotIndex))
+        if (!ushort.TryParse(span[(sep + 1)..], out slotIndex))
             return false;
 
         return pageIndex > 0;
@@ -283,12 +285,13 @@ public sealed class ClusteredPagedObjectStore
 
         if (value.StartsWith("o:", StringComparison.OrdinalIgnoreCase))
         {
-            var parts = value.Split(':');
-            if (parts.Length != 3)
+            var oSpan = value.AsSpan(2); // skip "o:"
+            int sep = oSpan.IndexOf(':');
+            if (sep < 0 || oSpan[(sep + 1)..].IndexOf(':') >= 0)
                 return false;
-            if (!long.TryParse(parts[1], out pageIndex))
+            if (!long.TryParse(oSpan[..sep], out pageIndex))
                 return false;
-            if (!int.TryParse(parts[2], out pageCount))
+            if (!int.TryParse(oSpan[(sep + 1)..], out pageCount))
                 return false;
             if (pageIndex <= 0 || pageCount <= 0)
                 return false;
@@ -297,16 +300,19 @@ public sealed class ClusteredPagedObjectStore
             return true;
         }
 
-        var standardParts = value.Split(':');
-        if (standardParts.Length != 2)
-            return false;
+        {
+            var span = value.AsSpan();
+            int sep = span.IndexOf(':');
+            if (sep < 0 || span[(sep + 1)..].IndexOf(':') >= 0)
+                return false;
 
-        if (!long.TryParse(standardParts[0], out pageIndex))
-            return false;
-        if (!ushort.TryParse(standardParts[1], out slotIndex))
-            return false;
-        if (pageIndex <= 0)
-            return false;
+            if (!long.TryParse(span[..sep], out pageIndex))
+                return false;
+            if (!ushort.TryParse(span[(sep + 1)..], out slotIndex))
+                return false;
+            if (pageIndex <= 0)
+                return false;
+        }
 
         pageCount = 1;
         return true;

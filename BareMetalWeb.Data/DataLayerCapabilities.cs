@@ -44,20 +44,20 @@ public static class DataLayerCapabilities
         "Direct ulong word comparison (4 × 64-bit, zero allocation)";
 
     /// <summary>
-    /// The acceleration path used by the Bloom filter bit operations in
-    /// <c>SearchIndexManager</c>. The bits are packed into <c>ulong[]</c> words
-    /// and population counts use <see cref="BitOperations.PopCount"/> which maps
-    /// to the hardware POPCNT instruction on x86 and equivalent on ARM.
+    /// The SIMD acceleration path used by <see cref="ColumnQueryExecutor"/> for
+    /// batch-vectorised column scanning during full-table queries.
     /// </summary>
-    public static string BloomFilterPath =>
-        "ulong[] bit-packing + BitOperations.PopCount (hardware POPCNT / NEON CNT)";
-
-    /// <summary>
-    /// The acceleration path used by <c>BinaryObjectSerializer.GetSignatureHash</c>
-    /// for schema structural-change detection.
-    /// </summary>
-    public static string SchemaHashPath =>
-        "XxHash64 (hardware-accelerated on x86 via AES/SSE4 and ARM via NEON)";
+    public static string ColumnQueryPath
+    {
+        get
+        {
+            string tier = SimdCapabilities.Current.BestTier;
+            int intWidth  = Vector<int>.Count * sizeof(int) * 8;
+            int longWidth = Vector<long>.Count * sizeof(long) * 8;
+            return $"Vector<T> portable SIMD ({tier}): {intWidth}-bit int lane, " +
+                   $"{longWidth}-bit long lane | threshold={ColumnQueryExecutor.VectorizationThreshold} rows";
+        }
+    }
 
     /// <summary>
     /// Returns a multi-line human-readable description of all active
@@ -69,6 +69,7 @@ public static class DataLayerCapabilities
             $"Portable SIMD width : {Vector<float>.Count * sizeof(float) * 8}-bit " +
             $"({Vector<float>.Count} floats/iter, Vector<float> baseline)\n" +
             $"Vector distance     : {VectorDistancePath}\n" +
+            $"Column query scan   : {ColumnQueryPath}\n" +
             $"CRC-32C             : {Crc32CPath}\n" +
             $"Key comparison      : {KeyComparisonPath}\n" +
             $"Bloom filter        : {BloomFilterPath}\n" +
