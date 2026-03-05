@@ -43,6 +43,9 @@ public sealed class WalStore : IDisposable
     /// <summary>In-memory head map: key → Ptr of the latest committed record for that key.</summary>
     public WalHeadMap HeadMap { get; } = new();
 
+    /// <summary>In-memory segment index: segmentId → set of WAL keys in that segment.</summary>
+    public WalSegmentIndex SegmentIndex { get; } = new();
+
     /// <summary>
     /// Global monotonic commit watermark (V2 spec §3.1 VisibleCommitPtr).
     /// Queries and projections should only observe versions ≤ this value.
@@ -168,6 +171,21 @@ public sealed class WalStore : IDisposable
                 opKeys[i] = filledOps[i].Key;
             HeadMap.BatchSetHeads(opKeys, ptr);
 
+            // Maintain segment index
+            var (newSegId, _) = WalConstants.UnpackPtr(ptr);
+            for (int i = 0; i < filledOps.Length; i++)
+            {
+                if (filledOps[i].PrevPtr != WalConstants.NullPtr)
+                {
+                    var (oldSegId, _) = WalConstants.UnpackPtr(filledOps[i].PrevPtr);
+                    SegmentIndex.Move(filledOps[i].Key, oldSegId, newSegId);
+                }
+                else
+                {
+                    SegmentIndex.Add(filledOps[i].Key, newSegId);
+                }
+            }
+
             Volatile.Write(ref _visibleCommitPtr, ptr);
         }
 
@@ -228,6 +246,7 @@ public sealed class WalStore : IDisposable
         ProjectionManager.Dispose();
         KeyAllocator.Dispose();
         HeadMap.Dispose();
+        SegmentIndex.Dispose();
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -293,6 +312,14 @@ public sealed class WalStore : IDisposable
             }
         }
 
+        // Rebuild segment index from head map
+        HeadMap.CopyArrays(out var skeys, out var sheads);
+        for (int i = 0; i < skeys.Length; i++)
+        {
+            var (segId, _) = WalConstants.UnpackPtr(sheads[i]);
+            SegmentIndex.Add(skeys[i], segId);
+        }
+
         // Always start a new segment; don't resume the previous active segment.
         _nextSegmentId = segments.Count > 0 ? segments[0].segId + 1 : 0;
     }
@@ -346,18 +373,10 @@ public sealed class WalStore : IDisposable
         long startTicks = EngineMetrics.StartTiming();
         long originalSize = new FileInfo(originalPath).Length;
 
-        // ── 1. Snapshot head map ────────────────────────────────────────────
-        HeadMap.CopyArrays(out ulong[] allKeys, out ulong[] allHeads);
+        // ── 1. Get keys from segment index ────────────────────────────────
+        SegmentIndex.GetKeys(segmentId, out ulong[] matchKeys);
 
-        // ── 2. Collect keys whose latest version lives in this segment ──────
-        int matchCount = 0;
-        for (int i = 0; i < allKeys.Length; i++)
-        {
-            var (segId, _) = WalConstants.UnpackPtr(allHeads[i]);
-            if (segId == segmentId) matchCount++;
-        }
-
-        if (matchCount == 0)
+        if (matchKeys.Length == 0)
         {
             // No live keys reference this segment — it can be deleted
             try { File.Delete(originalPath); } catch { /* best effort */ }
@@ -365,37 +384,41 @@ public sealed class WalStore : IDisposable
             return;
         }
 
-        // Gather matching entries (avoid LINQ; pre-sized arrays)
-        var matchKeys  = new ulong[matchCount];
-        var matchHeads = new ulong[matchCount];
-        int w = 0;
-        for (int i = 0; i < allKeys.Length; i++)
+        // ── 2. Look up head pointers for each key ──────────────────────────
+        var matchHeads = new ulong[matchKeys.Length];
+        for (int i = 0; i < matchKeys.Length; i++)
         {
-            var (segId, _) = WalConstants.UnpackPtr(allHeads[i]);
-            if (segId == segmentId)
-            {
-                matchKeys[w]  = allKeys[i];
-                matchHeads[w] = allHeads[i];
-                w++;
-            }
+            HeadMap.TryGetHead(matchKeys[i], out matchHeads[i]);
         }
 
         // ── 3. Read payloads from disk, skipping tombstones ─────────────────
-        var ops    = new WalOp[matchCount];
-        var opKeys = new ulong[matchCount]; // keys for head map update
+        var ops    = new WalOp[matchKeys.Length];
+        var opKeys = new ulong[matchKeys.Length]; // keys for head map update
         int opCount = 0;
+        var deadKeys = new ulong[matchKeys.Length]; // keys to remove from segment index
+        int deadCount = 0;
 
-        for (int i = 0; i < matchCount; i++)
+        for (int i = 0; i < matchKeys.Length; i++)
         {
             if (!TryReadFullOp(matchHeads[i], matchKeys[i], out WalOp op))
+            {
+                deadKeys[deadCount++] = matchKeys[i];
                 continue;
+            }
             if (op.OpType == WalConstants.OpTypeDeleteTombstone)
+            {
+                deadKeys[deadCount++] = matchKeys[i];
                 continue;
+            }
 
             ops[opCount]    = op;
             opKeys[opCount] = matchKeys[i];
             opCount++;
         }
+
+        // Remove dead keys from segment index
+        for (int i = 0; i < deadCount; i++)
+            SegmentIndex.Remove(deadKeys[i], segmentId);
 
         if (opCount == 0)
         {
