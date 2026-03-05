@@ -198,4 +198,41 @@ public class BackgroundJobServiceTests
         svc.TryGetJob(jobId, out var snapshot);
         Assert.NotNull(snapshot!.CompletedAt);
     }
+
+    // ── Pruning / CancellationTokenSource disposal ────────────────
+
+    [Fact]
+    public async Task PruneOldJobs_DisposesCompletedJobCts()
+    {
+        var svc = new BackgroundJobService();
+        var done = new TaskCompletionSource();
+
+        var jobId = svc.StartJob("Prunable", null, async (_, _) =>
+        {
+            await Task.Yield();
+            done.SetResult();
+        });
+
+        await done.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.Delay(50); // let Status become Succeeded
+
+        // Retrieve the raw entry via the internal Jobs dictionary.
+        var jobsField = typeof(BackgroundJobService).GetField("_jobs",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        var jobs = (System.Collections.Concurrent.ConcurrentDictionary<string, BackgroundJobService.JobEntry>)jobsField.GetValue(svc)!;
+        Assert.True(jobs.TryGetValue(jobId, out var entry));
+        var cts = entry!.Cts;
+
+        // Force CompletedAt to be old enough to be pruned.
+        entry.CompletedAt = DateTime.UtcNow - BackgroundJobService.RetentionPeriod - TimeSpan.FromSeconds(1);
+
+        // Start a new job – this triggers PruneOldJobs internally.
+        svc.StartJob("Trigger", null, (_, _) => Task.CompletedTask);
+
+        // The old job should be gone from the registry.
+        Assert.False(svc.TryGetJob(jobId, out _));
+
+        // The CTS should be disposed: accessing Token after disposal throws ObjectDisposedException.
+        Assert.Throws<ObjectDisposedException>(() => { var _ = cts.Token; });
+    }
 }

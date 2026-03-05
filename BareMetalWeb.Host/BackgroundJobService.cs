@@ -207,7 +207,8 @@ public sealed class BackgroundJobService
                 && kv.Value.CompletedAt.HasValue
                 && kv.Value.CompletedAt.Value < cutoff)
             {
-                _jobs.TryRemove(kv.Key, out _);
+                if (_jobs.TryRemove(kv.Key, out var removed))
+                    removed.Cts.Dispose();
             }
         }
     }
