@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
 using System;
 using System.Security.Cryptography;
+using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Host;
 
@@ -28,4 +29,12 @@ public static class HttpContextCspExtensions
         
         return GenerateCspNonce(context);
     }
+
+    // ── BmwContext overloads ────────────────────────────────────────────
+
+    public static string GenerateCspNonce(this BmwContext context)
+        => context.HttpContext.GenerateCspNonce();
+
+    public static string GetCspNonce(this BmwContext context)
+        => context.HttpContext.GetCspNonce();
 }

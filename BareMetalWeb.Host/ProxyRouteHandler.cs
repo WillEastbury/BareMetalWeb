@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -66,13 +67,13 @@ public sealed class ProxyRouteHandler
         _targets = BuildTargetStates(route);
     }
 
-    public async ValueTask HandleAsync(HttpContext context)
+    public async ValueTask HandleAsync(BmwContext context)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
 
-        var hasBody = ShouldHaveBody(context.Request);
+        var hasBody = ShouldHaveBody(context.HttpRequest);
         var retryAllRequested = !string.IsNullOrWhiteSpace(_route.RetryAllMethodsHeader)
-            && context.Request.Headers.ContainsKey(_route.RetryAllMethodsHeader);
+            && context.HttpRequest.Headers.ContainsKey(_route.RetryAllMethodsHeader);
         byte[]? bufferedBody = null;
 
         if (retryAllRequested && hasBody)
@@ -86,7 +87,7 @@ public sealed class ProxyRouteHandler
 
         var canRetry = retryAllRequested
             ? (!hasBody || bufferedBody != null)
-            : _route.RetryIdempotentRequests && RetryableMethods.Contains(context.Request.Method) && !hasBody;
+            : _route.RetryIdempotentRequests && RetryableMethods.Contains(context.HttpRequest.Method) && !hasBody;
 
         var maxAttempts = canRetry ? Math.Max(1, _route.MaxRetries + 1) : 1;
         var attempted = new HashSet<ProxyTargetState>();
@@ -122,7 +123,7 @@ public sealed class ProxyRouteHandler
                 await context.Response.WriteAsync("Proxy target blocked.");
                 return;
             }
-            using var requestMessage = new HttpRequestMessage(new HttpMethod(context.Request.Method), targetUri)
+            using var requestMessage = new HttpRequestMessage(new HttpMethod(context.HttpRequest.Method), targetUri)
             {
                 VersionPolicy = HttpVersionPolicy.RequestVersionOrLower
             };
@@ -135,15 +136,15 @@ public sealed class ProxyRouteHandler
                 }
                 else
                 {
-                    requestMessage.Content = new StreamContent(context.Request.Body);
+                    requestMessage.Content = new StreamContent(context.HttpRequest.Body);
                 }
-                if (!string.IsNullOrWhiteSpace(context.Request.ContentType))
+                if (!string.IsNullOrWhiteSpace(context.HttpRequest.ContentType))
                 {
-                    requestMessage.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(context.Request.ContentType);
+                    requestMessage.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(context.HttpRequest.ContentType);
                 }
-                if (context.Request.ContentLength.HasValue)
+                if (context.HttpRequest.ContentLength.HasValue)
                 {
-                    requestMessage.Content.Headers.ContentLength = context.Request.ContentLength.Value;
+                    requestMessage.Content.Headers.ContentLength = context.HttpRequest.ContentLength.Value;
                 }
             }
 
@@ -212,12 +213,12 @@ public sealed class ProxyRouteHandler
         }
     }
 
-    private Uri BuildTargetUri(HttpContext context, Uri targetBaseUri)
+    private Uri BuildTargetUri(BmwContext context, Uri targetBaseUri)
     {
         var builder = new UriBuilder(targetBaseUri);
-        var query = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : string.Empty;
+        var query = context.HttpRequest.QueryString.HasValue ? context.HttpRequest.QueryString.Value : string.Empty;
 
-        var requestPath = context.Request.Path.HasValue ? context.Request.Path.Value! : string.Empty;
+        var requestPath = context.HttpRequest.Path.HasValue ? context.HttpRequest.Path.Value! : string.Empty;
         var stripPrefix = _route.PathPrefixToStrip ?? string.Empty;
         if (!string.IsNullOrWhiteSpace(stripPrefix) && requestPath.StartsWith(stripPrefix, StringComparison.OrdinalIgnoreCase))
         {
@@ -289,9 +290,9 @@ public sealed class ProxyRouteHandler
         return request.Headers.ContainsKey("Transfer-Encoding");
     }
 
-    private void CopyRequestHeaders(HttpContext context, HttpRequestMessage requestMessage)
+    private void CopyRequestHeaders(BmwContext context, HttpRequestMessage requestMessage)
     {
-        foreach (var header in context.Request.Headers)
+        foreach (var header in context.HttpRequest.Headers)
         {
             if (string.Equals(header.Key, "Host", StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -370,24 +371,24 @@ public sealed class ProxyRouteHandler
             requestMessage.Headers.TryAddWithoutValidation("X-Forwarded-For", remoteIp);
         }
 
-        if (!string.IsNullOrWhiteSpace(context.Request.Scheme))
+        if (!string.IsNullOrWhiteSpace(context.HttpRequest.Scheme))
         {
-            requestMessage.Headers.TryAddWithoutValidation("X-Forwarded-Proto", context.Request.Scheme);
+            requestMessage.Headers.TryAddWithoutValidation("X-Forwarded-Proto", context.HttpRequest.Scheme);
         }
 
-        if (context.Request.Host.HasValue)
+        if (context.HttpRequest.Host.HasValue)
         {
-            requestMessage.Headers.TryAddWithoutValidation("X-Forwarded-Host", context.Request.Host.Value);
+            requestMessage.Headers.TryAddWithoutValidation("X-Forwarded-Host", context.HttpRequest.Host.Value);
         }
     }
 
-    private string? BuildFilteredCookieHeader(HttpContext context)
+    private string? BuildFilteredCookieHeader(BmwContext context)
     {
-        if (context.Request.Cookies == null || context.Request.Cookies.Count == 0)
+        if (context.HttpRequest.Cookies == null || context.HttpRequest.Cookies.Count == 0)
             return null;
 
         var builder = new StringBuilder(256);
-        foreach (var cookie in context.Request.Cookies)
+        foreach (var cookie in context.HttpRequest.Cookies)
         {
             if (string.Equals(cookie.Key, UserAuth.SessionCookieName, StringComparison.OrdinalIgnoreCase))
                 continue;
@@ -407,7 +408,7 @@ public sealed class ProxyRouteHandler
         return builder.Length == 0 ? null : builder.ToString();
     }
 
-    private static void CopyResponseHeaders(HttpContext context, HttpResponseMessage responseMessage)
+    private static void CopyResponseHeaders(BmwContext context, HttpResponseMessage responseMessage)
     {
         foreach (var header in responseMessage.Headers)
         {
@@ -434,12 +435,12 @@ public sealed class ProxyRouteHandler
         context.Response.Headers.Remove("transfer-encoding");
     }
 
-    private void ApplyTraceId(HttpContext context, HttpRequestMessage requestMessage)
+    private void ApplyTraceId(BmwContext context, HttpRequestMessage requestMessage)
     {
         if (string.IsNullOrWhiteSpace(_route.TraceIdHeader))
             return;
 
-        var traceId = context.TraceIdentifier;
+        var traceId = context.HttpContext.TraceIdentifier;
         if (string.IsNullOrWhiteSpace(traceId))
         {
             traceId = Guid.NewGuid().ToString("N");
@@ -485,22 +486,22 @@ public sealed class ProxyRouteHandler
         requestMessage.Headers.TryAddWithoutValidation("Cookie", combined);
     }
 
-    private static async Task<byte[]?> TryBufferRequestBodyAsync(HttpContext context, int maxBytes)
+    private static async Task<byte[]?> TryBufferRequestBodyAsync(BmwContext context, int maxBytes)
     {
         if (maxBytes <= 0)
             return null;
 
-        if (context.Request.ContentLength.HasValue && context.Request.ContentLength.Value > maxBytes)
+        if (context.HttpRequest.ContentLength.HasValue && context.HttpRequest.ContentLength.Value > maxBytes)
             return null;
 
-        using var buffer = new MemoryStream(context.Request.ContentLength.HasValue
-            ? (int)Math.Min(context.Request.ContentLength.Value, maxBytes)
+        using var buffer = new MemoryStream(context.HttpRequest.ContentLength.HasValue
+            ? (int)Math.Min(context.HttpRequest.ContentLength.Value, maxBytes)
             : 0);
 
         var temp = new byte[81920];
         int read;
         int total = 0;
-        while ((read = await context.Request.Body.ReadAsync(temp, 0, temp.Length, context.RequestAborted)) > 0)
+        while ((read = await context.HttpRequest.Body.ReadAsync(temp, 0, temp.Length, context.RequestAborted)) > 0)
         {
             total += read;
             if (total > maxBytes)
@@ -640,7 +641,7 @@ public sealed class ProxyRouteHandler
         return available[0];
     }
 
-    private string? GetStickyKey(HttpContext context, out bool setCookie)
+    private string? GetStickyKey(BmwContext context, out bool setCookie)
     {
         setCookie = false;
         if (!_route.StickySessionsEnabled)
@@ -654,10 +655,10 @@ public sealed class ProxyRouteHandler
         var keyName = _route.StickySessionKeyName;
         if (!string.IsNullOrWhiteSpace(keyName))
         {
-            if (context.Request.Headers.TryGetValue(keyName, out var headerValue) && !StringValues.IsNullOrEmpty(headerValue))
+            if (context.HttpRequest.Headers.TryGetValue(keyName, out var headerValue) && !StringValues.IsNullOrEmpty(headerValue))
                 return headerValue.ToString();
 
-            if (context.Request.Cookies.TryGetValue(keyName, out var cookieValue) && !string.IsNullOrWhiteSpace(cookieValue))
+            if (context.HttpRequest.Cookies.TryGetValue(keyName, out var cookieValue) && !string.IsNullOrWhiteSpace(cookieValue))
                 return cookieValue;
         }
 
@@ -666,12 +667,12 @@ public sealed class ProxyRouteHandler
         return generated;
     }
 
-    private void SetStickyCookie(HttpContext context, string key)
+    private void SetStickyCookie(BmwContext context, string key)
     {
         var options = new CookieOptions
         {
             HttpOnly = true,
-            Secure = context.Request.IsHttps,
+            Secure = context.HttpRequest.IsHttps,
             SameSite = SameSiteMode.Lax,
             Expires = DateTimeOffset.UtcNow.AddSeconds(Math.Max(1, _route.StickySessionTtlSeconds))
         };

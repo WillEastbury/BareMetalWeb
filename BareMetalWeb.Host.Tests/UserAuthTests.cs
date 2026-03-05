@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
@@ -43,7 +44,7 @@ public class UserAuthTests : IDisposable
         context.Request.Path = "/api/to-do";
 
         // Act
-        var user = await UserAuth.GetRequestUserAsync(context);
+        var user = await UserAuth.GetRequestUserAsync(context.ToBmw());
 
         // Assert
         Assert.NotNull(user);
@@ -70,7 +71,7 @@ public class UserAuthTests : IDisposable
         context.Request.Path = "/api/to-do";
 
         // Act
-        var result = await UserAuth.HasValidApiKeyAsync(context);
+        var result = await UserAuth.HasValidApiKeyAsync(context.ToBmw());
 
         // Assert
         Assert.True(result);
@@ -86,7 +87,7 @@ public class UserAuthTests : IDisposable
         context.Request.Path = "/api/to-do";
 
         // Act
-        var result = await UserAuth.HasValidApiKeyAsync(context);
+        var result = await UserAuth.HasValidApiKeyAsync(context.ToBmw());
 
         // Assert
         Assert.False(result);
@@ -101,7 +102,7 @@ public class UserAuthTests : IDisposable
         context.Request.Path = "/api/to-do";
 
         // Act
-        var result = await UserAuth.HasValidApiKeyAsync(context);
+        var result = await UserAuth.HasValidApiKeyAsync(context.ToBmw());
 
         // Assert
         Assert.False(result);
@@ -127,7 +128,7 @@ public class UserAuthTests : IDisposable
         context.Request.Path = "/api/to-do";
 
         // Act
-        var result = await UserAuth.HasValidApiKeyAsync(context);
+        var result = await UserAuth.HasValidApiKeyAsync(context.ToBmw());
 
         // Assert
         Assert.True(result);
@@ -153,7 +154,7 @@ public class UserAuthTests : IDisposable
         context.Request.Path = "/api/to-do";
 
         // Act
-        var result = await UserAuth.HasValidApiKeyAsync(context);
+        var result = await UserAuth.HasValidApiKeyAsync(context.ToBmw());
 
         // Assert
         Assert.False(result);
@@ -197,7 +198,7 @@ public class UserAuthTests : IDisposable
         var originalLastSeenUtc = session.LastSeenUtc;
 
         // Act
-        var result = await UserAuth.GetSessionAsync(context);
+        var result = await UserAuth.GetSessionAsync(context.ToBmw());
 
         // Assert
         Assert.NotNull(result);
@@ -244,7 +245,7 @@ public class UserAuthTests : IDisposable
         var originalExpiresUtc = session.ExpiresUtc;
 
         // Act
-        var result = await UserAuth.GetSessionAsync(context);
+        var result = await UserAuth.GetSessionAsync(context.ToBmw());
 
         // Assert
         Assert.NotNull(result);
@@ -287,7 +288,7 @@ public class UserAuthTests : IDisposable
         var originalLastSeenUtc = session.LastSeenUtc;
 
         // Act
-        var result = UserAuth.GetSession(context);
+        var result = UserAuth.GetSession(context.ToBmw());
 
         // Assert
         Assert.NotNull(result);
@@ -330,7 +331,7 @@ public class UserAuthTests : IDisposable
         var context = CreateHttpContext(session.Key.ToString());
 
         // Act
-        var result = await UserAuth.GetSessionAsync(context);
+        var result = await UserAuth.GetSessionAsync(context.ToBmw());
 
         // Assert
         Assert.Null(result);
@@ -349,7 +350,7 @@ public class UserAuthTests : IDisposable
         var context = CreateHttpContext(null);
 
         // Act
-        var result = await UserAuth.GetSessionAsync(context);
+        var result = await UserAuth.GetSessionAsync(context.ToBmw());
 
         // Assert
         Assert.Null(result);
@@ -383,7 +384,7 @@ public class UserAuthTests : IDisposable
         var originalExpiresUtc = session.ExpiresUtc;
 
         // Act
-        var result = await UserAuth.GetSessionAsync(context);
+        var result = await UserAuth.GetSessionAsync(context.ToBmw());
 
         // Assert — session returned successfully
         Assert.NotNull(result);
@@ -422,7 +423,7 @@ public class UserAuthTests : IDisposable
         var originalExpiresUtc = session.ExpiresUtc;
 
         // Act
-        var result = UserAuth.GetSession(context);
+        var result = UserAuth.GetSession(context.ToBmw());
 
         // Assert — session returned successfully
         Assert.NotNull(result);

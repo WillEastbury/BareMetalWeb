@@ -25,7 +25,7 @@ public static class ClusterApiHandlers
     }
 
     /// <summary>GET /api/_cluster — cluster state snapshot.</summary>
-    public static async ValueTask ClusterStatusHandler(HttpContext context)
+    public static async ValueTask ClusterStatusHandler(BmwContext context)
     {
         if (!await RequireAdminAsync(context)) return;
 
@@ -56,7 +56,7 @@ public static class ClusterApiHandlers
     /// GET /api/_cluster/replicate?afterLsn=X — return WAL entries after given LSN.
     /// Followers poll this endpoint to catch up with the leader.
     /// </summary>
-    public static async ValueTask ReplicationHandler(HttpContext context)
+    public static async ValueTask ReplicationHandler(BmwContext context)
     {
         if (!await RequireAdminAsync(context)) return;
 
@@ -68,7 +68,7 @@ public static class ClusterApiHandlers
             return;
         }
 
-        if (!context.Request.Query.TryGetValue("afterLsn", out var afterLsnStr) ||
+        if (!context.HttpRequest.Query.TryGetValue("afterLsn", out var afterLsnStr) ||
             !long.TryParse(afterLsnStr, out var afterLsn))
         {
             context.Response.StatusCode = 400;
@@ -90,7 +90,7 @@ public static class ClusterApiHandlers
     }
 
     /// <summary>POST /api/_cluster/stepdown — voluntary leadership stepdown.</summary>
-    public static async ValueTask StepDownHandler(HttpContext context)
+    public static async ValueTask StepDownHandler(BmwContext context)
     {
         if (!await RequireAdminAsync(context)) return;
 
@@ -109,7 +109,7 @@ public static class ClusterApiHandlers
     }
 
     /// <summary>Require admin-level authentication. Returns false and writes 401/403 if denied.</summary>
-    private static async ValueTask<bool> RequireAdminAsync(HttpContext context)
+    private static async ValueTask<bool> RequireAdminAsync(BmwContext context)
     {
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted);
         if (user == null)

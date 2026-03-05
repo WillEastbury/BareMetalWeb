@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using System;
 using System.Collections.Concurrent;
 using System.IO;
@@ -363,9 +364,9 @@ public static class CssBundleService
     /// Returns <c>true</c> if the path was handled (response fully written);
     /// <c>false</c> if the path is not a theme bundle path.
     /// </summary>
-    public static async Task<bool> TryServeAsync(HttpContext context)
+    public static async Task<bool> TryServeAsync(BmwContext context)
     {
-        var requestPath = context.Request.Path.Value ?? string.Empty;
+        var requestPath = context.HttpRequest.Path.Value ?? string.Empty;
         if (!requestPath.StartsWith(ThemePathPrefix, StringComparison.OrdinalIgnoreCase))
             return false;
 
@@ -390,7 +391,7 @@ public static class CssBundleService
             }
         }
 
-        if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
+        if (!HttpMethods.IsGet(context.HttpRequest.Method) && !HttpMethods.IsHead(context.HttpRequest.Method))
         {
             context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
             return true;
@@ -402,7 +403,7 @@ public static class CssBundleService
             return true;
         }
 
-        var ifNoneMatch = context.Request.Headers.IfNoneMatch.ToString();
+        var ifNoneMatch = context.HttpRequest.Headers.IfNoneMatch.ToString();
         if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch == bundle.ETag)
         {
             context.Response.StatusCode = StatusCodes.Status304NotModified;
@@ -426,7 +427,7 @@ public static class CssBundleService
         CompressionHelper.ApplyHeaders(context.Response, encoding);
         context.Response.ContentLength = responseBytes.Length;
 
-        if (HttpMethods.IsGet(context.Request.Method))
+        if (HttpMethods.IsGet(context.HttpRequest.Method))
             await context.Response.Body.WriteAsync(responseBytes);
 
         return true;

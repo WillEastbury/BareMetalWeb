@@ -26,7 +26,7 @@ public static class LookupApiHandlers
     /// GET /api/_lookup/{EntityType}/{Id}
     /// Fetches a single entity by ID.
     /// </summary>
-    public static async ValueTask GetEntityByIdHandler(HttpContext context)
+    public static async ValueTask GetEntityByIdHandler(BmwContext context)
     {
         var (meta, typeSlug, errorResponse) = await ValidateAndResolveEntityAsync(context);
         if (meta == null)
@@ -42,7 +42,7 @@ public static class LookupApiHandlers
             return;
         }
 
-        var traverse = context.Request.Query.TryGetValue("traverseRelationships", out var tvVal)
+        var traverse = context.HttpRequest.Query.TryGetValue("traverseRelationships", out var tvVal)
             && string.Equals(tvVal.Count > 0 ? tvVal[0] : null, "true", StringComparison.OrdinalIgnoreCase);
 
         try
@@ -69,7 +69,7 @@ public static class LookupApiHandlers
     /// Queries entities with optional filters.
     /// Supports multiple filters, sorting, pagination.
     /// </summary>
-    public static async ValueTask QueryEntitiesHandler(HttpContext context)
+    public static async ValueTask QueryEntitiesHandler(BmwContext context)
     {
         var (meta, typeSlug, errorResponse) = await ValidateAndResolveEntityAsync(context);
         if (meta == null)
@@ -79,8 +79,8 @@ public static class LookupApiHandlers
         }
 
         // Validate lookup relationship if source context is provided
-        var sourceSlug = context.Request.Query["from"].ToString();
-        var sourceField = context.Request.Query["via"].ToString();
+        var sourceSlug = context.HttpRequest.Query["from"].ToString();
+        var sourceField = context.HttpRequest.Query["via"].ToString();
         if (!string.IsNullOrWhiteSpace(sourceSlug) || !string.IsNullOrWhiteSpace(sourceField))
         {
             if (!ValidateLookupRelationship(sourceSlug, sourceField, typeSlug))
@@ -90,7 +90,7 @@ public static class LookupApiHandlers
             }
         }
 
-        var traverse = context.Request.Query.TryGetValue("traverseRelationships", out var tvVal)
+        var traverse = context.HttpRequest.Query.TryGetValue("traverseRelationships", out var tvVal)
             && string.Equals(tvVal.Count > 0 ? tvVal[0] : null, "true", StringComparison.OrdinalIgnoreCase);
 
         try
@@ -120,7 +120,7 @@ public static class LookupApiHandlers
     /// Request body: { "ids": ["id1", "id2", ...] }
     /// Response: { "results": { "id1": {...}, "id2": {...} } }
     /// </summary>
-    public static async ValueTask BatchGetEntitiesHandler(HttpContext context)
+    public static async ValueTask BatchGetEntitiesHandler(BmwContext context)
     {
         var (meta, typeSlug, errorResponse) = await ValidateAndResolveEntityAsync(context);
         if (meta == null)
@@ -132,7 +132,7 @@ public static class LookupApiHandlers
         List<string> ids;
         try
         {
-            using var doc = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+            using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, cancellationToken: context.RequestAborted);
             if (!doc.RootElement.TryGetProperty("ids", out var idsElement) || idsElement.ValueKind != JsonValueKind.Array)
             {
                 await WriteJsonErrorAsync(context, StatusCodes.Status400BadRequest, "Request body must contain an 'ids' array.");
@@ -163,7 +163,7 @@ public static class LookupApiHandlers
             return;
         }
 
-        var traverse = context.Request.Query.TryGetValue("traverseRelationships", out var tvVal)
+        var traverse = context.HttpRequest.Query.TryGetValue("traverseRelationships", out var tvVal)
             && string.Equals(tvVal.Count > 0 ? tvVal[0] : null, "true", StringComparison.OrdinalIgnoreCase);
 
         try
@@ -189,7 +189,7 @@ public static class LookupApiHandlers
     /// GET /api/_lookup/{EntityType}/_field/{Id}/{FieldName}
     /// Fetches a single field value from an entity.
     /// </summary>
-    public static async ValueTask GetEntityFieldHandler(HttpContext context)
+    public static async ValueTask GetEntityFieldHandler(BmwContext context)
     {
         var (meta, typeSlug, errorResponse) = await ValidateAndResolveEntityAsync(context);
         if (meta == null)
@@ -256,7 +256,7 @@ public static class LookupApiHandlers
     /// GET /api/_lookup/{EntityType}/_aggregate?fn=count&field=Total&filter=field:value
     /// Performs aggregate operations on entities (count, sum, avg, min, max).
     /// </summary>
-    public static async ValueTask AggregateEntitiesHandler(HttpContext context)
+    public static async ValueTask AggregateEntitiesHandler(BmwContext context)
     {
         var (meta, typeSlug, errorResponse) = await ValidateAndResolveEntityAsync(context);
         if (meta == null)
@@ -265,8 +265,8 @@ public static class LookupApiHandlers
             return;
         }
 
-        var fn = context.Request.Query["fn"].ToString().ToLowerInvariant();
-        var fieldName = context.Request.Query["field"].ToString();
+        var fn = context.HttpRequest.Query["fn"].ToString().ToLowerInvariant();
+        var fieldName = context.HttpRequest.Query["field"].ToString();
 
         if (string.IsNullOrWhiteSpace(fn))
         {
@@ -328,7 +328,7 @@ public static class LookupApiHandlers
 
     #region Helper Methods
 
-    private static async ValueTask<(DataEntityMetadata? Meta, string TypeSlug, ErrorResponse? Error)> ValidateAndResolveEntityAsync(HttpContext context)
+    private static async ValueTask<(DataEntityMetadata? Meta, string TypeSlug, ErrorResponse? Error)> ValidateAndResolveEntityAsync(BmwContext context)
     {
         var typeSlug = GetRouteValue(context, "type") ?? string.Empty;
         if (string.IsNullOrWhiteSpace(typeSlug))
@@ -350,7 +350,7 @@ public static class LookupApiHandlers
         return (metadata, typeSlug, null);
     }
 
-    private static async ValueTask<bool> HasEntityPermissionAsync(HttpContext context, DataEntityMetadata meta, CancellationToken cancellationToken)
+    private static async ValueTask<bool> HasEntityPermissionAsync(BmwContext context, DataEntityMetadata meta, CancellationToken cancellationToken)
     {
         var permissionsNeeded = meta.Permissions?.Trim();
         if (string.IsNullOrWhiteSpace(permissionsNeeded) || 
@@ -386,7 +386,7 @@ public static class LookupApiHandlers
         return true;
     }
 
-    private static string? GetRouteValue(HttpContext context, string key)
+    private static string? GetRouteValue(BmwContext context, string key)
     {
         var pageContext = context.GetPageContext();
         if (pageContext == null)
@@ -400,7 +400,7 @@ public static class LookupApiHandlers
         return null;
     }
 
-    internal static QueryDefinition BuildQueryFromRequest(HttpContext context, DataEntityMetadata meta)
+    internal static QueryDefinition BuildQueryFromRequest(BmwContext context, DataEntityMetadata meta)
     {
         var queryDef = new QueryDefinition();
 
@@ -409,7 +409,7 @@ public static class LookupApiHandlers
             viewableFields.Add(f.Name);
 
         // Parse filters from query string: ?filter=field:value
-        var filters = context.Request.Query["filter"];
+        var filters = context.HttpRequest.Query["filter"];
         foreach (var filter in filters)
         {
             if (string.IsNullOrWhiteSpace(filter))
@@ -431,8 +431,8 @@ public static class LookupApiHandlers
         }
 
         // Parse sort: ?sort=fieldName&dir=asc|desc — only allow viewable fields
-        var sortField = context.Request.Query["sort"].ToString();
-        var sortDir = context.Request.Query["dir"].ToString();
+        var sortField = context.HttpRequest.Query["sort"].ToString();
+        var sortDir = context.HttpRequest.Query["dir"].ToString();
         if (!string.IsNullOrWhiteSpace(sortField) && viewableFields.Contains(sortField))
         {
             queryDef.Sorts.Add(new SortClause
@@ -453,18 +453,18 @@ public static class LookupApiHandlers
         }
 
         // Parse pagination: ?skip=0&top=10
-        if (int.TryParse(context.Request.Query["skip"].ToString(), out var skip) && skip > 0)
+        if (int.TryParse(context.HttpRequest.Query["skip"].ToString(), out var skip) && skip > 0)
             queryDef.Skip = skip;
         
         const int LookupMaxPageSize = 10000;
         const int LookupDefaultPageSize = 200;
-        queryDef.Top = int.TryParse(context.Request.Query["top"].ToString(), out var top) && top > 0
+        queryDef.Top = int.TryParse(context.HttpRequest.Query["top"].ToString(), out var top) && top > 0
             ? Math.Min(top, LookupMaxPageSize)
             : LookupDefaultPageSize;
 
         // Parse search: ?search=term&searchField=FieldName — only allow viewable fields
-        var searchTerm = context.Request.Query["search"].ToString();
-        var searchField = context.Request.Query["searchField"].ToString();
+        var searchTerm = context.HttpRequest.Query["search"].ToString();
+        var searchField = context.HttpRequest.Query["searchField"].ToString();
         if (!string.IsNullOrWhiteSpace(searchTerm) && !string.IsNullOrWhiteSpace(searchField)
             && viewableFields.Contains(searchField))
         {
@@ -587,14 +587,14 @@ public static class LookupApiHandlers
         return fieldName;
     }
 
-    private static async ValueTask WriteJsonAsync(HttpContext context, object data)
+    private static async ValueTask WriteJsonAsync(BmwContext context, object data)
     {
         context.Response.ContentType = "application/json";
         context.Response.StatusCode = StatusCodes.Status200OK;
         await JsonSerializer.SerializeAsync(context.Response.Body, data, JsonCamelCase);
     }
 
-    private static async ValueTask WriteJsonErrorAsync(HttpContext context, int statusCode, string message)
+    private static async ValueTask WriteJsonErrorAsync(BmwContext context, int statusCode, string message)
     {
         context.Response.ContentType = "application/json";
         context.Response.StatusCode = statusCode;

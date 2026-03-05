@@ -13,7 +13,7 @@ namespace BareMetalWeb.Host;
 public static class ProductRenderer
 {
     /// <summary>Configures context for GET /products — category browse inside platform chrome.</summary>
-    public static async ValueTask ConfigureCategoryBrowseAsync(HttpContext context)
+    public static async ValueTask ConfigureCategoryBrowseAsync(BmwContext context)
     {
         if (!DataScaffold.TryGetEntity("product-categories", out var catMeta))
         {
@@ -65,7 +65,7 @@ public static class ProductRenderer
     }
 
     /// <summary>Configures context for GET /products/{category} — product grid inside platform chrome.</summary>
-    public static async ValueTask ConfigureProductGridAsync(HttpContext context)
+    public static async ValueTask ConfigureProductGridAsync(BmwContext context)
     {
         var categorySlug = BinaryApiHandlers.GetRouteValue(context, "category") ?? string.Empty;
 
@@ -103,8 +103,8 @@ public static class ProductRenderer
         var filtered = new List<ProductView>();
 
         // Parse query filter
-        var searchQuery = context.Request.Query.TryGetValue("q", out var q) ? q.ToString() : null;
-        var tagFilter = context.Request.Query.TryGetValue("tag", out var t) ? t.ToString() : null;
+        var searchQuery = context.HttpRequest.Query.TryGetValue("q", out var q) ? q.ToString() : null;
+        var tagFilter = context.HttpRequest.Query.TryGetValue("tag", out var t) ? t.ToString() : null;
 
         foreach (var p in products)
         {

@@ -3,6 +3,7 @@ using BareMetalWeb.Rendering;
 using BareMetalWeb.Core.Interfaces;
 using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Host;
+using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Core.Host;
 
@@ -37,9 +38,9 @@ public interface IBareWebHost
     string? HttpsRedirectHost { get; set; }
     int? HttpsRedirectPort { get; set; }
 
-    ValueTask BuildAppInfoMenuOptionsAsync(HttpContext? context = null, CancellationToken cancellationToken = default);
+    ValueTask BuildAppInfoMenuOptionsAsync(BmwContext? context = null, CancellationToken cancellationToken = default);
     void RegisterRoute(string path, RouteHandlerData routeHandler);
-    Task RenderForbidden(HttpContext context);
+    Task RenderForbidden(BmwContext context);
     Task RequestHandler(HttpContext context);
     Task WireUpRequestHandlingAndLoggerAsyncLifetime();
 }

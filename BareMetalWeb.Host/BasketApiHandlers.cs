@@ -15,7 +15,7 @@ namespace BareMetalWeb.Host;
 /// </summary>
 public static class BasketApiHandlers
 {
-    public static async ValueTask GetBasketHandler(HttpContext context)
+    public static async ValueTask GetBasketHandler(BmwContext context)
     {
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted);
         var userId = user?.Key.ToString() ?? GetAnonymousId(context);
@@ -40,12 +40,12 @@ public static class BasketApiHandlers
         }));
     }
 
-    public static async ValueTask AddItemHandler(HttpContext context)
+    public static async ValueTask AddItemHandler(BmwContext context)
     {
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted);
         var userId = user?.Key.ToString() ?? GetAnonymousId(context);
 
-        using var doc = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+        using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, cancellationToken: context.RequestAborted);
         var root = doc.RootElement;
         var productId = root.TryGetProperty("productId", out var pid) ? pid.GetString() ?? "" : "";
         var productName = root.TryGetProperty("productName", out var pn) ? pn.GetString() ?? "" : "";
@@ -104,9 +104,9 @@ public static class BasketApiHandlers
         await context.Response.WriteAsync("{\"ok\":true,\"itemCount\":" + basket.ItemCount + ",\"total\":" + basket.Total + "}");
     }
 
-    public static async ValueTask RemoveItemHandler(HttpContext context)
+    public static async ValueTask RemoveItemHandler(BmwContext context)
     {
-        using var doc = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+        using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, cancellationToken: context.RequestAborted);
         var itemKey = doc.RootElement.TryGetProperty("itemKey", out var ik) ? ik.GetUInt32() : 0u;
         if (itemKey == 0)
         {
@@ -122,7 +122,7 @@ public static class BasketApiHandlers
         await context.Response.WriteAsync("{\"ok\":true}");
     }
 
-    public static async ValueTask ClearBasketHandler(HttpContext context)
+    public static async ValueTask ClearBasketHandler(BmwContext context)
     {
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted);
         var userId = user?.Key.ToString() ?? GetAnonymousId(context);
@@ -187,10 +187,10 @@ public static class BasketApiHandlers
         return list;
     }
 
-    private static string GetAnonymousId(HttpContext context)
+    private static string GetAnonymousId(BmwContext context)
     {
         const string cookieName = "bm-anon-id";
-        if (context.Request.Cookies.TryGetValue(cookieName, out var id) && !string.IsNullOrEmpty(id))
+        if (context.HttpRequest.Cookies.TryGetValue(cookieName, out var id) && !string.IsNullOrEmpty(id))
             return id;
         id = Guid.NewGuid().ToString("N")[..12];
         context.Response.Cookies.Append(cookieName, id, new CookieOptions

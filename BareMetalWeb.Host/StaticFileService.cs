@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
@@ -22,12 +23,12 @@ public static class StaticFileService
     private static readonly IReadOnlyList<FileRange> EmptyRanges = Array.Empty<FileRange>();
     private static readonly TimeSpan MetadataCacheDuration = TimeSpan.FromSeconds(30);
 
-    public static async Task<bool> TryServeAsync(HttpContext context, StaticFileConfigOptions? options)
+    public static async Task<bool> TryServeAsync(BmwContext context, StaticFileConfigOptions? options)
     {
         if (options == null || !options.Enabled)
             return false;
 
-        var requestPath = context.Request.Path.Value ?? "/";
+        var requestPath = context.HttpRequest.Path.Value ?? "/";
         var prefix = string.IsNullOrWhiteSpace(options.NormalizedRequestPathPrefix)
             ? options.RequestPathPrefix
             : options.NormalizedRequestPathPrefix;
@@ -41,7 +42,7 @@ public static class StaticFileService
             return false;
         }
 
-        if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
+        if (!HttpMethods.IsGet(context.HttpRequest.Method) && !HttpMethods.IsHead(context.HttpRequest.Method))
         {
             context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
             return true;
@@ -94,7 +95,7 @@ public static class StaticFileService
             return true;
         }
 
-        var compressionSelection = context.Request.Headers.AcceptEncoding.Count == 0
+        var compressionSelection = context.HttpRequest.Headers.AcceptEncoding.Count == 0
             ? CompressionSelection.None
             : SelectCompression(context, options);
         if (compressionSelection.IsNotAcceptable)
@@ -132,10 +133,10 @@ public static class StaticFileService
             }
 
             var hasConditionals =
-                context.Request.Headers.IfMatch.Count > 0 ||
-                context.Request.Headers.IfUnmodifiedSince.Count > 0 ||
-                context.Request.Headers.IfNoneMatch.Count > 0 ||
-                context.Request.Headers.IfModifiedSince.Count > 0;
+                context.HttpRequest.Headers.IfMatch.Count > 0 ||
+                context.HttpRequest.Headers.IfUnmodifiedSince.Count > 0 ||
+                context.HttpRequest.Headers.IfNoneMatch.Count > 0 ||
+                context.HttpRequest.Headers.IfModifiedSince.Count > 0;
 
             if (hasConditionals && !EvaluatePreconditions(context, lastModifiedUtc, etag))
             {
@@ -192,7 +193,7 @@ public static class StaticFileService
 
         RangeRequestResult rangeResult;
         IReadOnlyList<FileRange> ranges;
-        if (context.Request.Headers.Range.Count == 0)
+        if (context.HttpRequest.Headers.Range.Count == 0)
         {
             rangeResult = RangeRequestResult.NotRange;
             ranges = EmptyRanges;
@@ -222,7 +223,7 @@ public static class StaticFileService
             context.Response.Headers.ContentRange = $"{BytesUnit} {range.Start}-{range.End}/{metadata.Length}";
             context.Response.ContentLength = range.Length;
 
-            if (HttpMethods.IsHead(context.Request.Method))
+            if (HttpMethods.IsHead(context.HttpRequest.Method))
                 return true;
 
             await context.Response.SendFileAsync(servePath, range.Start, range.Length);
@@ -236,7 +237,7 @@ public static class StaticFileService
             context.Response.ContentType = $"multipart/byteranges; boundary={boundary}";
             context.Response.Headers.AcceptRanges = BytesUnit;
 
-            if (HttpMethods.IsHead(context.Request.Method))
+            if (HttpMethods.IsHead(context.HttpRequest.Method))
                 return true;
 
             await WriteMultipartRangesAsync(context, servePath, contentType, metadata.Length, boundary, ranges);
@@ -250,7 +251,7 @@ public static class StaticFileService
             context.Response.Headers.ContentEncoding = compressionSelection.Kind == CompressionKind.Brotli ? "br" : "gzip";
             context.Response.Headers.Append("Vary", "Accept-Encoding");
 
-            if (HttpMethods.IsHead(context.Request.Method))
+            if (HttpMethods.IsHead(context.HttpRequest.Method))
                 return true;
 
             await using var fileStream = new FileStream(servePath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan | FileOptions.Asynchronous);
@@ -266,7 +267,7 @@ public static class StaticFileService
 
         context.Response.ContentLength = metadata.Length;
 
-        if (HttpMethods.IsHead(context.Request.Method))
+        if (HttpMethods.IsHead(context.HttpRequest.Method))
             return true;
 
         await context.Response.SendFileAsync(servePath, 0, null);
@@ -360,9 +361,9 @@ public static class StaticFileService
         return true;
     }
 
-    private static bool IsNotModified(HttpContext context, DateTime lastModifiedUtc, string? etag)
+    private static bool IsNotModified(BmwContext context, DateTime lastModifiedUtc, string? etag)
     {
-        var ifNoneMatch = context.Request.Headers.IfNoneMatch.ToString();
+        var ifNoneMatch = context.HttpRequest.Headers.IfNoneMatch.ToString();
         var hasIfNoneMatch = !string.IsNullOrWhiteSpace(ifNoneMatch);
         if (hasIfNoneMatch && !string.IsNullOrWhiteSpace(etag))
         {
@@ -392,9 +393,9 @@ public static class StaticFileService
         if (hasIfNoneMatch)
             return false;
 
-        if (context.Request.Headers.IfModifiedSince.Count > 0)
+        if (context.HttpRequest.Headers.IfModifiedSince.Count > 0)
         {
-            if (DateTimeOffset.TryParse(context.Request.Headers.IfModifiedSince.ToString(), out var modifiedSince))
+            if (DateTimeOffset.TryParse(context.HttpRequest.Headers.IfModifiedSince.ToString(), out var modifiedSince))
             {
                 var lastModified = new DateTimeOffset(lastModifiedUtc);
                 if (modifiedSince >= lastModified)
@@ -405,9 +406,9 @@ public static class StaticFileService
         return false;
     }
 
-    private static bool EvaluatePreconditions(HttpContext context, DateTime lastModifiedUtc, string? etag)
+    private static bool EvaluatePreconditions(BmwContext context, DateTime lastModifiedUtc, string? etag)
     {
-        var ifMatch = context.Request.Headers.IfMatch.ToString();
+        var ifMatch = context.HttpRequest.Headers.IfMatch.ToString();
         if (!string.IsNullOrWhiteSpace(ifMatch))
         {
             if (string.Equals(ifMatch, "*", StringComparison.Ordinal))
@@ -436,9 +437,9 @@ public static class StaticFileService
             }
         }
 
-        if (context.Request.Headers.IfUnmodifiedSince.Count > 0)
+        if (context.HttpRequest.Headers.IfUnmodifiedSince.Count > 0)
         {
-            if (DateTimeOffset.TryParse(context.Request.Headers.IfUnmodifiedSince.ToString(), out var unmodifiedSince))
+            if (DateTimeOffset.TryParse(context.HttpRequest.Headers.IfUnmodifiedSince.ToString(), out var unmodifiedSince))
             {
                 var lastModified = new DateTimeOffset(lastModifiedUtc);
                 if (lastModified > unmodifiedSince)
@@ -544,7 +545,7 @@ public static class StaticFileService
         return false;
     }
 
-    private static async Task WriteDirectoryListing(HttpContext context, string rootPath, string relativePath, StaticFileConfigOptions options)
+    private static async Task WriteDirectoryListing(BmwContext context, string rootPath, string relativePath, StaticFileConfigOptions options)
     {
         var targetPath = ResolveFullPath(rootPath, relativePath);
         if (targetPath == null || !Directory.Exists(targetPath))
@@ -625,13 +626,13 @@ public static class StaticFileService
         return $"\"{lastWrite}-{size}\"";
     }
 
-    private static RangeRequestResult TryGetRanges(HttpContext context, long fileLength, DateTime lastModifiedUtc, string? etag, int maxRanges, out List<FileRange> ranges)
+    private static RangeRequestResult TryGetRanges(BmwContext context, long fileLength, DateTime lastModifiedUtc, string? etag, int maxRanges, out List<FileRange> ranges)
     {
         ranges = new List<FileRange>();
-        if (context.Request.Headers.Range.Count == 0)
+        if (context.HttpRequest.Headers.Range.Count == 0)
             return RangeRequestResult.NotRange;
 
-        var rangeHeader = context.Request.Headers.Range.ToString();
+        var rangeHeader = context.HttpRequest.Headers.Range.ToString();
         if (string.IsNullOrWhiteSpace(rangeHeader))
             return RangeRequestResult.NotRange;
 
@@ -731,9 +732,9 @@ public static class StaticFileService
         return ranges.Count == 1 ? RangeRequestResult.Single : RangeRequestResult.Multipart;
     }
 
-    private static bool ShouldIgnoreRange(HttpContext context, DateTime lastModifiedUtc, string? etag)
+    private static bool ShouldIgnoreRange(BmwContext context, DateTime lastModifiedUtc, string? etag)
     {
-        var ifRange = context.Request.Headers.IfRange.ToString();
+        var ifRange = context.HttpRequest.Headers.IfRange.ToString();
         if (string.IsNullOrWhiteSpace(ifRange))
             return false;
 
@@ -772,9 +773,9 @@ public static class StaticFileService
         DateTime ExpiresUtc
     );
 
-    private static CompressionSelection SelectCompression(HttpContext context, StaticFileConfigOptions options)
+    private static CompressionSelection SelectCompression(BmwContext context, StaticFileConfigOptions options)
     {
-        var header = context.Request.Headers.AcceptEncoding.ToString();
+        var header = context.HttpRequest.Headers.AcceptEncoding.ToString();
         if (string.IsNullOrWhiteSpace(header))
             return CompressionSelection.None;
 
@@ -988,7 +989,7 @@ public static class StaticFileService
             ? filePath
             : filePath + "|" + contentTypePath;
 
-    private static async Task WriteMultipartRangesAsync(HttpContext context, string filePath, string contentType, long totalLength, string boundary, IReadOnlyList<FileRange> ranges)
+    private static async Task WriteMultipartRangesAsync(BmwContext context, string filePath, string contentType, long totalLength, string boundary, IReadOnlyList<FileRange> ranges)
     {
         await using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 64 * 1024, FileOptions.SequentialScan | FileOptions.Asynchronous);
         foreach (var range in ranges)
@@ -1026,7 +1027,7 @@ public static class StaticFileService
         }
     }
 
-    private static async Task WriteNotFound(HttpContext context)
+    private static async Task WriteNotFound(BmwContext context)
     {
         context.Response.StatusCode = StatusCodes.Status404NotFound;
         context.Response.ContentType = "text/plain; charset=utf-8";

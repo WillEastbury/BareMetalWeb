@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using System;
 using System.Buffers;
 using System.Collections.Concurrent;
@@ -266,13 +267,13 @@ public static class JsBundleService
     /// Attempts to serve a JS bundle if the request path matches a known bundle path.
     /// Returns <c>true</c> if the path matched (response fully written); <c>false</c> otherwise.
     /// </summary>
-    public static async Task<bool> TryServeAsync(HttpContext context)
+    public static async Task<bool> TryServeAsync(BmwContext context)
     {
-        var requestPath = context.Request.Path.Value ?? string.Empty;
+        var requestPath = context.HttpRequest.Path.Value ?? string.Empty;
         if (!_bundles.TryGetValue(requestPath, out var bundle))
             return false;
 
-        if (!HttpMethods.IsGet(context.Request.Method) && !HttpMethods.IsHead(context.Request.Method))
+        if (!HttpMethods.IsGet(context.HttpRequest.Method) && !HttpMethods.IsHead(context.HttpRequest.Method))
         {
             context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
             return true;
@@ -284,7 +285,7 @@ public static class JsBundleService
             return true;
         }
 
-        var ifNoneMatch = context.Request.Headers.IfNoneMatch.ToString();
+        var ifNoneMatch = context.HttpRequest.Headers.IfNoneMatch.ToString();
         if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch == bundle.ETag)
         {
             context.Response.StatusCode = StatusCodes.Status304NotModified;
@@ -308,7 +309,7 @@ public static class JsBundleService
         CompressionHelper.ApplyHeaders(context.Response, encoding);
         context.Response.ContentLength = responseBytes.Length;
 
-        if (HttpMethods.IsGet(context.Request.Method))
+        if (HttpMethods.IsGet(context.HttpRequest.Method))
             await context.Response.Body.WriteAsync(responseBytes);
 
         return true;

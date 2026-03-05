@@ -425,7 +425,7 @@ public static class RouteRegistrationExtensions
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    private static string? GetRouteParam(Microsoft.AspNetCore.Http.HttpContext context, string key)
+    private static string? GetRouteParam(BmwContext context, string key)
     {
         var pageContext = context.GetPageContext();
         if (pageContext == null) return null;
@@ -1008,7 +1008,7 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("Authenticated", false),
             async context =>
             {
-                using var reader = new System.IO.StreamReader(context.Request.Body);
+                using var reader = new System.IO.StreamReader(context.HttpRequest.Body);
                 var body = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
 
                 string entitySlug;
@@ -1047,7 +1047,7 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("Authenticated", false),
             async context =>
             {
-                using var reader = new System.IO.StreamReader(context.Request.Body);
+                using var reader = new System.IO.StreamReader(context.HttpRequest.Body);
                 var body = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
 
                 BareMetalWeb.Runtime.CommandIntent intent;
@@ -1108,7 +1108,7 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("admin", false),
             async context =>
             {
-                var overwrite = context.Request.Query.TryGetValue("overwrite", out var ovVal)
+                var overwrite = context.HttpRequest.Query.TryGetValue("overwrite", out var ovVal)
                     && string.Equals(ovVal, "true", StringComparison.OrdinalIgnoreCase);
 
                 var messages = new List<string>();
@@ -1208,7 +1208,7 @@ public static class RouteRegistrationExtensions
         return false;
     }
 
-    private static string? GetMetaRouteParam(HttpContext context, string key)
+    private static string? GetMetaRouteParam(BmwContext context, string key)
     {
         var pageContext = context.GetPageContext();
         if (pageContext == null)
@@ -1528,7 +1528,7 @@ public static class RouteRegistrationExtensions
                 }
 
                 sb.Append("</div></div></div>");
-                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context);
+                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context.HttpContext);
                 context.Response.ContentType = "text/html; charset=utf-8";
                 await context.Response.WriteAsync(sb.ToString());
             }));
@@ -1566,7 +1566,7 @@ public static class RouteRegistrationExtensions
                     runtimeParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var p in parameters)
                     {
-                        var val = context.Request.Query.TryGetValue(p.Name, out var qv) ? qv.ToString() : p.DefaultValue;
+                        var val = context.HttpRequest.Query.TryGetValue(p.Name, out var qv) ? qv.ToString() : p.DefaultValue;
                         runtimeParams[p.Name] = val;
                     }
                 }
@@ -1598,7 +1598,7 @@ public static class RouteRegistrationExtensions
                     host,
                     context.GetCspNonce(),
                     CsrfProtection.EnsureToken(context),
-                    context);
+                    context.HttpContext);
                 await pipeWriter.CompleteAsync();
             }));
 
@@ -1637,7 +1637,7 @@ public static class RouteRegistrationExtensions
                     runtimeParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
                     foreach (var p in parameters)
                     {
-                        var val = context.Request.Query.TryGetValue(p.Name, out var qv) ? qv.ToString() : p.DefaultValue;
+                        var val = context.HttpRequest.Query.TryGetValue(p.Name, out var qv) ? qv.ToString() : p.DefaultValue;
                         runtimeParams[p.Name] = val;
                     }
                 }
@@ -1656,7 +1656,7 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var format = context.Request.Query.TryGetValue("format", out var fmt) ? fmt.ToString() : "json";
+                var format = context.HttpRequest.Query.TryGetValue("format", out var fmt) ? fmt.ToString() : "json";
 
                 if (string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase))
                 {
@@ -1729,7 +1729,7 @@ public static class RouteRegistrationExtensions
         return value;
     }
 
-    private static async ValueTask ServeVNextShell(HttpContext context, IBareWebHost host, ITemplateStore templateStore)
+    private static async ValueTask ServeVNextShell(BmwContext context, IBareWebHost host, ITemplateStore templateStore)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         var safeToken = WebUtility.HtmlEncode(csrfToken);
@@ -1785,7 +1785,7 @@ public static class RouteRegistrationExtensions
         string? metaSlugScript = null;
         string? initialDataScript = null;
         // Extract the entity slug for /{slug} pages
-        var reqPath = context.Request.Path.Value ?? string.Empty;
+        var reqPath = context.HttpRequest.Path.Value ?? string.Empty;
         string? dataSlug = null;
         {
             var trimmed = reqPath.TrimStart('/');
@@ -1799,7 +1799,7 @@ public static class RouteRegistrationExtensions
             if (slashIdx < 0)
             {
                 // Only when there are no data-affecting query params in the URL
-                var q = context.Request.Query;
+                var q = context.HttpRequest.Query;
                 var hasCustomParams = q.ContainsKey("skip") || q.ContainsKey("top") || q.ContainsKey("q") ||
                                       q.ContainsKey("sort") || q.ContainsKey("dir");
                 if (!hasCustomParams)
@@ -1843,8 +1843,8 @@ public static class RouteRegistrationExtensions
         if (initialDataScript != null)
             sb.Append(initialDataScript);
         sb.Append("<script src=\"/static/js/vnext-bundle.js\"></script>");
-        if (BareMetalWeb.Rendering.HtmlRenderer.ShouldShowDiagnosticBanner(context, host))
-            sb.Append(BareMetalWeb.Rendering.HtmlRenderer.BuildDiagnosticBannerHtml(context, host, sb.Length));
+        if (BareMetalWeb.Rendering.HtmlRenderer.ShouldShowDiagnosticBanner(context.HttpContext, host))
+            sb.Append(BareMetalWeb.Rendering.HtmlRenderer.BuildDiagnosticBannerHtml(context.HttpContext, host, sb.Length));
         sb.Append("</body></html>");
 
         context.Response.ContentType = "text/html; charset=utf-8";
@@ -1936,7 +1936,7 @@ public static class RouteRegistrationExtensions
     /// (the client will fall back to the normal API call).
     /// </summary>
     private static async ValueTask<string?> TryBuildInitialDataScriptAsync(
-        HttpContext context, string slug, string safeNonce, User? user, CancellationToken cancellationToken)
+        BmwContext context, string slug, string safeNonce, User? user, CancellationToken cancellationToken)
     {
         try
         {
@@ -2261,7 +2261,7 @@ public static class RouteRegistrationExtensions
     }
 
     /// <summary>GET /api/_metrics — returns engine telemetry snapshot as JSON.</summary>
-    private static async ValueTask EngineMetricsHandler(HttpContext context)
+    private static async ValueTask EngineMetricsHandler(BmwContext context)
     {
         var snapshot = BareMetalWeb.Data.EngineMetrics.GetSnapshot();
 

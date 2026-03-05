@@ -252,6 +252,68 @@ public static class HttpContextPageInfoExtensions
         });
     }
 
+    // ── BmwContext overloads (delegate to HttpContext) ───────────────────
+
+    public static void SetPageMetaData(this BmwContext context, PageMetaData metaData)
+        => context.HttpContext.SetPageMetaData(metaData);
+
+    public static void SetPageContext(this BmwContext context, PageContext pageContext)
+        => context.HttpContext.SetPageContext(pageContext);
+
+    public static void SetPageInfo(this BmwContext context, PageInfo pageInfo)
+        => context.HttpContext.SetPageInfo(pageInfo);
+
+    public static PageMetaData? GetPageMetaData(this BmwContext context)
+        => context.HttpContext.GetPageMetaData();
+
+    public static PageContext? GetPageContext(this BmwContext context)
+        => context.HttpContext.GetPageContext();
+
+    public static PageInfo? GetPageInfo(this BmwContext context)
+        => context.HttpContext.GetPageInfo();
+
+    public static void SetApp(this BmwContext context, IBareWebHost app)
+        => context.HttpContext.SetApp(app);
+
+    public static IBareWebHost? GetApp(this BmwContext context)
+        => context.HttpContext.GetApp();
+
+    public static void SetStringValue(this BmwContext context, string key, string value)
+        => context.HttpContext.SetStringValue(key, value);
+
+    public static void AddStringValue(this BmwContext context, string key, string value)
+        => context.HttpContext.AddStringValue(key, value);
+
+    public static void RemoveStringValue(this BmwContext context, string key)
+        => context.HttpContext.RemoveStringValue(key);
+
+    public static void SetLoop(this BmwContext context, TemplateLoop loop)
+        => context.HttpContext.SetLoop(loop);
+
+    public static void SetLoop(this BmwContext context, string loopKey, IReadOnlyList<IReadOnlyDictionary<string, string>> items)
+        => context.HttpContext.SetLoop(loopKey, items);
+
+    public static void SetLoopValues(this BmwContext context, string loopKey, string valueKey, IReadOnlyList<string> values)
+        => context.HttpContext.SetLoopValues(loopKey, valueKey, values);
+
+    public static void AddLoopItem(this BmwContext context, string loopKey, IReadOnlyDictionary<string, string> item)
+        => context.HttpContext.AddLoopItem(loopKey, item);
+
+    public static void AddTable(this BmwContext context, string[] columnTitles, string[][] rows)
+        => context.HttpContext.AddTable(columnTitles, rows);
+
+    public static void AddTableColumnTitle(this BmwContext context, string title)
+        => context.HttpContext.AddTableColumnTitle(title);
+
+    public static void AddTableHeader(this BmwContext context, string[] titles)
+        => context.HttpContext.AddTableHeader(titles);
+
+    public static void AddTableRow(this BmwContext context, string[] row)
+        => context.HttpContext.AddTableRow(row);
+
+    public static void AddFormDefinition(this BmwContext context, FormDefinition formDefinition)
+        => context.HttpContext.AddFormDefinition(formDefinition);
+
     private static PageContext EnsurePageContext(HttpContext context)
     {
         var pageContext = context.GetPageContext();
