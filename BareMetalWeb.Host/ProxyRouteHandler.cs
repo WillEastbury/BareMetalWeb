@@ -325,7 +325,7 @@ public sealed class ProxyRouteHandler
             string?[] safeValues;
             if (hasCrlf)
             {
-                var filtered = new List<string?>();
+                var filtered = new List<string?>(rawValues.Length);
                 for (int i = 0; i < rawValues.Length; i++)
                 {
                     if (!ContainsCrlf(rawValues[i]))
@@ -761,7 +761,8 @@ public sealed class ProxyRouteHandler
 
     private static string[] EnumerableToArray(IEnumerable<string> values)
     {
-        var list = new List<string>();
+        // Use the collection count when available; fall back to 4 as a small-list default
+        var list = new List<string>(values is ICollection<string> col ? col.Count : 4);
         foreach (var v in values)
             list.Add(v);
         return list.ToArray();

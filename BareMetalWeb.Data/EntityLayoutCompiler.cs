@@ -50,7 +50,7 @@ public static class EntityLayoutCompiler
 
         var allProps = meta.Type
             .GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var propList = new List<PropertyInfo>();
+        var propList = new List<PropertyInfo>(allProps.Length);
         foreach (var p in allProps)
         {
             if (p.CanRead && p.CanWrite)

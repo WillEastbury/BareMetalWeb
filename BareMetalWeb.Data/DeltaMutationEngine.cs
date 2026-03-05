@@ -119,7 +119,7 @@ public static class DeltaMutationEngine
         BaseDataObject oldEntity,
         BaseDataObject newEntity)
     {
-        var changes = new List<FieldDelta>();
+        var changes = new List<FieldDelta>(layout.Fields.Length);
 
         foreach (var field in layout.Fields)
         {

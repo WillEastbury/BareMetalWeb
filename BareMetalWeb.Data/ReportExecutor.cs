@@ -451,7 +451,7 @@ public sealed class ReportExecutor
         IReadOnlyList<ReportColumn> columns)
     {
         // Group-by columns are those without an aggregate function
-        var groupByList = new List<int>();
+        var groupByList = new List<int>(columns.Count);
         for (int i = 0; i < columns.Count; i++)
         {
             if (columns[i].Aggregate == AggregateFunction.None)
@@ -459,7 +459,7 @@ public sealed class ReportExecutor
         }
         var groupByIndices = groupByList.ToArray();
 
-        var aggList = new List<(ReportColumn c, int i)>();
+        var aggList = new List<(ReportColumn c, int i)>(columns.Count);
         for (int i = 0; i < columns.Count; i++)
         {
             if (columns[i].Aggregate != AggregateFunction.None)

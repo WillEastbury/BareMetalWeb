@@ -388,8 +388,8 @@ public sealed class SearchIndexManager
         return _typeMetadata.GetOrAdd(type, t =>
         {
             var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-            var indexedProps = new List<PropertyInfo>();
-            var attrs = new List<DataIndexAttribute>();
+            var indexedProps = new List<PropertyInfo>(props.Length);
+            var attrs = new List<DataIndexAttribute>(props.Length);
             var kinds = new HashSet<IndexKind>();
 
             foreach (var prop in props)
