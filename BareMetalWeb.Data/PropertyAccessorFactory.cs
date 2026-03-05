@@ -12,10 +12,15 @@ file static class IsExternalInitDetector
 {
     private const string ModreqFullName = "System.Runtime.CompilerServices.IsExternalInit";
 
-    internal static bool IsInitOnlySetter(MethodInfo setter) =>
-        setter.ReturnParameter
-              .GetRequiredCustomModifiers()
-              .Any(t => t.FullName == ModreqFullName);
+    internal static bool IsInitOnlySetter(MethodInfo setter)
+    {
+        foreach (var t in setter.ReturnParameter.GetRequiredCustomModifiers())
+        {
+            if (t.FullName == ModreqFullName)
+                return true;
+        }
+        return false;
+    }
 }
 
 /// <summary>

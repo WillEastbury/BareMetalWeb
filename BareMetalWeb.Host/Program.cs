@@ -88,7 +88,12 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
             return;
         }
         var queryDef = new BareMetalWeb.Data.QueryDefinition { Clauses = new() { new BareMetalWeb.Data.QueryClause { Field = "DeviceCode", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = deviceCode } }, Top = 1 };
-        var dc = (await DataStoreProvider.Current.QueryAsync<DeviceCodeAuth>(queryDef)).FirstOrDefault();
+        DeviceCodeAuth? dc = null;
+        foreach (var item in await DataStoreProvider.Current.QueryAsync<DeviceCodeAuth>(queryDef))
+        {
+            dc = item;
+            break;
+        }
         if (dc == null || dc.IsExpired(DateTime.UtcNow))
         {
             context.Response.ContentType = "application/json";
@@ -180,7 +185,15 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
         }
         var queryDef = new BareMetalWeb.Data.QueryDefinition { Clauses = new() { new BareMetalWeb.Data.QueryClause { Field = "UserCode", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = code } }, Top = 10 };
         var candidates = await DataStoreProvider.Current.QueryAsync<DeviceCodeAuth>(queryDef);
-        var dc = candidates.FirstOrDefault(d => d.Status == "pending" && !d.IsExpired(DateTime.UtcNow));
+        DeviceCodeAuth? dc = null;
+        foreach (var d in candidates)
+        {
+            if (d.Status == "pending" && !d.IsExpired(DateTime.UtcNow))
+            {
+                dc = d;
+                break;
+            }
+        }
         if (dc == null)
         {
             context.Response.Redirect($"/device?msg=Error:+Invalid+or+expired+code&code={System.Net.WebUtility.UrlEncode(code)}");
@@ -195,60 +208,84 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
     appInfo.RegisterRoute("GET /api/_meta", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), async context =>
     {
         var entities = DataScaffold.Entities;
-        var result = entities.Select(e => new Dictionary<string, object?>
+        var resultList = new List<Dictionary<string, object?>>();
+        foreach (var e in entities)
         {
-            ["name"] = e.Name,
-            ["slug"] = e.Slug,
-            ["permissions"] = e.Permissions,
-            ["showOnNav"] = e.ShowOnNav,
-            ["navGroup"] = e.NavGroup,
-            ["navOrder"] = e.NavOrder,
-            ["viewType"] = e.ViewType.ToString(),
-            ["parentField"] = e.ParentField?.Name,
-            ["commands"] = e.Commands.Select(c => new Dictionary<string, object?>
+            var commandsList = new List<Dictionary<string, object?>>();
+            foreach (var c in e.Commands)
             {
-                ["name"] = c.Name,
-                ["label"] = c.Label,
-                ["icon"] = c.Icon,
-                ["confirmMessage"] = c.ConfirmMessage,
-                ["destructive"] = c.Destructive,
-                ["order"] = c.Order
-            }).ToArray(),
-            ["fields"] = e.Fields.Select(f => new Dictionary<string, object?>
-            {
-                ["name"] = f.Name,
-                ["label"] = f.Label,
-                ["type"] = f.FieldType.ToString(),
-                ["order"] = f.Order,
-                ["required"] = f.Required,
-                ["list"] = f.List,
-                ["view"] = f.View,
-                ["edit"] = f.Edit,
-                ["create"] = f.Create,
-                ["readOnly"] = f.ReadOnly,
-                ["placeholder"] = f.Placeholder,
-                ["isComputed"] = f.Computed != null,
-                ["isCalculated"] = f.Calculated != null,
-                ["lookupTargetSlug"] = f.Lookup != null ? DataScaffold.GetEntityByType(f.Lookup.TargetType)?.Slug : null,
-                ["lookupValueField"] = f.Lookup?.ValueField,
-                ["lookupDisplayField"] = f.Lookup?.DisplayField,
-                ["lookupFilterField"] = f.Lookup?.QueryField,
-                ["lookupFilterValue"] = f.Lookup?.QueryValue,
-                ["enumValues"] = f.FieldType == FormFieldType.Enum
-                    ? DataScaffold.BuildEnumOptions(f.Property.PropertyType)
-                        .Select(kv => new { value = kv.Key, label = kv.Value })
-                        .ToArray()
-                    : null,
-                ["upload"] = f.Upload == null ? null : new Dictionary<string, object?>
+                commandsList.Add(new Dictionary<string, object?>
                 {
-                    ["maxFileSizeBytes"] = f.Upload.MaxFileSizeBytes,
-                    ["allowedMimeTypes"] = f.Upload.AllowedMimeTypes,
-                    ["maxImageWidth"] = f.Upload.MaxImageWidth,
-                    ["maxImageHeight"] = f.Upload.MaxImageHeight,
-                    ["generateThumbnail"] = f.Upload.GenerateThumbnail
+                    ["name"] = c.Name,
+                    ["label"] = c.Label,
+                    ["icon"] = c.Icon,
+                    ["confirmMessage"] = c.ConfirmMessage,
+                    ["destructive"] = c.Destructive,
+                    ["order"] = c.Order
+                });
+            }
+
+            var fieldsList = new List<Dictionary<string, object?>>();
+            foreach (var f in e.Fields)
+            {
+                object? enumValues = null;
+                if (f.FieldType == FormFieldType.Enum)
+                {
+                    var enumOptionsList = new List<object>();
+                    foreach (var kv in DataScaffold.BuildEnumOptions(f.Property.PropertyType))
+                    {
+                        enumOptionsList.Add(new { value = kv.Key, label = kv.Value });
+                    }
+                    enumValues = enumOptionsList.ToArray();
                 }
-            }).ToArray()
-        }).ToArray();
+
+                fieldsList.Add(new Dictionary<string, object?>
+                {
+                    ["name"] = f.Name,
+                    ["label"] = f.Label,
+                    ["type"] = f.FieldType.ToString(),
+                    ["order"] = f.Order,
+                    ["required"] = f.Required,
+                    ["list"] = f.List,
+                    ["view"] = f.View,
+                    ["edit"] = f.Edit,
+                    ["create"] = f.Create,
+                    ["readOnly"] = f.ReadOnly,
+                    ["placeholder"] = f.Placeholder,
+                    ["isComputed"] = f.Computed != null,
+                    ["isCalculated"] = f.Calculated != null,
+                    ["lookupTargetSlug"] = f.Lookup != null ? DataScaffold.GetEntityByType(f.Lookup.TargetType)?.Slug : null,
+                    ["lookupValueField"] = f.Lookup?.ValueField,
+                    ["lookupDisplayField"] = f.Lookup?.DisplayField,
+                    ["lookupFilterField"] = f.Lookup?.QueryField,
+                    ["lookupFilterValue"] = f.Lookup?.QueryValue,
+                    ["enumValues"] = enumValues,
+                    ["upload"] = f.Upload == null ? null : new Dictionary<string, object?>
+                    {
+                        ["maxFileSizeBytes"] = f.Upload.MaxFileSizeBytes,
+                        ["allowedMimeTypes"] = f.Upload.AllowedMimeTypes,
+                        ["maxImageWidth"] = f.Upload.MaxImageWidth,
+                        ["maxImageHeight"] = f.Upload.MaxImageHeight,
+                        ["generateThumbnail"] = f.Upload.GenerateThumbnail
+                    }
+                });
+            }
+
+            resultList.Add(new Dictionary<string, object?>
+            {
+                ["name"] = e.Name,
+                ["slug"] = e.Slug,
+                ["permissions"] = e.Permissions,
+                ["showOnNav"] = e.ShowOnNav,
+                ["navGroup"] = e.NavGroup,
+                ["navOrder"] = e.NavOrder,
+                ["viewType"] = e.ViewType.ToString(),
+                ["parentField"] = e.ParentField?.Name,
+                ["commands"] = commandsList.ToArray(),
+                ["fields"] = fieldsList.ToArray()
+            });
+        }
+        var result = resultList.ToArray();
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
     }));
@@ -292,7 +329,12 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
             walProvider.SaveRecord(record, schema);
         }
 
-        var todos = walProvider.QueryRecords(schema).ToList();
+        var todosEnumerable = walProvider.QueryRecords(schema);
+        var todos = new List<BareMetalWeb.Data.DataRecord>();
+        foreach (var todo in todosEnumerable)
+        {
+            todos.Add(todo);
+        }
         var sb = new System.Text.StringBuilder();
         sb.Append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
         sb.Append("<title>Ideas</title><style>");
@@ -497,19 +539,33 @@ static class ProgramSetup
             }
         };
 
-        var users = (await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false)).ToList();
+        var usersEnumerable = await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false);
+        var users = new List<User>();
+        foreach (var u in usersEnumerable)
+        {
+            users.Add(u);
+        }
         foreach (var user in users)
         {
             if (user is null || !user.IsActive)
                 continue;
 
-            var perms = user.Permissions?.ToList() ?? new List<string>();
+            var perms = user.Permissions != null ? new List<string>(user.Permissions) : new List<string>();
             var changed = false;
             foreach (var required in requiredPermissions)
             {
                 if (string.IsNullOrWhiteSpace(required))
                     continue;
-                if (perms.Any(p => string.Equals(p, required, StringComparison.OrdinalIgnoreCase)))
+                bool alreadyHasPerm = false;
+                foreach (var p in perms)
+                {
+                    if (string.Equals(p, required, StringComparison.OrdinalIgnoreCase))
+                    {
+                        alreadyHasPerm = true;
+                        break;
+                    }
+                }
+                if (alreadyHasPerm)
                     continue;
                 perms.Add(required);
                 changed = true;
@@ -609,7 +665,12 @@ static class ProgramSetup
             appInfo.RegisterRoute("GET /proxy/status", new RouteHandlerData(pageInfoFactory.RawPage("admin", false), async context =>
             {
                 context.Response.ContentType = "application/json";
-                var status = proxyHandlers.Select(handler => handler.GetStatus()).ToArray();
+                var statusList = new List<ProxyRouteStatus>();
+                foreach (var handler in proxyHandlers)
+                {
+                    statusList.Add(handler.GetStatus());
+                }
+                var status = statusList.ToArray();
 
                 await using var stream = context.Response.Body;
                 using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });

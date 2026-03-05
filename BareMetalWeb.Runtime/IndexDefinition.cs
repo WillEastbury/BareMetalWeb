@@ -31,6 +31,5 @@ public class IndexDefinition : RenderableDataObject
 
     public IReadOnlyList<string> GetFieldList()
         => FieldNames
-            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToArray();
+            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }

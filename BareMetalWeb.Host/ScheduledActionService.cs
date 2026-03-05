@@ -1,5 +1,5 @@
 using System;
-using System.Linq;
+
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core.Interfaces;
@@ -54,7 +54,10 @@ public sealed class ScheduledActionService
     private async Task ProcessSchedulesAsync(DateTime nowUtc, CancellationToken ct)
     {
         var store = DataStoreProvider.Current;
-        var schedules = (await store.QueryAsync<BareMetalWeb.Runtime.ScheduledActionDefinition>(null, ct)).ToList();
+        var schedulesResult = await store.QueryAsync<BareMetalWeb.Runtime.ScheduledActionDefinition>(null, ct);
+        var schedules = new List<BareMetalWeb.Runtime.ScheduledActionDefinition>();
+        foreach (var s in schedulesResult)
+            schedules.Add(s);
 
         foreach (var sched in schedules)
         {
@@ -67,8 +70,15 @@ public sealed class ScheduledActionService
                 continue;
 
             // Find the action
-            var actionCmd = meta.Commands.FirstOrDefault(c =>
-                string.Equals(c.Name, sched.ActionName, StringComparison.OrdinalIgnoreCase));
+            RemoteCommandMetadata? actionCmd = null;
+            foreach (var c in meta.Commands)
+            {
+                if (string.Equals(c.Name, sched.ActionName, StringComparison.OrdinalIgnoreCase))
+                {
+                    actionCmd = c;
+                    break;
+                }
+            }
             if (actionCmd == null) continue;
 
             try
@@ -78,7 +88,10 @@ public sealed class ScheduledActionService
                     ? null
                     : new QueryDefinition();
 
-                var items = (await meta.Handlers.QueryAsync(query, ct)).ToList();
+                var queryResults = await meta.Handlers.QueryAsync(query, ct);
+                var items = new List<BaseDataObject>();
+                foreach (var item in queryResults)
+                    items.Add(item);
                 int count = 0;
 
                 foreach (var item in items)
@@ -152,7 +165,12 @@ public sealed class ScheduledActionService
                 Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityId } }
             }, CancellationToken.None).GetAwaiter().GetResult();
 
-        var def = defs.FirstOrDefault();
+        BareMetalWeb.Runtime.EntityDefinition? def = null;
+        foreach (var d in defs)
+        {
+            def = d;
+            break;
+        }
         return def?.Slug ?? def?.Name?.Replace(' ', '-').ToLowerInvariant();
     }
 }

@@ -182,7 +182,16 @@ public sealed class TenantRegistry
     }
 
     /// <summary>Gets a stable snapshot of all registered tenant contexts.</summary>
-    public IReadOnlyCollection<TenantContext> AllTenants => _byId.Values.ToArray();
+    public IReadOnlyCollection<TenantContext> AllTenants
+    {
+        get
+        {
+            var list = new List<TenantContext>(_byId.Count);
+            foreach (var kvp in _byId)
+                list.Add(kvp.Value);
+            return list.ToArray();
+        }
+    }
 
     /// <summary>Gets the system/default tenant context.</summary>
     public TenantContext? SystemTenant => _systemTenant;

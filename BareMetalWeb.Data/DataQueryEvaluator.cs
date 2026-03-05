@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data.Interfaces;
@@ -80,29 +79,36 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
         if (query == null || query.Sorts.Count == 0)
             return source;
 
-        IOrderedEnumerable<T>? ordered = null;
-        var comparer = new ObjectComparer();
-
+        // Collect the active sort specifications
+        var activeSorts = new List<(string Field, SortDirection Direction)>();
         foreach (var sort in query.Sorts)
         {
-            if (string.IsNullOrWhiteSpace(sort.Field))
-                continue;
-
-            if (ordered == null)
-            {
-                ordered = sort.Direction == SortDirection.Desc
-                    ? source.OrderByDescending(item => GetMemberValue(item!, sort.Field), comparer)
-                    : source.OrderBy(item => GetMemberValue(item!, sort.Field), comparer);
-            }
-            else
-            {
-                ordered = sort.Direction == SortDirection.Desc
-                    ? ordered.ThenByDescending(item => GetMemberValue(item!, sort.Field), comparer)
-                    : ordered.ThenBy(item => GetMemberValue(item!, sort.Field), comparer);
-            }
+            if (!string.IsNullOrWhiteSpace(sort.Field))
+                activeSorts.Add((sort.Field, sort.Direction));
         }
 
-        return ordered ?? source;
+        if (activeSorts.Count == 0)
+            return source;
+
+        var list = new List<T>(source is ICollection<T> col ? col.Count : 16);
+        foreach (var item in source)
+            list.Add(item);
+
+        var comparer = new ObjectComparer();
+        list.Sort((a, b) =>
+        {
+            foreach (var (field, direction) in activeSorts)
+            {
+                var va = GetMemberValue(a!, field);
+                var vb = GetMemberValue(b!, field);
+                int cmp = comparer.Compare(va, vb);
+                if (cmp != 0)
+                    return direction == SortDirection.Desc ? -cmp : cmp;
+            }
+            return 0;
+        });
+
+        return list;
     }
 
     private static bool EvaluateClause(object? memberValue, Type memberType, QueryClause clause)

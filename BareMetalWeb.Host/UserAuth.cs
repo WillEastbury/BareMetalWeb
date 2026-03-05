@@ -3,8 +3,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Data;
 using Microsoft.AspNetCore.Http;
-using System.Linq;
-
 namespace BareMetalWeb.Host;
 
 public static class UserAuth

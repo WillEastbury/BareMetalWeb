@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
+
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
@@ -43,7 +43,7 @@ public static class LookupApiHandlers
         }
 
         var traverse = context.Request.Query.TryGetValue("traverseRelationships", out var tvVal)
-            && string.Equals(tvVal.FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
+            && string.Equals(tvVal.Count > 0 ? tvVal[0] : null, "true", StringComparison.OrdinalIgnoreCase);
 
         try
         {
@@ -91,7 +91,7 @@ public static class LookupApiHandlers
         }
 
         var traverse = context.Request.Query.TryGetValue("traverseRelationships", out var tvVal)
-            && string.Equals(tvVal.FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
+            && string.Equals(tvVal.Count > 0 ? tvVal[0] : null, "true", StringComparison.OrdinalIgnoreCase);
 
         try
         {
@@ -139,13 +139,17 @@ public static class LookupApiHandlers
                 return;
             }
 
-            ids = idsElement.EnumerateArray()
-                .Where(e => e.ValueKind == JsonValueKind.String)
-                .Select(e => e.GetString()!)
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .Distinct()
-                .Take(500) // Cap batch size to prevent resource exhaustion
-                .ToList();
+            ids = new List<string>();
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var e in idsElement.EnumerateArray())
+            {
+                if (ids.Count >= 500) break;
+                if (e.ValueKind != JsonValueKind.String) continue;
+                var s = e.GetString()!;
+                if (string.IsNullOrWhiteSpace(s)) continue;
+                if (!seen.Add(s)) continue;
+                ids.Add(s);
+            }
         }
         catch (JsonException)
         {
@@ -160,7 +164,7 @@ public static class LookupApiHandlers
         }
 
         var traverse = context.Request.Query.TryGetValue("traverseRelationships", out var tvVal)
-            && string.Equals(tvVal.FirstOrDefault(), "true", StringComparison.OrdinalIgnoreCase);
+            && string.Equals(tvVal.Count > 0 ? tvVal[0] : null, "true", StringComparison.OrdinalIgnoreCase);
 
         try
         {
@@ -218,8 +222,15 @@ public static class LookupApiHandlers
                 return;
             }
 
-            var field = meta.Fields.FirstOrDefault(f => 
-                string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase) && f.View);
+            DataFieldMetadata? field = null;
+            foreach (var f in meta.Fields)
+            {
+                if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase) && f.View)
+                {
+                    field = f;
+                    break;
+                }
+            }
             
             if (field == null)
             {
@@ -360,7 +371,14 @@ public static class LookupApiHandlers
 
         var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
         var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return required.Length == 0 || required.All(userPermissions.Contains);
+        if (required.Length == 0)
+            return true;
+        foreach (var perm in required)
+        {
+            if (!userPermissions.Contains(perm))
+                return false;
+        }
+        return true;
     }
 
     private static string? GetRouteValue(HttpContext context, string key)
@@ -381,9 +399,9 @@ public static class LookupApiHandlers
     {
         var queryDef = new QueryDefinition();
 
-        var viewableFields = new HashSet<string>(
-            meta.ViewFields.Select(f => f.Name),
-            StringComparer.OrdinalIgnoreCase);
+        var viewableFields = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in meta.ViewFields)
+            viewableFields.Add(f.Name);
 
         // Parse filters from query string: ?filter=field:value
         var filters = context.Request.Query["filter"];
@@ -470,8 +488,15 @@ public static class LookupApiHandlers
         if (!DataScaffold.TryGetEntity(sourceSlug, out var sourceMeta))
             return false;
 
-        var field = sourceMeta!.Fields.FirstOrDefault(f =>
-            string.Equals(f.Name, sourceFieldName, StringComparison.OrdinalIgnoreCase));
+        DataFieldMetadata? field = null;
+        foreach (var f in sourceMeta!.Fields)
+        {
+            if (string.Equals(f.Name, sourceFieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                field = f;
+                break;
+            }
+        }
 
         if (field?.Lookup == null)
             return false;
@@ -517,8 +542,9 @@ public static class LookupApiHandlers
 
         int traversed = 0;
         const int MaxTraversals = 20; // Cap FK loads per entity to prevent N+1 explosion
-        foreach (var field in meta.Fields.Where(f => f.View && f.Lookup != null))
+        foreach (var field in meta.Fields)
         {
+            if (!field.View || field.Lookup == null) continue;
             if (traversed >= MaxTraversals) break;
 
             if (!result.TryGetValue(field.Name, out var rawValue) || rawValue == null)

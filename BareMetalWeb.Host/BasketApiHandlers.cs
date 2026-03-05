@@ -24,14 +24,19 @@ public static class BasketApiHandlers
         var items = await LoadBasketItems(basket.Key.ToString(), context.RequestAborted);
 
         context.Response.ContentType = "application/json";
+        decimal basketTotal = 0;
+        foreach (var i in items) basketTotal += i.LineTotal;
+        var itemProjections = new List<object>(items.Count);
+        foreach (var i in items)
+            itemProjections.Add(new { key = i.Key, productId = i.ProductId, productName = i.ProductName, quantity = i.Quantity, unitPrice = i.UnitPrice, lineTotal = i.LineTotal });
         await context.Response.WriteAsync(JsonSerializer.Serialize(new
         {
             basketKey = basket.Key,
             userId,
             status = basket.Status.ToString(),
             itemCount = items.Count,
-            total = items.Sum(i => i.LineTotal),
-            items = items.Select(i => new { key = i.Key, productId = i.ProductId, productName = i.ProductName, quantity = i.Quantity, unitPrice = i.UnitPrice, lineTotal = i.LineTotal })
+            total = basketTotal,
+            items = itemProjections
         }));
     }
 
@@ -58,7 +63,15 @@ public static class BasketApiHandlers
 
         // Check if product already in basket — update quantity
         var existing = await LoadBasketItems(basket.Key.ToString(), context.RequestAborted);
-        var existingItem = existing.FirstOrDefault(i => i.ProductId == productId);
+        BasketItem? existingItem = null;
+        foreach (var i in existing)
+        {
+            if (i.ProductId == productId)
+            {
+                existingItem = i;
+                break;
+            }
+        }
         if (existingItem != null)
         {
             existingItem.Quantity += quantity;
@@ -81,7 +94,9 @@ public static class BasketApiHandlers
         // Update basket totals
         var allItems = await LoadBasketItems(basket.Key.ToString(), context.RequestAborted);
         basket.ItemCount = allItems.Count;
-        basket.Total = allItems.Sum(i => i.LineTotal);
+        decimal allItemsTotal = 0;
+        foreach (var i in allItems) allItemsTotal += i.LineTotal;
+        basket.Total = allItemsTotal;
         if (DataScaffold.TryGetEntity("baskets", out var basketMeta))
             await basketMeta.Handlers.SaveAsync(basket, context.RequestAborted);
 
@@ -141,7 +156,12 @@ public static class BasketApiHandlers
         qd.Clauses.Add(new QueryClause { Field = "UserId", Operator = QueryOperator.Equals, Value = userId });
         qd.Clauses.Add(new QueryClause { Field = "Status", Operator = QueryOperator.Equals, Value = "Open" });
         var results = await meta.Handlers.QueryAsync(qd, ct);
-        var existing = results.Cast<Basket>().FirstOrDefault();
+        Basket? existing = null;
+        foreach (var obj in results)
+        {
+            existing = (Basket)obj;
+            break;
+        }
         if (existing != null) return existing;
 
         var basket = (Basket)meta.Handlers.Create();
@@ -161,7 +181,10 @@ public static class BasketApiHandlers
         var qd = new QueryDefinition();
         qd.Clauses.Add(new QueryClause { Field = "BasketId", Operator = QueryOperator.Equals, Value = basketKey });
         var results = await meta.Handlers.QueryAsync(qd, ct);
-        return results.Cast<BasketItem>().ToList();
+        var list = new List<BasketItem>();
+        foreach (var obj in results)
+            list.Add((BasketItem)obj);
+        return list;
     }
 
     private static string GetAnonymousId(HttpContext context)

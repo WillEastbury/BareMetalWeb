@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using System.Text.Json;
 using System.Threading;
@@ -68,7 +67,7 @@ public sealed class AuditService
             var changes = DetectChanges(oldEntity, newEntity);
             
             // Skip if no meaningful changes (e.g., only UpdatedOnUtc, ETag changed)
-            if (!changes.Any())
+            if (changes.Count == 0)
                 return;
 
             var auditEntry = new AuditEntry(userName)
@@ -228,8 +227,7 @@ public sealed class AuditService
         var type = typeof(T);
 
         // Get all public properties
-        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.CanRead && p.CanWrite);
+        var allProperties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
 
         // Fields to skip (metadata fields that always change + sensitive credential fields)
         var skipFields = new HashSet<string>
@@ -243,8 +241,11 @@ public sealed class AuditService
             "ApiKeyHashes"
         };
 
-        foreach (var prop in properties)
+        foreach (var prop in allProperties)
         {
+            if (!prop.CanRead || !prop.CanWrite)
+                continue;
+
             if (skipFields.Contains(prop.Name))
                 continue;
 
@@ -280,7 +281,16 @@ public sealed class AuditService
         // Handle collections
         if (a is IEnumerable<object> enumA && b is IEnumerable<object> enumB)
         {
-            return enumA.SequenceEqual(enumB);
+            using var eA = enumA.GetEnumerator();
+            using var eB = enumB.GetEnumerator();
+            while (true)
+            {
+                bool hasA = eA.MoveNext();
+                bool hasB = eB.MoveNext();
+                if (!hasA && !hasB) return true;
+                if (hasA != hasB) return false;
+                if (!Equals(eA.Current, eB.Current)) return false;
+            }
         }
 
         return a.Equals(b);

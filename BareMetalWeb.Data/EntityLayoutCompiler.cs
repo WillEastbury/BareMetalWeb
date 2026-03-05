@@ -44,18 +44,33 @@ public static class EntityLayoutCompiler
     public static EntityLayout Compile(DataEntityMetadata meta, out IReadOnlyList<string> warnings)
     {
         var warns = new List<string>();
-        var metaFieldsByName = meta.Fields.ToDictionary(f => f.Name, StringComparer.Ordinal);
+        var metaFieldsByName = new Dictionary<string, DataFieldMetadata>(StringComparer.Ordinal);
+        foreach (var f in meta.Fields)
+            metaFieldsByName[f.Name] = f;
 
-        var props = meta.Type
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.CanRead && p.CanWrite)
-            .OrderBy(p => p.Name, StringComparer.Ordinal)
-            .ToArray();
+        var allProps = meta.Type
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var propList = new List<PropertyInfo>();
+        foreach (var p in allProps)
+        {
+            if (p.CanRead && p.CanWrite)
+                propList.Add(p);
+        }
+        propList.Sort((a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+        var props = propList.ToArray();
 
         if (props.Length == 0)
             warns.Add($"Entity '{meta.Name}' has no public read/write properties.");
 
-        bool hasKey = props.Any(p => p.Name == "Key" && p.PropertyType == typeof(uint));
+        bool hasKey = false;
+        foreach (var p in props)
+        {
+            if (p.Name == "Key" && p.PropertyType == typeof(uint))
+            {
+                hasKey = true;
+                break;
+            }
+        }
         if (!hasKey)
             warns.Add($"Entity '{meta.Name}' is missing a uint Key property.");
 

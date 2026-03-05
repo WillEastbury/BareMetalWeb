@@ -118,12 +118,21 @@ public sealed class WalReplayValidator
                 }
 
                 // Check for keys in replay but not in live
-                int extra = replayHeadMap.Keys.Count(k =>
+                int extra = 0;
+                foreach (var k in replayHeadMap.Keys)
                 {
+                    bool foundInLive = false;
                     for (int i = 0; i < liveKeys.Length; i++)
-                        if (liveKeys[i] == k) return false;
-                    return true;
-                });
+                    {
+                        if (liveKeys[i] == k)
+                        {
+                            foundInLive = true;
+                            break;
+                        }
+                    }
+                    if (!foundInLive)
+                        extra++;
+                }
 
                 result.HeadMapMismatches = mismatches;
                 result.MissingFromReplay = missing;

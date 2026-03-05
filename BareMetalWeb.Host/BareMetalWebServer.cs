@@ -139,10 +139,10 @@ public class BareMetalWebServer : IBareWebHost
 
             _menuCache.Remove(cacheKey);
         }
-        foreach (var rte in routes.Where(kvp => kvp.Value.PageInfo is not null && kvp.Value.PageInfo.PageMetaData.ShowOnNavBar))
+        foreach (var rte in routes)
         {
             var pageInfo = rte.Value.PageInfo;
-            if (pageInfo == null)
+            if (pageInfo == null || !pageInfo.PageMetaData.ShowOnNavBar)
                 continue;
 
             if (!TryParseRoute(rte.Key, out var verb, out var path))
@@ -157,7 +157,7 @@ public class BareMetalWebServer : IBareWebHost
 
             // Build menu options here
             string href = path;
-            string label = pageInfo.PageContext.PageMetaDataValues.FirstOrDefault() ?? path.Trim('/');
+            string label = (pageInfo.PageContext.PageMetaDataValues.Length > 0 ? pageInfo.PageContext.PageMetaDataValues[0] : null) ?? path.Trim('/');
             bool rightAligned = pageInfo.PageContext.NavAlignment == NavAlignment.Right;
             bool highlightAsButton = pageInfo.PageContext.NavRenderStyle == NavRenderStyle.Button;
             var permissionsNeeded = pageInfo.PageMetaData.PermissionsNeeded ?? string.Empty;
@@ -180,7 +180,15 @@ public class BareMetalWebServer : IBareWebHost
                 if (isAnonymous)
                     continue;
 
-                bool hasPermission = requiredPermissions.All(userPermissions.Contains);
+                bool hasPermission = true;
+                for (int i = 0; i < requiredPermissions.Length; i++)
+                {
+                    if (!userPermissions.Contains(requiredPermissions[i]))
+                    {
+                        hasPermission = false;
+                        break;
+                    }
+                }
                 if (!hasPermission)
                     continue;
             }
@@ -204,8 +212,11 @@ public class BareMetalWebServer : IBareWebHost
                 subGroup: pageInfo.PageContext.NavSubGroup));
         }
 
-        foreach (var entity in DataScaffold.Entities.Where(e => e.ShowOnNav))
+        foreach (var entity in DataScaffold.Entities)
         {
+            if (!entity.ShowOnNav)
+                continue;
+
             var permissionsNeeded = entity.Permissions?.Trim() ?? string.Empty;
             bool requiresAnonymous = string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase);
             bool requiresAuthenticated = string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase);
@@ -226,7 +237,16 @@ public class BareMetalWebServer : IBareWebHost
                 if (isAnonymous)
                     continue;
 
-                if (!requiredPermissions.All(userPermissions.Contains))
+                bool allPermissionsMatch = true;
+                for (int i = 0; i < requiredPermissions.Length; i++)
+                {
+                    if (!userPermissions.Contains(requiredPermissions[i]))
+                    {
+                        allPermissionsMatch = false;
+                        break;
+                    }
+                }
+                if (!allPermissionsMatch)
                     continue;
             }
 
@@ -287,11 +307,16 @@ public class BareMetalWebServer : IBareWebHost
     {
         if (_sortedRoutes == null || _sortedRoutesVersion != _routesVersion)
         {
-            _sortedRoutes = routes
-                .Where(r => _compiledRoutes.ContainsKey(r.Key))
-                .Select(r => (r.Key, r.Value, _compiledRoutes[r.Key]))
-                .OrderByDescending(r => r.Item3.LiteralSegmentCount)
-                .ToList();
+            var tempList = new List<(string Key, RouteHandlerData Data, CompiledRoute Compiled)>();
+            foreach (var r in routes)
+            {
+                if (_compiledRoutes.ContainsKey(r.Key))
+                {
+                    tempList.Add((r.Key, r.Value, _compiledRoutes[r.Key]));
+                }
+            }
+            tempList.Sort((a, b) => b.Compiled.LiteralSegmentCount.CompareTo(a.Compiled.LiteralSegmentCount));
+            _sortedRoutes = tempList;
             _sortedRoutesVersion = _routesVersion;
         }
         return _sortedRoutes;
@@ -460,7 +485,11 @@ public class BareMetalWebServer : IBareWebHost
                         return;
                     }
                     await injectedPage.Handler(context);
-                    BufferedLogger.LogInfo($"{path}|{method}|{compiled.Verb}|{string.Join(", ", parameters.Select(p => $"{p.Key}={p.Value}"))}|200|{sourceIp}");
+                    var paramParts = new string[parameters.Count];
+                    int paramIdx = 0;
+                    foreach (var p in parameters)
+                        paramParts[paramIdx++] = $"{p.Key}={p.Value}";
+                    BufferedLogger.LogInfo($"{path}|{method}|{compiled.Verb}|{string.Join(", ", paramParts)}|200|{sourceIp}");
                     return;
                 }
             }
@@ -488,7 +517,11 @@ public class BareMetalWebServer : IBareWebHost
                         return;
                     }
                     await injectedPage.Handler(context);
-                    BufferedLogger.LogInfo($"{path}|{method}|{compiled.Verb}|{string.Join(", ", parameters.Select(p => $"{p.Key}={p.Value}"))}|200|{sourceIp}");
+                    var paramParts2 = new string[parameters.Count];
+                    int paramIdx2 = 0;
+                    foreach (var p in parameters)
+                        paramParts2[paramIdx2++] = $"{p.Key}={p.Value}";
+                    BufferedLogger.LogInfo($"{path}|{method}|{compiled.Verb}|{string.Join(", ", paramParts2)}|200|{sourceIp}");
                     return;
                 }
             }
@@ -599,13 +632,20 @@ public class BareMetalWebServer : IBareWebHost
 
         var userPermissions = new HashSet<string>(user!.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
 
-        return requiredPermissions.All(userPermissions.Contains);
+        for (int i = 0; i < requiredPermissions.Length; i++)
+        {
+            if (!userPermissions.Contains(requiredPermissions[i]))
+                return false;
+        }
+        return true;
     }
 
     private static async ValueTask<bool> RootUserExistsAsync(CancellationToken cancellationToken = default)
     {
         var users = await DataStoreProvider.Current.QueryAsync<User>(RootUserQuery, cancellationToken).ConfigureAwait(false);
-        return users.Any();
+        foreach (var _ in users)
+            return true;
+        return false;
     }
 
     private async ValueTask<bool> ShouldForceSetupAsync(string requestPath, CancellationToken cancellationToken = default)
@@ -683,8 +723,27 @@ public class BareMetalWebServer : IBareWebHost
         if (CorsAllowedOrigins.Length == 0)
             return false;
 
-        bool allowAny = CorsAllowedOrigins.Any(o => o == "*");
-        bool allowOrigin = allowAny || CorsAllowedOrigins.Any(o => string.Equals(o, origin, StringComparison.OrdinalIgnoreCase));
+        bool allowAny = false;
+        for (int i = 0; i < CorsAllowedOrigins.Length; i++)
+        {
+            if (CorsAllowedOrigins[i] == "*")
+            {
+                allowAny = true;
+                break;
+            }
+        }
+        bool allowOrigin = allowAny;
+        if (!allowOrigin)
+        {
+            for (int i = 0; i < CorsAllowedOrigins.Length; i++)
+            {
+                if (string.Equals(CorsAllowedOrigins[i], origin, StringComparison.OrdinalIgnoreCase))
+                {
+                    allowOrigin = true;
+                    break;
+                }
+            }
+        }
         if (!allowOrigin)
             return false;
 

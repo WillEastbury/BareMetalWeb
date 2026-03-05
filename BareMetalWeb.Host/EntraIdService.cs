@@ -264,7 +264,9 @@ public static class EntraIdService
             }
         }
 
-        user.Permissions = permissions.ToArray();
+        var permArray = new string[permissions.Count];
+        permissions.CopyTo(permArray);
+        user.Permissions = permArray;
         user.IsActive = true;
 
         await Users.SaveAsync(user, cancellationToken).ConfigureAwait(false);

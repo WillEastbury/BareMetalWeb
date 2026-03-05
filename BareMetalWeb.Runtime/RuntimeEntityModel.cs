@@ -167,17 +167,22 @@ public sealed class RuntimeEntityModel
         }
 
         // Build action descriptors from RuntimeActionModel
-        var commands = Actions.Select((a, i) => new RemoteCommandMetadata(
-            Method: null!,
-            Name: a.Name,
-            Label: a.Label,
-            Icon: a.Icon,
-            ConfirmMessage: null,
-            Destructive: false,
-            Permission: a.Permission,
-            OverrideEntityPermissions: false,
-            Order: i
-        )).ToList();
+        var commands = new List<RemoteCommandMetadata>(Actions.Count);
+        for (int i = 0; i < Actions.Count; i++)
+        {
+            var a = Actions[i];
+            commands.Add(new RemoteCommandMetadata(
+                Method: null!,
+                Name: a.Name,
+                Label: a.Label,
+                Icon: a.Icon,
+                ConfirmMessage: null,
+                Destructive: false,
+                Permission: a.Permission,
+                OverrideEntityPermissions: false,
+                Order: i
+            ));
+        }
 
         var handlers = new DataEntityHandlers(
             Create: () => schema.CreateRecord(),
@@ -195,7 +200,9 @@ public sealed class RuntimeEntityModel
             QueryAsync: async (query, ct) =>
             {
                 var items = await walProvider.QueryRecordsAsync(schema, query, ct).ConfigureAwait(false);
-                return items.Cast<BaseDataObject>();
+                var result = new List<BaseDataObject>();
+                foreach (var item in items) result.Add((BaseDataObject)item);
+                return result;
             },
             CountAsync: (query, ct) => walProvider.CountRecordsAsync(schema, query, ct)
         );
@@ -212,7 +219,11 @@ public sealed class RuntimeEntityModel
             }
         }
 
-        return new DataEntityMetadata(
+            var docRelFields = new List<DataFieldMetadata>();
+            foreach (var f in fields)
+                if (f.RelatedDocument != null) docRelFields.Add(f);
+
+            return new DataEntityMetadata(
             Type: typeof(DataRecord),
             Name: Name,
             Slug: Slug,
@@ -226,7 +237,7 @@ public sealed class RuntimeEntityModel
             Fields: fields,
             Handlers: handlers,
             Commands: commands,
-            DocumentRelationFields: fields.Where(f => f.RelatedDocument != null).ToList()
+            DocumentRelationFields: docRelFields
         );
     }
 }

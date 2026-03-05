@@ -177,8 +177,13 @@ internal static class Program
         // metal login --outofband → device code flow (no browser)
         // metal login → device code flow (opens browser)
         // metal login <user> <pass> → direct credentials
-        bool outOfBand = args.Any(a => a == "--outofband");
-        var filtered = args.Where(a => a != "--outofband").ToArray();
+        bool outOfBand = false;
+        foreach (var a in args)
+            if (a == "--outofband") { outOfBand = true; break; }
+        var filteredList = new List<string>();
+        foreach (var a in args)
+            if (a != "--outofband") filteredList.Add(a);
+        var filtered = filteredList.ToArray();
 
         if (filtered.Length >= 2)
             return await LoginDirect(filtered[0], filtered[1]);
@@ -205,7 +210,9 @@ internal static class Program
             if (!match.Success && _config.Url != null)
             {
                 var cookies = _cookies.GetCookies(new Uri(_config.Url));
-                var csrfCookie = cookies.FirstOrDefault(c => c.Name == "csrf_token");
+                Cookie? csrfCookie = null;
+                foreach (Cookie c in cookies)
+                    if (c.Name == "csrf_token") { csrfCookie = c; break; }
                 if (csrfCookie != null) csrfToken = csrfCookie.Value;
             }
             else if (match.Success)
@@ -485,7 +492,9 @@ internal static class Program
     {
         if (args.Length < 1) return Help(1, "Usage: metal first <type> [q=text] [field=X op=eq value=Y] [sort=F] [dir=asc|desc]");
         var slug = args[0];
-        var hasSort = args.Skip(1).Any(a => a.StartsWith("sort=", StringComparison.OrdinalIgnoreCase));
+        bool hasSort = false;
+        for (int i = 1; i < args.Length; i++)
+            if (args[i].StartsWith("sort=", StringComparison.OrdinalIgnoreCase)) { hasSort = true; break; }
         var qs = new StringBuilder("?top=1");
         if (!hasSort)
             qs.Append("&sort=CreatedOnUtc&dir=desc");
@@ -607,7 +616,7 @@ internal static class Program
         var slug = args[0];
         var format = "json";
         string? outputFile = null;
-        foreach (var a in args.Skip(1))
+        foreach (var a in args[1..])
         {
             if (a.StartsWith("--format=", StringComparison.OrdinalIgnoreCase))
                 format = a[9..].ToLowerInvariant();
@@ -672,7 +681,9 @@ internal static class Program
     {
         if (string.IsNullOrEmpty(_config.Url)) return null;
         var cookies = _cookies.GetCookies(new Uri(_config.Url));
-        return cookies.FirstOrDefault(c => c.Name == "csrf_token")?.Value;
+        foreach (Cookie c in cookies)
+            if (c.Name == "csrf_token") return c.Value;
+        return null;
     }
 
     /// Sends a request with CSRF headers attached.
@@ -721,23 +732,67 @@ internal static class Program
     {
         if (items.ValueKind != JsonValueKind.Array) { Console.WriteLine(items.ToString()); return; }
         var meta = await FetchMeta();
-        var entity = meta?.FirstOrDefault(e => string.Equals(e.Slug, slug, StringComparison.OrdinalIgnoreCase));
-        var listFields = entity?.Fields.Where(f => f.List).OrderBy(f => f.Order).Select(f => f.Name).ToArray();
+        MetaEntity? entity = null;
+        if (meta != null)
+        {
+            foreach (var e in meta)
+            {
+                if (string.Equals(e.Slug, slug, StringComparison.OrdinalIgnoreCase))
+                {
+                    entity = e;
+                    break;
+                }
+            }
+        }
+        string[]? listFields = null;
+        if (entity != null)
+        {
+            var fieldList = new List<MetaField>();
+            foreach (var f in entity.Fields)
+                if (f.List) fieldList.Add(f);
+            fieldList.Sort((a, b) => a.Order.CompareTo(b.Order));
+            var names = new List<string>();
+            foreach (var f in fieldList)
+                names.Add(f.Name);
+            listFields = names.ToArray();
+        }
 
         // Collect all rows to compute column widths
         var rows = new List<string[]>();
         string[] headers;
         if (listFields != null && listFields.Length > 0)
         {
-            headers = new[] { "Id" }.Concat(listFields).ToArray();
+            var headerList = new List<string> { "Id" };
+            foreach (var f in listFields) headerList.Add(f);
+            headers = headerList.ToArray();
         }
         else
         {
             // Fallback: use keys from first item
-            var first = items.EnumerateArray().FirstOrDefault();
-            headers = first.ValueKind == JsonValueKind.Object
-                ? first.EnumerateObject().Select(p => p.Name).Take(6).ToArray()
-                : new[] { "Value" };
+            JsonElement first = default;
+            bool hasFirst = false;
+            foreach (var elem in items.EnumerateArray())
+            {
+                first = elem;
+                hasFirst = true;
+                break;
+            }
+            if (hasFirst && first.ValueKind == JsonValueKind.Object)
+            {
+                var propNames = new List<string>();
+                int count = 0;
+                foreach (var p in first.EnumerateObject())
+                {
+                    if (count >= 6) break;
+                    propNames.Add(p.Name);
+                    count++;
+                }
+                headers = propNames.ToArray();
+            }
+            else
+            {
+                headers = new[] { "Value" };
+            }
         }
 
         foreach (var item in items.EnumerateArray())

@@ -68,7 +68,10 @@ public static class AgentApiHandlers
         {
             var entities = DataScaffold.Entities;
             if (entities.Count == 0) return "No entities registered.";
-            return "Available entities:\n" + string.Join("\n", entities.Select(e => $"• {e.Slug} ({e.Name})"));
+            var entityLines = new List<string>(entities.Count);
+            foreach (var e in entities)
+                entityLines.Add($"• {e.Slug} ({e.Name})");
+            return "Available entities:\n" + string.Join("\n", entityLines);
         }
 
         // Status
@@ -87,7 +90,9 @@ public static class AgentApiHandlers
             var slug = ExtractEntitySlug(lower, "schema ");
             if (!DataScaffold.TryGetEntity(slug, out var meta))
                 return $"Entity '{slug}' not found. Type 'entities' to see available types.";
-            var fields = meta.Fields.Select(f => $"  {f.Name} ({f.FieldType})");
+            var fields = new List<string>(meta.Fields.Count);
+            foreach (var f in meta.Fields)
+                fields.Add($"  {f.Name} ({f.FieldType})");
             return $"Schema for {meta.Name}:\n{string.Join("\n", fields)}";
         }
 
@@ -112,14 +117,17 @@ public static class AgentApiHandlers
             var store = DataStoreProvider.Current;
             var query = new QueryDefinition { Top = 10 };
             var items = await store.QueryAsync<DataRecord>(query, ct);
-            var list = items.ToList();
+            var list = new List<DataRecord>();
+            foreach (var item in items)
+                list.Add(item);
             if (list.Count == 0)
                 return $"No {meta.Name} found.";
-            var lines = list.Select(item =>
+            var lines = new List<string>(list.Count);
+            foreach (var item in list)
             {
                 var name = item.Key.ToString();
-                return $"• [{item.Key}] {name}";
-            });
+                lines.Add($"• [{item.Key}] {name}");
+            }
             return $"{meta.Name} (top 10):\n{string.Join("\n", lines)}";
         }
 
@@ -161,10 +169,14 @@ public static class AgentApiHandlers
                 }
             };
             var items = await store.QueryAsync<DataRecord>(query, ct);
-            var list = items.ToList();
+            var list = new List<DataRecord>();
+            foreach (var item in items)
+                list.Add(item);
             if (list.Count == 0)
                 return $"No {meta.Name} matching '{term}'.";
-            var lines = list.Select(item => $"• [{item.Key}] {item.Key.ToString()}");
+            var lines = new List<string>(list.Count);
+            foreach (var item in list)
+                lines.Add($"• [{item.Key}] {item.Key.ToString()}");
             return $"Results for '{term}' in {meta.Name}:\n{string.Join("\n", lines)}";
         }
 
