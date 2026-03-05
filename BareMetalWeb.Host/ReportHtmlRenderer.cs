@@ -90,9 +90,9 @@ public static class ReportHtmlRenderer
                     {
                         foreach (var opt in p.Options)
                         {
-                            var parts = opt.Split('|', 2);
-                            var optVal = parts[0];
-                            var optLabel = parts.Length > 1 ? parts[1] : parts[0];
+                            int pipeIdx = opt.IndexOf('|');
+                            var optVal = pipeIdx < 0 ? opt : opt[..pipeIdx];
+                            var optLabel = pipeIdx < 0 ? opt : opt[(pipeIdx + 1)..];
                             Write(writer, "<option value=\"");
                             WriteEncoded(writer, optVal);
                             Write(writer, "\"");

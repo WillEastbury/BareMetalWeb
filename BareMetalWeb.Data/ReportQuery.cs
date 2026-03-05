@@ -84,13 +84,13 @@ public sealed class ReportQuery
     {
         foreach (var col in entityDotField)
         {
-            var parts = col.Split('.');
-            if (parts.Length == 2)
+            int dotIdx = col.IndexOf('.');
+            if (dotIdx > 0 && dotIdx < col.Length - 1)
             {
                 _columns.Add(new ReportColumn
                 {
-                    Entity = parts[0],
-                    Field = parts[1],
+                    Entity = col[..dotIdx],
+                    Field = col[(dotIdx + 1)..],
                     Label = col
                 });
             }
@@ -115,9 +115,9 @@ public sealed class ReportQuery
     /// <summary>Adds a filter predicate ("Entity.Field", operator, value).</summary>
     public ReportQuery Where(string entityDotField, string op, string value)
     {
-        var parts = entityDotField.Split('.');
-        _filters.Add(parts.Length == 2
-            ? new ReportFilter { Entity = parts[0], Field = parts[1], Operator = op, Value = value }
+        int dotIdx = entityDotField.IndexOf('.');
+        _filters.Add(dotIdx > 0 && dotIdx < entityDotField.Length - 1
+            ? new ReportFilter { Entity = entityDotField[..dotIdx], Field = entityDotField[(dotIdx + 1)..], Operator = op, Value = value }
             : new ReportFilter { Entity = _rootEntity, Field = entityDotField, Operator = op, Value = value });
         return this;
     }

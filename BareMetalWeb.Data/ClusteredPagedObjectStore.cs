@@ -260,13 +260,14 @@ public sealed class ClusteredPagedObjectStore
         if (value.StartsWith("o:", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var parts = value.Split(':');
-        if (parts.Length != 2)
+        var span = value.AsSpan();
+        int sep = span.IndexOf(':');
+        if (sep < 0 || span[(sep + 1)..].IndexOf(':') >= 0)
             return false;
 
-        if (!long.TryParse(parts[0], out pageIndex))
+        if (!long.TryParse(span[..sep], out pageIndex))
             return false;
-        if (!ushort.TryParse(parts[1], out slotIndex))
+        if (!ushort.TryParse(span[(sep + 1)..], out slotIndex))
             return false;
 
         return pageIndex > 0;
@@ -284,12 +285,13 @@ public sealed class ClusteredPagedObjectStore
 
         if (value.StartsWith("o:", StringComparison.OrdinalIgnoreCase))
         {
-            var parts = value.Split(':');
-            if (parts.Length != 3)
+            var oSpan = value.AsSpan(2); // skip "o:"
+            int sep = oSpan.IndexOf(':');
+            if (sep < 0 || oSpan[(sep + 1)..].IndexOf(':') >= 0)
                 return false;
-            if (!long.TryParse(parts[1], out pageIndex))
+            if (!long.TryParse(oSpan[..sep], out pageIndex))
                 return false;
-            if (!int.TryParse(parts[2], out pageCount))
+            if (!int.TryParse(oSpan[(sep + 1)..], out pageCount))
                 return false;
             if (pageIndex <= 0 || pageCount <= 0)
                 return false;
@@ -298,16 +300,19 @@ public sealed class ClusteredPagedObjectStore
             return true;
         }
 
-        var standardParts = value.Split(':');
-        if (standardParts.Length != 2)
-            return false;
+        {
+            var span = value.AsSpan();
+            int sep = span.IndexOf(':');
+            if (sep < 0 || span[(sep + 1)..].IndexOf(':') >= 0)
+                return false;
 
-        if (!long.TryParse(standardParts[0], out pageIndex))
-            return false;
-        if (!ushort.TryParse(standardParts[1], out slotIndex))
-            return false;
-        if (pageIndex <= 0)
-            return false;
+            if (!long.TryParse(span[..sep], out pageIndex))
+                return false;
+            if (!ushort.TryParse(span[(sep + 1)..], out slotIndex))
+                return false;
+            if (pageIndex <= 0)
+                return false;
+        }
 
         pageCount = 1;
         return true;

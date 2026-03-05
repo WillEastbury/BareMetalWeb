@@ -617,21 +617,27 @@ public static class BinaryApiHandlers
                 if (!string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
                 {
                     var userPerms = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                    var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                    if (required.Length > 0)
+                    var altLookup = userPerms.GetAlternateLookup<ReadOnlySpan<char>>();
+                    var remaining = permissionsNeeded.AsSpan();
+                    bool hasRequired = false;
+                    bool allPresent = true;
+                    while (remaining.Length > 0)
                     {
-                        bool allPresent = true;
-                        foreach (var r in required)
+                        int idx = remaining.IndexOf(',');
+                        ReadOnlySpan<char> segment;
+                        if (idx < 0) { segment = remaining; remaining = default; }
+                        else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+                        var trimmed = segment.Trim();
+                        if (trimmed.IsEmpty) continue;
+                        hasRequired = true;
+                        if (!altLookup.Contains(trimmed))
                         {
-                            if (!userPerms.Contains(r))
-                            {
-                                allPresent = false;
-                                break;
-                            }
+                            allPresent = false;
+                            break;
                         }
-                        if (!allPresent)
-                            return (null, typeSlug, (403, "Access denied."));
                     }
+                    if (hasRequired && !allPresent)
+                            return (null, typeSlug, (403, "Access denied."));
                 }
             }
         }

@@ -1561,32 +1561,50 @@ public sealed class SearchIndexManager
     private static bool TryParseCoordinate(string token, out double lat, out double lng)
     {
         lat = lng = 0;
-        var parts = token.Split(',');
-        if (parts.Length < 2) return false;
-        return double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float,
+        var span = token.AsSpan();
+        int sep = span.IndexOf(',');
+        if (sep < 0) return false;
+        return double.TryParse(span[..sep].Trim(), System.Globalization.NumberStyles.Float,
                    System.Globalization.CultureInfo.InvariantCulture, out lat) &&
-               double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float,
+               double.TryParse(span[(sep + 1)..].Trim(), System.Globalization.NumberStyles.Float,
                    System.Globalization.CultureInfo.InvariantCulture, out lng);
     }
 
     private static IEnumerable<uint> SearchSpatialFromToken(IndexData index, string queryToken)
     {
         if (index.SpatialIndex == null) return Array.Empty<uint>();
-        var parts = queryToken.Split(',');
-        if (parts.Length == 3 &&
-            double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var lat) &&
-            double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var lng) &&
-            double.TryParse(parts[2].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var radius))
+
+        var span = queryToken.AsSpan();
+        // Count commas to determine format
+        int commaCount = 0;
+        foreach (var c in span) { if (c == ',') commaCount++; }
+
+        const System.Globalization.NumberStyles floatStyle = System.Globalization.NumberStyles.Float;
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+
+        if (commaCount == 2)
         {
-            return index.SpatialIndex.SearchRadius(lat, lng, radius);
+            int c1 = span.IndexOf(',');
+            int c2 = span[(c1 + 1)..].IndexOf(',') + c1 + 1;
+            if (double.TryParse(span[..c1].Trim(), floatStyle, inv, out var lat) &&
+                double.TryParse(span[(c1 + 1)..c2].Trim(), floatStyle, inv, out var lng) &&
+                double.TryParse(span[(c2 + 1)..].Trim(), floatStyle, inv, out var radius))
+            {
+                return index.SpatialIndex.SearchRadius(lat, lng, radius);
+            }
         }
-        if (parts.Length == 4 &&
-            double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var minLat) &&
-            double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var maxLat) &&
-            double.TryParse(parts[2].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var minLng) &&
-            double.TryParse(parts[3].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var maxLng))
+        if (commaCount == 3)
         {
-            return index.SpatialIndex.SearchBoundingBox(minLat, maxLat, minLng, maxLng);
+            int c1 = span.IndexOf(',');
+            int c2 = span[(c1 + 1)..].IndexOf(',') + c1 + 1;
+            int c3 = span[(c2 + 1)..].IndexOf(',') + c2 + 1;
+            if (double.TryParse(span[..c1].Trim(), floatStyle, inv, out var minLat) &&
+                double.TryParse(span[(c1 + 1)..c2].Trim(), floatStyle, inv, out var maxLat) &&
+                double.TryParse(span[(c2 + 1)..c3].Trim(), floatStyle, inv, out var minLng) &&
+                double.TryParse(span[(c3 + 1)..].Trim(), floatStyle, inv, out var maxLng))
+            {
+                return index.SpatialIndex.SearchBoundingBox(minLat, maxLat, minLng, maxLng);
+            }
         }
         return Array.Empty<uint>();
     }
