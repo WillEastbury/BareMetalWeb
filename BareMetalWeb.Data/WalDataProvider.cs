@@ -237,6 +237,11 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             var bytes  = _serializer.Serialize(obj, schemaVersion);
             var walKey = GetOrAllocateKey(type.Name, obj.Key);
 
+            // Capture old head pointer for cache eviction before commit changes it
+            ulong oldPtr = 0;
+            if (!isInsert)
+                _walStore.TryGetHead(walKey, out oldPtr);
+
             var commitTask = _walStore.CommitAsync(new[] { WalOp.Upsert(walKey, bytes, encryption: _walStore.Encryption) });
             if (!commitTask.IsCompleted)
                 commitTask.GetAwaiter().GetResult();
@@ -247,14 +252,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             if (isInsert)
                 _liveCounts.AddOrUpdate(type.Name, 1, (_, c) => c + 1);
 
-            // Evict stale deserialization cache entry (WAL pointer has changed)
-            foreach (var ck in _deserCache.Keys)
+            // Evict stale deserialization cache entry using exact old key
+            if (!isInsert && oldPtr != 0)
             {
-                if (ck.TypeName == type.Name && ck.Key == obj.Key)
-                {
-                    _deserCache.TryRemove(ck, out _);
-                    _deserCacheAccess.TryRemove(ck, out _);
-                }
+                var evictKey = (type.Name, obj.Key, oldPtr);
+                _deserCache.TryRemove(evictKey, out _);
+                _deserCacheAccess.TryRemove(evictKey, out _);
             }
 
             // ── Update secondary field indexes ────────────────────────────
@@ -334,14 +337,33 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
     private void EvictDeserCache()
     {
-        // LRU eviction — remove ~25% of entries with oldest access times
+        // LRU eviction — remove ~25% of entries with oldest access times.
+        // Single-pass min-scan avoids O(n log n) sort on the full cache.
         int toRemove = _deserCache.Count / 4;
-        var oldest = _deserCacheAccess
-            .OrderBy(kvp => kvp.Value)
-            .Take(toRemove)
-            .Select(kvp => kvp.Key)
-            .ToList();
-        foreach (var key in oldest)
+        if (toRemove == 0) toRemove = 1;
+
+        var evictKeys = new List<((string TypeName, uint Key, ulong WalPtr) key, long access)>(toRemove);
+
+        foreach (var kvp in _deserCacheAccess)
+        {
+            if (evictKeys.Count < toRemove)
+            {
+                evictKeys.Add((kvp.Key, kvp.Value));
+                continue;
+            }
+
+            // Find the max (youngest) entry in our evict set and replace it
+            // if this entry is older (smaller tick count)
+            int maxIdx = 0;
+            for (int i = 1; i < evictKeys.Count; i++)
+                if (evictKeys[i].access > evictKeys[maxIdx].access)
+                    maxIdx = i;
+
+            if (kvp.Value < evictKeys[maxIdx].access)
+                evictKeys[maxIdx] = (kvp.Key, kvp.Value);
+        }
+
+        foreach (var (key, _) in evictKeys)
         {
             _deserCache.TryRemove(key, out _);
             _deserCacheAccess.TryRemove(key, out _);
@@ -724,6 +746,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var idMap    = GetOrLoadIdMap(typeName);
         if (!idMap.TryGetValue(key, out var walKey)) return;
 
+        // Capture old head pointer for cache eviction before commit
+        _walStore.TryGetHead(walKey, out ulong oldPtr);
+
         // Load the old object before deleting so we can remove its index entries
         T? oldObj = null;
         List<PropertyInfo> indexedFields = new();
@@ -740,14 +765,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         // Decrement live count
         _liveCounts.AddOrUpdate(typeName, 0, (_, c) => Math.Max(0, c - 1));
 
-        // Evict deserialization cache entry
-        foreach (var ck in _deserCache.Keys)
+        // Evict deserialization cache entry using exact old key
+        if (oldPtr != 0)
         {
-            if (ck.TypeName == typeName && ck.Key == key)
-            {
-                _deserCache.TryRemove(ck, out _);
-                _deserCacheAccess.TryRemove(ck, out _);
-            }
+            var evictKey = (typeName, key, oldPtr);
+            _deserCache.TryRemove(evictKey, out _);
+            _deserCacheAccess.TryRemove(evictKey, out _);
         }
 
         // ── Remove from secondary field indexes ────────────────────────────
@@ -846,6 +869,11 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             var bytes = serializer.Serialize(record, plan, schemaVersion);
             var walKey = GetOrAllocateKey(entityName, record.Key);
 
+            // Capture old head pointer for cache eviction before commit
+            ulong oldPtr = 0;
+            if (!isInsert)
+                _walStore.TryGetHead(walKey, out oldPtr);
+
             var commitTask = _walStore.CommitAsync(new[] { WalOp.Upsert(walKey, bytes, encryption: _walStore.Encryption) });
             if (!commitTask.IsCompleted)
                 commitTask.GetAwaiter().GetResult();
@@ -855,13 +883,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             if (isInsert)
                 _liveCounts.AddOrUpdate(entityName, 1, (_, c) => c + 1);
 
-            foreach (var ck in _deserCache.Keys)
+            // Evict deserialization cache entry using exact old key
+            if (!isInsert && oldPtr != 0)
             {
-                if (ck.TypeName == entityName && ck.Key == record.Key)
-                {
-                    _deserCache.TryRemove(ck, out _);
-                    _deserCacheAccess.TryRemove(ck, out _);
-                }
+                var evictKey = (entityName, record.Key, oldPtr);
+                _deserCache.TryRemove(evictKey, out _);
+                _deserCacheAccess.TryRemove(evictKey, out _);
             }
 
             var keyStr = record.Key.ToString();

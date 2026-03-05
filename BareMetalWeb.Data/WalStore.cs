@@ -124,6 +124,9 @@ public sealed class WalStore : IDisposable
 
         cancellationToken.ThrowIfCancellationRequested();
 
+        WalOp[] filledOps;
+        ulong ptr;
+
         lock (_writeLock)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -137,7 +140,7 @@ public sealed class WalStore : IDisposable
             ulong txId = _nextTxId++;
 
             // Auto-fill PrevPtr from head map where caller left it as NullPtr
-            var filledOps = new WalOp[ops.Count];
+            filledOps = new WalOp[ops.Count];
             for (int i = 0; i < ops.Count; i++)
             {
                 var op = ops[i];
@@ -153,20 +156,22 @@ public sealed class WalStore : IDisposable
             }
 
             // Write record, fsync
-            ulong ptr = _activeWriter.AppendCommitBatch(txId, filledOps);
+            ptr = _activeWriter.AppendCommitBatch(txId, filledOps);
             _activeWriter.Flush(flushToDisk: true);
 
-            // Update head map and VisibleCommitPtr (completes the "TCS" notification in spec terms)
-            foreach (var op in filledOps)
-                HeadMap.SetHead(op.Key, ptr);
+            // Batch head map update — single write-lock instead of N
+            Span<ulong> opKeys = stackalloc ulong[filledOps.Length];
+            for (int i = 0; i < filledOps.Length; i++)
+                opKeys[i] = filledOps[i].Key;
+            HeadMap.BatchSetHeads(opKeys, ptr);
 
             Volatile.Write(ref _visibleCommitPtr, ptr);
-
-            // Dispatch to secondary projections (V2 spec §4.2)
-            ProjectionManager.ApplyCommit(filledOps);
-
-            return Task.FromResult(ptr);
         }
+
+        // Dispatch to secondary projections outside the write lock
+        ProjectionManager.ApplyCommit(filledOps);
+
+        return Task.FromResult(ptr);
     }
 
     // ── Read-back helpers ─────────────────────────────────────────────────────
@@ -243,14 +248,12 @@ public sealed class WalStore : IDisposable
         var segments = DiscoverSegments();  // sorted descending
 
         // Build head map from newest segment to oldest.
-        // Skip segments entirely within the snapshot horizon (all ptrs ≤ snapshotPtr)
-        // when the snapshot was just loaded – conservative: we replay all segments.
-        var headEntries = new SortedDictionary<ulong, ulong>();
+        // Use Dictionary (O(1) inserts) instead of SortedDictionary (O(log n) inserts)
+        // and sort once at the end for BulkLoad.
+        var headEntries = new Dictionary<ulong, ulong>();
 
         foreach (var (segId, filePath) in segments)
         {
-            // If snapshot covered this segment's entire range we still scan,
-            // but SetHead will be ignored for keys already in the head map.
             Dictionary<ulong, uint>? index = WalSegmentReader.TryReadFooterIndex(filePath)
                                           ?? WalSegmentReader.LinearScanIndex(filePath);
 
@@ -266,13 +269,25 @@ public sealed class WalStore : IDisposable
 
         if (headEntries.Count > 0)
         {
+            // Build sorted arrays from WAL-derived heads
             var keys  = new ulong[headEntries.Count];
             var heads = new ulong[headEntries.Count];
             int i = 0;
             foreach (var kv in headEntries) { keys[i] = kv.Key; heads[i] = kv.Value; i++; }
-            // Merge with existing (snapshot-loaded) head map: WAL wins for keys present in both
-            foreach (var kv in headEntries)
-                HeadMap.SetHead(kv.Key, kv.Value);
+
+            // Sort by key for BulkLoad/BatchSetHeads (single sort vs O(n log n) SortedDictionary inserts)
+            Array.Sort(keys, heads);
+
+            if (_visibleCommitPtr == WalConstants.NullPtr)
+            {
+                // No snapshot — just bulk-load the WAL-derived heads directly
+                HeadMap.BulkLoad(keys, heads);
+            }
+            else
+            {
+                // Snapshot was loaded — merge WAL heads on top (single write-lock)
+                HeadMap.BatchSetHeads(keys.AsSpan(), heads);
+            }
         }
 
         // Always start a new segment; don't resume the previous active segment.

@@ -109,6 +109,138 @@ public sealed class WalHeadMap : IDisposable
         finally { _lock.ExitReadLock(); }
     }
 
+    /// <summary>
+    /// Updates multiple heads in a single write-lock acquisition.
+    /// Keys that already exist are updated in-place; new keys trigger a single
+    /// sorted merge at the end rather than N array rebuilds.
+    /// </summary>
+    internal void BatchSetHeads(ReadOnlySpan<ulong> keys, ulong ptr)
+    {
+        if (keys.Length == 0) return;
+
+        _lock.EnterWriteLock();
+        try
+        {
+            // Fast path: all keys already exist — just update in-place
+            bool allExist = true;
+            for (int i = 0; i < keys.Length; i++)
+            {
+                int idx = Array.BinarySearch(_keysSorted, keys[i]);
+                if (idx >= 0)
+                    _headsSorted[idx] = ptr;
+                else
+                    { allExist = false; break; }
+            }
+            if (allExist) return;
+
+            // Slow path: some new keys — collect inserts and do a single merge
+            var insertKeys = new List<ulong>();
+            for (int i = 0; i < keys.Length; i++)
+            {
+                int idx = Array.BinarySearch(_keysSorted, keys[i]);
+                if (idx >= 0)
+                    _headsSorted[idx] = ptr;
+                else
+                    insertKeys.Add(keys[i]);
+            }
+
+            if (insertKeys.Count == 0) return;
+
+            insertKeys.Sort();
+            int oldLen = _keysSorted.Length;
+            int newLen = oldLen + insertKeys.Count;
+            var newKeys  = new ulong[newLen];
+            var newHeads = new ulong[newLen];
+
+            // Merge sorted _keysSorted and sorted insertKeys
+            int a = 0, b = 0, w = 0;
+            while (a < oldLen && b < insertKeys.Count)
+            {
+                if (_keysSorted[a] <= insertKeys[b])
+                {
+                    newKeys[w] = _keysSorted[a];
+                    newHeads[w] = _headsSorted[a];
+                    a++;
+                }
+                else
+                {
+                    newKeys[w] = insertKeys[b];
+                    newHeads[w] = ptr;
+                    b++;
+                }
+                w++;
+            }
+            while (a < oldLen) { newKeys[w] = _keysSorted[a]; newHeads[w] = _headsSorted[a]; a++; w++; }
+            while (b < insertKeys.Count) { newKeys[w] = insertKeys[b]; newHeads[w] = ptr; b++; w++; }
+
+            _keysSorted = newKeys;
+            _headsSorted = newHeads;
+        }
+        finally { _lock.ExitWriteLock(); }
+    }
+
+    /// <summary>
+    /// Updates multiple heads with per-key ptrs in a single write-lock acquisition.
+    /// Used during recovery where different keys map to different segment pointers.
+    /// Keys and ptrs must be pre-sorted ascending by key.
+    /// </summary>
+    internal void BatchSetHeads(ReadOnlySpan<ulong> keys, ulong[] ptrs)
+    {
+        if (keys.Length == 0) return;
+
+        _lock.EnterWriteLock();
+        try
+        {
+            // Collect new keys (not already present) and update existing ones
+            var insertKeys  = new List<ulong>();
+            var insertPtrs  = new List<ulong>();
+
+            for (int i = 0; i < keys.Length; i++)
+            {
+                int idx = Array.BinarySearch(_keysSorted, keys[i]);
+                if (idx >= 0)
+                    _headsSorted[idx] = ptrs[i];
+                else
+                {
+                    insertKeys.Add(keys[i]);
+                    insertPtrs.Add(ptrs[i]);
+                }
+            }
+
+            if (insertKeys.Count == 0) return;
+
+            int oldLen = _keysSorted.Length;
+            int newLen = oldLen + insertKeys.Count;
+            var newKeys  = new ulong[newLen];
+            var newHeads = new ulong[newLen];
+
+            // Merge sorted arrays (insertKeys are already sorted since input is sorted)
+            int a = 0, b = 0, w = 0;
+            while (a < oldLen && b < insertKeys.Count)
+            {
+                if (_keysSorted[a] <= insertKeys[b])
+                {
+                    newKeys[w] = _keysSorted[a];
+                    newHeads[w] = _headsSorted[a];
+                    a++;
+                }
+                else
+                {
+                    newKeys[w] = insertKeys[b];
+                    newHeads[w] = insertPtrs[b];
+                    b++;
+                }
+                w++;
+            }
+            while (a < oldLen) { newKeys[w] = _keysSorted[a]; newHeads[w] = _headsSorted[a]; a++; w++; }
+            while (b < insertKeys.Count) { newKeys[w] = insertKeys[b]; newHeads[w] = insertPtrs[b]; b++; w++; }
+
+            _keysSorted = newKeys;
+            _headsSorted = newHeads;
+        }
+        finally { _lock.ExitWriteLock(); }
+    }
+
     /// <inheritdoc/>
     public void Dispose() => _lock.Dispose();
 }
