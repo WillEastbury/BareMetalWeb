@@ -272,7 +272,7 @@ Sequential IDs are persisted so they survive restarts:
 {dataRoot}/
 ├── wal/                          ← WalStore root
 │   ├── {EntityType}_idmap.bin    ← string ID → packed ulong WAL key
-│   └── wal_seg_*.log             ← append-only WAL segment files
+│   └── wal_seg_*.log             ← append-only WAL segment files (CRC32C verified)
 ├── {EntityType}/
 │   ├── schema-{EntityType}-*.json ← schema version files (shared with LocalFolderBinaryDataProvider)
 │   └── _seqid.dat                ← sequential ID counter
@@ -284,9 +284,26 @@ Sequential IDs are persisted so they survive restarts:
 │   └── {EntityType}/
 │       └── {FieldName}_index.page ← IndexStore secondary field index (LocalPagedFile format)
 └── indexes/
-    └── {EntityType}.idx          ← SearchIndexManager full-text index
+    └── {EntityType}.idx          ← SearchIndexManager full-text index (Inverted only)
 ```
 
 ---
 
-_Status: Verified against codebase @ metadata-migration-719 branch_
+## WAL Segment Integrity: CRC32C Hardware Acceleration
+
+Each WAL segment entry includes a CRC32C checksum computed by `WalCrc32C`.  The
+implementation selects the fastest available hardware code path at runtime:
+
+| CPU feature | Code path | Performance |
+|---|---|---|
+| x86-64 SSE4.2 | `Sse42.X64.Crc32` — 8-byte lanes | Fastest on x86 |
+| x86 SSE4.2 | `Sse42.Crc32` — 4-byte lanes | Compatible fallback |
+| ARM CRC (AArch64) | `Crc32.Arm.ComputeCrc32C` | ARM64 native |
+| Portable | Software lookup-table | Any platform |
+
+This is the **only** place in BareMetalWeb that uses CPU-specific SIMD intrinsics
+(`System.Runtime.Intrinsics.X86` / `System.Runtime.Intrinsics.Arm`).
+
+---
+
+_Status: Updated @ commit HEAD (2026-03-05) — added WAL CRC32C hardware acceleration section; fixed storage layout_

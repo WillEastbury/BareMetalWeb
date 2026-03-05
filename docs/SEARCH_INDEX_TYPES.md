@@ -2,7 +2,9 @@
 
 ## Overview
 
-BareMetalWeb provides four different index types for optimizing search operations on data objects. Each index type has different performance characteristics and is suited for different use cases.
+BareMetalWeb provides **six** different index types for optimizing search operations on data objects. Each index type has different performance characteristics and is suited for different use cases.
+
+> For the separate ANN vector-embedding index, see [`docs/architecture/vector-index.md`](./architecture/vector-index.md).
 
 ## Index Types
 
@@ -134,6 +136,90 @@ public class LogEntry : BaseDataObject
 var results = searchManager.Search(typeof(LogEntry), "ERR-404", loadAll, IndexKind.Bloom);
 ```
 
+### 5. Graph Index
+
+**Best for:** Relationship traversal between entity records (foreign-key graphs, hierarchy trees)
+
+**Description:** Stores typed directed edges as forward and reverse adjacency lists.
+When a `uint`-valued field (a numeric foreign key) is decorated with `[DataIndex(IndexKind.Graph)]`
+an edge is recorded from the current record's ID to the referenced ID, labelled with the entity
+type name.
+
+**Characteristics:**
+- Forward traversal: O(degree) per hop
+- Reverse traversal: O(in-degree) per hop
+- BFS traversal up to configurable max-hops depth
+- Typed edges allow filtering by relationship kind
+- All in-memory; rebuilt on startup from the Inverted index log
+
+**Usage Example:**
+```csharp
+public class Employee : BaseDataObject
+{
+    [DataIndex(IndexKind.Graph)]
+    public string ManagerId { get; set; }   // FK → another Employee
+
+    [DataIndex(IndexKind.Graph)]
+    public string DepartmentId { get; set; } // FK → Department
+}
+```
+
+**Graph query API:**
+```csharp
+// All records reachable from nodeId within 3 hops
+var reachable = searchManager.TraverseGraph(typeof(Employee), nodeId, maxHops: 3, loadAll);
+
+// Direct neighbours
+var reports = searchManager.GetNeighbours(typeof(Employee), managerId, loadAll);
+
+// Reverse: find who points TO this node
+var managers = searchManager.GetReverseNeighbours(typeof(Employee), employeeId, loadAll);
+```
+
+---
+
+### 6. Spatial Index
+
+**Best for:** Geographic coordinate queries (radius, bounding box, nearest-N)
+
+**Description:** Stores geographic coordinate pairs (latitude/longitude) in a
+grid-based spatial hash with 0.1° cells (≈ 11 km per cell). Supports efficient
+radius, bounding-box, and nearest-N queries using Haversine distance.
+
+**Field format:** The indexed field must store coordinates as a `"lat,lng"` string
+(e.g. `"51.5074,-0.1278"`) or as a JSON-encoded object parseable by the built-in
+coordinate parser.
+
+**Characteristics:**
+- Grid cells ≈ 11 km × 11 km (0.1° resolution)
+- Candidate expansion based on radius: only grid cells within `ceil(radius / 11)` cells of the centre are scanned
+- Exact Haversine distance applied to all candidates for precise filtering
+- All in-memory; rebuilt on startup
+
+**Usage Example:**
+```csharp
+public class Store : BaseDataObject
+{
+    [DataIndex(IndexKind.Spatial)]
+    public string Location { get; set; }   // "lat,lng" e.g. "51.5074,-0.1278"
+}
+```
+
+**Spatial query API:**
+```csharp
+// Stores within 10 km of a point
+var nearby = searchManager.SearchRadius(typeof(Store), 51.5, -0.1, radiusKm: 10, loadAll);
+
+// Stores within a bounding box
+var inBox = searchManager.SearchBoundingBox(typeof(Store), 51.0, 52.0, -1.0, 0.0, loadAll);
+
+// 5 nearest stores with distances
+var nearest = searchManager.SearchNearest(typeof(Store), 51.5, -0.1, count: 5, loadAll);
+// Returns List<(uint Id, double DistanceKm)>
+```
+
+---
+
 ## Choosing the Right Index Type
 
 | Use Case | Recommended Index | Reason |
@@ -144,7 +230,13 @@ var results = searchManager.Search(typeof(LogEntry), "ERR-404", loadAll, IndexKi
 | Frequently changing tags/labels | Treap | Good balance for dynamic data |
 | User activity tracking | Bloom | Space-efficient membership testing |
 | Large dataset membership checks | Bloom | Very fast "is this present?" queries |
+| Foreign-key relationship traversal | Graph | BFS traversal, reverse lookups |
+| Manager/employee hierarchy | Graph | Multi-hop traversal |
+| Store locations, IoT devices | Spatial | Radius/nearest queries |
+| Delivery address geocoding | Spatial | Bounding-box filtering |
+| Semantic/embedding similarity | *VectorIndexManager* | See `docs/architecture/vector-index.md` |
 | General purpose search | Inverted | Best default choice |
+
 
 ## Mixed Index Types
 
