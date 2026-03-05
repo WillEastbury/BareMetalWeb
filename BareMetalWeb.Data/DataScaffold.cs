@@ -1125,7 +1125,7 @@ public static class DataScaffold
             if (item == null)
                 continue;
 
-            var values = new List<string>();
+            var values = new List<string>(listFields.Length);
             for (int fi = 0; fi < listFields.Length; fi++)
             {
                 var field = listFields[fi];

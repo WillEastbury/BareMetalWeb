@@ -917,10 +917,11 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var runtimeFieldsList = new List<object>();
-                foreach (var f in runtimeModel.Fields)
+                var runtimeFieldsList = new object[runtimeModel.Fields.Count];
+                for (int fi = 0; fi < runtimeModel.Fields.Count; fi++)
                 {
-                    runtimeFieldsList.Add(new Dictionary<string, object?>
+                    var f = runtimeModel.Fields[fi];
+                    runtimeFieldsList[fi] = new Dictionary<string, object?>
                     {
                         ["fieldId"] = f.FieldId,
                         ["ordinal"] = f.Ordinal,
@@ -952,22 +953,24 @@ public static class RouteRegistrationExtensions
                                   ["pattern"] = f.Pattern
                               }
                             : null
-                    });
+                    };
                 }
-                var runtimeIndexesList = new List<object>();
-                foreach (var i in runtimeModel.Indexes)
+                var runtimeIndexesList = new object[runtimeModel.Indexes.Count];
+                for (int ii = 0; ii < runtimeModel.Indexes.Count; ii++)
                 {
-                    runtimeIndexesList.Add(new Dictionary<string, object?>
+                    var idx = runtimeModel.Indexes[ii];
+                    runtimeIndexesList[ii] = new Dictionary<string, object?>
                     {
-                        ["indexId"] = i.IndexId,
-                        ["fields"] = i.FieldNames,
-                        ["type"] = i.Type
-                    });
+                        ["indexId"] = idx.IndexId,
+                        ["fields"] = idx.FieldNames,
+                        ["type"] = idx.Type
+                    };
                 }
-                var runtimeActionsList = new List<object>();
-                foreach (var a in runtimeModel.Actions)
+                var runtimeActionsList = new object[runtimeModel.Actions.Count];
+                for (int ai = 0; ai < runtimeModel.Actions.Count; ai++)
                 {
-                    runtimeActionsList.Add(new Dictionary<string, object?>
+                    var a = runtimeModel.Actions[ai];
+                    runtimeActionsList[ai] = new Dictionary<string, object?>
                     {
                         ["actionId"] = a.ActionId,
                         ["name"] = a.Name,
@@ -975,7 +978,7 @@ public static class RouteRegistrationExtensions
                         ["icon"] = a.Icon,
                         ["permission"] = a.Permission,
                         ["enabledWhen"] = a.EnabledWhen
-                    });
+                    };
                 }
 
                 var result = new Dictionary<string, object?>
@@ -991,9 +994,9 @@ public static class RouteRegistrationExtensions
                     ["version"] = runtimeModel.Version,
                     ["schemaHash"] = runtimeModel.SchemaHash,
                     ["formLayout"] = runtimeModel.FormLayout,
-                    ["fields"] = runtimeFieldsList.ToArray(),
-                    ["indexes"] = runtimeIndexesList.ToArray(),
-                    ["actions"] = runtimeActionsList.ToArray()
+                    ["fields"] = runtimeFieldsList,
+                    ["indexes"] = runtimeIndexesList,
+                    ["actions"] = runtimeActionsList
                 };
 
                 context.Response.ContentType = "application/json";
@@ -1080,10 +1083,11 @@ public static class RouteRegistrationExtensions
                         filteredTypes.Add(m);
                 }
                 filteredTypes.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
-                var typesList = new List<object>();
-                foreach (var m in filteredTypes)
+                var types = new object[filteredTypes.Count];
+                for (int ti = 0; ti < filteredTypes.Count; ti++)
                 {
-                    typesList.Add(new Dictionary<string, object?>
+                    var m = filteredTypes[ti];
+                    types[ti] = new Dictionary<string, object?>
                     {
                         ["name"] = m.Name,
                         ["slug"] = m.Slug,
@@ -1092,9 +1096,8 @@ public static class RouteRegistrationExtensions
                         ["showOnNav"] = m.ShowOnNav,
                         ["navGroup"] = m.NavGroup,
                         ["fieldCount"] = m.Fields.Count
-                    });
+                    };
                 }
-                var types = typesList.ToArray();
 
                 context.Response.ContentType = "application/json";
                 await context.Response.WriteAsync(JsonSerializer.Serialize(types, jsonOptions));
@@ -1216,9 +1219,10 @@ public static class RouteRegistrationExtensions
     {
         var sortedFieldsForBuild = new List<DataFieldMetadata>(meta.Fields);
         sortedFieldsForBuild.Sort((a, b) => a.Order.CompareTo(b.Order));
-        var fieldsList = new List<object>();
-        foreach (var f in sortedFieldsForBuild)
+        var fieldsList = new object[sortedFieldsForBuild.Count];
+        for (int fi = 0; fi < sortedFieldsForBuild.Count; fi++)
         {
+            var f = sortedFieldsForBuild[fi];
             var fd = new Dictionary<string, object?>
             {
                 ["name"] = f.Name,
@@ -1348,10 +1352,10 @@ public static class RouteRegistrationExtensions
             if (f.FieldType == FormFieldType.Enum)
             {
                 var enumOptions = DataScaffold.BuildEnumOptions(f.Property.PropertyType);
-                var enumList = new List<object>();
-                foreach (var kv in enumOptions)
-                    enumList.Add(new { value = kv.Key, label = kv.Value });
-                fd["enumValues"] = enumList.ToArray();
+                var enumArr = new object[enumOptions.Count];
+                for (int ei = 0; ei < enumOptions.Count; ei++)
+                    enumArr[ei] = new { value = enumOptions[ei].Key, label = enumOptions[ei].Value };
+                fd["enumValues"] = enumArr;
             }
             else
             {
@@ -1376,16 +1380,17 @@ public static class RouteRegistrationExtensions
                 fd["relatedDocument"] = null;
             }
 
-            fieldsList.Add(fd);
+            fieldsList[fi] = fd;
         }
-        var fields = fieldsList.ToArray();
+        var fields = fieldsList;
 
         var sortedCommands = new List<RemoteCommandMetadata>(meta.Commands);
         sortedCommands.Sort((a, b) => a.Order.CompareTo(b.Order));
-        var commandsList = new List<object>();
-        foreach (var c in sortedCommands)
+        var commands = new object[sortedCommands.Count];
+        for (int ci = 0; ci < sortedCommands.Count; ci++)
         {
-            commandsList.Add(new Dictionary<string, object?>
+            var c = sortedCommands[ci];
+            commands[ci] = new Dictionary<string, object?>
             {
                 ["name"] = c.Name,
                 ["label"] = c.Label,
@@ -1394,9 +1399,8 @@ public static class RouteRegistrationExtensions
                 ["destructive"] = c.Destructive,
                 ["permission"] = c.Permission,
                 ["order"] = c.Order
-            });
+            };
         }
-        var commands = commandsList.ToArray();
 
         bool canShowWorkflow = false;
         foreach (var f in meta.Fields)
@@ -1411,20 +1415,21 @@ public static class RouteRegistrationExtensions
         object[]? documentRelationFieldsArray = null;
         if (meta.DocumentRelationFields != null && meta.DocumentRelationFields.Count > 0)
         {
-            var drfList = new List<object>();
-            foreach (var f in meta.DocumentRelationFields)
+            var drfList = new object[meta.DocumentRelationFields.Count];
+            for (int di = 0; di < meta.DocumentRelationFields.Count; di++)
             {
+                var f = meta.DocumentRelationFields[di];
                 var targetMeta = DataScaffold.GetEntityByType(f.RelatedDocument!.TargetType);
-                drfList.Add(new Dictionary<string, object?>
+                drfList[di] = new Dictionary<string, object?>
                 {
                     ["name"] = f.Name,
                     ["label"] = f.Label,
                     ["targetSlug"] = targetMeta?.Slug,
                     ["targetName"] = targetMeta?.Name,
                     ["displayField"] = f.RelatedDocument.DisplayField
-                });
+                };
             }
-            documentRelationFieldsArray = drfList.ToArray();
+            documentRelationFieldsArray = drfList;
         }
 
         return new Dictionary<string, object?>

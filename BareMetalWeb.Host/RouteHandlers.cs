@@ -1619,18 +1619,18 @@ public sealed class RouteHandlers : IRouteHandlers
                 int cmp = a.NavOrder.CompareTo(b.NavOrder);
                 return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.Ordinal);
             });
-            var rowsList = new List<string[]>();
-            foreach (var entity in sortedEntities)
+            var rows = new string[sortedEntities.Count][];
+            for (int ri = 0; ri < sortedEntities.Count; ri++)
             {
-                rowsList.Add(new[]
+                var entity = sortedEntities[ri];
+                rows[ri] = new[]
                 {
                     $"<a class=\"btn btn-sm btn-outline-info me-1\" href=\"/ssr/admin/data/{entity.Slug}\" title=\"Open\" aria-label=\"Open\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i></a><a class=\"btn btn-sm btn-outline-success\" href=\"/ssr/admin/data/{entity.Slug}/import\" title=\"Import CSV\" aria-label=\"Import CSV\"><i class=\"bi bi-upload\" aria-hidden=\"true\"></i></a>",
                     WebUtility.HtmlEncode(entity.Name),
                     WebUtility.HtmlEncode(entity.Slug),
                     string.IsNullOrWhiteSpace(entity.Permissions) ? "Public" : WebUtility.HtmlEncode(entity.Permissions)
-                });
+                };
             }
-            var rows = rowsList.ToArray();
 
             ctx.AddTable(new[] { "Actions", "Entity", "Slug", "Permissions" }, rows);
         })(context);
@@ -1888,16 +1888,16 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var viewRowsHtml = DataScaffold.BuildViewRowsHtml(meta, instance, HasPermissionForMeta);
-        var rowsList2 = new List<string[]>();
-        foreach (var row in viewRowsHtml)
+        var rows = new string[viewRowsHtml.Count][];
+        for (int ri = 0; ri < viewRowsHtml.Count; ri++)
         {
-            rowsList2.Add(new[]
+            var row = viewRowsHtml[ri];
+            rows[ri] = new[]
             {
                 WebUtility.HtmlEncode(row.Label),
                 row.IsHtml ? row.Value : WebUtility.HtmlEncode(row.Value)
-            });
+            };
         }
-        var rows = rowsList2.ToArray();
 
         // Check if entity has nested components
         var nestedComponents = DataScaffold.GetNestedComponents(meta);
@@ -2058,10 +2058,9 @@ public sealed class RouteHandlers : IRouteHandlers
             default:
                 // Fall back to simple CSV (entity fields only, no nested)
                 var viewRows1 = DataScaffold.BuildViewRows(meta, instance);
-                var rowsList1 = new List<string[]>();
-                foreach (var row in viewRows1)
-                    rowsList1.Add(new[] { row.Label, row.Value });
-                var rows = rowsList1.ToArray();
+                var rows = new string[viewRows1.Count][];
+                for (int ri = 0; ri < viewRows1.Count; ri++)
+                    rows[ri] = new[] { viewRows1[ri].Label, viewRows1[ri].Value };
                 if (instance is BaseDataObject dataObject)
                 {
                     var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
@@ -2104,10 +2103,9 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var viewRowsRtf = DataScaffold.BuildViewRows(meta, instance);
-        var rowsListRtf = new List<string[]>();
-        foreach (var row in viewRowsRtf)
-            rowsListRtf.Add(new[] { row.Label, row.Value });
-        var rows = rowsListRtf.ToArray();
+        var rows = new string[viewRowsRtf.Count][];
+        for (int ri = 0; ri < viewRowsRtf.Count; ri++)
+            rows[ri] = new[] { viewRowsRtf[ri].Label, viewRowsRtf[ri].Value };
         if (instance is BaseDataObject dataObject)
         {
             var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
@@ -2148,10 +2146,9 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var viewRowsHtml2 = DataScaffold.BuildViewRows(meta, instance);
-        var rowsListHtml2 = new List<string[]>();
-        foreach (var row in viewRowsHtml2)
-            rowsListHtml2.Add(new[] { row.Label, row.Value });
-        var rows = rowsListHtml2.ToArray();
+        var rows = new string[viewRowsHtml2.Count][];
+        for (int ri = 0; ri < viewRowsHtml2.Count; ri++)
+            rows[ri] = new[] { viewRowsHtml2[ri].Label, viewRowsHtml2[ri].Value };
         if (instance is BaseDataObject dataObject)
         {
             var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
@@ -3012,9 +3009,9 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.Headers.Append("Content-Disposition", $"attachment; filename=\"{typeSlug}-bulk-export.csv\"");
             
             using var writer = new StreamWriter(context.Response.Body);
-            var encodedHeaders = new List<string>();
-            foreach (var h in headers)
-                encodedHeaders.Add(EscapeCsvValue(h));
+            var encodedHeaders = new string[headers.Count];
+            for (int hi = 0; hi < headers.Count; hi++)
+                encodedHeaders[hi] = EscapeCsvValue(headers[hi]);
             await writer.WriteLineAsync(string.Join(",", encodedHeaders));
             
             foreach (var row in rows)
@@ -3022,9 +3019,9 @@ public sealed class RouteHandlers : IRouteHandlers
                 var cleanRow = new string[row.Length];
                 for (int ci = 0; ci < row.Length; ci++)
                     cleanRow[ci] = StripHtmlTags(row[ci]);
-                var encodedCells = new List<string>();
-                foreach (var cell in cleanRow)
-                    encodedCells.Add(EscapeCsvValue(cell));
+                var encodedCells = new string[cleanRow.Length];
+                for (int ci = 0; ci < cleanRow.Length; ci++)
+                    encodedCells[ci] = EscapeCsvValue(cleanRow[ci]);
                 await writer.WriteLineAsync(string.Join(",", encodedCells));
             }
         }
@@ -7882,10 +7879,11 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var jobsList = new List<JobStatusSnapshot>(jobs);
         jobsList.Sort((a, b) => b.StartedAt.CompareTo(a.StartedAt));
-        var itemsList = new List<object>();
-        foreach (var snapshot in jobsList)
+        var items = new object[jobsList.Count];
+        for (int ji = 0; ji < jobsList.Count; ji++)
         {
-            itemsList.Add(new
+            var snapshot = jobsList[ji];
+            items[ji] = new
             {
                 jobId           = snapshot.JobId,
                 operationName   = snapshot.OperationName,
@@ -7903,9 +7901,8 @@ public sealed class RouteHandlers : IRouteHandlers
                 completedAt     = snapshot.CompletedAt?.ToString("O"),
                 error           = snapshot.Error,
                 resultUrl       = snapshot.ResultUrl
-            });
+            };
         }
-        var items = itemsList.ToArray();
 
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "application/json";

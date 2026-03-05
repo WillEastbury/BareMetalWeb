@@ -37,15 +37,16 @@ public static class GraphQLHandler
 
         foreach (var meta in DataScaffold.Entities)
         {
-            var fields = new List<object>();
-            fields.Add(new { name = "id", type = new { kind = "SCALAR", name = "ID", ofType = (object?)null } });
-            foreach (var f in meta.Fields)
+            var fields = new object[meta.Fields.Count + 1];
+            fields[0] = new { name = "id", type = new { kind = "SCALAR", name = "ID", ofType = (object?)null } };
+            for (int fi = 0; fi < meta.Fields.Count; fi++)
             {
-                fields.Add(new
+                var f = meta.Fields[fi];
+                fields[fi + 1] = new
                 {
                     name = ToCamel(f.Name),
                     type = new { kind = "SCALAR", name = ToGraphQLType(f.FieldType, f.Required), ofType = (object?)null }
-                });
+                };
             }
             types.Add(new { kind = "OBJECT", name = ToPascal(meta.Slug), fields });
 
