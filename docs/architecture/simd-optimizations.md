@@ -165,20 +165,83 @@ not steady-state latency.
 
 ---
 
-## 4. Remaining Opportunities (not yet implemented)
+## 4. Implemented Optimizations (continued)
 
-### 3.4 AES-NI Encryption  (`SynchronousEncryption.cs`)
+### 3.4 AVX2 Byte Scanner  (`SimdByteScanner.cs`)  ✅ Implemented
+
+**Hot path:** Any code that must find the first occurrence of a specific byte in
+a large `ReadOnlySpan<byte>` buffer — binary protocol parsing, WAL record scanning,
+static-file content inspection, and pre-screening UTF-8 template buffers for the
+`{` (0x7B) delimiter byte before full token parsing.
+
+**Method signature:**
+```csharp
+public static int FindByte(ReadOnlySpan<byte> data, byte target)
+```
+Returns the zero-based index of the first match, or `-1` if not found.
+Zero allocations; no `unsafe` blocks required (uses `Vector*.LoadUnsafe` and
+`MemoryMarshal.GetReference`).
+
+**What was done:**
+
+| Priority | Platform         | Path                                                    | Width   |
+|----------|------------------|---------------------------------------------------------|---------|
+| 1        | x86-64 with AVX2 | `Avx2.CompareEqual` + `Avx2.MoveMask` + `TrailingZeroCount` | 256-bit / 32 bytes/iter |
+| 2        | ARM64 NEON       | `AdvSimd.CompareEqual` + `AdvSimd.Arm64.MaxAcross`     | 128-bit / 16 bytes/iter |
+| 3        | All (portable)   | `Vector<byte>` — JIT selects AVX2 (32) or SSE2/NEON (16) | JIT-selected |
+| 4        | Scalar fallback  | Plain `for` loop — one byte/iteration                  | 1 byte/iter |
+
+**AVX2 algorithm (32 bytes per iteration):**
+1. Broadcast `target` byte into all 32 lanes of a `Vector256<byte>` with `Vector256.Create(target)`.
+2. Load 32 bytes from the current position via `Vector256.LoadUnsafe(ref origin, (nuint)i)`.
+3. Compare all 32 lanes simultaneously with `Avx2.CompareEqual` — each matching lane becomes `0xFF`.
+4. Pack the high bit of each 8-bit lane into a 32-bit mask with `Avx2.MoveMask`.
+5. If `mask != 0`, `BitOperations.TrailingZeroCount(mask)` gives the lane index of the first match.
+6. Repeat until the buffer is exhausted; remaining `< 32` bytes use a scalar tail.
+
+**Where it is used in the codebase:**
+- `SpanReader.IndexOfByte(byte marker)` — SIMD-accelerated search in the current read window
+  without advancing the reader position.
+- `SpanReader.SkipToMarker(byte marker)` — advances the reader to the next occurrence of a
+  specific sentinel byte, useful for binary record parsing in the WAL reader.
+- **Template engine** — `HtmlFragmentStore.ZeroAllocationReplaceCopy` and
+  `ZeroAllocationReplaceCopyAndWrite` were updated to replace the old char-by-char outer scan
+  with `span.IndexOf("{{".AsSpan())`, which routes through the .NET runtime's own SSE2/NEON
+  vector search.  For UTF-8 pre-encoded template byte buffers, callers can use
+  `SimdByteScanner.FindByte(utf8Bytes, (byte)'{')` as a fast pre-screen before full token parsing.
+
+**Performance goal:** scan buffers > 1 MB at memory-bandwidth speeds (~20+ GB/s on AVX2).
+
+**Benchmark:**
+```
+dotnet run -c Release --project BareMetalWeb.Benchmarks -- --filter *ByteScanner*
+```
+
+**Expected results (1 MB buffer, AVX2 machine):**
+
+| Method                        | Mean    | Ratio |
+|-------------------------------|---------|-------|
+| Scalar – no match             | ~300 µs | 1.00  |
+| Span.IndexOf – no match       | ~80  µs | 0.27  |
+| SimdByteScanner – no match    | ~60  µs | 0.20  |
+| SimdByteScanner – match at mid| ~30  µs | 0.10  |
+
+---
+
+## 5. Remaining Opportunities (not yet implemented)
+
+### 3.5 AES-NI Encryption  (`SynchronousEncryption.cs`)
 
 **Current:** Delegates to .NET's `Aes.Create()` which already selects AES-NI
 hardware under the hood on supported platforms.  No action required.
 
-### 3.5 SHA-256 Cookie / Session Signing  (`BinaryObjectSerializer.cs` — HMAC)
+### 3.6 SHA-256 Cookie / Session Signing  (`BinaryObjectSerializer.cs` — HMAC)
 
 **Current:** `IncrementalHash.CreateHMAC(HashAlgorithmName.SHA256, ...)` which
 already uses `SHA-NI` (x86) or `SHA256` (ARM) hardware acceleration via the
 .NET crypto provider.  No action required.
 
-### 3.6 AVX-512 Float16 / DP-INT8 for Quantized Vectors
+### 3.7 AVX-512 Float16 / DP-INT8 for Quantized Vectors
 
 **Future (not yet in scope):** When `QuantizationType.Float16` or
 `QuantizationType.ProductQuantization` is implemented, consider:
@@ -197,7 +260,7 @@ startup log:
 logger.LogInfo(SimdCapabilities.Current.ToLogLine());
 ```
 
-`DataLayerCapabilities.Describe()` now reports all six acceleration paths:
+`DataLayerCapabilities.Describe()` now reports all seven acceleration paths:
 
 ```
 Portable SIMD width : 256-bit (8 floats/iter, Vector<float> baseline)
@@ -206,10 +269,11 @@ CRC-32C             : x86 SSE4.2 CRC32Q (64-bit, hardware)
 Key comparison      : Direct ulong word comparison (4 × 64-bit, zero allocation)
 Bloom filter        : ulong[] bit-packing + BitOperations.PopCount (hardware POPCNT / NEON CNT)
 Schema hash         : XxHash64 (hardware-accelerated on x86 via AES/SSE4 and ARM via NEON)
+Byte scanner        : x86 AVX2 (256-bit / 32 bytes per iteration)
 ```
 
 This lets you verify at a glance which SIMD tier is active in production.
 
 ---
 
-_Status: 3.1–3.3 implemented in commit **bc095a0**; 3.4–3.5 no action required; 3.6 future scope_
+_Status: 3.1–3.3 implemented in commit **bc095a0**; 3.4 (AVX2 byte scanner) implemented; 3.5–3.6 no action required; 3.7 future scope_

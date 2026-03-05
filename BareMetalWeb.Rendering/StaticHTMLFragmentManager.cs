@@ -51,47 +51,61 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
     if (keys.Length != values.Length)
         throw new ArgumentException("Keys and values must be of equal length.");
 
-    // Estimate: template.Length * 2 = worst case after substitution
     ReadOnlySpan<char> input = template.AsSpan();
     var buffer = new ArrayBufferWriter<char>();
 
-    int i = 0;
-    while (i < input.Length)
+    int pos = 0;
+    while (pos < input.Length)
     {
-        if (input[i] == '{' && i + 1 < input.Length && input[i + 1] == '{')
+        // SIMD-accelerated scan: IndexOf uses SSE2/NEON vector search internally.
+        int openIdx = input.Slice(pos).IndexOf("{{".AsSpan());
+
+        if (openIdx < 0)
         {
-            int start = i + 2;
-            int end = input.Slice(start).IndexOf("}}");
-
-            if (end >= 0)
-            {
-                var token = input.Slice(start, end);
-
-                bool matched = false;
-                for (int k = 0; k < keys.Length; k++)
-                {
-                    if (token.SequenceEqual(keys[k].AsSpan().Slice(2, keys[k].Length - 4))) // remove {{ }}
-                    {
-                        buffer.Write(values[k]);
-                        matched = true;
-                        break;
-                    }
-                }
-
-                if (!matched)
-                {
-                    buffer.Write("{{");
-                    buffer.Write(token);
-                    buffer.Write("}}");
-                }
-
-                i = start + end + 2; // past the }}
-                continue;
-            }
+            // No more tokens — write the remainder as one contiguous slice.
+            buffer.Write(input.Slice(pos));
+            break;
         }
 
-        buffer.Write(input.Slice(i, 1));
-        i++;
+        // Write all literal characters before '{{'.
+        if (openIdx > 0)
+            buffer.Write(input.Slice(pos, openIdx));
+
+        int start = pos + openIdx + 2;
+        int end   = input.Slice(start).IndexOf("}}".AsSpan());
+
+        if (end >= 0)
+        {
+            var token = input.Slice(start, end);
+
+            bool matched = false;
+            for (int k = 0; k < keys.Length; k++)
+            {
+                if (token.SequenceEqual(keys[k].AsSpan().Slice(2, keys[k].Length - 4))) // remove {{ }}
+                {
+                    buffer.Write(values[k]);
+                    matched = true;
+                    break;
+                }
+            }
+
+            if (!matched)
+            {
+                buffer.Write("{{");
+                buffer.Write(token);
+                buffer.Write("}}");
+            }
+
+            pos = start + end + 2; // past the }}
+        }
+        else
+        {
+            // Unmatched '{{' with no closing '}}' — emit as literal and advance.
+            // `start` already equals `pos + openIdx + 2`, so assigning `pos = start`
+            // is the same as `pos += openIdx + 2`, which moves past the '{{'.
+            buffer.Write(input.Slice(pos + openIdx, 2));
+            pos = start; // identical to: pos = pos + openIdx + 2
+        }
     }
 
     return new string(buffer.WrittenSpan);
@@ -109,43 +123,58 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
 
     ReadOnlySpan<char> input = template.AsSpan();
 
-    int i = 0;
-    while (i < input.Length)
+    int pos = 0;
+    while (pos < input.Length)
     {
-        if (input[i] == '{' && i + 1 < input.Length && input[i + 1] == '{')
+        // SIMD-accelerated scan: IndexOf uses SSE2/NEON vector search internally.
+        int openIdx = input.Slice(pos).IndexOf("{{".AsSpan());
+
+        if (openIdx < 0)
         {
-            int start = i + 2;
-            int end = input.Slice(start).IndexOf("}}");
-
-            if (end >= 0)
-            {
-                var token = input.Slice(start, end);
-
-                bool matched = false;
-                for (int k = 0; k < keys.Length; k++)
-                {
-                    if (token.SequenceEqual(keys[k].AsSpan().Slice(2, keys[k].Length - 4))) // remove {{ }}
-                    {
-                        WriteUtf8(writer, values[k].AsSpan());
-                        matched = true;
-                        break;
-                    }
-                }
-
-                if (!matched)
-                {
-                    WriteUtf8(writer, "{{".AsSpan());
-                    WriteUtf8(writer, token);
-                    WriteUtf8(writer, "}}".AsSpan());
-                }
-
-                i = start + end + 2; // past the }}
-                continue;
-            }
+            // No more tokens — write the remainder as one contiguous UTF-8 slice.
+            WriteUtf8(writer, input.Slice(pos));
+            return;
         }
 
-        WriteUtf8(writer, input.Slice(i, 1));
-        i++;
+        // Write all literal characters before '{{'.
+        if (openIdx > 0)
+            WriteUtf8(writer, input.Slice(pos, openIdx));
+
+        int start = pos + openIdx + 2;
+        int end   = input.Slice(start).IndexOf("}}".AsSpan());
+
+        if (end >= 0)
+        {
+            var token = input.Slice(start, end);
+
+            bool matched = false;
+            for (int k = 0; k < keys.Length; k++)
+            {
+                if (token.SequenceEqual(keys[k].AsSpan().Slice(2, keys[k].Length - 4))) // remove {{ }}
+                {
+                    WriteUtf8(writer, values[k].AsSpan());
+                    matched = true;
+                    break;
+                }
+            }
+
+            if (!matched)
+            {
+                WriteUtf8(writer, "{{".AsSpan());
+                WriteUtf8(writer, token);
+                WriteUtf8(writer, "}}".AsSpan());
+            }
+
+            pos = start + end + 2; // past the }}
+        }
+        else
+        {
+            // Unmatched '{{' with no closing '}}' — emit as literal and advance.
+            // `start` already equals `pos + openIdx + 2`, so assigning `pos = start`
+            // is the same as `pos += openIdx + 2`, which moves past the '{{'.
+            WriteUtf8(writer, input.Slice(pos + openIdx, 2));
+            pos = start; // identical to: pos = pos + openIdx + 2
+        }
     }
 }
 
