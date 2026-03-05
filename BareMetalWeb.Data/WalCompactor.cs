@@ -32,9 +32,6 @@ public sealed class WalCompactor
         var segmentIds = _store.GetSegmentIds();
         uint? activeId = _store.ActiveSegmentId;
 
-        // Snapshot the head map once for the benefit check
-        _store.HeadMap.CopyArrays(out ulong[] keys, out ulong[] heads);
-
         for (int s = 0; s < segmentIds.Count; s++)
         {
             uint segId = segmentIds[s];
@@ -42,12 +39,7 @@ public sealed class WalCompactor
                 continue;
 
             // Count how many live head-map entries reference this segment
-            int liveCount = 0;
-            for (int i = 0; i < heads.Length; i++)
-            {
-                var (headSeg, _) = WalConstants.UnpackPtr(heads[i]);
-                if (headSeg == segId) liveCount++;
-            }
+            int liveCount = _store.SegmentIndex.GetCount(segId);
 
             if (liveCount == 0)
             {
