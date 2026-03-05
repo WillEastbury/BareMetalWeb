@@ -81,6 +81,48 @@ public class CssBundleServiceTests : IDisposable
         Assert.Contains(theme, CssBundleService.DefaultThemes);
     }
 
+    // ── CustomThemeDefinitions coverage ──────────────────────────────────────
+
+    [Fact]
+    public void CustomThemeDefinitions_Contains4Themes()
+    {
+        Assert.Equal(4, CssBundleService.CustomThemeDefinitions.Count);
+    }
+
+    [Theory]
+    [InlineData("jigsaw")]
+    [InlineData("rave")]
+    [InlineData("luminescent")]
+    [InlineData("geography")]
+    public void CustomThemeDefinitions_ContainsTheme(string theme)
+    {
+        Assert.True(CssBundleService.CustomThemeDefinitions.ContainsKey(theme),
+            $"CustomThemeDefinitions should contain '{theme}'");
+    }
+
+    [Theory]
+    [InlineData("jigsaw", "lumen")]
+    [InlineData("rave", "cyborg")]
+    [InlineData("luminescent", "darkly")]
+    [InlineData("geography", "sandstone")]
+    public void CustomThemeDefinitions_HasCorrectBaseTheme(string theme, string expectedBase)
+    {
+        var (baseTheme, _) = CssBundleService.CustomThemeDefinitions[theme];
+        Assert.Equal(expectedBase, baseTheme);
+    }
+
+    [Theory]
+    [InlineData("jigsaw")]
+    [InlineData("rave")]
+    [InlineData("luminescent")]
+    [InlineData("geography")]
+    public void CustomThemeDefinitions_HasNonEmptyCustomCss(string theme)
+    {
+        var (_, customCss) = CssBundleService.CustomThemeDefinitions[theme];
+        Assert.False(string.IsNullOrWhiteSpace(customCss),
+            $"Custom CSS for '{theme}' should not be empty");
+    }
+
     // ── BuildBundles ──────────────────────────────────────────────────────────
 
     [Fact]
@@ -247,15 +289,24 @@ public class CssBundleServiceTests : IDisposable
         foreach (var theme in CssBundleService.DefaultThemes)
             WriteThemeCss(theme, $"/* {theme} pre-existing */");
 
+        // Also pre-create custom theme files so no network calls are needed.
+        foreach (var theme in CssBundleService.CustomThemeDefinitions.Keys)
+            WriteThemeCss(theme, $"/* {theme} pre-existing */");
+
         var logged = new System.Collections.Generic.List<string>();
         await CssBundleService.EnsureAssetsAsync(_tempRoot, msg => logged.Add(msg));
 
-        // No "Downloading" messages expected since all files already existed.
+        // No "Downloading" or "Building" messages expected since all files already existed.
         Assert.DoesNotContain(logged, m => m.StartsWith("Downloading"));
+        Assert.DoesNotContain(logged, m => m.StartsWith("Building"));
 
         // BuildBundles is called at end — all 25 themes should be in memory.
         Assert.True(CssBundleService.HasBundles);
         foreach (var theme in CssBundleService.DefaultThemes)
+            Assert.Contains(theme, CssBundleService.LoadedThemes());
+
+        // All custom themes should also be in memory.
+        foreach (var theme in CssBundleService.CustomThemeDefinitions.Keys)
             Assert.Contains(theme, CssBundleService.LoadedThemes());
     }
 
@@ -282,6 +333,8 @@ public class CssBundleServiceTests : IDisposable
             File.WriteAllBytes(Path.Combine(fontsDir, "bootstrap-icons.woff2"), Array.Empty<byte>());
             foreach (var theme in CssBundleService.DefaultThemes)
                 File.WriteAllText(Path.Combine(themesDir, $"{theme}.min.css"), $"/* {theme} */");
+            foreach (var theme in CssBundleService.CustomThemeDefinitions.Keys)
+                File.WriteAllText(Path.Combine(themesDir, $"{theme}.min.css"), $"/* {theme} */");
 
             await CssBundleService.EnsureAssetsAsync(freshRoot);
 
@@ -303,6 +356,8 @@ public class CssBundleServiceTests : IDisposable
         File.WriteAllBytes(Path.Combine(_tempRoot, "fonts", "bootstrap-icons.woff2"), Array.Empty<byte>());
         foreach (var theme in CssBundleService.DefaultThemes)
             WriteThemeCss(theme, $"/* {theme} */");
+        foreach (var theme in CssBundleService.CustomThemeDefinitions.Keys)
+            WriteThemeCss(theme, $"/* {theme} */");
 
         await CssBundleService.EnsureAssetsAsync(_tempRoot);
 
@@ -312,6 +367,15 @@ public class CssBundleServiceTests : IDisposable
             var context = CreateContext("GET", $"/static/css/themes/{theme}.min.css");
             var result = await CssBundleService.TryServeAsync(context);
             Assert.True(result, $"Theme '{theme}' should be served after EnsureAssetsAsync");
+            Assert.Equal(200, context.Response.StatusCode);
+        }
+
+        // All custom themes must also be served from cache.
+        foreach (var theme in CssBundleService.CustomThemeDefinitions.Keys)
+        {
+            var context = CreateContext("GET", $"/static/css/themes/{theme}.min.css");
+            var result = await CssBundleService.TryServeAsync(context);
+            Assert.True(result, $"Custom theme '{theme}' should be served after EnsureAssetsAsync");
             Assert.Equal(200, context.Response.StatusCode);
         }
     }
