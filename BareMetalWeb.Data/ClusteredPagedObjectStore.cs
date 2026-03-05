@@ -216,15 +216,15 @@ public sealed class ClusteredPagedObjectStore
             brotli.Write(payload);
         }
 
-        var compressed = output.ToArray();
-        if (compressed.Length >= payload.Length)
+        // Compare sizes using the internal buffer — avoids allocating when compression doesn't help
+        if ((int)output.Length >= payload.Length)
         {
             compressionKind = CompressionNone;
             return payload.ToArray();
         }
 
         compressionKind = CompressionBrotli;
-        return compressed;
+        return output.GetBuffer().AsSpan(0, (int)output.Length).ToArray();
     }
 
     private static byte[] DecompressPayload(ReadOnlySpan<byte> payload, byte compressionKind, int uncompressedLength)
@@ -232,11 +232,12 @@ public sealed class ClusteredPagedObjectStore
         if (compressionKind == CompressionNone)
             return payload.ToArray();
 
-        using var input = new MemoryStream(payload.ToArray());
-        using var brotli = new BrotliStream(input, CompressionMode.Decompress);
-        using var output = new MemoryStream(uncompressedLength > 0 ? uncompressedLength : 0);
-        brotli.CopyTo(output);
-        return output.ToArray();
+        // Use span-based Brotli API — avoids 2 MemoryStream allocations + 2 ToArray copies
+        var result = new byte[uncompressedLength];
+        if (!BrotliDecoder.TryDecompress(payload, result, out int written) || written != uncompressedLength)
+            throw new InvalidDataException(
+                $"Clustered Brotli decompression failed: expected={uncompressedLength}, got={written}.");
+        return result;
     }
 
     private static string FormatLocation(long pageIndex, ushort slotIndex)

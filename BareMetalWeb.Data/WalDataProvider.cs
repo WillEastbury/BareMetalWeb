@@ -1619,11 +1619,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var arch   = ParseArchitecture(schemaFile.Architecture);
         var schema = _serializer.CreateSchema(schemaFile.Version, schemaMembers, arch, schemaFile.Hash);
 
-        // Materialize to array only at the serializer boundary
-        var arr = memory.ToArray();
+        // Use .Span to avoid allocating an intermediate byte[] copy
         if (_serializer is BinaryObjectSerializer bin)
-            return bin.Deserialize<T>(arr, schema, SchemaReadMode.BestEffort);
-        return _serializer.Deserialize<T>(arr, schema);
+            return bin.Deserialize<T>(memory.Span, schema, SchemaReadMode.BestEffort);
+        return _serializer.Deserialize<T>(memory.Span, schema);
     }
 
     // ── Singleton-flag enforcement ────────────────────────────────────────────
