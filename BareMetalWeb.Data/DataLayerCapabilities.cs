@@ -44,6 +44,22 @@ public static class DataLayerCapabilities
         "Direct ulong word comparison (4 × 64-bit, zero allocation)";
 
     /// <summary>
+    /// The SIMD acceleration path used by <see cref="ColumnQueryExecutor"/> for
+    /// batch-vectorised column scanning during full-table queries.
+    /// </summary>
+    public static string ColumnQueryPath
+    {
+        get
+        {
+            string tier = SimdCapabilities.Current.BestTier;
+            int intWidth  = Vector<int>.Count * sizeof(int) * 8;
+            int longWidth = Vector<long>.Count * sizeof(long) * 8;
+            return $"Vector<T> portable SIMD ({tier}): {intWidth}-bit int lane, " +
+                   $"{longWidth}-bit long lane | threshold={ColumnQueryExecutor.VectorizationThreshold} rows";
+        }
+    }
+
+    /// <summary>
     /// Returns a multi-line human-readable description of all active
     /// data-layer hardware acceleration paths.
     /// </summary>
@@ -53,6 +69,7 @@ public static class DataLayerCapabilities
             $"Portable SIMD width : {Vector<float>.Count * sizeof(float) * 8}-bit " +
             $"({Vector<float>.Count} floats/iter, Vector<float> baseline)\n" +
             $"Vector distance     : {VectorDistancePath}\n" +
+            $"Column query scan   : {ColumnQueryPath}\n" +
             $"CRC-32C             : {Crc32CPath}\n" +
             $"Key comparison      : {KeyComparisonPath}";
     }

@@ -601,6 +601,46 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
         // ── Fallback: filter/sort on non-indexed fields ─────────────────────
         var canShortCircuit = query == null || query.Sorts.Count == 0;
+
+        // ── Vectorised path: pre-load all objects, then apply SIMD column scan ──
+        // Activated when the entity set is large enough to amortise column-extraction
+        // overhead and the query has no nested OR groups.
+        if (query != null
+            && idMap.Count >= ColumnQueryExecutor.VectorizationThreshold
+            && query.Groups.Count == 0
+            && query.Clauses.Count > 0)
+        {
+            var allObjects = new List<T>(idMap.Count);
+            foreach (var (objKey, _) in idMap)
+            {
+                T? obj;
+                try { obj = Load<T>(objKey); }
+                catch (Exception ex)
+                {
+                    _logger?.LogError($"Deserialization failed for {typeName} with Key {objKey}.", ex);
+                    continue;
+                }
+                if (obj != null) allObjects.Add(obj);
+            }
+
+            if (canShortCircuit)
+            {
+                return ColumnQueryExecutor.Filter(allObjects, query, skip, top);
+            }
+
+            // With sorts: filter first (vectorised), then sort, then slice.
+            var filtered = ColumnQueryExecutor.Filter(allObjects, query);
+            var sortedList = new List<T>(_queryEvaluator.ApplySorts(filtered, query));
+            if (skip > 0 || top != int.MaxValue)
+            {
+                int end = Math.Min(skip + top, sortedList.Count);
+                var paged = new List<T>(Math.Max(0, end - skip));
+                for (int i = skip; i < end; i++) paged.Add(sortedList[i]);
+                return paged;
+            }
+            return sortedList;
+        }
+
         var scanResults     = new List<T>(Math.Min(top, idMap.Count));
         int scanMatched     = 0;
 

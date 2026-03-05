@@ -329,6 +329,49 @@ The 32-byte Latin-1 index key is stored internally as four `ulong` words.
 compares the resulting big-endian values directly — a zero-allocation,
 branch-minimal comparison that avoids the prior stackalloc + `SequenceCompareTo`.
 
+### Vectorised Column Query Scan — `ColumnQueryExecutor`
+
+When a full-table scan is required (no usable secondary index) and the entity set
+contains at least **256 rows**, `WalDataProvider.Query<T>` activates a
+batch-vectorised filter path instead of the per-row reflection loop.
+
+**How it works:**
+
+1. All rows are pre-loaded into a `List<T>`.
+2. For each `QueryClause` in the query, a typed column array is extracted from the
+   loaded objects using the compiled `GetValueFn` delegate (no reflection at scan
+   time):
+   - Numeric fields (`int`, `long`, `double`, `float`, `bool`, `enum`, `DateTime`,
+     `DateOnly`, `TimeOnly`, `TimeSpan`, `decimal`) → typed column array.
+   - String / GUID / other fields → scalar per-row evaluation.
+3. The column array is swept with `System.Numerics.Vector<T>` portable SIMD
+   comparisons (`Equals`, `GreaterThan`, `LessThan`, `GreaterThanOrEqual`,
+   `LessThanOrEqual`, `NotEquals`), writing matching row indices into a
+   `ulong[]` bitmask.
+4. Multi-clause AND queries compose bitmasks via SIMD `ulong` AND (using
+   `Vector<ulong>`).
+5. The final result is materialised by iterating set bits with
+   `BitOperations.TrailingZeroCount`, honouring `skip`/`top` pagination.
+
+**Expected throughput:** `Vector<int>.Count` rows per comparison cycle on the SIMD
+path (4–8× on SSE2/AVX2, 4× on ARM NEON). The integer-mask bitmask AND step adds
+negligible overhead and enables free multi-clause composition.
+
+**Eligibility gates:**
+- `idMap.Count >= 256` (vectorisation threshold)
+- `query.Groups.Count == 0` (no nested OR groups; use scalar path for complex logic)
+- `query.Clauses.Count > 0` (at least one predicate)
+
+**Fallback:** Clauses with unsupported operators (Contains, StartsWith, EndsWith,
+In, NotIn) or non-numeric field types fall back to the scalar
+`DataQueryEvaluator.Matches()` per-row loop for that clause, while vectorisable
+clauses in the same query still use the SIMD path. Results are AND-composed via
+bitmask intersection, so correctness is maintained for any mix of clause types.
+
+`DataLayerCapabilities.ColumnQueryPath` reports the active SIMD tier, lane width,
+and activation threshold at runtime (logged at startup and shown in the metrics
+dashboard).
+
 ---
 
 _Status: Updated @ commit HEAD (2026-03-05) — extended hardware acceleration section with SimdDistance FMA paths, WalLatin1Key32 word comparison, CRC slicing-by-4 software fallback; added striped WalHeadMap description_
