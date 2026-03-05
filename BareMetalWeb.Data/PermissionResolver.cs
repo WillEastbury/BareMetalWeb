@@ -218,8 +218,22 @@ public static class PermissionResolver
     private static IEnumerable<string> SplitCsv(string? value)
     {
         if (string.IsNullOrWhiteSpace(value)) yield break;
-        foreach (var part in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            yield return part;
+        int start = 0;
+        while (start <= value.Length)
+        {
+            int idx = value.IndexOf(',', start);
+            if (idx < 0) idx = value.Length;
+            int segStart = start;
+            int segEnd = idx;
+            // Trim leading whitespace
+            while (segStart < segEnd && char.IsWhiteSpace(value[segStart])) segStart++;
+            // Trim trailing whitespace
+            while (segEnd > segStart && char.IsWhiteSpace(value[segEnd - 1])) segEnd--;
+            if (segEnd > segStart)
+                yield return value[segStart..segEnd];
+            start = idx + 1;
+            if (idx == value.Length) break;
+        }
     }
 
     private static DataFieldMetadata? FindFieldByName(IReadOnlyList<DataFieldMetadata> fields, string name)

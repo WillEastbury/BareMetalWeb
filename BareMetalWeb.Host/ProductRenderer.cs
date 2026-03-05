@@ -197,8 +197,17 @@ public static class ProductRenderer
             if (!string.IsNullOrEmpty(p.Tags))
             {
                 sb.Append("""<div class="mt-2">""");
-                foreach (var tag in p.Tags.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                    sb.Append($"""<span class="badge bg-secondary me-1">{Enc(tag)}</span>""");
+                var tagsRemaining = p.Tags.AsSpan();
+                while (tagsRemaining.Length > 0)
+                {
+                    int idx = tagsRemaining.IndexOf(',');
+                    ReadOnlySpan<char> segment;
+                    if (idx < 0) { segment = tagsRemaining; tagsRemaining = default; }
+                    else { segment = tagsRemaining[..idx]; tagsRemaining = tagsRemaining[(idx + 1)..]; }
+                    var tag = segment.Trim();
+                    if (tag.IsEmpty) continue;
+                    sb.Append($"""<span class="badge bg-secondary me-1">{Enc(tag.ToString())}</span>""");
+                }
                 sb.AppendLine("</div>");
             }
 

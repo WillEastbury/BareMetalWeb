@@ -43,6 +43,8 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private const string PagedFolderName       = "Paged";
     private const string PagedFileExtension    = ".page";
 
+    private static readonly HashSet<uint> s_emptyUintSet = new();
+
     // Monotonic ETag counter — cheaper than Guid.NewGuid() per save
     private static long _etagCounter = DateTime.UtcNow.Ticks;
 
@@ -412,14 +414,14 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                     var fieldValue = clause.Value.ToString() ?? string.Empty;
                     var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
                     if (fieldIndex.Count == 0) break;
-                    clauseCandidates = fieldIndex.TryGetValue(fieldValue, out var ids) ? ids : new HashSet<uint>();
+                    clauseCandidates = fieldIndex.TryGetValue(fieldValue, out var ids) ? ids : s_emptyUintSet;
                 }
                 else if (clause.Operator == QueryOperator.StartsWith)
                 {
                     var prefix = clause.Value.ToString() ?? string.Empty;
                     var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
                     if (fieldIndex.Count == 0) break;
-                    clauseCandidates = new HashSet<uint>();
+                    clauseCandidates = new HashSet<uint>(16);
                     foreach (var kvp in fieldIndex)
                     {
                         if (kvp.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -736,14 +738,14 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                     var fieldValue = clause.Value.ToString() ?? string.Empty;
                     var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
                     if (fieldIndex.Count == 0) break;
-                    clauseCandidates = fieldIndex.TryGetValue(fieldValue, out var ids) ? ids : new HashSet<uint>();
+                    clauseCandidates = fieldIndex.TryGetValue(fieldValue, out var ids) ? ids : s_emptyUintSet;
                 }
                 else if (clause.Operator == QueryOperator.StartsWith)
                 {
                     var prefix = clause.Value.ToString() ?? string.Empty;
                     var fieldIndex = _indexStore.ReadIndex(typeName, prop.Name);
                     if (fieldIndex.Count == 0) break;
-                    clauseCandidates = new HashSet<uint>();
+                    clauseCandidates = new HashSet<uint>(16);
                     foreach (var kvp in fieldIndex)
                     {
                         if (kvp.Key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
@@ -1659,11 +1661,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var arch   = ParseArchitecture(schemaFile.Architecture);
         var schema = _serializer.CreateSchema(schemaFile.Version, schemaMembers, arch, schemaFile.Hash);
 
-        // Materialize to array only at the serializer boundary
-        var arr = memory.ToArray();
+        // Use .Span to avoid allocating an intermediate byte[] copy
         if (_serializer is BinaryObjectSerializer bin)
-            return bin.Deserialize<T>(arr, schema, SchemaReadMode.BestEffort);
-        return _serializer.Deserialize<T>(arr, schema);
+            return bin.Deserialize<T>(memory.Span, schema, SchemaReadMode.BestEffort);
+        return _serializer.Deserialize<T>(memory.Span, schema);
     }
 
     // ── Singleton-flag enforcement ────────────────────────────────────────────

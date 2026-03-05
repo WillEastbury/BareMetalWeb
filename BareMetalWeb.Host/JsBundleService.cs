@@ -88,7 +88,7 @@ public static class JsBundleService
 
     private static void BuildNamedBundle(string path, string[] fileOrder, string jsDirectory)
     {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(16384);
         var latestWrite = DateTime.MinValue;
 
         foreach (var fileName in fileOrder)

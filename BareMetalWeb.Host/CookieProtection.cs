@@ -71,16 +71,17 @@ public static class CookieProtection
         if (string.IsNullOrWhiteSpace(protectedValue))
             return null;
 
-        var parts = protectedValue.Split('.', 2, StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length != 2)
+        var span = protectedValue.AsSpan();
+        int dotIdx = span.IndexOf('.');
+        if (dotIdx < 0 || dotIdx == 0 || dotIdx == span.Length - 1)
             return null;
 
         byte[] encrypted;
         byte[] mac;
         try
         {
-            encrypted = Base64UrlDecode(parts[0]);
-            mac = Base64UrlDecode(parts[1]);
+            encrypted = Base64UrlDecode(span[..dotIdx].ToString());
+            mac = Base64UrlDecode(span[(dotIdx + 1)..].ToString());
         }
         catch (FormatException)
         {

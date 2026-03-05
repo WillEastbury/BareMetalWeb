@@ -385,7 +385,7 @@ internal static class OpenApiHandler
     private static string SchemaKey(string slug)
     {
         var parts = slug.Split('-');
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(slug.Length);
         foreach (var p in parts)
         {
             if (p.Length > 0)
@@ -498,12 +498,18 @@ internal static class OpenApiHandler
         if (string.Equals(perms, "Authenticated", StringComparison.OrdinalIgnoreCase))
             return user != null;
 
-        var required = perms.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var r in required)
+        var remaining = perms.AsSpan();
+        while (remaining.Length > 0)
         {
+            int idx = remaining.IndexOf(',');
+            ReadOnlySpan<char> segment;
+            if (idx < 0) { segment = remaining; remaining = default; }
+            else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+            var trimmed = segment.Trim();
+            if (trimmed.IsEmpty) continue;
             foreach (var p in userPermissions)
             {
-                if (string.Equals(p, r, StringComparison.OrdinalIgnoreCase))
+                if (trimmed.Equals(p.AsSpan(), StringComparison.OrdinalIgnoreCase))
                     return true;
             }
         }

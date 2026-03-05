@@ -40,6 +40,7 @@ graph TD
 - `DataStoreProvider.Current` is the one-stop shop for all data access.
 - `LocalFolderBinaryDataProvider` stores each entity instance as a single binary file, grouped by entity type.  Used when WAL is not configured.
 - `WalDataProvider` stores all records as commit-log payloads inside a `WalStore` at `{dataRoot}/wal/`.  Each entity type gets a stable `uint32` table-ID derived from the type name; each string record-ID is mapped to a monotonic `uint32` record-ID via a per-entity `_idmap.bin` file, giving a packed `ulong` key consumed by the WAL store.
+- **Striped head map** — `WalStore` holds a `WalHeadMap` that tracks the latest committed WAL pointer for every live key.  The map is partitioned into `N` independent shards (default 16, configurable power-of-two) keyed by `tableId & shardMask` (upper 32 bits of the packed key).  Each shard carries its own `ReaderWriterLockSlim` and a pair of sorted `ulong[]` arrays.  Reads (`TryGetHead`) and writes (`BatchSetHeads`) touch only the shard(s) relevant to the keys involved, so concurrent reads against different entity types never contend on the same lock stripe.  The `CopyArrays` snapshot helper merges all shards into a single globally-sorted array for checkpoint writes.
 - `WalDataProvider` maintains secondary field indexes via `IndexStore` (paged files under `{dataRoot}/Paged/`) and `SearchIndexManager` for full-text search. `Query<T>` consults `IndexStore` for `Equals` clauses on `[DataIndex]`-decorated fields before falling back to a full WAL scan, reducing deserializations from O(n) to O(matches).
 - Schema evolution is handled via `SchemaReadMode.BestEffort` in both providers: old records with extra/missing fields still load; new fields receive default values.
 - Schema files are shared between the two providers so they can coexist in the same data root.
@@ -373,4 +374,4 @@ dashboard).
 
 ---
 
-_Status: Updated @ commit HEAD (2026-03-05) — added vectorised column query scan section (ColumnQueryExecutor, WalDataProvider integration, DataLayerCapabilities)
+_Status: Updated @ commit HEAD (2026-03-05) — extended hardware acceleration section with SimdDistance FMA paths, WalLatin1Key32 word comparison, CRC slicing-by-4 software fallback; added striped WalHeadMap description_
