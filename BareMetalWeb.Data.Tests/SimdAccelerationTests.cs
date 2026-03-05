@@ -416,6 +416,44 @@ public sealed class SimdAccelerationTests
         Assert.Equal(original.Name, restored.Name);
         Assert.Equal(original.Value, restored.Value);
     }
+
+    [Fact]
+    public void SchemaHash_100k_RandomSchemas_CollisionRate_BelowExpected()
+    {
+        // Generate 100,000 random schemas with unique member signatures and verify
+        // that the XxHash64-folded-to-32-bit collision rate is within birthday-paradox
+        // expectations. For 100k items in a 2^32 space, expected unique ≈ 99,999
+        // (collision probability per pair ≈ 2.3e-10, expected collisions ≈ 1.2).
+        // We allow up to 50 collisions — still well below any quality concern.
+        const int count = 100_000;
+        const int maxAllowedCollisions = 50;
+        var ser = new BinaryObjectSerializer();
+        var hashes = new HashSet<uint>(count);
+        var rng = new Random(42); // deterministic seed for reproducibility
+        int collisions = 0;
+
+        string[] typeNames = { "String", "Int32", "Double", "Boolean", "Guid", "DateTime", "Byte[]", "Decimal" };
+
+        for (int i = 0; i < count; i++)
+        {
+            int memberCount = rng.Next(1, 8);
+            var members = new MemberSignature[memberCount];
+            for (int m = 0; m < memberCount; m++)
+            {
+                string name = $"Field_{i}_{m}_{rng.Next()}";
+                string typeName = typeNames[rng.Next(typeNames.Length)];
+                int? blittableSize = rng.Next(3) == 0 ? rng.Next(1, 64) : null;
+                members[m] = new MemberSignature(name, typeName, typeof(string), blittableSize);
+            }
+
+            var schema = ser.CreateSchema(1, members);
+            if (!hashes.Add(schema.Hash))
+                collisions++;
+        }
+
+        Assert.True(collisions <= maxAllowedCollisions,
+            $"Schema hash collision count {collisions} exceeds maximum allowed {maxAllowedCollisions}.");
+    }
 }
 
 // ── BloomFilterData unit tests ────────────────────────────────────────────
@@ -575,6 +613,60 @@ public sealed class BloomFilterDataTests
 
         int expected = setBits.Length;
         Assert.Equal(expected, bf.PopulationCount());
+    }
+
+    // ── False positive rate ──────────────────────────────────────────────────
+
+    [Fact]
+    public void BloomFilter_FalsePositiveRate_WithinExpectedBounds()
+    {
+        // Insert 1,000 tokens into a bloom filter sized for 10,000 bits with 3 hashes.
+        // Then probe 100,000 tokens that were NOT inserted and measure the false positive rate.
+        // For m=10000, k=3, n=1000: expected FPR ≈ (1 - e^(-kn/m))^k ≈ 3.6%
+        // We allow up to 10% to account for hash distribution variance.
+        const int size = 10_000;
+        const int hashCount = 3;
+        const int insertCount = 1_000;
+        const int probeCount = 100_000;
+        const double maxAllowedFpr = 0.10;
+
+        var bf = new BloomFilterData(size, hashCount);
+
+        // Insert tokens
+        for (int i = 0; i < insertCount; i++)
+        {
+            string token = $"inserted_{i}";
+            for (int h = 0; h < hashCount; h++)
+            {
+                int hash = ((StringComparer.OrdinalIgnoreCase.GetHashCode(token)
+                             ^ (h * unchecked((int)0x9e3779b9))) & 0x7FFFFFFF);
+                bf.SetBit((int)(hash % size));
+            }
+        }
+
+        // Probe tokens that were never inserted
+        int falsePositives = 0;
+        for (int i = 0; i < probeCount; i++)
+        {
+            string probe = $"notinserted_{i + insertCount}";
+            Span<int> indices = stackalloc int[hashCount];
+            for (int h = 0; h < hashCount; h++)
+            {
+                int hash = ((StringComparer.OrdinalIgnoreCase.GetHashCode(probe)
+                             ^ (h * unchecked((int)0x9e3779b9))) & 0x7FFFFFFF);
+                indices[h] = (int)(hash % size);
+            }
+            if (bf.MightContain(indices))
+                falsePositives++;
+        }
+
+        double fpr = (double)falsePositives / probeCount;
+        Assert.True(fpr < maxAllowedFpr,
+            $"False positive rate {fpr:P2} exceeds maximum allowed {maxAllowedFpr:P0}. " +
+            $"({falsePositives}/{probeCount} false positives)");
+        // Sanity: rate should be > 0 (a perfect filter with this config would be suspicious)
+        Assert.True(falsePositives > 0,
+            "Zero false positives is statistically implausible — possible test bug.");
     }
 }
 
