@@ -418,6 +418,166 @@ public sealed class SimdAccelerationTests
     }
 }
 
+// ── BloomFilterData unit tests ────────────────────────────────────────────
+
+/// <summary>
+/// Direct unit tests for <see cref="BloomFilterData.MightContain"/> and
+/// <see cref="BloomFilterData.PopulationCount"/>, covering both the 4-wide
+/// unrolled path and the scalar tail.
+/// </summary>
+public sealed class BloomFilterDataTests
+{
+    // ── MightContain ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public void MightContain_EmptySpan_ReturnsTrue()
+    {
+        // An empty set of required bits is trivially satisfied.
+        var bf = new BloomFilterData(size: 256, hashCount: 3);
+        Assert.True(bf.MightContain(ReadOnlySpan<int>.Empty));
+    }
+
+    [Fact]
+    public void MightContain_AllBitsSet_ReturnsTrue()
+    {
+        // Set all 8 bits explicitly, then ask whether they are all present.
+        var bf = new BloomFilterData(size: 256, hashCount: 8);
+        int[] indices = { 0, 7, 63, 64, 127, 128, 200, 255 };
+        foreach (var idx in indices)
+            bf.SetBit(idx);
+
+        // Exercises the 4-wide unrolled path (n=8 >= 4) and produces no false negatives.
+        Assert.True(bf.MightContain(indices));
+    }
+
+    [Fact]
+    public void MightContain_OneBitClearInUnrolledSection_ReturnsFalse()
+    {
+        // Set 7 of 8 bits; the missing one falls inside the 4-wide unrolled region (i < 4).
+        var bf = new BloomFilterData(size: 256, hashCount: 8);
+        int[] indices = { 0, 7, 63, 64, 127, 128, 200, 255 };
+        foreach (var idx in indices)
+            bf.SetBit(idx);
+
+        // Clear the second bit (index 1 in the span → inside the first 4-wide iteration).
+        bf.Bits[7 >> 6] &= ~(1UL << (7 & 63));
+
+        Assert.False(bf.MightContain(indices));
+    }
+
+    [Fact]
+    public void MightContain_OneBitClearInScalarTail_ReturnsFalse()
+    {
+        // n=5 → 4-wide loop runs once (i=0..3), scalar tail handles i=4.
+        // Clear the tail bit so the scalar path returns false.
+        var bf = new BloomFilterData(size: 256, hashCount: 5);
+        int[] indices = { 0, 7, 63, 64, 200 };
+        foreach (var idx in indices)
+            bf.SetBit(idx);
+
+        // Clear the last index (200) — processed by the scalar tail.
+        bf.Bits[200 >> 6] &= ~(1UL << (200 & 63));
+
+        Assert.False(bf.MightContain(indices));
+    }
+
+    [Fact]
+    public void MightContain_SpanLengthNotDivisibleByFour_ScalarTailCorrect()
+    {
+        // n=7 → one full 4-wide pass (i=0..3) + scalar tail (i=4,5,6).
+        var bf = new BloomFilterData(size: 512, hashCount: 7);
+        int[] indices = { 1, 10, 50, 100, 150, 200, 300 };
+        foreach (var idx in indices)
+            bf.SetBit(idx);
+
+        Assert.True(bf.MightContain(indices));
+    }
+
+    [Fact]
+    public void MightContain_ScalarOnlyPath_ThreeIndices_AllSet()
+    {
+        // hashCount=3 is the default: exercises only the scalar tail (n < 4).
+        var bf = new BloomFilterData(size: 10000, hashCount: 3);
+        int[] indices = { 42, 1000, 9999 };
+        foreach (var idx in indices)
+            bf.SetBit(idx);
+
+        Assert.True(bf.MightContain(indices));
+    }
+
+    [Fact]
+    public void MightContain_ScalarOnlyPath_ThreeIndices_OneClear()
+    {
+        var bf = new BloomFilterData(size: 10000, hashCount: 3);
+        int[] indices = { 42, 1000, 9999 };
+        bf.SetBit(42);
+        bf.SetBit(1000);
+        // 9999 is NOT set
+
+        Assert.False(bf.MightContain(indices));
+    }
+
+    // ── PopulationCount ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void PopulationCount_EmptyBits_ReturnsZero()
+    {
+        var bf = new BloomFilterData(size: 64, hashCount: 1);
+        // Bits array has exactly 1 ulong; no bits set.
+        Assert.Equal(0, bf.PopulationCount());
+    }
+
+    [Fact]
+    public void PopulationCount_LessThanFourWords_ScalarTailOnly()
+    {
+        // size=192 → Bits has 3 ulongs (< 4), so only the scalar tail executes.
+        var bf = new BloomFilterData(size: 192, hashCount: 1);
+        bf.SetBit(0);   // word 0, bit 0
+        bf.SetBit(64);  // word 1, bit 0
+        bf.SetBit(128); // word 2, bit 0
+        Assert.Equal(3, bf.PopulationCount());
+    }
+
+    [Fact]
+    public void PopulationCount_ExactlyFourWords_NoScalarTail()
+    {
+        // size=256 → Bits has exactly 4 ulongs; the unrolled loop runs once, tail is empty.
+        var bf = new BloomFilterData(size: 256, hashCount: 1);
+        bf.SetBit(0);   // word 0
+        bf.SetBit(64);  // word 1
+        bf.SetBit(128); // word 2
+        bf.SetBit(192); // word 3
+        Assert.Equal(4, bf.PopulationCount());
+    }
+
+    [Fact]
+    public void PopulationCount_MoreThanFourWords_CorrectCount()
+    {
+        // size=448 → 7 ulongs: one 4-wide pass + 3-word scalar tail.
+        var bf = new BloomFilterData(size: 448, hashCount: 1);
+        // Set two bits per word (7 words × 2 bits = 14)
+        for (int w = 0; w < 7; w++)
+        {
+            bf.SetBit(w * 64);
+            bf.SetBit(w * 64 + 1);
+        }
+        Assert.Equal(14, bf.PopulationCount());
+    }
+
+    [Fact]
+    public void PopulationCount_KnownPattern_MatchesBruteForce()
+    {
+        // Set bits at positions 0, 1, 63, 64, 127, 255.
+        var bf = new BloomFilterData(size: 512, hashCount: 1);
+        int[] setBits = { 0, 1, 63, 64, 127, 255 };
+        foreach (var b in setBits)
+            bf.SetBit(b);
+
+        int expected = setBits.Length;
+        Assert.Equal(expected, bf.PopulationCount());
+    }
+}
+
 /// <summary>Simple POCO used to verify XxHash64 schema hash stability.</summary>
 file class SimpleHashItem
 {
