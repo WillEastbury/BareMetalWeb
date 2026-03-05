@@ -866,7 +866,22 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         return ValueTask.CompletedTask;
     }
 
-    // ── DataRecord (non-generic, metadata-driven) ─────────────────────────────
+    // ── WAL compaction ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Compacts the given WAL segment by rebuilding it from the in-memory materialised
+    /// view.  Delegates to <see cref="WalStore.CompactSegmentFromMaterialisedView"/>.
+    ///
+    /// The segment is rebuilt without reading the full original segment from disk;
+    /// only the latest version of each live record in that segment is written,
+    /// eliminating the read phase and reducing disk IO roughly by half compared
+    /// to a sequential read-deduplicate-write approach.
+    ///
+    /// Precondition: <paramref name="segmentId"/> must not be the currently active
+    /// (still-being-written) segment.
+    /// </summary>
+    public void CompactSegmentFromMaterialisedView(uint segmentId)
+        => _walStore.CompactSegmentFromMaterialisedView(segmentId);
     //
     // Fully AOT-safe code path for DataRecord entities. Uses EntitySchema
     // parallel arrays and ordinal-indexed closures instead of generic type
