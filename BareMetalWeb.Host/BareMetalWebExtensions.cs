@@ -240,6 +240,7 @@ public static class BareMetalWebExtensions
 
         ClusterApiHandlers.Initialize(clusterState, compactorState);
         ProxyRouteHandler.Initialize(clusterState);
+        TenantApiHandlers.Initialize(tenantRegistry);
 
         // Attach write fencing to the primary WAL provider
         if (DataStoreProvider.PrimaryProvider is BareMetalWeb.Data.WalDataProvider walProvider)

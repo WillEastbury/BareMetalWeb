@@ -94,7 +94,14 @@ public sealed class TenantRegistry
 
             var (store, provider) = storeFactory(tenantId, dataRoot);
 
-            var ctx = new TenantContext(tenantId, dataRoot, logFolder, store, provider);
+            var ctx = new TenantContext(tenantId, dataRoot, logFolder, store, provider)
+            {
+                DisplayName   = tenantOptions.DisplayName,
+                LogoUrl       = tenantOptions.LogoUrl,
+                PrimaryColor  = tenantOptions.PrimaryColor,
+                MaxRecords    = tenantOptions.MaxRecords,
+                MaxStorageBytes = tenantOptions.MaxStorageBytes,
+            };
             _byId[tenantId] = ctx;
 
             // Register all host aliases (comma-separated list in single entry supported)
@@ -105,6 +112,50 @@ public sealed class TenantRegistry
             }
         }
     }
+
+    /// <summary>
+    /// Provisions a new tenant at runtime. Creates the data store and registers the host mapping.
+    /// Returns the new TenantContext, or null if the tenantId already exists.
+    /// </summary>
+    public TenantContext? Provision(
+        TenantOptions tenantOptions,
+        Func<string, string, (IDataObjectStore Store, IDataProvider Provider)> storeFactory,
+        IBufferedLogger logger)
+    {
+        var tenantId = ResolveTenantId(tenantOptions);
+        if (_byId.ContainsKey(tenantId))
+            return null;
+
+        var dataRoot  = ResolveAbsolutePath(tenantOptions.DataRoot,  $"Data/{tenantId}");
+        var logFolder = ResolveAbsolutePath(tenantOptions.LogFolder, $"Logs/{tenantId}");
+        Directory.CreateDirectory(dataRoot);
+        Directory.CreateDirectory(logFolder);
+
+        var (store, provider) = storeFactory(tenantId, dataRoot);
+        var ctx = new TenantContext(tenantId, dataRoot, logFolder, store, provider)
+        {
+            DisplayName     = tenantOptions.DisplayName,
+            LogoUrl         = tenantOptions.LogoUrl,
+            PrimaryColor    = tenantOptions.PrimaryColor,
+            MaxRecords      = tenantOptions.MaxRecords,
+            MaxStorageBytes = tenantOptions.MaxStorageBytes,
+        };
+
+        if (!_byId.TryAdd(tenantId, ctx))
+            return null;
+
+        foreach (var host in tenantOptions.Host.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            _byHost[host.ToLowerInvariant()] = ctx;
+            logger.LogInfo($"[TenantRegistry] Provisioned tenant '{tenantId}' for host '{host}'");
+        }
+
+        return ctx;
+    }
+
+    /// <summary>Looks up a tenant by its ID.</summary>
+    public TenantContext? GetById(string tenantId) =>
+        _byId.TryGetValue(tenantId, out var ctx) ? ctx : null;
 
     /// <summary>
     /// Resolves the <see cref="TenantContext"/> for the given HTTP request by inspecting

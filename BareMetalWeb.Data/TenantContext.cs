@@ -37,6 +37,21 @@ public sealed class TenantContext
     /// </summary>
     public IDataProvider Provider { get; }
 
+    /// <summary>Custom display name shown in the navbar.</summary>
+    public string? DisplayName { get; set; }
+
+    /// <summary>URL to a custom logo image.</summary>
+    public string? LogoUrl { get; set; }
+
+    /// <summary>Primary CSS color override.</summary>
+    public string? PrimaryColor { get; set; }
+
+    /// <summary>Maximum number of records (0 = unlimited).</summary>
+    public long MaxRecords { get; set; }
+
+    /// <summary>Maximum storage in bytes (0 = unlimited).</summary>
+    public long MaxStorageBytes { get; set; }
+
     public TenantContext(
         string tenantId,
         string dataRoot,

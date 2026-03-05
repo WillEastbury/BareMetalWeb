@@ -55,4 +55,19 @@ public sealed class TenantOptions
     /// Relative paths are resolved against the application content root.
     /// </summary>
     public string LogFolder { get; set; } = "";
+
+    /// <summary>Custom display name for this tenant (used in navbar branding).</summary>
+    public string? DisplayName { get; set; }
+
+    /// <summary>URL to a custom logo image for this tenant.</summary>
+    public string? LogoUrl { get; set; }
+
+    /// <summary>Primary CSS color override for this tenant's theme.</summary>
+    public string? PrimaryColor { get; set; }
+
+    /// <summary>Maximum number of records allowed for this tenant (0 = unlimited).</summary>
+    public long MaxRecords { get; set; }
+
+    /// <summary>Maximum storage in bytes for this tenant (0 = unlimited).</summary>
+    public long MaxStorageBytes { get; set; }
 }

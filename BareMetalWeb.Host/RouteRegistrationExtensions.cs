@@ -505,6 +505,12 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/_cluster", new RouteHandlerData(adminOnly, ClusterApiHandlers.ClusterStatusHandler));
         host.RegisterRoute("GET /api/_cluster/replicate", new RouteHandlerData(adminOnly, ClusterApiHandlers.ReplicationHandler));
         host.RegisterRoute("POST /api/_cluster/stepdown", new RouteHandlerData(adminOnly, ClusterApiHandlers.StepDownHandler));
+        host.RegisterRoute("GET /api/tenants", new RouteHandlerData(adminOnly, TenantApiHandlers.ListTenantsHandler));
+        host.RegisterRoute("GET /api/tenants/{id}", new RouteHandlerData(adminOnly, TenantApiHandlers.GetTenantHandler));
+        host.RegisterRoute("POST /api/tenants", new RouteHandlerData(adminOnly, TenantApiHandlers.ProvisionTenantHandler));
+        host.RegisterRoute("PUT /api/tenants/{id}/branding", new RouteHandlerData(adminOnly, TenantApiHandlers.UpdateBrandingHandler));
+        host.RegisterRoute("PUT /api/tenants/{id}/quotas", new RouteHandlerData(adminOnly, TenantApiHandlers.UpdateQuotasHandler));
+        host.RegisterRoute("GET /api/tenant/branding", new RouteHandlerData(raw, TenantApiHandlers.GetCurrentBrandingHandler));
         var templated = pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "", "" }, "Public", false, 1);
         host.RegisterRoute("GET /page/{slug}", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(PageRenderer.ConfigurePageAsync)));
         host.RegisterRoute("GET /api/pages", new RouteHandlerData(raw, PageRenderer.ListPagesHandler));
