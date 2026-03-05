@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
@@ -112,57 +113,69 @@ internal static class WalSegmentReader
             return result;
 
         Span<byte> recHeader = stackalloc byte[WalConstants.RecordHeaderBytes];
+        byte[]? pooledBuf = null;
 
-        while (fs.Position < fs.Length)
+        try
         {
-            long recordStart = fs.Position;
-            if (fs.Read(recHeader) != WalConstants.RecordHeaderBytes) break;
-
-            uint recMagic = BinaryPrimitives.ReadUInt32LittleEndian(recHeader[0..]);
-            if (recMagic != WalConstants.RecordMagic) break; // corrupt / start of footer
-
-            ushort recType    = BinaryPrimitives.ReadUInt16LittleEndian(recHeader[4..]);
-            uint   totalBytes = BinaryPrimitives.ReadUInt32LittleEndian(recHeader[8..]);
-
-            long minSize = WalConstants.RecordHeaderBytes + WalConstants.RecordTrailerBytes;
-            if (totalBytes < minSize) break;
-            if (recordStart + totalBytes > fs.Length) break; // truncated
-
-            // Read the entire record for CRC verification
-            fs.Seek(recordStart, SeekOrigin.Begin);
-            var recordBuf = new byte[totalBytes];
-            if (fs.Read(recordBuf) != (int)totalBytes) break;
-
-            if (!VerifyRecordCrc(recordBuf)) break; // CRC mismatch — treat as corrupt
-
-            if (recType == WalConstants.RecordTypeCommitBatch)
+            while (fs.Position < fs.Length)
             {
-                var span = recordBuf.AsSpan();
-                int off = WalConstants.RecordHeaderBytes;
-                // Commit batch header: TxId(8) + OpCount(4) + PayloadFlags(4) = 16
-                if (off + 16 > span.Length) break;
-                uint opCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 8)..]);
-                off += 16;
+                long recordStart = fs.Position;
+                if (fs.Read(recHeader) != WalConstants.RecordHeaderBytes) break;
 
-                bool corrupt = false;
-                for (uint k = 0; k < opCount; k++)
+                uint recMagic = BinaryPrimitives.ReadUInt32LittleEndian(recHeader[0..]);
+                if (recMagic != WalConstants.RecordMagic) break; // corrupt / start of footer
+
+                ushort recType    = BinaryPrimitives.ReadUInt16LittleEndian(recHeader[4..]);
+                uint   totalBytes = BinaryPrimitives.ReadUInt32LittleEndian(recHeader[8..]);
+
+                long minSize = WalConstants.RecordHeaderBytes + WalConstants.RecordTrailerBytes;
+                if (totalBytes < minSize) break;
+                if (recordStart + totalBytes > fs.Length) break; // truncated
+
+                // Read the entire record for CRC verification, using pooled buffer
+                fs.Seek(recordStart, SeekOrigin.Begin);
+                if (pooledBuf == null || pooledBuf.Length < (int)totalBytes)
                 {
-                    if (off + 44 > span.Length) { corrupt = true; break; }
-
-                    ulong key           = BinaryPrimitives.ReadUInt64LittleEndian(span[off..]);
-                    uint  compressedLen = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 32)..]);
-                    off += 44;
-
-                    result[key] = (uint)recordStart;
-
-                    off += (int)compressedLen;
-                    if (off > span.Length) { corrupt = true; break; }
+                    if (pooledBuf != null) ArrayPool<byte>.Shared.Return(pooledBuf);
+                    pooledBuf = ArrayPool<byte>.Shared.Rent((int)totalBytes);
                 }
-                if (corrupt) break;
-            }
+                if (fs.Read(pooledBuf, 0, (int)totalBytes) != (int)totalBytes) break;
 
-            // Advance to the next record
-            fs.Seek(recordStart + totalBytes, SeekOrigin.Begin);
+                if (!VerifyRecordCrc(pooledBuf.AsSpan(0, (int)totalBytes))) break;
+
+                if (recType == WalConstants.RecordTypeCommitBatch)
+                {
+                    var span = pooledBuf.AsSpan(0, (int)totalBytes);
+                    int off = WalConstants.RecordHeaderBytes;
+                    // Commit batch header: TxId(8) + OpCount(4) + PayloadFlags(4) = 16
+                    if (off + 16 > span.Length) break;
+                    uint opCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 8)..]);
+                    off += 16;
+
+                    bool corrupt = false;
+                    for (uint k = 0; k < opCount; k++)
+                    {
+                        if (off + 44 > span.Length) { corrupt = true; break; }
+
+                        ulong key           = BinaryPrimitives.ReadUInt64LittleEndian(span[off..]);
+                        uint  compressedLen = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 32)..]);
+                        off += 44;
+
+                        result[key] = (uint)recordStart;
+
+                        off += (int)compressedLen;
+                        if (off > span.Length) { corrupt = true; break; }
+                    }
+                    if (corrupt) break;
+                }
+
+                // Advance to the next record
+                fs.Seek(recordStart + totalBytes, SeekOrigin.Begin);
+            }
+        }
+        finally
+        {
+            if (pooledBuf != null) ArrayPool<byte>.Shared.Return(pooledBuf);
         }
 
         return result;
