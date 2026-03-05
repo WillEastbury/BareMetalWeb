@@ -102,9 +102,18 @@ Metadata record attached to an index registration:
 | `DotProduct` | `−(a·b)` (negated so lower = closer) | Pre-normalized embeddings, recommendation |
 | `Euclidean` | `√Σ(aᵢ−bᵢ)²` | Spatial embeddings, image features |
 
-All three distance functions are implemented as tight scalar loops.  There is no
-AVX/SIMD acceleration for the vector distance math at this time (unlike `WalCrc32C`
-which uses SSE4.2 / ARM CRC hardware intrinsics for WAL checksums).
+All three distance functions are implemented in `SimdDistance` and dispatch to the
+widest available SIMD instruction set at runtime, using fused multiply-add (FMA)
+where available:
+
+| CPU feature | Code path | Width |
+|---|---|---|
+| AVX-512F | `Avx512F.FusedMultiplyAdd` | 16 floats/iter |
+| AVX2 + FMA | `Fma.MultiplyAdd` | 8 floats/iter |
+| ARM64 AdvSimd | `AdvSimd.FusedMultiplyAdd` (NEON) | 4 floats/iter |
+| Portable | `System.Numerics.Vector<float>` | platform width |
+
+See `docs/architecture/data-layer.md` for a full hardware-acceleration overview.
 
 ---
 
@@ -245,10 +254,9 @@ sequenceDiagram
 |---|---|
 | In-memory only | Vectors are not persisted to disk.  Must be re-indexed after restart. |
 | No WAL integration | Vector upserts bypass the WAL; they are not replicated in a cluster. |
-| Scalar distance math | No AVX/SIMD acceleration (planned). |
 | No quantization | `Float16` and `ProductQuantization` quantizer types are defined but not implemented. |
 | No compaction | Tombstoned vectors accumulate; segments are never compacted or garbage-collected at runtime. |
 
 ---
 
-_Status: Verified against codebase @ commit HEAD (2026-03-05)_
+_Status: Updated @ commit HEAD (2026-03-05) — SimdDistance now uses AVX-512F/AVX2+FMA/AdvSimd hardware paths; removed stale "scalar loops only" limitation_

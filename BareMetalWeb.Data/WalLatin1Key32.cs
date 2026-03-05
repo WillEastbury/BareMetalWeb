@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Runtime.InteropServices;
 
 namespace BareMetalWeb.Data;
@@ -129,11 +130,28 @@ public readonly struct WalLatin1Key32 : IEquatable<WalLatin1Key32>, IComparable<
 
     public int CompareTo(WalLatin1Key32 other)
     {
-        // Lexicographic comparison over the 32-byte canonical form
-        Span<byte> a = stackalloc byte[32];
-        Span<byte> b = stackalloc byte[32];
-        CopyTo(a); other.CopyTo(b);
-        return a.SequenceCompareTo(b);
+        // Compare each 8-byte word without any stack allocation.
+        // ReverseEndianness converts a little-endian word to big-endian so that
+        // a plain ulong numeric comparison equals a left-to-right lexicographic
+        // byte comparison of the 8 bytes that word encodes.
+        ulong a0 = BinaryPrimitives.ReverseEndianness(_w0);
+        ulong b0 = BinaryPrimitives.ReverseEndianness(other._w0);
+        int c = a0.CompareTo(b0);
+        if (c != 0) return c;
+
+        ulong a1 = BinaryPrimitives.ReverseEndianness(_w1);
+        ulong b1 = BinaryPrimitives.ReverseEndianness(other._w1);
+        c = a1.CompareTo(b1);
+        if (c != 0) return c;
+
+        ulong a2 = BinaryPrimitives.ReverseEndianness(_w2);
+        ulong b2 = BinaryPrimitives.ReverseEndianness(other._w2);
+        c = a2.CompareTo(b2);
+        if (c != 0) return c;
+
+        ulong a3 = BinaryPrimitives.ReverseEndianness(_w3);
+        ulong b3 = BinaryPrimitives.ReverseEndianness(other._w3);
+        return a3.CompareTo(b3);
     }
 
     public static bool operator ==(WalLatin1Key32 a, WalLatin1Key32 b) => a.Equals(b);

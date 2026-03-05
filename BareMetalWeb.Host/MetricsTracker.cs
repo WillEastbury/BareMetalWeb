@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using BareMetalWeb.Core.Interfaces;
+using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
 #if NET7_0_OR_GREATER
 using System.Runtime.Intrinsics.Arm;
@@ -234,6 +235,11 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             new[] { "OS Architecture", RuntimeInformation.OSArchitecture.ToString() },
             new[] { "Runtime", RuntimeInformation.FrameworkDescription },
             new[] { "SIMD Vector Width", $"{System.Numerics.Vector<float>.Count * 4 * 8}-bit ({System.Numerics.Vector<float>.Count} floats)" },
+            new[] { "---- Active Acceleration Paths ----", "" },
+            new[] { "Vector Distance (ANN)", DataLayerCapabilities.VectorDistancePath },
+            new[] { "CRC-32C Checksum", DataLayerCapabilities.Crc32CPath },
+            new[] { "Key Comparison", DataLayerCapabilities.KeyComparisonPath },
+            new[] { "---- Available CPU Features ----", "" },
             .. GetSimdFeatureRows()
         ];
     }
