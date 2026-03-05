@@ -482,7 +482,7 @@ public sealed class VectorIndexManager
     /// <summary>Gets all registered index definitions.</summary>
     public IReadOnlyCollection<(string EntityType, string Field, VectorIndexDefinition Def)> GetDefinitions()
     {
-        var result = new List<(string EntityType, string Field, VectorIndexDefinition Def)>();
+        var result = new List<(string EntityType, string Field, VectorIndexDefinition Def)>(_definitions.Count);
         foreach (var kv in _definitions)
             result.Add((kv.Key.EntityType, kv.Key.Field, kv.Value));
         return result.ToArray();

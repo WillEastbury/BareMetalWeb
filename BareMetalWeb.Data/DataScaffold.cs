@@ -934,10 +934,8 @@ public static class DataScaffold
 
         var result = new List<Dictionary<string, object?>>();
 
-        var unsortedProps = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var propList = new List<System.Reflection.PropertyInfo>(unsortedProps);
-        propList.Sort((a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
-        var properties = propList.ToArray();
+        var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        Array.Sort(properties, (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
 
         foreach (var prop in properties)
         {
@@ -2495,10 +2493,8 @@ public static class DataScaffold
     private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadataSimple([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
     {
         var fields = new List<ChildFieldMeta>();
-        var unsortedProps = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var propsList = new List<System.Reflection.PropertyInfo>(unsortedProps);
-        propsList.Sort((a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
-        var properties = propsList.ToArray();
+        var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        Array.Sort(properties, (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
 
         foreach (var prop in properties)
         {
@@ -2530,10 +2526,8 @@ public static class DataScaffold
     private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
     {
         var fields = new List<ChildFieldMeta>();
-        var unsortedProps2 = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var propsList2 = new List<System.Reflection.PropertyInfo>(unsortedProps2);
-        propsList2.Sort((a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
-        var properties = propsList2.ToArray();
+        var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        Array.Sort(properties, (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
 
         foreach (var prop in properties)
         {
@@ -3646,10 +3640,8 @@ public static class DataScaffold
             return null;
 
         var fields = new List<DataFieldMetadata>();
-        var unsortedProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var propsList = new List<System.Reflection.PropertyInfo>(unsortedProps);
-        propsList.Sort((a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
-        var properties = propsList.ToArray();
+        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        Array.Sort(properties, (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
         for (int i = 0; i < properties.Length; i++)
         {
             var prop = properties[i];
@@ -3920,8 +3912,9 @@ public static class DataScaffold
         if (string.IsNullOrWhiteSpace(name))
             return string.Empty;
 
-        var words = new List<string>();
-        var buffer = new List<char>();
+        // Capacity hint: average CamelCase word is ~4 chars; +1 avoids empty-list corner case
+        var words = new List<string>(name.Length / 4 + 1);
+        var buffer = new List<char>(name.Length);
         for (int i = 0; i < name.Length; i++)
         {
             var c = name[i];
@@ -3977,7 +3970,7 @@ public static class DataScaffold
         if (string.IsNullOrWhiteSpace(name))
             return string.Empty;
 
-        var chars = new List<char>();
+        var chars = new List<char>(name.Length);
         foreach (var c in name)
         {
             if (char.IsLetterOrDigit(c))

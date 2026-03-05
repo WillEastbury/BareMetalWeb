@@ -27,7 +27,7 @@ public sealed class AggregateLockManager
         bool contended = false;
 
         // Sort deterministically to prevent deadlocks
-        var sortedList = new List<string>();
+        var sortedList = new List<string>(aggregateKeys.Count);
         foreach (var k in aggregateKeys)
         {
             bool exists = false;
@@ -53,7 +53,7 @@ public sealed class AggregateLockManager
                 EngineMetrics.RecordCommitRetry();
             }
 
-            var acquired = new List<string>();
+            var acquired = new List<string>(sorted.Length);
             bool success = true;
 
             foreach (var key in sorted)

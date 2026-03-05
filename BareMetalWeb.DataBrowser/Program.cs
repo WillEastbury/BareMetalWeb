@@ -543,9 +543,10 @@ internal static class Program
             foreach (var f in meta.Fields) if (f.List) listFieldsAll.Add(f);
             listFieldsAll.Sort((a, b) => a.Order.CompareTo(b.Order));
             var listFields = listFieldsAll.Count > 5 ? listFieldsAll.GetRange(0, 5) : listFieldsAll;
-            var colNamesList = new List<string> { "Id" };
-            foreach (var f in listFields) colNamesList.Add(f.Name);
-            var colNames = colNamesList.ToArray();
+            var colNames = new string[listFields.Count + 1];
+            colNames[0] = "Id";
+            for (int i = 0; i < listFields.Count; i++)
+                colNames[i + 1] = listFields[i].Name;
 
             var rows = new List<string[]>();
             foreach (var obj in list)
