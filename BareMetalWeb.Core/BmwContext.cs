@@ -98,4 +98,37 @@ public sealed class BmwContext
             app,
             sourceIp);
     }
+
+    /// <summary>
+    /// Creates a <see cref="BmwContext"/> directly from Kestrel's
+    /// <see cref="IFeatureCollection"/> — used by <c>BmwApplication</c>
+    /// when running without the ASP.NET middleware pipeline.
+    /// A <see cref="DefaultHttpContext"/> is created as a migration bridge.
+    /// </summary>
+    public static BmwContext CreateFromFeatures(IFeatureCollection features, IBareWebHost app)
+    {
+        var httpContext = new DefaultHttpContext(features);
+
+        var responseFeature = features.Get<IHttpResponseFeature>()!;
+        var connectionFeature = features.Get<IHttpConnectionFeature>();
+        var responseBodyFeature = features.Get<IHttpResponseBodyFeature>();
+        var requestFeature = features.Get<IHttpRequestFeature>()!;
+
+        var request = new BmwRequest(
+            requestFeature.Method,
+            requestFeature.Path,
+            requestFeature.QueryString ?? string.Empty);
+
+        var sourceIp = connectionFeature?.RemoteIpAddress?.ToString() ?? "unknown";
+
+        return new BmwContext(
+            httpContext,
+            request,
+            httpContext.Request.BodyReader,
+            responseBodyFeature?.Writer ?? httpContext.Response.BodyWriter,
+            responseFeature,
+            connectionFeature,
+            app,
+            sourceIp);
+    }
 }

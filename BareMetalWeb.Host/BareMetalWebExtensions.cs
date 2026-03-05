@@ -26,7 +26,7 @@ public static class BareMetalWebExtensions
     /// authentication, routing, static files, CORS, HTTPS, and proxy support.
     /// Optionally pass <paramref name="configureRoutes"/> to register additional routes.
     /// </summary>
-    public static async Task UseBareMetalWeb(
+    public static async Task<BareMetalWebServer> UseBareMetalWeb(
         this WebApplication app,
         Action<BareMetalWebServer, IRouteHandlers, IPageInfoFactory, IHtmlTemplate>? configureRoutes = null)
     {
@@ -316,5 +316,38 @@ public static class BareMetalWebExtensions
                 Console.WriteLine(warn);
             }
         });
+
+        return appInfo;
+    }
+
+    /// <summary>
+    /// Configures the full BareMetalWeb stack and returns a <see cref="BmwHost"/>
+    /// for direct Kestrel hosting — no ASP.NET middleware pipeline.
+    /// <para>
+    /// Uses <see cref="UseBareMetalWeb"/> for initialization, then replaces the
+    /// serving layer with a direct <c>KestrelServer</c> + <see cref="BmwApplication"/>.
+    /// </para>
+    /// <example>
+    /// <code>
+    /// var builder = WebApplication.CreateBuilder();
+    /// var app = builder.Build();
+    /// await using var host = await app.UseBareMetalWebDirect(
+    ///     configureKestrel: opts => opts.ListenAnyIP(5000));
+    /// await host.RunAsync();
+    /// </code>
+    /// </example>
+    /// </summary>
+    public static async Task<BmwHost> UseBareMetalWebDirect(
+        this WebApplication app,
+        Action<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>? configureKestrel = null,
+        Action<BareMetalWebServer, IRouteHandlers, IPageInfoFactory, IHtmlTemplate>? configureRoutes = null)
+    {
+        // Initialize the full stack via UseBareMetalWeb but capture the server instance
+        BareMetalWebServer? appInfo = await app.UseBareMetalWeb(configureRoutes);
+
+        // Re-wire for direct hosting: stop the middleware path, start the direct path
+        await appInfo.WireUpDirectHosting();
+
+        return BmwHost.Create(appInfo, configureKestrel);
     }
 }

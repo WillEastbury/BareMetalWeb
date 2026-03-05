@@ -339,18 +339,36 @@ public class BareMetalWebServer : IBareWebHost
         EnsureJumpTable();
         // Single terminal request handler. We deliberately do not use routing, MVC, or minimal APIs. All requests are handled explicitly by RequestHandler.
         app.Use(async (HttpContext context, RequestDelegate _) => await RequestHandler(context));
-        // Start everything (logging, request handling etc)
-        Task loggerTask = BufferedLogger.RunAsync(cts.Token); // Run the logging flusher loop
-        Task clientPruneTask = ClientRequests.RunPruningAsync(cts.Token); // Run client pruning loop
-        Task todoPeriodicityTask = new TodoPeriodicityService(BufferedLogger).RunAsync(cts.Token); // Run todo periodicity reset loop
-        Task scheduledActionTask = new ScheduledActionService(BufferedLogger).RunAsync(cts.Token); // Run scheduled action execution loop
-        app.Lifetime.ApplicationStopping.Register(() => BufferedLogger.OnApplicationStopping(cts, loggerTask)); // Setup shutdown to stop the logging flusher loop
-        // log it
+        // Start background services
+        StartBackgroundServices();
+        app.Lifetime.ApplicationStopping.Register(() => BufferedLogger.OnApplicationStopping(cts, _loggerTask!));
         BufferedLogger.LogInfo($"WireUpRequestHandlingAndLoggerAsyncLifetime completed and request handling is live.");
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Prepares the server for direct Kestrel hosting via <see cref="BmwHost"/>.
+    /// Does NOT register ASP.NET middleware — Kestrel calls
+    /// <see cref="BmwApplication.ProcessRequestAsync"/> directly.
+    /// </summary>
+    public Task WireUpDirectHosting()
+    {
+        EnsureJumpTable();
+        StartBackgroundServices();
+        BufferedLogger.LogInfo("WireUpDirectHosting completed — ready for BmwHost.RunAsync().");
+        return Task.CompletedTask;
+    }
+
+    private Task? _loggerTask;
+    private void StartBackgroundServices()
+    {
+        _loggerTask = BufferedLogger.RunAsync(cts.Token);
+        Task clientPruneTask = ClientRequests.RunPruningAsync(cts.Token);
+        Task todoPeriodicityTask = new TodoPeriodicityService(BufferedLogger).RunAsync(cts.Token);
+        Task scheduledActionTask = new ScheduledActionService(BufferedLogger).RunAsync(cts.Token);
         _ = clientPruneTask;
         _ = todoPeriodicityTask;
         _ = scheduledActionTask;
-        return Task.CompletedTask;
     }
     public async Task RequestHandler(HttpContext context)
     {
