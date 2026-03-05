@@ -266,7 +266,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var code = NormalizeOtpCode(form["code"].ToString());
-        if (string.IsNullOrEmpty(code))
+        if (code == null)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             RenderMfaChallengeForm(context, "Please enter your authentication code.");
