@@ -837,7 +837,7 @@ public sealed class IndexStore
         stream.Seek(0, SeekOrigin.End);
         using var writer = new StreamWriter(stream, encoding, bufferSize: 4096, leaveOpen: true);
         writer.WriteLine(entry);
-        _logger?.LogInfo($"Tracked index {entityName}.{fieldName}.");
+        _logger?.LogInfo($"Tracked index ({entry.Length} bytes).");
     }
     private string GetRegistryPath()
     {

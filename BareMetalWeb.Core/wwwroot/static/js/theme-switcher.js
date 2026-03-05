@@ -60,7 +60,7 @@
         const themeLink = getThemeLink();
 
         document.body.removeAttribute('data-bs-theme');
-        themeLink.href = `${THEME_PATH_PREFIX}${themeName}${THEME_PATH_SUFFIX}`;
+        themeLink.href = THEME_PATH_PREFIX + encodeURIComponent(themeName) + THEME_PATH_SUFFIX;
 
         setStoredTheme(themeName);
     }

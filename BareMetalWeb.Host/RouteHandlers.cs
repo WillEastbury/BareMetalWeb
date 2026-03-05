@@ -176,13 +176,6 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask LoginPostHandler(HttpContext context)
     {
-        if (!context.Request.HasFormContentType)
-        {
-            context.Response.StatusCode = StatusCodes.Status415UnsupportedMediaType;
-            await context.Response.WriteAsync("Unsupported content type.");
-            return;
-        }
-
         // IP-based rate limit — before any DB work
         var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         var ipKey = BuildMfaAttemptKey("login:ip", remoteIp);
@@ -196,20 +189,24 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        // Read form data; use empty collection for non-form requests so CSRF check always runs
+        var form = context.Request.HasFormContentType
+            ? await context.Request.ReadFormAsync()
+            : FormCollection.Empty;
+
+        if (!CsrfProtection.ValidateFormToken(context, form))
+        {
+            RenderLoginForm(context, "Invalid security token. Please try again.", string.Empty);
+            await _renderer.RenderPage(context);
+            return;
+        }
+
         var identifier = form["email"].ToString().Trim();
         var password = form["password"].ToString();
         var rememberValue = form["remember"].ToString();
         bool rememberMe = string.Equals(rememberValue, "true", StringComparison.OrdinalIgnoreCase)
             || string.Equals(rememberValue, "on", StringComparison.OrdinalIgnoreCase)
             || string.Equals(rememberValue, "yes", StringComparison.OrdinalIgnoreCase);
-
-        if (!CsrfProtection.ValidateFormToken(context, form))
-        {
-            RenderLoginForm(context, "Invalid security token. Please try again.", identifier);
-            await _renderer.RenderPage(context);
-            return;
-        }
 
         if (string.IsNullOrWhiteSpace(identifier) || string.IsNullOrWhiteSpace(password))
         {
@@ -324,14 +321,11 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!context.Request.HasFormContentType)
-        {
-            context.Response.StatusCode = StatusCodes.Status415UnsupportedMediaType;
-            await context.Response.WriteAsync("Unsupported content type.");
-            return;
-        }
+        // Read form data; use empty collection for non-form requests so CSRF check always runs
+        var form = context.Request.HasFormContentType
+            ? await context.Request.ReadFormAsync()
+            : FormCollection.Empty;
 
-        var form = await context.Request.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderMfaChallengeForm(context, "Invalid security token. Please try again.");
@@ -540,7 +534,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private EntraIdOptions? GetEntraIdOptions(HttpContext context)
     {
-        var config = context.RequestServices.GetService(typeof(IConfiguration)) as IConfiguration;
+        var config = context.RequestServices?.GetService(typeof(IConfiguration)) as IConfiguration;
         var section = config?.GetSection("EntraId");
         if (section == null || !section.Exists())
             return null;
@@ -552,6 +546,7 @@ public sealed class RouteHandlers : IRouteHandlers
             ClientId = section.GetValue<string>("ClientId") ?? string.Empty,
             ClientSecret = section.GetValue<string>("ClientSecret") ?? string.Empty,
             RedirectUri = section.GetValue<string>("RedirectUri") ?? "/auth/sso/callback",
+            BaseUrl = section.GetValue<string>("BaseUrl") ?? string.Empty,
             AutoProvisionUsers = section.GetValue("AutoProvisionUsers", true),
             DefaultPermissions = section.GetValue<string>("DefaultPermissions") ?? "user",
         };
@@ -700,9 +695,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
         if (options != null)
         {
-            var scheme = context.Request.IsHttps ? "https" : "http";
-            var host = context.Request.Host.Value;
-            var postLogoutUri = $"{scheme}://{host}/login";
+            // Build post-logout URI using the configured BaseUrl to avoid relying on the
+            // user-controlled Host header for the redirect destination.
+            var postLogoutUri = EntraIdService.BuildPostLogoutRedirectUri(options, context);
             var logoutUrl = EntraIdService.BuildLogoutUrl(options, postLogoutUri);
             context.Response.Redirect(logoutUrl);
         }
@@ -1077,14 +1072,10 @@ public sealed class RouteHandlers : IRouteHandlers
                 return;
             }
 
-            if (!context.Request.HasFormContentType)
-            {
-                RenderUnlockForm(context, "Invalid request.");
-                await _renderer.RenderPage(context);
-                return;
-            }
-
-            var unlockForm = await context.Request.ReadFormAsync();
+            // Read form data; use empty collection for non-form requests so CSRF check always runs
+            var unlockForm = context.Request.HasFormContentType
+                ? await context.Request.ReadFormAsync()
+                : FormCollection.Empty;
 
             if (!CsrfProtection.ValidateFormToken(context, unlockForm))
             {
@@ -1109,14 +1100,11 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!context.Request.HasFormContentType)
-        {
-            RenderSetupForm(context, "Invalid setup request.", null, null);
-            await _renderer.RenderPage(context);
-            return;
-        }
+        // Read form data; use empty collection for non-form requests so CSRF check always runs
+        var form = context.Request.HasFormContentType
+            ? await context.Request.ReadFormAsync()
+            : FormCollection.Empty;
 
-        var form = await context.Request.ReadFormAsync();
         var userName = form["username"].ToString().Trim();
         var email = form["email"].ToString().Trim();
         var password = form["password"].ToString();
