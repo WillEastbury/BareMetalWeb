@@ -5,12 +5,11 @@ using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
-using BareMetalWeb.Data.DataObjects;
 using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
 
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class BulkOperationsTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
@@ -20,9 +19,7 @@ public class BulkOperationsTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
         
-        // Force UserClasses assembly to load before scanning
-        _ = typeof(Product).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        _ = GalleryTestFixture.State;
     }
 
     public void Dispose()
@@ -34,8 +31,7 @@ public class BulkOperationsTests : IDisposable
     public void BuildListHeaders_WithBulkSelection_AddsCheckboxColumn()
     {
         // Arrange
-        var meta = DataScaffold.GetEntityByType(typeof(Product));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("products", out var meta));
 
         // Act
         var headers = DataScaffold.BuildListHeaders(meta, includeActions: true, includeBulkSelection: true);
@@ -50,8 +46,7 @@ public class BulkOperationsTests : IDisposable
     public void BuildListHeaders_WithoutBulkSelection_NoCheckboxColumn()
     {
         // Arrange
-        var meta = DataScaffold.GetEntityByType(typeof(Product));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("products", out var meta));
 
         // Act without bulk selection
         var headersWithoutBulk = DataScaffold.BuildListHeaders(meta, includeActions: true, includeBulkSelection: false);
@@ -69,14 +64,16 @@ public class BulkOperationsTests : IDisposable
     public void BuildListRows_WithBulkSelection_AddsCheckboxes()
     {
         // Arrange
-        var meta = DataScaffold.GetEntityByType(typeof(Product));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("products", out var meta));
 
-        var items = new List<Product>
+        var items = new List<BaseDataObject>();
+        for (int i = 1; i <= 2; i++)
         {
-            new Product { Key = 1, Name = "Item 1", Price = 10.99m },
-            new Product { Key = 2, Name = "Item 2", Price = 20.99m }
-        };
+            var p = meta.Handlers.Create();
+            p.Key = (uint)i;
+            meta.FindField("Name")!.SetValueFn(p, $"Item {i}");
+            items.Add(p);
+        }
 
         // Act
         var rows = DataScaffold.BuildListRows(
@@ -104,13 +101,13 @@ public class BulkOperationsTests : IDisposable
     public void BuildListRows_WithoutBulkSelection_NoCheckboxes()
     {
         // Arrange
-        var meta = DataScaffold.GetEntityByType(typeof(Product));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("products", out var meta));
 
-        var items = new List<Product>
-        {
-            new Product { Key = 1, Name = "Item 1", Price = 10.99m }
-        };
+        var items = new List<BaseDataObject>();
+        var p = meta.Handlers.Create();
+        p.Key = (uint)1;
+        meta.FindField("Name")!.SetValueFn(p, "Item 1");
+        items.Add(p);
 
         // Act
         var rows = DataScaffold.BuildListRows(
@@ -133,13 +130,13 @@ public class BulkOperationsTests : IDisposable
     public void BuildListRows_BothFlagsTrue_CheckboxBeforeActions()
     {
         // Arrange
-        var meta = DataScaffold.GetEntityByType(typeof(Product));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("products", out var meta));
 
-        var items = new List<Product>
-        {
-            new Product { Key = 1, Name = "Item 1", Price = 10.99m }
-        };
+        var items = new List<BaseDataObject>();
+        var p = meta.Handlers.Create();
+        p.Key = (uint)1;
+        meta.FindField("Name")!.SetValueFn(p, "Item 1");
+        items.Add(p);
 
         // Act
         var rows = DataScaffold.BuildListRows(

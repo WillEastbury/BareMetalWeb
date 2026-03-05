@@ -105,5 +105,71 @@ public class FieldDefinition : RenderableDataObject
     [DataField(Label = "Multiline", Order = 25)]
     public bool Multiline { get; set; } = false;
 
+    /// <summary>Slug of child entity for childlist fields (e.g. "order-rows").</summary>
+    [DataField(Label = "Child Entity Slug", Order = 26)]
+    public string? ChildEntitySlug { get; set; }
+
+    /// <summary>Lookup copy-fields mapping for child entity lookup fields (e.g. "Price->UnitPrice").</summary>
+    [DataField(Label = "Lookup Copy Fields", Order = 27)]
+    public string? LookupCopyFields { get; set; }
+
+    /// <summary>Calculated expression for child entity calculated fields (e.g. "Quantity * UnitPrice").</summary>
+    [DataField(Label = "Calculated Expression", Order = 28)]
+    public string? CalculatedExpression { get; set; }
+
+    /// <summary>Display format for calculated fields (e.g. "N2").</summary>
+    [DataField(Label = "Calculated Display Format", Order = 29)]
+    public string? CalculatedDisplayFormat { get; set; }
+
+    /// <summary>Parent field name for CopyFromParent fields (e.g. "CustomerId").</summary>
+    [DataField(Label = "Copy From Parent Field", Order = 30)]
+    public string? CopyFromParentField { get; set; }
+
+    /// <summary>Entity slug for CopyFromParent resolution (e.g. "customers").</summary>
+    [DataField(Label = "Copy From Parent Slug", Order = 31)]
+    public string? CopyFromParentSlug { get; set; }
+
+    /// <summary>Source field on the parent's target entity for CopyFromParent (e.g. "DiscountPercent").</summary>
+    [DataField(Label = "Copy From Parent Source Field", Order = 32)]
+    public string? CopyFromParentSourceField { get; set; }
+
+    /// <summary>Slug of the related document entity for document-chain navigation (e.g. "customers").</summary>
+    [DataField(Label = "Related Document Slug", Order = 33)]
+    public string? RelatedDocumentSlug { get; set; }
+
+    /// <summary>Display field on the related document entity (e.g. "Name").</summary>
+    [DataField(Label = "Related Document Display Field", Order = 34)]
+    public string? RelatedDocumentDisplayField { get; set; }
+
+    /// <summary>
+    /// Name of another field on the same entity whose value filters this lookup's options.
+    /// When the cascade-from field changes, this field's options are re-fetched with a filter.
+    /// E.g. on a Region field: CascadeFromField = "CountryId", CascadeFilterField = "CountryId".
+    /// </summary>
+    [DataField(Label = "Cascade From Field", Order = 35)]
+    public string? CascadeFromField { get; set; }
+
+    /// <summary>
+    /// Field name on the lookup target entity used to filter results in a cascade.
+    /// E.g. on a Region lookup targeting "regions": CascadeFilterField = "CountryId".
+    /// </summary>
+    [DataField(Label = "Cascade Filter Field", Order = 36)]
+    public string? CascadeFilterField { get; set; }
+
+    /// <summary>
+    /// Logical group name for organising fields into sections/cards on the form.
+    /// Fields with the same FieldGroup are rendered together under a shared heading.
+    /// Null/empty means the field sits in the default (ungrouped) section.
+    /// </summary>
+    [DataField(Label = "Field Group", Order = 37)]
+    public string? FieldGroup { get; set; }
+
+    /// <summary>
+    /// Number of CSS grid columns this field should span (1–12, Bootstrap grid).
+    /// Defaults to 12 (full width). Use 6 for half-width, 4 for third-width, etc.
+    /// </summary>
+    [DataField(Label = "Column Span", Order = 38)]
+    public int ColumnSpan { get; set; } = 12;
+
     public override string ToString() => $"{Name} ({Type})";
 }

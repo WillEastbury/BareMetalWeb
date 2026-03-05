@@ -1,9 +1,7 @@
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
-using BareMetalWeb.Data.DataObjects;
 using Xunit;
-using CustomDayOfWeek = BareMetalWeb.Data.DataObjects.DayOfWeek;
 
 namespace BareMetalWeb.Data.Tests;
 
@@ -11,7 +9,7 @@ namespace BareMetalWeb.Data.Tests;
 /// Tests for BuildTimetableHtml and CanShowTimetableView to validate
 /// timetable view rendering with custom day-of-week enum types.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class TimetableViewTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
@@ -21,9 +19,7 @@ public class TimetableViewTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        // Force UserClasses assembly to load so TimeTablePlan is registered
-        _ = typeof(BareMetalWeb.UserClasses.DataObjects.Employee).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        _ = GalleryTestFixture.State;
     }
 
     public void Dispose()
@@ -72,8 +68,7 @@ public class TimetableViewTests : IDisposable
     public void CanShowTimetableView_TimeTablePlanEntity_ReturnsTrue()
     {
         // Arrange
-        var metadata = DataScaffold.GetEntityByType(typeof(TimeTablePlan));
-        Assert.NotNull(metadata);
+        Assert.True(DataScaffold.TryGetEntity("time-table-plans", out var metadata));
 
         // Act
         var canShow = DataScaffold.CanShowTimetableView(metadata);
@@ -86,8 +81,7 @@ public class TimetableViewTests : IDisposable
     public void CanShowTimetableView_EntityWithoutTimeField_ReturnsFalse()
     {
         // Arrange - Customer has no TimeOnly/DateTime field
-        var metadata = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(metadata);
+        Assert.True(DataScaffold.TryGetEntity("customers", out var metadata));
 
         // Act
         var canShow = DataScaffold.CanShowTimetableView(metadata);
@@ -100,31 +94,27 @@ public class TimetableViewTests : IDisposable
     public void BuildTimetableHtml_GroupsByDay_EachDayInOwnSection()
     {
         // Arrange
-        var monday = new TimeTablePlan
-        {
-            Key = 1,
-            Day = CustomDayOfWeek.Monday,
-            StartTime = new TimeOnly(9, 0),
-            Minutes = 60
-        };
-        var tuesday = new TimeTablePlan
-        {
-            Key = 2,
-            Day = CustomDayOfWeek.Tuesday,
-            StartTime = new TimeOnly(10, 0),
-            Minutes = 45
-        };
-        var mondayLater = new TimeTablePlan
-        {
-            Key = 3,
-            Day = CustomDayOfWeek.Monday,
-            StartTime = new TimeOnly(11, 0),
-            Minutes = 30
-        };
+        Assert.True(DataScaffold.TryGetEntity("time-table-plans", out var metadata));
+
+        var monday = metadata.Handlers.Create();
+        monday.Key = 1;
+        metadata.FindField("Day")!.SetValueFn(monday, 1);
+        metadata.FindField("StartTime")!.SetValueFn(monday, new TimeOnly(9, 0));
+        metadata.FindField("Minutes")!.SetValueFn(monday, 60);
+
+        var tuesday = metadata.Handlers.Create();
+        tuesday.Key = 2;
+        metadata.FindField("Day")!.SetValueFn(tuesday, 2);
+        metadata.FindField("StartTime")!.SetValueFn(tuesday, new TimeOnly(10, 0));
+        metadata.FindField("Minutes")!.SetValueFn(tuesday, 45);
+
+        var mondayLater = metadata.Handlers.Create();
+        mondayLater.Key = 3;
+        metadata.FindField("Day")!.SetValueFn(mondayLater, 1);
+        metadata.FindField("StartTime")!.SetValueFn(mondayLater, new TimeOnly(11, 0));
+        metadata.FindField("Minutes")!.SetValueFn(mondayLater, 30);
 
         var items = new List<BaseDataObject> { monday, tuesday, mondayLater };
-        var metadata = DataScaffold.GetEntityByType(typeof(TimeTablePlan));
-        Assert.NotNull(metadata);
 
         // Act
         var html = DataScaffold.BuildTimetableHtml(metadata, items, "/admin/data/timetableplans");
@@ -140,24 +130,21 @@ public class TimetableViewTests : IDisposable
     public void BuildTimetableHtml_SortsByTimeWithinDay()
     {
         // Arrange: two Monday entries out of time order
-        var laterLesson = new TimeTablePlan
-        {
-            Key = 4,
-            Day = CustomDayOfWeek.Monday,
-            StartTime = new TimeOnly(12, 0),
-            Minutes = 60
-        };
-        var earlierLesson = new TimeTablePlan
-        {
-            Key = 5,
-            Day = CustomDayOfWeek.Monday,
-            StartTime = new TimeOnly(9, 5),
-            Minutes = 120
-        };
+        Assert.True(DataScaffold.TryGetEntity("time-table-plans", out var metadata));
+
+        var laterLesson = metadata.Handlers.Create();
+        laterLesson.Key = 4;
+        metadata.FindField("Day")!.SetValueFn(laterLesson, 1);
+        metadata.FindField("StartTime")!.SetValueFn(laterLesson, new TimeOnly(12, 0));
+        metadata.FindField("Minutes")!.SetValueFn(laterLesson, 60);
+
+        var earlierLesson = metadata.Handlers.Create();
+        earlierLesson.Key = 5;
+        metadata.FindField("Day")!.SetValueFn(earlierLesson, 1);
+        metadata.FindField("StartTime")!.SetValueFn(earlierLesson, new TimeOnly(9, 5));
+        metadata.FindField("Minutes")!.SetValueFn(earlierLesson, 120);
 
         var items = new List<BaseDataObject> { laterLesson, earlierLesson };
-        var metadata = DataScaffold.GetEntityByType(typeof(TimeTablePlan));
-        Assert.NotNull(metadata);
 
         // Act
         var html = DataScaffold.BuildTimetableHtml(metadata, items, "/admin/data/timetableplans");
@@ -173,8 +160,7 @@ public class TimetableViewTests : IDisposable
     {
         // Arrange
         var items = new List<BaseDataObject>();
-        var metadata = DataScaffold.GetEntityByType(typeof(TimeTablePlan));
-        Assert.NotNull(metadata);
+        Assert.True(DataScaffold.TryGetEntity("time-table-plans", out var metadata));
 
         // Act
         var html = DataScaffold.BuildTimetableHtml(metadata, items, "/admin/data/timetableplans");
@@ -187,8 +173,7 @@ public class TimetableViewTests : IDisposable
     public void BuildTimetableHtml_MissingDayOrTimeField_ReturnsWarning()
     {
         // Arrange - Customer has no Day enum or TimeOnly field
-        var metadata = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(metadata);
+        Assert.True(DataScaffold.TryGetEntity("customers", out var metadata));
         var items = new List<BaseDataObject>();
 
         // Act
@@ -202,24 +187,21 @@ public class TimetableViewTests : IDisposable
     public void BuildTimetableHtml_DaysSortedInEnumOrder()
     {
         // Arrange: Tuesday (enum value 2) and Monday (enum value 1) - added in reverse order
-        var tuesday = new TimeTablePlan
-        {
-            Key = 6,
-            Day = CustomDayOfWeek.Tuesday,
-            StartTime = new TimeOnly(9, 0),
-            Minutes = 60
-        };
-        var monday = new TimeTablePlan
-        {
-            Key = 7,
-            Day = CustomDayOfWeek.Monday,
-            StartTime = new TimeOnly(9, 0),
-            Minutes = 60
-        };
+        Assert.True(DataScaffold.TryGetEntity("time-table-plans", out var metadata));
+
+        var tuesday = metadata.Handlers.Create();
+        tuesday.Key = 6;
+        metadata.FindField("Day")!.SetValueFn(tuesday, 2);
+        metadata.FindField("StartTime")!.SetValueFn(tuesday, new TimeOnly(9, 0));
+        metadata.FindField("Minutes")!.SetValueFn(tuesday, 60);
+
+        var monday = metadata.Handlers.Create();
+        monday.Key = 7;
+        metadata.FindField("Day")!.SetValueFn(monday, 1);
+        metadata.FindField("StartTime")!.SetValueFn(monday, new TimeOnly(9, 0));
+        metadata.FindField("Minutes")!.SetValueFn(monday, 60);
 
         var items = new List<BaseDataObject> { tuesday, monday };
-        var metadata = DataScaffold.GetEntityByType(typeof(TimeTablePlan));
-        Assert.NotNull(metadata);
 
         // Act
         var html = DataScaffold.BuildTimetableHtml(metadata, items, "/admin/data/timetableplans");
@@ -234,24 +216,25 @@ public class TimetableViewTests : IDisposable
     public void BuildTimetableHtml_LookupField_ShowsDisplayValueNotRawId()
     {
         // Arrange: seed a Subject so the lookup can be resolved
-        var subject = new BareMetalWeb.Data.DataObjects.Subject { Key = 1, Name = "Mathematics" };
-        DataStoreProvider.Current.Save(subject);
+        Assert.True(DataScaffold.TryGetEntity("subjects", out var subjectMeta));
+        var subject = subjectMeta.Handlers.Create();
+        subject.Key = 1;
+        subjectMeta.FindField("Name")!.SetValueFn(subject, "Mathematics");
+        subjectMeta.Handlers.SaveAsync(subject, CancellationToken.None).AsTask().GetAwaiter().GetResult();
 
         // Clear lookup cache to force re-query with seeded data
         ClearLookupCache();
 
-        var plan = new TimeTablePlan
-        {
-            Key = 2,
-            SubjectId = "1",
-            Day = CustomDayOfWeek.Wednesday,
-            StartTime = new TimeOnly(10, 0),
-            Minutes = 45
-        };
+        Assert.True(DataScaffold.TryGetEntity("time-table-plans", out var metadata));
+
+        var plan = metadata.Handlers.Create();
+        plan.Key = 2;
+        metadata.FindField("SubjectId")!.SetValueFn(plan, "1");
+        metadata.FindField("Day")!.SetValueFn(plan, 3);
+        metadata.FindField("StartTime")!.SetValueFn(plan, new TimeOnly(10, 0));
+        metadata.FindField("Minutes")!.SetValueFn(plan, 45);
 
         var items = new List<BaseDataObject> { plan };
-        var metadata = DataScaffold.GetEntityByType(typeof(TimeTablePlan));
-        Assert.NotNull(metadata);
 
         // Act
         var html = DataScaffold.BuildTimetableHtml(metadata, items, "/admin/data/timetableplans");

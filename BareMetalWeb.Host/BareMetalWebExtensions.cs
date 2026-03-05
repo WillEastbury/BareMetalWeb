@@ -1,4 +1,3 @@
-using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
@@ -49,33 +48,18 @@ public static class BareMetalWebExtensions
             BinaryApiHandlers.Initialize(bos.GetSigningKeyCopy(), logger);
             LookupApiHandlers.Init(logger);
 
-        // LoadCompiledEntities: when true (default), scan assemblies for [DataEntity] types.
-        // Set to false for gallery-first startup where entities come from metadata only.
-        bool loadCompiled = app.Configuration.GetValue("Data:LoadCompiledEntities", false);
-        if (loadCompiled)
-        {
-            try { _ = Assembly.Load("BareMetalWeb.UserClasses"); } catch { }
-            DataEntityRegistry.RegisterAllEntities();
-        }
-        else
-        {
-            // Gallery-first mode: register system entities explicitly (AOT-safe, no assembly scanning).
-            DataScaffold.RegisterEntity<AppSetting>();
-            DataScaffold.RegisterEntity<User>();
-            DataScaffold.RegisterEntity<SystemPrincipal>();
-            DataScaffold.RegisterEntity<AuditEntry>();
-            DataScaffold.RegisterEntity<ReportDefinition>();
-            DataScaffold.RegisterEntity<EntityDefinition>();
-            DataScaffold.RegisterEntity<FieldDefinition>();
-            DataScaffold.RegisterEntity<IndexDefinition>();
-            DataScaffold.RegisterEntity<ActionDefinition>();
-            DataScaffold.RegisterEntity<ActionCommandDefinition>();
-            logger.LogInfo("Gallery-first mode: registered system entities only.");
-        }
+        // Register system entities explicitly (AOT-safe, no assembly scanning).
+        DataScaffold.RegisterEntity<AppSetting>();
+        DataScaffold.RegisterEntity<User>();
+        DataScaffold.RegisterEntity<SystemPrincipal>();
+        DataScaffold.RegisterEntity<AuditEntry>();
+        DataScaffold.RegisterEntity<ReportDefinition>();
+        DataScaffold.RegisterEntity<EntityDefinition>();
+        DataScaffold.RegisterEntity<FieldDefinition>();
+        DataScaffold.RegisterEntity<IndexDefinition>();
+        DataScaffold.RegisterEntity<ActionDefinition>();
+        DataScaffold.RegisterEntity<ActionCommandDefinition>();
 
-        DataEntityRegistry.RegisterVirtualEntitiesFromFile(
-            Path.Combine(contentRoot, "virtualEntities.json"),
-            dataRoot);
         IDataObjectStore dataStore = ProgramSetup.CreateDataStore(app, serializer, queryEvaluator, logger);
 
         // ── Multitenancy ──────────────────────────────────────────────────────
@@ -249,8 +233,22 @@ public static class BareMetalWebExtensions
         // Initialize cluster state with local lease (single-instance default)
         var clusterState = new BareMetalWeb.Data.ClusterState(new BareMetalWeb.Data.LocalLeaseAuthority());
         _ = clusterState.TryBecomeLeaderAsync(CancellationToken.None);
-        ClusterApiHandlers.Initialize(clusterState);
+
+        // Initialize compactor with its own independent lease
+        var compactorState = new BareMetalWeb.Data.CompactorState(new BareMetalWeb.Data.LocalLeaseAuthority());
+        _ = compactorState.TryBecomeCompactorAsync(CancellationToken.None);
+
+        ClusterApiHandlers.Initialize(clusterState, compactorState);
         ProxyRouteHandler.Initialize(clusterState);
+        TenantApiHandlers.Initialize(tenantRegistry);
+
+        // Vector ANN index manager
+        var vectorIndexManager = new BareMetalWeb.Data.VectorIndexManager(dataRoot, logger);
+        VectorApiHandlers.Initialize(vectorIndexManager);
+
+        // Attach write fencing to the primary WAL provider
+        if (DataStoreProvider.PrimaryProvider is BareMetalWeb.Data.WalDataProvider walProvider)
+            walProvider.SetClusterState(clusterState);
 
         appInfo.RegisterBinaryApiRoutes(routeHandlers, pageInfoFactory, mainTemplate);       // binary wire-format API
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);

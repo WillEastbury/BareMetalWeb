@@ -12,7 +12,7 @@ namespace BareMetalWeb.Data.Tests;
 /// <summary>
 /// Tests for ReportQuery, ReportExecutor, and related report models.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class ReportQueryTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;

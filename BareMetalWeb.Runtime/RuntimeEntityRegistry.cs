@@ -112,13 +112,13 @@ public sealed class RuntimeEntityRegistry
     /// </summary>
     /// <param name="store">The data store to load schema records from.</param>
     /// <param name="compiler">Compiler instance to use.</param>
-    /// <param name="walProvider">WAL provider for DataRecord storage (pass null to fall back to JSON).</param>
-    /// <param name="dataRootPath">Root path for virtual entity JSON storage (fallback).</param>
+    /// <param name="walProvider">WAL provider for DataRecord storage.</param>
+    /// <param name="dataRootPath">Root path for data storage.</param>
     /// <param name="logger">Optional logger for warnings.</param>
     public static async Task<RuntimeEntityRegistry> BuildAsync(
         IDataObjectStore store,
         IRuntimeEntityCompiler compiler,
-        WalDataProvider? walProvider,
+        WalDataProvider walProvider,
         string dataRootPath,
         Action<string>? logger = null)
     {
@@ -138,11 +138,11 @@ public sealed class RuntimeEntityRegistry
     /// </summary>
     public static async Task<RuntimeEntityRegistry> RebuildAsync()
     {
-        if (_initStore == null || _initCompiler == null || _initDataRootPath == null)
+        if (_initStore == null || _initCompiler == null || _initDataRootPath == null || _initWalProvider == null)
             throw new InvalidOperationException("Cannot rebuild — BuildAsync has not been called yet.");
 
         _initLogger?.Invoke("Rebuilding RuntimeEntityRegistry...");
-        var registry = await BuildCoreAsync(_initStore, _initCompiler, _initWalProvider, _initDataRootPath, _initLogger)
+        var registry = await BuildCoreAsync(_initStore, _initCompiler, _initWalProvider!, _initDataRootPath, _initLogger)
             .ConfigureAwait(false);
         _initLogger?.Invoke($"Registry rebuilt: {registry.All.Count} entities loaded.");
         return registry;
@@ -151,12 +151,11 @@ public sealed class RuntimeEntityRegistry
     private static async Task<RuntimeEntityRegistry> BuildCoreAsync(
         IDataObjectStore store,
         IRuntimeEntityCompiler compiler,
-        WalDataProvider? walProvider,
+        WalDataProvider walProvider,
         string dataRootPath,
         Action<string>? logger = null)
     {
         var registry = new RuntimeEntityRegistry();
-        var jsonStore = walProvider == null ? new VirtualEntityJsonStore(dataRootPath) : null;
 
         // Load all schema records in parallel
         var entityDefs = (await store.QueryAsync<EntityDefinition>().ConfigureAwait(false)).ToList();
@@ -179,13 +178,13 @@ public sealed class RuntimeEntityRegistry
                 entityDef.EntityId = entityDef.Key.ToString();
 
             var entityFields = allFields
-                .Where(f => string.Equals(f.EntityId, entityDef.Key.ToString(), StringComparison.OrdinalIgnoreCase))
+                .Where(f => string.Equals(f.EntityId, entityDef.EntityId, StringComparison.OrdinalIgnoreCase))
                 .ToList();
             var entityIndexes = allIndexes
-                .Where(i => string.Equals(i.EntityId, entityDef.Key.ToString(), StringComparison.OrdinalIgnoreCase))
+                .Where(i => string.Equals(i.EntityId, entityDef.EntityId, StringComparison.OrdinalIgnoreCase))
                 .ToList();
             var entityActions = allActions
-                .Where(a => string.Equals(a.EntityId, entityDef.Key.ToString(), StringComparison.OrdinalIgnoreCase))
+                .Where(a => string.Equals(a.EntityId, entityDef.EntityId, StringComparison.OrdinalIgnoreCase))
                 .ToList();
 
             // Ensure FieldId populated
@@ -213,16 +212,8 @@ public sealed class RuntimeEntityRegistry
             registry.Register(model);
 
             // Register with DataScaffold so existing admin-UI/API routes work
-            DataEntityMetadata entityMetadata;
-            if (walProvider != null)
-            {
-                var schema = EntitySchemaFactory.FromModel(model);
-                entityMetadata = model.ToEntityMetadata(walProvider, schema);
-            }
-            else
-            {
-                entityMetadata = model.ToEntityMetadata(jsonStore!);
-            }
+            var schema = EntitySchemaFactory.FromModel(model);
+            var entityMetadata = model.ToEntityMetadata(walProvider, schema);
             DataScaffold.RegisterVirtualEntity(entityMetadata);
 
             // Persist schema hash + version back to EntityDefinition if changed

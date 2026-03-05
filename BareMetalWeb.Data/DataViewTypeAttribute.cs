@@ -7,7 +7,8 @@ public enum ViewType
     OrgChart = 2,
     Timeline = 3,
     Timetable = 4,
-    Sankey = 5
+    Sankey = 5,
+    Calendar = 6
 }
 
 [AttributeUsage(AttributeTargets.Class, Inherited = true, AllowMultiple = false)]

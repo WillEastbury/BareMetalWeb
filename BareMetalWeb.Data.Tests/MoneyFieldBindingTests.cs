@@ -11,6 +11,7 @@ namespace BareMetalWeb.Data.Tests;
 /// Tests for Money field binding in ApplyValuesFromForm and ApplyValuesFromJson.
 /// Regression tests for "Money type Doesn't bind second field (Currency)".
 /// </summary>
+[Collection("SharedState")]
 public class MoneyFieldBindingTests
 {
     [DataEntity("MoneyTestEntities")]

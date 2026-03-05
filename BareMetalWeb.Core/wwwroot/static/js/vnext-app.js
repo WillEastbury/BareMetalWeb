@@ -5,7 +5,7 @@
     'use strict';
 
     // ── Configuration ─────────────────────────────────────────────────────────
-    var BASE = '/UI';
+    var BASE = '';
     var API  = '/api';
     var META = '/meta';
     var LOOKUP_CARDINALITY_THRESHOLD = 20; // above this count, show a search dialog
@@ -163,6 +163,46 @@
     function apiDelete(url)       { return apiFetch(url, { method: 'DELETE' }); }
     function apiGet(url)          { return apiFetch(url); }
 
+    // Raw ordinal fetch — decompresses Brotli on the client and parses ordinal array
+    function apiRawFetch(slug) {
+        return fetch('/api/_binary/' + encodeURIComponent(slug) + '/_raw')
+            .then(function (res) {
+                if (!res.ok) throw new Error('Raw fetch failed: ' + res.status);
+                var fieldsHeader = res.headers.get('X-BMW-Fields') || '';
+                var fieldNames = fieldsHeader.split(',');
+                return res.arrayBuffer().then(function (compressed) {
+                    // Use DecompressionStream if available (modern browsers)
+                    if (typeof DecompressionStream !== 'undefined') {
+                        var ds = new DecompressionStream('deflate-raw');
+                        var blob = new Blob([compressed]);
+                        return new Response(blob.stream().pipeThrough(ds)).arrayBuffer()
+                            .then(function (raw) { return parseOrdinalData(new DataView(raw), fieldNames); });
+                    }
+                    // Fallback: assume server sent uncompressed if no DecompressionStream
+                    return parseOrdinalData(new DataView(compressed), fieldNames);
+                });
+            });
+    }
+
+    function parseOrdinalData(view, fieldNames) {
+        var offset = 0;
+        var rowCount = view.getUint32(offset, true); offset += 4;
+        var fieldCount = view.getUint16(offset, true); offset += 2;
+        var rows = [];
+        var decoder = new TextDecoder();
+        for (var r = 0; r < rowCount; r++) {
+            var row = {};
+            for (var f = 0; f < fieldCount; f++) {
+                var len = view.getUint16(offset, true); offset += 2;
+                var val = decoder.decode(new Uint8Array(view.buffer, offset, len));
+                offset += len;
+                if (f < fieldNames.length) row[fieldNames[f]] = val;
+            }
+            rows.push(row);
+        }
+        return { rows: rows, fieldNames: fieldNames, rowCount: rowCount };
+    }
+
     // ── UI helpers ────────────────────────────────────────────────────────────
     var content = null;
 
@@ -273,6 +313,37 @@
         if (hidden) hidden.value = JSON.stringify(tags);
     }
 
+    // ── Lightweight Markdown → HTML ─────────────────────────────────────────
+    function renderMarkdownToHtml(md) {
+        if (!md) return '';
+        var html = escHtml(md);
+        // Code blocks (``` ... ```)
+        html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+        // Inline code
+        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+        // Headers
+        html = html.replace(/^### (.+)$/gm, '<h5>$1</h5>');
+        html = html.replace(/^## (.+)$/gm, '<h4>$1</h4>');
+        html = html.replace(/^# (.+)$/gm, '<h3>$1</h3>');
+        // Bold + italic
+        html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        // Links
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+        // Unordered lists
+        html = html.replace(/^\- (.+)$/gm, '<li>$1</li>');
+        html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+        // Horizontal rules
+        html = html.replace(/^---$/gm, '<hr>');
+        // Paragraphs (double newline)
+        html = html.replace(/\n\n/g, '</p><p>');
+        html = '<p>' + html + '</p>';
+        // Single newlines → <br>
+        html = html.replace(/\n/g, '<br>');
+        return html;
+    }
+
     function fmtValue(val, fieldType) {
         if (val == null || val === '') return '<span class="text-muted">—</span>';
         if (fieldType === 'YesNo' || fieldType === 'Boolean') {
@@ -281,6 +352,7 @@
                 : '<span class="badge bg-secondary">No</span>';
         }
         if (fieldType === 'Password') return '<span class="text-muted">••••••••</span>';
+        if (fieldType === 'Markdown') return '<div class="bm-markdown-rendered">' + renderMarkdownToHtml(String(val)) + '</div>';
         if (fieldType === 'Tags' && Array.isArray(val)) {
             return val.map(function (t) { return '<span class="badge bg-info text-dark me-1">' + escHtml(t) + '</span>'; }).join('');
         }
@@ -345,14 +417,14 @@
         Object.keys(groups).sort().forEach(function (groupName) {
             var items = groups[groupName];
             if (items.length === 1) {
-                html += '<li class="nav-item"><a class="nav-link" href="' + BASE + '/data/' + escHtml(items[0].slug) + '">' + escHtml(items[0].name) + '</a></li>';
+                html += '<li class="nav-item"><a class="nav-link" href="' + BASE + '/' + escHtml(items[0].slug) + '">' + escHtml(items[0].name) + '</a></li>';
             } else {
                 html += '<li class="nav-item dropdown">';
                 html += '<a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">' + escHtml(groupName) + '</a>';
                 html += '<ul class="dropdown-menu dropdown-menu-dark">';
                 items.sort(function (a, b) { return (a.navOrder || 0) - (b.navOrder || 0) || a.name.localeCompare(b.name); })
                      .forEach(function (e) {
-                        html += '<li><a class="dropdown-item" href="' + BASE + '/data/' + escHtml(e.slug) + '">' + escHtml(e.name) + '</a></li>';
+                        html += '<li><a class="dropdown-item" href="' + BASE + '/' + escHtml(e.slug) + '">' + escHtml(e.name) + '</a></li>';
                      });
                 html += '</ul></li>';
             }
@@ -404,12 +476,12 @@
                 html += '<h4 class="mt-4 mb-3 border-bottom pb-1">' + escHtml(groupName) + '</h4>';
                 html += '<div class="row row-cols-1 row-cols-md-3 g-3 mb-3">';
                 groups[groupName].forEach(function (e) {
-                    html += '<div class="col"><div class="card h-100">' +
+                    html += '<div class="col"><div class="card h-100 bm-entity-card">' +
                         '<div class="card-body">' +
                         '<h5 class="card-title">' + escHtml(e.name) + '</h5>' +
                         '</div>' +
                         '<div class="card-footer">' +
-                        '<a class="btn btn-primary btn-sm" href="' + BASE + '/data/' + escHtml(e.slug) + '">Open</a>' +
+                        '<a class="btn btn-primary btn-sm" href="' + BASE + '/' + escHtml(e.slug) + '">Open</a>' +
                         '</div></div></div>';
                 });
                 html += '</div>';
@@ -480,7 +552,7 @@
         var listFields = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; });
         var commands   = meta.commands || [];
 
-        var baseUrl = BASE + '/data/' + encodeURIComponent(slug);
+        var baseUrl = BASE + '/' + encodeURIComponent(slug);
 
         function buildSortUrl(fieldName) {
             var newDir = (sort === fieldName && dir === 'asc') ? 'desc' : 'asc';
@@ -535,7 +607,7 @@
         html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=json" download><i class="bi bi-filetype-json"></i> Export JSON</a>';
         html += '<button class="btn btn-outline-secondary btn-sm" id="vnext-import-btn" data-slug="' + escHtml(slug) + '"><i class="bi bi-upload"></i> Import CSV</button>';
         // View type switcher (when entity supports alternate views or has a parent field for hierarchy)
-        if (viewType !== 'Table' || meta.parentField || meta.canShowTimetable || meta.canShowTimeline || meta.canShowSankey) {
+        if (viewType !== 'Table' || meta.parentField || meta.canShowTimetable || meta.canShowTimeline || meta.canShowSankey || meta.canShowCalendar || meta.canShowWorkflow) {
             html += '<div class="btn-group btn-group-sm ms-2">';
             html += '<a class="btn btn-outline-secondary' + (activeView === 'Table' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Table' })) + '" title="Table View"><i class="bi bi-table"></i></a>';
             if (viewType === 'TreeView' || (viewType === 'OrgChart' && meta.parentField)) html += '<a class="btn btn-outline-secondary' + (activeView === 'TreeView' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'TreeView' })) + '" title="Tree View"><i class="bi bi-diagram-3"></i></a>';
@@ -543,6 +615,10 @@
             if (viewType === 'Timeline' || meta.canShowTimeline) html += '<a class="btn btn-outline-secondary' + (activeView === 'Timeline' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timeline' })) + '" title="Timeline"><i class="bi bi-calendar-range"></i></a>';
             if (meta.canShowTimetable) html += '<a class="btn btn-outline-secondary' + (activeView === 'Timetable' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timetable' })) + '" title="Timetable"><i class="bi bi-calendar3"></i></a>';
             if (viewType === 'Sankey' || meta.canShowSankey) html += '<a class="btn btn-outline-secondary' + (activeView === 'Sankey' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Sankey' })) + '" title="Document Chain (Sankey)"><i class="bi bi-diagram-2-fill"></i></a>';
+            if (viewType === 'Calendar' || meta.canShowCalendar) html += '<a class="btn btn-outline-secondary' + (activeView === 'Calendar' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar' })) + '" title="Calendar"><i class="bi bi-calendar-month"></i></a>';
+            if (meta.canShowWorkflow) html += '<a class="btn btn-outline-secondary' + (activeView === 'Workflow' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Workflow' })) + '" title="Workflow Board"><i class="bi bi-kanban"></i></a>';
+            html += '<a class="btn btn-outline-secondary' + (activeView === 'Aggregation' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Aggregation' })) + '" title="Aggregations"><i class="bi bi-bar-chart-line"></i></a>';
+            html += '<a class="btn btn-outline-secondary' + (activeView === 'Chart' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Chart' })) + '" title="Charts"><i class="bi bi-graph-up"></i></a>';
             html += '</div>';
         }
         html += '</div>';
@@ -557,6 +633,14 @@
             html += renderTimetable(meta, items, slug, baseUrl);
         } else if (activeView === 'Sankey' || (activeView === '' && viewType === 'Sankey')) {
             html += renderSankeyView(meta, items, slug, baseUrl);
+        } else if (activeView === 'Calendar' || (activeView === '' && viewType === 'Calendar')) {
+            html += renderCalendarView(meta, items, slug, baseUrl, query);
+        } else if (activeView === 'Aggregation') {
+            html += renderAggregationView(meta, items, slug, baseUrl, query);
+        } else if (activeView === 'Workflow') {
+            html += renderWorkflowView(meta, items, slug, baseUrl, query);
+        } else if (activeView === 'Chart') {
+            html += renderChartView(meta, items, slug, baseUrl, query);
         } else {
             // Search bar
             html += '<form class="d-flex gap-2 mb-3" id="vnext-search-form">';
@@ -606,7 +690,7 @@
             // Card layout for narrow viewports
             html += '<div class="d-md-none vnext-card-list">';
             if (items.length === 0) {
-                html += '<p class="text-center text-muted py-4">No records found.</p>';
+                html += '<div class="bm-empty-state"><i class="bi bi-inbox"></i><p>No records found</p><small>Create one to get started</small></div>';
             } else {
                 items.forEach(function (item) {
                     var id = item.id || item.Id || '';
@@ -675,7 +759,7 @@
             html += '<tbody>';
 
             if (items.length === 0) {
-                html += '<tr><td colspan="' + (listFields.length + 2) + '" class="text-center text-muted py-4">No records found.</td></tr>';
+                html += '<tr><td colspan="' + (listFields.length + 2) + '"><div class="bm-empty-state"><i class="bi bi-inbox"></i><p>No records found</p><small>Create one to get started</small></div></td></tr>';
             } else {
                 items.forEach(function (item) {
                     var id = item.id || item.Id || '';
@@ -688,7 +772,7 @@
                             html += '<td data-label="' + escHtml(f.label) + '"><span class="badge bg-secondary">' + val.length + ' item' + (val.length !== 1 ? 's' : '') + '</span></td>';
                         } else if (f.lookup && f.lookup.targetSlug && val) {
                             html += '<td data-label="' + escHtml(f.label) + '" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
-                                '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
+                                '<a href="' + BASE + '/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
                         } else {
                             html += '<td data-label="' + escHtml(f.label) + '">' + fmtValue(val, f.type) + '</td>';
                         }
@@ -914,7 +998,7 @@
                     html += '<dd class="col-sm-9">' + renderSubListReadonly(val, f) + '</dd>';
                 } else if (f.lookup && f.lookup.targetSlug && val) {
                     html += '<dd class="col-sm-9" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
-                        '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></dd>';
+                        '<a href="' + BASE + '/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></dd>';
                 } else {
                     html += '<dd class="col-sm-9">' + fmtValue(val, f.type) + '</dd>';
                 }
@@ -1314,7 +1398,7 @@
                     var val = nestedGet(item, f.name);
                     if (f.lookup && f.lookup.targetSlug && val) {
                         html += '<td data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
-                            '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
+                            '<a href="' + BASE + '/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
                     } else {
                         html += '<td>' + fmtValue(val, f.type) + '</td>';
                     }
@@ -1373,7 +1457,7 @@
                 relFields.forEach(function (rf) {
                     var fkVal = nestedGet(item, rf.name);
                     if (fkVal && rf.targetSlug) {
-                        var href = BASE + '/data/' + encodeURIComponent(rf.targetSlug) + '/' + encodeURIComponent(String(fkVal));
+                        var href = BASE + '/' + encodeURIComponent(rf.targetSlug) + '/' + encodeURIComponent(String(fkVal));
                         html += '<td><a href="' + href + '" class="badge bg-primary text-decoration-none">' + escHtml(String(fkVal)) + '</a></td>';
                     } else {
                         html += '<td><span class="text-muted small">—</span></td>';
@@ -1398,6 +1482,275 @@
         }, 50);
 
         return html;
+    }
+
+    // ── Monthly Calendar View ───────────────────────────────────────────────
+    function renderCalendarView(meta, items, slug, baseUrl, query) {
+        var dateField = meta.fields.find(function (f) {
+            return f.type === 'DateOnly' || f.type === 'DateTime';
+        });
+        if (!dateField) return '<p class="text-warning">Calendar view requires a Date field.</p>';
+
+        var labelField = meta.fields.find(function (f) { return f.list && f.type === 'Text'; }) || meta.fields[0];
+
+        // Determine current month from query or default to today
+        var now = new Date();
+        var calYear = parseInt(query.calYear) || now.getFullYear();
+        var calMonth = parseInt(query.calMonth); // 0-based
+        if (isNaN(calMonth)) calMonth = now.getMonth();
+
+        var firstDay = new Date(calYear, calMonth, 1);
+        var daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+        var startDow = firstDay.getDay(); // 0=Sun
+
+        // Build date→items map
+        var dateMap = {};
+        items.forEach(function (item) {
+            var raw = nestedGet(item, dateField.name);
+            if (!raw) return;
+            var d = new Date(raw);
+            if (isNaN(d.getTime())) return;
+            if (d.getFullYear() === calYear && d.getMonth() === calMonth) {
+                var day = d.getDate();
+                if (!dateMap[day]) dateMap[day] = [];
+                dateMap[day].push(item);
+            }
+        });
+
+        var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        var html = '';
+
+        // Month navigation
+        var prevMonth = calMonth - 1, prevYear = calYear;
+        if (prevMonth < 0) { prevMonth = 11; prevYear--; }
+        var nextMonth = calMonth + 1, nextYear = calYear;
+        if (nextMonth > 11) { nextMonth = 0; nextYear++; }
+
+        html += '<div class="d-flex justify-content-between align-items-center mb-3">';
+        html += '<a class="btn btn-outline-secondary btn-sm" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calYear: prevYear, calMonth: prevMonth })) + '"><i class="bi bi-chevron-left"></i></a>';
+        html += '<h4 class="mb-0">' + monthNames[calMonth] + ' ' + calYear + '</h4>';
+        html += '<a class="btn btn-outline-secondary btn-sm" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calYear: nextYear, calMonth: nextMonth })) + '"><i class="bi bi-chevron-right"></i></a>';
+        html += '</div>';
+
+        // Calendar grid
+        html += '<table class="table table-bordered bm-calendar-table"><thead><tr>';
+        ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(function (d) {
+            html += '<th class="text-center small text-muted" style="width:14.28%">' + d + '</th>';
+        });
+        html += '</tr></thead><tbody>';
+
+        var day = 1;
+        var today = now.getDate();
+        var isCurrentMonth = (calYear === now.getFullYear() && calMonth === now.getMonth());
+        for (var week = 0; day <= daysInMonth; week++) {
+            html += '<tr>';
+            for (var dow = 0; dow < 7; dow++) {
+                if ((week === 0 && dow < startDow) || day > daysInMonth) {
+                    html += '<td class="bg-light" style="min-height:80px;vertical-align:top">&nbsp;</td>';
+                } else {
+                    var isToday = isCurrentMonth && day === today;
+                    html += '<td style="min-height:80px;vertical-align:top" class="' + (isToday ? 'table-primary' : '') + '">';
+                    html += '<div class="fw-bold small ' + (isToday ? 'text-primary' : 'text-muted') + '">' + day + '</div>';
+                    var dayItems = dateMap[day] || [];
+                    dayItems.forEach(function (it) {
+                        var lbl = nestedGet(it, labelField.name) || '(untitled)';
+                        var itemId = it.id || it.Id || it.key || it.Key || '';
+                        html += '<a href="' + baseUrl + '/' + encodeURIComponent(itemId) + '" class="d-block small text-truncate badge bg-primary-subtle text-primary mb-1" title="' + escHtml(lbl) + '">' + escHtml(lbl) + '</a>';
+                    });
+                    html += '</td>';
+                    day++;
+                }
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+        return html;
+    }
+
+    // ── Workflow / Kanban Board View ─────────────────────────────────────────
+    function renderWorkflowView(meta, items, slug, baseUrl, query) {
+        // Find the first enum field to use as the workflow stage
+        var flowField = query.flowField
+            ? meta.fields.find(function (f) { return f.name === query.flowField; })
+            : null;
+        if (!flowField) {
+            flowField = meta.fields.find(function (f) {
+                return f.type === 'Enum' && f.enumValues && f.enumValues.length > 0;
+            });
+        }
+        if (!flowField || !flowField.enumValues) {
+            return '<div class="bm-empty-state"><i class="bi bi-kanban"></i><p>No enum field found for workflow view</p></div>';
+        }
+
+        var labelField = meta.fields.find(function (f) { return f.list && f.type === 'Text'; }) || meta.fields[0];
+        var stages = flowField.enumValues;
+
+        // Group items by stage
+        var stageMap = {};
+        stages.forEach(function (s) { stageMap[s] = []; });
+        items.forEach(function (item) {
+            var val = (nestedGet(item, flowField.name) || '').toString();
+            if (!stageMap[val]) stageMap[val] = [];
+            stageMap[val].push(item);
+        });
+
+        var colors = ['primary', 'info', 'warning', 'success', 'secondary', 'danger'];
+        var html = '<div class="d-flex gap-3 overflow-auto pb-3" style="min-height:400px">';
+        stages.forEach(function (stage, idx) {
+            var stageItems = stageMap[stage] || [];
+            var color = colors[idx % colors.length];
+            html += '<div class="card flex-shrink-0" style="min-width:260px;max-width:320px;flex:1">';
+            html += '<div class="card-header bg-' + color + '-subtle text-' + color + '-emphasis d-flex justify-content-between align-items-center">';
+            html += '<span class="fw-semibold">' + escHtml(stage) + '</span>';
+            html += '<span class="badge bg-' + color + '">' + stageItems.length + '</span>';
+            html += '</div>';
+            html += '<div class="card-body p-2" style="max-height:60vh;overflow-y:auto">';
+            if (stageItems.length === 0) {
+                html += '<div class="text-center text-muted small py-3"><i class="bi bi-inbox"></i><br>Empty</div>';
+            }
+            stageItems.forEach(function (item) {
+                var id = item.id || item.Id || item.key || item.Key || '';
+                var label = nestedGet(item, labelField.name) || '(untitled)';
+                html += '<a href="' + baseUrl + '/' + encodeURIComponent(id) + '" class="card mb-2 text-decoration-none bm-entity-card">';
+                html += '<div class="card-body p-2">';
+                html += '<div class="fw-semibold small">' + escHtml(label) + '</div>';
+                // Show a secondary field if available
+                var secondaryField = meta.fields.find(function (f) {
+                    return f.list && f.name !== labelField.name && f.name !== flowField.name && f.type !== 'YesNo';
+                });
+                if (secondaryField) {
+                    var secVal = nestedGet(item, secondaryField.name);
+                    if (secVal) html += '<div class="text-muted small text-truncate">' + escHtml(secVal.toString()) + '</div>';
+                }
+                html += '</div></a>';
+            });
+            html += '</div></div>';
+        });
+        html += '</div>';
+        return html;
+    }
+
+    // ── Aggregation Browser View ────────────────────────────────────────────
+    function renderAggregationView(meta, items, slug, baseUrl, query) {
+        var html = '<div class="card mb-3"><div class="card-header"><i class="bi bi-bar-chart-line me-2"></i>Aggregations</div><div class="card-body">';
+        html += '<div id="bm-agg-container"><div class="text-center py-3"><div class="spinner-border spinner-border-sm" role="status"></div> Loading aggregation definitions\u2026</div></div>';
+        html += '</div></div>';
+
+        // Load aggregation definitions and render drill-through
+        setTimeout(function () {
+            apiFetch('/api/_binary/' + encodeURIComponent(slug) + '/_aggregations')
+                .then(function (defs) {
+                    var container = document.getElementById('bm-agg-container');
+                    if (!container) return;
+                    if (!defs || defs.length === 0) {
+                        container.innerHTML = '<div class="bm-empty-state"><i class="bi bi-bar-chart-line"></i><p>No aggregation definitions</p><small>Add AggregationDefinition records for this entity</small></div>';
+                        return;
+                    }
+                    var aggHtml = '';
+                    defs.forEach(function (def, idx) {
+                        var levels = (def.groupByFields || '').split('|').filter(Boolean);
+                        var measures = (def.measures || '').split('|').filter(Boolean);
+                        aggHtml += '<div class="card mb-3"><div class="card-header fw-semibold">' + escHtml(def.name) + '</div>';
+                        aggHtml += '<div class="card-body">';
+                        aggHtml += '<div class="mb-2"><small class="text-muted">Levels: ' + levels.map(escHtml).join(' → ') + '</small></div>';
+                        aggHtml += '<div id="bm-agg-tree-' + idx + '" class="bm-agg-tree"></div>';
+                        aggHtml += '</div></div>';
+                    });
+                    container.innerHTML = aggHtml;
+
+                    // Build each aggregation tree from data
+                    defs.forEach(function (def, idx) {
+                        var levels = (def.groupByFields || '').split('|').filter(Boolean);
+                        var measures = (def.measures || '').split('|').filter(Boolean);
+                        var tree = buildAggTree(items, levels, measures, meta);
+                        var treeEl = document.getElementById('bm-agg-tree-' + idx);
+                        if (treeEl) treeEl.innerHTML = renderAggTreeNode(tree, levels, 0, measures, slug, baseUrl);
+                    });
+                })
+                .catch(function (err) {
+                    var container = document.getElementById('bm-agg-container');
+                    if (container) container.innerHTML = '<div class="text-danger">Error loading aggregations: ' + escHtml(err.message) + '</div>';
+                });
+        }, 50);
+
+        return html;
+    }
+
+    function buildAggTree(items, levels, measures, meta) {
+        var root = { _children: {}, _count: 0, _items: items };
+        items.forEach(function (item) {
+            var node = root;
+            node._count++;
+            levels.forEach(function (lvl) {
+                var val = (nestedGet(item, lvl) || '(empty)').toString();
+                if (!node._children[val]) node._children[val] = { _children: {}, _count: 0, _items: [] };
+                node._children[val]._count++;
+                node._children[val]._items.push(item);
+                node = node._children[val];
+            });
+        });
+        return root;
+    }
+
+    function renderAggTreeNode(node, levels, depth, measures, slug, baseUrl) {
+        var html = '';
+        var keys = Object.keys(node._children).sort();
+        if (keys.length === 0) return html;
+        html += '<table class="table table-sm table-hover mb-0">';
+        html += '<thead><tr><th>' + escHtml(levels[depth] || 'Value') + '</th>';
+        measures.forEach(function (m) { html += '<th class="text-end">' + escHtml(m) + '</th>'; });
+        html += '<th class="text-end">Count</th></tr></thead><tbody>';
+        keys.forEach(function (k) {
+            var child = node._children[k];
+            var hasChildren = Object.keys(child._children).length > 0;
+            html += '<tr class="' + (hasChildren ? 'bm-cursor-pointer' : '') + '" data-bm-agg-expand>';
+            html += '<td>';
+            if (hasChildren) html += '<i class="bi bi-chevron-right me-1 bm-agg-chevron"></i>';
+            html += escHtml(k) + '</td>';
+            measures.forEach(function (m) {
+                var parts = m.split(':');
+                var fn = parts[0] || 'count';
+                var field = parts[1] || '';
+                var val = computeMeasure(child._items, fn, field);
+                html += '<td class="text-end">' + val + '</td>';
+            });
+            html += '<td class="text-end"><span class="badge bg-secondary">' + child._count + '</span></td>';
+            html += '</tr>';
+            if (hasChildren) {
+                html += '<tr class="bm-agg-detail" style="display:none"><td colspan="' + (measures.length + 2) + '" class="ps-4">';
+                html += renderAggTreeNode(child, levels, depth + 1, measures, slug, baseUrl);
+                html += '</td></tr>';
+            }
+        });
+        html += '</tbody></table>';
+
+        setTimeout(function () {
+            document.querySelectorAll('[data-bm-agg-expand]').forEach(function (tr) {
+                if (tr.dataset.bmAggBound) return;
+                tr.dataset.bmAggBound = '1';
+                tr.addEventListener('click', function () {
+                    var detail = tr.nextElementSibling;
+                    if (detail && detail.classList.contains('bm-agg-detail')) {
+                        var visible = detail.style.display !== 'none';
+                        detail.style.display = visible ? 'none' : '';
+                        var chev = tr.querySelector('.bm-agg-chevron');
+                        if (chev) chev.className = visible ? 'bi bi-chevron-right me-1 bm-agg-chevron' : 'bi bi-chevron-down me-1 bm-agg-chevron';
+                    }
+                });
+            });
+        }, 100);
+
+        return html;
+    }
+
+    function computeMeasure(items, fn, field) {
+        if (fn === 'count') return items.length;
+        var vals = items.map(function (it) { return parseFloat(nestedGet(it, field)) || 0; });
+        if (fn === 'sum') return vals.reduce(function (a, b) { return a + b; }, 0).toFixed(2);
+        if (fn === 'avg') return vals.length ? (vals.reduce(function (a, b) { return a + b; }, 0) / vals.length).toFixed(2) : '0';
+        if (fn === 'min') return vals.length ? Math.min.apply(null, vals).toFixed(2) : '0';
+        if (fn === 'max') return vals.length ? Math.max.apply(null, vals).toFixed(2) : '0';
+        return items.length;
     }
 
     /**
@@ -1472,6 +1825,180 @@
         html += '</div>';
 
         el.innerHTML = html;
+    }
+
+    // ── Zero-dependency SVG Chart Renderer ──────────────────────────────────
+    var CHART_COLORS = ['#4e79a7','#f28e2b','#e15759','#76b7b2','#59a14f','#edc948','#b07aa1','#ff9da7','#9c755f','#bab0ac'];
+
+    function renderChartView(meta, items, slug, baseUrl, query) {
+        var numericFields = meta.fields.filter(function (f) { return f.type === 'Integer' || f.type === 'Decimal' || f.type === 'Currency'; });
+        var groupFields = meta.fields.filter(function (f) { return f.type === 'Enum' || f.type === 'Lookup' || f.type === 'String'; });
+        var dateFields = meta.fields.filter(function (f) { return f.type === 'DateOnly' || f.type === 'DateTime'; });
+        var labelField = meta.fields[0]; // first field as default label
+
+        var html = '<div class="card mb-3"><div class="card-header"><i class="bi bi-graph-up me-2"></i>Charts</div><div class="card-body">';
+        html += '<div class="row mb-3" id="bm-chart-controls">';
+        html += '<div class="col-auto"><label class="form-label form-label-sm">Type</label><select class="form-select form-select-sm" id="bm-chart-type">';
+        html += '<option value="column">Column</option><option value="stacked">Stacked Column</option><option value="line">Line</option><option value="pie">Pie</option>';
+        html += '</select></div>';
+        html += '<div class="col-auto"><label class="form-label form-label-sm">Group By</label><select class="form-select form-select-sm" id="bm-chart-group">';
+        groupFields.concat(dateFields).forEach(function (f) { html += '<option value="' + escHtml(f.name) + '">' + escHtml(f.label || f.name) + '</option>'; });
+        html += '</select></div>';
+        html += '<div class="col-auto"><label class="form-label form-label-sm">Measure</label><select class="form-select form-select-sm" id="bm-chart-measure">';
+        html += '<option value="count">Count</option>';
+        numericFields.forEach(function (f) { html += '<option value="sum:' + escHtml(f.name) + '">Sum ' + escHtml(f.label || f.name) + '</option>'; });
+        numericFields.forEach(function (f) { html += '<option value="avg:' + escHtml(f.name) + '">Avg ' + escHtml(f.label || f.name) + '</option>'; });
+        html += '</select></div>';
+        html += '<div class="col-auto d-flex align-items-end"><button class="btn btn-sm btn-primary" id="bm-chart-render">Render</button></div>';
+        html += '</div>';
+        html += '<div id="bm-chart-canvas" style="min-height:320px"></div>';
+        html += '</div></div>';
+
+        setTimeout(function () {
+            var btn = document.getElementById('bm-chart-render');
+            if (!btn) return;
+            btn.addEventListener('click', function () {
+                var chartType = document.getElementById('bm-chart-type').value;
+                var groupBy = document.getElementById('bm-chart-group').value;
+                var measure = document.getElementById('bm-chart-measure').value;
+                var canvas = document.getElementById('bm-chart-canvas');
+                if (!canvas) return;
+                var groups = {};
+                items.forEach(function (it) {
+                    var key = (nestedGet(it, groupBy) || '(empty)').toString();
+                    if (!groups[key]) groups[key] = [];
+                    groups[key].push(it);
+                });
+                var labels = Object.keys(groups).sort();
+                var values = labels.map(function (k) {
+                    var parts = measure.split(':');
+                    return parseFloat(computeMeasure(groups[k], parts[0], parts[1] || '')) || 0;
+                });
+                if (chartType === 'column') canvas.innerHTML = svgColumnChart(labels, values);
+                else if (chartType === 'stacked') canvas.innerHTML = svgStackedColumnChart(labels, groups, meta, numericFields);
+                else if (chartType === 'line') canvas.innerHTML = svgLineChart(labels, values);
+                else if (chartType === 'pie') canvas.innerHTML = svgPieChart(labels, values);
+            });
+            // auto-render on load
+            document.getElementById('bm-chart-render').click();
+        }, 50);
+        return html;
+    }
+
+    function svgColumnChart(labels, values) {
+        var W = 700, H = 320, pad = 50, barGap = 4;
+        var maxV = Math.max.apply(null, values) || 1;
+        var barW = Math.max(8, (W - pad * 2) / labels.length - barGap);
+        var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;font-family:sans-serif;font-size:11px">';
+        // Y axis gridlines
+        for (var g = 0; g <= 4; g++) {
+            var yy = pad + (H - pad * 2) * (1 - g / 4);
+            svg += '<line x1="' + pad + '" y1="' + yy + '" x2="' + (W - 10) + '" y2="' + yy + '" stroke="#e0e0e0"/>';
+            svg += '<text x="' + (pad - 5) + '" y="' + (yy + 4) + '" text-anchor="end" fill="#666">' + (maxV * g / 4).toFixed(0) + '</text>';
+        }
+        labels.forEach(function (lbl, i) {
+            var barH = (values[i] / maxV) * (H - pad * 2);
+            var x = pad + i * (barW + barGap);
+            var y = H - pad - barH;
+            svg += '<rect x="' + x + '" y="' + y + '" width="' + barW + '" height="' + barH + '" fill="' + CHART_COLORS[i % CHART_COLORS.length] + '" rx="2">';
+            svg += '<title>' + escHtml(lbl) + ': ' + values[i] + '</title></rect>';
+            svg += '<text x="' + (x + barW / 2) + '" y="' + (H - pad + 14) + '" text-anchor="middle" fill="#333" style="font-size:10px">' + escHtml(lbl.length > 10 ? lbl.substring(0, 9) + '\u2026' : lbl) + '</text>';
+        });
+        svg += '</svg>';
+        return svg;
+    }
+
+    function svgStackedColumnChart(labels, groups, meta, numericFields) {
+        var W = 700, H = 320, pad = 50, barGap = 4;
+        var series = numericFields.slice(0, 5);
+        if (series.length === 0) return '<div class="text-muted">No numeric fields for stacked chart</div>';
+        var stacks = labels.map(function (k) {
+            var sums = series.map(function (f) {
+                return groups[k].reduce(function (s, it) { return s + (parseFloat(nestedGet(it, f.name)) || 0); }, 0);
+            });
+            return { label: k, values: sums, total: sums.reduce(function (a, b) { return a + b; }, 0) };
+        });
+        var maxV = Math.max.apply(null, stacks.map(function (s) { return s.total; })) || 1;
+        var barW = Math.max(8, (W - pad * 2) / labels.length - barGap);
+        var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;font-family:sans-serif;font-size:11px">';
+        for (var g = 0; g <= 4; g++) {
+            var yy = pad + (H - pad * 2) * (1 - g / 4);
+            svg += '<line x1="' + pad + '" y1="' + yy + '" x2="' + (W - 10) + '" y2="' + yy + '" stroke="#e0e0e0"/>';
+            svg += '<text x="' + (pad - 5) + '" y="' + (yy + 4) + '" text-anchor="end" fill="#666">' + (maxV * g / 4).toFixed(0) + '</text>';
+        }
+        stacks.forEach(function (s, i) {
+            var x = pad + i * (barW + barGap);
+            var cumY = H - pad;
+            s.values.forEach(function (v, si) {
+                var segH = (v / maxV) * (H - pad * 2);
+                cumY -= segH;
+                svg += '<rect x="' + x + '" y="' + cumY + '" width="' + barW + '" height="' + segH + '" fill="' + CHART_COLORS[si % CHART_COLORS.length] + '" rx="1">';
+                svg += '<title>' + escHtml(series[si].label || series[si].name) + ': ' + v.toFixed(2) + '</title></rect>';
+            });
+            svg += '<text x="' + (x + barW / 2) + '" y="' + (H - pad + 14) + '" text-anchor="middle" fill="#333" style="font-size:10px">' + escHtml(s.label.length > 10 ? s.label.substring(0, 9) + '\u2026' : s.label) + '</text>';
+        });
+        // Legend
+        series.forEach(function (f, si) {
+            svg += '<rect x="' + (pad + si * 100) + '" y="5" width="12" height="12" fill="' + CHART_COLORS[si % CHART_COLORS.length] + '" rx="2"/>';
+            svg += '<text x="' + (pad + si * 100 + 16) + '" y="15" fill="#333" style="font-size:10px">' + escHtml(f.label || f.name) + '</text>';
+        });
+        svg += '</svg>';
+        return svg;
+    }
+
+    function svgLineChart(labels, values) {
+        var W = 700, H = 320, pad = 50;
+        var maxV = Math.max.apply(null, values) || 1;
+        var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;font-family:sans-serif;font-size:11px">';
+        for (var g = 0; g <= 4; g++) {
+            var yy = pad + (H - pad * 2) * (1 - g / 4);
+            svg += '<line x1="' + pad + '" y1="' + yy + '" x2="' + (W - 10) + '" y2="' + yy + '" stroke="#e0e0e0"/>';
+            svg += '<text x="' + (pad - 5) + '" y="' + (yy + 4) + '" text-anchor="end" fill="#666">' + (maxV * g / 4).toFixed(0) + '</text>';
+        }
+        var points = labels.map(function (lbl, i) {
+            var x = pad + (i / (labels.length - 1 || 1)) * (W - pad * 2);
+            var y = H - pad - (values[i] / maxV) * (H - pad * 2);
+            return { x: x, y: y, label: lbl, value: values[i] };
+        });
+        if (points.length > 1) {
+            var pathD = 'M' + points.map(function (p) { return p.x + ',' + p.y; }).join(' L');
+            svg += '<path d="' + pathD + '" fill="none" stroke="' + CHART_COLORS[0] + '" stroke-width="2.5"/>';
+        }
+        points.forEach(function (p, i) {
+            svg += '<circle cx="' + p.x + '" cy="' + p.y + '" r="4" fill="' + CHART_COLORS[0] + '"><title>' + escHtml(p.label) + ': ' + p.value + '</title></circle>';
+            if (labels.length <= 20) svg += '<text x="' + p.x + '" y="' + (H - pad + 14) + '" text-anchor="middle" fill="#333" style="font-size:10px">' + escHtml(p.label.length > 8 ? p.label.substring(0, 7) + '\u2026' : p.label) + '</text>';
+        });
+        svg += '</svg>';
+        return svg;
+    }
+
+    function svgPieChart(labels, values) {
+        var W = 400, H = 320, cx = W / 2, cy = H / 2 - 10, R = 120;
+        var total = values.reduce(function (a, b) { return a + b; }, 0) || 1;
+        var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;max-width:' + W + 'px;font-family:sans-serif;font-size:11px">';
+        var angle = -Math.PI / 2;
+        labels.forEach(function (lbl, i) {
+            var slice = (values[i] / total) * Math.PI * 2;
+            var x1 = cx + R * Math.cos(angle);
+            var y1 = cy + R * Math.sin(angle);
+            var x2 = cx + R * Math.cos(angle + slice);
+            var y2 = cy + R * Math.sin(angle + slice);
+            var large = slice > Math.PI ? 1 : 0;
+            svg += '<path d="M' + cx + ',' + cy + ' L' + x1 + ',' + y1 + ' A' + R + ',' + R + ' 0 ' + large + ',1 ' + x2 + ',' + y2 + ' Z" fill="' + CHART_COLORS[i % CHART_COLORS.length] + '" stroke="#fff" stroke-width="1.5">';
+            svg += '<title>' + escHtml(lbl) + ': ' + values[i] + ' (' + (values[i] / total * 100).toFixed(1) + '%)</title></path>';
+            angle += slice;
+        });
+        // Legend
+        var ly = 10;
+        labels.forEach(function (lbl, i) {
+            if (i < 12) {
+                svg += '<rect x="5" y="' + ly + '" width="10" height="10" fill="' + CHART_COLORS[i % CHART_COLORS.length] + '" rx="2"/>';
+                svg += '<text x="20" y="' + (ly + 9) + '" fill="#333" style="font-size:10px">' + escHtml(lbl.length > 20 ? lbl.substring(0, 19) + '\u2026' : lbl) + ' (' + values[i] + ')</text>';
+                ly += 16;
+            }
+        });
+        svg += '</svg>';
+        return svg;
     }
 
     function openImportModal(slug, baseUrl, query) {
@@ -1688,7 +2215,7 @@
     }
 
     function renderViewResult(meta, item, slug, id) {
-        var baseUrl  = BASE + '/data/' + encodeURIComponent(slug);
+        var baseUrl  = BASE + '/' + encodeURIComponent(slug);
         var viewFields = meta.fields.filter(function (f) { return f.view; }).sort(function (a, b) { return a.order - b.order; });
         var commands   = meta.commands || [];
 
@@ -1716,25 +2243,37 @@
         });
         html += '</div>';
 
-        // Fields table
-        html += '<div class="card bm-page-card"><div class="card-body"><dl class="row mb-0">';
+        // Fields — grouped into cards when fieldGroup is set
+        var viewGroups = [];
+        var viewGroupMap = {};
         viewFields.forEach(function (f) {
-            var val = nestedGet(item, f.name);
-
-            if (f.type === 'CustomHtml') {
-                var subItems = Array.isArray(val) ? val : [];
-                html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
-                html += '<dd class="col-sm-9">' + renderSubListReadonly(subItems, f) + '</dd>';
-            } else if (f.lookup && f.lookup.targetSlug && val) {
-                html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
-                html += '<dd class="col-sm-9" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
-                    '<a href="' + BASE + '/data/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></dd>';
-            } else {
-                html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
-                html += '<dd class="col-sm-9">' + fmtValue(val, f.type) + '</dd>';
-            }
+            var g = f.fieldGroup || '';
+            if (!viewGroupMap[g]) { viewGroupMap[g] = []; viewGroups.push(g); }
+            viewGroupMap[g].push(f);
         });
-        html += '</dl></div></div>';
+        viewGroups.forEach(function (g) {
+            var groupFields = viewGroupMap[g];
+            html += '<div class="card bm-page-card mb-3"><div class="card-body">';
+            if (g) html += '<h6 class="card-title mb-3">' + escHtml(g) + '</h6>';
+            html += '<dl class="row mb-0">';
+            groupFields.forEach(function (f) {
+                var val = nestedGet(item, f.name);
+
+                if (f.type === 'CustomHtml') {
+                    var subItems = Array.isArray(val) ? val : [];
+                    html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
+                    html += '<dd class="col-sm-9">' + renderSubListReadonly(subItems, f) + '</dd>';
+                } else if (f.lookup && f.lookup.targetSlug && val) {
+                    html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
+                    html += '<dd class="col-sm-9" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
+                        '<a href="' + BASE + '/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></dd>';
+                } else {
+                    html += '<dt class="col-sm-3">' + escHtml(f.label) + '</dt>';
+                    html += '<dd class="col-sm-9">' + fmtValue(val, f.type) + '</dd>';
+                }
+            });
+            html += '</dl></div></div>';
+        });
 
         // Document chain panel — shown when the entity has [RelatedDocument] fields
         var relFields = meta.documentRelationFields || [];
@@ -1805,7 +2344,7 @@
             html += '<div class="bm-doc-chain-section">';
             html += '<div class="bm-doc-chain-label text-muted small fw-semibold mb-1"><i class="bi bi-arrow-up-circle me-1"></i>Source Documents</div>';
             upstream.forEach(function (doc) {
-                var href = BASE + '/data/' + encodeURIComponent(doc.targetSlug) + '/' + encodeURIComponent(doc.id);
+                var href = BASE + '/' + encodeURIComponent(doc.targetSlug) + '/' + encodeURIComponent(doc.id);
                 html += '<div class="bm-doc-chain-node bm-doc-chain-upstream">' +
                     '<span class="badge bg-secondary me-2">' + escHtml(doc.targetName || doc.targetSlug) + '</span>' +
                     '<a href="' + href + '">' + escHtml(doc.label || doc.id) + '</a>' +
@@ -1823,7 +2362,7 @@
             html += '<div class="bm-doc-chain-section">';
             html += '<div class="bm-doc-chain-label text-muted small fw-semibold mt-2 mb-1"><i class="bi bi-arrow-down-circle me-1"></i>Derived Documents</div>';
             downstream.forEach(function (doc) {
-                var href = BASE + '/data/' + encodeURIComponent(doc.targetSlug) + '/' + encodeURIComponent(doc.id);
+                var href = BASE + '/' + encodeURIComponent(doc.targetSlug) + '/' + encodeURIComponent(doc.id);
                 html += '<div class="bm-doc-chain-node bm-doc-chain-downstream">' +
                     '<span class="badge bg-primary me-2">' + escHtml(doc.targetName || doc.targetSlug) + '</span>' +
                     '<a href="' + href + '">' + escHtml(doc.label || doc.id) + '</a>' +
@@ -1858,7 +2397,7 @@
                 var obj = results[value];
                 if (obj) {
                     var display = nestedGet(obj, displayField) || value;
-                    var href = BASE + '/data/' + encodeURIComponent(el.dataset.targetSlug) + '/' + encodeURIComponent(value);
+                    var href = BASE + '/' + encodeURIComponent(el.dataset.targetSlug) + '/' + encodeURIComponent(value);
                     el.innerHTML = '<a href="' + escHtml(href) + '">' + escHtml(String(display)) + '</a>';
                 }
             });
@@ -1958,7 +2497,7 @@
 
     function renderFormView(meta, item, slug, id) {
         var isCreate = id == null;
-        var baseUrl  = BASE + '/data/' + encodeURIComponent(slug);
+        var baseUrl  = BASE + '/' + encodeURIComponent(slug);
         var formFields = meta.fields.filter(function (f) { return isCreate ? f.create : f.edit; })
                                     .sort(function (a, b) { return a.order - b.order; });
         var commands   = (!isCreate && meta.commands) ? meta.commands : [];
@@ -1974,25 +2513,29 @@
         html += '<form id="vnext-editor-form" novalidate>';
         html += '<input type="hidden" name="__csrf" value="' + escHtml(getCsrfToken()) + '">';
 
-        formFields.forEach(function (f) {
-            var curVal = item ? (nestedGet(item, f.name)) : null;
-            html += renderFormField(f, curVal, meta, item);
-        });
+        var isWizard = (meta.formLayout || '').toLowerCase() === 'wizard';
+        if (isWizard) {
+            html += renderWizardFormFields(formFields, function (f) { return item ? nestedGet(item, f.name) : null; }, meta, item, commands, baseUrl, id, isCreate);
+        } else {
+            html += renderGroupedFormFields(formFields, function (f) { return item ? nestedGet(item, f.name) : null; }, meta, item);
 
-        html += '<div class="mt-4 d-flex gap-2 flex-wrap">';
-        html += '<button type="submit" class="btn btn-primary" id="vnext-save-btn"><i class="bi bi-check-lg"></i> Save</button>';
-        html += '<a class="btn btn-secondary" href="' + (id ? baseUrl + '/' + encodeURIComponent(id) : baseUrl) + '"><i class="bi bi-x-lg"></i> Cancel</a>';
-        // Command buttons (edit mode only)
-        commands.forEach(function (cmd) {
-            var cls = cmd.destructive ? 'btn-outline-danger' : 'btn-outline-secondary';
-            html += '<button type="button" class="btn btn-sm ' + cls + ' vnext-cmd-btn" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '">' +
-                (cmd.icon ? '<i class="bi ' + escHtml(cmd.icon) + ' me-1"></i>' : '') +
-                escHtml(cmd.label) + '</button>';
-        });
-        html += '</div></form></div>';
+            html += '<div class="mt-4 d-flex gap-2 flex-wrap">';
+            html += '<button type="submit" class="btn btn-primary" id="vnext-save-btn"><i class="bi bi-check-lg"></i> Save</button>';
+            html += '<a class="btn btn-secondary" href="' + (id ? baseUrl + '/' + encodeURIComponent(id) : baseUrl) + '"><i class="bi bi-x-lg"></i> Cancel</a>';
+            // Command buttons (edit mode only)
+            commands.forEach(function (cmd) {
+                var cls = cmd.destructive ? 'btn-outline-danger' : 'btn-outline-secondary';
+                html += '<button type="button" class="btn btn-sm ' + cls + ' vnext-cmd-btn" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '">' +
+                    (cmd.icon ? '<i class="bi ' + escHtml(cmd.icon) + ' me-1"></i>' : '') +
+                    escHtml(cmd.label) + '</button>';
+            });
+            html += '</div>';
+        }
+        html += '</form></div>';
 
         setContent(html);
         initFormBehaviours(meta, item, slug, id, isCreate, formFields);
+        if (isWizard) initWizardBehaviour();
 
         // Wire command buttons
         document.querySelectorAll('.vnext-cmd-btn').forEach(function (btn) {
@@ -2014,6 +2557,136 @@
                 else doRun();
             });
         });
+    }
+
+    // ── Wizard form rendering ──────────────────────────────────────────────
+    // Groups fields by fieldGroup into sequential steps with step indicator
+    // and prev/next/finish navigation. Falls back to single step if no groups.
+    function renderWizardFormFields(fields, valueFn, meta, item, commands, baseUrl, id, isCreate) {
+        var steps = [];
+        var stepMap = {};
+        fields.forEach(function (f) {
+            var g = f.fieldGroup || 'Details';
+            if (!stepMap[g]) { stepMap[g] = []; steps.push(g); }
+            stepMap[g].push(f);
+        });
+        if (steps.length < 2) steps = ['Details'];
+
+        var html = '';
+        // Step indicator
+        html += '<div class="d-flex justify-content-center mb-4">';
+        steps.forEach(function (s, i) {
+            html += '<div class="text-center mx-3 bm-wizard-step-indicator" data-step="' + i + '">';
+            html += '<div class="rounded-circle d-inline-flex align-items-center justify-content-center border border-2 ' +
+                (i === 0 ? 'border-primary text-primary' : 'border-secondary text-muted') +
+                '" style="width:36px;height:36px;font-weight:600;">' + (i + 1) + '</div>';
+            html += '<div class="small mt-1 ' + (i === 0 ? 'text-primary fw-semibold' : 'text-muted') + '">' + escHtml(s) + '</div>';
+            html += '</div>';
+        });
+        html += '</div>';
+
+        // Step panels
+        steps.forEach(function (s, i) {
+            var stepFields = stepMap[s] || fields;
+            html += '<div class="bm-wizard-panel" data-step="' + i + '" style="' + (i > 0 ? 'display:none' : '') + '">';
+            html += '<div class="card mb-3"><div class="card-header fw-semibold"><i class="bi bi-' + (i + 1) + '-circle me-2"></i>' + escHtml(s) + '</div><div class="card-body">';
+            html += '<div class="row g-3">';
+            stepFields.forEach(function (f) {
+                var span = f.columnSpan || 12;
+                html += '<div class="col-md-' + span + '">';
+                html += renderFormField(f, valueFn(f), meta, item);
+                html += '</div>';
+            });
+            html += '</div></div></div></div>';
+        });
+
+        // Navigation buttons
+        html += '<div class="mt-4 d-flex gap-2 flex-wrap">';
+        html += '<a class="btn btn-secondary" href="' + (id ? baseUrl + '/' + encodeURIComponent(id) : baseUrl) + '"><i class="bi bi-x-lg"></i> Cancel</a>';
+        html += '<button type="button" class="btn btn-outline-primary bm-wizard-prev" style="display:none"><i class="bi bi-chevron-left"></i> Previous</button>';
+        html += '<button type="button" class="btn btn-primary bm-wizard-next"><i class="bi bi-chevron-right"></i> Next</button>';
+        html += '<button type="submit" class="btn btn-success bm-wizard-finish" style="display:none" id="vnext-save-btn"><i class="bi bi-check-lg"></i> Finish</button>';
+        commands.forEach(function (cmd) {
+            var cls = cmd.destructive ? 'btn-outline-danger' : 'btn-outline-secondary';
+            html += '<button type="button" class="btn btn-sm ' + cls + ' vnext-cmd-btn" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '">' +
+                (cmd.icon ? '<i class="bi ' + escHtml(cmd.icon) + ' me-1"></i>' : '') +
+                escHtml(cmd.label) + '</button>';
+        });
+        html += '</div>';
+        return html;
+    }
+
+    function initWizardBehaviour() {
+        var panels = document.querySelectorAll('.bm-wizard-panel');
+        var indicators = document.querySelectorAll('.bm-wizard-step-indicator');
+        var prevBtn = document.querySelector('.bm-wizard-prev');
+        var nextBtn = document.querySelector('.bm-wizard-next');
+        var finishBtn = document.querySelector('.bm-wizard-finish');
+        if (!panels.length || !nextBtn) return;
+        var current = 0;
+        var total = panels.length;
+
+        function showStep(idx) {
+            panels.forEach(function (p, i) { p.style.display = i === idx ? '' : 'none'; });
+            indicators.forEach(function (ind, i) {
+                var circle = ind.querySelector('.rounded-circle');
+                var label = ind.querySelector('.small');
+                if (i < idx) {
+                    circle.className = 'rounded-circle d-inline-flex align-items-center justify-content-center border border-2 border-success text-success';
+                    label.className = 'small mt-1 text-success';
+                } else if (i === idx) {
+                    circle.className = 'rounded-circle d-inline-flex align-items-center justify-content-center border border-2 border-primary text-primary';
+                    label.className = 'small mt-1 text-primary fw-semibold';
+                } else {
+                    circle.className = 'rounded-circle d-inline-flex align-items-center justify-content-center border border-2 border-secondary text-muted';
+                    label.className = 'small mt-1 text-muted';
+                }
+            });
+            prevBtn.style.display = idx > 0 ? '' : 'none';
+            nextBtn.style.display = idx < total - 1 ? '' : 'none';
+            finishBtn.style.display = idx === total - 1 ? '' : 'none';
+            current = idx;
+        }
+
+        prevBtn.addEventListener('click', function () { if (current > 0) showStep(current - 1); });
+        nextBtn.addEventListener('click', function () {
+            // Validate current step fields before advancing
+            var panel = panels[current];
+            var inputs = panel.querySelectorAll('input,select,textarea');
+            var valid = true;
+            inputs.forEach(function (inp) { if (!inp.checkValidity()) { inp.reportValidity(); valid = false; } });
+            if (valid && current < total - 1) showStep(current + 1);
+        });
+    }
+
+    // ── Multi-column grouped form rendering ─────────────────────────────────
+    // Groups fields by fieldGroup, renders each group in a card with a row grid.
+    // Fields use col-md-{columnSpan} (default 12 = full width).
+    function renderGroupedFormFields(fields, valueFn, meta, item) {
+        var groups = [];
+        var groupMap = {};
+        fields.forEach(function (f) {
+            var g = f.fieldGroup || '';
+            if (!groupMap[g]) { groupMap[g] = []; groups.push(g); }
+            groupMap[g].push(f);
+        });
+        var html = '';
+        groups.forEach(function (g) {
+            var items = groupMap[g];
+            if (g) {
+                html += '<div class="card mb-3"><div class="card-header fw-semibold">' + escHtml(g) + '</div><div class="card-body"><div class="row g-3">';
+            } else {
+                html += '<div class="row g-3">';
+            }
+            items.forEach(function (f) {
+                var span = f.columnSpan || 12;
+                html += '<div class="col-md-' + span + '">';
+                html += renderFormField(f, valueFn(f), meta, item);
+                html += '</div>';
+            });
+            html += g ? '</div></div></div>' : '</div>';
+        });
+        return html;
     }
 
     function renderFormField(f, val, meta, item) {
@@ -2088,6 +2761,17 @@
             return '<div class="mb-3">' + label +
                 '<textarea class="form-control form-control-sm" id="' + id_ + '" name="' + escHtml(f.name) + '" rows="4"' + req + rdonly + placeholder + validation + '>' +
                 escHtml(taVal) + '</textarea>' + feedback + '</div>';
+        }
+
+        // Markdown editor with live preview
+        if (f.type === 'Markdown') {
+            var mdVal = val != null ? String(val) : '';
+            return '<div class="mb-3">' + label +
+                '<textarea class="form-control form-control-sm bm-md-editor" id="' + id_ + '" name="' + escHtml(f.name) + '" rows="8"' + req + rdonly + placeholder + validation + '>' +
+                escHtml(mdVal) + '</textarea>' +
+                '<div class="card mt-2"><div class="card-header py-1 small text-muted">Preview</div>' +
+                '<div class="card-body bm-md-preview" id="' + id_ + '_preview">' + renderMarkdownToHtml(mdVal) + '</div></div>' +
+                feedback + '</div>';
         }
 
         // Tags (pill-based input)
@@ -2501,6 +3185,14 @@
         var form = document.getElementById('vnext-editor-form');
         if (!form) return;
 
+        // Wire markdown live preview
+        form.querySelectorAll('.bm-md-editor').forEach(function (ta) {
+            var preview = document.getElementById(ta.id + '_preview');
+            if (preview) {
+                ta.addEventListener('input', function () { preview.innerHTML = renderMarkdownToHtml(ta.value); });
+            }
+        });
+
         // Load lookup options async
         formFields.forEach(function (f) {
             if (f.type === 'LookupList' && f.lookup && f.lookup.targetSlug) {
@@ -2519,6 +3211,30 @@
             if (f.type === 'CustomHtml') {
                 resolveSubListLookups(f.name);
             }
+        });
+
+        // ── Cascading dropdown support ─────────────────────────────────────────
+        // When a source field changes, re-load any lookup fields that cascade from it
+        formFields.forEach(function (f) {
+            if (f.type !== 'LookupList' || !f.lookup || !f.lookup.cascadeFromField || !f.lookup.cascadeFilterField) return;
+            var sourceFieldName = f.lookup.cascadeFromField;
+            var filterField = f.lookup.cascadeFilterField;
+            var sourceEl = document.querySelector('[name="' + sourceFieldName + '"]');
+            if (!sourceEl) return;
+            sourceEl.addEventListener('change', function () {
+                var sourceVal = sourceEl.value || '';
+                // Clear the lookup cache for the target slug so we get fresh results
+                clearLookupCache(f.lookup.targetSlug);
+                // Re-load with filter: set queryField and queryValue to filter by the source value
+                var cascadeField = Object.assign({}, f, {
+                    lookup: Object.assign({}, f.lookup, {
+                        queryField: filterField,
+                        queryValue: sourceVal,
+                        queryOperator: 'Equals'
+                    })
+                });
+                loadLookupSelect(cascadeField, null);
+            });
         });
 
         // Lookup add/refresh buttons
@@ -2680,7 +3396,7 @@
                 showToast('Saved successfully.', 'success');
                 clearLookupCache(slug);
                 var savedId = (result && (result.id || result.Id)) || id || '';
-                var dest = savedId ? BASE + '/data/' + encodeURIComponent(slug) + '/' + encodeURIComponent(savedId) : BASE + '/data/' + encodeURIComponent(slug);
+                var dest = savedId ? BASE + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(savedId) : BASE + '/' + encodeURIComponent(slug);
                 BMRouter.navigate(dest);
             }).catch(function (err) {
                 showToast('Save failed: ' + err.message, 'error');
@@ -3145,7 +3861,7 @@
         Promise.all([fetchMeta(slug), apiFetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id))])
             .then(function (r) {
                 var meta = r[0]; var item = r[1];
-                var baseUrl = BASE + '/data/' + encodeURIComponent(slug);
+                var baseUrl = BASE + '/' + encodeURIComponent(slug);
                 var html = '<div class="p-3">' +
                     '<div class="alert alert-danger">' +
                     '<h4 class="alert-heading"><i class="bi bi-exclamation-triangle-fill"></i> Confirm Delete</h4>' +
@@ -3355,14 +4071,26 @@
             }
         } catch (e) {}
 
+        // Skin restore
+        try {
+            var sm = document.cookie.match(/(?:^|;\s*)bm-selected-skin=([^;]+)/);
+            if (sm) {
+                var sk = decodeURIComponent(sm[1]);
+                var allowedSkins = ['default','sidebar','compact','focus'];
+                if (allowedSkins.indexOf(sk) >= 0 && sk !== 'default') {
+                    document.body.setAttribute('data-bm-skin', sk);
+                }
+            }
+        } catch (e) {}
+
         // Register routes
         BMRouter
-            .on(BASE + '/data/:entity/create', function (p) { renderCreate(p.entity); })
-            .on(BASE + '/data/:entity/:id/edit',   function (p) { renderEdit(p.entity, p.id); })
-            .on(BASE + '/data/:entity/:id/delete', function (p) { renderDelete(p.entity, p.id); })
-            .on(BASE + '/data/:entity/:id',        function (p, q) { renderView(p.entity, p.id); })
-            .on(BASE + '/data/:entity',            function (p, q) { renderList(p.entity, q); })
-            .on(BASE + '/data',                    function () { renderHome(); })
+            .on(BASE + '/:entity/create', function (p) { renderCreate(p.entity); })
+            .on(BASE + '/:entity/:id/edit',   function (p) { renderEdit(p.entity, p.id); })
+            .on(BASE + '/:entity/:id/delete', function (p) { renderDelete(p.entity, p.id); })
+            .on(BASE + '/:entity/:id',        function (p, q) { renderView(p.entity, p.id); })
+            .on(BASE + '/:entity',            function (p, q) { renderList(p.entity, q); })
+            .on(BASE + '/',                           function () { renderHome(); })
             .on(BASE,                                    function () { renderHome(); })
             .notFound(function (path) {
                 showError('Page not found: ' + path);
@@ -3422,7 +4150,7 @@
 
 })(window);
 // VNext Router — thin SPA router powered by BareMetalRendering
-// Parses /UI/[{slug}[/{id}[/edit|/delete]|/create]]
+// Parses /{slug}[/{id}[/edit|/delete]|/create]
 // Depends on: BareMetalRest, BareMetalBind, BareMetalTemplate, BareMetalRendering
 (async function () {
   'use strict';
@@ -3859,7 +4587,7 @@
   }
 
   async function route() {
-    const p      = location.pathname.replace(/^\/UI\/?/, '').replace(/^data\/?/, '').split('/').filter(Boolean);
+    const p      = location.pathname.replace(/^\//, '').split('/').filter(Boolean);
     const slug   = p[0], rawId = p[1], action = p[2];
     const id     = (rawId && rawId !== 'create') ? rawId : null;
 

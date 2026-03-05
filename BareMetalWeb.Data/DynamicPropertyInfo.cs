@@ -6,9 +6,8 @@ namespace BareMetalWeb.Data;
 
 /// <summary>
 /// A <see cref="PropertyInfo"/> implementation for virtual entity fields.
-/// Supports both legacy <see cref="DynamicDataObject"/> (string dictionary) and
-/// <see cref="DataRecord"/> (ordinal-indexed <c>object?[]</c>) storage.
-/// When an ordinal is provided, <see cref="DataRecord"/> access is ~1–2 ns via array index.
+/// Uses <see cref="DataRecord"/> (ordinal-indexed <c>object?[]</c>) storage
+/// for ~1–2 ns field access.
 /// </summary>
 internal sealed class DynamicPropertyInfo : PropertyInfo
 {
@@ -16,12 +15,8 @@ internal sealed class DynamicPropertyInfo : PropertyInfo
     private readonly Type _propertyType;
     private readonly int _ordinal;
 
-    /// <summary>Creates a property backed by dictionary lookup (legacy path).</summary>
-    public DynamicPropertyInfo(string fieldName, Type propertyType)
-        : this(fieldName, propertyType, -1) { }
-
     /// <summary>Creates a property backed by ordinal index on <see cref="DataRecord"/>.</summary>
-    public DynamicPropertyInfo(string fieldName, Type propertyType, int ordinal)
+    public DynamicPropertyInfo(string fieldName, Type propertyType, int ordinal = -1)
     {
         _fieldName = fieldName ?? throw new ArgumentNullException(nameof(fieldName));
         _propertyType = propertyType ?? throw new ArgumentNullException(nameof(propertyType));
@@ -31,8 +26,8 @@ internal sealed class DynamicPropertyInfo : PropertyInfo
     // ── MemberInfo ──────────────────────────────────────────────────────────
 
     public override string Name => _fieldName;
-    public override Type? DeclaringType => typeof(DynamicDataObject);
-    public override Type? ReflectedType => typeof(DynamicDataObject);
+    public override Type? DeclaringType => typeof(DataRecord);
+    public override Type? ReflectedType => typeof(DataRecord);
     public override MemberTypes MemberType => MemberTypes.Property;
 
     // ── PropertyInfo ────────────────────────────────────────────────────────
@@ -48,8 +43,7 @@ internal sealed class DynamicPropertyInfo : PropertyInfo
     public override MethodInfo? GetSetMethod(bool nonPublic) => null;
 
     /// <summary>
-    /// Returns the field value. For <see cref="DataRecord"/>, uses ordinal array access (~1–2 ns).
-    /// For <see cref="DynamicDataObject"/>, falls back to dictionary lookup.
+    /// Returns the field value using ordinal array access (~1–2 ns).
     /// </summary>
     public override object? GetValue(object? obj, BindingFlags invokeAttr, Binder? binder, object?[]? index, CultureInfo? culture)
     {
@@ -58,26 +52,17 @@ internal sealed class DynamicPropertyInfo : PropertyInfo
             if (_ordinal >= 0) return dr.GetValue(_ordinal);
             if (dr.Schema != null) return dr.GetField(dr.Schema, _fieldName);
         }
-        if (obj is DynamicDataObject dynamicObj)
-            return dynamicObj.GetField(_fieldName);
         return null;
     }
 
     /// <summary>
-    /// Stores a value. For <see cref="DataRecord"/>, stores the native CLR value by ordinal.
-    /// For <see cref="DynamicDataObject"/>, converts to string and stores in dictionary.
+    /// Stores a native CLR value by ordinal.
     /// </summary>
     public override void SetValue(object? obj, object? value, BindingFlags invokeAttr, Binder? binder, object?[]? index, CultureInfo? culture)
     {
-        if (obj is DataRecord dr)
-        {
-            if (_ordinal >= 0) { dr.SetValue(_ordinal, value); return; }
-            if (dr.Schema != null) { dr.SetField(dr.Schema, _fieldName, value); return; }
-        }
-        if (obj is not DynamicDataObject dynamicObj)
-            return;
-
-        dynamicObj.SetField(_fieldName, ConvertToString(value));
+        if (obj is not DataRecord dr) return;
+        if (_ordinal >= 0) { dr.SetValue(_ordinal, value); return; }
+        if (dr.Schema != null) { dr.SetField(dr.Schema, _fieldName, value); return; }
     }
 
     // ── Attribute stubs ─────────────────────────────────────────────────────
@@ -85,23 +70,4 @@ internal sealed class DynamicPropertyInfo : PropertyInfo
     public override object[] GetCustomAttributes(bool inherit) => Array.Empty<object>();
     public override object[] GetCustomAttributes(Type attributeType, bool inherit) => Array.Empty<object>();
     public override bool IsDefined(Type attributeType, bool inherit) => false;
-
-    // ── Helpers ─────────────────────────────────────────────────────────────
-
-    /// <summary>Converts a CLR value to its string representation for dictionary storage.</summary>
-    internal static string? ConvertToString(object? value)
-    {
-        if (value == null)
-            return null;
-
-        return value switch
-        {
-            bool b => b ? "true" : "false",
-            DateTime dt => dt.ToString("O", CultureInfo.InvariantCulture),
-            DateTimeOffset dto => dto.UtcDateTime.ToString("O", CultureInfo.InvariantCulture),
-            DateOnly d => d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
-            TimeOnly t => t.ToString("HH:mm:ss", CultureInfo.InvariantCulture),
-            _ => value.ToString()
-        };
-    }
 }

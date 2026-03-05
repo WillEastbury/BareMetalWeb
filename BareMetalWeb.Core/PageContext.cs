@@ -14,5 +14,6 @@ public record PageContext(
     string? NavGroup = null,
     NavAlignment NavAlignment = NavAlignment.Left,
     NavRenderStyle NavRenderStyle = NavRenderStyle.Link,
-    string? NavColorClass = null
+    string? NavColorClass = null,
+    string? NavSubGroup = null
 );

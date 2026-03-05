@@ -200,7 +200,8 @@ public class BareMetalWebServer : IBareWebHost
                 requiresLoggedIn: requiresLoggedIn,
                 requiredPermissions: requiredPermissions,
                 colorClass: pageInfo.PageContext.NavColorClass,
-                group: group));
+                group: group,
+                subGroup: pageInfo.PageContext.NavSubGroup));
         }
 
         foreach (var entity in DataScaffold.Entities.Where(e => e.ShowOnNav))
@@ -234,7 +235,7 @@ public class BareMetalWebServer : IBareWebHost
             bool entityRightAligned = string.Equals(entity.NavGroup, "Admin", StringComparison.OrdinalIgnoreCase);
 
             MenuOptionsList.Add(new MenuOption(
-                href: $"/UI/data/{entity.Slug}",
+                href: $"/{entity.Slug}",
                 label: entity.Name,
                 showOnNavBar: true,
                 permissionsNeeded: permissionsNeeded,
@@ -303,11 +304,13 @@ public class BareMetalWebServer : IBareWebHost
         Task loggerTask = BufferedLogger.RunAsync(cts.Token); // Run the logging flusher loop
         Task clientPruneTask = ClientRequests.RunPruningAsync(cts.Token); // Run client pruning loop
         Task todoPeriodicityTask = new TodoPeriodicityService(BufferedLogger).RunAsync(cts.Token); // Run todo periodicity reset loop
+        Task scheduledActionTask = new ScheduledActionService(BufferedLogger).RunAsync(cts.Token); // Run scheduled action execution loop
         app.Lifetime.ApplicationStopping.Register(() => BufferedLogger.OnApplicationStopping(cts, loggerTask)); // Setup shutdown to stop the logging flusher loop
         // log it
         BufferedLogger.LogInfo($"WireUpRequestHandlingAndLoggerAsyncLifetime completed and request handling is live.");
         _ = clientPruneTask;
         _ = todoPeriodicityTask;
+        _ = scheduledActionTask;
         return Task.CompletedTask;
     }
     public async Task RequestHandler(HttpContext context)

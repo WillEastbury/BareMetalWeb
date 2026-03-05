@@ -185,10 +185,10 @@ public class SingletonFlagTests : IDisposable
     }
 
     [Fact]
-    public void SingletonFlagAttribute_IsApplied_ToCurrencyIsBase()
+    public void SingletonFlagAttribute_IsApplied_ToTestItemIsDefault()
     {
-        // Verify that the Currency.IsBase property has the [SingletonFlag] attribute applied
-        var prop = typeof(BareMetalWeb.Data.DataObjects.Currency).GetProperty(nameof(BareMetalWeb.Data.DataObjects.Currency.IsBase));
+        // Verify that the SingletonTestItem.IsDefault property has the [SingletonFlag] attribute applied
+        var prop = typeof(SingletonTestItem).GetProperty(nameof(SingletonTestItem.IsDefault));
         Assert.NotNull(prop);
         var attr = prop!.GetCustomAttributes(typeof(SingletonFlagAttribute), inherit: true);
         Assert.NotEmpty(attr);

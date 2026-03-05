@@ -13,7 +13,7 @@ namespace BareMetalWeb.Host.Tests;
 /// Tests for authorization logic in BareMetalWebServer.IsAuthorized method.
 /// These tests validate that empty permissions allow public access (fix for blank permissions issue).
 /// </summary>
-[Collection("CookieProtection")]
+[Collection("SharedState")]
 public class AuthorizationTests : IClassFixture<DataStoreFixture>
 {
     private readonly DataStoreFixture _fixture;

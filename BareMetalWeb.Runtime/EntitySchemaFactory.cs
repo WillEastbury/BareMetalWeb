@@ -15,9 +15,14 @@ public static class EntitySchemaFactory
     /// </summary>
     public static EntitySchema FromModel(RuntimeEntityModel model)
     {
-        // RuntimeEntityModel fields are already sorted by ordinal.
-        // Ordinals are 1-based from RuntimeEntityCompiler, but we use 0-based
-        // array indexing in EntitySchema — map ordinal i to array index i.
+        // Build a set of indexed field names from the model's indexes
+        var indexedFieldNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var idx in model.Indexes)
+        {
+            foreach (var fn in idx.FieldNames)
+                indexedFieldNames.Add(fn);
+        }
+
         var fields = model.Fields;
         var builder = new EntitySchema.Builder(model.Name, model.Slug);
 
@@ -38,7 +43,7 @@ public static class EntitySchemaFactory
                 clrType: clrType,
                 nullable: f.IsNullable,
                 required: f.Required,
-                indexed: false, // indexes handled separately via IndexDefinition
+                indexed: indexedFieldNames.Contains(f.Name),
                 maxLength: f.MaxLength ?? 0,
                 extraFlags: flags);
         }

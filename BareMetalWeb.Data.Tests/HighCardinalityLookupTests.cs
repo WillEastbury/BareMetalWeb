@@ -1,16 +1,11 @@
 using System;
 using System.Collections;
-using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Threading;
-using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
-using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Rendering.Models;
-using BareMetalWeb.UserClasses.DataObjects;
 using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
@@ -19,42 +14,45 @@ namespace BareMetalWeb.Data.Tests;
 /// Tests that BuildFormFields detects high-cardinality lookup fields and
 /// switches to the search dialog rendering instead of a full dropdown.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class HighCardinalityLookupTests : IDisposable
 {
-    private readonly IDataObjectStore _originalStore;
     private readonly int _originalThreshold;
 
     public HighCardinalityLookupTests()
     {
-        _originalStore = DataStoreProvider.Current;
         _originalThreshold = DataScaffold.LargeListThreshold;
-        DataStoreProvider.Current = new CountableInMemoryDataStore();
-
-        _ = typeof(Employee).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        _ = GalleryTestFixture.State;
     }
 
     public void Dispose()
     {
-        DataStoreProvider.Current = _originalStore;
         DataScaffold.LargeListThreshold = _originalThreshold;
         ClearCaches();
+    }
+
+    private static void SeedEmployees(DataEntityMetadata empMeta, int count, int startKey = 1)
+    {
+        for (int i = startKey; i < startKey + count; i++)
+        {
+            var emp = empMeta.Handlers.Create();
+            emp.Key = (uint)i;
+            empMeta.FindField("Name")!.SetValueFn(emp, $"Employee {i}");
+            empMeta.Handlers.SaveAsync(emp, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+        }
     }
 
     [Fact]
     public void BuildFormFields_LowCardinalityLookup_UsesDropdown()
     {
-        // Arrange: threshold = 5, add 3 employees (below threshold)
-        DataScaffold.LargeListThreshold = 5;
+        // Arrange: threshold higher than any seeded data, add 3 employees (below threshold)
+        DataScaffold.LargeListThreshold = 500;
         ClearCaches();
 
-        var store = (CountableInMemoryDataStore)DataStoreProvider.Current;
-        for (int i = 1; i <= 3; i++)
-            store.Save(new Employee { Key = (uint)i, Name = $"Employee {i}" });
+        Assert.True(DataScaffold.TryGetEntity("employees", out var meta));
 
-        var meta = DataScaffold.GetEntityByType(typeof(Employee));
-        Assert.NotNull(meta);
+        SeedEmployees(meta, 3);
+        ClearCaches();
 
         // Act
         var fields = DataScaffold.BuildFormFields(meta, null, forCreate: true);
@@ -76,12 +74,10 @@ public class HighCardinalityLookupTests : IDisposable
         DataScaffold.LargeListThreshold = 2;
         ClearCaches();
 
-        var store = (CountableInMemoryDataStore)DataStoreProvider.Current;
-        for (int i = 1; i <= 5; i++)
-            store.Save(new Employee { Key = (uint)i, Name = $"Employee {i}" });
+        Assert.True(DataScaffold.TryGetEntity("employees", out var meta));
 
-        var meta = DataScaffold.GetEntityByType(typeof(Employee));
-        Assert.NotNull(meta);
+        SeedEmployees(meta, 5);
+        ClearCaches();
 
         // Act
         var fields = DataScaffold.BuildFormFields(meta, null, forCreate: true);
@@ -102,15 +98,22 @@ public class HighCardinalityLookupTests : IDisposable
         DataScaffold.LargeListThreshold = 2;
         ClearCaches();
 
-        var store = (CountableInMemoryDataStore)DataStoreProvider.Current;
-        store.Save(new Employee { Key = 100, Name = "Alice Manager" });
-        for (int i = 2; i <= 5; i++)
-            store.Save(new Employee { Key = (uint)i, Name = $"Employee {i}" });
+        Assert.True(DataScaffold.TryGetEntity("employees", out var meta));
 
-        var instance = new Employee { Key = 1, Name = "Bob", ManagerId = "100" };
+        // Save "Alice Manager" with Key = 100
+        var alice = meta.Handlers.Create();
+        alice.Key = 100;
+        meta.FindField("Name")!.SetValueFn(alice, "Alice Manager");
+        meta.Handlers.SaveAsync(alice, CancellationToken.None).AsTask().GetAwaiter().GetResult();
 
-        var meta = DataScaffold.GetEntityByType(typeof(Employee));
-        Assert.NotNull(meta);
+        SeedEmployees(meta, 4, startKey: 2);
+        ClearCaches();
+
+        // Create instance via handlers with ManagerId pointing to Alice
+        var instance = meta.Handlers.Create();
+        instance.Key = 1;
+        meta.FindField("Name")!.SetValueFn(instance, "Bob");
+        meta.FindField("ManagerId")!.SetValueFn(instance, "100");
 
         // Act
         var fields = DataScaffold.BuildFormFields(meta, instance, forCreate: false);
@@ -129,12 +132,10 @@ public class HighCardinalityLookupTests : IDisposable
         DataScaffold.LargeListThreshold = 2;
         ClearCaches();
 
-        var store = (CountableInMemoryDataStore)DataStoreProvider.Current;
-        for (int i = 1; i <= 5; i++)
-            store.Save(new Employee { Key = (uint)i, Name = $"Employee {i}" });
+        Assert.True(DataScaffold.TryGetEntity("employees", out var meta));
 
-        var meta = DataScaffold.GetEntityByType(typeof(Employee));
-        Assert.NotNull(meta);
+        SeedEmployees(meta, 5);
+        ClearCaches();
 
         // Act: create form, no current value
         var fields = DataScaffold.BuildFormFields(meta, null, forCreate: true);
@@ -178,64 +179,5 @@ public class HighCardinalityLookupTests : IDisposable
         var largeListCache = typeof(DataScaffold).GetField("LargeListCache",
             BindingFlags.NonPublic | BindingFlags.Static);
         if (largeListCache?.GetValue(null) is IDictionary llc) llc.Clear();
-    }
-
-    private class CountableInMemoryDataStore : IDataObjectStore
-    {
-        private readonly Dictionary<(Type, uint), BaseDataObject> _store = new();
-
-        public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
-        public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
-        public void RegisterFallbackProvider(IDataProvider provider) { }
-        public void ClearProviders() { }
-
-        public void Save<T>(T obj) where T : BaseDataObject
-            => _store[(typeof(T), obj.Key)] = obj;
-
-        public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
-        { Save(obj); return ValueTask.CompletedTask; }
-
-        public T? Load<T>(uint key) where T : BaseDataObject
-            => _store.TryGetValue((typeof(T), key), out var obj) ? obj as T : null;
-
-        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult(Load<T>(key));
-
-        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
-        {
-            var all = _store.Values.OfType<T>();
-            if (query?.Clauses.Count > 0)
-                all = all.Where(item => query.Clauses.All(c => MatchClause(item, c)));
-            if (query?.Top > 0)
-                all = all.Take(query.Top.Value);
-            return all;
-        }
-
-        private static bool MatchClause<T>(T item, QueryClause clause) where T : BaseDataObject
-        {
-            var prop = typeof(T).GetProperty(clause.Field, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            if (prop == null) return true;
-            var val = prop.GetValue(item)?.ToString() ?? string.Empty;
-            var clauseVal = clause.Value?.ToString() ?? string.Empty;
-            return clause.Operator switch
-            {
-                QueryOperator.Equals => string.Equals(val, clauseVal, StringComparison.OrdinalIgnoreCase),
-                QueryOperator.NotEquals => !string.Equals(val, clauseVal, StringComparison.OrdinalIgnoreCase),
-                QueryOperator.Contains => val.Contains(clauseVal, StringComparison.OrdinalIgnoreCase),
-                _ => true
-            };
-        }
-
-        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult(Query<T>(query));
-
-        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult(Query<T>(query).Count());
-
-        public void Delete<T>(uint key) where T : BaseDataObject
-            => _store.Remove((typeof(T), key));
-
-        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
-        { Delete<T>(key); return ValueTask.CompletedTask; }
     }
 }

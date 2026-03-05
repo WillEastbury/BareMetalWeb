@@ -127,7 +127,7 @@ public static class DeltaApiHandlers
                 await context.Response.Body.WriteAsync(payload, context.RequestAborted);
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             await WriteResult(context, 500, MutationResult.ValidationFailed, "An internal error occurred.");
         }

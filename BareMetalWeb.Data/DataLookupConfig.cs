@@ -11,7 +11,8 @@ public sealed record DataLookupConfig(
     string? QueryValue,
     string? SortField,
     SortDirection SortDirection,
-    TimeSpan CacheTtl
+    TimeSpan CacheTtl,
+    string? TargetSlug = null
 );
 
 

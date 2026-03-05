@@ -13,6 +13,7 @@ namespace BareMetalWeb.Data.Tests;
 /// The VNext SPA sends List&lt;string&gt; TextArea fields as a plain newline-separated
 /// string rather than a JSON array. TryConvertJson must accept both forms.
 /// </summary>
+[Collection("SharedState")]
 public class StringListFieldBindingTests
 {
     [DataEntity("TagsTestEntities")]

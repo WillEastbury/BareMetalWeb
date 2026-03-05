@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
+using BareMetalWeb.Runtime;
 
 namespace BareMetalWeb.DataBrowser;
 
@@ -60,12 +61,60 @@ internal static class Program
         _provider = new LocalFolderBinaryDataProvider(_dataRoot);
         _indexStore = new IndexStore(_provider);
 
-        // Register all known entity types so DataScaffold.Entities is populated.
         DataStoreProvider.PrimaryProvider = _provider;
         var store = new DataObjectStore();
         store.RegisterProvider(_provider);
         DataStoreProvider.Current = store;
-        DataEntityRegistry.RegisterAllEntities();
+
+        // Register system entities and compile gallery entities from JSON.
+        DataScaffold.RegisterEntity<AppSetting>();
+        DataScaffold.RegisterEntity<User>();
+        DataScaffold.RegisterEntity<SystemPrincipal>();
+        DataScaffold.RegisterEntity<AuditEntry>();
+        DataScaffold.RegisterEntity<ReportDefinition>();
+        DataScaffold.RegisterEntity<EntityDefinition>();
+        DataScaffold.RegisterEntity<FieldDefinition>();
+        DataScaffold.RegisterEntity<IndexDefinition>();
+        DataScaffold.RegisterEntity<ActionDefinition>();
+        DataScaffold.RegisterEntity<ActionCommandDefinition>();
+
+        var compiler = new RuntimeEntityCompiler();
+        var walProvider = new WalDataProvider(_dataRoot);
+        var registry = new RuntimeEntityRegistry();
+        var packages = SampleGalleryService.GetAllPackages();
+        var compiledModels = new List<RuntimeEntityModel>();
+        foreach (var pkg in packages)
+        {
+            foreach (var srcEntity in pkg.Entities)
+            {
+                var entityId = srcEntity.EntityId;
+                var entityFields = pkg.Fields
+                    .Where(f => string.Equals(f.EntityId, entityId, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                var entityIndexes = pkg.Indexes
+                    .Where(i => string.Equals(i.EntityId, entityId, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                var model = compiler.Compile(srcEntity, entityFields, entityIndexes,
+                    Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _);
+                if (model == null) continue;
+                registry.Register(model);
+                compiledModels.Add(model);
+                var schema = EntitySchemaFactory.FromModel(model);
+                var entityMetadata = model.ToEntityMetadata(walProvider, schema);
+                DataScaffold.RegisterVirtualEntity(entityMetadata);
+            }
+        }
+        foreach (var model in compiledModels)
+        {
+            if (model.Fields.Any(f => f.FieldType == Rendering.Models.FormFieldType.LookupList
+                && !string.IsNullOrWhiteSpace(f.LookupEntitySlug)))
+            {
+                var schema = EntitySchemaFactory.FromModel(model);
+                var updated = model.ToEntityMetadata(walProvider, schema);
+                DataScaffold.RegisterVirtualEntity(updated);
+            }
+        }
+        registry.Freeze();
 
         WriteBanner();
 

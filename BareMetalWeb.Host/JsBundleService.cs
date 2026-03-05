@@ -51,7 +51,8 @@ public static class JsBundleService
         "BareMetalTemplate.js",
         "BareMetalRendering.js",
         "theme-switcher.js",
-        "vnext-app.js"
+        "vnext-app.js",
+        "agent-panel.js"
     };
 
     /// <summary>The route path at which the SSR bundle is served.</summary>

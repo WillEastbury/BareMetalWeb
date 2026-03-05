@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// Default implementation of <see cref="IQueryService"/>.
 /// Delegates to the entity's <see cref="DataEntityHandlers"/> registered with
 /// <see cref="DataScaffold"/>, serializing results to field-name → value dictionaries.
-/// Works for both compiled (UserClasses) and runtime-defined (EntityDefinition-based) entities.
+/// Works for both compiled and runtime-defined (EntityDefinition-based) entities.
 /// </summary>
 public sealed class QueryService : IQueryService
 {

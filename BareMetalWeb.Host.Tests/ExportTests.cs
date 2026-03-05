@@ -3,14 +3,40 @@ using System.Collections.Generic;
 using System.Linq;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
 using Microsoft.AspNetCore.Http;
 using Xunit;
 
 namespace BareMetalWeb.Host.Tests;
 
+[Collection("SharedState")]
 public class ExportTests
 {
+    [DataEntity("Test Order Rows", Slug = "test-export-order-rows")]
+    private class TestOrderRow : BaseDataObject
+    {
+        [DataField(Label = "Product", Order = 1)]
+        [DataLookup(typeof(BaseDataObject))]
+        public string ProductId { get; set; } = "";
+        [DataField(Label = "Quantity", Order = 2, FieldType = Rendering.Models.FormFieldType.Integer)] public int Quantity { get; set; }
+        [DataField(Label = "Unit Price", Order = 3, FieldType = Rendering.Models.FormFieldType.Decimal)] public decimal UnitPrice { get; set; }
+        [DataField(Label = "Notes", Order = 4)] public string Notes { get; set; } = "";
+        [DataField(Label = "Line Total", Order = 5, FieldType = Rendering.Models.FormFieldType.Decimal)]
+        [CalculatedField(Expression = "Quantity * UnitPrice")]
+        public decimal LineTotal { get; set; }
+    }
+
+    [DataEntity("Test Orders", Slug = "test-export-orders")]
+    private class TestOrder : BaseDataObject
+    {
+        [DataField(Label = "Order Number", Order = 1)] public string OrderNumber { get; set; } = "";
+        [DataField(Label = "Customer", Order = 2)] public string CustomerId { get; set; } = "";
+        [DataField(Label = "Order Date", Order = 3, FieldType = Rendering.Models.FormFieldType.DateOnly)] public DateOnly OrderDate { get; set; }
+        [DataField(Label = "Status", Order = 4)] public string Status { get; set; } = "";
+        [DataField(Label = "Currency", Order = 5)] public string CurrencyId { get; set; } = "";
+        [DataField(Label = "Order Rows", Order = 6, FieldType = Rendering.Models.FormFieldType.ChildList)]
+        public List<TestOrderRow> OrderRows { get; set; } = new();
+    }
+
     [Fact]
     public void ExportOptions_FromQuery_ParsesFormat()
     {
@@ -110,8 +136,8 @@ public class ExportTests
     public void DataScaffold_GetNestedComponents_ReturnsChildLists()
     {
         // Arrange - ensure Order entity is registered
-        DataScaffold.RegisterEntity<Order>();
-        var metadata = DataScaffold.TryGetEntity("orders", out var meta) ? meta : null;
+        DataScaffold.RegisterEntity<TestOrder>();
+        var metadata = DataScaffold.TryGetEntity("test-export-orders", out var meta) ? meta : null;
         Assert.NotNull(metadata);
 
         // Act
@@ -120,18 +146,18 @@ public class ExportTests
         // Assert
         Assert.NotEmpty(nested);
         var orderRowsField = nested.First(n => n.Field.Name == "OrderRows");
-        Assert.Equal(typeof(OrderRow), orderRowsField.ChildType);
+        Assert.Equal(typeof(TestOrderRow), orderRowsField.ChildType);
     }
 
     [Fact]
     public void DataScaffold_ExtractNestedData_ExtractsOrderRows()
     {
         // Arrange
-        DataScaffold.RegisterEntity<Order>();
-        var metadata = DataScaffold.TryGetEntity("orders", out var meta) ? meta : null;
+        DataScaffold.RegisterEntity<TestOrder>();
+        var metadata = DataScaffold.TryGetEntity("test-export-orders", out var meta) ? meta : null;
         Assert.NotNull(metadata);
 
-        var order = new Order
+        var order = new TestOrder
         {
             Key = 1,
             OrderNumber = "12345",
@@ -139,9 +165,9 @@ public class ExportTests
             OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
             Status = "Open",
             CurrencyId = "USD",
-            OrderRows = new List<OrderRow>
+            OrderRows = new List<TestOrderRow>
             {
-                new OrderRow
+                new TestOrderRow
                 {
                     ProductId = "PROD-001",
                     Quantity = 2,
@@ -149,7 +175,7 @@ public class ExportTests
                     LineTotal = 21.00m,
                     Notes = "Test item 1"
                 },
-                new OrderRow
+                new TestOrderRow
                 {
                     ProductId = "PROD-002",
                     Quantity = 1,
@@ -183,11 +209,11 @@ public class ExportTests
     public void DataScaffold_ExtractNestedData_HandlesEmptyList()
     {
         // Arrange
-        DataScaffold.RegisterEntity<Order>();
-        var metadata = DataScaffold.TryGetEntity("orders", out var meta) ? meta : null;
+        DataScaffold.RegisterEntity<TestOrder>();
+        var metadata = DataScaffold.TryGetEntity("test-export-orders", out var meta) ? meta : null;
         Assert.NotNull(metadata);
 
-        var order = new Order
+        var order = new TestOrder
         {
             Key = 2,
             OrderNumber = "67890",
@@ -195,7 +221,7 @@ public class ExportTests
             OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
             Status = "Open",
             CurrencyId = "USD",
-            OrderRows = new List<OrderRow>() // Empty list
+            OrderRows = new List<TestOrderRow>() // Empty list
         };
 
         // Act
@@ -211,8 +237,8 @@ public class ExportTests
     public void BuildSubFieldSchemas_ForOrderRowsField_ReturnsSubFieldMetadata()
     {
         // Arrange - ensure Order entity is registered
-        DataScaffold.RegisterEntity<Order>();
-        var metadata = DataScaffold.TryGetEntity("orders", out var meta) ? meta : null;
+        DataScaffold.RegisterEntity<TestOrder>();
+        var metadata = DataScaffold.TryGetEntity("test-export-orders", out var meta) ? meta : null;
         Assert.NotNull(metadata);
 
         var orderRowsField = metadata!.Fields.FirstOrDefault(f => f.Name == "OrderRows");
@@ -247,8 +273,8 @@ public class ExportTests
     public void BuildSubFieldSchemas_ForNonListField_ReturnsNull()
     {
         // Arrange
-        DataScaffold.RegisterEntity<Order>();
-        var metadata = DataScaffold.TryGetEntity("orders", out var meta) ? meta : null;
+        DataScaffold.RegisterEntity<TestOrder>();
+        var metadata = DataScaffold.TryGetEntity("test-export-orders", out var meta) ? meta : null;
         Assert.NotNull(metadata);
 
         // Pick a non-list field (OrderNumber is a plain string field)

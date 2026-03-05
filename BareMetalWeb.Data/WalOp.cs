@@ -53,9 +53,11 @@ public readonly struct WalOp
     /// Creates a full-image upsert op, automatically applying Brotli compression when
     /// the payload meets the minimum size threshold and compression reduces the size.
     /// </summary>
-    public static WalOp Upsert(ulong key, ReadOnlyMemory<byte> payload, ulong schemaSignature = 0)
+    public static WalOp Upsert(ulong key, ReadOnlyMemory<byte> payload,
+        ulong schemaSignature = 0, WalEnvelopeEncryption? encryption = null)
     {
-        var compressed = WalPayloadCodec.TryCompress(payload, out ushort codec, out uint uncompressedLen);
+        var compressed = WalPayloadCodec.TryCompress(payload, out ushort codec,
+            out uint uncompressedLen, encryption);
         return new WalOp
         {
             Key             = key,

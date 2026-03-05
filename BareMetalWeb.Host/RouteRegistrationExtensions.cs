@@ -149,7 +149,7 @@ public static class RouteRegistrationExtensions
     {
         // Metrics
         host.RegisterRoute("GET /metrics", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Metric Viewer", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Metric Viewer", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
             routeHandlers.BuildPageHandler(context =>
             {
                 var app = context.GetApp()!;
@@ -164,7 +164,7 @@ public static class RouteRegistrationExtensions
 
         // IP tracking
         host.RegisterRoute("GET /topips", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Top IPs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Top IPs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
             routeHandlers.BuildPageHandler(context =>
             {
                 var app = context.GetApp()!;
@@ -174,7 +174,7 @@ public static class RouteRegistrationExtensions
             })));
 
         host.RegisterRoute("GET /suspiciousips", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Suspicious IPs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Suspicious IPs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
             routeHandlers.BuildPageHandler(context =>
             {
                 var app = context.GetApp()!;
@@ -195,7 +195,7 @@ public static class RouteRegistrationExtensions
     {
         // Log management
         host.RegisterRoute("GET /admin/logs", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Logs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Logs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
             routeHandlers.LogsViewerHandler));
         host.RegisterRoute("GET /admin/logs/prune", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Prune Logs", "" }, "monitoring", false, 1),
@@ -209,7 +209,7 @@ public static class RouteRegistrationExtensions
 
         // Sample data generation
         host.RegisterRoute("GET /admin/sample-data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Generate Sample Data", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Generate Sample Data", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.SampleDataHandler));
         host.RegisterRoute("POST /admin/sample-data", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Generate Sample Data", "" }, "admin", false, 1),
@@ -217,12 +217,12 @@ public static class RouteRegistrationExtensions
 
         // Template management
         host.RegisterRoute("GET /admin/reload-templates", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.ReloadTemplatesHandler));
 
         // Wipe all data — always registered; returns 419 if admin.allowWipeData setting is not configured
         host.RegisterRoute("GET /admin/wipe-data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", true, 0, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", true, 0, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "⚠️ Danger"),
             routeHandlers.WipeDataHandler));
         host.RegisterRoute("POST /admin/wipe-data", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", false, 0),
@@ -230,12 +230,12 @@ public static class RouteRegistrationExtensions
 
         // Entity designer — visual editor for creating virtual entity JSON definitions
         host.RegisterRoute("GET /admin/entity-designer", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Entity Designer", "" }, "admin", true, 2, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Entity Designer", "" }, "admin", true, 2, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.EntityDesignerHandler));
 
         // Gallery — browse and deploy pre-built sample entity schema packages
         host.RegisterRoute("GET /admin/gallery", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Sample Gallery", "" }, "admin", true, 3, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Sample Gallery", "" }, "admin", true, 3, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.GalleryHandler));
         host.RegisterRoute("POST /admin/gallery/deploy/{package}", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Sample Gallery", "" }, "admin", false, 0),
@@ -243,7 +243,7 @@ public static class RouteRegistrationExtensions
 
         // Data & Index Sizing — disk and in-memory index footprint per table
         host.RegisterRoute("GET /admin/data-sizes", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Data & Index Sizing", "" }, "admin", true, 4, navGroup: "Admin", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Data & Index Sizing", "" }, "admin", true, 4, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.DataSizingHandler));
     }
 
@@ -494,19 +494,40 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/_binary/_key", new RouteHandlerData(raw, BinaryApiHandlers.KeyHandler));
         host.RegisterRoute("GET /api/_binary/{type}/_schema", new RouteHandlerData(raw, BinaryApiHandlers.SchemaHandler));
         host.RegisterRoute("GET /api/_binary/{type}/_aggregate", new RouteHandlerData(raw, BinaryApiHandlers.AggregateHandler));
+        host.RegisterRoute("GET /api/_binary/{type}/_raw", new RouteHandlerData(raw, BinaryApiHandlers.RawListHandler));
+        host.RegisterRoute("GET /api/_binary/{type}/_aggregations", new RouteHandlerData(raw, BinaryApiHandlers.AggregationDefsHandler));
         host.RegisterRoute("GET /api/_binary/{type}/_layout", new RouteHandlerData(raw, DeltaApiHandlers.LayoutHandler));
         host.RegisterRoute("GET /api/_binary/{type}/_actions", new RouteHandlerData(raw, ActionApiHandlers.ListActionsHandler));
         host.RegisterRoute("POST /api/_binary/{type}/_action/{actionId}", new RouteHandlerData(raw, ActionApiHandlers.ExecuteActionHandler));
         host.RegisterRoute("GET /api/_metrics", new RouteHandlerData(raw, EngineMetricsHandler));
+        host.RegisterRoute("POST /api/graphql", new RouteHandlerData(raw, GraphQLHandler.HandleAsync));
         var adminOnly = pageInfoFactory.RawPage("admin", false);
         host.RegisterRoute("GET /api/_cluster", new RouteHandlerData(adminOnly, ClusterApiHandlers.ClusterStatusHandler));
         host.RegisterRoute("GET /api/_cluster/replicate", new RouteHandlerData(adminOnly, ClusterApiHandlers.ReplicationHandler));
         host.RegisterRoute("POST /api/_cluster/stepdown", new RouteHandlerData(adminOnly, ClusterApiHandlers.StepDownHandler));
+        host.RegisterRoute("GET /api/tenants", new RouteHandlerData(adminOnly, TenantApiHandlers.ListTenantsHandler));
+        host.RegisterRoute("GET /api/tenants/{id}", new RouteHandlerData(adminOnly, TenantApiHandlers.GetTenantHandler));
+        host.RegisterRoute("POST /api/tenants", new RouteHandlerData(adminOnly, TenantApiHandlers.ProvisionTenantHandler));
+        host.RegisterRoute("PUT /api/tenants/{id}/branding", new RouteHandlerData(adminOnly, TenantApiHandlers.UpdateBrandingHandler));
+        host.RegisterRoute("PUT /api/tenants/{id}/quotas", new RouteHandlerData(adminOnly, TenantApiHandlers.UpdateQuotasHandler));
+        host.RegisterRoute("GET /api/tenant/branding", new RouteHandlerData(raw, TenantApiHandlers.GetCurrentBrandingHandler));
+        host.RegisterRoute("POST /api/vector/search", new RouteHandlerData(raw, VectorApiHandlers.SearchHandler));
+        host.RegisterRoute("POST /api/vector/upsert", new RouteHandlerData(raw, VectorApiHandlers.UpsertHandler));
+        host.RegisterRoute("POST /api/vector/delete", new RouteHandlerData(raw, VectorApiHandlers.DeleteHandler));
+        host.RegisterRoute("GET /api/vector/indexes", new RouteHandlerData(raw, VectorApiHandlers.ListIndexesHandler));
+        host.RegisterRoute("POST /api/vector/register", new RouteHandlerData(adminOnly, VectorApiHandlers.RegisterHandler));
+        host.RegisterRoute("POST /api/agent/chat", new RouteHandlerData(raw, AgentApiHandlers.ChatHandler));
         var templated = pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "", "" }, "Public", false, 1);
         host.RegisterRoute("GET /page/{slug}", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(PageRenderer.ConfigurePageAsync)));
         host.RegisterRoute("GET /api/pages", new RouteHandlerData(raw, PageRenderer.ListPagesHandler));
         host.RegisterRoute("GET /products", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(ProductRenderer.ConfigureCategoryBrowseAsync)));
         host.RegisterRoute("GET /products/{category}", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(ProductRenderer.ConfigureProductGridAsync)));
+        host.RegisterRoute("GET /api/basket", new RouteHandlerData(raw, BasketApiHandlers.GetBasketHandler));
+        host.RegisterRoute("POST /api/basket/add", new RouteHandlerData(raw, BasketApiHandlers.AddItemHandler));
+        host.RegisterRoute("POST /api/basket/remove", new RouteHandlerData(raw, BasketApiHandlers.RemoveItemHandler));
+        host.RegisterRoute("POST /api/basket/clear", new RouteHandlerData(raw, BasketApiHandlers.ClearBasketHandler));
+        host.RegisterRoute("POST /api/checkout", new RouteHandlerData(raw, CheckoutApiHandlers.CheckoutHandler));
+        host.RegisterRoute("POST /api/checkout/confirm", new RouteHandlerData(raw, CheckoutApiHandlers.ConfirmPaymentHandler));
         host.RegisterRoute("GET /api/_binary/{type}/{id}", new RouteHandlerData(raw, BinaryApiHandlers.GetHandler));
         host.RegisterRoute("GET /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.ListHandler));
         host.RegisterRoute("POST /api/_binary/{type}", new RouteHandlerData(raw, BinaryApiHandlers.CreateHandler));
@@ -586,7 +607,10 @@ public static class RouteRegistrationExtensions
                                 var fkVal = rf.GetValueFn(current)?.ToString();
                                 if (string.IsNullOrEmpty(fkVal)) continue;
 
-                                var targetMeta = DataScaffold.GetEntityByType(rf.RelatedDocument.TargetType);
+                                var targetMeta = !string.IsNullOrEmpty(rf.RelatedDocument.TargetSlug)
+                                    && DataScaffold.TryGetEntity(rf.RelatedDocument.TargetSlug, out var slugMeta)
+                                    ? slugMeta
+                                    : DataScaffold.GetEntityByType(rf.RelatedDocument.TargetType);
                                 if (targetMeta == null) continue;
 
                                 // Try to load the upstream document
@@ -625,7 +649,11 @@ public static class RouteRegistrationExtensions
                     foreach (var rf in childMeta.DocumentRelationFields)
                     {
                         if (rf.RelatedDocument == null) continue;
-                        if (rf.RelatedDocument.TargetType != meta.Type) continue;
+                        // Match by slug (metadata-driven) or CLR type (compiled entities)
+                        bool matches = !string.IsNullOrEmpty(rf.RelatedDocument.TargetSlug)
+                            ? string.Equals(rf.RelatedDocument.TargetSlug, meta.Slug, StringComparison.OrdinalIgnoreCase)
+                            : rf.RelatedDocument.TargetType == meta.Type;
+                        if (!matches) continue;
 
                         // Query child records that reference this record's ID
                         var query = new QueryDefinition
@@ -693,7 +721,10 @@ public static class RouteRegistrationExtensions
                     foreach (var rf in entityMeta.DocumentRelationFields)
                     {
                         if (rf.RelatedDocument == null) continue;
-                        var targetMeta = DataScaffold.GetEntityByType(rf.RelatedDocument.TargetType);
+                        var targetMeta = !string.IsNullOrEmpty(rf.RelatedDocument.TargetSlug)
+                            && DataScaffold.TryGetEntity(rf.RelatedDocument.TargetSlug, out var slugMeta)
+                            ? slugMeta
+                            : DataScaffold.GetEntityByType(rf.RelatedDocument.TargetType);
                         if (targetMeta == null) continue;
 
                         if (seenSlugs.Add(targetMeta.Slug))
@@ -762,7 +793,7 @@ public static class RouteRegistrationExtensions
     /// <summary>
     /// Register the VNext JS SPA shell and metadata API endpoints.
     /// Metadata routes at /meta/objects and /meta/{object} provide schema info to the client.
-    /// The SPA shell at /UI and /UI/{*path} serves the client-side application (default UI).
+    /// The SPA shell at /{*path} serves the client-side application as a catch-all fallback.
     /// </summary>
     public static void RegisterVNextRoutes(
         this IBareWebHost host,
@@ -818,13 +849,16 @@ public static class RouteRegistrationExtensions
                     JsonSerializer.Serialize(result, JsonCompact));
             }));
 
-        // VNext SPA shell — serve for all /UI and /UI/{*path} routes (default UI).
-        // The root /UI route is the "Admin > Data" nav entry for the metadata-driven admin interface.
-        host.RegisterRoute("GET /UI", new RouteHandlerData(
-            pageInfoFactory.RawPage("Authenticated", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Data"),
+        // VNext SPA shell — nav entry visible in the Admin dropdown.
+        host.RegisterRoute("GET /d", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Data", navSubGroup: "🔧 Tools"),
             context => ServeVNextShell(context, host, templateStore)));
 
-        host.RegisterRoute("GET /UI/{*path}", new RouteHandlerData(
+        // Catch-all fallback: serves the VNext SPA shell for any unmatched path
+        // (e.g. /{slug}, /{slug}/{id}, /{slug}/{id}/edit).
+        // Registered last and has 0 literal segments so the route sorter tries
+        // all specific routes first.
+        host.RegisterRoute("GET /{*path}", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
             context => ServeVNextShell(context, host, templateStore)));
     }
@@ -875,6 +909,7 @@ public static class RouteRegistrationExtensions
                     ["idStrategy"] = runtimeModel.IdStrategy.ToString(),
                     ["version"] = runtimeModel.Version,
                     ["schemaHash"] = runtimeModel.SchemaHash,
+                    ["formLayout"] = runtimeModel.FormLayout,
                     ["fields"] = runtimeModel.Fields.Select(f => (object)new Dictionary<string, object?>
                     {
                         ["fieldId"] = f.FieldId,
@@ -1003,7 +1038,7 @@ public static class RouteRegistrationExtensions
             async context =>
             {
                 var types = DataScaffold.Entities
-                    .Where(m => m.Type != typeof(DynamicDataObject)
+                    .Where(m => m.Type != typeof(DataRecord)
                                 && m.Type.GetCustomAttribute<DataEntityAttribute>() != null)
                     .OrderBy(m => m.Name)
                     .Select(m => (object)new Dictionary<string, object?>
@@ -1140,7 +1175,9 @@ public static class RouteRegistrationExtensions
                 ["isIdField"] = f.IdGeneration != IdGenerationStrategy.None,
                 ["idGeneration"] = f.IdGeneration.ToString(),
                 ["placeholder"] = f.Placeholder,
-                ["indexed"] = f.IsIndexed
+                ["indexed"] = f.IsIndexed,
+                ["fieldGroup"] = f.FieldGroup,
+                ["columnSpan"] = f.ColumnSpan
             };
 
             if (f.Lookup != null)
@@ -1164,7 +1201,9 @@ public static class RouteRegistrationExtensions
                     ["sortField"] = f.Lookup.SortField,
                     ["sortDirection"] = f.Lookup.SortDirection.ToString(),
                     ["sourceSlug"] = meta.Slug,
-                    ["sourceFieldName"] = f.Name
+                    ["sourceFieldName"] = f.Name,
+                    ["cascadeFromField"] = f.CascadeFromField,
+                    ["cascadeFilterField"] = f.CascadeFilterField
                 };
             }
             else
@@ -1255,7 +1294,10 @@ public static class RouteRegistrationExtensions
 
             if (f.RelatedDocument != null)
             {
-                var targetMeta = DataScaffold.GetEntityByType(f.RelatedDocument.TargetType);
+                var targetMeta = !string.IsNullOrEmpty(f.RelatedDocument.TargetSlug)
+                    && DataScaffold.TryGetEntity(f.RelatedDocument.TargetSlug, out var rdSlugMeta)
+                    ? rdSlugMeta
+                    : DataScaffold.GetEntityByType(f.RelatedDocument.TargetType);
                 fd["relatedDocument"] = new Dictionary<string, object?>
                 {
                     ["targetSlug"] = targetMeta?.Slug,
@@ -1294,6 +1336,8 @@ public static class RouteRegistrationExtensions
             ["canShowTimetable"] = DataScaffold.CanShowTimetableView(meta),
             ["canShowTimeline"] = DataScaffold.CanShowTimelineView(meta),
             ["canShowSankey"] = DataScaffold.CanShowSankeyView(meta),
+            ["canShowCalendar"] = DataScaffold.CanShowCalendarView(meta),
+            ["canShowWorkflow"] = meta.Fields.Any(f => f.FieldType == BareMetalWeb.Rendering.Models.FormFieldType.Enum),
             ["idGeneration"] = meta.IdGeneration.ToString(),
             ["defaultSortField"] = meta.DefaultSortField,
             ["defaultSortDirection"] = meta.DefaultSortDirection.ToString(),
@@ -1334,7 +1378,7 @@ public static class RouteRegistrationExtensions
     {
         // List all reports
         host.RegisterRoute("GET /reports", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Reports"),
+            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Reports", navSubGroup: "🔧 Tools"),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
@@ -1355,12 +1399,12 @@ public static class RouteRegistrationExtensions
                 sb.Append("<div class=\"card shadow-sm bm-page-card\">");
                 sb.Append("<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
                 sb.Append("<h1 class=\"h5 mb-0\"><i class=\"bi bi-bar-chart-fill\"></i> Reports</h1>");
-                sb.Append("<a href=\"/UI/report-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New Report</a>");
+                sb.Append("<a href=\"/report-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New Report</a>");
                 sb.Append("</div><div class=\"card-body\">");
 
                 if (reports.Count == 0)
                 {
-                    sb.Append("<div class=\"text-center py-5 text-muted\">No reports defined yet. Create one via <a href=\"/UI/report-definitions/create\">Report Definitions</a>.</div>");
+                    sb.Append("<div class=\"text-center py-5 text-muted\">No reports defined yet. Create one via <a href=\"/report-definitions/create\">Report Definitions</a>.</div>");
                 }
                 else
                 {
@@ -1595,11 +1639,8 @@ public static class RouteRegistrationExtensions
         var navbarSection = navEndIdx >= 0
             ? template.Body.Substring(0, navEndIdx + 6)
             : template.Body;
-        // Point the brand at the VNext root (default UI)
-        navbarSection = navbarSection.Replace(
-            "class=\"navbar-brand\" href=\"/\"",
-            "class=\"navbar-brand\" href=\"/UI\"",
-            StringComparison.Ordinal);
+        // Brand link stays at the VNext root (/)
+        // (navbarSection already has href="/", no override needed)
 
         // Extract only the <footer>…</footer> block from the footer template
         var footerEndIdx = template.Footer.IndexOf("</footer>", StringComparison.OrdinalIgnoreCase);
@@ -1613,19 +1654,17 @@ public static class RouteRegistrationExtensions
 
         // Inline /meta/objects (and optionally /meta/{slug}) to eliminate client-side round-trips
         var metaObjectsScript = TryBuildMetaObjectsScript(user, userPermissions, safeNonce);
-        // For any /UI/data/{slug}[/...] path, inline /meta/{slug} to eliminate the schema round-trip
+        // For any /{slug}[/...] path, inline /meta/{slug} to eliminate the schema round-trip
         string? metaSlugScript = null;
         string? initialDataScript = null;
-        // Extract the entity slug for /UI/data/{slug} pages
+        // Extract the entity slug for /{slug} pages
         var reqPath = context.Request.Path.Value ?? string.Empty;
-        const string dataPrefix = "/UI/data/";
         string? dataSlug = null;
-        if (reqPath.StartsWith(dataPrefix, StringComparison.OrdinalIgnoreCase))
         {
-            var pathAfterData = reqPath.Substring(dataPrefix.Length);
-            // Extract slug — it is the first path segment (before any '/')
-            var slashIdx = pathAfterData.IndexOf('/');
-            var entitySlug = slashIdx >= 0 ? pathAfterData.Substring(0, slashIdx) : pathAfterData;
+            var trimmed = reqPath.TrimStart('/');
+            // Extract slug — first path segment (before any '/')
+            var slashIdx = trimmed.IndexOf('/');
+            var entitySlug = slashIdx >= 0 ? trimmed.Substring(0, slashIdx) : trimmed;
             if (!string.IsNullOrEmpty(entitySlug))
                 metaSlugScript = TryBuildMetaSlugScript(entitySlug, safeNonce);
 
@@ -1641,7 +1680,7 @@ public static class RouteRegistrationExtensions
                     initialDataScript = await TryBuildInitialDataScriptAsync(
                         context, entitySlug, safeNonce, user, context.RequestAborted).ConfigureAwait(false);
             }
-            var slugCandidate = reqPath.Substring(dataPrefix.Length);
+            var slugCandidate = trimmed;
             // Only for simple slug paths (not /create, /123, /123/edit etc.)
             if (!string.IsNullOrEmpty(slugCandidate) && !slugCandidate.Contains('/'))
                 dataSlug = slugCandidate;
@@ -1652,7 +1691,7 @@ public static class RouteRegistrationExtensions
         sb.Append("<head>");
         sb.Append(ReplaceTemplateTokens(template.Head, tokens));
         sb.Append($"<meta name=\"csrf-token\" content=\"{safeToken}\">");
-        sb.Append("<meta name=\"vnext-base\" content=\"/UI\">");
+        sb.Append("<meta name=\"vnext-base\" content=\"\">");
         sb.Append("</head>");
         sb.Append("<body>");
         sb.Append(ReplaceTemplateTokens(navbarSection, tokens));
@@ -1853,7 +1892,9 @@ public static class RouteRegistrationExtensions
 
         foreach (var field in lookupFields)
         {
-            var targetMeta = DataScaffold.GetEntityByType(field.Lookup!.TargetType);
+            var targetMeta = field.Lookup!.TargetSlug != null
+                ? (DataScaffold.TryGetEntity(field.Lookup.TargetSlug, out var bySlug) ? bySlug : null)
+                : DataScaffold.GetEntityByType(field.Lookup!.TargetType);
             if (targetMeta == null) continue;
 
             // Collect unique non-null IDs for this field across all payload rows

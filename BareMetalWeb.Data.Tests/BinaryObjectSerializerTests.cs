@@ -1,17 +1,43 @@
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Data.Tests;
 
 public class BinaryObjectSerializerTests
 {
+    private class TestAddress : BaseDataObject
+    {
+        public string Label { get; set; } = "";
+        public string Line1 { get; set; } = "";
+        public string Line2 { get; set; } = "";
+        public string City { get; set; } = "";
+        public string Region { get; set; } = "";
+        public string PostalCode { get; set; } = "";
+        public string Country { get; set; } = "";
+    }
+
+    private class TestCustomer : BaseDataObject
+    {
+        public string Name { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Phone { get; set; } = "";
+        public string Company { get; set; } = "";
+        public bool IsActive { get; set; }
+    }
+
+    private class TestProduct : BaseDataObject
+    {
+        public string Name { get; set; } = "";
+        public string Sku { get; set; } = "";
+        public List<string> Tags { get; set; } = new();
+    }
+
     [Fact]
     public void Serialize_SimpleObject_ReturnsNonEmptyByteArray()
     {
         // Arrange
         var serializer = new BinaryObjectSerializer();
-        var original = new Address
+        var original = new TestAddress
         {
             Label = "Test Address",
             Line1 = "123 Main St",
@@ -36,7 +62,7 @@ public class BinaryObjectSerializerTests
     {
         // Arrange
         var serializer = new BinaryObjectSerializer();
-        var original = new Customer
+        var original = new TestCustomer
         {
             Name = "John Doe",
             Email = "john@example.com",
@@ -60,7 +86,7 @@ public class BinaryObjectSerializerTests
     {
         // Arrange
         var serializer = new BinaryObjectSerializer();
-        var original = new Product
+        var original = new TestProduct
         {
             Name = "Widget",
             Sku = "W001",
@@ -80,13 +106,13 @@ public class BinaryObjectSerializerTests
     {
         // Arrange
         var serializer = new BinaryObjectSerializer();
-        var emptyList = new Product
+        var emptyList = new TestProduct
         {
             Name = "Widget",
             Sku = "W001",
             Tags = new List<string>()
         };
-        var withList = new Product
+        var withList = new TestProduct
         {
             Name = "Widget",
             Sku = "W001",
@@ -109,8 +135,8 @@ public class BinaryObjectSerializerTests
     {
         // Arrange
         var serializer = new BinaryObjectSerializer();
-        var address1 = new Address { Label = "Address 1", Line1 = "123 Main St", City = "City1", Country = "US" };
-        var address2 = new Address { Label = "Address 2", Line1 = "456 Oak Ave", City = "City2", Country = "US" };
+        var address1 = new TestAddress { Label = "Address 1", Line1 = "123 Main St", City = "City1", Country = "US" };
+        var address2 = new TestAddress { Label = "Address 2", Line1 = "456 Oak Ave", City = "City2", Country = "US" };
 
         // Act
         var serialized1 = serializer.Serialize(address1);
@@ -128,15 +154,15 @@ public class BinaryObjectSerializerTests
         // Arrange - simulates what happens when an entity class changes (new field added)
         // and old records are read with a schema whose hash no longer matches the current type.
         var serializer = new BinaryObjectSerializer();
-        var original = new Customer { Key = 1, Name = "Acme Corp", Email = "acme@test.com" };
+        var original = new TestCustomer { Key = 1, Name = "Acme Corp", Email = "acme@test.com" };
         var bytes = serializer.Serialize(original, 1);
 
-        var currentSchema = serializer.BuildSchema(typeof(Customer));
+        var currentSchema = serializer.BuildSchema(typeof(TestCustomer));
         // Construct a stale schema with a deliberately wrong hash (simulating old schema after entity change)
         var staleSchema = new SchemaDefinition(1, currentSchema.Hash + 1, currentSchema.Members);
 
         // Act & Assert - Strict mode should throw on hash mismatch
-        Assert.Throws<InvalidOperationException>(() => serializer.Deserialize<Customer>(bytes, staleSchema));
+        Assert.Throws<InvalidOperationException>(() => serializer.Deserialize<TestCustomer>(bytes, staleSchema));
     }
 
     [Fact]
@@ -145,15 +171,15 @@ public class BinaryObjectSerializerTests
         // Arrange - simulates schema evolution: entity was modified after records were saved.
         // The stored schema's hash differs from the current type's hash, but the data is still readable.
         var serializer = new BinaryObjectSerializer();
-        var original = new Customer { Key = 1, Name = "Acme Corp", Email = "acme@test.com" };
+        var original = new TestCustomer { Key = 1, Name = "Acme Corp", Email = "acme@test.com" };
         var bytes = serializer.Serialize(original, 1);
 
-        var currentSchema = serializer.BuildSchema(typeof(Customer));
+        var currentSchema = serializer.BuildSchema(typeof(TestCustomer));
         // Construct a stale schema with a wrong hash (old hash before entity evolution)
         var staleSchema = new SchemaDefinition(1, currentSchema.Hash + 1, currentSchema.Members);
 
         // Act - BestEffort mode should succeed and return the object with its available data
-        var result = serializer.Deserialize<Customer>(bytes, staleSchema, SchemaReadMode.BestEffort);
+        var result = serializer.Deserialize<TestCustomer>(bytes, staleSchema, SchemaReadMode.BestEffort);
 
         // Assert
         Assert.NotNull(result);

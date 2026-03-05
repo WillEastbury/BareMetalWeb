@@ -13,4 +13,5 @@ public interface IMenuOption
     string[] RequiredPermissions { get; set; }
     string? ColorClass { get; set; }
     string? Group { get; set; }
+    string? SubGroup { get; set; }
 }

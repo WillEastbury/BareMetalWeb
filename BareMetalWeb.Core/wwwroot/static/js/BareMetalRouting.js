@@ -8,12 +8,12 @@
      * BMRouter — lightweight SPA router
      *
      * Usage:
-     *   BMRouter.on('/UI/data/:entity',       handlers.listView);
-     *   BMRouter.on('/UI/data/:entity/create', handlers.createView);
-     *   BMRouter.on('/UI/data/:entity/:id',    handlers.detailView);
-     *   BMRouter.on('/UI',                           handlers.homeView);
+     *   BMRouter.on('/:entity',       handlers.listView);
+     *   BMRouter.on('/:entity/create', handlers.createView);
+     *   BMRouter.on('/:entity/:id',    handlers.detailView);
+     *   BMRouter.on('/',                           handlers.homeView);
      *   BMRouter.start();                // match current URL and start listening
-     *   BMRouter.navigate('/UI/...');  // programmatic navigation
+     *   BMRouter.navigate('/...');     // programmatic navigation
      */
     var BMRouter = {
         _routes: [],
@@ -23,7 +23,7 @@
          * Register a route handler.
          * Patterns support named segments (:param) and a catch-all (*).
          * Routes are matched in registration order; register more-specific routes first.
-         * @param {string}   pattern  URL pattern, e.g. '/UI/data/:entity/:id/edit'
+         * @param {string}   pattern  URL pattern, e.g. '/:entity/:id/edit'
          * @param {function} handler  Called with (params, query, state) when matched.
          */
         on: function (pattern, handler) {
@@ -64,7 +64,7 @@
 
         /**
          * Navigate to a new path without a full page reload.
-         * @param {string}  path     Absolute path, e.g. '/UI/data/customers'
+         * @param {string}  path     Absolute path, e.g. '/customers'
          * @param {object}  [state]  Optional state object for history entry
          * @param {boolean} [replace] When true uses replaceState instead of pushState
          */
@@ -179,9 +179,14 @@
                 return false;
             }
         }
-        return href === '/UI' ||
-               href.indexOf('/UI/') === 0 ||
-               href.indexOf('/meta/') === 0;
+        return !href.startsWith('/api/') &&
+               !href.startsWith('/auth/') &&
+               !href.startsWith('/admin/') &&
+               !href.startsWith('/login') &&
+               !href.startsWith('/logout') &&
+               !href.startsWith('/meta/') &&
+               href !== '/status' &&
+               href !== '/metrics';
     }
 
     global.BMRouter = BMRouter;

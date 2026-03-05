@@ -5,7 +5,7 @@ namespace BareMetalWeb.Runtime;
 
 /// <summary>
 /// Unified query facade that works across all registered entities —
-/// both compiled (UserClasses) and runtime-defined (EntityDefinition-based).
+/// both compiled and runtime-defined (EntityDefinition-based).
 /// </summary>
 public interface IQueryService
 {

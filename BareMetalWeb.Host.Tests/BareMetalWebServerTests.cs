@@ -26,7 +26,7 @@ namespace BareMetalWeb.Host.Tests;
 /// Tests for BareMetalWebServer request pipeline including routing, error handling,
 /// CORS, HTTPS redirect, proxy headers, menu building, and setup flow.
 /// </summary>
-[Collection("CookieProtection")]
+[Collection("SharedState")]
 public class BareMetalWebServerTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;

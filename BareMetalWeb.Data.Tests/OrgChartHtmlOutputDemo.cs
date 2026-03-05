@@ -1,7 +1,6 @@
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
-using BareMetalWeb.Data.DataObjects;
 using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
@@ -9,7 +8,7 @@ namespace BareMetalWeb.Data.Tests;
 /// <summary>
 /// Demo program to output the org chart HTML for visual inspection
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class OrgChartHtmlOutputDemo
 {
     [Fact(Skip = "Demo only - outputs HTML to console")]
@@ -19,36 +18,28 @@ public class OrgChartHtmlOutputDemo
         try
         {
             DataStoreProvider.Current = new InMemoryDataStore();
-            _ = typeof(BareMetalWeb.UserClasses.DataObjects.Employee).Assembly;
-            DataEntityRegistry.RegisterAllEntities();
+            _ = GalleryTestFixture.State;
 
-            var metadata = DataScaffold.GetEntityByType(typeof(BareMetalWeb.UserClasses.DataObjects.Employee));
-            Assert.NotNull(metadata);
+            Assert.True(DataScaffold.TryGetEntity("employees", out var metadata));
 
-            var employees = new List<BaseDataObject>
-            {
-                new BareMetalWeb.UserClasses.DataObjects.Employee
-                {
-                    Key = 1,
-                    Name = "Idit",
-                    Title = "Manager",
-                    ManagerId = null
-                },
-                new BareMetalWeb.UserClasses.DataObjects.Employee
-                {
-                    Key = 2,
-                    Name = "Jaime",
-                    Title = "Manager",
-                    ManagerId = "1"
-                },
-                new BareMetalWeb.UserClasses.DataObjects.Employee
-                {
-                    Key = 3,
-                    Name = "Mr William Eastbury",
-                    Title = "Solution Engineer",
-                    ManagerId = "2"
-                }
-            };
+            var emp1 = metadata.Handlers.Create();
+            emp1.Key = 1;
+            metadata.FindField("Name")!.SetValueFn(emp1, "Idit");
+            metadata.FindField("Title")!.SetValueFn(emp1, "Manager");
+
+            var emp2 = metadata.Handlers.Create();
+            emp2.Key = 2;
+            metadata.FindField("Name")!.SetValueFn(emp2, "Jaime");
+            metadata.FindField("Title")!.SetValueFn(emp2, "Manager");
+            metadata.FindField("ManagerId")!.SetValueFn(emp2, "1");
+
+            var emp3 = metadata.Handlers.Create();
+            emp3.Key = 3;
+            metadata.FindField("Name")!.SetValueFn(emp3, "Mr William Eastbury");
+            metadata.FindField("Title")!.SetValueFn(emp3, "Solution Engineer");
+            metadata.FindField("ManagerId")!.SetValueFn(emp3, "2");
+
+            var employees = new List<BaseDataObject> { emp1, emp2, emp3 };
 
             var html = DataScaffold.BuildOrgChartHtml(metadata, employees, selectedId: null, basePath: "/admin/data/employees");
             

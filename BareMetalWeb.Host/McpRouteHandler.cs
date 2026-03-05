@@ -81,7 +81,7 @@ internal static class McpRouteHandler
             doc = JsonDocument.Parse(body);
             await DispatchRequestAsync(context, doc.RootElement).ConfigureAwait(false);
         }
-        catch (JsonException ex)
+        catch (JsonException)
         {
             context.Response.StatusCode = 400;
             await WriteRawAsync(context, BuildErrorEnvelope(null, -32700, "Parse error"))
@@ -130,7 +130,7 @@ internal static class McpRouteHandler
 
             await WriteRawAsync(context, BuildSuccessEnvelope(id, result)).ConfigureAwait(false);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             await WriteRawAsync(context, BuildErrorEnvelope(id, -32603, "Internal error"))
                 .ConfigureAwait(false);

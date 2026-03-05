@@ -133,6 +133,7 @@ public static class SampleGalleryService
                 NavGroup = srcEntity.NavGroup,
                 NavOrder = srcEntity.NavOrder,
                 Permissions = srcEntity.Permissions,
+                FormLayout = srcEntity.FormLayout ?? "Standard",
                 Version = 1
             };
 
@@ -142,7 +143,7 @@ public static class SampleGalleryService
                 newEntity.Key = existing.Key;
                 newEntity.EntityId = existing.EntityId;
                 newEntity.Version = existing.Version + 1;
-                await DeleteChildRecordsAsync(store, existing.EntityId, cancellationToken).ConfigureAwait(false);
+                await DeleteChildRecordsAsync(store, existing.EntityId, existing.Slug, cancellationToken).ConfigureAwait(false);
 
                 // Use preserved EntityId for remapping child records
                 oldEntityId = existing.EntityId;
@@ -200,20 +201,154 @@ public static class SampleGalleryService
                 await store.SaveAsync(newIndex, cancellationToken).ConfigureAwait(false);
             }
 
+            // Import actions that belong to this entity
+            foreach (var srcAction in package.Actions.Where(a => a.EntityId == oldEntityId))
+            {
+                var newAction = new ActionDefinition
+                {
+                    EntityId = newEntity.EntityId,
+                    Name = srcAction.Name,
+                    Label = srcAction.Label,
+                    Icon = srcAction.Icon,
+                    Permission = srcAction.Permission,
+                    EnabledWhen = srcAction.EnabledWhen,
+                    Operations = srcAction.Operations,
+                    Version = srcAction.Version
+                };
+                await store.SaveAsync(newAction, cancellationToken).ConfigureAwait(false);
+
+                // Import action commands that belong to this action (matched by Name)
+                foreach (var srcCmd in package.ActionCommands.Where(c => c.ActionId == srcAction.Name))
+                {
+                    var newCmd = new ActionCommandDefinition
+                    {
+                        ActionId = newAction.Key.ToString(),
+                        CommandType = srcCmd.CommandType,
+                        Order = srcCmd.Order,
+                        Condition = srcCmd.Condition,
+                        FieldId = srcCmd.FieldId,
+                        ValueExpression = srcCmd.ValueExpression,
+                        Severity = srcCmd.Severity,
+                        ErrorCode = srcCmd.ErrorCode,
+                        Message = srcCmd.Message
+                    };
+                    await store.SaveAsync(newCmd, cancellationToken).ConfigureAwait(false);
+                }
+            }
+
+            // Import reports that reference this entity slug
+            foreach (var srcReport in package.Reports.Where(r =>
+                string.Equals(r.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)))
+            {
+                var newReport = new ReportDefinition
+                {
+                    Name = srcReport.Name,
+                    Description = srcReport.Description,
+                    RootEntity = newEntity.Slug,
+                    ColumnsJson = srcReport.ColumnsJson,
+                    FiltersJson = srcReport.FiltersJson,
+                    ParametersJson = srcReport.ParametersJson,
+                    SortField = srcReport.SortField,
+                    SortDescending = srcReport.SortDescending
+                };
+                await store.SaveAsync(newReport, cancellationToken).ConfigureAwait(false);
+            }
+
+            // Import aggregation definitions for this entity
+            foreach (var srcAgg in package.Aggregations.Where(a => a.EntityId == oldEntityId))
+            {
+                var newAgg = new AggregationDefinition
+                {
+                    EntityId = newEntity.EntityId,
+                    Name = srcAgg.Name,
+                    GroupByFields = srcAgg.GroupByFields,
+                    Measures = srcAgg.Measures
+                };
+                await store.SaveAsync(newAgg, cancellationToken).ConfigureAwait(false);
+            }
+
+            // Import scheduled action definitions for this entity
+            foreach (var srcSched in package.ScheduledActions.Where(s => s.EntityId == oldEntityId))
+            {
+                var newSched = new ScheduledActionDefinition
+                {
+                    EntityId = newEntity.EntityId,
+                    Name = srcSched.Name,
+                    ActionName = srcSched.ActionName,
+                    Schedule = srcSched.Schedule,
+                    FilterExpression = srcSched.FilterExpression,
+                    Enabled = srcSched.Enabled
+                };
+                await store.SaveAsync(newSched, cancellationToken).ConfigureAwait(false);
+            }
+
             var fieldCount = package.Fields.Count(f => f.EntityId == oldEntityId);
             var indexCount = package.Indexes.Count(ix => ix.EntityId == oldEntityId);
-            logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es).");
+            var actionCount = package.Actions.Count(a => a.EntityId == oldEntityId);
+            var reportCount = package.Reports.Count(r =>
+                string.Equals(r.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase));
+            var aggCount = package.Aggregations.Count(a => a.EntityId == oldEntityId);
+            logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es), {actionCount} action(s), {reportCount} report(s), {aggCount} aggregation(s).");
             deployed.Add(srcEntity.Name);
         }
+
+        // Deploy package-level RBAC definitions
+        await DeployRbacAsync(package, logger, cancellationToken).ConfigureAwait(false);
 
         return deployed;
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
 
+    private static async Task DeployRbacAsync(
+        SamplePackage package,
+        Action<string>? logger,
+        CancellationToken ct)
+    {
+        if (package.Permissions.Count == 0 && package.Roles.Count == 0)
+            return;
+
+        // Deploy permissions
+        if (package.Permissions.Count > 0 && DataScaffold.TryGetEntity("permissions", out var permMeta))
+        {
+            foreach (var srcPerm in package.Permissions)
+            {
+                var rec = permMeta.Handlers.Create();
+                if (rec is DataRecord dr && dr.Schema != null)
+                {
+                    dr.SetField(dr.Schema, "Code", srcPerm.Code);
+                    dr.SetField(dr.Schema, "Description", srcPerm.Description);
+                    dr.SetField(dr.Schema, "TargetEntity", srcPerm.TargetEntity);
+                    dr.SetField(dr.Schema, "Actions", srcPerm.Actions);
+                    dr.SetField(dr.Schema, "RequiresElevation", srcPerm.RequiresElevation);
+                    await DataScaffold.SaveAsync(permMeta, rec, ct).ConfigureAwait(false);
+                }
+            }
+            logger?.Invoke($"Deployed {package.Permissions.Count} permission(s).");
+        }
+
+        // Deploy roles
+        if (package.Roles.Count > 0 && DataScaffold.TryGetEntity("roles", out var roleMeta))
+        {
+            foreach (var srcRole in package.Roles)
+            {
+                var rec = roleMeta.Handlers.Create();
+                if (rec is DataRecord dr && dr.Schema != null)
+                {
+                    dr.SetField(dr.Schema, "RoleName", srcRole.RoleName);
+                    dr.SetField(dr.Schema, "Description", srcRole.Description);
+                    dr.SetField(dr.Schema, "PermissionCodes", srcRole.PermissionCodes);
+                    await DataScaffold.SaveAsync(roleMeta, rec, ct).ConfigureAwait(false);
+                }
+            }
+            logger?.Invoke($"Deployed {package.Roles.Count} role(s).");
+        }
+    }
+
     private static async Task DeleteChildRecordsAsync(
         IDataObjectStore store,
         string entityDefId,
+        string entitySlug,
         CancellationToken ct)
     {
         var entityIdQuery = new QueryDefinition
@@ -228,5 +363,42 @@ public static class SampleGalleryService
         var idxs = (await store.QueryAsync<IndexDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
         foreach (var idx in idxs)
             await store.DeleteAsync<IndexDefinition>(idx.Key, ct).ConfigureAwait(false);
+
+        // Also delete actions and their commands
+        var actionQuery = new QueryDefinition
+        {
+            Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityDefId } }
+        };
+        var actions = (await store.QueryAsync<ActionDefinition>(actionQuery, ct).ConfigureAwait(false)).ToList();
+        foreach (var action in actions)
+        {
+            var cmdQuery = new QueryDefinition
+            {
+                Clauses = { new QueryClause { Field = "ActionId", Operator = QueryOperator.Equals, Value = action.Key } }
+            };
+            var cmds = (await store.QueryAsync<ActionCommandDefinition>(cmdQuery, ct).ConfigureAwait(false)).ToList();
+            foreach (var cmd in cmds)
+                await store.DeleteAsync<ActionCommandDefinition>(cmd.Key, ct).ConfigureAwait(false);
+            await store.DeleteAsync<ActionDefinition>(action.Key, ct).ConfigureAwait(false);
+        }
+
+        // Delete reports whose root entity matches this entity's slug
+        var reportQuery = new QueryDefinition
+        {
+            Clauses = { new QueryClause { Field = "RootEntity", Operator = QueryOperator.Equals, Value = entitySlug } }
+        };
+        var reports = (await store.QueryAsync<ReportDefinition>(reportQuery, ct).ConfigureAwait(false)).ToList();
+        foreach (var report in reports)
+            await store.DeleteAsync<ReportDefinition>(report.Key, ct).ConfigureAwait(false);
+
+        // Delete aggregation definitions
+        var aggs = (await store.QueryAsync<AggregationDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
+        foreach (var agg in aggs)
+            await store.DeleteAsync<AggregationDefinition>(agg.Key, ct).ConfigureAwait(false);
+
+        // Delete scheduled actions
+        var scheds = (await store.QueryAsync<ScheduledActionDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
+        foreach (var sched in scheds)
+            await store.DeleteAsync<ScheduledActionDefinition>(sched.Key, ct).ConfigureAwait(false);
     }
 }

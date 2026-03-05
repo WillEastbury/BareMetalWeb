@@ -2,7 +2,6 @@ using System.Collections;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Data.Interfaces;
 
 namespace BareMetalWeb.Data.Tests;
@@ -12,7 +11,7 @@ namespace BareMetalWeb.Data.Tests;
 /// Regression test for the create-route 500 bug caused by QueryByType attempting
 /// an invalid cast from ValueTask&lt;IEnumerable&lt;T&gt;&gt; to ValueTask&lt;IEnumerable&gt;.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class DataScaffoldLookupTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
@@ -22,9 +21,7 @@ public class DataScaffoldLookupTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        // Force UserClasses assembly to load before scanning
-        _ = typeof(Product).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        _ = GalleryTestFixture.State;
     }
 
     public void Dispose()
@@ -35,9 +32,8 @@ public class DataScaffoldLookupTests : IDisposable
     [Fact]
     public void BuildFormFields_ForCreate_WithLookupFields_DoesNotThrow()
     {
-        // Product has [DataLookup] on UnitOfMeasureId and CurrencyId
-        var meta = DataScaffold.GetEntityByType(typeof(Product));
-        Assert.NotNull(meta);
+        // Product has lookup on UnitOfMeasureId and CurrencyId
+        Assert.True(DataScaffold.TryGetEntity("products", out var meta));
 
         var fields = DataScaffold.BuildFormFields(meta, null, forCreate: true);
         Assert.NotNull(fields);
@@ -47,8 +43,7 @@ public class DataScaffoldLookupTests : IDisposable
     [Fact]
     public void BuildFormFields_ForCreate_WithLookupFields_ReturnsLookupListType()
     {
-        var meta = DataScaffold.GetEntityByType(typeof(Product));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("products", out var meta));
 
         var fields = DataScaffold.BuildFormFields(meta, null, forCreate: true);
 
@@ -65,21 +60,23 @@ public class DataScaffoldLookupTests : IDisposable
     [Fact]
     public void BuildFormFields_ForCreate_WithLookupFields_PopulatesLookupOptions()
     {
-        // Seed some lookup data
-        var uom = new UnitOfMeasure { Key = 1, Name = "Each" };
-        DataStoreProvider.Current.Save(uom);
+        // Seed lookup data through entity handlers (gallery entities use WalDataProvider)
+        Assert.True(DataScaffold.TryGetEntity("units-of-measure", out var uomMeta));
+        var uom = uomMeta.Handlers.Create();
+        uom.Key = 1;
+        uomMeta.FindField("Name")!.SetValueFn(uom, "Each");
+        uomMeta.Handlers.SaveAsync(uom, CancellationToken.None).AsTask().GetAwaiter().GetResult();
 
-        var currency = new Currency { Key = 1 };
-        // Set IsoCode via reflection (it's a property)
-        typeof(Currency).GetProperty("IsoCode")?.SetValue(currency, "USD");
-
-        DataStoreProvider.Current.Save(currency);
+        Assert.True(DataScaffold.TryGetEntity("currencies", out var curMeta));
+        var currency = curMeta.Handlers.Create();
+        currency.Key = 1;
+        curMeta.FindField("IsoCode")!.SetValueFn(currency, "USD");
+        curMeta.Handlers.SaveAsync(currency, CancellationToken.None).AsTask().GetAwaiter().GetResult();
 
         // Clear lookup cache to force re-query
         ClearLookupCache();
 
-        var meta = DataScaffold.GetEntityByType(typeof(Product));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("products", out var meta));
 
         var fields = DataScaffold.BuildFormFields(meta, null, forCreate: true);
 
@@ -92,9 +89,8 @@ public class DataScaffoldLookupTests : IDisposable
     [Fact]
     public void BuildFormFields_ForCreate_Order_WithCustomerLookup_DoesNotThrow()
     {
-        // Order has [DataLookup] on CustomerId and CurrencyId
-        var meta = DataScaffold.GetEntityByType(typeof(Order));
-        Assert.NotNull(meta);
+        // Order has lookup on CustomerId and CurrencyId
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
 
         var fields = DataScaffold.BuildFormFields(meta, null, forCreate: true);
         Assert.NotNull(fields);
@@ -104,18 +100,14 @@ public class DataScaffoldLookupTests : IDisposable
     [Fact]
     public void BuildFormFields_ForEdit_WithLookupFields_DoesNotThrow()
     {
-        var product = new Product
-        {
-            Key = 1,
-            Name = "Widget",
-            Sku = "W001",
-            UnitOfMeasureId = "1",
-            CurrencyId = "1",
-            Price = 9.99m
-        };
-
-        var meta = DataScaffold.GetEntityByType(typeof(Product));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("products", out var meta));
+        var product = meta.Handlers.Create();
+        product.Key = 1;
+        meta.FindField("Name")!.SetValueFn(product, "Widget");
+        meta.FindField("Sku")!.SetValueFn(product, "W001");
+        meta.FindField("UnitOfMeasureId")!.SetValueFn(product, "1");
+        meta.FindField("CurrencyId")!.SetValueFn(product, "1");
+        meta.FindField("Price")!.SetValueFn(product, 9.99m);
 
         var fields = DataScaffold.BuildFormFields(meta, product, forCreate: false);
         Assert.NotNull(fields);
@@ -226,21 +218,17 @@ public class DataScaffoldLookupTests : IDisposable
     public void BuildFormFields_ForEdit_WithCountryField_SetsSelectedValue()
     {
         // Arrange
-        var address = new Address
-        {
-            Key = 1,
-            Label = "Main",
-            Line1 = "123 Example Street",
-            City = "London",
-            Country = "GB" // United Kingdom
-        };
-
-        var meta = DataScaffold.GetEntityByType(typeof(Address));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("addresses", out var meta));
+        var address = meta.Handlers.Create();
+        address.Key = 1;
+        meta.FindField("Label")!.SetValueFn(address, "Main");
+        meta.FindField("Line1")!.SetValueFn(address, "123 Example Street");
+        meta.FindField("City")!.SetValueFn(address, "London");
+        meta.FindField("Country")!.SetValueFn(address, "GB");
 
         // Act
         var fields = DataScaffold.BuildFormFields(meta, address, forCreate: false);
-        var countryField = fields.FirstOrDefault(f => f.Name == nameof(Address.Country));
+        var countryField = fields.FirstOrDefault(f => f.Name == "Country");
 
         // Assert
         Assert.NotNull(countryField);
@@ -255,20 +243,25 @@ public class DataScaffoldLookupTests : IDisposable
     [Fact]
     public void BuildListRows_WithDuplicateLookupIds_DoesNotThrow()
     {
-        // Arrange: two Address objects with the same Id (simulates corrupted/duplicated store data)
-        DataStoreProvider.Current = new DuplicateIdDataStore();
+        // Arrange: seed two Address objects with the same Id via entity handlers
+        Assert.True(DataScaffold.TryGetEntity("addresses", out var addrMeta));
+        var addr1 = addrMeta.Handlers.Create();
+        addr1.Key = 1;
+        addrMeta.FindField("Label")!.SetValueFn(addr1, "First copy");
+        addrMeta.FindField("Line1")!.SetValueFn(addr1, "1 Main St");
+        addrMeta.FindField("City")!.SetValueFn(addr1, "Springfield");
+        addrMeta.FindField("Country")!.SetValueFn(addr1, "US");
+        addrMeta.Handlers.SaveAsync(addr1, CancellationToken.None).AsTask().GetAwaiter().GetResult();
+
         ClearLookupCache();
 
-        var meta = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
 
-        var customer = new Customer
-        {
-            Key = 1,
-            Name = "Test Customer",
-            Email = "test@example.com",
-            AddressId = "1"
-        };
+        var customer = meta.Handlers.Create();
+        customer.Key = 1;
+        meta.FindField("Name")!.SetValueFn(customer, "Test Customer");
+        meta.FindField("Email")!.SetValueFn(customer, "test@example.com");
+        meta.FindField("AddressId")!.SetValueFn(customer, "1");
 
         // Act – must not throw ArgumentException ("An item with the same key has already been added")
         var rows = DataScaffold.BuildListRows(meta!, new[] { customer }, "/admin/data/customers", includeActions: false);
@@ -286,20 +279,16 @@ public class DataScaffoldLookupTests : IDisposable
     public void BuildFormFields_ForEdit_WithEnumField_PopulatesOptionsAndSelectedValue()
     {
         // Arrange: a TimeTablePlan with Day = Tuesday
-        var plan = new TimeTablePlan
-        {
-            Key = 1,
-            SubjectId = "subj-1",
-            Day = BareMetalWeb.Data.DataObjects.DayOfWeek.Tuesday,
-            StartTime = new TimeOnly(12, 0)
-        };
-
-        var meta = DataScaffold.GetEntityByType(typeof(TimeTablePlan));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("time-table-plans", out var meta));
+        var plan = meta.Handlers.Create();
+        plan.Key = 1;
+        meta.FindField("SubjectId")!.SetValueFn(plan, "subj-1");
+        meta.FindField("Day")!.SetValueFn(plan, "Tuesday");
+        meta.FindField("StartTime")!.SetValueFn(plan, new TimeOnly(12, 0));
 
         // Act
         var fields = DataScaffold.BuildFormFields(meta, plan, forCreate: false);
-        var dayField = fields.FirstOrDefault(f => f.Name == nameof(TimeTablePlan.Day));
+        var dayField = fields.FirstOrDefault(f => f.Name == "Day");
 
         // Assert
         Assert.NotNull(dayField);
@@ -310,48 +299,4 @@ public class DataScaffoldLookupTests : IDisposable
         Assert.Equal("Tuesday", dayField.SelectedValue);
     }
 
-    /// <summary>
-    /// A data store that deliberately returns two Address items with the same Id,
-    /// replicating what can happen after repeated sample-data generation.
-    /// </summary>
-    private sealed class DuplicateIdDataStore : IDataObjectStore
-    {
-        public IReadOnlyList<IDataProvider> Providers => Array.Empty<IDataProvider>();
-        public void RegisterProvider(IDataProvider provider, bool prepend = false) { }
-        public void RegisterFallbackProvider(IDataProvider provider) { }
-        public void ClearProviders() { }
-
-        public void Save<T>(T obj) where T : BaseDataObject { }
-        public ValueTask SaveAsync<T>(T obj, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.CompletedTask;
-
-        public T? Load<T>(uint key) where T : BaseDataObject => null;
-        public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult((T?)null);
-
-        public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
-        {
-            if (typeof(T) == typeof(Address))
-            {
-                // Return two Address objects sharing the same Id – the duplicated-data scenario
-                return (IEnumerable<T>)(IEnumerable<Address>)new[]
-                {
-                    new Address { Key = 1, Label = "First copy",  Line1 = "1 Main St", City = "Springfield", Country = "US" },
-                    new Address { Key = 1, Label = "Second copy", Line1 = "2 Main St", City = "Springfield", Country = "US" }
-                };
-            }
-
-            return Enumerable.Empty<T>();
-        }
-
-        public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult(Query<T>(query));
-
-        public ValueTask<int> CountAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.FromResult(0);
-
-        public void Delete<T>(uint key) where T : BaseDataObject { }
-        public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default) where T : BaseDataObject
-            => ValueTask.CompletedTask;
-    }
 }

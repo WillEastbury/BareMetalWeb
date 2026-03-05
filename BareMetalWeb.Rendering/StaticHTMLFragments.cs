@@ -385,8 +385,18 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
             var menuAlignmentClass = rightAligned ? "dropdown-menu dropdown-menu-end" : "dropdown-menu";
             var dropdownHtml = $"<li class=\"nav-item dropdown\"><a class=\"nav-link dropdown-toggle\" href=\"#\" role=\"button\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\">{groupLabel}</a><ul class=\"{menuAlignmentClass}\">";
 
+            string? lastSubGroup = null;
             foreach (var item in groupItems)
             {
+                // Emit a divider + sub-group header when the sub-group changes
+                if (!string.IsNullOrEmpty(item.SubGroup) &&
+                    !string.Equals(item.SubGroup, lastSubGroup, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (lastSubGroup != null)
+                        dropdownHtml += "<li><hr class=\"dropdown-divider\"></li>";
+                    dropdownHtml += $"<li><h6 class=\"dropdown-header\">{WebUtility.HtmlEncode(item.SubGroup)}</h6></li>";
+                    lastSubGroup = item.SubGroup;
+                }
                 var itemLabel = WebUtility.HtmlEncode(item.Label);
                 var itemHref = WebUtility.HtmlEncode(item.Href);
                 dropdownHtml += $"<li><a class=\"dropdown-item\" href=\"{itemHref}\">{itemLabel}</a></li>";

@@ -15,7 +15,7 @@ namespace BareMetalWeb.Data.Tests;
 /// <summary>
 /// Tests for computed field attribute and service functionality.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class ComputedFieldTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;

@@ -53,5 +53,18 @@ public sealed record RuntimeFieldModel(
     int? MaxLength,
     double? RangeMin,
     double? RangeMax,
-    string? Pattern
+    string? Pattern,
+    string? ChildEntitySlug = null,
+    string? LookupCopyFields = null,
+    string? CalculatedExpression = null,
+    string? CalculatedDisplayFormat = null,
+    string? CopyFromParentField = null,
+    string? CopyFromParentSlug = null,
+    string? CopyFromParentSourceField = null,
+    string? RelatedDocumentSlug = null,
+    string? RelatedDocumentDisplayField = null,
+    string? CascadeFromField = null,
+    string? CascadeFilterField = null,
+    string? FieldGroup = null,
+    int ColumnSpan = 12
 );

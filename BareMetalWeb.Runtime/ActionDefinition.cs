@@ -49,7 +49,7 @@ public class ActionDefinition : RenderableDataObject
     /// Once published, the <see cref="Name"/> (ActionId) is immutable per spec §2.
     /// </summary>
     [DataField(Label = "Version", Order = 8, ReadOnly = true)]
-    public int Version { get; set; } = 1;
+    public new int Version { get; set; } = 1;
 
     public override string ToString() => Label ?? Name;
 }

@@ -5,15 +5,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Rendering.Models;
-using BareMetalWeb.UserClasses.DataObjects;
 using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
 
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class LookupFieldButtonTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
@@ -23,9 +21,7 @@ public class LookupFieldButtonTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        // Force UserClasses assembly to load before scanning
-        _ = typeof(Employee).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        _ = GalleryTestFixture.State;
     }
 
     public void Dispose()
@@ -37,11 +33,14 @@ public class LookupFieldButtonTests : IDisposable
     public void BuildFormFields_LookupField_IncludesTargetMetadata()
     {
         // Arrange
-        var metadata = DataScaffold.GetEntityByType(typeof(Employee));
-        Assert.NotNull(metadata);
+        Assert.True(DataScaffold.TryGetEntity("employees", out var meta));
+
+        var instance = meta.Handlers.Create();
+        instance.Key = (uint)1;
+        meta.FindField("Name")!.SetValueFn(instance, "Test");
 
         // Act
-        var fields = DataScaffold.BuildFormFields(metadata, null, forCreate: true);
+        var fields = DataScaffold.BuildFormFields(meta, instance, forCreate: true);
 
         // Assert - Find the ManagerId field which has a lookup
         var managerField = fields.FirstOrDefault(f => f.Name == "ManagerId");
@@ -50,7 +49,7 @@ public class LookupFieldButtonTests : IDisposable
         
         // Verify lookup metadata is populated
         Assert.NotNull(managerField.LookupTargetType);
-        Assert.Equal("Employee", managerField.LookupTargetType);
+        Assert.Equal("Employees", managerField.LookupTargetType);
         Assert.NotNull(managerField.LookupTargetSlug);
         Assert.Equal("employees", managerField.LookupTargetSlug);
     }
@@ -59,11 +58,14 @@ public class LookupFieldButtonTests : IDisposable
     public void BuildFormFields_NonLookupField_DoesNotIncludeLookupTargetMetadata()
     {
         // Arrange
-        var metadata = DataScaffold.GetEntityByType(typeof(Employee));
-        Assert.NotNull(metadata);
+        Assert.True(DataScaffold.TryGetEntity("employees", out var meta));
+
+        var instance = meta.Handlers.Create();
+        instance.Key = (uint)1;
+        meta.FindField("Name")!.SetValueFn(instance, "Test");
 
         // Act
-        var fields = DataScaffold.BuildFormFields(metadata, null, forCreate: true);
+        var fields = DataScaffold.BuildFormFields(meta, instance, forCreate: true);
 
         // Assert - Find the Department field which is a string, not a lookup
         var deptField = fields.FirstOrDefault(f => f.Name == "Department");

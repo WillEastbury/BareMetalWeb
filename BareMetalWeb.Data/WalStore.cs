@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
@@ -31,6 +30,7 @@ public sealed class WalStore : IDisposable
     private readonly string _directory;
     private readonly uint   _maxSegmentBytes;
     private readonly object _writeLock = new();
+    internal readonly WalEnvelopeEncryption Encryption;
 
     private WalSegmentWriter? _activeWriter;
     private uint _nextSegmentId;
@@ -80,11 +80,13 @@ public sealed class WalStore : IDisposable
     ///   Rotate to a new segment when the active segment reaches this size.
     ///   Defaults to <see cref="DefaultMaxSegmentBytes"/> (64 MiB).
     /// </param>
-    public WalStore(string directory, uint maxSegmentBytes = DefaultMaxSegmentBytes)
+    public WalStore(string directory, uint maxSegmentBytes = DefaultMaxSegmentBytes,
+        WalEnvelopeEncryption? encryption = null)
     {
         ArgumentNullException.ThrowIfNull(directory);
         _directory       = directory;
         _maxSegmentBytes = maxSegmentBytes;
+        Encryption       = encryption ?? WalPayloadCodec.GetDefaultEncryption();
         Directory.CreateDirectory(directory);
         KeyAllocator = WalTableKeyAllocator.Load(directory);
         Recover();
@@ -187,7 +189,7 @@ public sealed class WalStore : IDisposable
         {
             using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
                 FileShare.ReadWrite, 4096);
-            return TryReadOpPayloadFromStream(fs, offset32, key, out payload);
+            return TryReadOpPayloadFromStream(fs, offset32, key, out payload, Encryption);
         }
         catch (FileNotFoundException) { return false; }
         catch (DirectoryNotFoundException) { return false; }
@@ -314,7 +316,7 @@ public sealed class WalStore : IDisposable
     // ── Read-back internals ───────────────────────────────────────────────────
 
     private static bool TryReadOpPayloadFromStream(FileStream fs, uint offset32,
-        ulong targetKey, out ReadOnlyMemory<byte> payload)
+        ulong targetKey, out ReadOnlyMemory<byte> payload, WalEnvelopeEncryption? encryption = null)
     {
         payload = default;
 
@@ -329,51 +331,54 @@ public sealed class WalStore : IDisposable
         if (BinaryPrimitives.ReadUInt16LittleEndian(recHdr[4..]) != WalConstants.RecordTypeCommitBatch)
             return false;
 
-        // Read commit batch header: TxId(8)+OpCount(4)+PayloadFlags(4) = 16
-        Span<byte> batchHdr = stackalloc byte[16];
-        if (fs.Read(batchHdr) != 16) return false;
-        uint opCount = BinaryPrimitives.ReadUInt32LittleEndian(batchHdr[8..]);
+        uint totalBytes = BinaryPrimitives.ReadUInt32LittleEndian(recHdr[8..]);
+        long minSize = WalConstants.RecordHeaderBytes + WalConstants.RecordTrailerBytes;
+        if (totalBytes < minSize || offset32 + totalBytes > fs.Length) return false;
 
-        // Op header = 44 bytes; declared once outside the loop
-        Span<byte> opHdr = stackalloc byte[44];
+        // Read entire record for CRC verification
+        fs.Seek(offset32, SeekOrigin.Begin);
+        var recordBuf = new byte[totalBytes];
+        if (fs.Read(recordBuf) != (int)totalBytes) return false;
+
+        if (!WalSegmentReader.VerifyRecordCrc(recordBuf)) return false;
+
+        // Parse commit batch from the verified buffer
+        var span = recordBuf.AsSpan();
+        int off = WalConstants.RecordHeaderBytes;
+
+        // Commit batch header: TxId(8)+OpCount(4)+PayloadFlags(4) = 16
+        if (off + 16 > span.Length) return false;
+        uint opCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 8)..]);
+        off += 16;
+
         for (uint i = 0; i < opCount; i++)
         {
-            if (fs.Read(opHdr) != 44) return false;
+            if (off + 44 > span.Length) return false;
 
-            ulong key           = BinaryPrimitives.ReadUInt64LittleEndian(opHdr[0..]);
-            uint  compressedLen = BinaryPrimitives.ReadUInt32LittleEndian(opHdr[32..]);
+            ulong key           = BinaryPrimitives.ReadUInt64LittleEndian(span[off..]);
+            uint  compressedLen = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 32)..]);
 
             if (key == targetKey)
             {
-                ushort codec          = BinaryPrimitives.ReadUInt16LittleEndian(opHdr[26..]);
-                uint   uncompressedLen = BinaryPrimitives.ReadUInt32LittleEndian(opHdr[28..]);
+                ushort codec           = BinaryPrimitives.ReadUInt16LittleEndian(span[(off + 26)..]);
+                uint   uncompressedLen = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 28)..]);
+                off += 44;
 
-                if (codec != WalConstants.CodecNone && codec != WalConstants.CodecBrotli)
+                if (codec != WalConstants.CodecNone && codec != WalConstants.CodecBrotli
+                    && codec != WalConstants.CodecEncryptedNone && codec != WalConstants.CodecEncryptedBrotli)
                     throw new System.IO.InvalidDataException(
                         $"Unknown WAL op codec 0x{codec:X4} for key 0x{key:X16}.");
 
                 if (compressedLen == 0) { payload = ReadOnlyMemory<byte>.Empty; return true; }
-                var buf = ArrayPool<byte>.Shared.Rent((int)compressedLen);
-                try
-                {
-                    if (fs.Read(buf, 0, (int)compressedLen) != (int)compressedLen)
-                    {
-                        ArrayPool<byte>.Shared.Return(buf);
-                        return false;
-                    }
-                    // Copy to owned array, then decompress if needed
-                    var raw = buf.AsMemory(0, (int)compressedLen).ToArray();
-                    payload = WalPayloadCodec.Decompress(raw, codec, uncompressedLen);
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(buf);
-                }
+                if (off + compressedLen > span.Length) return false;
+
+                var raw = span.Slice(off, (int)compressedLen).ToArray();
+                payload = WalPayloadCodec.Decompress(raw, codec, uncompressedLen, encryption);
                 return true;
             }
 
-            // Skip this op's payload
-            fs.Seek(compressedLen, SeekOrigin.Current);
+            off += 44 + (int)compressedLen;
+            if (off > span.Length) return false;
         }
 
         return false;

@@ -50,6 +50,7 @@ public class DateRangeEntity : BaseDataObject
     public DateTime EndDate { get; set; }
 }
 
+[Collection("SharedState")]
 public class ValidationServiceTests
 {
     [Fact]

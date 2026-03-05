@@ -205,15 +205,143 @@
   ],
   "indexes": [
     {
-      "EntityId": "1908a6f17dc742eeb168574ee312138e",
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
       "FieldNames": "Title",
-      "Type": "secondary",
-      "Id": "9884264a1da24ae4a32650ce3ee33abf",
-      "CreatedOnUtc": "2026-02-27T16:07:21.2481641Z",
-      "UpdatedOnUtc": "2026-02-27T16:07:21.2481641Z",
-      "CreatedBy": "",
-      "UpdatedBy": "",
-      "ETag": ""
+      "Type": "inverted"
+    },
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "FieldNames": "Priority",
+      "Type": "btree"
+    },
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "FieldNames": "DueDate",
+      "Type": "btree"
+    },
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "FieldNames": "IsCompleted",
+      "Type": "bloom"
+    },
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "FieldNames": "AssignedTo",
+      "Type": "inverted"
+    }
+  ],
+  "actions": [
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "Name": "MarkComplete",
+      "Label": "\u2705 Mark Complete",
+      "Icon": "bi-check-circle",
+      "Permission": "To Do",
+      "EnabledWhen": "IsCompleted == false",
+      "Version": 1
+    },
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "Name": "Reopen",
+      "Label": "\ud83d\udd04 Reopen",
+      "Icon": "bi-arrow-counterclockwise",
+      "Permission": "To Do",
+      "EnabledWhen": "IsCompleted == true",
+      "Version": 1
+    }
+  ],
+  "actionCommands": [
+    {
+      "ActionId": "MarkComplete",
+      "CommandType": "SetIf",
+      "Order": 1,
+      "Condition": "",
+      "FieldId": "IsCompleted",
+      "ValueExpression": "true"
+    },
+    {
+      "ActionId": "Reopen",
+      "CommandType": "SetIf",
+      "Order": 1,
+      "Condition": "",
+      "FieldId": "IsCompleted",
+      "ValueExpression": "false"
+    }
+  ],
+  "reports": [
+    {
+      "name": "Completed Tasks",
+      "description": "Lists all completed to-do items with completion date",
+      "rootEntity": "to-do",
+      "columnsJson": "[{\"Field\": \"Title\", \"Label\": \"Task\"}, {\"Field\": \"IsCompleted\", \"Label\": \"Done\"}, {\"Field\": \"DueDate\", \"Label\": \"Due Date\"}, {\"Field\": \"UpdatedOnUtc\", \"Label\": \"Completed At\"}]",
+      "filtersJson": "[{\"Field\": \"IsCompleted\", \"Operator\": \"Equals\", \"Value\": \"true\"}]",
+      "sortField": "UpdatedOnUtc",
+      "sortDescending": true,
+      "permission": "To Do"
+    },
+    {
+      "name": "Overdue Tasks",
+      "description": "Tasks past their due date that are not yet completed",
+      "rootEntity": "to-do",
+      "columnsJson": "[{\"Field\": \"Title\", \"Label\": \"Task\"}, {\"Field\": \"Priority\", \"Label\": \"Priority\"}, {\"Field\": \"DueDate\", \"Label\": \"Due Date\"}, {\"Field\": \"AssignedTo\", \"Label\": \"Assigned To\"}]",
+      "filtersJson": "[{\"Field\": \"IsCompleted\", \"Operator\": \"Equals\", \"Value\": \"false\"}]",
+      "sortField": "DueDate",
+      "sortDescending": false,
+      "permission": "To Do"
+    }
+  ],
+  "permissions": [
+    {
+      "code": "todo.read",
+      "description": "View to-do items",
+      "targetEntity": "to-do",
+      "actions": "Read",
+      "requiresElevation": false
+    },
+    {
+      "code": "todo.write",
+      "description": "Create and edit to-do items",
+      "targetEntity": "to-do",
+      "actions": "Read,Create,Update",
+      "requiresElevation": false
+    },
+    {
+      "code": "todo.admin",
+      "description": "Full access to to-do items including delete and actions",
+      "targetEntity": "to-do",
+      "actions": "*",
+      "requiresElevation": false
+    }
+  ],
+  "roles": [
+    {
+      "roleName": "Todo Viewer",
+      "description": "Can view to-do items but not modify them",
+      "permissionCodes": "todo.read"
+    },
+    {
+      "roleName": "Todo Editor",
+      "description": "Can create, edit and view to-do items",
+      "permissionCodes": "todo.read,todo.write"
+    },
+    {
+      "roleName": "Todo Admin",
+      "description": "Full to-do module access including delete and execute actions",
+      "permissionCodes": "todo.admin"
+    }
+  ],
+  "aggregations": [
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "Name": "Tasks by Priority and Status",
+      "GroupByFields": "Priority|IsCompleted",
+      "Measures": "count:Title"
+    },
+    {
+      "EntityId": "d558cee0-4a35-417f-afab-d798cbc05e63",
+      "Name": "Tasks by Assignee",
+      "GroupByFields": "AssignedTo|Priority",
+      "Measures": "count:Title"
     }
   ]
 }

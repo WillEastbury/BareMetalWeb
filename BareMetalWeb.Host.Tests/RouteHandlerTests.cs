@@ -16,7 +16,6 @@ using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Models;
-using BareMetalWeb.Data.DataObjects;
 using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Host.Tests;
@@ -25,7 +24,7 @@ namespace BareMetalWeb.Host.Tests;
 /// Unit tests for RouteHandlers — testing pure/static logic, argument validation,
 /// and handler behaviour that can be exercised without a full HTTP server.
 /// </summary>
-[Collection("CookieProtection")]
+[Collection("SharedState")]
 public class RouteHandlerTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
@@ -649,7 +648,7 @@ public class RouteHandlerTests : IDisposable
     [Fact]
     public void BuildViewSwitcher_WithParentField_ShowsAllViews()
     {
-        var dummyProp = typeof(Address).GetProperties().First();
+        var dummyProp = typeof(TestEntity).GetProperties().First();
         var parentField = new DataFieldMetadata(dummyProp, "ParentId", "Parent", FormFieldType.String, 0, false, false, false, false, false, false, null, null, IdGenerationStrategy.None, null, null, null, null);
         var meta = CreateMinimalMetadata(parentField: parentField, hasDateField: false);
         var result = InvokeStatic<string>("BuildViewSwitcher", "category", ViewType.Table, meta);
@@ -661,7 +660,7 @@ public class RouteHandlerTests : IDisposable
     [Fact]
     public void BuildViewSwitcher_TreeViewActive_MarksTreeActive()
     {
-        var dummyProp = typeof(Address).GetProperties().First();
+        var dummyProp = typeof(TestEntity).GetProperties().First();
         var parentField = new DataFieldMetadata(dummyProp, "ParentId", "Parent", FormFieldType.String, 0, false, false, false, false, false, false, null, null, IdGenerationStrategy.None, null, null, null, null);
         var meta = CreateMinimalMetadata(parentField: parentField, hasDateField: false);
         var result = InvokeStatic<string>("BuildViewSwitcher", "category", ViewType.TreeView, meta);
@@ -893,8 +892,8 @@ public class RouteHandlerTests : IDisposable
     [Fact]
     public void ApplyUserPasswordIfNeeded_NonUserMeta_DoesNothing()
     {
-        var meta = CreateEmptyEntityMetadata(typeof(Address));
-        var address = new Address { Key = 1 };
+        var meta = CreateEmptyEntityMetadata(typeof(TestEntity));
+        var address = new TestEntity { Key = 1 };
         var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
         {
             ["password"] = "secret"
@@ -1139,11 +1138,11 @@ public class RouteHandlerTests : IDisposable
         EnsureStore();
         const string slug = "pagination-test-items";
         var items = Enumerable.Range(1, 5)
-            .Select(i => (BaseDataObject)new Address { Key = (uint)i })
+            .Select(i => (BaseDataObject)new TestEntity { Key = (uint)i })
             .ToArray();
 
         var meta = new DataEntityMetadata(
-            Type: typeof(Address),
+            Type: typeof(TestEntity),
             Name: "PaginationTestItems",
             Slug: slug,
             Permissions: "",
@@ -1155,7 +1154,7 @@ public class RouteHandlerTests : IDisposable
             ParentField: null,
             Fields: Array.Empty<DataFieldMetadata>(),
             Handlers: new DataEntityHandlers(
-                Create: () => new Address(),
+                Create: () => new TestEntity(),
                 LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
                 SaveAsync: (_, _) => ValueTask.CompletedTask,
                 DeleteAsync: (_, _) => ValueTask.CompletedTask,
@@ -1197,11 +1196,11 @@ public class RouteHandlerTests : IDisposable
         EnsureStore();
         const string slug = "plain-array-test-items";
         var items = Enumerable.Range(1, 3)
-            .Select(i => (BaseDataObject)new Address { Key = (uint)i })
+            .Select(i => (BaseDataObject)new TestEntity { Key = (uint)i })
             .ToArray();
 
         var meta = new DataEntityMetadata(
-            Type: typeof(Address),
+            Type: typeof(TestEntity),
             Name: "PlainArrayTestItems",
             Slug: slug,
             Permissions: "",
@@ -1213,7 +1212,7 @@ public class RouteHandlerTests : IDisposable
             ParentField: null,
             Fields: Array.Empty<DataFieldMetadata>(),
             Handlers: new DataEntityHandlers(
-                Create: () => new Address(),
+                Create: () => new TestEntity(),
                 LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
                 SaveAsync: (_, _) => ValueTask.CompletedTask,
                 DeleteAsync: (_, _) => ValueTask.CompletedTask,
@@ -1247,7 +1246,7 @@ public class RouteHandlerTests : IDisposable
         EnsureStore();
         const string slug = "stale-count-test-items";
         var meta = new DataEntityMetadata(
-            Type: typeof(Address),
+            Type: typeof(TestEntity),
             Name: "StaleCountTestItems",
             Slug: slug,
             Permissions: "",
@@ -1259,7 +1258,7 @@ public class RouteHandlerTests : IDisposable
             ParentField: null,
             Fields: Array.Empty<DataFieldMetadata>(),
             Handlers: new DataEntityHandlers(
-                Create: () => new Address(),
+                Create: () => new TestEntity(),
                 LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
                 SaveAsync: (_, _) => ValueTask.CompletedTask,
                 DeleteAsync: (_, _) => ValueTask.CompletedTask,
@@ -1297,11 +1296,11 @@ public class RouteHandlerTests : IDisposable
         EnsureStore();
         const string slug = "partial-page-clamp-items";
         var items = Enumerable.Range(1, 3)
-            .Select(i => (BaseDataObject)new Address { Key = (uint)i })
+            .Select(i => (BaseDataObject)new TestEntity { Key = (uint)i })
             .ToArray();
 
         var meta = new DataEntityMetadata(
-            Type: typeof(Address),
+            Type: typeof(TestEntity),
             Name: "PartialPageClampItems",
             Slug: slug,
             Permissions: "",
@@ -1313,7 +1312,7 @@ public class RouteHandlerTests : IDisposable
             ParentField: null,
             Fields: Array.Empty<DataFieldMetadata>(),
             Handlers: new DataEntityHandlers(
-                Create: () => new Address(),
+                Create: () => new TestEntity(),
                 LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
                 SaveAsync: (_, _) => ValueTask.CompletedTask,
                 DeleteAsync: (_, _) => ValueTask.CompletedTask,
@@ -1434,7 +1433,7 @@ public class RouteHandlerTests : IDisposable
 
     private static DataEntityMetadata CreateEmptyEntityMetadata(Type? entityType = null)
     {
-        var type = entityType ?? typeof(Address);
+        var type = entityType ?? typeof(TestEntity);
         return new DataEntityMetadata(
             Type: type,
             Name: "Test",
@@ -1462,12 +1461,12 @@ public class RouteHandlerTests : IDisposable
         var fields = new List<DataFieldMetadata>();
         if (hasDateField)
         {
-            var dummyProp = typeof(Address).GetProperties().First();
+            var dummyProp = typeof(TestEntity).GetProperties().First();
             fields.Add(new DataFieldMetadata(dummyProp, "DateField", "Date", FormFieldType.DateOnly, 0, false, false, false, false, false, false, null, null, IdGenerationStrategy.None, null, null, null, null));
         }
 
         return new DataEntityMetadata(
-            Type: typeof(Address),
+            Type: typeof(TestEntity),
             Name: "Test",
             Slug: "test",
             Permissions: "",
@@ -1479,7 +1478,7 @@ public class RouteHandlerTests : IDisposable
             ParentField: parentField,
             Fields: fields,
             Handlers: new DataEntityHandlers(
-                Create: () => new Address(),
+                Create: () => new TestEntity(),
                 LoadAsync: (_, _) => ValueTask.FromResult<BaseDataObject?>(null),
                 SaveAsync: (_, _) => ValueTask.CompletedTask,
                 DeleteAsync: (_, _) => ValueTask.CompletedTask,
@@ -1491,6 +1490,8 @@ public class RouteHandlerTests : IDisposable
     // ──────────────────────────────────────────────────────────────
     //  Mocks
     // ──────────────────────────────────────────────────────────────
+
+    private class TestEntity : BaseDataObject { }
 
     private class TimelineTestItem : BaseDataObject
     {

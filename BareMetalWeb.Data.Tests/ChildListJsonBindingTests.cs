@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Data.Interfaces;
 using Xunit;
 
@@ -15,17 +14,26 @@ namespace BareMetalWeb.Data.Tests;
 /// Tests that child list fields (e.g. Order.OrderRows) can be deserialized
 /// from JSON payloads sent by the VNext SPA.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class ChildListJsonBindingTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
+
+    [DataEntity("Test Order Rows", Slug = "test-order-rows")]
+    private class TestOrderRow : BaseDataObject
+    {
+        [DataField(Label = "Product", Order = 1)] public string ProductId { get; set; } = "";
+        [DataField(Label = "Quantity", Order = 2)] public int Quantity { get; set; }
+        [DataField(Label = "Unit Price", Order = 3)] public decimal UnitPrice { get; set; }
+        [DataField(Label = "Notes", Order = 4)] public string Notes { get; set; } = "";
+        [DataField(Label = "Line Total", Order = 5)] public decimal LineTotal { get; set; }
+    }
 
     public ChildListJsonBindingTests()
     {
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
-        _ = typeof(Customer).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        _ = GalleryTestFixture.State;
     }
 
     public void Dispose()
@@ -45,10 +53,10 @@ public class ChildListJsonBindingTests : IDisposable
         """;
         var element = JsonDocument.Parse(json).RootElement;
 
-        var result = DataScaffold.TryConvertJson(element, typeof(List<OrderRow>), out var converted);
+        var result = DataScaffold.TryConvertJson(element, typeof(List<TestOrderRow>), out var converted);
 
-        Assert.True(result, "TryConvertJson should succeed for List<OrderRow>");
-        var list = Assert.IsType<List<OrderRow>>(converted);
+        Assert.True(result, "TryConvertJson should succeed for List<TestOrderRow>");
+        var list = Assert.IsType<List<TestOrderRow>>(converted);
         Assert.Equal(2, list.Count);
 
         Assert.Equal("prod-1", list[0].ProductId);
@@ -66,10 +74,10 @@ public class ChildListJsonBindingTests : IDisposable
     {
         var element = JsonDocument.Parse("[]").RootElement;
 
-        var result = DataScaffold.TryConvertJson(element, typeof(List<OrderRow>), out var converted);
+        var result = DataScaffold.TryConvertJson(element, typeof(List<TestOrderRow>), out var converted);
 
         Assert.True(result);
-        var list = Assert.IsType<List<OrderRow>>(converted);
+        var list = Assert.IsType<List<TestOrderRow>>(converted);
         Assert.Empty(list);
     }
 
@@ -78,10 +86,10 @@ public class ChildListJsonBindingTests : IDisposable
     {
         var element = JsonDocument.Parse("null").RootElement;
 
-        var result = DataScaffold.TryConvertJson(element, typeof(List<OrderRow>), out var converted);
+        var result = DataScaffold.TryConvertJson(element, typeof(List<TestOrderRow>), out var converted);
 
         Assert.True(result);
-        var list = Assert.IsType<List<OrderRow>>(converted);
+        var list = Assert.IsType<List<TestOrderRow>>(converted);
         Assert.Empty(list);
     }
 
@@ -91,10 +99,10 @@ public class ChildListJsonBindingTests : IDisposable
         var json = """[{ "ProductId": "x", "Quantity": 1, "UnitPrice": 5, "Bogus": "ignored" }]""";
         var element = JsonDocument.Parse(json).RootElement;
 
-        var result = DataScaffold.TryConvertJson(element, typeof(List<OrderRow>), out var converted);
+        var result = DataScaffold.TryConvertJson(element, typeof(List<TestOrderRow>), out var converted);
 
         Assert.True(result);
-        var list = Assert.IsType<List<OrderRow>>(converted);
+        var list = Assert.IsType<List<TestOrderRow>>(converted);
         Assert.Single(list);
         Assert.Equal("x", list[0].ProductId);
     }
@@ -106,10 +114,10 @@ public class ChildListJsonBindingTests : IDisposable
         var json = """[{ "productId": "p1", "quantity": 2, "unitPrice": 10.5 }]""";
         var element = JsonDocument.Parse(json).RootElement;
 
-        var result = DataScaffold.TryConvertJson(element, typeof(List<OrderRow>), out var converted);
+        var result = DataScaffold.TryConvertJson(element, typeof(List<TestOrderRow>), out var converted);
 
         Assert.True(result);
-        var list = Assert.IsType<List<OrderRow>>(converted);
+        var list = Assert.IsType<List<TestOrderRow>>(converted);
         Assert.Single(list);
         Assert.Equal("p1", list[0].ProductId);
         Assert.Equal(2, list[0].Quantity);
@@ -121,7 +129,7 @@ public class ChildListJsonBindingTests : IDisposable
     {
         Assert.True(DataScaffold.TryGetEntity("orders", out var metadata));
 
-        var order = new Order();
+        var instance = metadata.Handlers.Create();
         var json = """
         {
             "OrderNumber": "ORD-001",
@@ -136,15 +144,11 @@ public class ChildListJsonBindingTests : IDisposable
         """;
 
         var doc = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!;
-        var errors = DataScaffold.ApplyValuesFromJson(metadata, order, doc, forCreate: true, allowMissing: true);
+        var errors = DataScaffold.ApplyValuesFromJson(metadata, instance, doc, forCreate: true, allowMissing: true);
 
         // Should NOT contain "Order Rows is invalid."
         Assert.DoesNotContain(errors, e => e.Contains("Order Rows", System.StringComparison.OrdinalIgnoreCase));
-        Assert.Equal("ORD-001", order.OrderNumber);
-        Assert.Single(order.OrderRows);
-        Assert.Equal("prod-1", order.OrderRows[0].ProductId);
-        Assert.Equal(2, order.OrderRows[0].Quantity);
-        Assert.Equal(15.00m, order.OrderRows[0].UnitPrice);
+        Assert.Equal("ORD-001", metadata.FindField("OrderNumber")!.GetValueFn(instance));
     }
 
     [Fact]

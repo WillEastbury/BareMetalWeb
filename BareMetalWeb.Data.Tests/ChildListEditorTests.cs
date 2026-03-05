@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Data.Interfaces;
 using Xunit;
 
@@ -14,7 +13,7 @@ namespace BareMetalWeb.Data.Tests;
 /// <summary>
 /// Tests for child list editor functionality in DataScaffold.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class ChildListEditorTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
@@ -24,9 +23,7 @@ public class ChildListEditorTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        // Force UserClasses assembly to load before scanning
-        _ = typeof(Customer).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        _ = GalleryTestFixture.State;
     }
 
     public void Dispose()
@@ -37,26 +34,16 @@ public class ChildListEditorTests : IDisposable
     [Fact]
     public void BuildFormFields_WithChildListField_IncludesOnSubmitFalse()
     {
-        // Arrange - Create an Order with child OrderRows
-        var order = new Order
-        {
-            Key = 1,
-            OrderNumber = "ORD-001",
-            CustomerId = "cust-1",
-            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
-            Status = "Open",
-            CurrencyId = "USD",
-            IsOpen = true
-        };
-        order.OrderRows.Add(new OrderRow
-        {
-            ProductId = "prod-1",
-            Quantity = 2,
-            UnitPrice = 10.50m
-        });
-
-        var meta = DataScaffold.GetEntityByType(typeof(Order));
-        Assert.NotNull(meta);
+        // Arrange - Create an Order via metadata
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
+        var order = meta.Handlers.Create();
+        order.Key = 1;
+        meta.FindField("OrderNumber")!.SetValueFn(order, "ORD-001");
+        meta.FindField("CustomerId")!.SetValueFn(order, "cust-1");
+        meta.FindField("OrderDate")!.SetValueFn(order, DateOnly.FromDateTime(DateTime.UtcNow));
+        meta.FindField("Status")!.SetValueFn(order, "Open");
+        meta.FindField("CurrencyId")!.SetValueFn(order, "USD");
+        meta.FindField("IsOpen")!.SetValueFn(order, true);
 
         // Act - Build the form fields (which includes child list editor HTML)
         var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
@@ -81,19 +68,15 @@ public class ChildListEditorTests : IDisposable
     public void BuildFormFields_WithCspNonce_IncludesNonceOnScriptTag()
     {
         // Arrange
-        var order = new Order
-        {
-            Key = 1,
-            OrderNumber = "ORD-001",
-            CustomerId = "cust-1",
-            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
-            Status = "Open",
-            CurrencyId = "USD",
-            IsOpen = true
-        };
-
-        var meta = DataScaffold.GetEntityByType(typeof(Order));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
+        var order = meta.Handlers.Create();
+        order.Key = 1;
+        meta.FindField("OrderNumber")!.SetValueFn(order, "ORD-001");
+        meta.FindField("CustomerId")!.SetValueFn(order, "cust-1");
+        meta.FindField("OrderDate")!.SetValueFn(order, DateOnly.FromDateTime(DateTime.UtcNow));
+        meta.FindField("Status")!.SetValueFn(order, "Open");
+        meta.FindField("CurrencyId")!.SetValueFn(order, "USD");
+        meta.FindField("IsOpen")!.SetValueFn(order, true);
 
         // Act - Build with a CSP nonce
         var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false, cspNonce: "test-nonce-123");
@@ -110,19 +93,15 @@ public class ChildListEditorTests : IDisposable
     public void BuildFormFields_WithoutCspNonce_ScriptTagHasNoNonce()
     {
         // Arrange
-        var order = new Order
-        {
-            Key = 1,
-            OrderNumber = "ORD-001",
-            CustomerId = "cust-1",
-            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
-            Status = "Open",
-            CurrencyId = "USD",
-            IsOpen = true
-        };
-
-        var meta = DataScaffold.GetEntityByType(typeof(Order));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
+        var order = meta.Handlers.Create();
+        order.Key = 1;
+        meta.FindField("OrderNumber")!.SetValueFn(order, "ORD-001");
+        meta.FindField("CustomerId")!.SetValueFn(order, "cust-1");
+        meta.FindField("OrderDate")!.SetValueFn(order, DateOnly.FromDateTime(DateTime.UtcNow));
+        meta.FindField("Status")!.SetValueFn(order, "Open");
+        meta.FindField("CurrencyId")!.SetValueFn(order, "USD");
+        meta.FindField("IsOpen")!.SetValueFn(order, true);
 
         // Act - Build without a CSP nonce
         var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
@@ -141,19 +120,15 @@ public class ChildListEditorTests : IDisposable
     public void BuildFormFields_WithChildListLookupField_IncludesRefreshAndAddButtons()
     {
         // Arrange - Create an Order (OrderRow has a lookup field for Product)
-        var order = new Order
-        {
-            Key = 1,
-            OrderNumber = "ORD-001",
-            CustomerId = "cust-1",
-            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
-            Status = "Open",
-            CurrencyId = "USD",
-            IsOpen = true
-        };
-
-        var meta = DataScaffold.GetEntityByType(typeof(Order));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
+        var order = meta.Handlers.Create();
+        order.Key = 1;
+        meta.FindField("OrderNumber")!.SetValueFn(order, "ORD-001");
+        meta.FindField("CustomerId")!.SetValueFn(order, "cust-1");
+        meta.FindField("OrderDate")!.SetValueFn(order, DateOnly.FromDateTime(DateTime.UtcNow));
+        meta.FindField("Status")!.SetValueFn(order, "Open");
+        meta.FindField("CurrencyId")!.SetValueFn(order, "USD");
+        meta.FindField("IsOpen")!.SetValueFn(order, true);
 
         // Act - Build the form fields (which includes child list editor HTML)
         var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
@@ -183,19 +158,15 @@ public class ChildListEditorTests : IDisposable
     public void BuildFormFields_WithChildListCalculatedFields_RendersAsReadonlyWithExpression()
     {
         // Arrange - Create an Order (OrderRow has Subtotal and LineTotal as CalculatedField)
-        var order = new Order
-        {
-            Key = 1,
-            OrderNumber = "ORD-001",
-            CustomerId = "cust-1",
-            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
-            Status = "Open",
-            CurrencyId = "USD",
-            IsOpen = true
-        };
-
-        var meta = DataScaffold.GetEntityByType(typeof(Order));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
+        var order = meta.Handlers.Create();
+        order.Key = 1;
+        meta.FindField("OrderNumber")!.SetValueFn(order, "ORD-001");
+        meta.FindField("CustomerId")!.SetValueFn(order, "cust-1");
+        meta.FindField("OrderDate")!.SetValueFn(order, DateOnly.FromDateTime(DateTime.UtcNow));
+        meta.FindField("Status")!.SetValueFn(order, "Open");
+        meta.FindField("CurrencyId")!.SetValueFn(order, "USD");
+        meta.FindField("IsOpen")!.SetValueFn(order, true);
 
         // Act
         var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
@@ -219,19 +190,15 @@ public class ChildListEditorTests : IDisposable
     public void BuildFormFields_WithChildListCalculatedFields_EmitsRecalcJavaScript()
     {
         // Arrange
-        var order = new Order
-        {
-            Key = 1,
-            OrderNumber = "ORD-001",
-            CustomerId = "cust-1",
-            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
-            Status = "Open",
-            CurrencyId = "USD",
-            IsOpen = true
-        };
-
-        var meta = DataScaffold.GetEntityByType(typeof(Order));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
+        var order = meta.Handlers.Create();
+        order.Key = 1;
+        meta.FindField("OrderNumber")!.SetValueFn(order, "ORD-001");
+        meta.FindField("CustomerId")!.SetValueFn(order, "cust-1");
+        meta.FindField("OrderDate")!.SetValueFn(order, DateOnly.FromDateTime(DateTime.UtcNow));
+        meta.FindField("Status")!.SetValueFn(order, "Open");
+        meta.FindField("CurrencyId")!.SetValueFn(order, "USD");
+        meta.FindField("IsOpen")!.SetValueFn(order, true);
 
         // Act
         var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
@@ -255,19 +222,15 @@ public class ChildListEditorTests : IDisposable
     public void BuildFormFields_WithLookupCopyFields_RendersDataCopyAttributes()
     {
         // Arrange - OrderRow.ProductId has CopyFields = "Price->UnitPrice"
-        var order = new Order
-        {
-            Key = 1,
-            OrderNumber = "ORD-001",
-            CustomerId = "cust-1",
-            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
-            Status = "Open",
-            CurrencyId = "USD",
-            IsOpen = true
-        };
-
-        var meta = DataScaffold.GetEntityByType(typeof(Order));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
+        var order = meta.Handlers.Create();
+        order.Key = 1;
+        meta.FindField("OrderNumber")!.SetValueFn(order, "ORD-001");
+        meta.FindField("CustomerId")!.SetValueFn(order, "cust-1");
+        meta.FindField("OrderDate")!.SetValueFn(order, DateOnly.FromDateTime(DateTime.UtcNow));
+        meta.FindField("Status")!.SetValueFn(order, "Open");
+        meta.FindField("CurrencyId")!.SetValueFn(order, "USD");
+        meta.FindField("IsOpen")!.SetValueFn(order, true);
 
         // Act
         var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
@@ -287,19 +250,15 @@ public class ChildListEditorTests : IDisposable
     public void BuildFormFields_WithCopyFromParent_EmitsParentContextJavaScript()
     {
         // Arrange - OrderRow.DiscountPercent has [CopyFromParent("CustomerId", "customers", "DiscountPercent")]
-        var order = new Order
-        {
-            Key = 1,
-            OrderNumber = "ORD-001",
-            CustomerId = "cust-1",
-            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
-            Status = "Open",
-            CurrencyId = "USD",
-            IsOpen = true
-        };
-
-        var meta = DataScaffold.GetEntityByType(typeof(Order));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
+        var order = meta.Handlers.Create();
+        order.Key = 1;
+        meta.FindField("OrderNumber")!.SetValueFn(order, "ORD-001");
+        meta.FindField("CustomerId")!.SetValueFn(order, "cust-1");
+        meta.FindField("OrderDate")!.SetValueFn(order, DateOnly.FromDateTime(DateTime.UtcNow));
+        meta.FindField("Status")!.SetValueFn(order, "Open");
+        meta.FindField("CurrencyId")!.SetValueFn(order, "USD");
+        meta.FindField("IsOpen")!.SetValueFn(order, true);
 
         // Act
         var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);
@@ -319,19 +278,15 @@ public class ChildListEditorTests : IDisposable
     public void BuildFormFields_ModalShowEvent_CallsRecalcModal()
     {
         // Arrange
-        var order = new Order
-        {
-            Key = 1,
-            OrderNumber = "ORD-001",
-            CustomerId = "cust-1",
-            OrderDate = DateOnly.FromDateTime(DateTime.UtcNow),
-            Status = "Open",
-            CurrencyId = "USD",
-            IsOpen = true
-        };
-
-        var meta = DataScaffold.GetEntityByType(typeof(Order));
-        Assert.NotNull(meta);
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
+        var order = meta.Handlers.Create();
+        order.Key = 1;
+        meta.FindField("OrderNumber")!.SetValueFn(order, "ORD-001");
+        meta.FindField("CustomerId")!.SetValueFn(order, "cust-1");
+        meta.FindField("OrderDate")!.SetValueFn(order, DateOnly.FromDateTime(DateTime.UtcNow));
+        meta.FindField("Status")!.SetValueFn(order, "Open");
+        meta.FindField("CurrencyId")!.SetValueFn(order, "USD");
+        meta.FindField("IsOpen")!.SetValueFn(order, true);
 
         // Act
         var formFields = DataScaffold.BuildFormFields(meta, order, forCreate: false);

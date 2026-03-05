@@ -99,7 +99,20 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
                 MaxLength: f.MaxLength,
                 RangeMin: f.RangeMin,
                 RangeMax: f.RangeMax,
-                Pattern: f.Pattern
+                Pattern: f.Pattern,
+                ChildEntitySlug: f.ChildEntitySlug,
+                LookupCopyFields: f.LookupCopyFields,
+                CalculatedExpression: f.CalculatedExpression,
+                CalculatedDisplayFormat: f.CalculatedDisplayFormat,
+                CopyFromParentField: f.CopyFromParentField,
+                CopyFromParentSlug: f.CopyFromParentSlug,
+                CopyFromParentSourceField: f.CopyFromParentSourceField,
+                RelatedDocumentSlug: f.RelatedDocumentSlug,
+                RelatedDocumentDisplayField: f.RelatedDocumentDisplayField,
+                CascadeFromField: f.CascadeFromField,
+                CascadeFilterField: f.CascadeFilterField,
+                FieldGroup: f.FieldGroup,
+                ColumnSpan: f.ColumnSpan
             ));
         }
 
@@ -163,6 +176,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
             idStrategy: idStrategy,
             version: entity.Version,
             schemaHash: schemaHash,
+            formLayout: entity.FormLayout ?? "Standard",
             fields: compiledFields.AsReadOnly(),
             indexes: compiledIndexes.AsReadOnly(),
             actions: compiledActions.AsReadOnly()
@@ -191,7 +205,10 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
             "time" or "timeonly" => FormFieldType.TimeOnly,
             "enum" => FormFieldType.Enum,
             "lookup" => FormFieldType.LookupList,
+            "childlist" or "child-list" or "child_list" => FormFieldType.ChildList,
+            "markdown" or "md" => FormFieldType.Markdown,
             "email" => FormFieldType.Email,
+            "country" => FormFieldType.Country,
             "phone" => FormFieldType.String,
             "url" => FormFieldType.String,
             _ => FormFieldType.String
@@ -213,6 +230,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
             FormFieldType.DateOnly => isNullable ? typeof(DateOnly?) : typeof(DateOnly),
             FormFieldType.TimeOnly => isNullable ? typeof(TimeOnly?) : typeof(TimeOnly),
             FormFieldType.Enum => BuildEnumType(enumValues),
+            FormFieldType.ChildList => typeof(string), // JSON-serialized child rows
             _ => typeof(string)
         };
     }

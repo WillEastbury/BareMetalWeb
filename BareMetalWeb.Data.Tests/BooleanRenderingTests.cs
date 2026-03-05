@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
-using BareMetalWeb.Data.DataObjects;
 using BareMetalWeb.Data.Interfaces;
 using Xunit;
 
@@ -14,7 +13,7 @@ namespace BareMetalWeb.Data.Tests;
 /// <summary>
 /// Tests for rendering boolean values as checkboxes in list and view contexts.
 /// </summary>
-[Collection("DataStoreProvider")]
+[Collection("SharedState")]
 public class BooleanRenderingTests : IDisposable
 {
     private readonly IDataObjectStore _originalStore;
@@ -24,9 +23,7 @@ public class BooleanRenderingTests : IDisposable
         _originalStore = DataStoreProvider.Current;
         DataStoreProvider.Current = new InMemoryDataStore();
 
-        // Force UserClasses assembly to load before scanning
-        _ = typeof(Customer).Assembly;
-        DataEntityRegistry.RegisterAllEntities();
+        _ = GalleryTestFixture.State;
     }
 
     public void Dispose()
@@ -38,16 +35,13 @@ public class BooleanRenderingTests : IDisposable
     public void BuildViewRowsHtml_WithBooleanTrue_RendersGreenCheckbox()
     {
         // Arrange
-        var customer = new Customer
-        {
-            Key = 1,
-            Name = "Test Customer",
-            Email = "test@example.com",
-            IsActive = true
-        };
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
 
-        var meta = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(meta);
+        var customer = meta.Handlers.Create();
+        customer.Key = 1;
+        meta.FindField("Name")!.SetValueFn(customer, "Test Customer");
+        meta.FindField("Email")!.SetValueFn(customer, "test@example.com");
+        meta.FindField("IsActive")!.SetValueFn(customer, true);
 
         // Act
         var rows = DataScaffold.BuildViewRowsHtml(meta, customer);
@@ -64,16 +58,13 @@ public class BooleanRenderingTests : IDisposable
     public void BuildViewRowsHtml_WithBooleanFalse_RendersRedCheckbox()
     {
         // Arrange
-        var customer = new Customer
-        {
-            Key = 2,
-            Name = "Inactive Customer",
-            Email = "inactive@example.com",
-            IsActive = false
-        };
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
 
-        var meta = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(meta);
+        var customer = meta.Handlers.Create();
+        customer.Key = 2;
+        meta.FindField("Name")!.SetValueFn(customer, "Inactive Customer");
+        meta.FindField("Email")!.SetValueFn(customer, "inactive@example.com");
+        meta.FindField("IsActive")!.SetValueFn(customer, false);
 
         // Act
         var rows = DataScaffold.BuildViewRowsHtml(meta, customer);
@@ -90,21 +81,17 @@ public class BooleanRenderingTests : IDisposable
     public void BuildListRows_WithBooleanTrue_RendersGreenCheckbox()
     {
         // Arrange
-        var products = new[]
-        {
-            new Product
-            {
-                Key = 1,
-                Name = "Active Product",
-                Sku = "SKU-001",
-                IsActive = true,
-                UnitOfMeasureId = "uom-1",
-                CurrencyId = "cur-1"
-            }
-        };
+        Assert.True(DataScaffold.TryGetEntity("products", out var meta));
 
-        var meta = DataScaffold.GetEntityByType(typeof(Product));
-        Assert.NotNull(meta);
+        var product = meta.Handlers.Create();
+        product.Key = 1;
+        meta.FindField("Name")!.SetValueFn(product, "Active Product");
+        meta.FindField("Sku")!.SetValueFn(product, "SKU-001");
+        meta.FindField("IsActive")!.SetValueFn(product, true);
+        meta.FindField("UnitOfMeasureId")!.SetValueFn(product, "uom-1");
+        meta.FindField("CurrencyId")!.SetValueFn(product, "cur-1");
+        var products = new[] { product };
+
 
         // Act
         var rows = DataScaffold.BuildListRows(meta, products, "/admin/data/products", includeActions: false);
@@ -128,21 +115,17 @@ public class BooleanRenderingTests : IDisposable
     public void BuildListRows_WithBooleanFalse_RendersRedCheckbox()
     {
         // Arrange
-        var products = new[]
-        {
-            new Product
-            {
-                Key = 2,
-                Name = "Inactive Product",
-                Sku = "SKU-002",
-                IsActive = false,
-                UnitOfMeasureId = "uom-1",
-                CurrencyId = "cur-1"
-            }
-        };
+        Assert.True(DataScaffold.TryGetEntity("products", out var meta));
 
-        var meta = DataScaffold.GetEntityByType(typeof(Product));
-        Assert.NotNull(meta);
+        var product = meta.Handlers.Create();
+        product.Key = 2;
+        meta.FindField("Name")!.SetValueFn(product, "Inactive Product");
+        meta.FindField("Sku")!.SetValueFn(product, "SKU-002");
+        meta.FindField("IsActive")!.SetValueFn(product, false);
+        meta.FindField("UnitOfMeasureId")!.SetValueFn(product, "uom-1");
+        meta.FindField("CurrencyId")!.SetValueFn(product, "cur-1");
+        var products = new[] { product };
+
 
         // Act
         var rows = DataScaffold.BuildListRows(meta, products, "/admin/data/products", includeActions: false);
@@ -166,14 +149,22 @@ public class BooleanRenderingTests : IDisposable
     public void BuildListRows_WithMixedBooleans_RendersAppropriateCheckboxes()
     {
         // Arrange
-        var customers = new[]
-        {
-            new Customer { Key = 1, Name = "Active", Email = "a@test.com", IsActive = true },
-            new Customer { Key = 2, Name = "Inactive", Email = "b@test.com", IsActive = false }
-        };
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
 
-        var meta = DataScaffold.GetEntityByType(typeof(Customer));
-        Assert.NotNull(meta);
+        var customer1 = meta.Handlers.Create();
+        customer1.Key = 1;
+        meta.FindField("Name")!.SetValueFn(customer1, "Active");
+        meta.FindField("Email")!.SetValueFn(customer1, "a@test.com");
+        meta.FindField("IsActive")!.SetValueFn(customer1, true);
+
+        var customer2 = meta.Handlers.Create();
+        customer2.Key = 2;
+        meta.FindField("Name")!.SetValueFn(customer2, "Inactive");
+        meta.FindField("Email")!.SetValueFn(customer2, "b@test.com");
+        meta.FindField("IsActive")!.SetValueFn(customer2, false);
+
+        var customers = new[] { customer1, customer2 };
+
 
         // Act
         var rows = DataScaffold.BuildListRows(meta, customers, "/admin/data/customers", includeActions: false);

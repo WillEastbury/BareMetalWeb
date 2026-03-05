@@ -356,17 +356,18 @@ public class RuntimeEntityRegistryTests : IDisposable
         var model = compiler.Compile(entity, fields, Array.Empty<IndexDefinition>(),
             Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _)!;
 
-        var store = new VirtualEntityJsonStore(_tempDir);
-        var metadata = model.ToEntityMetadata(store);
+        var walProvider = new WalDataProvider(_tempDir);
+        var schema = EntitySchemaFactory.FromModel(model);
+        var metadata = model.ToEntityMetadata(walProvider, schema);
 
         Assert.Equal(entity.Name, metadata.Name);
         Assert.Equal(model.Slug, metadata.Slug);
         Assert.Single(metadata.Fields);
         Assert.Equal("Title", metadata.Fields[0].Name);
 
-        // Create handler must return DynamicDataObject
+        // Create handler must return DataRecord
         var obj = metadata.Handlers.Create();
-        Assert.IsType<DynamicDataObject>(obj);
+        Assert.IsType<DataRecord>(obj);
     }
 
     // ── CommandService / QueryService tests ──────────────────────────────────
