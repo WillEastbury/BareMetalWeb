@@ -8,7 +8,7 @@ namespace BareMetalWeb.Runtime;
 /// and executes matching actions against qualifying records.
 /// </summary>
 [DataEntity("Scheduled Actions", ShowOnNav = true, NavGroup = "Admin", NavOrder = 1006)]
-public class ScheduledActionDefinition : RenderableDataObject
+public class ScheduledActionDefinition : BaseDataObject
 {
     /// <summary>Foreign key to <see cref="EntityDefinition.EntityId"/>.</summary>
     [DataField(Label = "Entity ID", Order = 1, Required = true)]

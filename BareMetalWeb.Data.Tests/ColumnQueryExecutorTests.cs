@@ -21,13 +21,14 @@ public sealed class ColumnQueryExecutorTests : IDisposable
 {
     // ── Minimal entity used in all tests ─────────────────────────────────
 
-    private class SampleItem : RenderableDataObject
+    [DataEntity("SampleItems")]
+    private class SampleItem : BaseDataObject
     {
-        public string Name    { get; set; } = string.Empty;
-        public int    Age     { get; set; }
-        public double Score   { get; set; }
-        public long   BigNum  { get; set; }
-        public float  Ratio   { get; set; }
+        [DataField] public string Name    { get; set; } = string.Empty;
+        [DataField] public int    Age     { get; set; }
+        [DataField] public double Score   { get; set; }
+        [DataField] public long   BigNum  { get; set; }
+        [DataField] public float  Ratio   { get; set; }
     }
 
     private static readonly Random _rng = new(42); // reserved for future randomised test helpers

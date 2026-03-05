@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// Each user has at most one open basket; completing checkout closes it.
 /// </summary>
 [DataEntity("Baskets", ShowOnNav = false, Permissions = "Public")]
-public class Basket : RenderableDataObject
+public class Basket : BaseDataObject
 {
     [DataField(Label = "User ID", Order = 1, Required = true)]
     public string UserId { get; set; } = string.Empty;
@@ -38,7 +38,7 @@ public enum BasketStatus
 /// A line item within a shopping basket.
 /// </summary>
 [DataEntity("Basket Items", ShowOnNav = false, Permissions = "Public")]
-public class BasketItem : RenderableDataObject
+public class BasketItem : BaseDataObject
 {
     /// <summary>FK to the parent Basket.</summary>
     [DataField(Label = "Basket ID", Order = 1, Required = true)]

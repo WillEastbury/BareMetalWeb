@@ -9,7 +9,7 @@ namespace BareMetalWeb.Runtime;
 /// Notifications can be triggered by scheduled actions or long-running processes.
 /// </summary>
 [DataEntity("Notification Channels", ShowOnNav = true, NavGroup = "Admin", NavOrder = 1007)]
-public class NotificationDefinition : RenderableDataObject
+public class NotificationDefinition : BaseDataObject
 {
     [DataField(Label = "Name", Order = 1, Required = true)]
     public string Name { get; set; } = string.Empty;

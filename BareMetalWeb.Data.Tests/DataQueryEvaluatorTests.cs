@@ -10,13 +10,14 @@ namespace BareMetalWeb.Data.Tests;
 [Collection("SharedState")]
 public class DataQueryEvaluatorTests : IDisposable
 {
-    private class TestItem : RenderableDataObject
+    [DataEntity("TestItems")]
+    private class TestItem : BaseDataObject
     {
-        public string Name { get; set; } = string.Empty;
-        public int Age { get; set; }
-        public decimal Price { get; set; }
-        public string? NullableField { get; set; }
-        public List<string> Tags { get; set; } = new();
+        [DataField] public string Name { get; set; } = string.Empty;
+        [DataField] public int Age { get; set; }
+        [DataField] public decimal Price { get; set; }
+        [DataField] public string? NullableField { get; set; }
+        [DataField] public List<string> Tags { get; set; } = new();
     }
 
     private readonly DataQueryEvaluator _evaluator = new();

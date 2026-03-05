@@ -70,7 +70,7 @@ var restored = IdentifierValue.ReadFrom(buffer);
 ```csharp
 [DataEntity("Invoices", ShowOnNav = true, NavGroup = "Finance",
             IdGeneration = AutoIdStrategy.Sequential)]
-public class Invoice : RenderableDataObject
+public class Invoice : BaseDataObject
 {
     [DataField(Label = "Invoice Code", Order = 1)]
     public IdentifierValue Identifier { get; set; }

@@ -8,7 +8,7 @@ namespace BareMetalWeb.Runtime;
 /// handled by <see cref="ICommandService"/>.
 /// </summary>
 [DataEntity("Action Definitions", ShowOnNav = true, NavGroup = "Admin", NavOrder = 1003)]
-public class ActionDefinition : RenderableDataObject
+public class ActionDefinition : BaseDataObject
 {
     /// <summary>Foreign key to <see cref="EntityDefinition.Id"/>.</summary>
     [DataField(Label = "Entity ID", Order = 1, Required = true)]

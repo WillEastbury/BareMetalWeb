@@ -2,11 +2,6 @@ using System;
 
 namespace BareMetalWeb.Data;
 
-public class RenderableDataObject : BaseDataObject , IBaseDataObject
-{
-
-}
-
 public abstract class BaseDataObject : IBaseDataObject
 {
     public uint Key { get; set; }
