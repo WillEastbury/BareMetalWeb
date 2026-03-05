@@ -1,0 +1,86 @@
+name: Deploy to Tenant
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reusable workflow: deploy a pre-built publish package to a single Azure Web
+# App tenant and run a health-check loop to verify the deployment succeeded.
+#
+# Called from ci-cd-pipeline.yml for both L2.2 (early access) and L2.3 (full
+# rollout) matrix jobs.
+#
+# Inputs
+# ──────
+#   app-name       – Azure Web App name (e.g. baremetalweb-tenant-acme)
+#   artifact-name  – Name of the Actions artifact that contains the publish
+#                    directory (uploaded by l2-0-release-candidate)
+#
+# Secrets
+# ───────
+#   azure-credentials – Service principal JSON with Contributor access to the
+#                       target Web App.  All tenants share AZURE_CREDENTIALS_TENANTS
+#                       if they are in the same subscription; pass a different
+#                       secret per tenant group if needed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        description: 'Azure Web App name to deploy to'
+        required: true
+        type: string
+      artifact-name:
+        description: 'Name of the GitHub Actions artifact containing the publish directory'
+        required: true
+        type: string
+    secrets:
+      azure-credentials:
+        description: 'Azure service principal credentials JSON'
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  deploy:
+    name: "Deploy to ${{ inputs.app-name }}"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download publish artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ./publish
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.azure-credentials }}
+
+      - name: Deploy to ${{ inputs.app-name }}
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ inputs.app-name }}
+          package: ./publish
+
+      - name: Wait for deployment to stabilise
+        run: |
+          echo "Waiting 30 s for app to start..."
+          sleep 30
+
+      - name: Health check
+        run: |
+          APP_URL="https://${{ inputs.app-name }}.azurewebsites.net/"
+          echo "Running health check for ${{ inputs.app-name }} at ${APP_URL}"
+          for i in {1..6}; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "${APP_URL}" || echo "000")
+            if [ "$STATUS" = "200" ] || [ "$STATUS" = "302" ]; then
+              echo "Health check passed (HTTP ${STATUS}) ✓"
+              exit 0
+            fi
+            echo "Attempt ${i}/6: HTTP ${STATUS} – retrying in 10 s..."
+            sleep 10
+          done
+          echo "::error::Health check failed for ${{ inputs.app-name }} after 6 attempts – deployment may be broken"
+          exit 1

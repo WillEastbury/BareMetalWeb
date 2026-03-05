@@ -1,0 +1,39 @@
+{
+  "_readme": [
+    "BareMetalWeb tenant rollout configuration.",
+    "",
+    "early_access  – Tenants that receive the canary release first (L2.2).",
+    "                All deployments here run in parallel after canary ring-0 passes.",
+    "                A 20-minute monitoring window follows before L2.3 is triggered.",
+    "",
+    "main_rollout  – Remaining tenants deployed at L2.3 after manual approval",
+    "                via the 'production-rollout' GitHub Environment.",
+    "",
+    "Fields per entry:",
+    "  id        – Unique identifier used in workflow job names.",
+    "  name      – Human-readable tenant name (shown in GitHub Actions UI).",
+    "  app_name  – Azure Web App name (must match the target App Service).",
+    "",
+    "Credentials:",
+    "  All entries use the AZURE_CREDENTIALS_TENANTS repository secret.",
+    "  That service principal must have 'Website Contributor' (or Contributor)",
+    "  rights on every app_name listed here.",
+    "  For tenants in different subscriptions, use a service principal with",
+    "  cross-subscription Contributor access, or split into multiple secrets",
+    "  and add dedicated jobs in ci-cd-pipeline.yml."
+  ],
+  "early_access": [
+    {
+      "id": "tenant-example-ea",
+      "name": "Example Early-Access Tenant",
+      "app_name": "baremetalweb-tenant-example-ea"
+    }
+  ],
+  "main_rollout": [
+    {
+      "id": "tenant-example-prod",
+      "name": "Example Production Tenant",
+      "app_name": "baremetalweb-tenant-example-prod"
+    }
+  ]
+}
