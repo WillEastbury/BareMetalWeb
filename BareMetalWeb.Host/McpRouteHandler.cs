@@ -141,10 +141,17 @@ internal static class McpRouteHandler
 
     private static object BuildInitializeResult()
     {
-        var rawVersion = typeof(McpRouteHandler).Assembly
-            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
-            .Cast<System.Reflection.AssemblyInformationalVersionAttribute>()
-            .FirstOrDefault()?.InformationalVersion ?? "1.0";
+        string? rawVersion = null;
+        foreach (var attr in typeof(McpRouteHandler).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false))
+        {
+            if (attr is System.Reflection.AssemblyInformationalVersionAttribute infoAttr)
+            {
+                rawVersion = infoAttr.InformationalVersion;
+                break;
+            }
+        }
+        rawVersion ??= "1.0";
 
         // Trim SHA suffix (e.g. "1.0.0+abc1234" → "1.0.0")
         var plusIdx = rawVersion.IndexOf('+');
@@ -172,18 +179,26 @@ internal static class McpRouteHandler
             var name = entity.Name;
 
             // Field map for create/update input schemas
-            var writableFields = entity.Fields
-                .Where(f => f.FieldType != FormFieldType.CustomHtml
-                         && f.FieldType != FormFieldType.Button
-                         && f.FieldType != FormFieldType.Link
-                         && !f.ReadOnly)
-                .ToList();
+            var writableFields = new List<DataFieldMetadata>();
+            foreach (var f in entity.Fields)
+            {
+                if (f.FieldType != FormFieldType.CustomHtml
+                    && f.FieldType != FormFieldType.Button
+                    && f.FieldType != FormFieldType.Link
+                    && !f.ReadOnly)
+                {
+                    writableFields.Add(f);
+                }
+            }
 
             var fieldProps = BuildFieldProperties(writableFields);
-            var requiredCreateFields = writableFields
-                .Where(f => f.Required && f.Create)
-                .Select(f => f.Name)
-                .ToArray();
+            var requiredCreateList = new List<string>();
+            foreach (var f in writableFields)
+            {
+                if (f.Required && f.Create)
+                    requiredCreateList.Add(f.Name);
+            }
+            var requiredCreateFields = requiredCreateList.ToArray();
 
             // query_{slug}
             tools.Add(MakeTool(
@@ -329,7 +344,9 @@ internal static class McpRouteHandler
         var query = BuildQueryDefinition(arguments);
         var svc = new QueryService();
         var results = await svc.QueryAsync(slug, query, ct).ConfigureAwait(false);
-        var list = results.ToList();
+        var list = new List<Dictionary<string, object?>>();
+        foreach (var item in results)
+            list.Add(item);
         return BuildToolTextResult(JsonSerializer.Serialize(list, _jsonOptions));
     }
 
@@ -544,8 +561,15 @@ internal static class McpRouteHandler
             return segment;
 
         // Try matching with original slug casing
-        var match = DataScaffold.Entities.FirstOrDefault(e =>
-            string.Equals(ToToolSegment(e.Slug), segment, StringComparison.OrdinalIgnoreCase));
+        DataEntityMetadata? match = null;
+        foreach (var e in DataScaffold.Entities)
+        {
+            if (string.Equals(ToToolSegment(e.Slug), segment, StringComparison.OrdinalIgnoreCase))
+            {
+                match = e;
+                break;
+            }
+        }
 
         return match?.Slug ?? segment;
     }

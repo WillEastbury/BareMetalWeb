@@ -229,7 +229,16 @@ public static class GraphQLHandler
         var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
 
         // Always include id if requested or no selection
-        if (selectedFields.Count == 0 || selectedFields.Any(f => f.Equals("id", StringComparison.OrdinalIgnoreCase)))
+        bool hasIdField = false;
+        foreach (var sf in selectedFields)
+        {
+            if (sf.Equals("id", StringComparison.OrdinalIgnoreCase))
+            {
+                hasIdField = true;
+                break;
+            }
+        }
+        if (selectedFields.Count == 0 || hasIdField)
         {
             if (item is BaseDataObject bdo) row["id"] = bdo.Key;
         }
@@ -237,9 +246,20 @@ public static class GraphQLHandler
         foreach (var f in meta.Fields)
         {
             var camel = ToCamel(f.Name);
-            if (selectedFields.Count > 0 && !selectedFields.Any(s => s.Equals(camel, StringComparison.OrdinalIgnoreCase)
-                                                                   || s.Equals(f.Name, StringComparison.OrdinalIgnoreCase)))
-                continue;
+            if (selectedFields.Count > 0)
+            {
+                bool fieldSelected = false;
+                foreach (var s in selectedFields)
+                {
+                    if (s.Equals(camel, StringComparison.OrdinalIgnoreCase)
+                        || s.Equals(f.Name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        fieldSelected = true;
+                        break;
+                    }
+                }
+                if (!fieldSelected) continue;
+            }
 
             try { row[camel] = f.GetValueFn(item)?.ToString(); }
             catch { row[camel] = null; }

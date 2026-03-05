@@ -110,17 +110,25 @@ public static class BareMetalWebExtensions
             msg => logger.LogInfo($"[RuntimeEntityRegistry] {msg}")).ConfigureAwait(false);
 
         // Permissions
-        var entityPermissions = DataScaffold.Entities
-            .SelectMany(e => (e.Permissions ?? string.Empty)
+        var permSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in DataScaffold.Entities)
+        {
+            foreach (var perm in (e.Permissions ?? string.Empty)
                 .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+            {
+                permSet.Add(perm);
+            }
+        }
+        var entityPermissions = new string[permSet.Count];
+        permSet.CopyTo(entityPermissions);
         var rootPermissionSet = new HashSet<string>(entityPermissions, StringComparer.OrdinalIgnoreCase)
         {
             "admin",
             "monitoring"
         };
-        await ProgramSetup.EnsureRootPermissionsAsync(logger, rootPermissionSet.ToArray());
+        var rootPermsArray = new string[rootPermissionSet.Count];
+        rootPermissionSet.CopyTo(rootPermsArray);
+        await ProgramSetup.EnsureRootPermissionsAsync(logger, rootPermsArray);
 
         // Rendering
         IHtmlFragmentStore fragmentStore = new HtmlFragmentStore();
@@ -272,7 +280,7 @@ public static class BareMetalWebExtensions
             var list = addresses is null || addresses.Count == 0
                 ? (app.Urls ?? Array.Empty<string>())
                 : addresses;
-            var display = list.Any() ? string.Join(", ", list) : "unknown";
+            var display = list.Count > 0 ? string.Join(", ", list) : "unknown";
             logger.LogInfo($"BareMetalWeb server is ready — PID {Environment.ProcessId} — listening for requests on {display}");
             Console.WriteLine($"BareMetalWeb server is ready — PID {Environment.ProcessId} — listening for requests on {display}");
 
@@ -280,7 +288,15 @@ public static class BareMetalWebExtensions
             logger.LogInfo(httpsConfig);
             Console.WriteLine(httpsConfig);
 
-            var httpsAddress = list.FirstOrDefault(a => a.StartsWith("https://", StringComparison.OrdinalIgnoreCase));
+            string? httpsAddress = null;
+            foreach (var a in list)
+            {
+                if (a.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                {
+                    httpsAddress = a;
+                    break;
+                }
+            }
             appInfo.HttpsEndpointAvailable = !string.IsNullOrWhiteSpace(httpsAddress);
             if (appInfo.HttpsEndpointAvailable && Uri.TryCreate(httpsAddress, UriKind.Absolute, out var httpsUri))
             {

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using BareMetalWeb.Core;
@@ -41,7 +40,14 @@ public static class CalculatedFieldService
         // Evict half the cache when it exceeds the max size
         if (_compiledExpressions.Count >= MaxExpressionCacheSize)
         {
-            var keysToRemove = _compiledExpressions.Keys.Take(MaxExpressionCacheSize / 2).ToArray();
+            int count = 0;
+            int target = MaxExpressionCacheSize / 2;
+            var keysToRemove = new List<string>(target);
+            foreach (var key in _compiledExpressions.Keys)
+            {
+                keysToRemove.Add(key);
+                if (++count >= target) break;
+            }
             foreach (var key in keysToRemove)
                 _compiledExpressions.TryRemove(key, out _);
         }

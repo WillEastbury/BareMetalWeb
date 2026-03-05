@@ -15,9 +15,13 @@ public static class QueryTools
     {
         if (!DataScaffold.TryGetEntity(entitySlug, out var meta)) return null;
 
-        return meta.Fields.Select(f => new FieldQueryInfo(
-            f.Name, f.FieldType.ToString(), f.IsIndexed
-        )).ToArray();
+        var result = new FieldQueryInfo[meta.Fields.Count];
+        for (int i = 0; i < meta.Fields.Count; i++)
+        {
+            var f = meta.Fields[i];
+            result[i] = new FieldQueryInfo(f.Name, f.FieldType.ToString(), f.IsIndexed);
+        }
+        return result;
     }
 
     [Description("Get valid query operators (Equals, NotEquals, Contains, StartsWith, EndsWith, In, NotIn, GreaterThan, LessThan, etc.).")]
@@ -51,18 +55,20 @@ public static class QueryTools
 
         if (filters is { Length: > 0 })
         {
-            query.Clauses = filters.Select(f =>
+            query.Clauses = new List<QueryClause>(filters.Length);
+            foreach (var f in filters)
             {
                 Enum.TryParse<QueryOperator>(f.Operator, ignoreCase: true, out var op);
-                return new QueryClause { Field = f.Field, Operator = op, Value = f.Value };
-            }).ToList();
+                query.Clauses.Add(new QueryClause { Field = f.Field, Operator = op, Value = f.Value });
+            }
         }
 
         var results = await meta.Handlers.QueryAsync(query, CancellationToken.None)
             .ConfigureAwait(false);
 
         var layout = EntityLayoutCompiler.GetOrCompile(meta);
-        var rows = results.Select(entity =>
+        var rowsList = new List<Dictionary<string, object?>>();
+        foreach (var entity in results)
         {
             var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
             {
@@ -73,8 +79,9 @@ public static class QueryTools
                 try { dict[field.Name] = field.Getter(entity); }
                 catch { dict[field.Name] = null; }
             }
-            return dict;
-        }).ToArray();
+            rowsList.Add(dict);
+        }
+        var rows = rowsList.ToArray();
 
         return new QueryResultInfo(rows.Length, rows, null);
     }
@@ -89,13 +96,15 @@ public static class QueryTools
         QueryDefinition? query = null;
         if (filters is { Length: > 0 })
         {
+            var clauses = new List<QueryClause>(filters.Length);
+            foreach (var f in filters)
+            {
+                Enum.TryParse<QueryOperator>(f.Operator, ignoreCase: true, out var op);
+                clauses.Add(new QueryClause { Field = f.Field, Operator = op, Value = f.Value });
+            }
             query = new QueryDefinition
             {
-                Clauses = filters.Select(f =>
-                {
-                    Enum.TryParse<QueryOperator>(f.Operator, ignoreCase: true, out var op);
-                    return new QueryClause { Field = f.Field, Operator = op, Value = f.Value };
-                }).ToList()
+                Clauses = clauses
             };
         }
 

@@ -51,13 +51,16 @@ public static class BinaryApiHandlers
     private static MetadataWireSerializer.FieldPlan[] BuildPlanFromMetadata(DataEntityMetadata meta)
     {
         // Build a lookup from metadata fields for getter/setter reuse
-        var metaFieldsByName = meta.Fields.ToDictionary(f => f.Name, StringComparer.Ordinal);
+        var metaFieldsByName = new Dictionary<string, DataFieldMetadata>(StringComparer.Ordinal);
+        foreach (var f in meta.Fields)
+            metaFieldsByName[f.Name] = f;
 
         // Collect ALL public properties on the CLR type — same set the BinaryObjectSerializer uses.
         // Sort by name (Ordinal compare) to match binary serializer member ordering.
-        var props = meta.Type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
-            .OrderBy(p => p.Name, StringComparer.Ordinal)
-            .ToArray();
+        var unsortedProps = meta.Type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+        var propsList = new List<System.Reflection.PropertyInfo>(unsortedProps);
+        propsList.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
+        var props = propsList.ToArray();
 
         var descriptors = new List<MetadataWireSerializer.FieldPlanDescriptor>(props.Length);
         foreach (var prop in props)
@@ -160,7 +163,9 @@ public static class BinaryApiHandlers
         {
             var queryDef = LookupApiHandlers.BuildQueryFromRequest(context, meta);
             var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
-            var list = entities.Cast<object>().ToList();
+            var list = new List<object>();
+            foreach (var e in entities)
+                list.Add((object)e);
             var plan = GetOrBuildPlan(meta);
             await WriteListResponse(context, list, plan);
         }
@@ -186,7 +191,9 @@ public static class BinaryApiHandlers
         {
             var queryDef = LookupApiHandlers.BuildQueryFromRequest(context, meta);
             var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
-            var list = entities.Cast<object>().ToList();
+            var list = new List<object>();
+            foreach (var e in entities)
+                list.Add((object)e);
             var plan = GetOrBuildPlan(meta);
 
             // Build raw ordinal array: each row is field values in plan order
@@ -221,7 +228,13 @@ public static class BinaryApiHandlers
             context.Response.StatusCode = 200;
             context.Response.ContentType = "application/x-bmw-raw";
             context.Response.Headers["Content-Encoding"] = "br";
-            context.Response.Headers["X-BMW-Fields"] = string.Join(",", plan.Select(p => p.Name));
+            var fieldNamesSb = new System.Text.StringBuilder();
+            for (int i = 0; i < plan.Length; i++)
+            {
+                if (i > 0) fieldNamesSb.Append(',');
+                fieldNamesSb.Append(plan[i].Name);
+            }
+            context.Response.Headers["X-BMW-Fields"] = fieldNamesSb.ToString();
             context.Response.ContentLength = compressed.Length;
             await context.Response.Body.WriteAsync(compressed, context.RequestAborted);
         }
@@ -246,9 +259,16 @@ public static class BinaryApiHandlers
             // Find aggregation definitions where EntityId matches
             var entityDefs = await DataStoreProvider.Current
                 .QueryAsync<BareMetalWeb.Runtime.EntityDefinition>(null, context.RequestAborted);
-            var entityDef = entityDefs.FirstOrDefault(e =>
-                string.Equals(e.Slug, typeSlug, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(e.Name?.Replace(' ', '-').ToLowerInvariant(), typeSlug, StringComparison.OrdinalIgnoreCase));
+            BareMetalWeb.Runtime.EntityDefinition? entityDef = null;
+            foreach (var e in entityDefs)
+            {
+                if (string.Equals(e.Slug, typeSlug, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(e.Name?.Replace(' ', '-').ToLowerInvariant(), typeSlug, StringComparison.OrdinalIgnoreCase))
+                {
+                    entityDef = e;
+                    break;
+                }
+            }
 
             if (entityDef == null)
             {
@@ -262,9 +282,10 @@ public static class BinaryApiHandlers
             {
                 Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityDef.EntityId } }
             };
-            var aggs = (await DataStoreProvider.Current
+            var aggs = new List<BareMetalWeb.Runtime.AggregationDefinition>();
+            foreach (var a in await DataStoreProvider.Current
                 .QueryAsync<BareMetalWeb.Runtime.AggregationDefinition>(aggQuery, context.RequestAborted))
-                .ToList();
+                aggs.Add(a);
 
             context.Response.StatusCode = 200;
             context.Response.ContentType = "application/json";
@@ -596,8 +617,20 @@ public static class BinaryApiHandlers
                 {
                     var userPerms = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
                     var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                    if (required.Length > 0 && !required.All(userPerms.Contains))
-                        return (null, typeSlug, (403, "Access denied."));
+                    if (required.Length > 0)
+                    {
+                        bool allPresent = true;
+                        foreach (var r in required)
+                        {
+                            if (!userPerms.Contains(r))
+                            {
+                                allPresent = false;
+                                break;
+                            }
+                        }
+                        if (!allPresent)
+                            return (null, typeSlug, (403, "Access denied."));
+                    }
                 }
             }
         }

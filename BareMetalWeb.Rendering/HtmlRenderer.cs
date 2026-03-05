@@ -1,6 +1,6 @@
 using System.Buffers;
 using System.Collections.Generic;
-using System.Linq;
+
 using System.IO.Pipelines;
 using System.Net;
 using System.Text;
@@ -270,7 +270,7 @@ public class HtmlRenderer : IHtmlRenderer
 
         if (parts.Length == 5)
         {
-            parts = parts.Skip(1).ToArray();
+            var newParts = new string[parts.Length - 1]; Array.Copy(parts, 1, newParts, 0, parts.Length - 1); parts = newParts;
         }
 
         if (parts.Length != 4)
@@ -628,7 +628,7 @@ public class HtmlRenderer : IHtmlRenderer
     {
         if (!app.ShowHostDiagnostics)
             return false;
-        var qsVal = context.Request.Query["showhst"].FirstOrDefault() ?? string.Empty;
+        string? qsVal = string.Empty; var showhstValues = context.Request.Query["showhst"]; if (showhstValues.Count > 0) qsVal = showhstValues[0] ?? string.Empty; else qsVal = string.Empty;
         return string.Equals(qsVal, "true", StringComparison.OrdinalIgnoreCase);
     }
 

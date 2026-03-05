@@ -5,7 +5,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -603,7 +603,20 @@ public sealed class SearchIndexManager
         var metadata = GetOrCreateTypeMetadata(type);
         
         // Determine which index to use
-        var useKind = preferredKind ?? (metadata.IndexKinds.FirstOrDefault());
+        IndexKind useKind;
+        if (preferredKind.HasValue)
+        {
+            useKind = preferredKind.Value;
+        }
+        else
+        {
+            useKind = IndexKind.Inverted;
+            foreach (var k in metadata.IndexKinds)
+            {
+                useKind = k;
+                break;
+            }
+        }
         
         var results = new HashSet<uint>();
         lock (index.Sync)
@@ -842,7 +855,9 @@ public sealed class SearchIndexManager
         index.PrefixTree.Clear();
         
         // Load all objects once to avoid calling loadAll multiple times
-        var allObjects = loadAll().ToList();
+        var allObjects = new List<BaseDataObject>();
+        foreach (var obj in loadAll())
+            allObjects.Add(obj);
         if (allObjects.Count == 0)
             return;
         
@@ -1497,7 +1512,11 @@ public sealed class SearchIndexManager
         {
             if (index.GraphIndex == null) return Array.Empty<uint>();
             if (!index.GraphIndex.Forward.TryGetValue(nodeId, out var edges)) return Array.Empty<uint>();
-            return edges.Select(e => e.TargetId).ToArray();
+            var result = new uint[edges.Count];
+            int idx = 0;
+            foreach (var e in edges)
+                result[idx++] = e.TargetId;
+            return result;
         }
     }
 
@@ -1512,7 +1531,11 @@ public sealed class SearchIndexManager
         {
             if (index.GraphIndex == null) return Array.Empty<uint>();
             if (!index.GraphIndex.Reverse.TryGetValue(nodeId, out var edges)) return Array.Empty<uint>();
-            return edges.Select(e => e.TargetId).ToArray();
+            var result = new uint[edges.Count];
+            int idx = 0;
+            foreach (var e in edges)
+                result[idx++] = e.TargetId;
+            return result;
         }
     }
 

@@ -93,8 +93,7 @@ public static class PermissionResolver
             var user = await DataScaffold.LoadAsync(userMeta, principalKey, ct) as BaseDataObject;
             if (user != null)
             {
-                var permsField = userMeta.Fields.FirstOrDefault(f =>
-                    string.Equals(f.Name, "Permissions", StringComparison.OrdinalIgnoreCase));
+                var permsField = FindFieldByName(userMeta.Fields, "Permissions");
                 if (permsField?.GetValueFn != null)
                 {
                     var rawPerms = permsField.GetValueFn(user);
@@ -190,7 +189,10 @@ public static class PermissionResolver
             return Array.Empty<BaseDataObject>();
 
         var items = await meta.Handlers.QueryAsync(null, ct);
-        return items.ToList();
+        var list = new List<BaseDataObject>();
+        foreach (var item in items)
+            list.Add(item);
+        return list;
     }
 
     private static readonly ConcurrentDictionary<string, Func<object, object?>?> _getterCache = new();
@@ -201,8 +203,7 @@ public static class PermissionResolver
         var getter = _getterCache.GetOrAdd(key, _ =>
         {
             if (!DataScaffold.TryGetEntity(entitySlug, out var meta)) return null;
-            var field = meta.Fields.FirstOrDefault(f =>
-                string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+            var field = FindFieldByName(meta.Fields, fieldName);
             return field?.GetValueFn;
         });
         return getter?.Invoke(obj)?.ToString() ?? string.Empty;
@@ -219,6 +220,16 @@ public static class PermissionResolver
         if (string.IsNullOrWhiteSpace(value)) yield break;
         foreach (var part in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             yield return part;
+    }
+
+    private static DataFieldMetadata? FindFieldByName(IReadOnlyList<DataFieldMetadata> fields, string name)
+    {
+        foreach (var f in fields)
+        {
+            if (string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase))
+                return f;
+        }
+        return null;
     }
 }
 

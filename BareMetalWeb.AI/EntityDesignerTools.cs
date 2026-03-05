@@ -14,9 +14,14 @@ public static class EntityDesignerTools
     [Description("List all registered entity types with name, slug, and field count.")]
     public static IReadOnlyList<EntitySummary> ListEntities()
     {
-        return DataScaffold.Entities
-            .Select(e => new EntitySummary(e.Name, e.Slug, e.Fields.Count))
-            .ToArray();
+        var entities = DataScaffold.Entities;
+        var result = new EntitySummary[entities.Count];
+        for (int i = 0; i < entities.Count; i++)
+        {
+            var e = entities[i];
+            result[i] = new EntitySummary(e.Name, e.Slug, e.Fields.Count);
+        }
+        return result;
     }
 
     [Description("List available field types (Bool, Int32, Decimal, DateTime, StringUtf8, etc.) for entity field definitions.")]
@@ -30,10 +35,15 @@ public static class EntityDesignerTools
     {
         if (!DataScaffold.TryGetEntity(slug, out var meta)) return null;
 
-        var fields = meta.Fields.Select(f => new FieldSchemaInfo(
-            f.Name, f.Label, f.FieldType.ToString(),
-            f.Required, f.ReadOnly, f.Validation?.MaxLength ?? 0
-        )).ToArray();
+        var fields = new FieldSchemaInfo[meta.Fields.Count];
+        for (int i = 0; i < meta.Fields.Count; i++)
+        {
+            var f = meta.Fields[i];
+            fields[i] = new FieldSchemaInfo(
+                f.Name, f.Label, f.FieldType.ToString(),
+                f.Required, f.ReadOnly, f.Validation?.MaxLength ?? 0
+            );
+        }
 
         return new EntitySchemaInfo(meta.Name, meta.Slug, fields);
     }
@@ -58,10 +68,15 @@ public static class EntityDesignerTools
 
         builder.Build(); // validates the schema
 
-        var resultFields = fields.Select(f => new FieldSchemaInfo(
-            f.Name, f.Label ?? f.Name, f.Type,
-            f.Required, false, f.MaxLength
-        )).ToArray();
+        var resultFields = new FieldSchemaInfo[fields.Length];
+        for (int i = 0; i < fields.Length; i++)
+        {
+            var f = fields[i];
+            resultFields[i] = new FieldSchemaInfo(
+                f.Name, f.Label ?? f.Name, f.Type,
+                f.Required, false, f.MaxLength
+            );
+        }
 
         return new EntitySchemaInfo(entityName, slug, resultFields);
     }

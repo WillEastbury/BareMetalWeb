@@ -43,11 +43,17 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
 
         // Sort fields: first by existing Ordinal (non-zero), then alphabetically.
         // Fields with Ordinal == 0 get assigned the next available ordinal.
-        var sortedFields = fields
-            .Where(f => !string.IsNullOrWhiteSpace(f.Name))
-            .OrderBy(f => f.Ordinal > 0 ? f.Ordinal : int.MaxValue)
-            .ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var sortedFields = new List<FieldDefinition>();
+        foreach (var f in fields)
+            if (!string.IsNullOrWhiteSpace(f.Name)) sortedFields.Add(f);
+        sortedFields.Sort((a, b) =>
+        {
+            int ordA = a.Ordinal > 0 ? a.Ordinal : int.MaxValue;
+            int ordB = b.Ordinal > 0 ? b.Ordinal : int.MaxValue;
+            int cmp = ordA.CompareTo(ordB);
+            if (cmp != 0) return cmp;
+            return string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+        });
 
         // Assign deterministic ordinals
         int nextOrdinal = 1;
@@ -59,7 +65,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
         }
 
         // Re-sort by assigned ordinal
-        sortedFields = sortedFields.OrderBy(f => f.Ordinal).ToList();
+        sortedFields.Sort((a, b) => a.Ordinal.CompareTo(b.Ordinal));
 
         var compiledFields = new List<RuntimeFieldModel>(sortedFields.Count);
         foreach (var f in sortedFields)
@@ -118,44 +124,47 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
 
         // ── Index compilation ──────────────────────────────────────────────────
 
-        var compiledIndexes = indexes
-            .Select(idx => new RuntimeIndexModel(
+        var compiledIndexes = new List<RuntimeIndexModel>(indexes.Count);
+        foreach (var idx in indexes)
+        {
+            compiledIndexes.Add(new RuntimeIndexModel(
                 IndexId: idx.Key.ToString(),
                 EntityId: idx.EntityId,
                 FieldNames: idx.GetFieldList(),
-                Type: string.IsNullOrWhiteSpace(idx.Type) ? "secondary" : idx.Type))
-            .ToList();
+                Type: string.IsNullOrWhiteSpace(idx.Type) ? "secondary" : idx.Type));
+        }
 
         // ── Action compilation ─────────────────────────────────────────────────
 
-        var compiledActions = actions
-            .Where(a => !string.IsNullOrWhiteSpace(a.Name))
-            .Select(a =>
+        var compiledActions = new List<RuntimeActionModel>();
+        foreach (var a in actions)
+        {
+            if (string.IsNullOrWhiteSpace(a.Name)) continue;
+            var actionKey = a.Key.ToString();
+            var topLevel = new List<ActionCommandDefinition>();
+            foreach (var c in actionCommands)
             {
-                var actionKey = a.Key.ToString();
-                // Load top-level commands for this action (ParentCommandId == null)
-                var topLevel = actionCommands
-                    .Where(c => string.Equals(c.ActionId, actionKey, StringComparison.OrdinalIgnoreCase)
-                             && string.IsNullOrWhiteSpace(c.ParentCommandId))
-                    .OrderBy(c => c.Order)
-                    .ToList();
+                if (string.Equals(c.ActionId, actionKey, StringComparison.OrdinalIgnoreCase)
+                    && string.IsNullOrWhiteSpace(c.ParentCommandId))
+                    topLevel.Add(c);
+            }
+            topLevel.Sort((x, y) => x.Order.CompareTo(y.Order));
 
-                var compiled = CompileCommands(topLevel, actionCommands, warnList);
+            var compiled = CompileCommands(topLevel, actionCommands, warnList);
 
-                return new RuntimeActionModel(
-                    ActionId: actionKey,
-                    EntityId: a.EntityId,
-                    Name: a.Name,
-                    Label: a.Label ?? a.Name,
-                    Icon: a.Icon,
-                    Permission: a.Permission,
-                    EnabledWhen: a.EnabledWhen,
-                    Operations: ParsePipeList(a.Operations),
-                    Commands: compiled,
-                    Version: a.Version
-                );
-            })
-            .ToList();
+            compiledActions.Add(new RuntimeActionModel(
+                ActionId: actionKey,
+                EntityId: a.EntityId,
+                Name: a.Name,
+                Label: a.Label ?? a.Name,
+                Icon: a.Icon,
+                Permission: a.Permission,
+                EnabledWhen: a.EnabledWhen,
+                Operations: ParsePipeList(a.Operations),
+                Commands: compiled,
+                Version: a.Version
+            ));
+        }
 
         // ── Schema hash ────────────────────────────────────────────────────────
 
@@ -336,8 +345,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
             return Array.Empty<string>();
 
         return value
-            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToArray();
+            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
 
     /// <summary>
@@ -457,10 +465,11 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
                 }
 
                 // Load sub-commands
-                var subDefs = allCommands
-                    .Where(c => string.Equals(c.ParentCommandId, defKey, StringComparison.OrdinalIgnoreCase))
-                    .OrderBy(c => c.Order)
-                    .ToList();
+                var subDefs = new List<ActionCommandDefinition>();
+                foreach (var c in allCommands)
+                    if (string.Equals(c.ParentCommandId, defKey, StringComparison.OrdinalIgnoreCase))
+                        subDefs.Add(c);
+                subDefs.Sort((x, y) => x.Order.CompareTo(y.Order));
 
                 var subCommands = CompileCommands(subDefs, allCommands, warnings);
 

@@ -64,8 +64,24 @@ public static class ModuleRegistry
         if (modules.Count == 0) return true;
 
         // Find owning module
-        var owner = modules.FirstOrDefault(m =>
-            m.EntitySlugs.Contains(entitySlug, StringComparer.OrdinalIgnoreCase));
+        ModuleInfo? owner = null;
+        foreach (var m in modules)
+        {
+            bool found = false;
+            foreach (var slug in m.EntitySlugs)
+            {
+                if (StringComparer.OrdinalIgnoreCase.Equals(slug, entitySlug))
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (found)
+            {
+                owner = m;
+                break;
+            }
+        }
 
         // Unowned entities are always enabled
         if (owner == null) return true;
@@ -91,8 +107,11 @@ public static class ModuleRegistry
         }
 
         // Check isolated modules don't reference external entities
-        foreach (var mod in modules.Where(m => string.Equals(m.Isolation, "isolated", StringComparison.OrdinalIgnoreCase)))
+        foreach (var mod in modules)
         {
+            if (!string.Equals(mod.Isolation, "isolated", StringComparison.OrdinalIgnoreCase))
+                continue;
+
             foreach (var slug in mod.EntitySlugs)
             {
                 if (!DataScaffold.TryGetEntity(slug, out var meta)) continue;
@@ -101,8 +120,15 @@ public static class ModuleRegistry
                 {
                     if (field.Lookup == null) continue;
                     // Resolve target entity slug from lookup type
-                    var lookupSlug = DataScaffold.Entities
-                        .FirstOrDefault(e => e.Type == field.Lookup.TargetType)?.Slug;
+                    string? lookupSlug = null;
+                    foreach (var e in DataScaffold.Entities)
+                    {
+                        if (e.Type == field.Lookup.TargetType)
+                        {
+                            lookupSlug = e.Slug;
+                            break;
+                        }
+                    }
                     if (string.IsNullOrEmpty(lookupSlug)) continue;
 
                     if (entityOwner.TryGetValue(lookupSlug, out var targetModule) &&
@@ -117,12 +143,22 @@ public static class ModuleRegistry
         }
 
         // Check dependencies are satisfied
-        foreach (var mod in modules.Where(m => m.Enabled))
+        foreach (var mod in modules)
         {
+            if (!mod.Enabled)
+                continue;
+
             foreach (var dep in mod.Dependencies)
             {
-                var depMod = modules.FirstOrDefault(m =>
-                    string.Equals(m.ModuleId, dep, StringComparison.OrdinalIgnoreCase));
+                ModuleInfo? depMod = null;
+                foreach (var m in modules)
+                {
+                    if (string.Equals(m.ModuleId, dep, StringComparison.OrdinalIgnoreCase))
+                    {
+                        depMod = m;
+                        break;
+                    }
+                }
 
                 if (depMod == null)
                     violations.Add($"Missing dependency: {mod.ModuleId} requires {dep} (not found)");
@@ -141,19 +177,28 @@ public static class ModuleRegistry
     public static async ValueTask<ModulePackage> ExportAsync(string moduleId, CancellationToken ct)
     {
         var modules = await GetModulesAsync(ct);
-        var mod = modules.FirstOrDefault(m =>
-            string.Equals(m.ModuleId, moduleId, StringComparison.OrdinalIgnoreCase))
-            ?? throw new InvalidOperationException($"Module '{moduleId}' not found.");
+        ModuleInfo? mod = null;
+        foreach (var m in modules)
+        {
+            if (string.Equals(m.ModuleId, moduleId, StringComparison.OrdinalIgnoreCase))
+            {
+                mod = m;
+                break;
+            }
+        }
+        if (mod == null) throw new InvalidOperationException($"Module '{moduleId}' not found.");
 
         var schemas = new List<ModuleEntitySchema>();
         foreach (var slug in mod.EntitySlugs)
         {
             if (!DataScaffold.TryGetEntity(slug, out var meta)) continue;
+            var fieldSchemas = new List<ModuleFieldSchema>();
+            foreach (var f in meta.Fields)
+                fieldSchemas.Add(new ModuleFieldSchema(f.Name, f.Label, f.FieldType.ToString(), f.Required, f.IsIndexed));
             schemas.Add(new ModuleEntitySchema(
                 Slug: slug,
                 EntityName: meta.Name,
-                Fields: meta.Fields.Select(f => new ModuleFieldSchema(
-                    f.Name, f.Label, f.FieldType.ToString(), f.Required, f.IsIndexed)).ToList()));
+                Fields: fieldSchemas));
         }
 
         return new ModulePackage(
@@ -169,8 +214,15 @@ public static class ModuleRegistry
 
     private static string GetField(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
     {
-        var field = meta.Fields.FirstOrDefault(f =>
-            string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        DataFieldMetadata? field = null;
+        foreach (var f in meta.Fields)
+        {
+            if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                field = f;
+                break;
+            }
+        }
         return field?.GetValueFn?.Invoke(obj)?.ToString() ?? string.Empty;
     }
 

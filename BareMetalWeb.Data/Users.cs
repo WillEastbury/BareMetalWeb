@@ -1,5 +1,4 @@
 using System;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -21,7 +20,12 @@ public static class Users
 
         var normalized = email.Trim();
         var users = await DataStoreProvider.Current.QueryAsync<User>(null, cancellationToken).ConfigureAwait(false);
-        return users.FirstOrDefault(user => string.Equals(user.Email, normalized, StringComparison.OrdinalIgnoreCase));
+        foreach (var user in users)
+        {
+            if (string.Equals(user.Email, normalized, StringComparison.OrdinalIgnoreCase))
+                return user;
+        }
+        return null;
     }
 
     public static async ValueTask<User?> FindByUserNameAsync(string userName, CancellationToken cancellationToken = default)
@@ -31,7 +35,12 @@ public static class Users
 
         var normalized = userName.Trim();
         var users = await DataStoreProvider.Current.QueryAsync<User>(null, cancellationToken).ConfigureAwait(false);
-        return users.FirstOrDefault(user => string.Equals(user.UserName, normalized, StringComparison.OrdinalIgnoreCase));
+        foreach (var user in users)
+        {
+            if (string.Equals(user.UserName, normalized, StringComparison.OrdinalIgnoreCase))
+                return user;
+        }
+        return null;
     }
 
     public static async ValueTask<User?> FindByEmailOrUserNameAsync(string value, CancellationToken cancellationToken = default)
@@ -41,8 +50,13 @@ public static class Users
 
         var normalized = value.Trim();
         var users = await DataStoreProvider.Current.QueryAsync<User>(null, cancellationToken).ConfigureAwait(false);
-        return users.FirstOrDefault(user => string.Equals(user.Email, normalized, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(user.UserName, normalized, StringComparison.OrdinalIgnoreCase));
+        foreach (var user in users)
+        {
+            if (string.Equals(user.Email, normalized, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(user.UserName, normalized, StringComparison.OrdinalIgnoreCase))
+                return user;
+        }
+        return null;
     }
 
     public static async ValueTask<bool> ExistsByEmailOrUserNameAsync(string value, CancellationToken cancellationToken = default)

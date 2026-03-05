@@ -89,10 +89,11 @@ public sealed class AggregateLockManager
         TimeSpan expiry)
     {
         // §6.2 — sort deterministically to prevent deadlocks
-        var sorted = aggregateIds
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .OrderBy(x => x, StringComparer.Ordinal)
-            .ToList();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var sorted = new List<string>();
+        foreach (var id in aggregateIds)
+            if (seen.Add(id)) sorted.Add(id);
+        sorted.Sort(StringComparer.Ordinal);
 
         var acquired = new List<string>(sorted.Count);
         foreach (var id in sorted)
@@ -127,7 +128,12 @@ public sealed class AggregateLockManager
         {
             var now = DateTime.UtcNow;
             lock (_syncRoot)
-                return _locks.Values.Count(e => e.ExpiryUtc > now);
+            {
+                int count = 0;
+                foreach (var e in _locks.Values)
+                    if (e.ExpiryUtc > now) count++;
+                return count;
+            }
         }
     }
 }
