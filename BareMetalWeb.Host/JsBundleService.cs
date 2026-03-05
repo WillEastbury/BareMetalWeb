@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.IO;
 using System.Security.Cryptography;
@@ -72,6 +73,9 @@ public static class JsBundleService
 
     private static readonly ConcurrentDictionary<string, BundleData> _bundles = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Characters that require special handling during minification. SIMD-accelerated via SearchValues.</summary>
+    private static readonly SearchValues<char> s_jsSpecialChars = SearchValues.Create("\r\n\"'`/");
+
     /// <summary>
     /// Builds and caches the SSR and VNext JS bundles from files in <paramref name="jsDirectory"/>.
     /// Should be called once at application startup.
@@ -135,12 +139,31 @@ public static class JsBundleService
     internal static string MinifyJs(string source)
     {
         var sb = new StringBuilder(source.Length);
-        int i = 0, len = source.Length;
+        var span = source.AsSpan();
+        int i = 0;
         int consecutiveNewlines = 0;
 
-        while (i < len)
+        while (i < span.Length)
         {
-            char c = source[i];
+            // SIMD fast path: bulk-copy plain text to next special character.
+            // SearchValues<char> uses hardware SIMD (SSE/AVX on x64, NEON on ARM64).
+            var remaining = span.Slice(i);
+            int nextSpecial = remaining.IndexOfAny(s_jsSpecialChars);
+
+            if (nextSpecial < 0)
+            {
+                sb.Append(remaining);
+                break;
+            }
+
+            if (nextSpecial > 0)
+            {
+                sb.Append(remaining.Slice(0, nextSpecial));
+                consecutiveNewlines = 0;
+                i += nextSpecial;
+            }
+
+            char c = span[i];
 
             // Normalise CRLF → LF by skipping bare \r
             if (c == '\r') { i++; continue; }
@@ -152,39 +175,71 @@ public static class JsBundleService
                 char quote = c;
                 sb.Append(c);
                 i++;
-                while (i < len)
+                while (i < span.Length)
                 {
-                    char sc = source[i];
-                    if (sc == '\\' && i + 1 < len)   // escape sequence: copy both chars
+                    // SIMD inner scan: find next quote, backslash, or newline
+                    var litRemaining = span.Slice(i);
+                    int nextLit = quote == '`'
+                        ? litRemaining.IndexOfAny('\\', quote)
+                        : litRemaining.IndexOfAny('\\', quote, '\n');
+
+                    if (nextLit < 0)
+                    {
+                        sb.Append(litRemaining);
+                        i = span.Length;
+                        break;
+                    }
+
+                    if (nextLit > 0)
+                    {
+                        sb.Append(litRemaining.Slice(0, nextLit));
+                        i += nextLit;
+                    }
+
+                    char sc = span[i];
+                    if (sc == '\\' && i + 1 < span.Length)
                     {
                         sb.Append(sc);
                         i++;
-                        sb.Append(source[i]);
+                        sb.Append(span[i]);
                         i++;
                         continue;
                     }
                     sb.Append(sc);
                     i++;
                     if (sc == quote) break;
-                    if (sc == '\n' && quote != '`') break; // unterminated non-template string
+                    if (sc == '\n' && quote != '`') break;
                 }
                 continue;
             }
 
-            // Line comment: skip to end of line (newline is handled on the next iteration)
-            if (c == '/' && i + 1 < len && source[i + 1] == '/')
+            // Line comment: skip to end of line (SIMD scan for newline)
+            if (c == '/' && i + 1 < span.Length && span[i + 1] == '/')
             {
                 i += 2;
-                while (i < len && source[i] != '\n') i++;
+                var commentRemaining = span.Slice(i);
+                int nlIdx = commentRemaining.IndexOf('\n');
+                i += nlIdx < 0 ? commentRemaining.Length : nlIdx;
                 continue;
             }
 
-            // Block comment: replace the whole comment with one space to avoid merging tokens
-            if (c == '/' && i + 1 < len && source[i + 1] == '*')
+            // Block comment: replace with one space (SIMD scan for *)
+            if (c == '/' && i + 1 < span.Length && span[i + 1] == '*')
             {
                 i += 2;
-                while (i + 1 < len && !(source[i] == '*' && source[i + 1] == '/')) i++;
-                if (i + 1 < len) i += 2; // consume closing */
+                while (i + 1 < span.Length)
+                {
+                    var blockRemaining = span.Slice(i);
+                    int starIdx = blockRemaining.IndexOf('*');
+                    if (starIdx < 0) { i = span.Length; break; }
+                    i += starIdx;
+                    if (i + 1 < span.Length && span[i + 1] == '/')
+                    {
+                        i += 2;
+                        break;
+                    }
+                    i++;
+                }
                 sb.Append(' ');
                 continue;
             }
@@ -198,6 +253,7 @@ public static class JsBundleService
                 continue;
             }
 
+            // Regular slash (division/regex) — not followed by / or *
             consecutiveNewlines = 0;
             sb.Append(c);
             i++;
