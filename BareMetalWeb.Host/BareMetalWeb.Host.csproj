@@ -17,16 +17,13 @@
          Full PublishAot requires eliminating remaining Expression.Compile
          and Assembly.GetTypes calls (tracked in #791). -->
     <IsAotCompatible>true</IsAotCompatible>
-    <!-- GC memory footprint reduction:
-         Workstation GC uses a single heap instead of one per logical CPU (server GC),
-         significantly reducing the baseline working set. Override at deploy time via
-         DOTNET_GCServer=1 environment variable to restore server GC for throughput.
-         ConserveMemory (0-9) instructs the GC to return memory to the OS more aggressively
-         at the cost of slightly more frequent collections; 5 is a balanced default.
+    <!-- GC configuration:
+         Server GC uses one heap per logical CPU for higher throughput under load.
+         GCHeapCount=0 lets the runtime auto-select the heap count.
          IlcDisableRegionGC (NativeAOT only) disables region-based GC which trades
          memory use for allocation throughput. -->
-    <ServerGarbageCollection>false</ServerGarbageCollection>
-    <GCConserveMemory>5</GCConserveMemory>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <GCHeapCount>0</GCHeapCount>
     <IlcDisableRegionGC>true</IlcDisableRegionGC>
   </PropertyGroup>
 
@@ -50,11 +47,10 @@
   </ItemGroup>
 
   <!-- Tell the AOT linker which GC code paths to trim.
-       Trim="true" allows the linker to remove the opposite branch (e.g., server GC code
-       is removed when System.GC.Server=false, saving code memory in the published binary). -->
+       Trim="true" allows the linker to remove the opposite branch (e.g., workstation GC code
+       is removed when System.GC.Server=true, saving code memory in the published binary). -->
   <ItemGroup>
-    <RuntimeHostConfigurationOption Include="System.GC.Server" Value="false" Trim="true" />
+    <RuntimeHostConfigurationOption Include="System.GC.Server" Value="true" Trim="true" />
     <RuntimeHostConfigurationOption Include="System.GC.Concurrent" Value="true" Trim="true" />
-    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="5" Trim="true" />
   </ItemGroup>
 </Project>

@@ -162,10 +162,9 @@ public static class BareMetalWebExtensions
 
             // GC — informational only; actual values are baked in at publish time via the
             // project's RuntimeHostConfigurationOption entries. Override at process-start time
-            // by setting DOTNET_GCServer=1 (server GC) or DOTNET_GCConserveMemory=0-9 env
-            // variables before launching the process — these cannot be changed while running.
-            (WellKnownSettings.GCServerMode, app.Configuration.GetValue("GC:ServerMode", false).ToString(), "Server GC mode (true = one heap per CPU, false = workstation GC). Fixed at process start; set DOTNET_GCServer env var before launch to override."),
-            (WellKnownSettings.GCConserveMemory, app.Configuration.GetValue("GC:ConserveMemory", 5).ToString(), "GC memory conservation level (0-9). Higher values return memory to the OS more aggressively. Fixed at process start; set DOTNET_GCConserveMemory env var before launch to override."),
+            // by setting DOTNET_GCServer=1 (server GC) env variable before launching the process
+            // — these cannot be changed while running.
+            (WellKnownSettings.GCServerMode, app.Configuration.GetValue("GC:ServerMode", true).ToString(), "Server GC mode (true = one heap per CPU, false = workstation GC). Fixed at process start; set DOTNET_GCServer env var before launch to override."),
 
             // Admin
             (WellKnownSettings.AllowWipeData, app.Configuration.GetValue("Admin:AllowWipeData", string.Empty), "Secret token required to trigger wipe-all-data. Leave empty to disable the endpoint."),
