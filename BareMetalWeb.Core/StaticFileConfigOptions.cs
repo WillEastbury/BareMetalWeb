@@ -125,7 +125,7 @@ public sealed class StaticFileConfigOptions
         options.HideUnknownMimeFiles = config.HideUnknownMimeFiles;
         options.DefaultMimeType = config.DefaultMimeType ?? options.DefaultMimeType;
         options.DefaultFile = config.DefaultFile;
-        options.DefaultFiles = config.DefaultFiles?.ToList() ?? new List<string>();
+        options.DefaultFiles = config.DefaultFiles != null ? new List<string>(config.DefaultFiles) : new List<string>();
         options.EnableDirectoryBrowsing = config.EnableDirectoryBrowsing;
         options.DirectoryListingHideDotFiles = config.DirectoryListingHideDotFiles;
         options.DirectoryListingHideUnknownMime = config.DirectoryListingHideUnknownMime;
@@ -140,7 +140,7 @@ public sealed class StaticFileConfigOptions
         options.AllowRangeOnPrecompressed = config.AllowRangeOnPrecompressed;
         options.MaxRanges = config.MaxRanges;
         options.MetadataCacheMaxEntries = config.MetadataCacheMaxEntries;
-        options.CompressibleContentTypePrefixes = config.CompressibleContentTypePrefixes?.ToList() ?? new List<string>();
+        options.CompressibleContentTypePrefixes = config.CompressibleContentTypePrefixes != null ? new List<string>(config.CompressibleContentTypePrefixes) : new List<string>();
 
         return options;
     }

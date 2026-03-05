@@ -215,8 +215,15 @@ public static class ProductRenderer
 
     private static string GetField(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
     {
-        var field = meta.Fields.FirstOrDefault(f =>
-            string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        BareMetalWeb.Core.DataFieldMetadata? field = null;
+        foreach (var f in meta.Fields)
+        {
+            if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                field = f;
+                break;
+            }
+        }
         return field?.GetValueFn?.Invoke(obj)?.ToString() ?? string.Empty;
     }
 

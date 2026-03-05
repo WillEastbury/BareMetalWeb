@@ -65,10 +65,10 @@ public sealed class QueryPlanner
             JoinInfo: null));
 
         // 3. Reorder joins by estimated cardinality of the TO entity (smallest first)
-        var orderedJoins = query.Joins
-            .Select(j => (Join: j, Estimate: EstimateCardinality(j.ToEntity)))
-            .OrderBy(x => x.Estimate)
-            .ToList();
+        var orderedJoins = new List<(ReportJoin Join, int Estimate)>();
+        foreach (var j in query.Joins)
+            orderedJoins.Add((j, EstimateCardinality(j.ToEntity)));
+        orderedJoins.Sort((a, b) => a.Estimate.CompareTo(b.Estimate));
 
         foreach (var (join, estimate) in orderedJoins)
         {
@@ -111,14 +111,42 @@ public sealed class QueryPlanner
         }
 
         // 4. Determine aggregate streaming eligibility
-        var canStreamAggregate = query.Columns.Any(c =>
-            c.Aggregate != AggregateFunction.None) && query.Joins.Count == 0;
+        bool canStreamAggregate = false;
+        if (query.Joins.Count == 0)
+        {
+            foreach (var c in query.Columns)
+            {
+                if (c.Aggregate != AggregateFunction.None)
+                {
+                    canStreamAggregate = true;
+                    break;
+                }
+            }
+        }
 
         // 5. Post-join filter step (filters referencing cross-entity computed fields)
-        var hasPostJoinFilters = query.Filters.Any(f =>
-            !string.IsNullOrEmpty(f.Entity) &&
-            !string.Equals(f.Entity, query.RootEntity, StringComparison.OrdinalIgnoreCase) &&
-            query.Joins.All(j => !string.Equals(j.ToEntity, f.Entity, StringComparison.OrdinalIgnoreCase)));
+        bool hasPostJoinFilters = false;
+        foreach (var f in query.Filters)
+        {
+            if (string.IsNullOrEmpty(f.Entity) ||
+                string.Equals(f.Entity, query.RootEntity, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            bool referencesJoin = false;
+            foreach (var j in query.Joins)
+            {
+                if (string.Equals(j.ToEntity, f.Entity, StringComparison.OrdinalIgnoreCase))
+                {
+                    referencesJoin = true;
+                    break;
+                }
+            }
+            if (!referencesJoin)
+            {
+                hasPostJoinFilters = true;
+                break;
+            }
+        }
 
         if (hasPostJoinFilters)
         {
@@ -197,8 +225,12 @@ public sealed class QueryPlanner
         if (!DataScaffold.TryGetEntity(entitySlug, out var meta))
             return false;
 
-        return meta.Fields.Any(f =>
-            string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase) && f.IsIndexed);
+        foreach (var f in meta.Fields)
+        {
+            if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase) && f.IsIndexed)
+                return true;
+        }
+        return false;
     }
 
     private static QueryOperator MapOperator(string op)

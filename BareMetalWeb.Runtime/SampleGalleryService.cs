@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -32,9 +31,14 @@ public static class SampleGalleryService
         var assembly = typeof(SampleGalleryService).Assembly;
         var packages = new List<SamplePackage>();
 
-        foreach (var resourceName in assembly.GetManifestResourceNames()
-            .Where(n => n.Contains(".Samples.") && n.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-            .OrderBy(n => n))
+        var allResourceNames = assembly.GetManifestResourceNames();
+        var matchingResources = new List<string>();
+        foreach (var n in allResourceNames)
+            if (n.Contains(".Samples.") && n.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                matchingResources.Add(n);
+        matchingResources.Sort(StringComparer.Ordinal);
+
+        foreach (var resourceName in matchingResources)
         {
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream == null) continue;
@@ -56,10 +60,15 @@ public static class SampleGalleryService
         ArgumentNullException.ThrowIfNull(slug);
 
         var assembly = typeof(SampleGalleryService).Assembly;
-        var resourceName = assembly.GetManifestResourceNames()
-            .FirstOrDefault(n =>
-                n.Contains(".Samples.") &&
-                n.EndsWith($".{slug}.json", StringComparison.OrdinalIgnoreCase));
+        string? resourceName = null;
+        foreach (var n in assembly.GetManifestResourceNames())
+        {
+            if (n.Contains(".Samples.") && n.EndsWith($".{slug}.json", StringComparison.OrdinalIgnoreCase))
+            {
+                resourceName = n;
+                break;
+            }
+        }
 
         if (resourceName == null) return null;
 
@@ -98,12 +107,15 @@ public static class SampleGalleryService
         var deployed = new List<string>();
 
         // Load existing EntityDefinitions so we can skip or overwrite
-        var existingDefs = (await store.QueryAsync<EntityDefinition>(null, cancellationToken)
-            .ConfigureAwait(false)).ToList();
+        var existingDefs = new List<EntityDefinition>(await store.QueryAsync<EntityDefinition>(null, cancellationToken)
+            .ConfigureAwait(false));
 
-        var existingBySlug = existingDefs.ToDictionary(
-            e => !string.IsNullOrWhiteSpace(e.Slug) ? e.Slug! : DataScaffold.ToSlug(e.Name),
-            StringComparer.OrdinalIgnoreCase);
+        var existingBySlug = new Dictionary<string, EntityDefinition>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in existingDefs)
+        {
+            var s = !string.IsNullOrWhiteSpace(e.Slug) ? e.Slug! : DataScaffold.ToSlug(e.Name);
+            existingBySlug[s] = e;
+        }
 
         foreach (var srcEntity in package.Entities)
         {
@@ -154,8 +166,9 @@ public static class SampleGalleryService
             await store.SaveAsync(newEntity, cancellationToken).ConfigureAwait(false);
 
             // Import fields that belong to this entity (matched by old entity Id from the JSON)
-            foreach (var srcField in package.Fields.Where(f => f.EntityId == oldEntityId))
+            foreach (var srcField in package.Fields)
             {
+                if (srcField.EntityId != oldEntityId) continue;
                 var newField = new FieldDefinition
                 {
                     FieldId = Guid.NewGuid().ToString("D"),
@@ -189,8 +202,9 @@ public static class SampleGalleryService
             }
 
             // Import indexes that belong to this entity
-            foreach (var srcIndex in package.Indexes.Where(ix => ix.EntityId == oldEntityId))
+            foreach (var srcIndex in package.Indexes)
             {
+                if (srcIndex.EntityId != oldEntityId) continue;
                 var newIndex = new IndexDefinition
                 {
                     EntityId = newEntity.EntityId,
@@ -202,8 +216,9 @@ public static class SampleGalleryService
             }
 
             // Import actions that belong to this entity
-            foreach (var srcAction in package.Actions.Where(a => a.EntityId == oldEntityId))
+            foreach (var srcAction in package.Actions)
             {
+                if (srcAction.EntityId != oldEntityId) continue;
                 var newAction = new ActionDefinition
                 {
                     EntityId = newEntity.EntityId,
@@ -218,8 +233,9 @@ public static class SampleGalleryService
                 await store.SaveAsync(newAction, cancellationToken).ConfigureAwait(false);
 
                 // Import action commands that belong to this action (matched by Name)
-                foreach (var srcCmd in package.ActionCommands.Where(c => c.ActionId == srcAction.Name))
+                foreach (var srcCmd in package.ActionCommands)
                 {
+                    if (srcCmd.ActionId != srcAction.Name) continue;
                     var newCmd = new ActionCommandDefinition
                     {
                         ActionId = newAction.Key.ToString(),
@@ -237,9 +253,9 @@ public static class SampleGalleryService
             }
 
             // Import reports that reference this entity slug
-            foreach (var srcReport in package.Reports.Where(r =>
-                string.Equals(r.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)))
+            foreach (var srcReport in package.Reports)
             {
+                if (!string.Equals(srcReport.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) continue;
                 var newReport = new ReportDefinition
                 {
                     Name = srcReport.Name,
@@ -255,8 +271,9 @@ public static class SampleGalleryService
             }
 
             // Import aggregation definitions for this entity
-            foreach (var srcAgg in package.Aggregations.Where(a => a.EntityId == oldEntityId))
+            foreach (var srcAgg in package.Aggregations)
             {
+                if (srcAgg.EntityId != oldEntityId) continue;
                 var newAgg = new AggregationDefinition
                 {
                     EntityId = newEntity.EntityId,
@@ -268,8 +285,9 @@ public static class SampleGalleryService
             }
 
             // Import scheduled action definitions for this entity
-            foreach (var srcSched in package.ScheduledActions.Where(s => s.EntityId == oldEntityId))
+            foreach (var srcSched in package.ScheduledActions)
             {
+                if (srcSched.EntityId != oldEntityId) continue;
                 var newSched = new ScheduledActionDefinition
                 {
                     EntityId = newEntity.EntityId,
@@ -282,12 +300,16 @@ public static class SampleGalleryService
                 await store.SaveAsync(newSched, cancellationToken).ConfigureAwait(false);
             }
 
-            var fieldCount = package.Fields.Count(f => f.EntityId == oldEntityId);
-            var indexCount = package.Indexes.Count(ix => ix.EntityId == oldEntityId);
-            var actionCount = package.Actions.Count(a => a.EntityId == oldEntityId);
-            var reportCount = package.Reports.Count(r =>
-                string.Equals(r.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase));
-            var aggCount = package.Aggregations.Count(a => a.EntityId == oldEntityId);
+            int fieldCount = 0;
+            foreach (var f in package.Fields) if (f.EntityId == oldEntityId) fieldCount++;
+            int indexCount = 0;
+            foreach (var ix in package.Indexes) if (ix.EntityId == oldEntityId) indexCount++;
+            int actionCount = 0;
+            foreach (var a in package.Actions) if (a.EntityId == oldEntityId) actionCount++;
+            int reportCount = 0;
+            foreach (var r in package.Reports) if (string.Equals(r.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) reportCount++;
+            int aggCount = 0;
+            foreach (var a in package.Aggregations) if (a.EntityId == oldEntityId) aggCount++;
             logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es), {actionCount} action(s), {reportCount} report(s), {aggCount} aggregation(s).");
             deployed.Add(srcEntity.Name);
         }
@@ -356,11 +378,11 @@ public static class SampleGalleryService
             Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityDefId } }
         };
 
-        var fields = (await store.QueryAsync<FieldDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
+        var fields = new List<FieldDefinition>(await store.QueryAsync<FieldDefinition>(entityIdQuery, ct).ConfigureAwait(false));
         foreach (var f in fields)
             await store.DeleteAsync<FieldDefinition>(f.Key, ct).ConfigureAwait(false);
 
-        var idxs = (await store.QueryAsync<IndexDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
+        var idxs = new List<IndexDefinition>(await store.QueryAsync<IndexDefinition>(entityIdQuery, ct).ConfigureAwait(false));
         foreach (var idx in idxs)
             await store.DeleteAsync<IndexDefinition>(idx.Key, ct).ConfigureAwait(false);
 
@@ -369,14 +391,14 @@ public static class SampleGalleryService
         {
             Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityDefId } }
         };
-        var actions = (await store.QueryAsync<ActionDefinition>(actionQuery, ct).ConfigureAwait(false)).ToList();
+        var actions = new List<ActionDefinition>(await store.QueryAsync<ActionDefinition>(actionQuery, ct).ConfigureAwait(false));
         foreach (var action in actions)
         {
             var cmdQuery = new QueryDefinition
             {
                 Clauses = { new QueryClause { Field = "ActionId", Operator = QueryOperator.Equals, Value = action.Key } }
             };
-            var cmds = (await store.QueryAsync<ActionCommandDefinition>(cmdQuery, ct).ConfigureAwait(false)).ToList();
+            var cmds = new List<ActionCommandDefinition>(await store.QueryAsync<ActionCommandDefinition>(cmdQuery, ct).ConfigureAwait(false));
             foreach (var cmd in cmds)
                 await store.DeleteAsync<ActionCommandDefinition>(cmd.Key, ct).ConfigureAwait(false);
             await store.DeleteAsync<ActionDefinition>(action.Key, ct).ConfigureAwait(false);
@@ -387,17 +409,17 @@ public static class SampleGalleryService
         {
             Clauses = { new QueryClause { Field = "RootEntity", Operator = QueryOperator.Equals, Value = entitySlug } }
         };
-        var reports = (await store.QueryAsync<ReportDefinition>(reportQuery, ct).ConfigureAwait(false)).ToList();
+        var reports = new List<ReportDefinition>(await store.QueryAsync<ReportDefinition>(reportQuery, ct).ConfigureAwait(false));
         foreach (var report in reports)
             await store.DeleteAsync<ReportDefinition>(report.Key, ct).ConfigureAwait(false);
 
         // Delete aggregation definitions
-        var aggs = (await store.QueryAsync<AggregationDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
+        var aggs = new List<AggregationDefinition>(await store.QueryAsync<AggregationDefinition>(entityIdQuery, ct).ConfigureAwait(false));
         foreach (var agg in aggs)
             await store.DeleteAsync<AggregationDefinition>(agg.Key, ct).ConfigureAwait(false);
 
         // Delete scheduled actions
-        var scheds = (await store.QueryAsync<ScheduledActionDefinition>(entityIdQuery, ct).ConfigureAwait(false)).ToList();
+        var scheds = new List<ScheduledActionDefinition>(await store.QueryAsync<ScheduledActionDefinition>(entityIdQuery, ct).ConfigureAwait(false));
         foreach (var sched in scheds)
             await store.DeleteAsync<ScheduledActionDefinition>(sched.Key, ct).ConfigureAwait(false);
     }

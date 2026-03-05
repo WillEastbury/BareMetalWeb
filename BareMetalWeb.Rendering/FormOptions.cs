@@ -21,7 +21,8 @@ public static class FormOptions
                 // Ignore invalid cultures
             }
         }
-        var list = set.OrderBy(code => code).ToList();
+        var list = new List<string>(set);
+        list.Sort(StringComparer.Ordinal);
         return list;
     });
 
@@ -41,9 +42,9 @@ public static class FormOptions
                 // Ignore invalid cultures
             }
         }
-        return set.OrderBy(kvp => kvp.Value)
-            .Select(kvp => new KeyValuePair<string, string>(kvp.Key, kvp.Value))
-            .ToList();
+        var list = new List<KeyValuePair<string, string>>(set);
+        list.Sort((a, b) => string.Compare(a.Value, b.Value, StringComparison.Ordinal));
+        return list;
     });
 
     public static IReadOnlyList<string> GetCurrencyOptions() => CurrencyCodes.Value;

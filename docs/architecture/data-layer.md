@@ -272,7 +272,7 @@ Sequential IDs are persisted so they survive restarts:
 {dataRoot}/
 ├── wal/                          ← WalStore root
 │   ├── {EntityType}_idmap.bin    ← string ID → packed ulong WAL key
-│   └── wal_seg_*.log             ← append-only WAL segment files
+│   └── wal_seg_*.log             ← append-only WAL segment files (CRC32C verified)
 ├── {EntityType}/
 │   ├── schema-{EntityType}-*.json ← schema version files (shared with LocalFolderBinaryDataProvider)
 │   └── _seqid.dat                ← sequential ID counter
@@ -284,9 +284,50 @@ Sequential IDs are persisted so they survive restarts:
 │   └── {EntityType}/
 │       └── {FieldName}_index.page ← IndexStore secondary field index (LocalPagedFile format)
 └── indexes/
-    └── {EntityType}.idx          ← SearchIndexManager full-text index
+    └── {EntityType}.idx          ← SearchIndexManager full-text index (Inverted only)
 ```
 
 ---
 
-_Status: Verified against codebase @ metadata-migration-719 branch_
+## Hardware Acceleration in the Data Layer
+
+BareMetalWeb uses CPU-specific SIMD intrinsics in several hot paths.  All paths
+are guarded by `IsSupported` checks and fall back gracefully to portable code.
+The `DataLayerCapabilities` class exposes the active code paths as human-readable
+strings for the metrics dashboard.
+
+### CRC-32C (WAL checksums) — `WalCrc32C`
+
+Each WAL segment entry includes a CRC-32C checksum.  The implementation selects
+the fastest available hardware path at runtime:
+
+| CPU feature | Code path | Granularity |
+|---|---|---|
+| ARM64 CRC | `Crc32.Arm64.ComputeCrc32C` | 8-byte lanes |
+| x86-64 SSE4.2 | `Sse42.X64.Crc32` | 8-byte lanes |
+| x86 SSE4.2 | `Sse42.Crc32` | 4-byte lanes |
+| Portable | Slicing-by-4 lookup tables (~4× byte-at-a-time) | 4-byte lanes |
+
+### Vector Distance (ANN search) — `SimdDistance`
+
+Cosine, dot-product, and Euclidean distance computations dispatch to the widest
+available SIMD instruction set.  All paths use fused multiply-add (FMA) where
+available to reduce rounding error and improve throughput:
+
+| CPU feature | Code path | Width |
+|---|---|---|
+| AVX-512F | `Avx512F.FusedMultiplyAdd` | 16 floats/iter |
+| AVX2 + FMA | `Fma.MultiplyAdd` | 8 floats/iter |
+| ARM64 AdvSimd | `AdvSimd.FusedMultiplyAdd` (NEON) | 4 floats/iter |
+| Portable | `System.Numerics.Vector<float>` (auto-vectorised by JIT) | platform width |
+
+### Key Comparison — `WalLatin1Key32.CompareTo`
+
+The 32-byte Latin-1 index key is stored internally as four `ulong` words.
+`CompareTo` byte-swaps each word with `BinaryPrimitives.ReverseEndianness` and
+compares the resulting big-endian values directly — a zero-allocation,
+branch-minimal comparison that avoids the prior stackalloc + `SequenceCompareTo`.
+
+---
+
+_Status: Updated @ commit HEAD (2026-03-05) — extended hardware acceleration section with SimdDistance FMA paths, WalLatin1Key32 word comparison, CRC slicing-by-4 software fallback_

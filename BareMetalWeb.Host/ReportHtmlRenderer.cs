@@ -326,8 +326,15 @@ public static class ReportHtmlRenderer
         if (!BareMetalWeb.Core.DataScaffold.TryGetEntity(entitySlug, out var meta))
             return Array.Empty<string>();
 
-        var field = meta.Fields.FirstOrDefault(f =>
-            string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        BareMetalWeb.Core.DataFieldMetadata? field = null;
+        foreach (var f in meta.Fields)
+        {
+            if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                field = f;
+                break;
+            }
+        }
         if (field == null) return Array.Empty<string>();
 
         var getter = field.GetValueFn;
@@ -348,6 +355,8 @@ public static class ReportHtmlRenderer
             }
         }
 
-        return distinct.ToArray();
+        var distinctArray = new string[distinct.Count];
+        distinct.CopyTo(distinctArray);
+        return distinctArray;
     }
 }

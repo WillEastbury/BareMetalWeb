@@ -205,7 +205,10 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     public SchemaDefinition CreateSchema(int version, IEnumerable<MemberSignature> members, BinaryArchitecture architecture, uint? expectedHash = null)
     {
         if (members is null) throw new ArgumentNullException(nameof(members));
-        var materialized = members.ToArray();
+        var materializedList = new List<MemberSignature>();
+        foreach (var m in members)
+            materializedList.Add(m);
+        var materialized = materializedList.ToArray();
         var hash = GetSignatureHash(materialized);
         if (expectedHash.HasValue && expectedHash.Value != hash)
             throw new InvalidOperationException("Schema hash does not match member signatures.");

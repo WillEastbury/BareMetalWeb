@@ -4,7 +4,6 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
@@ -207,7 +206,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
             if (existing == null)
             {
-                schemaVersion = cache.Versions.Count == 0 ? 1 : cache.Versions.Keys.Max() + 1;
+                int maxVer = int.MinValue;
+                foreach (var k in cache.Versions.Keys)
+                {
+                    if (k > maxVer) maxVer = k;
+                }
+                schemaVersion = cache.Versions.Count == 0 ? 1 : maxVer + 1;
                 var schemaFile = BuildSchemaFile(currentSchema, schemaVersion);
                 cache.Versions[schemaVersion]           = schemaFile;
                 cache.HashToVersion[currentSchema.Hash] = schemaVersion;
@@ -237,6 +241,11 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             var bytes  = _serializer.Serialize(obj, schemaVersion);
             var walKey = GetOrAllocateKey(type.Name, obj.Key);
 
+            // Capture old head pointer for cache eviction before commit changes it
+            ulong oldPtr = 0;
+            if (!isInsert)
+                _walStore.TryGetHead(walKey, out oldPtr);
+
             var commitTask = _walStore.CommitAsync(new[] { WalOp.Upsert(walKey, bytes, encryption: _walStore.Encryption) });
             if (!commitTask.IsCompleted)
                 commitTask.GetAwaiter().GetResult();
@@ -247,14 +256,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             if (isInsert)
                 _liveCounts.AddOrUpdate(type.Name, 1, (_, c) => c + 1);
 
-            // Evict stale deserialization cache entry (WAL pointer has changed)
-            foreach (var ck in _deserCache.Keys)
+            // Evict stale deserialization cache entry using exact old key
+            if (!isInsert && oldPtr != 0)
             {
-                if (ck.TypeName == type.Name && ck.Key == obj.Key)
-                {
-                    _deserCache.TryRemove(ck, out _);
-                    _deserCacheAccess.TryRemove(ck, out _);
-                }
+                var evictKey = (type.Name, obj.Key, oldPtr);
+                _deserCache.TryRemove(evictKey, out _);
+                _deserCacheAccess.TryRemove(evictKey, out _);
             }
 
             // ── Update secondary field indexes ────────────────────────────
@@ -334,14 +341,33 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
     private void EvictDeserCache()
     {
-        // LRU eviction — remove ~25% of entries with oldest access times
+        // LRU eviction — remove ~25% of entries with oldest access times.
+        // Single-pass min-scan avoids O(n log n) sort on the full cache.
         int toRemove = _deserCache.Count / 4;
-        var oldest = _deserCacheAccess
-            .OrderBy(kvp => kvp.Value)
-            .Take(toRemove)
-            .Select(kvp => kvp.Key)
-            .ToList();
-        foreach (var key in oldest)
+        if (toRemove == 0) toRemove = 1;
+
+        var evictKeys = new List<((string TypeName, uint Key, ulong WalPtr) key, long access)>(toRemove);
+
+        foreach (var kvp in _deserCacheAccess)
+        {
+            if (evictKeys.Count < toRemove)
+            {
+                evictKeys.Add((kvp.Key, kvp.Value));
+                continue;
+            }
+
+            // Find the max (youngest) entry in our evict set and replace it
+            // if this entry is older (smaller tick count)
+            int maxIdx = 0;
+            for (int i = 1; i < evictKeys.Count; i++)
+                if (evictKeys[i].access > evictKeys[maxIdx].access)
+                    maxIdx = i;
+
+            if (kvp.Value < evictKeys[maxIdx].access)
+                evictKeys[maxIdx] = (kvp.Key, kvp.Value);
+        }
+
+        foreach (var (key, _) in evictKeys)
         {
             _deserCache.TryRemove(key, out _);
             _deserCacheAccess.TryRemove(key, out _);
@@ -444,13 +470,32 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                         loaded.Add(obj);
                 }
 
-                IEnumerable<T> filtered = needRecheck
-                    ? loaded.Where(item => _queryEvaluator.Matches(item, query))
-                    : loaded;
-                var sorted = _queryEvaluator.ApplySorts(filtered, query);
+                List<T> filtered;
+                if (needRecheck)
+                {
+                    filtered = new List<T>(loaded.Count);
+                    foreach (var item in loaded)
+                    {
+                        if (_queryEvaluator.Matches(item, query))
+                            filtered.Add(item);
+                    }
+                }
+                else
+                {
+                    filtered = loaded;
+                }
+                var sortedList = new List<T>();
+                foreach (var item in _queryEvaluator.ApplySorts(filtered, query))
+                    sortedList.Add(item);
                 if (skip > 0 || top != DefaultQueryLimit)
-                    sorted = sorted.Skip(skip).Take(top);
-                return sorted.ToList();
+                {
+                    int end = Math.Min(skip + top, sortedList.Count);
+                    var paged = new List<T>(Math.Max(0, end - skip));
+                    for (int i = skip; i < end; i++)
+                        paged.Add(sortedList[i]);
+                    return paged;
+                }
+                return sortedList;
             }
         }
         // ── Full scan (no usable index) ───────────────────────────────────────
@@ -490,11 +535,11 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                     foreach (var (objKey, _) in idMap)
                         allKeys.Add(objKey);
                     allKeys.Reverse();
-                    var descPage = allKeys.Skip(skip).Take(top).ToList();
-                    var descResults = new List<T>(descPage.Count);
-                    foreach (var key in descPage)
+                    int descEnd = Math.Min(skip + top, allKeys.Count);
+                    var descResults = new List<T>(Math.Max(0, descEnd - skip));
+                    for (int i = skip; i < descEnd; i++)
                     {
-                        var obj = Load<T>(key);
+                        var obj = Load<T>(allKeys[i]);
                         if (obj != null) descResults.Add(obj);
                     }
                     return descResults;
@@ -538,11 +583,11 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                             return sort.Direction == SortDirection.Desc ? -cmp : cmp;
                         });
 
-                        var sortPage = keysWithValues.Skip(skip).Take(top).ToList();
-                        var sortResults = new List<T>(sortPage.Count);
-                        foreach (var (key, _) in sortPage)
+                        int sortEnd = Math.Min(skip + top, keysWithValues.Count);
+                        var sortResults = new List<T>(Math.Max(0, sortEnd - skip));
+                        for (int i = skip; i < sortEnd; i++)
                         {
-                            var obj = Load<T>(key);
+                            var obj = Load<T>(keysWithValues[i].Key);
                             if (obj != null)
                                 sortResults.Add(obj);
                         }
@@ -588,10 +633,18 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
         if (!canShortCircuit)
         {
-            IEnumerable<T> sorted = _queryEvaluator.ApplySorts(scanResults, query);
+            var sortedList = new List<T>();
+            foreach (var item in _queryEvaluator.ApplySorts(scanResults, query))
+                sortedList.Add(item);
             if (skip > 0 || top != int.MaxValue)
-                sorted = sorted.Skip(skip).Take(top);
-            return sorted.ToList();
+            {
+                int end = Math.Min(skip + top, sortedList.Count);
+                var paged = new List<T>(Math.Max(0, end - skip));
+                for (int i = skip; i < end; i++)
+                    paged.Add(sortedList[i]);
+                return paged;
+            }
+            return sortedList;
         }
 
         return scanResults;
@@ -724,6 +777,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var idMap    = GetOrLoadIdMap(typeName);
         if (!idMap.TryGetValue(key, out var walKey)) return;
 
+        // Capture old head pointer for cache eviction before commit
+        _walStore.TryGetHead(walKey, out ulong oldPtr);
+
         // Load the old object before deleting so we can remove its index entries
         T? oldObj = null;
         List<PropertyInfo> indexedFields = new();
@@ -740,14 +796,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         // Decrement live count
         _liveCounts.AddOrUpdate(typeName, 0, (_, c) => Math.Max(0, c - 1));
 
-        // Evict deserialization cache entry
-        foreach (var ck in _deserCache.Keys)
+        // Evict deserialization cache entry using exact old key
+        if (oldPtr != 0)
         {
-            if (ck.TypeName == typeName && ck.Key == key)
-            {
-                _deserCache.TryRemove(ck, out _);
-                _deserCacheAccess.TryRemove(ck, out _);
-            }
+            var evictKey = (typeName, key, oldPtr);
+            _deserCache.TryRemove(evictKey, out _);
+            _deserCacheAccess.TryRemove(evictKey, out _);
         }
 
         // ── Remove from secondary field indexes ────────────────────────────
@@ -846,6 +900,11 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             var bytes = serializer.Serialize(record, plan, schemaVersion);
             var walKey = GetOrAllocateKey(entityName, record.Key);
 
+            // Capture old head pointer for cache eviction before commit
+            ulong oldPtr = 0;
+            if (!isInsert)
+                _walStore.TryGetHead(walKey, out oldPtr);
+
             var commitTask = _walStore.CommitAsync(new[] { WalOp.Upsert(walKey, bytes, encryption: _walStore.Encryption) });
             if (!commitTask.IsCompleted)
                 commitTask.GetAwaiter().GetResult();
@@ -855,13 +914,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             if (isInsert)
                 _liveCounts.AddOrUpdate(entityName, 1, (_, c) => c + 1);
 
-            foreach (var ck in _deserCache.Keys)
+            // Evict deserialization cache entry using exact old key
+            if (!isInsert && oldPtr != 0)
             {
-                if (ck.TypeName == entityName && ck.Key == record.Key)
-                {
-                    _deserCache.TryRemove(ck, out _);
-                    _deserCacheAccess.TryRemove(ck, out _);
-                }
+                var evictKey = (entityName, record.Key, oldPtr);
+                _deserCache.TryRemove(evictKey, out _);
+                _deserCacheAccess.TryRemove(evictKey, out _);
             }
 
             var keyStr = record.Key.ToString();
@@ -985,10 +1043,15 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             });
         }
 
-        IEnumerable<DataRecord> output = results;
-        if (skip > 0) output = output.Skip(skip);
-        if (top < DefaultQueryLimit) output = output.Take(top);
-        return output;
+        if (skip > 0 || top < DefaultQueryLimit)
+        {
+            int end = (top < DefaultQueryLimit) ? Math.Min(skip + top, results.Count) : results.Count;
+            var paged = new List<DataRecord>(Math.Max(0, end - skip));
+            for (int i = skip; i < end; i++)
+                paged.Add(results[i]);
+            return paged;
+        }
+        return results;
     }
 
     /// <summary>Queries <see cref="DataRecord"/> entities asynchronously.</summary>
@@ -1001,7 +1064,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         var entityName = schema.EntityName;
         if (query == null || query.Clauses.Count == 0)
             return _liveCounts.TryGetValue(entityName, out var c) ? c : GetOrLoadIdMap(entityName).Count;
-        return QueryRecords(schema, query).Count();
+        int count = 0;
+        foreach (var _ in QueryRecords(schema, query))
+            count++;
+        return count;
     }
 
     /// <summary>Counts <see cref="DataRecord"/> entities asynchronously.</summary>
@@ -1399,7 +1465,14 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         }
 
         if (cache.Versions.Count > 0)
-            cache.CurrentVersion = cache.Versions.Keys.Max();
+        {
+            int maxVersion = int.MinValue;
+            foreach (var key in cache.Versions.Keys)
+            {
+                if (key > maxVersion) maxVersion = key;
+            }
+            cache.CurrentVersion = maxVersion;
+        }
 
         return cache;
     }
@@ -1467,15 +1540,24 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             Version      = version,
             Hash         = schema.Hash,
             Architecture = schema.Architecture.ToString(),
-            Members      = schema.Members
-                .Select(m => new MemberSignatureFile
-                {
-                    Name          = m.Name,
-                    TypeName      = m.TypeName,
-                    BlittableSize = m.BlittableSize,
-                })
-                .ToList()
+            Members      = BuildMemberSignatureFiles(schema.Members)
         };
+
+    private static List<MemberSignatureFile> BuildMemberSignatureFiles(MemberSignature[] members)
+    {
+        var list = new List<MemberSignatureFile>(members.Length);
+        for (int i = 0; i < members.Length; i++)
+        {
+            var m = members[i];
+            list.Add(new MemberSignatureFile
+            {
+                Name          = m.Name,
+                TypeName      = m.TypeName,
+                BlittableSize = m.BlittableSize,
+            });
+        }
+        return list;
+    }
 
     private static bool TryParseSchemaVersion(Type type, string fileName, out int version)
     {
@@ -1520,12 +1602,19 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         }
 
         var schemaMembers = _schemaMemberCache.GetOrAdd((type, schemaVersion), _ =>
-            schemaFile.Members
-                .Select(m => new MemberSignature(
+        {
+            var members = schemaFile.Members;
+            var arr = new MemberSignature[members.Count];
+            for (int i = 0; i < members.Count; i++)
+            {
+                var m = members[i];
+                arr[i] = new MemberSignature(
                     m.Name, m.TypeName,
                     AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)),
-                    m.BlittableSize))
-                .ToArray());
+                    m.BlittableSize);
+            }
+            return arr;
+        });
 
         var arch   = ParseArchitecture(schemaFile.Architecture);
         var schema = _serializer.CreateSchema(schemaFile.Version, schemaMembers, arch, schemaFile.Hash);
@@ -1542,12 +1631,18 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private void ClearSingletonFlagsOnOtherRecords<T>(T obj) where T : BaseDataObject
     {
         var type           = typeof(T);
-        var singletonProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.PropertyType == typeof(bool)
-                        && p.GetCustomAttribute<SingletonFlagAttribute>() != null
-                        && p.CanRead && p.CanWrite
-                        && true.Equals(p.GetValue(obj)))
-            .ToList();
+        var allProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var singletonProps = new List<PropertyInfo>();
+        foreach (var p in allProps)
+        {
+            if (p.PropertyType == typeof(bool)
+                && p.GetCustomAttribute<SingletonFlagAttribute>() != null
+                && p.CanRead && p.CanWrite
+                && true.Equals(p.GetValue(obj)))
+            {
+                singletonProps.Add(p);
+            }
+        }
 
         if (singletonProps.Count == 0) return;
 

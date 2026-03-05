@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
+
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core.Interfaces;
@@ -128,50 +128,82 @@ public sealed class ClientRequestTracker : IClientRequestTracker
 
     public IReadOnlyList<KeyValuePair<string, ClientRequestStats>> GetTopClients(int count)
     {
-        return _stats
-            .OrderByDescending(kvp => kvp.Value.Count)
-            .ThenByDescending(kvp => kvp.Value.LastSeenUtc)
-            .Take(count)
-            .ToList();
+        var list = new List<KeyValuePair<string, ClientRequestStats>>(_stats);
+        list.Sort((a, b) =>
+        {
+            int cmp = b.Value.Count.CompareTo(a.Value.Count);
+            if (cmp != 0) return cmp;
+            return b.Value.LastSeenUtc.CompareTo(a.Value.LastSeenUtc);
+        });
+        if (list.Count > count)
+            list.RemoveRange(count, list.Count - count);
+        return list;
     }
 
     public void GetTopClientsTable(int count, out string[] tableColumns, out string[][] tableRows)
     {
         var top = GetTopClients(count);
         tableColumns = new[] { "IP Address", "Requests", "Last Seen (UTC)" };
-        tableRows = top.Count == 0
-            ? new[] { new[] { "No requests recorded.", "", "" } }
-            : top.Select(kvp => new[]
+        if (top.Count == 0)
+        {
+            tableRows = new[] { new[] { "No requests recorded.", "", "" } };
+        }
+        else
+        {
+            tableRows = new string[top.Count][];
+            for (int i = 0; i < top.Count; i++)
             {
-                kvp.Key,
-                kvp.Value.Count.ToString(),
-                kvp.Value.LastSeenUtc.ToString("O")
-            }).ToArray();
+                tableRows[i] = new[]
+                {
+                    top[i].Key,
+                    top[i].Value.Count.ToString(),
+                    top[i].Value.LastSeenUtc.ToString("O")
+                };
+            }
+        }
     }
 
     public IReadOnlyList<KeyValuePair<string, ClientRequestStats>> GetSuspiciousClients(int count)
     {
         var nowUtc = DateTime.UtcNow;
-        return _stats
-            .Where(kvp => kvp.Value.IsSuspicious || kvp.Value.BlockedUntilUtc > nowUtc)
-            .OrderByDescending(kvp => kvp.Value.Count)
-            .ThenByDescending(kvp => kvp.Value.LastSeenUtc)
-            .Take(count)
-            .ToList();
+        var filtered = new List<KeyValuePair<string, ClientRequestStats>>();
+        foreach (var kvp in _stats)
+        {
+            if (kvp.Value.IsSuspicious || kvp.Value.BlockedUntilUtc > nowUtc)
+                filtered.Add(kvp);
+        }
+        filtered.Sort((a, b) =>
+        {
+            int cmp = b.Value.Count.CompareTo(a.Value.Count);
+            if (cmp != 0) return cmp;
+            return b.Value.LastSeenUtc.CompareTo(a.Value.LastSeenUtc);
+        });
+        if (filtered.Count > count)
+            filtered.RemoveRange(count, filtered.Count - count);
+        return filtered;
     }
 
     public void GetSuspiciousClientsTable(int count, out string[] tableColumns, out string[][] tableRows)
     {
         var suspicious = GetSuspiciousClients(count);
         tableColumns = new[] { "IP Address", "Requests", "Last Seen (UTC)" };
-        tableRows = suspicious.Count == 0
-            ? new[] { new[] { "No suspicious IPs recorded.", "", "" } }
-            : suspicious.Select(kvp => new[]
+        if (suspicious.Count == 0)
+        {
+            tableRows = new[] { new[] { "No suspicious IPs recorded.", "", "" } };
+        }
+        else
+        {
+            tableRows = new string[suspicious.Count][];
+            for (int i = 0; i < suspicious.Count; i++)
             {
-                kvp.Key,
-                kvp.Value.Count.ToString(),
-                kvp.Value.LastSeenUtc.ToString("O")
-            }).ToArray();
+                tableRows[i] = new[]
+                {
+                    suspicious[i].Key,
+                    suspicious[i].Value.Count.ToString(),
+                    suspicious[i].Value.LastSeenUtc.ToString("O")
+                };
+            }
+        }
     }
 
     public async Task RunPruningAsync(CancellationToken token)
@@ -213,9 +245,12 @@ public sealed class ClientRequestTracker : IClientRequestTracker
         if (overflow <= 0)
             return pruned;
 
-        foreach (var kvp in _stats.OrderBy(k => k.Value.LastSeenUtc).Take(overflow))
+        var list = new List<KeyValuePair<string, ClientRequestStats>>(_stats);
+        list.Sort((a, b) => a.Value.LastSeenUtc.CompareTo(b.Value.LastSeenUtc));
+        int removeCount = Math.Min(overflow, list.Count);
+        for (int i = 0; i < removeCount; i++)
         {
-            if (_stats.TryRemove(kvp.Key, out _))
+            if (_stats.TryRemove(list[i].Key, out _))
                 pruned++;
         }
 

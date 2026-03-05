@@ -194,7 +194,10 @@ internal sealed class VectorSegment
         while (results.Count > topK)
             results.Remove(results.Max);
 
-        return results.Select(r => (r.Id, r.Dist)).ToList();
+        var output = new List<(uint Id, float Distance)>(results.Count);
+        foreach (var r in results)
+            output.Add((r.Id, r.Dist));
+        return output;
     }
 
     /// <summary>Greedy best-first search returning nearest candidate IDs.</summary>
@@ -235,7 +238,15 @@ internal sealed class VectorSegment
             }
         }
 
-        return bestList.Take(count).Select(b => b.Id).ToList();
+        var output = new List<uint>(Math.Min(count, bestList.Count));
+        int taken = 0;
+        foreach (var b in bestList)
+        {
+            if (taken >= count) break;
+            output.Add(b.Id);
+            taken++;
+        }
+        return output;
     }
 
     /// <summary>Prune neighbour list to diverse subset via Vamana alpha-pruning.</summary>
@@ -245,11 +256,13 @@ internal sealed class VectorSegment
             return candidates;
 
         // Sort by distance to query
-        var ranked = candidates
-            .Where(id => _nodes.ContainsKey(id))
-            .Select(id => (Id: id, Dist: ComputeDistance(query, _nodes[id].Embedding)))
-            .OrderBy(x => x.Dist)
-            .ToList();
+        var ranked = new List<(uint Id, float Dist)>();
+        foreach (var id in candidates)
+        {
+            if (_nodes.ContainsKey(id))
+                ranked.Add((id, ComputeDistance(query, _nodes[id].Embedding)));
+        }
+        ranked.Sort((a, b) => a.Dist.CompareTo(b.Dist));
 
         var result = new List<uint>();
         foreach (var (id, dist) in ranked)
@@ -280,37 +293,23 @@ internal sealed class VectorSegment
     private void TrimNeighbours(VectorNode node)
     {
         if (node.Neighbours.Count <= MaxDegree) return;
-        var sorted = node.Neighbours
-            .Where(id => _nodes.ContainsKey(id))
-            .Select(id => (Id: id, Dist: ComputeDistance(node.Embedding, _nodes[id].Embedding)))
-            .OrderBy(x => x.Dist)
-            .Take(MaxDegree)
-            .Select(x => x.Id)
-            .ToList();
+        var sortable = new List<(uint Id, float Dist)>();
+        foreach (var id in node.Neighbours)
+        {
+            if (_nodes.ContainsKey(id))
+                sortable.Add((id, ComputeDistance(node.Embedding, _nodes[id].Embedding)));
+        }
+        sortable.Sort((a, b) => a.Dist.CompareTo(b.Dist));
+        int trimCount = Math.Min(MaxDegree, sortable.Count);
+        var sorted = new List<uint>(trimCount);
+        for (int i = 0; i < trimCount; i++)
+            sorted.Add(sortable[i].Id);
         node.Neighbours.Clear();
         node.Neighbours.AddRange(sorted);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private float ComputeDistance(float[] a, float[] b)
-    {
-        return Metric switch
-        {
-            DistanceMetric.Cosine => CosineDistance(a, b),
-            DistanceMetric.DotProduct => DotProductDistance(a, b),
-            DistanceMetric.Euclidean => EuclideanDistance(a, b),
-            _ => CosineDistance(a, b)
-        };
-    }
-
-    private static float CosineDistance(float[] a, float[] b) =>
-        SimdVectorMath.CosineDistance(a, b);
-
-    private static float DotProductDistance(float[] a, float[] b) =>
-        -SimdVectorMath.DotProduct(a, b); // Negate so smaller = more similar
-
-    private static float EuclideanDistance(float[] a, float[] b) =>
-        MathF.Sqrt(SimdVectorMath.EuclideanDistanceSquared(a, b));
+    private float ComputeDistance(float[] a, float[] b) => SimdDistance.Compute(Metric, a, b);
 
     private void RecomputeCentroid()
     {
@@ -379,7 +378,15 @@ public sealed class VectorIndexManager
                 seg.Delete(objectId);
 
             // Find a segment with capacity, or create a new one
-            var target = segments.FirstOrDefault(s => s.LiveCount < MaxSegmentSize);
+            VectorSegment? target = null;
+            foreach (var s in segments)
+            {
+                if (s.LiveCount < MaxSegmentSize)
+                {
+                    target = s;
+                    break;
+                }
+            }
             if (target == null)
             {
                 target = new VectorSegment(def.Dimension, def.Metric, def.MaxDegree);
@@ -425,12 +432,14 @@ public sealed class VectorIndexManager
             }
             else
             {
-                selectedSegments = segments
-                    .Select(s => (Seg: s, Dist: CentroidDistance(query, s.Centroid, def.Metric)))
-                    .OrderBy(x => x.Dist)
-                    .Take(maxSegments)
-                    .Select(x => x.Seg)
-                    .ToList();
+                var rankedSegments = new List<(VectorSegment Seg, float Dist)>(segments.Count);
+                foreach (var s in segments)
+                    rankedSegments.Add((s, CentroidDistance(query, s.Centroid, def.Metric)));
+                rankedSegments.Sort((a, b) => a.Dist.CompareTo(b.Dist));
+                int takeCount = Math.Min(maxSegments, rankedSegments.Count);
+                selectedSegments = new List<VectorSegment>(takeCount);
+                for (int i = 0; i < takeCount; i++)
+                    selectedSegments.Add(rankedSegments[i].Seg);
             }
         }
 
@@ -445,7 +454,15 @@ public sealed class VectorIndexManager
                 allResults.Add((dist, id));
         }
 
-        return allResults.Take(topK).Select(r => (r.Id, r.Dist)).ToList();
+        var output = new List<(uint Id, float Distance)>(Math.Min(topK, allResults.Count));
+        int resultsTaken = 0;
+        foreach (var r in allResults)
+        {
+            if (resultsTaken >= topK) break;
+            output.Add((r.Id, r.Dist));
+            resultsTaken++;
+        }
+        return output;
     }
 
     /// <summary>Returns the number of indexed vectors for an entity/field pair.</summary>
@@ -454,23 +471,23 @@ public sealed class VectorIndexManager
         var key = (entityType, field);
         if (!_indexes.TryGetValue(key, out var segments)) return 0;
         lock (segments)
-            return segments.Sum(s => s.LiveCount);
+        {
+            int total = 0;
+            foreach (var s in segments)
+                total += s.LiveCount;
+            return total;
+        }
     }
 
     /// <summary>Gets all registered index definitions.</summary>
     public IReadOnlyCollection<(string EntityType, string Field, VectorIndexDefinition Def)> GetDefinitions()
     {
-        return _definitions.Select(kv => (kv.Key.EntityType, kv.Key.Field, kv.Value)).ToArray();
+        var result = new List<(string EntityType, string Field, VectorIndexDefinition Def)>();
+        foreach (var kv in _definitions)
+            result.Add((kv.Key.EntityType, kv.Key.Field, kv.Value));
+        return result.ToArray();
     }
 
     private static float CentroidDistance(float[] query, float[] centroid, DistanceMetric metric)
-    {
-        return metric switch
-        {
-            DistanceMetric.Cosine => SimdVectorMath.CosineDistance(query, centroid),
-            DistanceMetric.DotProduct => -SimdVectorMath.DotProduct(query, centroid),
-            DistanceMetric.Euclidean => MathF.Sqrt(SimdVectorMath.EuclideanDistanceSquared(query, centroid)),
-            _ => SimdVectorMath.CosineDistance(query, centroid)
-        };
-    }
+        => SimdDistance.Compute(metric, query, centroid);
 }

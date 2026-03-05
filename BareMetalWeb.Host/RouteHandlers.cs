@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
 using System.IO;
 using System.IO.Compression;
 using System.Globalization;
@@ -864,7 +863,10 @@ public sealed class RouteHandlers : IRouteHandlers
             RegisterSuccess(BuildMfaAttemptKey("setup:secret", currentPendingSecret));
 
             context.SetStringValue("title", "Enable MFA");
-            var backupList = string.Join(string.Empty, backupCodes.Codes.Select(codeValue => $"<li><code>{WebUtility.HtmlEncode(codeValue)}</code></li>"));
+            var backupListBuilder = new StringBuilder();
+            foreach (var codeValue in backupCodes.Codes)
+                backupListBuilder.Append($"<li><code>{WebUtility.HtmlEncode(codeValue)}</code></li>");
+            var backupList = backupListBuilder.ToString();
             var backupHtml = string.IsNullOrWhiteSpace(backupList)
                 ? string.Empty
                 : $"<div class=\"mt-3\"><p><strong>Backup codes (save these now):</strong></p><ul>{backupList}</ul><p class=\"text-warning\">These codes are shown once.</p></div>";
@@ -1110,9 +1112,9 @@ public sealed class RouteHandlers : IRouteHandlers
     private async ValueTask EnsureDefaultReports(string createdBy)
     {
         var existing = await DataStoreProvider.Current.QueryAsync<ReportDefinition>(null).ConfigureAwait(false);
-        var existingNames = new HashSet<string>(
-            existing.Select(r => r.Name),
-            StringComparer.OrdinalIgnoreCase);
+        var existingNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in existing)
+            existingNames.Add(r.Name);
 
         var reports = new List<ReportDefinition>
         {
@@ -1611,17 +1613,24 @@ public sealed class RouteHandlers : IRouteHandlers
             ctx.SetStringValue("title", "Data");
             ctx.SetStringValue("html_message", "<p>Manage data entities.</p>");
 
-            var rows = DataScaffold.Entities
-                .OrderBy(e => e.NavOrder)
-                .ThenBy(e => e.Name)
-                .Select(entity => new[]
+            var sortedEntities = new List<DataEntityMetadata>(DataScaffold.Entities);
+            sortedEntities.Sort((a, b) =>
+            {
+                int cmp = a.NavOrder.CompareTo(b.NavOrder);
+                return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.Ordinal);
+            });
+            var rowsList = new List<string[]>();
+            foreach (var entity in sortedEntities)
+            {
+                rowsList.Add(new[]
                 {
                     $"<a class=\"btn btn-sm btn-outline-info me-1\" href=\"/ssr/admin/data/{entity.Slug}\" title=\"Open\" aria-label=\"Open\"><i class=\"bi bi-search\" aria-hidden=\"true\"></i></a><a class=\"btn btn-sm btn-outline-success\" href=\"/ssr/admin/data/{entity.Slug}/import\" title=\"Import CSV\" aria-label=\"Import CSV\"><i class=\"bi bi-upload\" aria-hidden=\"true\"></i></a>",
                     WebUtility.HtmlEncode(entity.Name),
                     WebUtility.HtmlEncode(entity.Slug),
                     string.IsNullOrWhiteSpace(entity.Permissions) ? "Public" : WebUtility.HtmlEncode(entity.Permissions)
-                })
-                .ToArray();
+                });
+            }
+            var rows = rowsList.ToArray();
 
             ctx.AddTable(new[] { "Actions", "Entity", "Slug", "Permissions" }, rows);
         })(context);
@@ -1663,7 +1672,13 @@ public sealed class RouteHandlers : IRouteHandlers
                 return false;
             var userPermissions = new HashSet<string>(currentUser.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
             var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            return required.Length == 0 || required.All(userPermissions.Contains);
+            if (required.Length == 0) return true;
+            foreach (var r in required)
+            {
+                if (!userPermissions.Contains(r))
+                    return false;
+            }
+            return true;
         }
 
         var queryDictionary = ToQueryDictionary(context.Request.Query);
@@ -1695,7 +1710,10 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             var allQuery = DataScaffold.BuildQueryDefinition(queryDictionary, meta);
             allQuery.Top ??= 10000; // Cap to prevent unbounded memory usage
-            var allResults = (await DataScaffold.QueryAsync(meta, allQuery)).Cast<BaseDataObject>().ToList();
+            var allResultsRaw = await DataScaffold.QueryAsync(meta, allQuery);
+            var allResults = new List<BaseDataObject>();
+            foreach (var item in allResultsRaw)
+                allResults.Add((BaseDataObject)item);
             
             var basePath = $"/ssr/admin/data/{typeSlug}";
 
@@ -1850,7 +1868,13 @@ public sealed class RouteHandlers : IRouteHandlers
                 return false;
             var userPermissions = new HashSet<string>(currentUser.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
             var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            return required.Length == 0 || required.All(userPermissions.Contains);
+            if (required.Length == 0) return true;
+            foreach (var r in required)
+            {
+                if (!userPermissions.Contains(r))
+                    return false;
+            }
+            return true;
         }
 
         var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
@@ -1863,13 +1887,17 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var rows = DataScaffold.BuildViewRowsHtml(meta, instance, HasPermissionForMeta)
-            .Select(row => new[]
+        var viewRowsHtml = DataScaffold.BuildViewRowsHtml(meta, instance, HasPermissionForMeta);
+        var rowsList2 = new List<string[]>();
+        foreach (var row in viewRowsHtml)
+        {
+            rowsList2.Add(new[]
             {
                 WebUtility.HtmlEncode(row.Label),
                 row.IsHtml ? row.Value : WebUtility.HtmlEncode(row.Value)
-            })
-            .ToArray();
+            });
+        }
+        var rows = rowsList2.ToArray();
 
         // Check if entity has nested components
         var nestedComponents = DataScaffold.GetNestedComponents(meta);
@@ -1904,7 +1932,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.Request.Query), meta);
         var results = await DataScaffold.QueryAsync(meta, query);
-        var resultsList = results.Cast<object?>().ToList();
+        var resultsList = new List<object?>();
+        foreach (var item in results)
+            resultsList.Add((object?)item);
 
         var rows = BuildListPlainRowsWithId(meta, resultsList, out var headers);
         var csv = BuildCsv(headers, rows);
@@ -1930,7 +1960,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.Request.Query), meta);
         var results = await DataScaffold.QueryAsync(meta, query);
-        var resultsList = results.Cast<object?>().ToList();
+        var resultsList = new List<object?>();
+        foreach (var item in results)
+            resultsList.Add((object?)item);
 
         var rows = BuildListPlainRowsWithId(meta, resultsList, out var headers);
         var title = $"{meta.Name} List";
@@ -1958,7 +1990,9 @@ public sealed class RouteHandlers : IRouteHandlers
         var options = ExportOptions.FromQuery(context.Request.Query);
         var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.Request.Query), meta);
         var results = await DataScaffold.QueryAsync(meta, query);
-        var resultsList = results.Cast<object?>().ToList();
+        var resultsList = new List<object?>();
+        foreach (var item in results)
+            resultsList.Add((object?)item);
 
         switch (options.Format)
         {
@@ -2023,13 +2057,18 @@ public sealed class RouteHandlers : IRouteHandlers
             case ExportFormat.SimpleCSV:
             default:
                 // Fall back to simple CSV (entity fields only, no nested)
-                var rows = DataScaffold.BuildViewRows(meta, instance)
-                    .Select(row => new[] { row.Label, row.Value })
-                    .ToArray();
+                var viewRows1 = DataScaffold.BuildViewRows(meta, instance);
+                var rowsList1 = new List<string[]>();
+                foreach (var row in viewRows1)
+                    rowsList1.Add(new[] { row.Label, row.Value });
+                var rows = rowsList1.ToArray();
                 if (instance is BaseDataObject dataObject)
                 {
                     var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
-                    rows = new[] { new[] { "Id", recordId } }.Concat(rows).ToArray();
+                    var concatList = new List<string[]>();
+                    concatList.Add(new[] { "Id", recordId });
+                    concatList.AddRange(rows);
+                    rows = concatList.ToArray();
                 }
                 var headers = new[] { "Field", "Value" };
                 var csv = BuildCsv(headers, rows);
@@ -2064,13 +2103,18 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var rows = DataScaffold.BuildViewRows(meta, instance)
-            .Select(row => new[] { row.Label, row.Value })
-            .ToArray();
+        var viewRowsRtf = DataScaffold.BuildViewRows(meta, instance);
+        var rowsListRtf = new List<string[]>();
+        foreach (var row in viewRowsRtf)
+            rowsListRtf.Add(new[] { row.Label, row.Value });
+        var rows = rowsListRtf.ToArray();
         if (instance is BaseDataObject dataObject)
         {
             var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
-            rows = new[] { new[] { "Id", recordId } }.Concat(rows).ToArray();
+            var concatList = new List<string[]>();
+            concatList.Add(new[] { "Id", recordId });
+            concatList.AddRange(rows);
+            rows = concatList.ToArray();
         }
         var title = $"{meta.Name} Details";
         var rtf = BuildRtfDocument(title, rows);
@@ -2103,13 +2147,18 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var rows = DataScaffold.BuildViewRows(meta, instance)
-            .Select(row => new[] { row.Label, row.Value })
-            .ToArray();
+        var viewRowsHtml2 = DataScaffold.BuildViewRows(meta, instance);
+        var rowsListHtml2 = new List<string[]>();
+        foreach (var row in viewRowsHtml2)
+            rowsListHtml2.Add(new[] { row.Label, row.Value });
+        var rows = rowsListHtml2.ToArray();
         if (instance is BaseDataObject dataObject)
         {
             var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
-            rows = new[] { new[] { "Id", recordId } }.Concat(rows).ToArray();
+            var concatList = new List<string[]>();
+            concatList.Add(new[] { "Id", recordId });
+            concatList.AddRange(rows);
+            rows = concatList.ToArray();
         }
         var title = $"{meta.Name} Details";
         var html = BuildHtmlTableDocument(title, new[] { "Field", "Value" }, rows);
@@ -2228,7 +2277,16 @@ public sealed class RouteHandlers : IRouteHandlers
         for (int i = 1; i < rows.Count; i++)
         {
             var row = rows[i];
-            if (row.All(string.IsNullOrWhiteSpace))
+            bool allBlank = true;
+            foreach (var cell in row)
+            {
+                if (!string.IsNullOrWhiteSpace(cell))
+                {
+                    allBlank = false;
+                    break;
+                }
+            }
+            if (allBlank)
                 continue;
 
             var rowNumber = i + 1;
@@ -2294,7 +2352,16 @@ public sealed class RouteHandlers : IRouteHandlers
         var summary = $"<p>Import complete. Created: {created}, Updated: {updated}, Skipped: {skipped}.</p>";
         if (errors.Count > 0)
         {
-            var preview = string.Join("<br/>", errors.Take(10).Select(WebUtility.HtmlEncode));
+            var previewBuilder = new StringBuilder();
+            int previewCount = 0;
+            foreach (var err in errors)
+            {
+                if (previewCount >= 10) break;
+                if (previewCount > 0) previewBuilder.Append("<br/>");
+                previewBuilder.Append(WebUtility.HtmlEncode(err));
+                previewCount++;
+            }
+            var preview = previewBuilder.ToString();
             var more = errors.Count > 10 ? $"<p>And {errors.Count - 10} more errors.</p>" : string.Empty;
             summary += $"<div class=\"alert alert-warning\"><strong>Errors:</strong><br/>{preview}{more}</div>";
         }
@@ -2326,7 +2393,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var csrfToken = CsrfProtection.EnsureToken(context);
-        var fields = DataScaffold.BuildFormFields(meta, null, forCreate: true, cspNonce: context.GetCspNonce()).ToList();
+        var fields = new List<FormField>(DataScaffold.BuildFormFields(meta, null, forCreate: true, cspNonce: context.GetCspNonce()));
         AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: true);
         fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken));
 
@@ -2381,7 +2448,9 @@ public sealed class RouteHandlers : IRouteHandlers
         // Apply auto-generated IDs before binding form values
         DataScaffold.ApplyAutoGeneratedIds(meta, instance);
 
-        var values = form.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in form)
+            values[kvp.Key] = (string?)kvp.Value.ToString();
         var apiKeyInputs = ExtractSystemPrincipalKeys(values);
         var errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: true);
         await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
@@ -2397,7 +2466,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (errors.Count > 0)
         {
             context.SetStringValue("title", $"Create {meta.Name}");
-            context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
+            context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{JoinEncoded("<br/>", errors)}</div>");
             var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: true, validationResult, cspNonce: context.GetCspNonce());
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: true);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
@@ -2411,7 +2480,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (instance is SystemPrincipal principal)
         {
             var createdKeys = ApplySystemPrincipalKeys(principal, apiKeyInputs, isCreate: true);
-            newApiKey = createdKeys.FirstOrDefault();
+            newApiKey = createdKeys.Count > 0 ? createdKeys[0] : null;
         }
 
         var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
@@ -2487,7 +2556,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var csrfToken = CsrfProtection.EnsureToken(context);
-        var fields = DataScaffold.BuildFormFields(meta, instance, forCreate: false, cspNonce: context.GetCspNonce()).ToList();
+        var fields = new List<FormField>(DataScaffold.BuildFormFields(meta, instance, forCreate: false, cspNonce: context.GetCspNonce()));
         AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: false);
         fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken));
 
@@ -2561,7 +2630,9 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var values = form.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in form)
+            values[kvp.Key] = (string?)kvp.Value.ToString();
         var apiKeyInputs = ExtractSystemPrincipalKeys(values);
         var errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
         await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
@@ -2575,7 +2646,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (errors.Count > 0)
         {
             context.SetStringValue("title", $"Edit {meta.Name}");
-            context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
+            context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{JoinEncoded("<br/>", errors)}</div>");
             var fields = BuildFormFieldsWithErrors(meta, instance, forCreate: false, validationResult, cspNonce: context.GetCspNonce());
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: false);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
@@ -2941,12 +3012,20 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.Headers.Append("Content-Disposition", $"attachment; filename=\"{typeSlug}-bulk-export.csv\"");
             
             using var writer = new StreamWriter(context.Response.Body);
-            await writer.WriteLineAsync(string.Join(",", headers.Select(EscapeCsvValue)));
+            var encodedHeaders = new List<string>();
+            foreach (var h in headers)
+                encodedHeaders.Add(EscapeCsvValue(h));
+            await writer.WriteLineAsync(string.Join(",", encodedHeaders));
             
             foreach (var row in rows)
             {
-                var cleanRow = row.Select(cell => StripHtmlTags(cell)).ToArray();
-                await writer.WriteLineAsync(string.Join(",", cleanRow.Select(EscapeCsvValue)));
+                var cleanRow = new string[row.Length];
+                for (int ci = 0; ci < row.Length; ci++)
+                    cleanRow[ci] = StripHtmlTags(row[ci]);
+                var encodedCells = new List<string>();
+                foreach (var cell in cleanRow)
+                    encodedCells.Add(EscapeCsvValue(cell));
+                await writer.WriteLineAsync(string.Join(",", encodedCells));
             }
         }
     }
@@ -3068,7 +3147,9 @@ public sealed class RouteHandlers : IRouteHandlers
     private static BaseDataObject CreateClone(DataEntityMetadata meta, BaseDataObject source)
     {
         var clone = meta.Handlers.Create();
-        foreach (var field in meta.Fields.OrderBy(f => f.Order))
+        var sortedFields = new List<DataFieldMetadata>(meta.Fields);
+        sortedFields.Sort((a, b) => a.Order.CompareTo(b.Order));
+        foreach (var field in sortedFields)
         {
             var property = field.Property;
             if (!property.CanWrite)
@@ -3163,14 +3244,19 @@ public sealed class RouteHandlers : IRouteHandlers
 
             if (format == "csv" || acceptCsv)
             {
-                var resultsList = results.Cast<object?>().ToList();
+                var resultsList = new List<object?>();
+                foreach (var item in results)
+                    resultsList.Add((object?)item);
                 var rows = BuildListPlainRowsWithId(meta, resultsList, out var headers);
                 var csv = BuildCsv(headers, rows);
                 await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_list.csv");
                 return;
             }
 
-            var payload = results.Cast<object>().Select(item => BuildApiModel(meta, item)).ToArray();
+            var payloadList = new List<Dictionary<string, object?>>();
+            foreach (var item in results)
+                payloadList.Add(BuildApiModel(meta, (object)item));
+            var payload = payloadList.ToArray();
             // Clamp total: if fewer items than requested were returned, the real total cannot exceed skip + returned count.
             // This prevents inflated page counts when the location map has stale entries for unreadable records.
             // Applies whether or not Top was specified: without a top limit we also know the total is at most skip + payload.Length.
@@ -3184,14 +3270,19 @@ public sealed class RouteHandlers : IRouteHandlers
 
         if (format == "csv" || acceptCsv)
         {
-            var resultsList = allResults.Cast<object?>().ToList();
+            var resultsList = new List<object?>();
+            foreach (var item in allResults)
+                resultsList.Add((object?)item);
             var rows = BuildListPlainRowsWithId(meta, resultsList, out var headers);
             var csv = BuildCsv(headers, rows);
             await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_list.csv");
             return;
         }
 
-        var allPayload = allResults.Cast<object>().Select(item => BuildApiModel(meta, item)).ToArray();
+        var allPayloadList = new List<Dictionary<string, object?>>();
+        foreach (var item in allResults)
+            allPayloadList.Add(BuildApiModel(meta, (object)item));
+        var allPayload = allPayloadList.ToArray();
         await WriteJsonResponseAsync(context, allPayload);
     }
 
@@ -3267,7 +3358,16 @@ public sealed class RouteHandlers : IRouteHandlers
         for (int i = 1; i < rows.Count; i++)
         {
             var row = rows[i];
-            if (row.All(string.IsNullOrWhiteSpace)) continue;
+            bool allBlankApi = true;
+            foreach (var cell in row)
+            {
+                if (!string.IsNullOrWhiteSpace(cell))
+                {
+                    allBlankApi = false;
+                    break;
+                }
+            }
+            if (allBlankApi) continue;
 
             var rowNumber = i + 1;
             var idValue = idIndex >= 0 && idIndex < row.Length ? row[idIndex]?.Trim() : string.Empty;
@@ -3391,7 +3491,9 @@ public sealed class RouteHandlers : IRouteHandlers
         if (context.Request.HasFormContentType)
         {
             var form = await context.Request.ReadFormAsync();
-            var values = form.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+            var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in form)
+                values[kvp.Key] = (string?)kvp.Value.ToString();
             errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: true);
             await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
         }
@@ -3479,7 +3581,9 @@ public sealed class RouteHandlers : IRouteHandlers
         if (context.Request.HasFormContentType)
         {
             var form = await context.Request.ReadFormAsync();
-            var values = form.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+            var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in form)
+                values[kvp.Key] = (string?)kvp.Value.ToString();
             errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
             errors = FilterMissingRequiredErrorsForPatchForm(meta, values, errors);
             await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
@@ -3566,7 +3670,9 @@ public sealed class RouteHandlers : IRouteHandlers
         if (context.Request.HasFormContentType)
         {
             var form = await context.Request.ReadFormAsync();
-            var values = form.ToDictionary(k => k.Key, v => (string?)v.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+            var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in form)
+                values[kvp.Key] = (string?)kvp.Value.ToString();
             errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
             await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
         }
@@ -3742,68 +3848,171 @@ public sealed class RouteHandlers : IRouteHandlers
             var year = ctx.Request.Query["year"].ToString();
             var month = ctx.Request.Query["month"].ToString();
 
-            var dates = Directory.GetDirectories(root)
-                .Select(Path.GetFileName)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Select(name => name!)
-                .ToList();
+            var dates = new List<string>();
+            foreach (var dir in Directory.GetDirectories(root))
+            {
+                var dirName = Path.GetFileName(dir);
+                if (!string.IsNullOrWhiteSpace(dirName))
+                    dates.Add(dirName!);
+            }
 
-            if (!dates.Contains(date, StringComparer.OrdinalIgnoreCase))
-                date = string.Empty;
+            {
+                bool dateFound = false;
+                foreach (var d in dates)
+                {
+                    if (string.Equals(d, date, StringComparison.OrdinalIgnoreCase))
+                    {
+                        dateFound = true;
+                        break;
+                    }
+                }
+                if (!dateFound)
+                    date = string.Empty;
+            }
 
-            var hours = string.IsNullOrWhiteSpace(date)
-                ? new List<string>()
-                : Directory.GetDirectories(Path.Combine(root, date))
-                    .Select(Path.GetFileName)
-                    .Where(name => !string.IsNullOrWhiteSpace(name))
-                    .Select(name => name!)
-                    .ToList();
+            List<string> hours;
+            if (string.IsNullOrWhiteSpace(date))
+            {
+                hours = new List<string>();
+            }
+            else
+            {
+                hours = new List<string>();
+                foreach (var dir in Directory.GetDirectories(Path.Combine(root, date)))
+                {
+                    var dirName = Path.GetFileName(dir);
+                    if (!string.IsNullOrWhiteSpace(dirName))
+                        hours.Add(dirName!);
+                }
+            }
 
-            hours = hours
-                .OrderBy(h => ParseHourValue(h))
-                .ThenBy(h => h, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            hours.Sort((a, b) =>
+            {
+                int cmp = ParseHourValue(a).CompareTo(ParseHourValue(b));
+                return cmp != 0 ? cmp : string.Compare(a, b, StringComparison.OrdinalIgnoreCase);
+            });
 
-            if (!hours.Contains(hour, StringComparer.OrdinalIgnoreCase))
-                hour = string.Empty;
+            {
+                bool hourFound = false;
+                foreach (var h in hours)
+                {
+                    if (string.Equals(h, hour, StringComparison.OrdinalIgnoreCase))
+                    {
+                        hourFound = true;
+                        break;
+                    }
+                }
+                if (!hourFound)
+                    hour = string.Empty;
+            }
 
-            var fileEntries = string.IsNullOrWhiteSpace(date) || string.IsNullOrWhiteSpace(hour)
-                ? new List<LogFileEntry>()
-                : Directory.GetFiles(Path.Combine(root, date, hour), "*.log")
-                    .Select(Path.GetFileName)
-                    .Where(name => !string.IsNullOrWhiteSpace(name))
-                    .Select(name => BuildLogFileEntry(name!))
-                    .OrderBy(entry => entry.SortKey)
-                    .ThenBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
+            List<LogFileEntry> fileEntries;
+            if (string.IsNullOrWhiteSpace(date) || string.IsNullOrWhiteSpace(hour))
+            {
+                fileEntries = new List<LogFileEntry>();
+            }
+            else
+            {
+                fileEntries = new List<LogFileEntry>();
+                foreach (var filePath in Directory.GetFiles(Path.Combine(root, date, hour), "*.log"))
+                {
+                    var fileName = Path.GetFileName(filePath);
+                    if (!string.IsNullOrWhiteSpace(fileName))
+                        fileEntries.Add(BuildLogFileEntry(fileName!));
+                }
+                fileEntries.Sort((a, b) =>
+                {
+                    int cmp = a.SortKey.CompareTo(b.SortKey);
+                    return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                });
+            }
 
-            if (!fileEntries.Any(entry => string.Equals(entry.Name, file, StringComparison.OrdinalIgnoreCase)))
-                file = string.Empty;
+            {
+                bool fileFound = false;
+                foreach (var entry in fileEntries)
+                {
+                    if (string.Equals(entry.Name, file, StringComparison.OrdinalIgnoreCase))
+                    {
+                        fileFound = true;
+                        break;
+                    }
+                }
+                if (!fileFound)
+                    file = string.Empty;
+            }
 
             var yearEntries = BuildLogYears(root, dates);
             var selectedYearKey = string.IsNullOrWhiteSpace(year) ? ResolveYearKey(selectedDate: date) : year;
             var selectedMonthKey = string.IsNullOrWhiteSpace(month) ? ResolveMonthKey(selectedDate: date) : month;
 
-            if (!yearEntries.Any(entry => string.Equals(entry.Key, selectedYearKey, StringComparison.OrdinalIgnoreCase)))
-                selectedYearKey = string.Empty;
+            {
+                bool yearFound = false;
+                foreach (var entry in yearEntries)
+                {
+                    if (string.Equals(entry.Key, selectedYearKey, StringComparison.OrdinalIgnoreCase))
+                    {
+                        yearFound = true;
+                        break;
+                    }
+                }
+                if (!yearFound)
+                    selectedYearKey = string.Empty;
+            }
 
             if (string.IsNullOrWhiteSpace(selectedYearKey) && yearEntries.Count > 0)
             {
-                var latestYear = yearEntries.OrderByDescending(entry => entry.YearDate).First();
+                var latestYear = yearEntries[0];
+                for (int yi = 1; yi < yearEntries.Count; yi++)
+                {
+                    if (yearEntries[yi].YearDate > latestYear.YearDate)
+                        latestYear = yearEntries[yi];
+                }
                 selectedYearKey = latestYear.Key;
             }
 
-            var selectedYear = yearEntries.FirstOrDefault(entry => string.Equals(entry.Key, selectedYearKey, StringComparison.OrdinalIgnoreCase));
-            if (!(selectedYear.Months?.Any(entry => string.Equals(entry.Key, selectedMonthKey, StringComparison.OrdinalIgnoreCase)) ?? false))
-                selectedMonthKey = string.Empty;
+            LogYearEntry selectedYear = default;
+            foreach (var entry in yearEntries)
+            {
+                if (string.Equals(entry.Key, selectedYearKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    selectedYear = entry;
+                    break;
+                }
+            }
+            {
+                bool monthFound = false;
+                if (selectedYear.Months != null)
+                {
+                    foreach (var entry in selectedYear.Months)
+                    {
+                        if (string.Equals(entry.Key, selectedMonthKey, StringComparison.OrdinalIgnoreCase))
+                        {
+                            monthFound = true;
+                            break;
+                        }
+                    }
+                }
+                if (!monthFound)
+                    selectedMonthKey = string.Empty;
+            }
 
             if (string.IsNullOrWhiteSpace(selectedMonthKey) && selectedYear.Months?.Count > 0)
             {
-                var latestMonth = selectedYear.Months!.OrderByDescending(entry => entry.MonthDate).First();
+                var latestMonth = selectedYear.Months![0];
+                for (int mi = 1; mi < selectedYear.Months.Count; mi++)
+                {
+                    if (selectedYear.Months[mi].MonthDate > latestMonth.MonthDate)
+                        latestMonth = selectedYear.Months[mi];
+                }
                 selectedMonthKey = latestMonth.Key;
             }
 
-            var monthEntries = yearEntries.SelectMany(entry => entry.Months).ToList();
+            var monthEntries = new List<LogMonthEntry>();
+            foreach (var entry in yearEntries)
+            {
+                if (entry.Months != null)
+                    monthEntries.AddRange(entry.Months);
+            }
             var actionsHtml = RenderLogActions(yearEntries, selectedYearKey, selectedMonthKey, date, hour);
 
             var html = new StringBuilder();
@@ -3818,7 +4027,15 @@ public sealed class RouteHandlers : IRouteHandlers
             {
                 var fullPath = Path.GetFullPath(Path.Combine(root, date ?? string.Empty, hour ?? string.Empty, file));
                 var normalizedRoot = Path.GetFullPath(root);
-                var selectedEntry = fileEntries.FirstOrDefault(entry => string.Equals(entry.Name, file, StringComparison.OrdinalIgnoreCase));
+                LogFileEntry selectedEntry = default;
+                foreach (var fe in fileEntries)
+                {
+                    if (string.Equals(fe.Name, file, StringComparison.OrdinalIgnoreCase))
+                    {
+                        selectedEntry = fe;
+                        break;
+                    }
+                }
 
                 var isUnderRoot = fullPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase)
                     && (fullPath.Length == normalizedRoot.Length
@@ -4021,8 +4238,8 @@ public sealed class RouteHandlers : IRouteHandlers
         if (errors.Count > 0)
         {
             context.SetStringValue("title", "Generate Sample Data");
-            context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>");
-            RenderSampleDataForm(context, $"<div class=\"alert alert-danger\">{string.Join("<br/>", errors.Select(WebUtility.HtmlEncode))}</div>", registry.All, 10, clearExisting);
+            context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{JoinEncoded("<br/>", errors)}</div>");
+            RenderSampleDataForm(context, $"<div class=\"alert alert-danger\">{JoinEncoded("<br/>", errors)}</div>", registry.All, 10, clearExisting);
             await _renderer.RenderPage(context);
             return;
         }
@@ -4046,10 +4263,12 @@ public sealed class RouteHandlers : IRouteHandlers
                     return;
                 }
 
-                var slugs = capturedCounts.Keys.ToList();
+                var slugs = new List<string>(capturedCounts.Keys);
                 int totalEntities = slugs.Count;
                 int entityIndex = 0;
-                int totalRecords = capturedCounts.Values.Sum();
+                int totalRecords = 0;
+                foreach (var v in capturedCounts.Values)
+                    totalRecords += v;
                 int savedRecords = 0;
 
                 foreach (var slug in slugs)
@@ -4103,9 +4322,13 @@ public sealed class RouteHandlers : IRouteHandlers
                     entityIndex++;
                 }
 
-                var summary = string.Join(", ", slugs
-                    .Where(s => capturedCounts[s] > 0)
-                    .Select(s => $"{capturedCounts[s]} {s}"));
+                var summaryParts = new List<string>();
+                foreach (var s in slugs)
+                {
+                    if (capturedCounts[s] > 0)
+                        summaryParts.Add($"{capturedCounts[s]} {s}");
+                }
+                var summary = string.Join(", ", summaryParts);
                 progress.Report(100, $"Done. Created {summary}.");
             });
 
@@ -4177,7 +4400,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var providers = DataStoreProvider.Current.Providers.ToList();
+        var providers = new List<BareMetalWeb.Data.Interfaces.IDataProvider>(DataStoreProvider.Current.Providers);
         int totalProviders = providers.Count;
 
         var jobId = BackgroundJobService.Instance.StartJob(
@@ -4361,8 +4584,10 @@ public sealed class RouteHandlers : IRouteHandlers
                     return;
                 }
 
-                var slugs = capturedCounts.Keys.ToList();
-                int totalRecords = capturedCounts.Values.Sum();
+                var slugs = new List<string>(capturedCounts.Keys);
+                int totalRecords = 0;
+                foreach (var v in capturedCounts.Values)
+                    totalRecords += v;
                 int savedRecords = 0;
                 int entityIndex = 0;
                 int totalEntities = slugs.Count;
@@ -4418,9 +4643,13 @@ public sealed class RouteHandlers : IRouteHandlers
                     entityIndex++;
                 }
 
-                var summary = string.Join(", ", slugs
-                    .Where(s => capturedCounts[s] > 0)
-                    .Select(s => $"{capturedCounts[s]} {s}"));
+                var summaryParts2 = new List<string>();
+                foreach (var s in slugs)
+                {
+                    if (capturedCounts[s] > 0)
+                        summaryParts2.Add($"{capturedCounts[s]} {s}");
+                }
+                var summary = string.Join(", ", summaryParts2);
                 progress.Report(100, $"Done. Created {summary}.");
             });
 
@@ -4485,7 +4714,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var providers = DataStoreProvider.Current.Providers.ToList();
+        var providers = new List<BareMetalWeb.Data.Interfaces.IDataProvider>(DataStoreProvider.Current.Providers);
         int totalProviders = providers.Count;
 
         var jobId = BackgroundJobService.Instance.StartJob(
@@ -4525,37 +4754,51 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         var entries = QueryPlanHistory.GetSnapshot();
 
-        var payload = entries.Select(e => new Dictionary<string, object?>
+        var payload = new List<Dictionary<string, object?>>();
+        foreach (var e in entries)
         {
-            ["executedAt"]     = e.ExecutedAt.ToString("o"),
-            ["rootEntity"]     = e.RootEntity,
-            ["joinCount"]      = e.JoinCount,
-            ["resultRowCount"] = e.ResultRowCount,
-            ["elapsedMs"]      = Math.Round(e.ElapsedMs, 3),
-            ["canStreamAggregate"]   = e.Plan.CanStreamAggregate,
-            ["joinOrderOptimised"]   = e.Plan.JoinOrderOptimised,
-            ["steps"] = e.Plan.Steps.Select(s => new Dictionary<string, object?>
+            var stepsList = new List<Dictionary<string, object?>>();
+            foreach (var s in e.Plan.Steps)
             {
-                ["stepType"]     = s.StepType.ToString(),
-                ["entitySlug"]   = s.EntitySlug,
-                ["estimatedRows"] = s.EstimatedRows,
-                ["indexedFields"] = s.IndexedFields,
-                ["join"] = s.JoinInfo == null ? null : new Dictionary<string, object?>
+                stepsList.Add(new Dictionary<string, object?>
                 {
-                    ["fromEntity"]        = s.JoinInfo.FromEntity,
-                    ["fromField"]         = s.JoinInfo.FromField,
-                    ["toField"]           = s.JoinInfo.ToField,
-                    ["joinType"]          = s.JoinInfo.JoinType.ToString(),
-                    ["buildSideIndexed"]  = s.JoinInfo.BuildSideIndexed
-                }
-            }).ToList(),
-            ["missingIndexRecommendations"] = e.Plan.MissingIndexRecommendations.Select(r => new Dictionary<string, object?>
+                    ["stepType"]     = s.StepType.ToString(),
+                    ["entitySlug"]   = s.EntitySlug,
+                    ["estimatedRows"] = s.EstimatedRows,
+                    ["indexedFields"] = s.IndexedFields,
+                    ["join"] = s.JoinInfo == null ? null : new Dictionary<string, object?>
+                    {
+                        ["fromEntity"]        = s.JoinInfo.FromEntity,
+                        ["fromField"]         = s.JoinInfo.FromField,
+                        ["toField"]           = s.JoinInfo.ToField,
+                        ["joinType"]          = s.JoinInfo.JoinType.ToString(),
+                        ["buildSideIndexed"]  = s.JoinInfo.BuildSideIndexed
+                    }
+                });
+            }
+            var missingIndexList = new List<Dictionary<string, object?>>();
+            foreach (var r in e.Plan.MissingIndexRecommendations)
             {
-                ["entitySlug"] = r.EntitySlug,
-                ["fieldName"]  = r.FieldName,
-                ["reason"]     = r.Reason
-            }).ToList()
-        }).ToList();
+                missingIndexList.Add(new Dictionary<string, object?>
+                {
+                    ["entitySlug"] = r.EntitySlug,
+                    ["fieldName"]  = r.FieldName,
+                    ["reason"]     = r.Reason
+                });
+            }
+            payload.Add(new Dictionary<string, object?>
+            {
+                ["executedAt"]     = e.ExecutedAt.ToString("o"),
+                ["rootEntity"]     = e.RootEntity,
+                ["joinCount"]      = e.JoinCount,
+                ["resultRowCount"] = e.ResultRowCount,
+                ["elapsedMs"]      = Math.Round(e.ElapsedMs, 3),
+                ["canStreamAggregate"]   = e.Plan.CanStreamAggregate,
+                ["joinOrderOptimised"]   = e.Plan.JoinOrderOptimised,
+                ["steps"] = stepsList,
+                ["missingIndexRecommendations"] = missingIndexList
+            });
+        }
 
         await WriteJsonResponseAsync(context, payload);
     }
@@ -4579,16 +4822,31 @@ public sealed class RouteHandlers : IRouteHandlers
 
             // Determine which packages are already deployed (have at least one EntityDefinition with matching slug)
             var deployedSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var existingDefs = (await DataStoreProvider.Current.QueryAsync<EntityDefinition>(null, ctx.RequestAborted)
-                .ConfigureAwait(false)).ToList();
-            var existingSlugs = existingDefs
-                .Select(e => e.Slug ?? string.Empty)
-                .Where(s => s.Length > 0)
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var existingDefsRaw = await DataStoreProvider.Current.QueryAsync<EntityDefinition>(null, ctx.RequestAborted)
+                .ConfigureAwait(false);
+            var existingDefs = new List<EntityDefinition>();
+            foreach (var def in existingDefsRaw)
+                existingDefs.Add(def);
+            var existingSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var e in existingDefs)
+            {
+                var slug = e.Slug ?? string.Empty;
+                if (slug.Length > 0)
+                    existingSlugs.Add(slug);
+            }
 
             foreach (var pkg in packages)
             {
-                if (pkg.Entities.Any(e => existingSlugs.Contains(e.Slug ?? string.Empty)))
+                bool hasMatchingEntity = false;
+                foreach (var e in pkg.Entities)
+                {
+                    if (existingSlugs.Contains(e.Slug ?? string.Empty))
+                    {
+                        hasMatchingEntity = true;
+                        break;
+                    }
+                }
+                if (hasMatchingEntity)
                     deployedSlugs.Add(pkg.Slug);
             }
 
@@ -4695,8 +4953,10 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private async ValueTask ApplyUploadFieldsFromFormAsync(HttpContext context, DataEntityMetadata meta, BaseDataObject instance, IFormCollection form, List<string> errors)
     {
-        foreach (var field in meta.Fields.Where(f => f.FieldType == FormFieldType.File || f.FieldType == FormFieldType.Image))
+        foreach (var field in meta.Fields)
         {
+            if (field.FieldType != FormFieldType.File && field.FieldType != FormFieldType.Image)
+                continue;
             var deleteKey = $"{field.Name}__delete";
             var deleteRequested = form.TryGetValue(deleteKey, out var deleteValue) && DataScaffold.IsTruthy(deleteValue.ToString());
             var uploadedFile = form.Files.GetFile(field.Name);
@@ -4726,10 +4986,22 @@ public sealed class RouteHandlers : IRouteHandlers
                     continue;
                 }
 
-                if (config.AllowedMimeTypes.Length > 0 && !config.AllowedMimeTypes.Contains(uploadedFile.ContentType, StringComparer.OrdinalIgnoreCase))
+                if (config.AllowedMimeTypes.Length > 0)
                 {
-                    errors.Add($"{field.Label} has an invalid file type.");
-                    continue;
+                    bool mimeAllowed = false;
+                    foreach (var mime in config.AllowedMimeTypes)
+                    {
+                        if (string.Equals(mime, uploadedFile.ContentType, StringComparison.OrdinalIgnoreCase))
+                        {
+                            mimeAllowed = true;
+                            break;
+                        }
+                    }
+                    if (!mimeAllowed)
+                    {
+                        errors.Add($"{field.Label} has an invalid file type.");
+                        continue;
+                    }
                 }
             }
 
@@ -4960,11 +5232,35 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.IsNullOrWhiteSpace(selectedYearKey) && string.IsNullOrWhiteSpace(selectedMonthKey) && string.IsNullOrWhiteSpace(selectedDate) && string.IsNullOrWhiteSpace(selectedHour))
             return string.Empty;
 
-        var year = years.FirstOrDefault(entry => string.Equals(entry.Key, selectedYearKey, StringComparison.OrdinalIgnoreCase));
+        LogYearEntry year = default;
+        foreach (var entry in years)
+        {
+            if (string.Equals(entry.Key, selectedYearKey, StringComparison.OrdinalIgnoreCase))
+            {
+                year = entry;
+                break;
+            }
+        }
         var months = year.Months ?? Array.Empty<LogMonthEntry>();
-        var month = months.FirstOrDefault(entry => string.Equals(entry.Key, selectedMonthKey, StringComparison.OrdinalIgnoreCase));
+        LogMonthEntry month = default;
+        foreach (var entry in months)
+        {
+            if (string.Equals(entry.Key, selectedMonthKey, StringComparison.OrdinalIgnoreCase))
+            {
+                month = entry;
+                break;
+            }
+        }
         var days = month.Days ?? Array.Empty<LogDayEntry>();
-        var day = days.FirstOrDefault(entry => string.Equals(entry.Folder, selectedDate, StringComparison.OrdinalIgnoreCase));
+        LogDayEntry day = default;
+        foreach (var entry in days)
+        {
+            if (string.Equals(entry.Folder, selectedDate, StringComparison.OrdinalIgnoreCase))
+            {
+                day = entry;
+                break;
+            }
+        }
 
         html.Append("<nav class=\"bm-log-actions mb-3\" aria-label=\"Log scope\">");
         html.Append("<div class=\"bm-log-actions-row\">Log scope</div>");
@@ -5096,14 +5392,16 @@ public sealed class RouteHandlers : IRouteHandlers
                 return false;
             }
 
-            var dayFolders = Directory.GetDirectories(root)
-                .Select(Path.GetFileName)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Select(name => name!)
-                .Where(name => TryParseDayFolder(name, out var dateValue) && dateValue.Year == yearValue)
-                .Select(name => Path.Combine(root, name))
-                .Where(Directory.Exists)
-                .ToList();
+            var dayFolders = new List<string>();
+            foreach (var dir in Directory.GetDirectories(root))
+            {
+                var name = Path.GetFileName(dir);
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                if (!TryParseDayFolder(name!, out var dv) || dv.Year != yearValue) continue;
+                var fullPath = Path.Combine(root, name!);
+                if (Directory.Exists(fullPath))
+                    dayFolders.Add(fullPath);
+            }
 
             if (dayFolders.Count == 0)
             {
@@ -5123,14 +5421,16 @@ public sealed class RouteHandlers : IRouteHandlers
                 return false;
             }
 
-            var dayFolders = Directory.GetDirectories(root)
-                .Select(Path.GetFileName)
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Select(name => name!)
-                .Where(name => TryParseDayFolder(name, out var dateValue) && dateValue.Year == monthDate.Year && dateValue.Month == monthDate.Month)
-                .Select(name => Path.Combine(root, name))
-                .Where(Directory.Exists)
-                .ToList();
+            var dayFolders = new List<string>();
+            foreach (var dir in Directory.GetDirectories(root))
+            {
+                var name = Path.GetFileName(dir);
+                if (string.IsNullOrWhiteSpace(name)) continue;
+                if (!TryParseDayFolder(name!, out var dv) || dv.Year != monthDate.Year || dv.Month != monthDate.Month) continue;
+                var fullPath = Path.Combine(root, name!);
+                if (Directory.Exists(fullPath))
+                    dayFolders.Add(fullPath);
+            }
 
             if (dayFolders.Count == 0)
             {
@@ -5213,7 +5513,13 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!Directory.Exists(dayPath))
             return;
 
-        if (Directory.EnumerateFileSystemEntries(dayPath).Any())
+        bool hasEntries = false;
+        foreach (var _ in Directory.EnumerateFileSystemEntries(dayPath))
+        {
+            hasEntries = true;
+            break;
+        }
+        if (hasEntries)
             return;
 
         Directory.Delete(dayPath, recursive: false);
@@ -5241,38 +5547,66 @@ public sealed class RouteHandlers : IRouteHandlers
             }
         }
 
-        var years = dayEntries
-            .GroupBy(entry => entry.YearKey, StringComparer.OrdinalIgnoreCase)
-            .Select(group =>
+        // Group by year
+        var yearDict = new Dictionary<string, List<LogDayEntry>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in dayEntries)
+        {
+            if (!yearDict.TryGetValue(entry.YearKey, out var yearGroup))
             {
-                var first = group.First();
-                var yearDate = first.Date == DateTime.MinValue
+                yearGroup = new List<LogDayEntry>();
+                yearDict[entry.YearKey] = yearGroup;
+            }
+            yearGroup.Add(entry);
+        }
+
+        var years = new List<LogYearEntry>();
+        foreach (var (yearKey, yearGroup) in yearDict)
+        {
+            var first = yearGroup[0];
+            var yearDate = first.Date == DateTime.MinValue
+                ? DateTime.MaxValue
+                : new DateTime(first.Date.Year, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+            // Group by month within year
+            var monthDict = new Dictionary<string, List<LogDayEntry>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var entry in yearGroup)
+            {
+                if (!monthDict.TryGetValue(entry.MonthKey, out var monthGroup))
+                {
+                    monthGroup = new List<LogDayEntry>();
+                    monthDict[entry.MonthKey] = monthGroup;
+                }
+                monthGroup.Add(entry);
+            }
+
+            var monthsList = new List<LogMonthEntry>();
+            foreach (var (monthKey, monthGroup) in monthDict)
+            {
+                var monthFirst = monthGroup[0];
+                var monthDate = monthFirst.Date == DateTime.MinValue
                     ? DateTime.MaxValue
-                    : new DateTime(first.Date.Year, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+                    : new DateTime(monthFirst.Date.Year, monthFirst.Date.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+                var days = new List<LogDayEntry>(monthGroup);
+                days.Sort((a, b) =>
+                {
+                    var da = a.Date == DateTime.MinValue ? DateTime.MaxValue : a.Date;
+                    var db = b.Date == DateTime.MinValue ? DateTime.MaxValue : b.Date;
+                    int cmp = da.CompareTo(db);
+                    return cmp != 0 ? cmp : string.Compare(a.Folder, b.Folder, StringComparison.OrdinalIgnoreCase);
+                });
+                long monthSize = 0;
+                foreach (var d in days)
+                    monthSize += d.SizeBytes;
+                monthsList.Add(new LogMonthEntry(monthKey, monthFirst.MonthLabel, monthDate, days, monthSize));
+            }
+            monthsList.Sort((a, b) => a.MonthDate.CompareTo(b.MonthDate));
 
-                var months = group
-                    .GroupBy(entry => entry.MonthKey, StringComparer.OrdinalIgnoreCase)
-                    .Select(monthGroup =>
-                    {
-                        var monthFirst = monthGroup.First();
-                        var monthDate = monthFirst.Date == DateTime.MinValue
-                            ? DateTime.MaxValue
-                            : new DateTime(monthFirst.Date.Year, monthFirst.Date.Month, 1, 0, 0, 0, DateTimeKind.Utc);
-                        var days = monthGroup
-                            .OrderBy(entry => entry.Date == DateTime.MinValue ? DateTime.MaxValue : entry.Date)
-                            .ThenBy(entry => entry.Folder, StringComparer.OrdinalIgnoreCase)
-                            .ToList();
-                        var monthSize = days.Sum(entry => entry.SizeBytes);
-                        return new LogMonthEntry(monthGroup.Key, monthFirst.MonthLabel, monthDate, days, monthSize);
-                    })
-                    .OrderBy(entry => entry.MonthDate)
-                    .ToList();
-
-                var yearSize = months.Sum(entry => entry.SizeBytes);
-                return new LogYearEntry(group.Key, first.YearLabel, yearDate, months, yearSize);
-            })
-            .OrderBy(entry => entry.YearDate)
-            .ToList();
+            long yearSize = 0;
+            foreach (var m in monthsList)
+                yearSize += m.SizeBytes;
+            years.Add(new LogYearEntry(yearKey, first.YearLabel, yearDate, monthsList, yearSize));
+        }
+        years.Sort((a, b) => a.YearDate.CompareTo(b.YearDate));
 
         return years;
     }
@@ -5434,16 +5768,30 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string[][] BuildListPlainRows(DataEntityMetadata metadata, IEnumerable items)
     {
         var rows = DataScaffold.BuildListRows(metadata, items, string.Empty, includeActions: false);
-        return rows
-            .Select(row => row.Select(cell => StripHtml(WebUtility.HtmlDecode(cell ?? string.Empty))).ToArray())
-            .ToArray();
+        var result = new List<string[]>();
+        foreach (var row in rows)
+        {
+            var cleanRow = new string[row.Length];
+            for (int ci = 0; ci < row.Length; ci++)
+                cleanRow[ci] = StripHtml(WebUtility.HtmlDecode(row[ci] ?? string.Empty));
+            result.Add(cleanRow);
+        }
+        return result.ToArray();
     }
 
     private static string[][] BuildListPlainRowsWithId(DataEntityMetadata metadata, IReadOnlyList<object?> items, out string[] headers)
     {
-        var filteredItems = items.Where(item => item != null).ToList();
+        var filteredItems = new List<object?>();
+        foreach (var item in items)
+        {
+            if (item != null)
+                filteredItems.Add(item);
+        }
         var baseRows = BuildListPlainRows(metadata, filteredItems);
-        headers = new[] { "Id" }.Concat(DataScaffold.BuildListHeaders(metadata, includeActions: false)).ToArray();
+        var baseHeaders = DataScaffold.BuildListHeaders(metadata, includeActions: false);
+        var headerList = new List<string> { "Id" };
+        headerList.AddRange(baseHeaders);
+        headers = headerList.ToArray();
 
         var output = new string[baseRows.Length][];
         for (int i = 0; i < baseRows.Length; i++)
@@ -5451,7 +5799,10 @@ public sealed class RouteHandlers : IRouteHandlers
             var id = filteredItems[i] is BaseDataObject dataObject
                 ? DataScaffold.GetIdValue(dataObject) ?? string.Empty
                 : string.Empty;
-            output[i] = new[] { id }.Concat(baseRows[i]).ToArray();
+            var concatRow = new string[1 + baseRows[i].Length];
+            concatRow[0] = id;
+            Array.Copy(baseRows[i], 0, concatRow, 1, baseRows[i].Length);
+            output[i] = concatRow;
         }
 
         return output;
@@ -5517,6 +5868,50 @@ public sealed class RouteHandlers : IRouteHandlers
         return safe;
     }
 
+    private static string[][] ViewRowsToArray(IReadOnlyList<(string Label, string Value)> viewRows)
+    {
+        var result = new string[viewRows.Count][];
+        for (int i = 0; i < viewRows.Count; i++)
+            result[i] = new[] { viewRows[i].Label, viewRows[i].Value };
+        return result;
+    }
+
+    private static string[][] PrependIdRow(string recordId, string[][] rows)
+    {
+        var result = new string[rows.Length + 1][];
+        result[0] = new[] { "Id", recordId };
+        Array.Copy(rows, 0, result, 1, rows.Length);
+        return result;
+    }
+
+    private static string[] ConcatArrays(string[] a, string[] b)
+    {
+        var result = new string[a.Length + b.Length];
+        Array.Copy(a, 0, result, 0, a.Length);
+        Array.Copy(b, 0, result, a.Length, b.Length);
+        return result;
+    }
+
+    private static string[] BuildParentValueRow(string parentId, List<(string Label, string Value)> fields)
+    {
+        var result = new string[1 + fields.Count];
+        result[0] = parentId;
+        for (int i = 0; i < fields.Count; i++)
+            result[i + 1] = fields[i].Value;
+        return result;
+    }
+
+    private static string JoinEncoded(string separator, IReadOnlyList<string> items)
+    {
+        var sb = new StringBuilder();
+        for (int i = 0; i < items.Count; i++)
+        {
+            if (i > 0) sb.Append(separator);
+            sb.Append(WebUtility.HtmlEncode(items[i]));
+        }
+        return sb.ToString();
+    }
+
     // Export helper methods for nested/embedded components
 
     private async ValueTask ExportHierarchicalJson(HttpContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
@@ -5564,16 +5959,22 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // Build flat CSV with parent fields repeated for each child row
         var flatRows = new List<string[]>();
-        var parentHeaders = new[] { "Id" }.Concat(DataScaffold.BuildListHeaders(meta, includeActions: false)).ToList();
-        var allHeaders = new List<string>(parentHeaders);
+        var parentHeadersList = new List<string> { "Id" };
+        parentHeadersList.AddRange(DataScaffold.BuildListHeaders(meta, includeActions: false));
+        var allHeaders = new List<string>(parentHeadersList);
         
         // Add headers for first nested component (for simplicity, we'll flatten only the first one)
         var firstNested = nestedComponents[0];
-        var nestedData = DataScaffold.ExtractNestedData(meta, items.FirstOrDefault() ?? new object());
+        object firstItem = new object();
+        foreach (var it in items)
+        {
+            if (it != null) { firstItem = it; break; }
+        }
+        var nestedData = DataScaffold.ExtractNestedData(meta, firstItem);
         if (nestedData.Count > 0)
         {
-            var childHeaders = nestedData[0].Headers.Select(h => $"{firstNested.Field.Label}.{h}");
-            allHeaders.AddRange(childHeaders);
+            foreach (var h in nestedData[0].Headers)
+                allHeaders.Add($"{firstNested.Field.Label}.{h}");
         }
 
         foreach (var item in items)
@@ -5582,22 +5983,29 @@ public sealed class RouteHandlers : IRouteHandlers
                 continue;
 
             var id = item is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) ?? string.Empty : string.Empty;
-            var parentRow = new[] { id }.Concat(BuildListPlainRows(meta, new[] { item })[0]).ToArray();
+            var baseRow = BuildListPlainRows(meta, new[] { item })[0];
+            var parentRow = new string[1 + baseRow.Length];
+            parentRow[0] = id;
+            Array.Copy(baseRow, 0, parentRow, 1, baseRow.Length);
             
             var nested = DataScaffold.ExtractNestedData(meta, item);
             if (nested.Count > 0 && nested[0].Rows.Length > 0)
             {
-                // Repeat parent row for each child
                 foreach (var childRow in nested[0].Rows)
                 {
-                    flatRows.Add(parentRow.Concat(childRow).ToArray());
+                    var combined = new string[parentRow.Length + childRow.Length];
+                    Array.Copy(parentRow, 0, combined, 0, parentRow.Length);
+                    Array.Copy(childRow, 0, combined, parentRow.Length, childRow.Length);
+                    flatRows.Add(combined);
                 }
             }
             else
             {
-                // No children, just add parent row with empty child fields
                 var emptyChild = nestedData.Count > 0 ? new string[nestedData[0].Headers.Length] : Array.Empty<string>();
-                flatRows.Add(parentRow.Concat(emptyChild).ToArray());
+                var combined = new string[parentRow.Length + emptyChild.Length];
+                Array.Copy(parentRow, 0, combined, 0, parentRow.Length);
+                Array.Copy(emptyChild, 0, combined, parentRow.Length, emptyChild.Length);
+                flatRows.Add(combined);
             }
         }
 
@@ -5609,15 +6017,9 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         if (!options.IncludeNested || options.MaxDepth < 1)
         {
-            // No nested data, fall back to simple CSV
-            var rows = DataScaffold.BuildViewRows(meta, instance)
-                .Select(row => new[] { row.Label, row.Value })
-                .ToArray();
+            var rows = ViewRowsToArray(DataScaffold.BuildViewRows(meta, instance));
             if (instance is BaseDataObject dataObject)
-            {
-                var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
-                rows = new[] { new[] { "Id", recordId } }.Concat(rows).ToArray();
-            }
+                rows = PrependIdRow(DataScaffold.GetIdValue(dataObject) ?? string.Empty, rows);
             var headers = new[] { "Field", "Value" };
             var csv = BuildCsv(headers, rows);
             await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_{WebUtility.UrlEncode(id)}_flat.csv");
@@ -5627,15 +6029,9 @@ public sealed class RouteHandlers : IRouteHandlers
         var nestedComponents = DataScaffold.GetNestedComponents(meta);
         if (nestedComponents.Count == 0)
         {
-            // No nested components
-            var rows = DataScaffold.BuildViewRows(meta, instance)
-                .Select(row => new[] { row.Label, row.Value })
-                .ToArray();
+            var rows = ViewRowsToArray(DataScaffold.BuildViewRows(meta, instance));
             if (instance is BaseDataObject dataObject)
-            {
-                var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
-                rows = new[] { new[] { "Id", recordId } }.Concat(rows).ToArray();
-            }
+                rows = PrependIdRow(DataScaffold.GetIdValue(dataObject) ?? string.Empty, rows);
             var headers = new[] { "Field", "Value" };
             var csv = BuildCsv(headers, rows);
             await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_{WebUtility.UrlEncode(id)}_flat.csv");
@@ -5645,36 +6041,35 @@ public sealed class RouteHandlers : IRouteHandlers
         // Build flat CSV with parent fields repeated for each child row
         var flatRows = new List<string[]>();
         var parentId = instance is BaseDataObject dobj ? DataScaffold.GetIdValue(dobj) ?? string.Empty : string.Empty;
-        var parentFields = DataScaffold.BuildViewRows(meta, instance).ToList();
+        var parentFieldsList = new List<(string Label, string Value)>(DataScaffold.BuildViewRows(meta, instance));
         var parentHeaders = new List<string> { "Id" };
-        parentHeaders.AddRange(parentFields.Select(f => f.Label));
+        foreach (var f in parentFieldsList)
+            parentHeaders.Add(f.Label);
 
         var allHeaders = new List<string>(parentHeaders);
         var nested = DataScaffold.ExtractNestedData(meta, instance);
         
         if (nested.Count > 0)
         {
-            var childHeaders = nested[0].Headers.Select(h => $"{nested[0].FieldName}.{h}");
-            allHeaders.AddRange(childHeaders);
+            foreach (var h in nested[0].Headers)
+                allHeaders.Add($"{nested[0].FieldName}.{h}");
 
-            var parentRow = new[] { parentId }.Concat(parentFields.Select(f => f.Value)).ToArray();
+            var parentRow = BuildParentValueRow(parentId, parentFieldsList);
             
             if (nested[0].Rows.Length > 0)
             {
                 foreach (var childRow in nested[0].Rows)
-                {
-                    flatRows.Add(parentRow.Concat(childRow).ToArray());
-                }
+                    flatRows.Add(ConcatArrays(parentRow, childRow));
             }
             else
             {
                 var emptyChild = new string[nested[0].Headers.Length];
-                flatRows.Add(parentRow.Concat(emptyChild).ToArray());
+                flatRows.Add(ConcatArrays(parentRow, emptyChild));
             }
         }
         else
         {
-            var parentRow = new[] { parentId }.Concat(parentFields.Select(f => f.Value)).ToArray();
+            var parentRow = BuildParentValueRow(parentId, parentFieldsList);
             flatRows.Add(parentRow);
         }
 
@@ -5713,7 +6108,15 @@ public sealed class RouteHandlers : IRouteHandlers
 
                         var parentId = item is BaseDataObject dobj ? DataScaffold.GetIdValue(dobj) ?? string.Empty : string.Empty;
                         var nested = DataScaffold.ExtractNestedData(meta, item);
-                        var matchingNested = nested.FirstOrDefault(n => string.Equals(n.FieldName, field.Name, StringComparison.OrdinalIgnoreCase));
+                        (string FieldName, string[] Headers, string[][] Rows) matchingNested = default;
+                        foreach (var n in nested)
+                        {
+                            if (string.Equals(n.FieldName, field.Name, StringComparison.OrdinalIgnoreCase))
+                            {
+                                matchingNested = n;
+                                break;
+                            }
+                        }
                         
                         if (headers == null && matchingNested.Headers != null && matchingNested.Headers.Length > 0)
                         {
@@ -5725,7 +6128,10 @@ public sealed class RouteHandlers : IRouteHandlers
                         {
                             foreach (var row in matchingNested.Rows)
                             {
-                                childRows.Add(new[] { parentId }.Concat(row).ToArray());
+                                var concatRow = new string[1 + row.Length];
+                                concatRow[0] = parentId;
+                                Array.Copy(row, 0, concatRow, 1, row.Length);
+                                childRows.Add(concatRow);
                             }
                         }
                     }
@@ -5754,14 +6160,9 @@ public sealed class RouteHandlers : IRouteHandlers
         using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
         {
             // Add parent CSV
-            var parentRows = DataScaffold.BuildViewRows(meta, instance)
-                .Select(row => new[] { row.Label, row.Value })
-                .ToArray();
+            var parentRows = ViewRowsToArray(DataScaffold.BuildViewRows(meta, instance));
             if (instance is BaseDataObject dataObject)
-            {
-                var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
-                parentRows = new[] { new[] { "Id", recordId } }.Concat(parentRows).ToArray();
-            }
+                parentRows = PrependIdRow(DataScaffold.GetIdValue(dataObject) ?? string.Empty, parentRows);
             var parentHeaders = new[] { "Field", "Value" };
             var parentCsv = BuildCsv(parentHeaders, parentRows);
             var parentEntry = archive.CreateEntry($"{typeSlug}.csv");
@@ -5979,7 +6380,13 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
         var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return required.Length == 0 || required.All(userPermissions.Contains);
+        if (required.Length == 0) return true;
+        foreach (var r in required)
+        {
+            if (!userPermissions.Contains(r))
+                return false;
+        }
+        return true;
     }
 
     private static List<string[]> ParseCsvRows(string content)
@@ -6048,8 +6455,19 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         current.Add(field.ToString());
-        if (current.Any(value => !string.IsNullOrWhiteSpace(value)))
-            rows.Add(current.ToArray());
+        {
+            bool hasNonBlank = false;
+            foreach (var value in current)
+            {
+                if (!string.IsNullOrWhiteSpace(value))
+                {
+                    hasNonBlank = true;
+                    break;
+                }
+            }
+            if (hasNonBlank)
+                rows.Add(current.ToArray());
+        }
 
         return rows;
     }
@@ -6061,8 +6479,10 @@ public sealed class RouteHandlers : IRouteHandlers
         passwordIndex = -1;
 
         var fieldMap = new Dictionary<string, DataFieldMetadata>(StringComparer.OrdinalIgnoreCase);
-        foreach (var field in meta.Fields.Where(f => (f.Create || f.Edit) && !f.ReadOnly))
+        foreach (var field in meta.Fields)
         {
+            if (!((field.Create || field.Edit) && !field.ReadOnly))
+                continue;
             if (!fieldMap.ContainsKey(field.Name))
                 fieldMap[field.Name] = field;
             if (!string.IsNullOrWhiteSpace(field.Label) && !fieldMap.ContainsKey(field.Label))
@@ -6336,8 +6756,14 @@ public sealed class RouteHandlers : IRouteHandlers
             var props = JsonPropertyCache.GetOrAdd(valueType, static t =>
             {
                 #pragma warning disable IL2070, IL2075
-                return t.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
-                        .Where(p => p.CanRead && p.GetIndexParameters().Length == 0).ToArray();
+                var allProps = t.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+                var filtered = new List<System.Reflection.PropertyInfo>();
+                foreach (var p in allProps)
+                {
+                    if (p.CanRead && p.GetIndexParameters().Length == 0)
+                        filtered.Add(p);
+                }
+                return filtered.ToArray();
                 #pragma warning restore IL2070, IL2075
             });
             foreach (var prop in props)
@@ -6409,7 +6835,13 @@ public sealed class RouteHandlers : IRouteHandlers
                     },
                     Top = 1
                 };
-                var existing = (await DataStoreProvider.Current.QueryAsync<AppSetting>(query, cancellationToken).ConfigureAwait(false)).FirstOrDefault();
+                var existingResults = await DataStoreProvider.Current.QueryAsync<AppSetting>(query, cancellationToken).ConfigureAwait(false);
+                AppSetting? existing = null;
+                foreach (var e in existingResults)
+                {
+                    existing = e;
+                    break;
+                }
                 if (existing != null && !string.Equals(existing.Key.ToString(), excludeId, StringComparison.OrdinalIgnoreCase))
                     errors.Add("A setting with this Setting ID already exists.");
             }
@@ -6443,7 +6875,9 @@ public sealed class RouteHandlers : IRouteHandlers
             return errors;
 
         const string requiredSuffix = " is required.";
-        var fieldByLabel = meta.Fields.ToDictionary(f => f.Label, f => f, StringComparer.OrdinalIgnoreCase);
+        var fieldByLabel = new Dictionary<string, DataFieldMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in meta.Fields)
+            fieldByLabel[f.Label] = f;
         var filtered = new List<string>(errors.Count);
         foreach (var error in errors)
         {
@@ -6522,7 +6956,13 @@ public sealed class RouteHandlers : IRouteHandlers
         };
 
         var users = await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false);
-        return users.Any();
+        bool hasUsers = false;
+        foreach (var _ in users)
+        {
+            hasUsers = true;
+            break;
+        }
+        return hasUsers;
     }
 
     private static async ValueTask<User?> GetLockedRootUserAsync(CancellationToken cancellationToken = default)
@@ -6537,7 +6977,16 @@ public sealed class RouteHandlers : IRouteHandlers
         };
 
         var users = await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false);
-        return users.FirstOrDefault(u => u.IsLockedOut);
+        User? lockedUser = null;
+        foreach (var u in users)
+        {
+            if (u.IsLockedOut)
+            {
+                lockedUser = u;
+                break;
+            }
+        }
+        return lockedUser;
     }
 
     private static string BuildViewSwitcher(string typeSlug, ViewType currentView, DataEntityMetadata meta)
@@ -6585,15 +7034,22 @@ public sealed class RouteHandlers : IRouteHandlers
         var html = new StringBuilder();
 
         // Find the first two DateOnly/DateTime fields: first is start date, second (if any) is end date
-        var dateFields = meta.Fields
-            .Where(f => f.FieldType == FormFieldType.DateOnly || f.FieldType == FormFieldType.DateTime)
-            .Take(2)
-            .ToList();
+        var dateFields = new List<DataFieldMetadata>();
+        foreach (var f in meta.Fields)
+        {
+            if (f.FieldType == FormFieldType.DateOnly || f.FieldType == FormFieldType.DateTime)
+            {
+                dateFields.Add(f);
+                if (dateFields.Count >= 2) break;
+            }
+        }
 
         if (dateFields.Count == 0)
             return "<p class=\"text-warning\">Timeline view requires a DateOnly or DateTime field.</p>";
 
-        var itemsList = allItems.ToList();
+        var itemsList = new List<BaseDataObject>();
+        foreach (var item in allItems)
+            itemsList.Add(item);
         if (itemsList.Count == 0)
             return "<p class=\"text-muted\">No items found.</p>";
 
@@ -6641,8 +7097,13 @@ public sealed class RouteHandlers : IRouteHandlers
         ganttItems.Sort((a, b) => a.Start.CompareTo(b.Start));
 
         // Expand date range to full month boundaries
-        var minDate = ganttItems.Min(x => x.Start);
-        var maxDate = ganttItems.Max(x => x.End);
+        var minDate = ganttItems[0].Start;
+        var maxDate = ganttItems[0].End;
+        for (int gi = 1; gi < ganttItems.Count; gi++)
+        {
+            if (ganttItems[gi].Start < minDate) minDate = ganttItems[gi].Start;
+            if (ganttItems[gi].End > maxDate) maxDate = ganttItems[gi].End;
+        }
         var chartStart = new DateOnly(minDate.Year, minDate.Month, 1);
         var chartEndExclusive = maxDate.Month == 12
             ? new DateOnly(maxDate.Year + 1, 1, 1)
@@ -6743,10 +7204,17 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string GetDisplayValue(DataEntityMetadata meta, BaseDataObject item)
     {
         // Try common name fields first (same heuristic as DataScaffold.GetDisplayValue)
-        var nameField = meta.Fields.FirstOrDefault(f =>
-            string.Equals(f.Name, "Name", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(f.Name, "Title", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(f.Name, "DisplayName", StringComparison.OrdinalIgnoreCase));
+        DataFieldMetadata? nameField = null;
+        foreach (var f in meta.Fields)
+        {
+            if (string.Equals(f.Name, "Name", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(f.Name, "Title", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(f.Name, "DisplayName", StringComparison.OrdinalIgnoreCase))
+            {
+                nameField = f;
+                break;
+            }
+        }
         if (nameField != null)
         {
             var value = nameField.Property.GetValue(item)?.ToString();
@@ -6755,7 +7223,15 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         // Fall back to first List string field
-        var displayField = meta.Fields.FirstOrDefault(f => f.List && f.FieldType == FormFieldType.String);
+        DataFieldMetadata? displayField = null;
+        foreach (var f in meta.Fields)
+        {
+            if (f.List && f.FieldType == FormFieldType.String)
+            {
+                displayField = f;
+                break;
+            }
+        }
         if (displayField != null)
         {
             var value = displayField.Property.GetValue(item)?.ToString();
@@ -6981,7 +7457,8 @@ public sealed class RouteHandlers : IRouteHandlers
             columnTitles.Add("");
         if (includeActions)
             columnTitles.Add("Actions");
-        columnTitles.AddRange(metadata.ListFields.Select(f => f.Label));
+        foreach (var f in metadata.ListFields)
+            columnTitles.Add(f.Label);
         
         foreach (var row in rows)
         {
@@ -7027,7 +7504,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private static List<FormField> BuildFormFieldsWithErrors(
         DataEntityMetadata meta, object instance, bool forCreate, ValidationResult validationResult, string? cspNonce = null)
     {
-        var fields = DataScaffold.BuildFormFields(meta, instance, forCreate, cspNonce: cspNonce).ToList();
+        var fields = new List<FormField>(DataScaffold.BuildFormFields(meta, instance, forCreate, cspNonce: cspNonce));
         if (!validationResult.IsValid)
         {
             for (int i = 0; i < fields.Count; i++)
@@ -7069,7 +7546,15 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var cmd = meta.Commands.FirstOrDefault(c => string.Equals(c.Name, commandName, StringComparison.OrdinalIgnoreCase));
+        RemoteCommandMetadata? cmd = null;
+        foreach (var c in meta.Commands)
+        {
+            if (string.Equals(c.Name, commandName, StringComparison.OrdinalIgnoreCase))
+            {
+                cmd = c;
+                break;
+            }
+        }
         if (cmd == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -7099,7 +7584,19 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!string.IsNullOrEmpty(cmd.Permission))
         {
             var user = await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-            if (user == null || !user.Permissions.Contains(cmd.Permission, StringComparer.OrdinalIgnoreCase))
+            bool hasPermission = false;
+            if (user != null)
+            {
+                foreach (var perm in user.Permissions)
+                {
+                    if (string.Equals(perm, cmd.Permission, StringComparison.OrdinalIgnoreCase))
+                    {
+                        hasPermission = true;
+                        break;
+                    }
+                }
+            }
+            if (user == null || !hasPermission)
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
                 await WriteJsonResponseAsync(context, new { success = false, message = "Insufficient permissions." });
@@ -7264,7 +7761,9 @@ public sealed class RouteHandlers : IRouteHandlers
             html.Append("<th class=\"text-end\">Table Total</th>");
             html.Append("</tr></thead><tbody>");
 
-            foreach (var (name, slug, schemaBytes, idMapBytes, indexBytes) in rows.OrderBy(r => r.Name, StringComparer.OrdinalIgnoreCase))
+            var sortedRows = new List<(string Name, string Slug, long SchemaBytes, long IdMapBytes, long IndexBytes)>(rows);
+            sortedRows.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
+            foreach (var (name, slug, schemaBytes, idMapBytes, indexBytes) in sortedRows)
             {
                 long tableTotal = schemaBytes + idMapBytes + indexBytes;
                 html.Append("<tr>");
@@ -7381,9 +7880,12 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         var jobs = BackgroundJobService.Instance.GetAllJobs();
 
-        var items = jobs
-            .OrderByDescending(s => s.StartedAt)
-            .Select(snapshot => (object)new
+        var jobsList = new List<JobStatusSnapshot>(jobs);
+        jobsList.Sort((a, b) => b.StartedAt.CompareTo(a.StartedAt));
+        var itemsList = new List<object>();
+        foreach (var snapshot in jobsList)
+        {
+            itemsList.Add(new
             {
                 jobId           = snapshot.JobId,
                 operationName   = snapshot.OperationName,
@@ -7401,8 +7903,9 @@ public sealed class RouteHandlers : IRouteHandlers
                 completedAt     = snapshot.CompletedAt?.ToString("O"),
                 error           = snapshot.Error,
                 resultUrl       = snapshot.ResultUrl
-            })
-            .ToArray();
+            });
+        }
+        var items = itemsList.ToArray();
 
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "application/json";

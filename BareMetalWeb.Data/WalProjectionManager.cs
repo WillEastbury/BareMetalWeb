@@ -20,6 +20,7 @@ public sealed class WalProjectionManager : IDisposable
 {
     private readonly ReaderWriterLockSlim _regLock = new(LockRecursionPolicy.NoRecursion);
     private readonly List<ISecondaryIndex> _indexes = new();
+    private volatile ISecondaryIndex[] _cachedSnapshot = [];
     private bool _disposed;
 
     // ── Registration ─────────────────────────────────────────────────────────
@@ -35,6 +36,7 @@ public sealed class WalProjectionManager : IDisposable
                 if (_indexes[i].TableId == index.TableId && _indexes[i].Name == index.Name)
                     return; // already registered
             _indexes.Add(index);
+            _cachedSnapshot = _indexes.ToArray();
         }
         finally { _regLock.ExitWriteLock(); }
     }
@@ -46,6 +48,7 @@ public sealed class WalProjectionManager : IDisposable
         try
         {
             _indexes.RemoveAll(idx => idx.TableId == tableId && idx.Name == name);
+            _cachedSnapshot = _indexes.ToArray();
         }
         finally { _regLock.ExitWriteLock(); }
     }
@@ -76,11 +79,8 @@ public sealed class WalProjectionManager : IDisposable
     {
         if (ops.Count == 0) return;
 
-        _regLock.EnterReadLock();
-        ISecondaryIndex[] snapshot;
-        try { snapshot = _indexes.ToArray(); }
-        finally { _regLock.ExitReadLock(); }
-
+        // Use cached snapshot — no lock, no allocation on the commit hot path
+        var snapshot = _cachedSnapshot;
         if (snapshot.Length == 0) return;
 
         foreach (var op in ops)

@@ -2,7 +2,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
 using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data.ExpressionEngine;
@@ -41,12 +40,16 @@ public static class ValidationService
     [RequiresUnreferencedCode("Attribute scanning requires property metadata to be preserved.")]
     public static ValidationConfig? BuildValidationConfig(PropertyInfo property)
     {
-        var validators = property.GetCustomAttributes()
-            .OfType<ValidationAttribute>()
-            .ToList();
+        var validators = new List<ValidationAttribute>();
+        foreach (var attr in property.GetCustomAttributes())
+        {
+            if (attr is ValidationAttribute va)
+                validators.Add(va);
+        }
 
-        var expressionRules = property.GetCustomAttributes<ValidationRuleAttribute>()
-            .ToList();
+        var expressionRules = new List<ValidationRuleAttribute>();
+        foreach (var rule in property.GetCustomAttributes<ValidationRuleAttribute>())
+            expressionRules.Add(rule);
 
         if (validators.Count == 0 && expressionRules.Count == 0)
             return null;
@@ -107,7 +110,12 @@ public static class ValidationService
     public static IReadOnlyList<ValidationRuleAttribute> GetEntityRules(Type entityType)
     {
         return _entityRulesCache.GetOrAdd(entityType, static t =>
-            t.GetCustomAttributes<ValidationRuleAttribute>().ToList());
+        {
+            var rules = new List<ValidationRuleAttribute>();
+            foreach (var rule in t.GetCustomAttributes<ValidationRuleAttribute>())
+                rules.Add(rule);
+            return rules;
+        });
     }
 
     /// <summary>

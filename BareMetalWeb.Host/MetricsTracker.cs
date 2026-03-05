@@ -2,9 +2,15 @@ using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Threading;
 using BareMetalWeb.Core.Interfaces;
+using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
+#if NET7_0_OR_GREATER
+using System.Runtime.Intrinsics.Arm;
+using System.Runtime.Intrinsics.X86;
+#endif
 
 namespace BareMetalWeb.Host;
 
@@ -223,7 +229,18 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             new[] { "Process ID (PID)", snapshot.ProcessId.ToString() },
             new[] { "Process Uptime", FormatUptime(snapshot.ProcessUptime) },
             new[] { "Working Set (bytes)", FormatSizeBytes(snapshot.WorkingSet64) },
-            new[] { "Virtual Memory Size (bytes)", FormatSizeBytes(snapshot.VirtualMemorySize64) }
+            new[] { "Virtual Memory Size (bytes)", FormatSizeBytes(snapshot.VirtualMemorySize64) },
+            new[] { "---- CPU / SIMD ----", "" },
+            new[] { "Architecture", RuntimeInformation.ProcessArchitecture.ToString() },
+            new[] { "OS Architecture", RuntimeInformation.OSArchitecture.ToString() },
+            new[] { "Runtime", RuntimeInformation.FrameworkDescription },
+            new[] { "SIMD Vector Width", $"{System.Numerics.Vector<float>.Count * 4 * 8}-bit ({System.Numerics.Vector<float>.Count} floats)" },
+            new[] { "---- Active Acceleration Paths ----", "" },
+            new[] { "Vector Distance (ANN)", DataLayerCapabilities.VectorDistancePath },
+            new[] { "CRC-32C Checksum", DataLayerCapabilities.Crc32CPath },
+            new[] { "Key Comparison", DataLayerCapabilities.KeyComparisonPath },
+            new[] { "---- Available CPU Features ----", "" },
+            .. GetSimdFeatureRows()
         ];
     }
 
@@ -249,5 +266,36 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
         return unitIndex == 0
             ? $"{size:N0} {units[unitIndex]}"
             : $"{size:N2} {units[unitIndex]}";
+    }
+
+    private static string[][] GetSimdFeatureRows()
+    {
+        var features = new List<string[]>();
+#if NET7_0_OR_GREATER
+        if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
+        {
+            features.Add(new[] { "ARM AdvSimd (NEON)", AdvSimd.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "ARM AdvSimd.Arm64", AdvSimd.Arm64.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "ARM Aes", System.Runtime.Intrinsics.Arm.Aes.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "ARM Crc32", Crc32.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "ARM Crc32.Arm64", Crc32.Arm64.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "ARM Dp", Dp.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "ARM Sha256", Sha256.IsSupported ? "✓" : "✗" });
+        }
+        else
+        {
+            features.Add(new[] { "x86 SSE2", Sse2.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "x86 SSE4.2", Sse42.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "x86 AVX", Avx.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "x86 AVX2", Avx2.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "x86 AVX-512F", Avx512F.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "x86 FMA", Fma.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "x86 BMI1", Bmi1.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "x86 BMI2", Bmi2.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "x86 POPCNT", Popcnt.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "x86 LZCNT", Lzcnt.IsSupported ? "✓" : "✗" });
+        }
+#endif
+        return features.ToArray();
     }
 }

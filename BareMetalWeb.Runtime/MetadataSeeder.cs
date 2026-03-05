@@ -42,15 +42,18 @@ public static class MetadataSeeder
         var seeded = new List<string>();
 
         // Load existing EntityDefinitions so we can skip already-seeded entities.
-        var existingDefs = (await store.QueryAsync<EntityDefinition>(null, cancellationToken)
-            .ConfigureAwait(false)).ToList();
+        var existingDefs = new List<EntityDefinition>(await store.QueryAsync<EntityDefinition>(null, cancellationToken)
+            .ConfigureAwait(false));
 
         // Index by the slug that will be used (either explicit Slug, or derived from Name).
-        var existingBySlug = existingDefs.ToDictionary(
-            e => !string.IsNullOrWhiteSpace(e.Slug)
+        var existingBySlug = new Dictionary<string, EntityDefinition>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in existingDefs)
+        {
+            var s = !string.IsNullOrWhiteSpace(e.Slug)
                 ? e.Slug!
-                : DataScaffold.ToSlug(e.Name),
-            StringComparer.OrdinalIgnoreCase);
+                : DataScaffold.ToSlug(e.Name);
+            existingBySlug[s] = e;
+        }
 
         foreach (var meta in DataScaffold.Entities)
         {
@@ -119,14 +122,12 @@ public static class MetadataSeeder
             Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityDefId } }
         };
 
-        var fields = (await store.QueryAsync<FieldDefinition>(entityIdQuery, ct).ConfigureAwait(false))
-            .ToList();
+        var fields = new List<FieldDefinition>(await store.QueryAsync<FieldDefinition>(entityIdQuery, ct).ConfigureAwait(false));
 
         foreach (var f in fields)
             await store.DeleteAsync<FieldDefinition>(f.Key, ct).ConfigureAwait(false);
 
-        var idxs = (await store.QueryAsync<IndexDefinition>(entityIdQuery, ct).ConfigureAwait(false))
-            .ToList();
+        var idxs = new List<IndexDefinition>(await store.QueryAsync<IndexDefinition>(entityIdQuery, ct).ConfigureAwait(false));
 
         foreach (var idx in idxs)
             await store.DeleteAsync<IndexDefinition>(idx.Key, ct).ConfigureAwait(false);

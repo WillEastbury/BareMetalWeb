@@ -42,17 +42,21 @@ public static class TenantApiHandlers
             return;
         }
 
-        var tenants = _registry!.AllTenants.Select(t => new
+        var tenants = new List<object>();
+        foreach (var t in _registry!.AllTenants)
         {
-            t.TenantId,
-            t.DataRoot,
-            t.LogFolder,
-            t.DisplayName,
-            t.LogoUrl,
-            t.PrimaryColor,
-            t.MaxRecords,
-            t.MaxStorageBytes,
-        });
+            tenants.Add(new
+            {
+                t.TenantId,
+                t.DataRoot,
+                t.LogFolder,
+                t.DisplayName,
+                t.LogoUrl,
+                t.PrimaryColor,
+                t.MaxRecords,
+                t.MaxStorageBytes,
+            });
+        }
 
         context.Response.ContentType = "application/json";
         await JsonSerializer.SerializeAsync(context.Response.Body, tenants, JsonOpts);

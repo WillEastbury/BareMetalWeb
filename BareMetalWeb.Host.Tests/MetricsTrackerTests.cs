@@ -333,7 +333,7 @@ public class MetricsTrackerTests
         Assert.Equal(2, columns.Length);
         Assert.Equal("Metric", columns[0]);
         Assert.Equal("Value", columns[1]);
-        Assert.Equal(19, rows.Length);
+        Assert.True(rows.Length >= 19, $"Expected at least 19 metric rows (got {rows.Length})");
     }
 
     [Fact]
@@ -359,6 +359,10 @@ public class MetricsTrackerTests
         Assert.Contains("Process ID (PID)", metricNames);
         Assert.Contains("Working Set (bytes)", metricNames);
         Assert.Contains("Virtual Memory Size (bytes)", metricNames);
+        Assert.Contains("---- CPU / SIMD ----", metricNames);
+        Assert.Contains("Architecture", metricNames);
+        Assert.Contains("Runtime", metricNames);
+        Assert.Contains("SIMD Vector Width", metricNames);
     }
 
     [Fact]
@@ -563,7 +567,7 @@ public class MetricsTrackerTests
 
         // Assert
         Assert.Equal(2, columns.Length);
-        Assert.Equal(19, rows.Length);
+        Assert.True(rows.Length >= 19, $"Expected at least 19 metric rows (got {rows.Length})");
         Assert.Equal("0", metricDict["Total Requests"]);
         Assert.Equal("0", metricDict["Errored Requests (5xx)"]);
         Assert.Equal("0", metricDict["Pages Served 2xx"]);

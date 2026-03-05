@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Data.Interfaces;
@@ -107,7 +106,15 @@ public sealed class DataObjectStore : IDataObjectStore
     {
         return _providerCache.GetOrAdd(type, t =>
         {
-            var provider = _providersList.FirstOrDefault(p => p.CanHandle(t));
+            IDataProvider? provider = null;
+            foreach (var p in _providersList)
+            {
+                if (p.CanHandle(t))
+                {
+                    provider = p;
+                    break;
+                }
+            }
             if (provider is not null)
                 return provider;
 

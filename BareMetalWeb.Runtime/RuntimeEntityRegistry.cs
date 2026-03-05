@@ -48,7 +48,13 @@ public sealed class RuntimeEntityRegistry
             if (cached != null) return cached;
             lock (_sync)
             {
-                _sortedAll ??= _bySlug.Values.OrderBy(e => e.NavOrder).ThenBy(e => e.Name).ToArray();
+                var list = new List<RuntimeEntityModel>(_bySlug.Values);
+                list.Sort((a, b) =>
+                {
+                    int cmp = a.NavOrder.CompareTo(b.NavOrder);
+                    return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.Ordinal);
+                });
+                _sortedAll ??= list.ToArray();
                 return _sortedAll;
             }
         }
@@ -158,7 +164,7 @@ public sealed class RuntimeEntityRegistry
         var registry = new RuntimeEntityRegistry();
 
         // Load all schema records in parallel
-        var entityDefs = (await store.QueryAsync<EntityDefinition>().ConfigureAwait(false)).ToList();
+        var entityDefs = new List<EntityDefinition>(await store.QueryAsync<EntityDefinition>().ConfigureAwait(false));
         if (entityDefs.Count == 0)
         {
             registry.Freeze();
@@ -166,10 +172,10 @@ public sealed class RuntimeEntityRegistry
             return registry;
         }
 
-        var allFields = (await store.QueryAsync<FieldDefinition>().ConfigureAwait(false)).ToList();
-        var allIndexes = (await store.QueryAsync<IndexDefinition>().ConfigureAwait(false)).ToList();
-        var allActions = (await store.QueryAsync<ActionDefinition>().ConfigureAwait(false)).ToList();
-        var allActionCommands = (await store.QueryAsync<ActionCommandDefinition>().ConfigureAwait(false)).ToList();
+        var allFields = new List<FieldDefinition>(await store.QueryAsync<FieldDefinition>().ConfigureAwait(false));
+        var allIndexes = new List<IndexDefinition>(await store.QueryAsync<IndexDefinition>().ConfigureAwait(false));
+        var allActions = new List<ActionDefinition>(await store.QueryAsync<ActionDefinition>().ConfigureAwait(false));
+        var allActionCommands = new List<ActionCommandDefinition>(await store.QueryAsync<ActionCommandDefinition>().ConfigureAwait(false));
 
         foreach (var entityDef in entityDefs)
         {
@@ -177,15 +183,18 @@ public sealed class RuntimeEntityRegistry
             if (string.IsNullOrWhiteSpace(entityDef.EntityId))
                 entityDef.EntityId = entityDef.Key.ToString();
 
-            var entityFields = allFields
-                .Where(f => string.Equals(f.EntityId, entityDef.EntityId, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            var entityIndexes = allIndexes
-                .Where(i => string.Equals(i.EntityId, entityDef.EntityId, StringComparison.OrdinalIgnoreCase))
-                .ToList();
-            var entityActions = allActions
-                .Where(a => string.Equals(a.EntityId, entityDef.EntityId, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            var entityFields = new List<FieldDefinition>();
+            foreach (var f in allFields)
+                if (string.Equals(f.EntityId, entityDef.EntityId, StringComparison.OrdinalIgnoreCase))
+                    entityFields.Add(f);
+            var entityIndexes = new List<IndexDefinition>();
+            foreach (var i in allIndexes)
+                if (string.Equals(i.EntityId, entityDef.EntityId, StringComparison.OrdinalIgnoreCase))
+                    entityIndexes.Add(i);
+            var entityActions = new List<ActionDefinition>();
+            foreach (var a in allActions)
+                if (string.Equals(a.EntityId, entityDef.EntityId, StringComparison.OrdinalIgnoreCase))
+                    entityActions.Add(a);
 
             // Ensure FieldId populated
             foreach (var f in entityFields)
@@ -193,12 +202,12 @@ public sealed class RuntimeEntityRegistry
                     f.FieldId = f.Key.ToString();
 
             // Gather all ActionCommandDefinitions whose ActionId belongs to this entity
-            var entityActionKeys = new HashSet<string>(
-                entityActions.Select(a => a.Key.ToString()),
-                StringComparer.OrdinalIgnoreCase);
-            var entityActionCommands = allActionCommands
-                .Where(c => entityActionKeys.Contains(c.ActionId))
-                .ToList();
+            var entityActionKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var a in entityActions)
+                entityActionKeys.Add(a.Key.ToString());
+            var entityActionCommands = new List<ActionCommandDefinition>();
+            foreach (var c in allActionCommands)
+                if (entityActionKeys.Contains(c.ActionId)) entityActionCommands.Add(c);
 
             var model = compiler.Compile(entityDef, entityFields, entityIndexes, entityActions,
                 entityActionCommands, out var warnings);

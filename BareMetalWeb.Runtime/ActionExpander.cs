@@ -49,9 +49,13 @@ public static class ActionExpander
         ProcessCommands(action.Commands, workingContext, primaryKey, aggregateType, aggregateId,
             mutations, assertions, depth);
 
+        var builtMutations = new List<AggregateMutation>(mutations.Count);
+        foreach (var b in mutations.Values)
+            builtMutations.Add(b.Build());
+
         return new TransactionEnvelope(
             transactionId: Guid.NewGuid().ToString("N"),
-            aggregateMutations: mutations.Values.Select(b => b.Build()).ToList(),
+            aggregateMutations: builtMutations,
             assertions: assertions);
     }
 
@@ -67,7 +71,9 @@ public static class ActionExpander
         List<AssertionResult> assertions,
         int depth)
     {
-        foreach (var command in commands.OrderBy(c => c.Order))
+        var sortedCommands = new List<ActionCommand>(commands);
+        sortedCommands.Sort((a, b) => a.Order.CompareTo(b.Order));
+        foreach (var command in sortedCommands)
         {
             switch (command)
             {
@@ -154,7 +160,8 @@ public static class ActionExpander
             return;
 
         // Snapshot: take a copy of the list so snapshot-mode doesn't see loop mutations
-        var snapshot = items.ToList();
+        var snapshot = new List<IDictionary<string, object?>>();
+        foreach (var item in items) snapshot.Add(item);
 
         foreach (var item in snapshot)
         {
@@ -191,8 +198,15 @@ public static class ActionExpander
         if (!RuntimeEntityRegistry.Current.TryGet(cmd.TargetEntityType, out var targetModel))
             return;
 
-        var targetAction = targetModel.Actions
-            .FirstOrDefault(a => string.Equals(a.Name, cmd.TargetActionId, StringComparison.OrdinalIgnoreCase));
+        RuntimeActionModel? targetAction = null;
+        foreach (var a in targetModel.Actions)
+        {
+            if (string.Equals(a.Name, cmd.TargetActionId, StringComparison.OrdinalIgnoreCase))
+            {
+                targetAction = a;
+                break;
+            }
+        }
 
         if (targetAction == null)
             return;

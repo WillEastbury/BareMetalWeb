@@ -59,13 +59,16 @@ public static class VectorApiHandlers
 
         var results = _manager.Search(entity, field, vector, top);
 
+        var projectedResults = new List<object>(results.Count);
+        foreach (var r in results)
+            projectedResults.Add(new { id = r.Id, distance = r.Distance });
         context.Response.ContentType = "application/json";
         await JsonSerializer.SerializeAsync(context.Response.Body, new
         {
             entity,
             field,
             count = results.Count,
-            results = results.Select(r => new { id = r.Id, distance = r.Distance }),
+            results = projectedResults,
         }, JsonOpts);
     }
 
@@ -120,15 +123,20 @@ public static class VectorApiHandlers
     {
         if (_manager == null) { context.Response.StatusCode = 503; return; }
 
-        var defs = _manager.GetDefinitions().Select(d => new
+        var rawDefs = _manager.GetDefinitions();
+        var defs = new List<object>();
+        foreach (var d in rawDefs)
         {
-            entity = d.EntityType,
-            field = d.Field,
-            dimension = d.Def.Dimension,
-            metric = d.Def.Metric.ToString(),
-            maxDegree = d.Def.MaxDegree,
-            count = _manager.Count(d.EntityType, d.Field),
-        });
+            defs.Add(new
+            {
+                entity = d.EntityType,
+                field = d.Field,
+                dimension = d.Def.Dimension,
+                metric = d.Def.Metric.ToString(),
+                maxDegree = d.Def.MaxDegree,
+                count = _manager.Count(d.EntityType, d.Field),
+            });
+        }
 
         context.Response.ContentType = "application/json";
         await JsonSerializer.SerializeAsync(context.Response.Body, defs, JsonOpts);

@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -88,12 +88,14 @@ internal static class Program
             foreach (var srcEntity in pkg.Entities)
             {
                 var entityId = srcEntity.EntityId;
-                var entityFields = pkg.Fields
-                    .Where(f => string.Equals(f.EntityId, entityId, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
-                var entityIndexes = pkg.Indexes
-                    .Where(i => string.Equals(i.EntityId, entityId, StringComparison.OrdinalIgnoreCase))
-                    .ToList();
+                var entityFields = new List<FieldDefinition>();
+                foreach (var f in pkg.Fields)
+                    if (string.Equals(f.EntityId, entityId, StringComparison.OrdinalIgnoreCase))
+                        entityFields.Add(f);
+                var entityIndexes = new List<IndexDefinition>();
+                foreach (var i in pkg.Indexes)
+                    if (string.Equals(i.EntityId, entityId, StringComparison.OrdinalIgnoreCase))
+                        entityIndexes.Add(i);
                 var model = compiler.Compile(srcEntity, entityFields, entityIndexes,
                     Array.Empty<ActionDefinition>(), Array.Empty<ActionCommandDefinition>(), out _);
                 if (model == null) continue;
@@ -106,8 +108,17 @@ internal static class Program
         }
         foreach (var model in compiledModels)
         {
-            if (model.Fields.Any(f => f.FieldType == Rendering.Models.FormFieldType.LookupList
-                && !string.IsNullOrWhiteSpace(f.LookupEntitySlug)))
+            bool hasLookup = false;
+            foreach (var f in model.Fields)
+            {
+                if (f.FieldType == Rendering.Models.FormFieldType.LookupList
+                    && !string.IsNullOrWhiteSpace(f.LookupEntitySlug))
+                {
+                    hasLookup = true;
+                    break;
+                }
+            }
+            if (hasLookup)
             {
                 var schema = EntitySchemaFactory.FromModel(model);
                 var updated = model.ToEntityMetadata(walProvider, schema);
@@ -267,8 +278,9 @@ internal static class Program
         // Discover entities from two sources:
         // 1. DataScaffold-registered types (known C# entity classes)
         // 2. Subdirectories in the Paged folder (entities with stored data)
-        var registered = DataScaffold.Entities
-            .ToDictionary(e => e.Name, StringComparer.OrdinalIgnoreCase);
+        var registered = new Dictionary<string, DataEntityMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var e in DataScaffold.Entities)
+            registered[e.Name] = e;
 
         var onDisk = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pagedRoot = Path.Combine(_dataRoot, "Paged");
@@ -280,8 +292,10 @@ internal static class Program
         foreach (var (entity, _) in IndexStore.ListTrackedIndexes(_provider))
             onDisk.Add(entity);
 
-        var all = registered.Keys.Union(onDisk, StringComparer.OrdinalIgnoreCase)
-            .OrderBy(n => n).ToList();
+        var allSet = new HashSet<string>(registered.Keys, StringComparer.OrdinalIgnoreCase);
+        foreach (var name in onDisk) allSet.Add(name);
+        var all = new List<string>(allSet);
+        all.Sort(StringComparer.OrdinalIgnoreCase);
 
         if (all.Count == 0)
         {
@@ -290,18 +304,19 @@ internal static class Program
         }
 
         var headers = new[] { "Entity", "Slug", "Fields", "OnDisk", "Registered" };
-        var rows = all.Select(name =>
+        var rows = new List<string[]>();
+        foreach (var name in all)
         {
             registered.TryGetValue(name, out var meta);
-            return new[]
+            rows.Add(new[]
             {
                 name,
                 meta?.Slug ?? "-",
                 meta?.Fields.Count.ToString() ?? "-",
                 onDisk.Contains(name) ? "yes" : "no",
                 meta != null ? "yes" : "no"
-            };
-        }).ToList();
+            });
+        }
 
         PrintTable(headers, rows);
         Console.WriteLine($"\n{all.Count} entity type(s).");
@@ -314,10 +329,15 @@ internal static class Program
     {
         var filterEntity = args.Length > 0 && !args[0].StartsWith("--") ? args[0] : null;
 
-        var entries = IndexStore.ListTrackedIndexes(_provider)
-            .Where(e => filterEntity == null || string.Equals(e.EntityName, filterEntity, StringComparison.OrdinalIgnoreCase))
-            .OrderBy(e => e.EntityName).ThenBy(e => e.FieldName)
-            .ToList();
+        var entries = new List<(string EntityName, string FieldName)>();
+        foreach (var e in IndexStore.ListTrackedIndexes(_provider))
+            if (filterEntity == null || string.Equals(e.EntityName, filterEntity, StringComparison.OrdinalIgnoreCase))
+                entries.Add(e);
+        entries.Sort((a, b) =>
+        {
+            int cmp = string.Compare(a.EntityName, b.EntityName, StringComparison.Ordinal);
+            return cmp != 0 ? cmp : string.Compare(a.FieldName, b.FieldName, StringComparison.Ordinal);
+        });
 
         if (entries.Count == 0)
         {
@@ -328,11 +348,12 @@ internal static class Program
         }
 
         var headers = new[] { "Entity", "Field", "Snapshot pages", "Log pages", "Sequence" };
-        var rows = entries.Select(e =>
+        var rows = new List<string[]>();
+        foreach (var e in entries)
         {
             var (snap, log, seq) = _indexStore.ReadIndexStats(e.EntityName, e.FieldName);
-            return new[] { e.EntityName, e.FieldName, snap.ToString(), log.ToString(), seq.ToString() };
-        }).ToList();
+            rows.Add(new[] { e.EntityName, e.FieldName, snap.ToString(), log.ToString(), seq.ToString() });
+        }
 
         PrintTable(headers, rows);
         Console.WriteLine($"\n{entries.Count} index(es).");
@@ -357,13 +378,33 @@ internal static class Program
         }
 
         var headers = new[] { "Key", "IDs" };
-        var rows = index.OrderBy(kv => kv.Key)
-            .Select(kv => new[] { kv.Key, string.Join(", ", kv.Value.Take(10)) +
-                (kv.Value.Count > 10 ? $"  …+{kv.Value.Count - 10}" : "") })
-            .ToList();
+        var sortedEntries = new List<KeyValuePair<string, HashSet<uint>>>(index);
+        sortedEntries.Sort((a, b) => string.Compare(a.Key, b.Key, StringComparison.Ordinal));
+        var rows = new List<string[]>();
+        foreach (var kv in sortedEntries)
+        {
+            string idsDisplay;
+            if (kv.Value.Count <= 10)
+                idsDisplay = string.Join(", ", kv.Value);
+            else
+            {
+                var first10 = new List<uint>();
+                int t = 0;
+                foreach (var id in kv.Value)
+                {
+                    if (t >= 10) break;
+                    first10.Add(id);
+                    t++;
+                }
+                idsDisplay = string.Join(", ", first10) + $"  …+{kv.Value.Count - 10}";
+            }
+            rows.Add(new[] { kv.Key, idsDisplay });
+        }
 
         PrintTable(headers, rows);
-        Console.WriteLine($"\n{index.Count} key(s),  {index.Values.Sum(v => v.Count)} total ID(s).");
+        int totalIds = 0;
+        foreach (var v in index.Values) totalIds += v.Count;
+        Console.WriteLine($"\n{index.Count} key(s),  {totalIds} total ID(s).");
         return 0;
     }
 
@@ -376,7 +417,9 @@ internal static class Program
 
         var entity = args[0];
         var field = args[1];
-        bool raw = args.Contains("--raw", StringComparer.OrdinalIgnoreCase);
+        bool raw = false;
+        foreach (var arg in args)
+            if (string.Equals(arg, "--raw", StringComparison.OrdinalIgnoreCase)) { raw = true; break; }
 
         var entries = _indexStore.ReadRawLogEntries(entity, field);
         if (entries.Count == 0)
@@ -386,14 +429,15 @@ internal static class Program
         }
 
         var headers = new[] { "Timestamp (UTC)", "Op", "Key", "ID", "Expires (UTC)" };
-        var rows = entries.Select(e =>
+        var rows = new List<string[]>();
+        foreach (var e in entries)
         {
             var ts = new DateTime(e.Ticks, DateTimeKind.Utc).ToString("yyyy-MM-dd HH:mm:ss.fff");
             var exp = e.ExpiresAtUtcTicks.HasValue && e.ExpiresAtUtcTicks.Value > 0
                 ? new DateTime(e.ExpiresAtUtcTicks.Value, DateTimeKind.Utc).ToString("yyyy-MM-dd HH:mm:ss")
                 : "-";
-            return new[] { ts, e.Op.ToString(), e.Key, e.Id, exp };
-        }).ToList();
+            rows.Add(new[] { ts, e.Op.ToString(), e.Key, e.Id, exp });
+        }
 
         PrintTable(headers, rows);
         Console.WriteLine($"\n{entries.Count} WAL log entry(ies).");
@@ -445,7 +489,7 @@ internal static class Program
     {
         RequireWriteMode();
 
-        var indexes = IndexStore.ListTrackedIndexes(_provider).ToList();
+        var indexes = new List<(string EntityName, string FieldName)>(IndexStore.ListTrackedIndexes(_provider));
         if (indexes.Count == 0)
         {
             Console.WriteLine("No indexes tracked.");
@@ -488,17 +532,23 @@ internal static class Program
         {
             var query = new QueryDefinition { Top = top };
             var results = await meta.Handlers.QueryAsync(query, CancellationToken.None);
-            var list = results.ToList();
+            var list = new List<BaseDataObject>(results);
             if (list.Count == 0)
             {
                 Console.WriteLine("No records found.");
                 return 0;
             }
 
-            var listFields = meta.Fields.Where(f => f.List).OrderBy(f => f.Order).Take(5).ToList();
-            var colNames = new[] { "Id" }.Concat(listFields.Select(f => f.Name)).ToArray();
+            var listFieldsAll = new List<DataFieldMetadata>();
+            foreach (var f in meta.Fields) if (f.List) listFieldsAll.Add(f);
+            listFieldsAll.Sort((a, b) => a.Order.CompareTo(b.Order));
+            var listFields = listFieldsAll.Count > 5 ? listFieldsAll.GetRange(0, 5) : listFieldsAll;
+            var colNamesList = new List<string> { "Id" };
+            foreach (var f in listFields) colNamesList.Add(f.Name);
+            var colNames = colNamesList.ToArray();
 
-            var rows = list.Select(obj =>
+            var rows = new List<string[]>();
+            foreach (var obj in list)
             {
                 var cells = new string[colNames.Length];
                 cells[0] = obj.Key.ToString();
@@ -507,8 +557,8 @@ internal static class Program
                     var val = listFields[i].GetValueFn(obj);
                     cells[i + 1] = FormatValue(val);
                 }
-                return cells;
-            }).ToList();
+                rows.Add(cells);
+            }
 
             PrintTable(colNames, rows);
             Console.WriteLine($"\n{list.Count} record(s) (top={top}).");
@@ -524,10 +574,16 @@ internal static class Program
             }
 
             var headers = new[] { "Id", "Clustered location" };
-            var rows = index.OrderBy(kv => kv.Key)
-                .Take(top)
-                .Select(kv => new[] { kv.Key, kv.Value })
-                .ToList();
+            var sortedKvs = new List<KeyValuePair<string, string>>(index);
+            sortedKvs.Sort((a, b) => string.Compare(a.Key, b.Key, StringComparison.Ordinal));
+            var rows = new List<string[]>();
+            int count = 0;
+            foreach (var kv in sortedKvs)
+            {
+                if (count >= top) break;
+                rows.Add(new[] { kv.Key, kv.Value });
+                count++;
+            }
 
             PrintTable(headers, rows);
             Console.WriteLine($"\n{Math.Min(index.Count, top)} of {index.Count} record(s) shown.");
@@ -571,8 +627,11 @@ internal static class Program
         Console.WriteLine($"  Updated: {obj.UpdatedOnUtc:yyyy-MM-dd HH:mm:ss} UTC");
         Console.WriteLine();
 
-        var allFields = meta.Fields.OrderBy(f => f.Order).ToList();
-        var maxLabel = allFields.Count > 0 ? allFields.Max(f => f.Label.Length) : 10;
+        var allFields = new List<DataFieldMetadata>(meta.Fields);
+        allFields.Sort((a, b) => a.Order.CompareTo(b.Order));
+        int maxLabel = 10;
+        foreach (var f in allFields)
+            if (f.Label.Length > maxLabel) maxLabel = f.Label.Length;
         maxLabel = Math.Max(maxLabel, 10);
 
         foreach (var field in allFields)
@@ -611,8 +670,15 @@ internal static class Program
 
         foreach (var (key, value) in pairs)
         {
-            var field = meta.Fields.FirstOrDefault(f =>
-                string.Equals(f.Name, key, StringComparison.OrdinalIgnoreCase));
+            DataFieldMetadata? field = null;
+            foreach (var f in meta.Fields)
+            {
+                if (string.Equals(f.Name, key, StringComparison.OrdinalIgnoreCase))
+                {
+                    field = f;
+                    break;
+                }
+            }
 
             if (field == null)
             {
@@ -723,9 +789,13 @@ internal static class Program
 
     static DataEntityMetadata? FindEntityMetadata(string entityNameOrSlug)
     {
-        return DataScaffold.Entities.FirstOrDefault(e =>
-            string.Equals(e.Name, entityNameOrSlug, StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(e.Slug, entityNameOrSlug, StringComparison.OrdinalIgnoreCase));
+        foreach (var e in DataScaffold.Entities)
+        {
+            if (string.Equals(e.Name, entityNameOrSlug, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(e.Slug, entityNameOrSlug, StringComparison.OrdinalIgnoreCase))
+                return e;
+        }
+        return null;
     }
 
     static void RequireWriteMode()
@@ -758,7 +828,8 @@ internal static class Program
                 items.Add(item?.ToString() ?? "");
             if (items.Count == 0)
                 return "[]";
-            var joined = "[" + string.Join(", ", items.Take(5)) + (items.Count > 5 ? $", …+{items.Count - 5}" : "") + "]";
+            var displayItems = items.Count > 5 ? items.GetRange(0, 5) : items;
+            var joined = "[" + string.Join(", ", displayItems) + (items.Count > 5 ? $", …+{items.Count - 5}" : "") + "]";
             return joined.Length > 80 ? joined[..77] + "…" : joined;
         }
         var s = val.ToString() ?? "";

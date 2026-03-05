@@ -252,7 +252,7 @@ public static class DeltaApiHandlers
             FieldType.Float32 => (float)el.GetDouble(),
             FieldType.Float64 => el.GetDouble(),
             FieldType.Decimal => el.GetDecimal(),
-            FieldType.Char => el.GetString()?.FirstOrDefault() ?? '\0',
+            FieldType.Char => el.GetString() is { Length: > 0 } charStr ? charStr[0] : '\0',
             FieldType.StringUtf8 => el.GetString(),
             FieldType.Guid => Guid.Parse(el.GetString()!),
             FieldType.DateTime => DateTime.Parse(el.GetString()!),

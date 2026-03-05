@@ -20,6 +20,12 @@ graph TD
         Proxy["ProxyRouteHandler"]
         Logger["DiskBufferedLogger"]
         Throttle["ClientRequestTracker<br/>(token-bucket)"]
+        GraphQL["GraphQLHandler"]
+        McpHandler["McpRouteHandler<br/>(JSON-RPC 2.0 MCP)"]
+        OpenApi["OpenApiHandler<br/>(openapi.json)"]
+        VectorHandlers["VectorApiHandlers<br/>(/api/vector/*)"]
+        AgentHandlers["AgentApiHandlers<br/>(/api/agent/chat)"]
+        BgJobs["BackgroundJobService"]
     end
 
     subgraph Core["BareMetalWeb.Core"]
@@ -37,13 +43,15 @@ graph TD
         BinSerializer["BinaryObjectSerializer"]
         EntityReg["DataEntityRegistry"]
         Scaffold["DataScaffold"]
-        SearchIdx["SearchIndexManager"]
+        SearchIdx["SearchIndexManager<br/>(Inverted/BTree/Treap/Bloom/Graph/Spatial)"]
+        VectorIdx["VectorIndexManager<br/>(ANN — Vamana NSW graph)"]
         IndexStore["IndexStore"]
         VirtualLoader["VirtualEntityLoader"]
         DynObject["DynamicDataObject"]
         ExprEngine["ExpressionEngine<br/>(CalculatedFieldService)"]
         ReportExec["ReportExecutor"]
         PlanHistory["QueryPlanHistory<br/>(in-memory circular buffer)"]
+        WalCrc32["WalCrc32C<br/>(SSE4.2 / ARM CRC hardware)"]
     end
 
     subgraph Rendering["BareMetalWeb.Rendering"]
@@ -54,6 +62,12 @@ graph TD
         StaticFrags["StaticHTMLFragments"]
         OutputCache["OutputCache"]
         CsrfRend["CsrfProtection (rendering)"]
+    end
+
+    subgraph AI["BareMetalWeb.AI"]
+        AdminAI["AdminAssistantService<br/>(IChatClient tools)"]
+        EntityDesignTools["EntityDesignerTools"]
+        QueryTools["QueryTools"]
     end
 
     subgraph Runtime["BareMetalWeb.Runtime"]
@@ -82,6 +96,12 @@ graph TD
     RouteReg --> RouteHandlers
     RouteReg --> StaticFile
     RouteReg --> Proxy
+    RouteReg --> GraphQL
+    RouteReg --> McpHandler
+    RouteReg --> OpenApi
+    RouteReg --> VectorHandlers
+    RouteReg --> AgentHandlers
+    RouteReg --> BgJobs
     Server --> UserAuth
     Server --> CsrfProt
 
@@ -93,7 +113,9 @@ graph TD
     WalDP --> WalS
     WalDP --> BinSerializer
     WalDP --> SearchIdx
+    WalS --> WalCrc32
     SearchIdx --> IndexStore
+    VectorHandlers --> VectorIdx
     Extensions --> EntityReg
     EntityReg --> Scaffold
     Extensions --> VirtualLoader
@@ -129,14 +151,16 @@ graph TD
 
 | Project | Depends on |
 |---------|-----------|
-| `BareMetalWeb.Host` | Core, Data, Rendering, Runtime, API |
+| `BareMetalWeb.Host` | Core, Data, Rendering, Runtime, API, AI |
 | `BareMetalWeb.Core` | *(no project dependencies — interfaces only)* |
 | `BareMetalWeb.Data` | Core |
 | `BareMetalWeb.Rendering` | Core |
 | `BareMetalWeb.Runtime` | Core, Data |
 | `BareMetalWeb.API` | Core, Data |
+| `BareMetalWeb.AI` | Core, Data, Microsoft.Extensions.AI |
 | `BareMetalWeb.UserClasses` | Data |
 | `BareMetalWeb.CLI` | *(standalone — uses HTTP only)* |
+| `BareMetalWeb.DataBrowser` | Data *(CLI tool — server must be stopped for write ops)* |
 
 ---
 
@@ -201,8 +225,13 @@ flowchart TD
     Type --> API[API handler<br/>JSON in/out]
     Type --> SSR[SSR handler<br/>HTML template rendering]
     Type --> VNext[VNext SPA<br/>shell HTML + client-side routing]
-    Type --> Report[Report handler<br/>HTML / CSV]
+    Type --> Report[Report handler<br/>HTML / CSV / JSON]
     Type --> Meta[/meta/* runtime<br/>entity metadata]
+    Type --> Vector[/api/vector/*<br/>ANN vector search]
+    Type --> Agent[/api/agent/chat<br/>NL query interface]
+    Type --> GraphQL[POST /api/graphql<br/>GraphQL queries]
+    Type --> MCP[POST /mcp<br/>Model Context Protocol]
+    Type --> OpenAPI[GET /openapi.json<br/>OpenAPI 3.0.3 spec]
 ```
 
 ---
@@ -217,4 +246,4 @@ flowchart TD
 
 ---
 
-_Status: Verified against codebase @ commit e38d19057e1a55fc1d9a563f5ec6228bb991a0b5_
+_Status: Updated @ commit HEAD (2026-03-05) — added VectorIndexManager, AI project, GraphQL, MCP, OpenAPI, Agent to component diagram; updated route divergence flowchart_

@@ -80,10 +80,8 @@ public static class MetadataExtractor
         var indexes = new List<IndexDefinition>();
         var nullabilityCtx = new NullabilityInfoContext();
 
-        var properties = type
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .OrderBy(p => p.MetadataToken)
-            .ToArray();
+        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        Array.Sort(properties, (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
 
         int ordinal = 1;
         for (int i = 0; i < properties.Length; i++)

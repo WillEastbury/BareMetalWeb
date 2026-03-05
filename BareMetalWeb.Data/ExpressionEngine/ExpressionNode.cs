@@ -297,7 +297,13 @@ public sealed class FunctionNode : ExpressionNode
 
     public override string ToJavaScript()
     {
-        var args = string.Join(", ", System.Linq.Enumerable.Select(Arguments, a => a.ToJavaScript()));
+        var argsSb = new System.Text.StringBuilder();
+        for (int i = 0; i < Arguments.Count; i++)
+        {
+            if (i > 0) argsSb.Append(", ");
+            argsSb.Append(Arguments[i].ToJavaScript());
+        }
+        var args = argsSb.ToString();
 
         return FunctionName.ToLowerInvariant() switch
         {
@@ -313,15 +319,20 @@ public sealed class FunctionNode : ExpressionNode
         };
     }
 
-    public override Dictionary<string, object?> ToJsonAst() =>
-        new()
+    public override Dictionary<string, object?> ToJsonAst()
+    {
+        var argsArray = new Dictionary<string, object?>[Arguments.Count];
+        for (int i = 0; i < Arguments.Count; i++)
+            argsArray[i] = Arguments[i].ToJsonAst();
+        return new()
         {
             ["t"] = "fn",
             // Function name is lowercased so the client-side tree-walker can switch on
             // lowercase strings regardless of how the author capitalised the expression.
             ["fn"] = FunctionName.ToLowerInvariant(),
-            ["args"] = System.Linq.Enumerable.Select(Arguments, a => a.ToJsonAst()).ToArray()
+            ["args"] = argsArray
         };
+    }
 
     private object? EvaluateRound(IReadOnlyDictionary<string, object?> context)
     {
@@ -347,7 +358,12 @@ public sealed class FunctionNode : ExpressionNode
             values.Add(ConvertToDecimal(arg.Evaluate(context)));
         }
 
-        return values.Min();
+        decimal minVal = values[0];
+        for (int i = 1; i < values.Count; i++)
+        {
+            if (values[i] < minVal) minVal = values[i];
+        }
+        return minVal;
     }
 
     private object? EvaluateMax(IReadOnlyDictionary<string, object?> context)
@@ -361,7 +377,12 @@ public sealed class FunctionNode : ExpressionNode
             values.Add(ConvertToDecimal(arg.Evaluate(context)));
         }
 
-        return values.Max();
+        decimal maxVal = values[0];
+        for (int i = 1; i < values.Count; i++)
+        {
+            if (values[i] > maxVal) maxVal = values[i];
+        }
+        return maxVal;
     }
 
     private object? EvaluateAbs(IReadOnlyDictionary<string, object?> context)
@@ -548,6 +569,11 @@ public sealed class DotAccessNode : ExpressionNode
         return $"await bmwRelatedLookup('{LookupField}', '{Path[0]}')";
     }
 
-    public override Dictionary<string, object?> ToJsonAst() =>
-        new() { ["t"] = "dot", ["fk"] = LookupField, ["path"] = Path.ToArray() };
+    public override Dictionary<string, object?> ToJsonAst()
+    {
+        var pathArray = new string[Path.Count];
+        for (int i = 0; i < Path.Count; i++)
+            pathArray[i] = Path[i];
+        return new() { ["t"] = "dot", ["fk"] = LookupField, ["path"] = pathArray };
+    }
 }

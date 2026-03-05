@@ -108,8 +108,15 @@ public sealed class CommandService : ICommandService
         if (!RuntimeEntityRegistry.Current.TryGet(intent.EntitySlug, out var runtimeModel))
             return CommandResult.Fail($"No runtime entity found for slug '{intent.EntitySlug}'.");
 
-        var action = runtimeModel.Actions
-            .FirstOrDefault(a => string.Equals(a.Name, actionName, StringComparison.OrdinalIgnoreCase));
+        RuntimeActionModel? action = null;
+        foreach (var a in runtimeModel.Actions)
+        {
+            if (string.Equals(a.Name, actionName, StringComparison.OrdinalIgnoreCase))
+            {
+                action = a;
+                break;
+            }
+        }
 
         if (action == null)
             return CommandResult.Fail($"Action '{intent.Operation}' not found on entity '{intent.EntitySlug}'.");
@@ -180,9 +187,9 @@ public sealed class CommandService : ICommandService
         }
 
         // §6.2 — collect touched aggregates and acquire locks in sorted order
-        var touchedIds = envelope.AggregateMutations
-            .Select(m => $"{m.AggregateType}:{m.AggregateId}")
-            .ToList();
+        var touchedIds = new List<string>(envelope.AggregateMutations.Count);
+        foreach (var m in envelope.AggregateMutations)
+            touchedIds.Add($"{m.AggregateType}:{m.AggregateId}");
 
         var transactionId = envelope.TransactionId;
         var lockTimeout = TimeSpan.FromSeconds(5);
@@ -202,9 +209,15 @@ public sealed class CommandService : ICommandService
         try
         {
             // Apply mutations for the primary aggregate to the loaded object
-            var primaryMutation = envelope.AggregateMutations
-                .FirstOrDefault(m => string.Equals(m.AggregateType, intent.EntitySlug,
-                    StringComparison.OrdinalIgnoreCase));
+            AggregateMutation? primaryMutation = null;
+            foreach (var m in envelope.AggregateMutations)
+            {
+                if (string.Equals(m.AggregateType, intent.EntitySlug, StringComparison.OrdinalIgnoreCase))
+                {
+                    primaryMutation = m;
+                    break;
+                }
+            }
 
             if (primaryMutation != null)
             {

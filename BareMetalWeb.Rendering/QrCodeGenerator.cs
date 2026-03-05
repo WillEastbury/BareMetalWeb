@@ -1,6 +1,6 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
+
 using System.Text;
 
 namespace BareMetalWeb.Rendering;
@@ -482,9 +482,16 @@ public static class QrCodeGenerator
                 ecBlocks.Add(ecBlock);
             }
 
-            int maxDataLen = dataBlocks.Max(b => b.Length);
-            int maxEcLen = ecBlocks.Max(b => b.Length);
-            var result = new List<byte>(data.Length + ecBlocks.Sum(b => b.Length));
+            int maxDataLen = 0;
+            for (int j = 0; j < dataBlocks.Count; j++)
+                if (dataBlocks[j].Length > maxDataLen) maxDataLen = dataBlocks[j].Length;
+            int maxEcLen = 0;
+            for (int j = 0; j < ecBlocks.Count; j++)
+                if (ecBlocks[j].Length > maxEcLen) maxEcLen = ecBlocks[j].Length;
+            int ecBytesTotal = 0;
+            for (int j = 0; j < ecBlocks.Count; j++)
+                ecBytesTotal += ecBlocks[j].Length;
+            var result = new List<byte>(data.Length + ecBytesTotal);
 
             for (int i = 0; i < maxDataLen; i++)
             {
@@ -594,7 +601,13 @@ public static class QrCodeGenerator
     private static class RsBlockTable
     {
         public static int GetDataCodewords(int version, EccLevel ecc)
-            => GetBlocks(version, ecc).Sum(b => b.DataCodewords);
+        {
+            var blocks = GetBlocks(version, ecc);
+            int total = 0;
+            for (int i = 0; i < blocks.Length; i++)
+                total += blocks[i].DataCodewords;
+            return total;
+        }
 
         public static BlockInfo[] GetBlocks(int version, EccLevel ecc)
         {

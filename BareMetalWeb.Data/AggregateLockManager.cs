@@ -27,7 +27,23 @@ public sealed class AggregateLockManager
         bool contended = false;
 
         // Sort deterministically to prevent deadlocks
-        var sorted = aggregateKeys.OrderBy(k => k, StringComparer.Ordinal).Distinct().ToArray();
+        var sortedList = new List<string>();
+        foreach (var k in aggregateKeys)
+        {
+            bool exists = false;
+            foreach (var s in sortedList)
+            {
+                if (StringComparer.Ordinal.Equals(s, k))
+                {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists)
+                sortedList.Add(k);
+        }
+        sortedList.Sort(StringComparer.Ordinal);
+        var sorted = sortedList.ToArray();
 
         for (int attempt = 0; attempt <= MaxRetries; attempt++)
         {

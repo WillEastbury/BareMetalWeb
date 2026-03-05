@@ -4,7 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
-using System.Linq;
+
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -371,7 +371,16 @@ public static class StaticFileService
 
             if (TryParseEtags(ifNoneMatch, out var tags))
             {
-                if (tags.Any(tag => WeakEtagEquals(tag, etag)))
+                var anyMatch = false;
+                foreach (var tag in tags)
+                {
+                    if (WeakEtagEquals(tag, etag))
+                    {
+                        anyMatch = true;
+                        break;
+                    }
+                }
+                if (anyMatch)
                     return true;
             }
             else if (string.Equals(ifNoneMatch, etag, StringComparison.Ordinal))
@@ -409,7 +418,16 @@ public static class StaticFileService
 
             if (TryParseEtags(ifMatch, out var tags))
             {
-                if (!tags.Any(tag => StrongEtagEquals(tag, etag)))
+                var anyMatch = false;
+                foreach (var tag in tags)
+                {
+                    if (StrongEtagEquals(tag, etag))
+                    {
+                        anyMatch = true;
+                        break;
+                    }
+                }
+                if (!anyMatch)
                     return false;
             }
             else if (!string.Equals(ifMatch, etag, StringComparison.Ordinal))
@@ -540,20 +558,32 @@ public static class StaticFileService
             builder.Append("<li><a href=\"../\">../</a></li>");
         }
 
-        var entries = Directory.EnumerateFileSystemEntries(targetPath)
-            .Select(path => new { Path = path, Name = Path.GetFileName(path) ?? string.Empty, IsDir = Directory.Exists(path) })
-            .Where(entry => !string.IsNullOrWhiteSpace(entry.Name));
-
-        entries = entries.Where(entry => !IsDotName(entry.Name));
-        entries = entries.Where(entry => entry.IsDir || !entry.Name.EndsWith(".key", StringComparison.OrdinalIgnoreCase));
+        var entriesList = new List<(string Path, string Name, bool IsDir)>();
+        foreach (var path in Directory.EnumerateFileSystemEntries(targetPath))
+        {
+            var name = Path.GetFileName(path) ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(name))
+                continue;
+            var isDir = Directory.Exists(path);
+            if (IsDotName(name))
+                continue;
+            if (!isDir && name.EndsWith(".key", StringComparison.OrdinalIgnoreCase))
+                continue;
+            entriesList.Add((path, name, isDir));
+        }
 
         if (options.DirectoryListingSortDirectoriesFirst)
         {
-            entries = entries.OrderByDescending(entry => entry.IsDir).ThenBy(entry => entry.Name, StringComparer.OrdinalIgnoreCase);
+            entriesList.Sort((a, b) =>
+            {
+                int dirCmp = b.IsDir.CompareTo(a.IsDir);
+                if (dirCmp != 0) return dirCmp;
+                return StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name);
+            });
         }
 
         int count = 0;
-        foreach (var entry in entries)
+        foreach (var entry in entriesList)
         {
             if (options.DirectoryListingMaxEntries > 0 && count >= options.DirectoryListingMaxEntries)
                 break;
@@ -784,7 +814,12 @@ public static class StaticFileService
             return false;
 
         var value = contentType.Split(';', 2)[0].Trim();
-        return options.CompressibleContentTypePrefixes.Any(prefix => value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        foreach (var prefix in options.CompressibleContentTypePrefixes)
+        {
+            if (value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     private static void GetEncodingQualities(string header, out double brQ, out double gzipQ, out double identityQ, out double starQ)

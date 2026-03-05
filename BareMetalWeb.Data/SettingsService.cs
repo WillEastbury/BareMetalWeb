@@ -46,7 +46,15 @@ public static class SettingsService
         };
 
         var settings = DataStoreProvider.Current.Query<AppSetting>(query);
-        var setting = settings.FirstOrDefault(s => string.Equals(s.SettingId, settingId, StringComparison.OrdinalIgnoreCase));
+        AppSetting? setting = null;
+        foreach (var s in settings)
+        {
+            if (string.Equals(s.SettingId, settingId, StringComparison.OrdinalIgnoreCase))
+            {
+                setting = s;
+                break;
+            }
+        }
         if (setting != null)
         {
             cache[settingId] = setting.Value;
@@ -87,9 +95,13 @@ public static class SettingsService
         string createdBy,
         CancellationToken cancellationToken = default)
     {
-        var existing = (await store.QueryAsync<AppSetting>(null, cancellationToken).ConfigureAwait(false))
-            .GroupBy(s => s.SettingId, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var existing = new Dictionary<string, AppSetting>(StringComparer.OrdinalIgnoreCase);
+        var allSettings = await store.QueryAsync<AppSetting>(null, cancellationToken).ConfigureAwait(false);
+        foreach (var s in allSettings)
+        {
+            if (!existing.ContainsKey(s.SettingId))
+                existing[s.SettingId] = s;
+        }
 
         foreach (var (settingId, value, description) in defaults)
         {

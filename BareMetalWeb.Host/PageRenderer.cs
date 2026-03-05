@@ -62,7 +62,12 @@ public static partial class PageRenderer
             Top = 1
         };
         var pages = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
-        BaseDataObject? pageObj = pages.FirstOrDefault();
+        BaseDataObject? pageObj = null;
+        foreach (var p in pages)
+        {
+            pageObj = p;
+            break;
+        }
 
         if (pageObj == null)
         {
@@ -239,8 +244,15 @@ public static partial class PageRenderer
 
     private static string GetField(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
     {
-        var field = meta.Fields.FirstOrDefault(f =>
-            string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        BareMetalWeb.Core.DataFieldMetadata? field = null;
+        foreach (var f in meta.Fields)
+        {
+            if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                field = f;
+                break;
+            }
+        }
         return field?.GetValueFn?.Invoke(obj)?.ToString() ?? string.Empty;
     }
 }

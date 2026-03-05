@@ -5,7 +5,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -603,7 +603,20 @@ public sealed class SearchIndexManager
         var metadata = GetOrCreateTypeMetadata(type);
         
         // Determine which index to use
-        var useKind = preferredKind ?? (metadata.IndexKinds.FirstOrDefault());
+        IndexKind useKind;
+        if (preferredKind.HasValue)
+        {
+            useKind = preferredKind.Value;
+        }
+        else
+        {
+            useKind = IndexKind.Inverted;
+            foreach (var k in metadata.IndexKinds)
+            {
+                useKind = k;
+                break;
+            }
+        }
         
         var results = new HashSet<uint>();
         lock (index.Sync)
@@ -842,7 +855,9 @@ public sealed class SearchIndexManager
         index.PrefixTree.Clear();
         
         // Load all objects once to avoid calling loadAll multiple times
-        var allObjects = loadAll().ToList();
+        var allObjects = new List<BaseDataObject>();
+        foreach (var obj in loadAll())
+            allObjects.Add(obj);
         if (allObjects.Count == 0)
             return;
         
@@ -1036,8 +1051,6 @@ public sealed class SearchIndexManager
         if (value.IsEmpty)
             return;
 
-        // Use stack-allocated buffer for tokens up to 256 chars
-        // For longer tokens, we'll fall back to slower path with array rental
         const int MaxStackTokenSize = 256;
         Span<char> buffer = stackalloc char[MaxStackTokenSize];
         int bufferPos = 0;
@@ -1046,18 +1059,41 @@ public sealed class SearchIndexManager
         for (int i = 0; i < value.Length; i++)
         {
             var ch = value[i];
-            
-            if (char.IsLetterOrDigit(ch))
+
+            // ASCII fast path: range check + bitwise lowercase (no Unicode table lookup)
+            if (ch <= 127)
             {
+                if ((uint)(ch - 'a') <= 'z' - 'a' || (uint)(ch - 'A') <= 'Z' - 'A' || (uint)(ch - '0') <= '9' - '0')
+                {
+                    // Bitwise OR 0x20 lowercases A-Z, is a no-op for 0-9
+                    var lowerCh = (char)(ch | 0x20);
+                    if (bufferPos < MaxStackTokenSize)
+                    {
+                        buffer[bufferPos++] = lowerCh;
+                    }
+                    else
+                    {
+                        if (overflowBuffer == null)
+                        {
+                            overflowBuffer = new List<char>(MaxStackTokenSize * 2);
+                            for (int j = 0; j < bufferPos; j++)
+                                overflowBuffer.Add(buffer[j]);
+                        }
+                        overflowBuffer.Add(lowerCh);
+                    }
+                    continue;
+                }
+            }
+            else if (char.IsLetterOrDigit(ch))
+            {
+                // Unicode path: full table lookup + invariant lowercase
                 var lowerCh = char.ToLowerInvariant(ch);
-                
                 if (bufferPos < MaxStackTokenSize)
                 {
                     buffer[bufferPos++] = lowerCh;
                 }
                 else
                 {
-                    // Rare case: token exceeds stack buffer, switch to heap allocation
                     if (overflowBuffer == null)
                     {
                         overflowBuffer = new List<char>(MaxStackTokenSize * 2);
@@ -1373,9 +1409,8 @@ public sealed class SearchIndexManager
 
     private int ComputeBloomHash(string token, int hashIndex, int size)
     {
-        // Use a simple but effective hash combining the token and hash index
-        var baseHash = token.ToLowerInvariant().GetHashCode();
-        var hash = ((baseHash ^ (hashIndex * 0x9e3779b9)) & 0x7FFFFFFF); // Mix with golden ratio, ensure positive
+        var baseHash = StringComparer.OrdinalIgnoreCase.GetHashCode(token);
+        var hash = ((baseHash ^ (hashIndex * 0x9e3779b9)) & 0x7FFFFFFF);
         return (int)(hash % size);
     }
 
@@ -1477,7 +1512,11 @@ public sealed class SearchIndexManager
         {
             if (index.GraphIndex == null) return Array.Empty<uint>();
             if (!index.GraphIndex.Forward.TryGetValue(nodeId, out var edges)) return Array.Empty<uint>();
-            return edges.Select(e => e.TargetId).ToArray();
+            var result = new uint[edges.Count];
+            int idx = 0;
+            foreach (var e in edges)
+                result[idx++] = e.TargetId;
+            return result;
         }
     }
 
@@ -1492,7 +1531,11 @@ public sealed class SearchIndexManager
         {
             if (index.GraphIndex == null) return Array.Empty<uint>();
             if (!index.GraphIndex.Reverse.TryGetValue(nodeId, out var edges)) return Array.Empty<uint>();
-            return edges.Select(e => e.TargetId).ToArray();
+            var result = new uint[edges.Count];
+            int idx = 0;
+            foreach (var e in edges)
+                result[idx++] = e.TargetId;
+            return result;
         }
     }
 
