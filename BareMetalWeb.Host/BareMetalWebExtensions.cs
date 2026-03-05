@@ -242,6 +242,10 @@ public static class BareMetalWebExtensions
         ProxyRouteHandler.Initialize(clusterState);
         TenantApiHandlers.Initialize(tenantRegistry);
 
+        // Vector ANN index manager
+        var vectorIndexManager = new BareMetalWeb.Data.VectorIndexManager(dataRoot, logger);
+        VectorApiHandlers.Initialize(vectorIndexManager);
+
         // Attach write fencing to the primary WAL provider
         if (DataStoreProvider.PrimaryProvider is BareMetalWeb.Data.WalDataProvider walProvider)
             walProvider.SetClusterState(clusterState);
