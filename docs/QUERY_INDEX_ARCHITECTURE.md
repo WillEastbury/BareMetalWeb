@@ -16,7 +16,7 @@ This document covers how secondary field indexes work and where they are used in
 Decorate entity properties with `[DataIndex]` to enable query acceleration:
 
 ```csharp
-public class Order : RenderableDataObject
+public class Order : BaseDataObject
 {
     [DataIndex]
     [DataField(Label = "Status")]

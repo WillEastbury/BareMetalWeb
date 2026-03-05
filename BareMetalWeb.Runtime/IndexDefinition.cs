@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// Describes which fields should be indexed for efficient query filtering and sorting.
 /// </summary>
 [DataEntity("Index Definitions", ShowOnNav = true, NavGroup = "Admin", NavOrder = 1002)]
-public class IndexDefinition : RenderableDataObject
+public class IndexDefinition : BaseDataObject
 {
     /// <summary>Foreign key to <see cref="EntityDefinition.Id"/>.</summary>
     [DataField(Label = "Entity ID", Order = 1, Required = true)]

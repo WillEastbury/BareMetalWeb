@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// and measures (sum, count, avg, min, max) for drill-through browsing.
 /// </summary>
 [DataEntity("Aggregation Definitions", ShowOnNav = true, NavGroup = "Admin", NavOrder = 1005)]
-public class AggregationDefinition : RenderableDataObject
+public class AggregationDefinition : BaseDataObject
 {
     /// <summary>Foreign key to <see cref="EntityDefinition.EntityId"/>.</summary>
     [DataField(Label = "Entity ID", Order = 1, Required = true)]

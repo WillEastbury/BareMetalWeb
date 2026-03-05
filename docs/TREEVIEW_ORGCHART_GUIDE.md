@@ -57,7 +57,7 @@ The system automatically detects self-referencing entities:
 ```csharp
 [DataEntity("Employees", ShowOnNav = true, NavGroup = "Organization")]
 [DataViewType(ViewType.TreeView)]  // Optional: sets default view
-public class Employee : RenderableDataObject
+public class Employee : BaseDataObject
 {
     [DataField(Label = "Name", List = true, View = true, Required = true)]
     public string Name { get; set; } = string.Empty;

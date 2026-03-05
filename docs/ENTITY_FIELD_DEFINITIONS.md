@@ -29,7 +29,7 @@ A minimal entity with two fields:
 using BareMetalWeb.Data;
 
 [DataEntity("Products", ShowOnNav = true, NavGroup = "Inventory")]
-public class Product : RenderableDataObject
+public class Product : BaseDataObject
 {
     [DataField(Label = "Name", Order = 1, Required = true)]
     public string Name { get; set; } = string.Empty;
@@ -164,7 +164,7 @@ Apply `[ValidationRule]` at the entity level:
 ```csharp
 [ValidationRule("EndDate > StartDate", "End date must be after start date")]
 [DataEntity("Events")]
-public class Event : RenderableDataObject
+public class Event : BaseDataObject
 {
     [DataField(Label = "Start")] public DateTime StartDate { get; set; }
     [DataField(Label = "End")]   public DateTime EndDate { get; set; }
@@ -364,7 +364,7 @@ Parameters: `CopyFromParent(parentFieldName, entitySlug, sourceFieldName)`
 
 | Class | Use |
 |-------|-----|
-| `RenderableDataObject` | Standard entities with full UI (forms, lists, detail views) |
+| `BaseDataObject` | Standard entities with full UI (forms, lists, detail views) |
 | `BaseDataObject` | Internal/system entities without direct UI rendering |
 
 Both provide: `Id`, `CreatedOnUtc`, `UpdatedOnUtc`, `CreatedBy`, `UpdatedBy`, `ETag`.
@@ -372,7 +372,7 @@ Both provide: `Id`, `CreatedOnUtc`, `UpdatedOnUtc`, `CreatedBy`, `UpdatedBy`, `E
 ```csharp
 // Standard entity — use this for most cases
 [DataEntity("Customers", ShowOnNav = true)]
-public class Customer : RenderableDataObject { ... }
+public class Customer : BaseDataObject { ... }
 
 // System entity — no auto-generated UI
 public class AuditEntry : BaseDataObject { ... }
@@ -388,7 +388,7 @@ A full entity with lookups, validation, calculated fields, indexing, and command
 using BareMetalWeb.Data;
 
 [DataEntity("Orders", ShowOnNav = true, NavGroup = "Sales", NavOrder = 40, DefaultSortField = "OrderDate", DefaultSortDirection = SortDirection.Desc)]
-public class Order : RenderableDataObject
+public class Order : BaseDataObject
 {
     [DataField(Label = "Order Number", Order = 1, Required = true)]
     [MinLength(3)]

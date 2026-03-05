@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// payment method, and fulfilment status.
 /// </summary>
 [DataEntity("Orders", ShowOnNav = true, NavGroup = "Sales", NavOrder = 500)]
-public class Order : RenderableDataObject
+public class Order : BaseDataObject
 {
     [DataField(Label = "Order Number", Order = 1, ReadOnly = true)]
     public string OrderNumber { get; set; } = string.Empty;

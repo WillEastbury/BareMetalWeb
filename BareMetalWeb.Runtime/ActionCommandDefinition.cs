@@ -13,7 +13,7 @@ namespace BareMetalWeb.Runtime;
 /// <c>ForSet</c>, <c>ForSetSequential</c>, <c>InvokeIf</c>.
 /// </summary>
 [DataEntity("Action Commands", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1004)]
-public class ActionCommandDefinition : RenderableDataObject
+public class ActionCommandDefinition : BaseDataObject
 {
     /// <summary>FK to the owning <see cref="ActionDefinition"/>.</summary>
     [DataField(Label = "Action ID", Order = 1, Required = true)]

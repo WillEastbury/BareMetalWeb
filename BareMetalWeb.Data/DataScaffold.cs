@@ -3670,8 +3670,7 @@ public static class DataScaffold
             return null;
 
         var entityAttribute = type.GetCustomAttribute<DataEntityAttribute>();
-        var useConvention = typeof(RenderableDataObject).IsAssignableFrom(type);
-        if (entityAttribute == null && !useConvention)
+        if (entityAttribute == null)
             return null;
 
         var fields = new List<DataFieldMetadata>();
@@ -3701,7 +3700,7 @@ public static class DataScaffold
             var calculatedAttribute = prop.GetCustomAttribute<CalculatedFieldAttribute>();
             var dataIndexAttribute = prop.GetCustomAttribute<DataIndexAttribute>();
             var relatedDocAttribute = prop.GetCustomAttribute<RelatedDocumentAttribute>();
-            if (fieldAttribute == null && imageFieldAttribute == null && fileFieldAttribute == null && !useConvention)
+            if (fieldAttribute == null && imageFieldAttribute == null && fileFieldAttribute == null)
                 continue;
 
             var fieldType = imageFieldAttribute != null

@@ -137,7 +137,7 @@ The original CSV export routes remain unchanged:
 
 ```csharp
 [DataEntity("Orders", ShowOnNav = true, NavGroup = "Sales")]
-public class Order : RenderableDataObject
+public class Order : BaseDataObject
 {
     [DataField(Label = "Order Number", Order = 1)]
     public string OrderNumber { get; set; } = string.Empty;

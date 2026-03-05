@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// Persisted schema definition for a single field on a runtime-managed entity.
 /// </summary>
 [DataEntity("Field Definitions", ShowOnNav = true, NavGroup = "Admin", NavOrder = 1001)]
-public class FieldDefinition : RenderableDataObject
+public class FieldDefinition : BaseDataObject
 {
     /// <summary>Stable GUID identity that survives renames. Defaults to Id.</summary>
     [DataField(Label = "Field ID", Order = 1, ReadOnly = true)]

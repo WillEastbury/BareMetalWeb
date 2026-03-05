@@ -16,7 +16,7 @@ If both conditions are met, a "Timetable" button will appear in the view switche
 
 ```csharp
 [DataEntity("Time Table Plans", ShowOnNav = true, NavGroup = "School", NavOrder = 20)]
-public class TimeTablePlan : RenderableDataObject
+public class TimeTablePlan : BaseDataObject
 {
     [DataLookup(typeof(Subject), DisplayField = "Name")]
     [DataField(Label = "Subject Id", Order = 1, Required = true, List = true)]

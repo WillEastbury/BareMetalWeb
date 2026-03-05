@@ -94,7 +94,7 @@ Client-side calculated fields provide lightweight expression-based field calcula
 
 ```csharp
 [DataEntity("Order Lines", Slug = "order-lines")]
-public class OrderRow : RenderableDataObject
+public class OrderRow : BaseDataObject
 {
     [DataField(Label = "Quantity", Order = 1)]
     public int Quantity { get; set; }

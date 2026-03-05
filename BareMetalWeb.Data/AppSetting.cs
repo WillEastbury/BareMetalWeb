@@ -1,7 +1,7 @@
 namespace BareMetalWeb.Data;
 
 [DataEntity("Settings", ShowOnNav = true, NavGroup = "Admin", NavOrder = 1, Permissions = "admin")]
-public class AppSetting : RenderableDataObject
+public class AppSetting : BaseDataObject
 {
     [DataField(Label = "Setting ID", Order = 1, Required = true)]
     [DataIndex]
