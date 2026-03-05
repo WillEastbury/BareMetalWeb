@@ -19,5 +19,18 @@ public class OutputCache : IOutputCache
             statusCode,
             DateTime.UtcNow.Add(TimeSpan.FromSeconds(expiry))
         );
+        PruneExpired();
+    }
+
+    private void PruneExpired()
+    {
+        var now = DateTime.UtcNow;
+        // ConcurrentDictionary enumeration is safe under concurrent modification (no exceptions,
+        // no corruption). Missed or extra entries are acceptable for best-effort pruning.
+        foreach (var kv in _cache)
+        {
+            if (kv.Value.Expires <= now)
+                _cache.TryRemove(kv.Key, out _);
+        }
     }
 }

@@ -300,4 +300,29 @@ public class OutputCacheTests
         Assert.True(response.Expires > beforeStore.AddSeconds(9));
         Assert.True(response.Expires < afterStore.AddSeconds(11));
     }
+
+    [Fact]
+    public void Store_PrunesExpiredEntries_SoTheyDontAccumulate()
+    {
+        // Arrange: store several paths with a very short expiry then store a new one.
+        var cache = new OutputCache();
+        var expiredPaths = new[] { "/expired1", "/expired2", "/expired3" };
+        var body = Encoding.UTF8.GetBytes("content");
+
+        foreach (var p in expiredPaths)
+            cache.Store(p, body, "text/html", 200, expiry: 0);
+
+        // Wait long enough for all entries to expire.
+        Thread.Sleep(50);
+
+        // Act: store a new entry – this triggers PruneExpired internally.
+        cache.Store("/new", body, "text/html", 200, expiry: 30);
+
+        // Assert: the expired paths should no longer be retrievable.
+        foreach (var p in expiredPaths)
+            Assert.False(cache.TryGet(p, out _), $"Expected '{p}' to be pruned but it was still present.");
+
+        // The new (non-expired) path should still be there.
+        Assert.True(cache.TryGet("/new", out _));
+    }
 }

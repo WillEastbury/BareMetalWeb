@@ -141,6 +141,12 @@ public static class DataScaffold
     private static readonly ConcurrentDictionary<Type, DataEntityMetadata> EntitiesByType = new();
     private static readonly NullabilityInfoContext NullabilityContext = new();
     private static readonly ConcurrentDictionary<string, LookupCacheEntry> LookupCache = new(StringComparer.OrdinalIgnoreCase);
+
+    // Max number of entries in LookupCache before expired entries are pruned.
+    private const int LookupCacheMaxSize = 500;
+    // Minimum ticks between successive LookupCache prune sweeps (60 seconds).
+    private static readonly long LookupCachePruneCooldownTicks = TimeSpan.FromSeconds(60).Ticks;
+    private static long _lastLookupCachePruneTicks;
     private static readonly IIdGenerator IdGenerator = new DefaultIdGenerator();
     private static readonly ConcurrentDictionary<(Type, string), PropertyInfo?> PropertyCache = new();
 
@@ -2100,6 +2106,18 @@ public static class DataScaffold
             _ => BuildLookupCacheEntry(lookup),
             (_, existing) => existing.ExpiresUtc > DateTime.UtcNow ? existing : BuildLookupCacheEntry(lookup));
 
+        // Prune expired entries when the cache grows beyond its size cap, subject to cooldown.
+        if (LookupCache.Count > LookupCacheMaxSize)
+        {
+            var nowTicks = DateTime.UtcNow.Ticks;
+            var last = Interlocked.Read(ref _lastLookupCachePruneTicks);
+            if (nowTicks - last > LookupCachePruneCooldownTicks &&
+                Interlocked.CompareExchange(ref _lastLookupCachePruneTicks, nowTicks, last) == last)
+            {
+                PruneExpiredLookupCache(now);
+            }
+        }
+
         return entry.Options;
     }
 
@@ -2126,6 +2144,23 @@ public static class DataScaffold
             lookup.SortDirection,
             lookup.CacheTtl.TotalSeconds.ToString(CultureInfo.InvariantCulture));
     }
+
+    private static void PruneExpiredLookupCache(DateTime now)
+    {
+        // ConcurrentDictionary enumeration is safe under concurrent modification (no exceptions,
+        // no corruption). Missed or extra entries are acceptable for best-effort pruning.
+        foreach (var kv in LookupCache)
+        {
+            if (kv.Value.ExpiresUtc <= now)
+                LookupCache.TryRemove(kv.Key, out _);
+        }
+    }
+
+    /// <summary>
+    /// Invalidates the entire lookup options cache, forcing fresh reads on next access.
+    /// Call after bulk writes that change lookup source data.
+    /// </summary>
+    public static void InvalidateLookupCache() => LookupCache.Clear();
 
     private static QueryDefinition? BuildLookupQuery(DataLookupConfig lookup)
     {
