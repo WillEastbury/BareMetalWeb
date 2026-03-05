@@ -8,6 +8,7 @@ using Xunit;
 
 namespace BareMetalWeb.Host.Tests;
 
+[Collection("JsBundleService")]
 public class JsBundleServiceTests : IDisposable
 {
     private readonly string _tempDir;

@@ -129,6 +129,7 @@ public class CompressionHelperTests
     }
 }
 
+[Collection("JsBundleService")]
 public class JsBundleServiceCompressionTests : IDisposable
 {
     private readonly string _tempDir;
@@ -202,6 +203,7 @@ public class JsBundleServiceCompressionTests : IDisposable
     }
 }
 
+[Collection("CssBundleService")]
 public class CssBundleServiceCompressionTests : IDisposable
 {
     private readonly string _tempRoot;

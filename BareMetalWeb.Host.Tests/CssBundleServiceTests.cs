@@ -8,6 +8,7 @@ using Xunit;
 
 namespace BareMetalWeb.Host.Tests;
 
+[Collection("CssBundleService")]
 public class CssBundleServiceTests : IDisposable
 {
     private readonly string _tempRoot;
