@@ -1,7 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Concurrent;
-using System.Linq;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -30,8 +30,11 @@ public static class ComputedFieldService
         ComputedTrigger trigger,
         CancellationToken cancellationToken = default)
     {
-        foreach (var field in metadata.Fields.Where(f => f.Computed != null))
+        foreach (var field in metadata.Fields)
         {
+            if (field.Computed == null)
+                continue;
+
             var config = field.Computed!;
 
             // Skip if this field doesn't match the trigger
@@ -197,7 +200,11 @@ public static class ComputedFieldService
             return GetDefaultValueForAggregate(config.Aggregate, field.Property.PropertyType);
         }
 
-        var items = collection.Cast<object>().ToList();
+        var items = new List<object>();
+        foreach (var item in collection)
+        {
+            items.Add(item);
+        }
 
         if (string.IsNullOrEmpty(config.SourceField))
         {
@@ -253,84 +260,243 @@ public static class ComputedFieldService
 
             case AggregateFunction.None:
             default:
-                return values.FirstOrDefault();
+                return values.Count > 0 ? values[0] : null;
         }
+    }
+
+    private static List<object> FilterNonNull(List<object?> values)
+    {
+        var result = new List<object>(values.Count);
+        foreach (var v in values)
+        {
+            if (v != null)
+                result.Add(v);
+        }
+        return result;
     }
 
     private static object? SumValues(List<object?> values, Type targetType)
     {
-        var numericValues = values.Where(v => v != null).ToList();
+        var numericValues = FilterNonNull(values);
         if (numericValues.Count == 0)
             return GetDefaultValueForAggregate(AggregateFunction.Sum, targetType);
 
         if (targetType == typeof(decimal) || targetType == typeof(decimal?))
-            return numericValues.Sum(v => Convert.ToDecimal(v));
+        {
+            decimal sum = 0m;
+            foreach (var v in numericValues)
+                sum += Convert.ToDecimal(v);
+            return sum;
+        }
         if (targetType == typeof(double) || targetType == typeof(double?))
-            return numericValues.Sum(v => Convert.ToDouble(v));
+        {
+            double sum = 0.0;
+            foreach (var v in numericValues)
+                sum += Convert.ToDouble(v);
+            return sum;
+        }
         if (targetType == typeof(float) || targetType == typeof(float?))
-            return (float)numericValues.Sum(v => Convert.ToDouble(v));
+        {
+            double sum = 0.0;
+            foreach (var v in numericValues)
+                sum += Convert.ToDouble(v);
+            return (float)sum;
+        }
         if (targetType == typeof(long) || targetType == typeof(long?))
-            return numericValues.Sum(v => Convert.ToInt64(v));
+        {
+            long sum = 0L;
+            foreach (var v in numericValues)
+                sum += Convert.ToInt64(v);
+            return sum;
+        }
         if (targetType == typeof(int) || targetType == typeof(int?))
-            return numericValues.Sum(v => Convert.ToInt32(v));
+        {
+            int sum = 0;
+            foreach (var v in numericValues)
+                sum += Convert.ToInt32(v);
+            return sum;
+        }
 
-        return numericValues.Sum(v => Convert.ToDecimal(v));
+        {
+            decimal sum = 0m;
+            foreach (var v in numericValues)
+                sum += Convert.ToDecimal(v);
+            return sum;
+        }
     }
 
     private static object? AverageValues(List<object?> values, Type targetType)
     {
-        var numericValues = values.Where(v => v != null).ToList();
+        var numericValues = FilterNonNull(values);
         if (numericValues.Count == 0)
             return GetDefaultValueForAggregate(AggregateFunction.Average, targetType);
 
         if (targetType == typeof(decimal) || targetType == typeof(decimal?))
-            return numericValues.Average(v => Convert.ToDecimal(v));
+        {
+            decimal sum = 0m;
+            foreach (var v in numericValues)
+                sum += Convert.ToDecimal(v);
+            return sum / numericValues.Count;
+        }
         if (targetType == typeof(double) || targetType == typeof(double?))
-            return numericValues.Average(v => Convert.ToDouble(v));
+        {
+            double sum = 0.0;
+            foreach (var v in numericValues)
+                sum += Convert.ToDouble(v);
+            return sum / numericValues.Count;
+        }
         if (targetType == typeof(float) || targetType == typeof(float?))
-            return (float)numericValues.Average(v => Convert.ToDouble(v));
+        {
+            double sum = 0.0;
+            foreach (var v in numericValues)
+                sum += Convert.ToDouble(v);
+            return (float)(sum / numericValues.Count);
+        }
 
-        return numericValues.Average(v => Convert.ToDecimal(v));
+        {
+            decimal sum = 0m;
+            foreach (var v in numericValues)
+                sum += Convert.ToDecimal(v);
+            return sum / numericValues.Count;
+        }
     }
 
     private static object? MinValue(List<object?> values, Type targetType)
     {
-        var numericValues = values.Where(v => v != null).ToList();
+        var numericValues = FilterNonNull(values);
         if (numericValues.Count == 0)
             return GetDefaultValueForAggregate(AggregateFunction.Min, targetType);
 
         if (targetType == typeof(decimal) || targetType == typeof(decimal?))
-            return numericValues.Min(v => Convert.ToDecimal(v));
+        {
+            decimal min = Convert.ToDecimal(numericValues[0]);
+            for (int i = 1; i < numericValues.Count; i++)
+            {
+                decimal val = Convert.ToDecimal(numericValues[i]);
+                if (val < min) min = val;
+            }
+            return min;
+        }
         if (targetType == typeof(double) || targetType == typeof(double?))
-            return numericValues.Min(v => Convert.ToDouble(v));
+        {
+            double min = Convert.ToDouble(numericValues[0]);
+            for (int i = 1; i < numericValues.Count; i++)
+            {
+                double val = Convert.ToDouble(numericValues[i]);
+                if (val < min) min = val;
+            }
+            return min;
+        }
         if (targetType == typeof(float) || targetType == typeof(float?))
-            return numericValues.Min(v => Convert.ToSingle(v));
+        {
+            float min = Convert.ToSingle(numericValues[0]);
+            for (int i = 1; i < numericValues.Count; i++)
+            {
+                float val = Convert.ToSingle(numericValues[i]);
+                if (val < min) min = val;
+            }
+            return min;
+        }
         if (targetType == typeof(long) || targetType == typeof(long?))
-            return numericValues.Min(v => Convert.ToInt64(v));
+        {
+            long min = Convert.ToInt64(numericValues[0]);
+            for (int i = 1; i < numericValues.Count; i++)
+            {
+                long val = Convert.ToInt64(numericValues[i]);
+                if (val < min) min = val;
+            }
+            return min;
+        }
         if (targetType == typeof(int) || targetType == typeof(int?))
-            return numericValues.Min(v => Convert.ToInt32(v));
+        {
+            int min = Convert.ToInt32(numericValues[0]);
+            for (int i = 1; i < numericValues.Count; i++)
+            {
+                int val = Convert.ToInt32(numericValues[i]);
+                if (val < min) min = val;
+            }
+            return min;
+        }
 
-        return numericValues.Min();
+        {
+            var comparer = Comparer<object>.Default;
+            object min = numericValues[0];
+            for (int i = 1; i < numericValues.Count; i++)
+            {
+                if (comparer.Compare(numericValues[i], min) < 0)
+                    min = numericValues[i];
+            }
+            return min;
+        }
     }
 
     private static object? MaxValue(List<object?> values, Type targetType)
     {
-        var numericValues = values.Where(v => v != null).ToList();
+        var numericValues = FilterNonNull(values);
         if (numericValues.Count == 0)
             return GetDefaultValueForAggregate(AggregateFunction.Max, targetType);
 
         if (targetType == typeof(decimal) || targetType == typeof(decimal?))
-            return numericValues.Max(v => Convert.ToDecimal(v));
+        {
+            decimal max = Convert.ToDecimal(numericValues[0]);
+            for (int i = 1; i < numericValues.Count; i++)
+            {
+                decimal val = Convert.ToDecimal(numericValues[i]);
+                if (val > max) max = val;
+            }
+            return max;
+        }
         if (targetType == typeof(double) || targetType == typeof(double?))
-            return numericValues.Max(v => Convert.ToDouble(v));
+        {
+            double max = Convert.ToDouble(numericValues[0]);
+            for (int i = 1; i < numericValues.Count; i++)
+            {
+                double val = Convert.ToDouble(numericValues[i]);
+                if (val > max) max = val;
+            }
+            return max;
+        }
         if (targetType == typeof(float) || targetType == typeof(float?))
-            return numericValues.Max(v => Convert.ToSingle(v));
+        {
+            float max = Convert.ToSingle(numericValues[0]);
+            for (int i = 1; i < numericValues.Count; i++)
+            {
+                float val = Convert.ToSingle(numericValues[i]);
+                if (val > max) max = val;
+            }
+            return max;
+        }
         if (targetType == typeof(long) || targetType == typeof(long?))
-            return numericValues.Max(v => Convert.ToInt64(v));
+        {
+            long max = Convert.ToInt64(numericValues[0]);
+            for (int i = 1; i < numericValues.Count; i++)
+            {
+                long val = Convert.ToInt64(numericValues[i]);
+                if (val > max) max = val;
+            }
+            return max;
+        }
         if (targetType == typeof(int) || targetType == typeof(int?))
-            return numericValues.Max(v => Convert.ToInt32(v));
+        {
+            int max = Convert.ToInt32(numericValues[0]);
+            for (int i = 1; i < numericValues.Count; i++)
+            {
+                int val = Convert.ToInt32(numericValues[i]);
+                if (val > max) max = val;
+            }
+            return max;
+        }
 
-        return numericValues.Max();
+        {
+            var comparer = Comparer<object>.Default;
+            object max = numericValues[0];
+            for (int i = 1; i < numericValues.Count; i++)
+            {
+                if (comparer.Compare(numericValues[i], max) > 0)
+                    max = numericValues[i];
+            }
+            return max;
+        }
     }
 
     private static object? GetDefaultValueForAggregate(AggregateFunction aggregate, Type targetType)

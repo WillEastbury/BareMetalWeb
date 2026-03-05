@@ -101,7 +101,15 @@ public sealed record DataEntityMetadata(
 
     /// <summary>O(1) field lookup by name (case-insensitive). Lazy-built on first access.</summary>
     public Dictionary<string, DataFieldMetadata> FieldsByName =>
-        _fieldsByName ??= Fields.ToDictionary(f => f.Name, StringComparer.OrdinalIgnoreCase);
+        _fieldsByName ??= BuildFieldsByName();
+
+    private Dictionary<string, DataFieldMetadata> BuildFieldsByName()
+    {
+        var dict = new Dictionary<string, DataFieldMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in Fields)
+            dict[f.Name] = f;
+        return dict;
+    }
 
     /// <summary>Try to find a field by name in O(1). Returns null if not found.</summary>
     public DataFieldMetadata? FindField(string name) =>
@@ -177,7 +185,12 @@ public static class DataScaffold
 
     private static IReadOnlyList<DataEntityMetadata> RebuildEntityList()
     {
-        var list = EntitiesBySlug.Values.OrderBy(e => e.NavOrder).ThenBy(e => e.Name).ToArray();
+        var list = new List<DataEntityMetadata>(EntitiesBySlug.Values);
+        list.Sort((a, b) =>
+        {
+            int cmp = a.NavOrder.CompareTo(b.NavOrder);
+            return cmp != 0 ? cmp : string.Compare(a.Name, b.Name, StringComparison.Ordinal);
+        });
         _cachedEntityList = list;
         return list;
     }
@@ -287,9 +300,16 @@ public static class DataScaffold
             {
                 // If any field uses field-level sequential generation, seed and assign here
                 // to ensure the ID survives application restarts without duplicates.
-                var seqField = metadata.Fields.FirstOrDefault(f =>
-                    f.IdGeneration == IdGenerationStrategy.Sequential &&
-                    string.Equals(f.Property.Name, nameof(BaseDataObject.Key), StringComparison.Ordinal));
+                DataFieldMetadata? seqField = null;
+                foreach (var f in metadata.Fields)
+                {
+                    if (f.IdGeneration == IdGenerationStrategy.Sequential &&
+                        string.Equals(f.Property.Name, nameof(BaseDataObject.Key), StringComparison.Ordinal))
+                    {
+                        seqField = f;
+                        break;
+                    }
+                }
 
                 if (seqField != null && !_sequenceSeeded.ContainsKey(metadata.Name))
                 {
@@ -499,8 +519,10 @@ public static class DataScaffold
 
     public static IReadOnlyList<FormField> BuildFormFields(DataEntityMetadata metadata, object? instance, bool forCreate, string? cspNonce = null)
     {
+        var sortedFields = new List<DataFieldMetadata>(metadata.Fields);
+        sortedFields.Sort((a, b) => a.Order.CompareTo(b.Order));
         var fields = new List<FormField>();
-        foreach (var field in metadata.Fields.OrderBy(f => f.Order))
+        foreach (var field in sortedFields)
         {
             if (forCreate && !field.Create)
                 continue;
@@ -771,7 +793,9 @@ public static class DataScaffold
             if (field.Lookup != null)
             {
                 var lookupOptions = GetLookupOptions(field.Lookup);
-                var lookupMap = lookupOptions.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                var lookupMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var opt in lookupOptions)
+                    lookupMap[opt.Key] = opt.Value;
                 var key = value?.ToString() ?? string.Empty;
                 var display = lookupMap.TryGetValue(key, out var resolved) ? resolved : key;
                 rows.Add((field.Label, FormatLookupDisplay(key, display)));
@@ -799,7 +823,9 @@ public static class DataScaffold
             if (field.Lookup != null)
             {
                 var lookupOptions = GetLookupOptions(field.Lookup);
-                var lookupMap = lookupOptions.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                var lookupMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var opt in lookupOptions)
+                    lookupMap[opt.Key] = opt.Value;
                 var key = value?.ToString() ?? string.Empty;
                 var display = lookupMap.TryGetValue(key, out var resolved) ? resolved : key;
                 var relatedUrl = TryBuildLookupUrl(field.Lookup, key, canRenderLookupLink);
@@ -857,11 +883,16 @@ public static class DataScaffold
 
     public static IReadOnlyList<string> BuildListHeaders(DataEntityMetadata metadata, bool includeActions, bool includeBulkSelection = false)
     {
-        var headers = metadata.Fields
-            .Where(f => f.List)
-            .OrderBy(f => f.Order)
-            .Select(f => f.Label)
-            .ToList();
+        var listFields = new List<DataFieldMetadata>();
+        foreach (var f in metadata.Fields)
+        {
+            if (f.List)
+                listFields.Add(f);
+        }
+        listFields.Sort((a, b) => a.Order.CompareTo(b.Order));
+        var headers = new List<string>(listFields.Count);
+        foreach (var f in listFields)
+            headers.Add(f.Label);
 
         if (includeActions)
             headers.Insert(0, "Actions");
@@ -903,9 +934,10 @@ public static class DataScaffold
 
         var result = new List<Dictionary<string, object?>>();
 
-        var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .OrderBy(p => p.MetadataToken)
-            .ToArray();
+        var unsortedProps = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var propList = new List<System.Reflection.PropertyInfo>(unsortedProps);
+        propList.Sort((a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
+        var properties = propList.ToArray();
 
         foreach (var prop in properties)
         {
@@ -956,9 +988,11 @@ public static class DataScaffold
             else if (effectiveType == FormFieldType.Enum)
             {
                 fd["lookup"]     = null;
-                fd["enumValues"] = BuildEnumOptions(prop.PropertyType)
-                    .Select(o => (object)new Dictionary<string, object?> { ["value"] = o.Key, ["label"] = o.Value })
-                    .ToList();
+                var enumOpts = BuildEnumOptions(prop.PropertyType);
+                var enumList = new List<object>(enumOpts.Count);
+                foreach (var o in enumOpts)
+                    enumList.Add((object)new Dictionary<string, object?> { ["value"] = o.Key, ["label"] = o.Value });
+                fd["enumValues"] = enumList;
                 fd["lookupCopyFields"] = null;
                 fd["lookupTargetSlug"] = null;
             }
@@ -1018,7 +1052,9 @@ public static class DataScaffold
             if (value is not IEnumerable enumerable)
                 continue;
             var childFields = GetChildFieldMetadataSimple(childType);
-            var headers = childFields.Select(f => f.Label).ToArray();
+            var headers = new string[childFields.Count];
+            for (int hi = 0; hi < childFields.Count; hi++)
+                headers[hi] = childFields[hi].Label;
             var rows = new List<string[]>();
             
             foreach (var item in enumerable)
@@ -1079,7 +1115,10 @@ public static class DataScaffold
             if (listFields[fi].Lookup != null)
             {
                 var opts = GetLookupOptions(listFields[fi].Lookup!);
-                lookupMaps[fi] = opts.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var opt in opts)
+                    map[opt.Key] = opt.Value;
+                lookupMaps[fi] = map;
             }
         }
 
@@ -1165,8 +1204,12 @@ public static class DataScaffold
             return "<p class=\"text-warning\">Tree view requires a self-referencing parent field.</p>";
 
         var html = new StringBuilder();
-        var itemsList = allItems.ToList();
-        var itemsById = itemsList.ToDictionary(i => GetIdValue(i) ?? string.Empty, i => i, StringComparer.OrdinalIgnoreCase);
+        var itemsList = new List<BaseDataObject>();
+        foreach (var item in allItems)
+            itemsList.Add(item);
+        var itemsById = new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in itemsList)
+            itemsById[GetIdValue(item) ?? string.Empty] = item;
         
         // Find root items (no parent or parent not found)
         var rootItems = new List<BaseDataObject>();
@@ -1187,8 +1230,9 @@ public static class DataScaffold
         }
         else
         {
+            rootItems.Sort((a, b) => string.Compare(GetDisplayValue(metadata, a), GetDisplayValue(metadata, b), StringComparison.Ordinal));
             html.Append("<ul class=\"bm-data-tree-list\">");
-            foreach (var root in rootItems.OrderBy(i => GetDisplayValue(metadata, i)))
+            foreach (var root in rootItems)
             {
                 RenderTreeNode(html, metadata, root, itemsList, selectedId, basePath, 0);
             }
@@ -1251,11 +1295,13 @@ public static class DataScaffold
         var children = new List<BaseDataObject>();
         if (metadata.ParentField != null)
         {
-            children = allItems.Where(child =>
+            foreach (var child in allItems)
             {
                 var parentId = metadata.ParentField.GetValueFn(child)?.ToString();
-                return string.Equals(parentId, itemId, StringComparison.OrdinalIgnoreCase);
-            }).OrderBy(c => GetDisplayValue(metadata, c)).ToList();
+                if (string.Equals(parentId, itemId, StringComparison.OrdinalIgnoreCase))
+                    children.Add(child);
+            }
+            children.Sort((a, b) => string.Compare(GetDisplayValue(metadata, a), GetDisplayValue(metadata, b), StringComparison.Ordinal));
         }
 
         var hasChildren = children.Count > 0;
@@ -1300,7 +1346,9 @@ public static class DataScaffold
         if (string.IsNullOrWhiteSpace(selectedId))
             return false;
 
-        var itemsById = allItems.ToDictionary(i => GetIdValue(i) ?? string.Empty, i => i, StringComparer.OrdinalIgnoreCase);
+        var itemsById = new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase);
+        foreach (var i in allItems)
+            itemsById[GetIdValue(i) ?? string.Empty] = i;
         var itemId = GetIdValue(item) ?? string.Empty;
 
         // Check if selectedId is a descendant of itemId
@@ -1338,8 +1386,12 @@ public static class DataScaffold
             return "<p class=\"text-warning\">Org chart view requires a self-referencing parent field.</p>";
 
         var html = new StringBuilder();
-        var itemsList = allItems.ToList();
-        var itemsById = itemsList.ToDictionary(i => GetIdValue(i) ?? string.Empty, i => i, StringComparer.OrdinalIgnoreCase);
+        var itemsList = new List<BaseDataObject>();
+        foreach (var item in allItems)
+            itemsList.Add(item);
+        var itemsById = new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase);
+        foreach (var item in itemsList)
+            itemsById[GetIdValue(item) ?? string.Empty] = item;
 
         // Find the selected item or default to first root
         BaseDataObject? rootItem = null;
@@ -1350,11 +1402,15 @@ public static class DataScaffold
         else
         {
             // Find first root item (no parent)
-            rootItem = itemsList.FirstOrDefault(i =>
+            foreach (var i in itemsList)
             {
                 var parentId = metadata.ParentField.GetValueFn(i)?.ToString();
-                return string.IsNullOrWhiteSpace(parentId) || !itemsById.ContainsKey(parentId);
-            });
+                if (string.IsNullOrWhiteSpace(parentId) || !itemsById.ContainsKey(parentId))
+                {
+                    rootItem = i;
+                    break;
+                }
+            }
         }
 
         html.Append("<div class=\"bm-orgchart-container\">");
@@ -1395,10 +1451,17 @@ public static class DataScaffold
         var selectedClass = isSelected ? " bm-orgchart-card-selected" : string.Empty;
         
         // Find a field that might represent title/role (look for common names)
-        var titleField = metadata.Fields.FirstOrDefault(f =>
-            f.Name.Contains("Title", StringComparison.OrdinalIgnoreCase) ||
-            f.Name.Contains("Role", StringComparison.OrdinalIgnoreCase) ||
-            f.Name.Contains("Position", StringComparison.OrdinalIgnoreCase));
+        DataFieldMetadata? titleField = null;
+        foreach (var f in metadata.Fields)
+        {
+            if (f.Name.Contains("Title", StringComparison.OrdinalIgnoreCase) ||
+                f.Name.Contains("Role", StringComparison.OrdinalIgnoreCase) ||
+                f.Name.Contains("Position", StringComparison.OrdinalIgnoreCase))
+            {
+                titleField = f;
+                break;
+            }
+        }
         var titleValue = titleField != null ? titleField.GetValueFn(item)?.ToString() : null;
         
         // Render the current node
@@ -1422,11 +1485,14 @@ public static class DataScaffold
         // Find children
         if (metadata.ParentField != null)
         {
-            var children = allItems.Where(child =>
+            var children = new List<BaseDataObject>();
+            foreach (var child in allItems)
             {
                 var parentId = metadata.ParentField.GetValueFn(child)?.ToString();
-                return string.Equals(parentId, itemId, StringComparison.OrdinalIgnoreCase);
-            }).OrderBy(c => GetDisplayValue(metadata, c)).ToList();
+                if (string.Equals(parentId, itemId, StringComparison.OrdinalIgnoreCase))
+                    children.Add(child);
+            }
+            children.Sort((a, b) => string.Compare(GetDisplayValue(metadata, a), GetDisplayValue(metadata, b), StringComparison.Ordinal));
 
             if (children.Count > 0)
             {
@@ -1444,10 +1510,19 @@ public static class DataScaffold
     private static DataFieldMetadata? FindDayEnumField(DataEntityMetadata metadata)
     {
         // Prefer enum fields whose name or label contains "day" (e.g. Day, DayOfWeek, WeekDay)
-        return metadata.Fields.FirstOrDefault(f =>
-                f.FieldType == FormFieldType.Enum &&
-                f.Name.Contains("day", StringComparison.OrdinalIgnoreCase))
-            ?? metadata.Fields.FirstOrDefault(f => f.FieldType == FormFieldType.Enum);
+        DataFieldMetadata? dayField = null;
+        DataFieldMetadata? anyEnum = null;
+        foreach (var f in metadata.Fields)
+        {
+            if (f.FieldType != FormFieldType.Enum) continue;
+            anyEnum ??= f;
+            if (f.Name.Contains("day", StringComparison.OrdinalIgnoreCase))
+            {
+                dayField = f;
+                break;
+            }
+        }
+        return dayField ?? anyEnum;
     }
 
     public static bool CanShowTimetableView(DataEntityMetadata metadata)
@@ -1456,18 +1531,27 @@ public static class DataScaffold
         var dayField = FindDayEnumField(metadata);
 
         // Check for TimeOnly or DateTime field
-        var timeField = metadata.Fields.FirstOrDefault(f =>
-            f.FieldType == FormFieldType.TimeOnly ||
-            f.FieldType == FormFieldType.DateTime);
+        DataFieldMetadata? timeField = null;
+        foreach (var f in metadata.Fields)
+        {
+            if (f.FieldType == FormFieldType.TimeOnly || f.FieldType == FormFieldType.DateTime)
+            {
+                timeField = f;
+                break;
+            }
+        }
 
         return dayField != null && timeField != null;
     }
 
     public static bool CanShowTimelineView(DataEntityMetadata metadata)
     {
-        return metadata.Fields.Any(f =>
-            f.FieldType == FormFieldType.DateOnly ||
-            f.FieldType == FormFieldType.DateTime);
+        foreach (var f in metadata.Fields)
+        {
+            if (f.FieldType == FormFieldType.DateOnly || f.FieldType == FormFieldType.DateTime)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -1481,9 +1565,12 @@ public static class DataScaffold
 
     public static bool CanShowCalendarView(DataEntityMetadata metadata)
     {
-        return metadata.Fields.Any(f =>
-            f.FieldType == FormFieldType.DateOnly ||
-            f.FieldType == FormFieldType.DateTime);
+        foreach (var f in metadata.Fields)
+        {
+            if (f.FieldType == FormFieldType.DateOnly || f.FieldType == FormFieldType.DateTime)
+                return true;
+        }
+        return false;
     }
 
     public static string BuildTimetableHtml(
@@ -1497,23 +1584,38 @@ public static class DataScaffold
         // Find the day and time fields
         var dayField = FindDayEnumField(metadata);
 
-        var timeField = metadata.Fields.FirstOrDefault(f =>
-            f.FieldType == FormFieldType.TimeOnly ||
-            f.FieldType == FormFieldType.DateTime);
+        DataFieldMetadata? timeField = null;
+        foreach (var f in metadata.Fields)
+        {
+            if (f.FieldType == FormFieldType.TimeOnly || f.FieldType == FormFieldType.DateTime)
+            {
+                timeField = f;
+                break;
+            }
+        }
 
         if (dayField == null || timeField == null)
             return "<p class=\"text-warning\">Timetable view requires a Day (DayOfWeek) field and a Time field.</p>";
 
         var html = new StringBuilder();
-        var itemsList = allItems.ToList();
+        var itemsList = new List<BaseDataObject>();
+        foreach (var item in allItems)
+            itemsList.Add(item);
 
         // Group by day using the integer value of the enum so any day-of-week enum type works
-        var groupedByDay = itemsList
-            .GroupBy(item => Convert.ToInt32(dayField.GetValueFn(item) ?? 0))
-            .OrderBy(g => g.Key)
-            .ToList();
+        var dayGroups = new SortedDictionary<int, List<BaseDataObject>>();
+        foreach (var item in itemsList)
+        {
+            var dayKey = Convert.ToInt32(dayField.GetValueFn(item) ?? 0);
+            if (!dayGroups.TryGetValue(dayKey, out var group))
+            {
+                group = new List<BaseDataObject>();
+                dayGroups[dayKey] = group;
+            }
+            group.Add(item);
+        }
 
-        if (groupedByDay.Count == 0)
+        if (dayGroups.Count == 0)
         {
             html.Append("<p class=\"text-muted mb-0\">No items found.</p>");
             return html.ToString();
@@ -1521,16 +1623,20 @@ public static class DataScaffold
 
         html.Append("<div class=\"bm-timetable-container\">");
 
-        foreach (var dayGroup in groupedByDay)
+        foreach (var dayGroupEntry in dayGroups)
         {
-            var dayName = Enum.GetName(dayField.Property.PropertyType, dayGroup.Key) ?? dayGroup.Key.ToString();
+            var dayKey = dayGroupEntry.Key;
+            var dayGroup = dayGroupEntry.Value;
+            var dayName = Enum.GetName(dayField.Property.PropertyType, dayKey) ?? dayKey.ToString();
             html.Append($"<div class=\"bm-timetable-day-section mb-4\">");
             html.Append($"<h3 class=\"bm-timetable-day-header\">{WebUtility.HtmlEncode(dayName)}</h3>");
 
             // Sort items by time within this day
-            var sortedItems = timeField.FieldType == FormFieldType.TimeOnly
-                ? dayGroup.OrderBy(item => CoerceTimeOnly(timeField.GetValueFn(item))).ToList()
-                : dayGroup.OrderBy(item => (DateTime)(timeField.GetValueFn(item) ?? DateTime.MinValue)).ToList();
+            var sortedItems = new List<BaseDataObject>(dayGroup);
+            if (timeField.FieldType == FormFieldType.TimeOnly)
+                sortedItems.Sort((a, b) => CoerceTimeOnly(timeField.GetValueFn(a)).CompareTo(CoerceTimeOnly(timeField.GetValueFn(b))));
+            else
+                sortedItems.Sort((a, b) => ((DateTime)(timeField.GetValueFn(a) ?? DateTime.MinValue)).CompareTo((DateTime)(timeField.GetValueFn(b) ?? DateTime.MinValue)));
 
             html.Append("<table class=\"table table-striped table-hover\">");
             html.Append("<thead><tr>");
@@ -1542,7 +1648,13 @@ public static class DataScaffold
             html.Append($"<th scope=\"col\">{WebUtility.HtmlEncode(timeField.Label)}</th>");
             
             // Add other list fields
-            foreach (var field in metadata.Fields.Where(f => f.List && f != dayField && f != timeField))
+            var otherListFields = new List<DataFieldMetadata>();
+            foreach (var f in metadata.Fields)
+            {
+                if (f.List && f != dayField && f != timeField)
+                    otherListFields.Add(f);
+            }
+            foreach (var field in otherListFields)
             {
                 html.Append($"<th scope=\"col\">{WebUtility.HtmlEncode(field.Label)}</th>");
             }
@@ -1584,7 +1696,7 @@ public static class DataScaffold
                 html.Append($"<td>{WebUtility.HtmlEncode(timeDisplay)}</td>");
 
                 // Other list fields
-                foreach (var field in metadata.Fields.Where(f => f.List && f != dayField && f != timeField))
+                foreach (var field in otherListFields)
                 {
                     var rawValue = field.GetValueFn(item);
                     string displayValue;
@@ -1592,7 +1704,9 @@ public static class DataScaffold
                     if (field.Lookup != null)
                     {
                         var lookupOptions = GetLookupOptions(field.Lookup);
-                        var lookupMap = lookupOptions.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                        var lookupMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var opt in lookupOptions)
+                            lookupMap[opt.Key] = opt.Value;
                         var key = rawValue?.ToString() ?? string.Empty;
                         var display = lookupMap.TryGetValue(key, out var resolved) ? resolved : key;
                         var relatedUrl = TryBuildLookupUrl(field.Lookup, key, canRenderLookupLink);
@@ -1630,10 +1744,17 @@ public static class DataScaffold
     private static string GetDisplayValue(DataEntityMetadata metadata, BaseDataObject item)
     {
         // Try to find a Name field
-        var nameField = metadata.Fields.FirstOrDefault(f =>
-            string.Equals(f.Name, "Name", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(f.Name, "Title", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(f.Name, "DisplayName", StringComparison.OrdinalIgnoreCase));
+        DataFieldMetadata? nameField = null;
+        foreach (var f in metadata.Fields)
+        {
+            if (string.Equals(f.Name, "Name", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(f.Name, "Title", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(f.Name, "DisplayName", StringComparison.OrdinalIgnoreCase))
+            {
+                nameField = f;
+                break;
+            }
+        }
 
         if (nameField != null)
         {
@@ -1708,7 +1829,9 @@ public static class DataScaffold
     public static List<string> ApplyValuesFromForm(DataEntityMetadata metadata, object instance, IDictionary<string, string?> values, bool forCreate)
     {
         var errors = new List<string>();
-        foreach (var field in metadata.Fields.OrderBy(f => f.Order))
+        var sortedFields = new List<DataFieldMetadata>(metadata.Fields);
+        sortedFields.Sort((a, b) => a.Order.CompareTo(b.Order));
+        foreach (var field in sortedFields)
         {
             if (field.ReadOnly)
                 continue;
@@ -1813,7 +1936,9 @@ public static class DataScaffold
     public static List<string> ApplyValuesFromJson(DataEntityMetadata metadata, object instance, IDictionary<string, JsonElement> values, bool forCreate, bool allowMissing)
     {
         var errors = new List<string>();
-        foreach (var field in metadata.Fields.OrderBy(f => f.Order))
+        var sortedFields = new List<DataFieldMetadata>(metadata.Fields);
+        sortedFields.Sort((a, b) => a.Order.CompareTo(b.Order));
+        foreach (var field in sortedFields)
         {
             if (field.ReadOnly)
                 continue;
@@ -1957,9 +2082,11 @@ public static class DataScaffold
         if (!effectiveType.IsEnum)
             return Array.Empty<KeyValuePair<string, string>>();
 
-        return Enum.GetNames(effectiveType)
-            .Select(name => new KeyValuePair<string, string>(name, DeCamelcaseWithId(name)))
-            .ToArray();
+        var names = Enum.GetNames(effectiveType);
+        var result = new KeyValuePair<string, string>[names.Length];
+        for (int i = 0; i < names.Length; i++)
+            result[i] = new KeyValuePair<string, string>(names[i], DeCamelcaseWithId(names[i]));
+        return result;
     }
 
     private static IReadOnlyList<KeyValuePair<string, string>> GetLookupOptions(DataLookupConfig lookup)
@@ -2134,7 +2261,13 @@ public static class DataScaffold
                 var q = new QueryDefinition();
                 q.Clauses.Add(new QueryClause { Field = lookup.ValueField, Operator = QueryOperator.Equals, Value = currentValue });
                 q.Top = 1;
-                entity = QueryByType(lookup.TargetType, q, lookup.TargetSlug).Cast<object>().FirstOrDefault();
+                object? firstResult = null;
+                foreach (var item in QueryByType(lookup.TargetType, q, lookup.TargetSlug))
+                {
+                    firstResult = item;
+                    break;
+                }
+                entity = firstResult;
             }
 
             if (entity == null)
@@ -2362,9 +2495,10 @@ public static class DataScaffold
     private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadataSimple([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
     {
         var fields = new List<ChildFieldMeta>();
-        var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .OrderBy(p => p.MetadataToken)
-            .ToArray();
+        var unsortedProps = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var propsList = new List<System.Reflection.PropertyInfo>(unsortedProps);
+        propsList.Sort((a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
+        var properties = propsList.ToArray();
 
         foreach (var prop in properties)
         {
@@ -2396,9 +2530,10 @@ public static class DataScaffold
     private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
     {
         var fields = new List<ChildFieldMeta>();
-        var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .OrderBy(p => p.MetadataToken)
-            .ToArray();
+        var unsortedProps2 = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var propsList2 = new List<System.Reflection.PropertyInfo>(unsortedProps2);
+        propsList2.Sort((a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
+        var properties = propsList2.ToArray();
 
         foreach (var prop in properties)
         {
@@ -2710,8 +2845,10 @@ public static class DataScaffold
         sb.Append("var tbody=table.querySelector('tbody');" );
         sb.Append("var lookupMaps=");
         var lookupMaps = new Dictionary<string, Dictionary<string, string>>(StringComparer.OrdinalIgnoreCase);
-        foreach (var child in childFields.Where(child => child.LookupOptions != null))
+        foreach (var child in childFields)
         {
+            if (child.LookupOptions == null)
+                continue;
             var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var option in child.LookupOptions!)
             {
@@ -2753,7 +2890,12 @@ public static class DataScaffold
         sb.Append("recalcModal();");
 
         // CopyFromParent: for new rows, look up parent-form entity and pre-fill this field
-        var copyFromParentFields = childFields.Where(c => c.CopyFromParentField != null).ToList();
+        var copyFromParentFields = new List<ChildFieldMeta>();
+        foreach (var c in childFields)
+        {
+            if (c.CopyFromParentField != null)
+                copyFromParentFields.Add(c);
+        }
         if (copyFromParentFields.Count > 0)
         {
             sb.Append("if(idx===null){");
@@ -2815,7 +2957,9 @@ public static class DataScaffold
                     var displayText = ToDisplayString(value, child.FieldType);
                     if (child.LookupOptions != null)
                     {
-                        var map = child.LookupOptions.ToDictionary(k => k.Key, v => v.Value, StringComparer.OrdinalIgnoreCase);
+                        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var opt in child.LookupOptions)
+                            map[opt.Key] = opt.Value;
                         var key = value?.ToString() ?? string.Empty;
                         displayText = map.TryGetValue(key, out var resolved) ? resolved : key;
                     }
@@ -3425,9 +3569,12 @@ public static class DataScaffold
         try
         {
             var typedList = (IList)Activator.CreateInstance(listType)!;
-            var props = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .Where(p => p.CanRead && p.CanWrite)
-                .ToDictionary(p => p.Name, p => p, StringComparer.OrdinalIgnoreCase);
+            var props = new Dictionary<string, System.Reflection.PropertyInfo>(StringComparer.OrdinalIgnoreCase);
+            foreach (var p in childType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (p.CanRead && p.CanWrite)
+                    props[p.Name] = p;
+            }
 
             foreach (var row in element.EnumerateArray())
             {
@@ -3499,9 +3646,10 @@ public static class DataScaffold
             return null;
 
         var fields = new List<DataFieldMetadata>();
-        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .OrderBy(p => p.MetadataToken)
-            .ToArray();
+        var unsortedProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var propsList = new List<System.Reflection.PropertyInfo>(unsortedProps);
+        propsList.Sort((a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
+        var properties = propsList.ToArray();
         for (int i = 0; i < properties.Length; i++)
         {
             var prop = properties[i];
@@ -3692,6 +3840,15 @@ public static class DataScaffold
             ));
         }
 
+        fields.Sort((a, b) => a.Order.CompareTo(b.Order));
+        commands.Sort((a, b) => a.Order.CompareTo(b.Order));
+        var docRelFields = new List<DataFieldMetadata>();
+        foreach (var f in fields)
+        {
+            if (f.RelatedDocument != null)
+                docRelFields.Add(f);
+        }
+
         return new DataEntityMetadata(
             type,
             name,
@@ -3703,12 +3860,12 @@ public static class DataScaffold
             idGeneration,
             viewType,
             parentField,
-            fields.OrderBy(f => f.Order).ToList(),
+            fields,
             handlers,
-            commands.OrderBy(c => c.Order).ToList(),
+            commands,
             defaultSortField,
             defaultSortDirection,
-            fields.Where(f => f.RelatedDocument != null).ToList()
+            docRelFields
         );
     }
 
@@ -3848,7 +4005,10 @@ public static class DataScaffold
     private static async ValueTask<IEnumerable<BaseDataObject>> QueryTypedAsync<T>(QueryDefinition? query, CancellationToken cancellationToken) where T : BaseDataObject
     {
         var results = await DataStoreProvider.Current.QueryAsync<T>(query, cancellationToken);
-        return results.Cast<BaseDataObject>().ToList();
+        var list = new List<BaseDataObject>();
+        foreach (var item in results)
+            list.Add(item);
+        return list;
     }
 
     private static async ValueTask<int> CountTypedAsync<T>(QueryDefinition? query, CancellationToken cancellationToken) where T : BaseDataObject

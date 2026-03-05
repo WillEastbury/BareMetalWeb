@@ -32,8 +32,15 @@ public static class AggregationEngine
 
         // Resolve getter — prefer compiled from DataFieldMetadata, fallback to EntityLayout
         Func<object, object?>? getter = null;
-        var field = meta.Fields.FirstOrDefault(f =>
-            string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        DataFieldMetadata? field = null;
+        foreach (var f in meta.Fields)
+        {
+            if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                field = f;
+                break;
+            }
+        }
         if (field != null)
         {
             getter = field.GetValueFn; // compiled delegate, no reflection
@@ -76,15 +83,29 @@ public static class AggregationEngine
             return Array.Empty<AggregateResult>();
 
         // Fast path: all are Count
-        if (aggregates.All(a => a.Function == AggregateFunction.Count))
+        bool allCount = true;
+        foreach (var a in aggregates)
+        {
+            if (a.Function != AggregateFunction.Count)
+            {
+                allCount = false;
+                break;
+            }
+        }
+        if (allCount)
         {
             var count = await meta.Handlers.CountAsync(query, cancellationToken);
-            return aggregates.Select(a => new AggregateResult(a.Function, a.FieldName, count, count)).ToArray();
+            var countResults = new AggregateResult[aggregates.Length];
+            for (int i = 0; i < aggregates.Length; i++)
+                countResults[i] = new AggregateResult(aggregates[i].Function, aggregates[i].FieldName, count, count);
+            return countResults;
         }
 
         // Resolve getters
         var layout = EntityLayoutCompiler.GetOrCompile(meta);
-        var fieldsByName = meta.Fields.ToDictionary(f => f.Name, StringComparer.OrdinalIgnoreCase);
+        var fieldsByName = new Dictionary<string, DataFieldMetadata>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in meta.Fields)
+            fieldsByName[f.Name] = f;
         var accumulators = new (Func<object, object?>? Getter, StreamingAccumulator Acc, string FieldName, AggregateFunction Fn)[aggregates.Length];
 
         for (int i = 0; i < aggregates.Length; i++)

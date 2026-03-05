@@ -33,20 +33,21 @@ public class AggregationDefinition : RenderableDataObject
 
     public IReadOnlyList<string> GetGroupByList()
         => GroupByFields
-            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToArray();
+            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     public IReadOnlyList<(string Function, string Field)> GetMeasureList()
-        => Measures
-            .Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(m =>
-            {
-                var parts = m.Split(':', 2);
-                return parts.Length == 2
-                    ? (parts[0].ToLowerInvariant(), parts[1])
-                    : ("count", m);
-            })
-            .ToArray();
+    {
+        var parts = Measures.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var result = new (string Function, string Field)[parts.Length];
+        for (int i = 0; i < parts.Length; i++)
+        {
+            var p = parts[i].Split(':', 2);
+            result[i] = p.Length == 2
+                ? (p[0].ToLowerInvariant(), p[1])
+                : ("count", parts[i]);
+        }
+        return result;
+    }
 
     public override string ToString() => Name;
 }

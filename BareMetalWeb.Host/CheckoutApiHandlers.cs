@@ -39,7 +39,12 @@ public static class CheckoutApiHandlers
         bqd.Clauses.Add(new QueryClause { Field = "UserId", Operator = QueryOperator.Equals, Value = userId });
         bqd.Clauses.Add(new QueryClause { Field = "Status", Operator = QueryOperator.Equals, Value = "Open" });
         var baskets = await basketMeta.Handlers.QueryAsync(bqd, context.RequestAborted);
-        var basket = baskets.Cast<Basket>().FirstOrDefault();
+        Basket? basket = null;
+        foreach (var obj in baskets)
+        {
+            basket = (Basket)obj;
+            break;
+        }
         if (basket == null)
         {
             context.Response.StatusCode = 400;
@@ -50,7 +55,10 @@ public static class CheckoutApiHandlers
         // Load items
         var iqd = new QueryDefinition();
         iqd.Clauses.Add(new QueryClause { Field = "BasketId", Operator = QueryOperator.Equals, Value = basket.Key.ToString() });
-        var items = (await itemMeta.Handlers.QueryAsync(iqd, context.RequestAborted)).Cast<BasketItem>().ToList();
+        var itemResults = await itemMeta.Handlers.QueryAsync(iqd, context.RequestAborted);
+        var items = new List<BasketItem>();
+        foreach (var obj in itemResults)
+            items.Add((BasketItem)obj);
         if (items.Count == 0)
         {
             context.Response.StatusCode = 400;
@@ -74,11 +82,16 @@ public static class CheckoutApiHandlers
         order.Email = email;
         order.ShippingAddress = address;
         order.PaymentMethod = Enum.TryParse<PaymentMethod>(method, true, out var pmEnum) ? pmEnum : PaymentMethod.Stripe;
-        order.Subtotal = items.Sum(i => i.LineTotal);
+        decimal subtotal = 0;
+        foreach (var i in items) subtotal += i.LineTotal;
+        order.Subtotal = subtotal;
         order.Tax = Math.Round(order.Subtotal * 0.20m, 2); // 20% tax (configurable in future)
         order.Total = order.Subtotal + order.Tax;
         order.ItemCount = items.Count;
-        order.ItemsJson = JsonSerializer.Serialize(items.Select(i => new { i.ProductId, i.ProductName, i.Quantity, i.UnitPrice, i.LineTotal }));
+        var itemsSummary = new List<object>(items.Count);
+        foreach (var i in items)
+            itemsSummary.Add(new { i.ProductId, i.ProductName, i.Quantity, i.UnitPrice, i.LineTotal });
+        order.ItemsJson = JsonSerializer.Serialize(itemsSummary);
         order.PlacedAtUtc = DateTime.UtcNow;
         order.Status = OrderStatus.Pending;
         await orderMeta.Handlers.SaveAsync(order, context.RequestAborted);

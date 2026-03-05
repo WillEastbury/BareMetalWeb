@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Core;
 using BareMetalWeb.Rendering.Models;
@@ -61,10 +60,18 @@ public static class HttpContextPageInfoExtensions
     public static void SetStringValue(this HttpContext context, string key, string value)
     {
         var current = EnsurePageContext(context);
-        var keys = current.PageMetaDataKeys.ToList();
-        var values = current.PageMetaDataValues.ToList();
+        var keys = new List<string>(current.PageMetaDataKeys);
+        var values = new List<string>(current.PageMetaDataValues);
 
-        int index = keys.FindIndex(k => string.Equals(k, key, StringComparison.Ordinal));
+        int index = -1;
+        for (int i = 0; i < keys.Count; i++)
+        {
+            if (string.Equals(keys[i], key, StringComparison.Ordinal))
+            {
+                index = i;
+                break;
+            }
+        }
         if (index >= 0)
         {
             values[index] = value;
@@ -85,8 +92,8 @@ public static class HttpContextPageInfoExtensions
     public static void AddStringValue(this HttpContext context, string key, string value)
     {
         var current = EnsurePageContext(context);
-        var keys = current.PageMetaDataKeys.ToList();
-        var values = current.PageMetaDataValues.ToList();
+        var keys = new List<string>(current.PageMetaDataKeys);
+        var values = new List<string>(current.PageMetaDataValues);
 
         keys.Add(key);
         values.Add(value);
@@ -122,9 +129,17 @@ public static class HttpContextPageInfoExtensions
     public static void SetLoop(this HttpContext context, TemplateLoop loop)
     {
         var current = EnsurePageContext(context);
-        var loops = current.TemplateLoops?.ToList() ?? new List<TemplateLoop>();
+        var loops = current.TemplateLoops != null ? new List<TemplateLoop>(current.TemplateLoops) : new List<TemplateLoop>();
 
-        int index = loops.FindIndex(l => string.Equals(l.Key, loop.Key, StringComparison.Ordinal));
+        int index = -1;
+        for (int i = 0; i < loops.Count; i++)
+        {
+            if (string.Equals(loops[i].Key, loop.Key, StringComparison.Ordinal))
+            {
+                index = i;
+                break;
+            }
+        }
         if (index >= 0)
         {
             loops[index] = loop;
@@ -145,12 +160,11 @@ public static class HttpContextPageInfoExtensions
 
     public static void SetLoopValues(this HttpContext context, string loopKey, string valueKey, IReadOnlyList<string> values)
     {
-        var items = values
-            .Select(value => (IReadOnlyDictionary<string, string>)new Dictionary<string, string>
-            {
-                [valueKey] = value
-            })
-            .ToList();
+        var items = new List<IReadOnlyDictionary<string, string>>(values.Count);
+        for (int i = 0; i < values.Count; i++)
+        {
+            items.Add(new Dictionary<string, string> { [valueKey] = values[i] });
+        }
 
         context.SetLoop(loopKey, items);
     }
@@ -158,12 +172,20 @@ public static class HttpContextPageInfoExtensions
     public static void AddLoopItem(this HttpContext context, string loopKey, IReadOnlyDictionary<string, string> item)
     {
         var current = EnsurePageContext(context);
-        var loops = current.TemplateLoops?.ToList() ?? new List<TemplateLoop>();
+        var loops = current.TemplateLoops != null ? new List<TemplateLoop>(current.TemplateLoops) : new List<TemplateLoop>();
 
-        int index = loops.FindIndex(l => string.Equals(l.Key, loopKey, StringComparison.Ordinal));
+        int index = -1;
+        for (int i = 0; i < loops.Count; i++)
+        {
+            if (string.Equals(loops[i].Key, loopKey, StringComparison.Ordinal))
+            {
+                index = i;
+                break;
+            }
+        }
         if (index >= 0)
         {
-            var items = loops[index].Items.ToList();
+            var items = new List<IReadOnlyDictionary<string, string>>(loops[index].Items);
             items.Add(item);
             loops[index] = loops[index] with { Items = items };
         }
@@ -191,7 +213,7 @@ public static class HttpContextPageInfoExtensions
     public static void AddTableColumnTitle(this HttpContext context, string title)
     {
         var current = EnsurePageContext(context);
-        var titles = current.TableColumnTitles?.ToList() ?? new List<string>();
+        var titles = current.TableColumnTitles != null ? new List<string>(current.TableColumnTitles) : new List<string>();
         titles.Add(title);
 
         context.SetPageContext(current with
@@ -212,7 +234,7 @@ public static class HttpContextPageInfoExtensions
     public static void AddTableRow(this HttpContext context, string[] row)
     {
         var current = EnsurePageContext(context);
-        var rows = current.TableData?.ToList() ?? new List<string[]>();
+        var rows = current.TableData != null ? new List<string[]>(current.TableData) : new List<string[]>();
         rows.Add(row);
 
         context.SetPageContext(current with

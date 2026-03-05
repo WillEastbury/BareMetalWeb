@@ -35,10 +35,14 @@ internal static class OpenApiHandler
 
         var userPermissions = user?.Permissions ?? Array.Empty<string>();
 
-        var accessibleEntities = DataScaffold.Entities
-            .Where(e => IsEntityAccessible(e, user, userPermissions))
-            .OrderBy(e => e.Slug)
-            .ToArray();
+        var filteredEntities = new List<DataEntityMetadata>();
+        foreach (var e in DataScaffold.Entities)
+        {
+            if (IsEntityAccessible(e, user, userPermissions))
+                filteredEntities.Add(e);
+        }
+        filteredEntities.Sort((a, b) => string.Compare(a.Slug, b.Slug, StringComparison.Ordinal));
+        var accessibleEntities = filteredEntities.ToArray();
 
         var document = BuildDocument(context, accessibleEntities);
 
@@ -283,7 +287,9 @@ internal static class OpenApiHandler
         var properties = new Dictionary<string, object?>(StringComparer.Ordinal);
         var required = new List<string>();
 
-        foreach (var field in entity.Fields.OrderBy(f => f.Order))
+        var sortedFields = new List<DataFieldMetadata>(entity.Fields);
+        sortedFields.Sort((a, b) => a.Order.CompareTo(b.Order));
+        foreach (var field in sortedFields)
         {
             // Skip fields that are not viewable
             if (!field.View && !field.Edit && !field.Create)
@@ -352,10 +358,15 @@ internal static class OpenApiHandler
         if (enumValues.Count == 0)
             return SimpleSchema("string", null);
 
+        var keys = new string[enumValues.Count];
+        var ki = 0;
+        foreach (var kv in enumValues)
+            keys[ki++] = kv.Key;
+
         return new Dictionary<string, object?>
         {
             ["type"] = "string",
-            ["enum"] = enumValues.Select(kv => kv.Key).ToArray()
+            ["enum"] = keys
         };
     }
 
@@ -371,10 +382,20 @@ internal static class OpenApiHandler
     private static Dictionary<string, object?> SchemaRef(string slug) =>
         new() { ["$ref"] = $"#/components/schemas/{SchemaKey(slug)}" };
 
-    private static string SchemaKey(string slug) =>
-        string.Concat(slug.Split('-')
-            .Where(p => p.Length > 0)
-            .Select(p => char.ToUpperInvariant(p[0]) + p[1..]));
+    private static string SchemaKey(string slug)
+    {
+        var parts = slug.Split('-');
+        var sb = new StringBuilder();
+        foreach (var p in parts)
+        {
+            if (p.Length > 0)
+            {
+                sb.Append(char.ToUpperInvariant(p[0]));
+                sb.Append(p, 1, p.Length - 1);
+            }
+        }
+        return sb.ToString();
+    }
 
     private static Dictionary<string, object?> IdParameter() =>
         new()
@@ -478,6 +499,14 @@ internal static class OpenApiHandler
             return user != null;
 
         var required = perms.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        return required.Any(r => userPermissions.Any(p => string.Equals(p, r, StringComparison.OrdinalIgnoreCase)));
+        foreach (var r in required)
+        {
+            foreach (var p in userPermissions)
+            {
+                if (string.Equals(p, r, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        return false;
     }
 }

@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
@@ -36,8 +35,15 @@ public sealed class ServerLookupResolver : ILookupResolver
 
         if (!string.IsNullOrEmpty(currentEntitySlug) && DataScaffold.TryGetEntity(currentEntitySlug, out var currentMeta))
         {
-            var fkFieldMeta = currentMeta!.Fields.FirstOrDefault(f =>
-                string.Equals(f.Name, foreignKeyField, StringComparison.OrdinalIgnoreCase));
+            DataFieldMetadata? fkFieldMeta = null;
+            foreach (var f in currentMeta!.Fields)
+            {
+                if (string.Equals(f.Name, foreignKeyField, StringComparison.OrdinalIgnoreCase))
+                {
+                    fkFieldMeta = f;
+                    break;
+                }
+            }
 
             if (fkFieldMeta?.Lookup != null)
             {
@@ -111,8 +117,15 @@ public sealed class ServerLookupResolver : ILookupResolver
         DataEntityMetadata? currentMeta = null;
         if (!string.IsNullOrEmpty(startEntitySlug) && DataScaffold.TryGetEntity(startEntitySlug, out var startMeta))
         {
-            var firstFkFieldMeta = startMeta!.Fields.FirstOrDefault(f =>
-                string.Equals(f.Name, firstFkField, StringComparison.OrdinalIgnoreCase));
+            DataFieldMetadata? firstFkFieldMeta = null;
+            foreach (var f in startMeta!.Fields)
+            {
+                if (string.Equals(f.Name, firstFkField, StringComparison.OrdinalIgnoreCase))
+                {
+                    firstFkFieldMeta = f;
+                    break;
+                }
+            }
             if (firstFkFieldMeta?.Lookup != null)
                 currentMeta = DataScaffold.GetEntityByType(firstFkFieldMeta.Lookup.TargetType);
         }
@@ -137,10 +150,17 @@ public sealed class ServerLookupResolver : ILookupResolver
                 return null;
 
             DataEntityMetadata? nextMeta = null;
-            var lookupAttr = currentEntity.GetType()
-                .GetProperties(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(p => string.Equals(p.Name, nextFkField, StringComparison.OrdinalIgnoreCase))
-                ?.GetCustomAttribute<DataLookupAttribute>();
+            PropertyInfo? lookupProp = null;
+            foreach (var p in currentEntity.GetType()
+                .GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            {
+                if (string.Equals(p.Name, nextFkField, StringComparison.OrdinalIgnoreCase))
+                {
+                    lookupProp = p;
+                    break;
+                }
+            }
+            var lookupAttr = lookupProp?.GetCustomAttribute<DataLookupAttribute>();
             if (lookupAttr != null)
                 nextMeta = DataScaffold.GetEntityByType(lookupAttr.TargetType);
 

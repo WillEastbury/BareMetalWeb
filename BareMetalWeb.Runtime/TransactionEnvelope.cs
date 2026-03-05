@@ -105,11 +105,26 @@ public sealed class TransactionEnvelope
     /// Returns <c>true</c> when no <see cref="AssertSeverity.Error"/> assertion fired.
     /// A <c>false</c> result means the commit must be aborted.
     /// </summary>
-    public bool IsValid => !Assertions.Any(a => a.Fired && a.Severity == AssertSeverity.Error);
+    public bool IsValid
+    {
+        get
+        {
+            foreach (var a in Assertions)
+                if (a.Fired && a.Severity == AssertSeverity.Error) return false;
+            return true;
+        }
+    }
 
     /// <summary>
     /// Returns the first error assertion that fired, or <c>null</c> when the envelope is valid.
     /// </summary>
-    public AssertionResult? FirstError =>
-        Assertions.FirstOrDefault(a => a.Fired && a.Severity == AssertSeverity.Error);
+    public AssertionResult? FirstError
+    {
+        get
+        {
+            foreach (var a in Assertions)
+                if (a.Fired && a.Severity == AssertSeverity.Error) return a;
+            return null;
+        }
+    }
 }

@@ -24,8 +24,14 @@ public sealed class AdminAssistantService
     public static string BuildSystemPrompt()
     {
         var entities = DataScaffold.Entities;
-        var entityList = string.Join("\n", entities.Select(e =>
-            $"  - {e.Name} (slug: {e.Slug}, {e.Fields.Count} fields)"));
+        var sb = new System.Text.StringBuilder();
+        for (int i = 0; i < entities.Count; i++)
+        {
+            var e = entities[i];
+            if (i > 0) sb.Append('\n');
+            sb.Append($"  - {e.Name} (slug: {e.Slug}, {e.Fields.Count} fields)");
+        }
+        var entityList = sb.ToString();
 
         return $"""
             You are an AI assistant for a BareMetalWeb application.
@@ -93,8 +99,10 @@ public sealed class AdminAssistantService
 
         var options = new ChatOptions
         {
-            Tools = GetTools().Cast<AITool>().ToList()
+            Tools = new List<AITool>()
         };
+        foreach (var tool in GetTools())
+            options.Tools.Add((AITool)tool);
 
         await foreach (var update in _chatClient.GetStreamingResponseAsync(history, options)
             .ConfigureAwait(false))
@@ -186,10 +194,15 @@ public static class SystemTools
         if (idField == null || valueField == null)
             return Array.Empty<SettingSummary>();
 
-        return items.Select(e => new SettingSummary(
-            idField.Getter(e)?.ToString() ?? "",
-            valueField.Getter(e)?.ToString() ?? ""
-        )).ToArray();
+        var result = new List<SettingSummary>();
+        foreach (var e in items)
+        {
+            result.Add(new SettingSummary(
+                idField.Getter(e)?.ToString() ?? "",
+                valueField.Getter(e)?.ToString() ?? ""
+            ));
+        }
+        return result.ToArray();
     }
 }
 

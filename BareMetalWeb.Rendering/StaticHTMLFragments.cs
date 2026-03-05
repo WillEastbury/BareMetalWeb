@@ -1,7 +1,7 @@
 using System;
 using System.Buffers;
 using System.Text;
-using System.Linq;
+
 using System.Collections.Generic;
 using System.Net;
 using BareMetalWeb.Core.Interfaces;
@@ -358,7 +358,9 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
     {
         var buffer = new ArrayBufferWriter<byte>();
 
-        var visibleOptions = options.Where(o => o.RightAligned == rightAligned).ToList();
+        var visibleOptions = new List<IMenuOption>();
+        foreach (var o in options)
+            if (o.RightAligned == rightAligned) visibleOptions.Add(o);
         var renderedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var option in visibleOptions)
@@ -377,9 +379,10 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                 continue;
 
             renderedGroups.Add(option.Group);
-            var groupItems = visibleOptions
-                .Where(o => string.Equals(o.Group, option.Group, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            var groupItems = new List<IMenuOption>();
+            foreach (var o in visibleOptions)
+                if (string.Equals(o.Group, option.Group, StringComparison.OrdinalIgnoreCase))
+                    groupItems.Add(o);
 
             var groupLabel = WebUtility.HtmlEncode(option.Group);
             var menuAlignmentClass = rightAligned ? "dropdown-menu dropdown-menu-end" : "dropdown-menu";
@@ -443,7 +446,15 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
     {
         var buffer = new ArrayBufferWriter<byte>();
 
-        var needsMultipart = definition.Fields.Any(f => f.FieldType == FormFieldType.Image || f.FieldType == FormFieldType.File);
+        bool needsMultipart = false;
+        foreach (var f in definition.Fields)
+        {
+            if (f.FieldType == FormFieldType.Image || f.FieldType == FormFieldType.File)
+            {
+                needsMultipart = true;
+                break;
+            }
+        }
         _fragmentStore.ZeroAllocationReplaceCopyAndWrite(
             _fragmentStore.ReturnTemplateFragment("FormStart"),
             buffer,

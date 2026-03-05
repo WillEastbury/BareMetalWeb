@@ -21,7 +21,10 @@ public sealed class QueryService : IQueryService
             return Array.Empty<Dictionary<string, object?>>();
 
         var items = await meta.Handlers.QueryAsync(query, cancellationToken).ConfigureAwait(false);
-        return items.Select(obj => SerializeObject(obj, meta));
+        var result = new List<Dictionary<string, object?>>();
+        foreach (var obj in items)
+            result.Add(SerializeObject(obj, meta));
+        return result;
     }
 
     /// <inheritdoc/>

@@ -3,7 +3,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
-using System.Linq;
+
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
@@ -368,7 +368,9 @@ public static class RouteRegistrationExtensions
                 var initialData  = new Dictionary<string, object?>();
                 var layoutFields = new List<string>();
 
-                foreach (var f in meta.Fields.OrderBy(x => x.Order))
+                var sortedFieldsForSchema = new List<DataFieldMetadata>(meta.Fields);
+                sortedFieldsForSchema.Sort((a, b) => a.Order.CompareTo(b.Order));
+                foreach (var f in sortedFieldsForSchema)
                 {
                     var isId = f.Name.Equals("Id", StringComparison.OrdinalIgnoreCase);
                     // Override type to "select" for fields with lookup config so the
@@ -621,8 +623,15 @@ public static class RouteRegistrationExtensions
                                     parentDoc = await targetMeta.Handlers.LoadAsync(parentKey, context.RequestAborted).ConfigureAwait(false);
                                     if (parentDoc != null)
                                     {
-                                        var displayField = targetMeta.Fields.FirstOrDefault(f =>
-                                            string.Equals(f.Name, rf.RelatedDocument.DisplayField, StringComparison.OrdinalIgnoreCase));
+                                        DataFieldMetadata? displayField = null;
+                                        foreach (var fCandidate in targetMeta.Fields)
+                                        {
+                                            if (string.Equals(fCandidate.Name, rf.RelatedDocument.DisplayField, StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                displayField = fCandidate;
+                                                break;
+                                            }
+                                        }
                                         parentLabel = displayField?.GetValueFn(parentDoc)?.ToString();
                                     }
                                 }
@@ -663,10 +672,18 @@ public static class RouteRegistrationExtensions
                         };
 
                         var children = await childMeta.Handlers.QueryAsync(query, context.RequestAborted).ConfigureAwait(false);
-                        var labelField = childMeta.Fields
-                            .Where(f => f.List)
-                            .OrderBy(f => f.Order)
-                            .FirstOrDefault();
+                        DataFieldMetadata? labelField = null;
+                        {
+                            int bestOrder = int.MaxValue;
+                            foreach (var fCandidate in childMeta.Fields)
+                            {
+                                if (fCandidate.List && fCandidate.Order < bestOrder)
+                                {
+                                    bestOrder = fCandidate.Order;
+                                    labelField = fCandidate;
+                                }
+                            }
+                        }
 
                         foreach (var child in children)
                         {
@@ -808,9 +825,11 @@ public static class RouteRegistrationExtensions
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 var userPermissions = user?.Permissions ?? Array.Empty<string>();
 
-                var entities = DataScaffold.Entities
-                    .Where(e => IsEntityAccessible(e, user, userPermissions))
-                    .Select(e => (object)new Dictionary<string, object?>
+                var entitiesList = new List<object>();
+                foreach (var e in DataScaffold.Entities)
+                {
+                    if (!IsEntityAccessible(e, user, userPermissions)) continue;
+                    entitiesList.Add(new Dictionary<string, object?>
                     {
                         ["slug"]         = e.Slug,
                         ["name"]         = e.Name,
@@ -819,8 +838,9 @@ public static class RouteRegistrationExtensions
                         ["navOrder"]     = e.NavOrder,
                         ["viewType"]     = e.ViewType.ToString(),
                         ["rightAligned"] = string.Equals(e.NavGroup, "Admin", StringComparison.OrdinalIgnoreCase)
-                    })
-                    .ToArray();
+                    });
+                }
+                var entities = entitiesList.ToArray();
 
                 context.Response.ContentType = "application/json";
                 context.Response.Headers["Cache-Control"] = "private, max-age=300";
@@ -897,20 +917,10 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var result = new Dictionary<string, object?>
+                var runtimeFieldsList = new List<object>();
+                foreach (var f in runtimeModel.Fields)
                 {
-                    ["entityId"] = runtimeModel.EntityId,
-                    ["name"] = runtimeModel.Name,
-                    ["slug"] = runtimeModel.Slug,
-                    ["permissions"] = runtimeModel.Permissions,
-                    ["showOnNav"] = runtimeModel.ShowOnNav,
-                    ["navGroup"] = runtimeModel.NavGroup,
-                    ["navOrder"] = runtimeModel.NavOrder,
-                    ["idStrategy"] = runtimeModel.IdStrategy.ToString(),
-                    ["version"] = runtimeModel.Version,
-                    ["schemaHash"] = runtimeModel.SchemaHash,
-                    ["formLayout"] = runtimeModel.FormLayout,
-                    ["fields"] = runtimeModel.Fields.Select(f => (object)new Dictionary<string, object?>
+                    runtimeFieldsList.Add(new Dictionary<string, object?>
                     {
                         ["fieldId"] = f.FieldId,
                         ["ordinal"] = f.Ordinal,
@@ -942,14 +952,22 @@ public static class RouteRegistrationExtensions
                                   ["pattern"] = f.Pattern
                               }
                             : null
-                    }).ToArray(),
-                    ["indexes"] = runtimeModel.Indexes.Select(i => (object)new Dictionary<string, object?>
+                    });
+                }
+                var runtimeIndexesList = new List<object>();
+                foreach (var i in runtimeModel.Indexes)
+                {
+                    runtimeIndexesList.Add(new Dictionary<string, object?>
                     {
                         ["indexId"] = i.IndexId,
                         ["fields"] = i.FieldNames,
                         ["type"] = i.Type
-                    }).ToArray(),
-                    ["actions"] = runtimeModel.Actions.Select(a => (object)new Dictionary<string, object?>
+                    });
+                }
+                var runtimeActionsList = new List<object>();
+                foreach (var a in runtimeModel.Actions)
+                {
+                    runtimeActionsList.Add(new Dictionary<string, object?>
                     {
                         ["actionId"] = a.ActionId,
                         ["name"] = a.Name,
@@ -957,7 +975,25 @@ public static class RouteRegistrationExtensions
                         ["icon"] = a.Icon,
                         ["permission"] = a.Permission,
                         ["enabledWhen"] = a.EnabledWhen
-                    }).ToArray()
+                    });
+                }
+
+                var result = new Dictionary<string, object?>
+                {
+                    ["entityId"] = runtimeModel.EntityId,
+                    ["name"] = runtimeModel.Name,
+                    ["slug"] = runtimeModel.Slug,
+                    ["permissions"] = runtimeModel.Permissions,
+                    ["showOnNav"] = runtimeModel.ShowOnNav,
+                    ["navGroup"] = runtimeModel.NavGroup,
+                    ["navOrder"] = runtimeModel.NavOrder,
+                    ["idStrategy"] = runtimeModel.IdStrategy.ToString(),
+                    ["version"] = runtimeModel.Version,
+                    ["schemaHash"] = runtimeModel.SchemaHash,
+                    ["formLayout"] = runtimeModel.FormLayout,
+                    ["fields"] = runtimeFieldsList.ToArray(),
+                    ["indexes"] = runtimeIndexesList.ToArray(),
+                    ["actions"] = runtimeActionsList.ToArray()
                 };
 
                 context.Response.ContentType = "application/json";
@@ -1037,11 +1073,17 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("admin", false),
             async context =>
             {
-                var types = DataScaffold.Entities
-                    .Where(m => m.Type != typeof(DataRecord)
-                                && m.Type.GetCustomAttribute<DataEntityAttribute>() != null)
-                    .OrderBy(m => m.Name)
-                    .Select(m => (object)new Dictionary<string, object?>
+                var filteredTypes = new List<DataEntityMetadata>();
+                foreach (var m in DataScaffold.Entities)
+                {
+                    if (m.Type != typeof(DataRecord) && m.Type.GetCustomAttribute<DataEntityAttribute>() != null)
+                        filteredTypes.Add(m);
+                }
+                filteredTypes.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
+                var typesList = new List<object>();
+                foreach (var m in filteredTypes)
+                {
+                    typesList.Add(new Dictionary<string, object?>
                     {
                         ["name"] = m.Name,
                         ["slug"] = m.Slug,
@@ -1050,8 +1092,9 @@ public static class RouteRegistrationExtensions
                         ["showOnNav"] = m.ShowOnNav,
                         ["navGroup"] = m.NavGroup,
                         ["fieldCount"] = m.Fields.Count
-                    })
-                    .ToArray();
+                    });
+                }
+                var types = typesList.ToArray();
 
                 context.Response.ContentType = "application/json";
                 await context.Response.WriteAsync(JsonSerializer.Serialize(types, jsonOptions));
@@ -1128,7 +1171,20 @@ public static class RouteRegistrationExtensions
 
         // Legacy flat check
         var required = perms.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (required.Any(r => userPermissions.Any(p => string.Equals(p, r, StringComparison.OrdinalIgnoreCase))))
+        bool hasMatchingPermission = false;
+        foreach (var r in required)
+        {
+            foreach (var p in userPermissions)
+            {
+                if (string.Equals(p, r, StringComparison.OrdinalIgnoreCase))
+                {
+                    hasMatchingPermission = true;
+                    break;
+                }
+            }
+            if (hasMatchingPermission) break;
+        }
+        if (hasMatchingPermission)
             return true;
 
         // RBAC check via resolved permission set
@@ -1158,7 +1214,10 @@ public static class RouteRegistrationExtensions
 
     private static Dictionary<string, object?> BuildEntitySchema(DataEntityMetadata meta)
     {
-        var fields = meta.Fields.OrderBy(f => f.Order).Select(f =>
+        var sortedFieldsForBuild = new List<DataFieldMetadata>(meta.Fields);
+        sortedFieldsForBuild.Sort((a, b) => a.Order.CompareTo(b.Order));
+        var fieldsList = new List<object>();
+        foreach (var f in sortedFieldsForBuild)
         {
             var fd = new Dictionary<string, object?>
             {
@@ -1286,11 +1345,18 @@ public static class RouteRegistrationExtensions
 
             // Sub-field schema for List<T> child collections (CustomHtml type)
             fd["subFields"] = DataScaffold.BuildSubFieldSchemas(f);
-            fd["enumValues"] = f.FieldType == FormFieldType.Enum
-                ? DataScaffold.BuildEnumOptions(f.Property.PropertyType)
-                    .Select(kv => new { value = kv.Key, label = kv.Value })
-                    .ToArray()
-                : null;
+            if (f.FieldType == FormFieldType.Enum)
+            {
+                var enumOptions = DataScaffold.BuildEnumOptions(f.Property.PropertyType);
+                var enumList = new List<object>();
+                foreach (var kv in enumOptions)
+                    enumList.Add(new { value = kv.Key, label = kv.Value });
+                fd["enumValues"] = enumList.ToArray();
+            }
+            else
+            {
+                fd["enumValues"] = null;
+            }
 
             if (f.RelatedDocument != null)
             {
@@ -1310,19 +1376,56 @@ public static class RouteRegistrationExtensions
                 fd["relatedDocument"] = null;
             }
 
-            return (object)fd;
-        }).ToArray();
+            fieldsList.Add(fd);
+        }
+        var fields = fieldsList.ToArray();
 
-        var commands = meta.Commands.OrderBy(c => c.Order).Select(c => (object)new Dictionary<string, object?>
+        var sortedCommands = new List<RemoteCommandMetadata>(meta.Commands);
+        sortedCommands.Sort((a, b) => a.Order.CompareTo(b.Order));
+        var commandsList = new List<object>();
+        foreach (var c in sortedCommands)
         {
-            ["name"] = c.Name,
-            ["label"] = c.Label,
-            ["icon"] = c.Icon,
-            ["confirmMessage"] = c.ConfirmMessage,
-            ["destructive"] = c.Destructive,
-            ["permission"] = c.Permission,
-            ["order"] = c.Order
-        }).ToArray();
+            commandsList.Add(new Dictionary<string, object?>
+            {
+                ["name"] = c.Name,
+                ["label"] = c.Label,
+                ["icon"] = c.Icon,
+                ["confirmMessage"] = c.ConfirmMessage,
+                ["destructive"] = c.Destructive,
+                ["permission"] = c.Permission,
+                ["order"] = c.Order
+            });
+        }
+        var commands = commandsList.ToArray();
+
+        bool canShowWorkflow = false;
+        foreach (var f in meta.Fields)
+        {
+            if (f.FieldType == BareMetalWeb.Rendering.Models.FormFieldType.Enum)
+            {
+                canShowWorkflow = true;
+                break;
+            }
+        }
+
+        object[]? documentRelationFieldsArray = null;
+        if (meta.DocumentRelationFields != null && meta.DocumentRelationFields.Count > 0)
+        {
+            var drfList = new List<object>();
+            foreach (var f in meta.DocumentRelationFields)
+            {
+                var targetMeta = DataScaffold.GetEntityByType(f.RelatedDocument!.TargetType);
+                drfList.Add(new Dictionary<string, object?>
+                {
+                    ["name"] = f.Name,
+                    ["label"] = f.Label,
+                    ["targetSlug"] = targetMeta?.Slug,
+                    ["targetName"] = targetMeta?.Name,
+                    ["displayField"] = f.RelatedDocument.DisplayField
+                });
+            }
+            documentRelationFieldsArray = drfList.ToArray();
+        }
 
         return new Dictionary<string, object?>
         {
@@ -1337,7 +1440,7 @@ public static class RouteRegistrationExtensions
             ["canShowTimeline"] = DataScaffold.CanShowTimelineView(meta),
             ["canShowSankey"] = DataScaffold.CanShowSankeyView(meta),
             ["canShowCalendar"] = DataScaffold.CanShowCalendarView(meta),
-            ["canShowWorkflow"] = meta.Fields.Any(f => f.FieldType == BareMetalWeb.Rendering.Models.FormFieldType.Enum),
+            ["canShowWorkflow"] = canShowWorkflow,
             ["idGeneration"] = meta.IdGeneration.ToString(),
             ["defaultSortField"] = meta.DefaultSortField,
             ["defaultSortDirection"] = meta.DefaultSortDirection.ToString(),
@@ -1346,20 +1449,7 @@ public static class RouteRegistrationExtensions
                 ["name"] = meta.ParentField.Name,
                 ["label"] = meta.ParentField.Label
             } : null,
-            ["documentRelationFields"] = meta.DocumentRelationFields != null && meta.DocumentRelationFields.Count > 0
-                ? meta.DocumentRelationFields.Select(f =>
-                {
-                    var targetMeta = DataScaffold.GetEntityByType(f.RelatedDocument!.TargetType);
-                    return (object)new Dictionary<string, object?>
-                    {
-                        ["name"] = f.Name,
-                        ["label"] = f.Label,
-                        ["targetSlug"] = targetMeta?.Slug,
-                        ["targetName"] = targetMeta?.Name,
-                        ["displayField"] = f.RelatedDocument.DisplayField
-                    };
-                }).ToArray()
-                : null,
+            ["documentRelationFields"] = documentRelationFieldsArray,
             ["fields"] = fields,
             ["commands"] = commands
         };
@@ -1386,7 +1476,8 @@ public static class RouteRegistrationExtensions
                 var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
                 if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
 
-                var reports = DataStoreProvider.Current.Query<ReportDefinition>(null).OrderBy(r => r.Name).ToList();
+                var reports = new List<ReportDefinition>(DataStoreProvider.Current.Query<ReportDefinition>(null));
+                reports.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
                 var csrfToken = CsrfProtection.EnsureToken(context);
                 var safeToken = WebUtility.HtmlEncode(csrfToken);
                 var nonce = context.GetCspNonce();
@@ -1458,13 +1549,16 @@ public static class RouteRegistrationExtensions
                 }
 
                 var parameters = def.Parameters;
-                var runtimeParams = parameters.Count > 0
-                    ? parameters
-                        .Select(p => new KeyValuePair<string, string>(
-                            p.Name,
-                            context.Request.Query.TryGetValue(p.Name, out var qv) ? qv.ToString() : p.DefaultValue))
-                        .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase)
-                    : null;
+                Dictionary<string, string>? runtimeParams = null;
+                if (parameters.Count > 0)
+                {
+                    runtimeParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var p in parameters)
+                    {
+                        var val = context.Request.Query.TryGetValue(p.Name, out var qv) ? qv.ToString() : p.DefaultValue;
+                        runtimeParams[p.Name] = val;
+                    }
+                }
 
                 var executor = new ReportExecutor(DataStoreProvider.Current);
                 ReportResult result;
@@ -1526,13 +1620,16 @@ public static class RouteRegistrationExtensions
                 }
 
                 var parameters = def.Parameters;
-                var runtimeParams = parameters.Count > 0
-                    ? parameters
-                        .Select(p => new KeyValuePair<string, string>(
-                            p.Name,
-                            context.Request.Query.TryGetValue(p.Name, out var qv) ? qv.ToString() : p.DefaultValue))
-                        .ToDictionary(kv => kv.Key, kv => kv.Value, StringComparer.OrdinalIgnoreCase)
-                    : null;
+                Dictionary<string, string>? runtimeParams = null;
+                if (parameters.Count > 0)
+                {
+                    runtimeParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var p in parameters)
+                    {
+                        var val = context.Request.Query.TryGetValue(p.Name, out var qv) ? qv.ToString() : p.DefaultValue;
+                        runtimeParams[p.Name] = val;
+                    }
+                }
 
                 var executor = new ReportExecutor(DataStoreProvider.Current);
                 ReportResult result;
@@ -1555,11 +1652,33 @@ public static class RouteRegistrationExtensions
                     context.Response.ContentType = "text/csv";
                     context.Response.Headers.ContentDisposition = $"attachment; filename=\"{Uri.EscapeDataString(def.Name)}.csv\"";
                     var csvSb = new StringBuilder();
-                    csvSb.AppendLine(string.Join(",", result.ColumnLabels.Select(CsvCell)));
+                    {
+                        var headerCells = new string[result.ColumnLabels.Length];
+                        for (int ci = 0; ci < result.ColumnLabels.Length; ci++)
+                            headerCells[ci] = CsvCell(result.ColumnLabels[ci]);
+                        csvSb.AppendLine(string.Join(",", headerCells));
+                    }
                     foreach (var row in result.Rows)
-                        csvSb.AppendLine(string.Join(",", row.Select(c => CsvCell(c ?? string.Empty))));
+                    {
+                        var rowCells = new string[row.Length];
+                        for (int ci = 0; ci < row.Length; ci++)
+                            rowCells[ci] = CsvCell(row[ci] ?? string.Empty);
+                        csvSb.AppendLine(string.Join(",", rowCells));
+                    }
                     await context.Response.WriteAsync(csvSb.ToString());
                     return;
+                }
+
+                var rowsList = new List<Dictionary<string, string?>>();
+                foreach (var r in result.Rows)
+                {
+                    var dict = new Dictionary<string, string?>();
+                    for (int i = 0; i < r.Length; i++)
+                    {
+                        var key = i < result.ColumnLabels.Length ? result.ColumnLabels[i] : $"col{i}";
+                        dict[key] = r[i];
+                    }
+                    rowsList.Add(dict);
                 }
 
                 // Default: JSON
@@ -1570,10 +1689,7 @@ public static class RouteRegistrationExtensions
                     totalRows = result.TotalRows,
                     isTruncated = result.IsTruncated,
                     columns = result.ColumnLabels,
-                    rows = result.Rows.Select(r => r.Select((v, i) => new KeyValuePair<string, string?>(
-                        i < result.ColumnLabels.Length ? result.ColumnLabels[i] : $"col{i}", v))
-                        .ToDictionary(kv => kv.Key, kv => kv.Value))
-                        .ToArray()
+                    rows = rowsList.ToArray()
                 };
                 context.Response.ContentType = "application/json";
                 await context.Response.WriteAsync(JsonSerializer.Serialize(json, JsonCompact));
@@ -1674,8 +1790,18 @@ public static class RouteRegistrationExtensions
                 // Only when there are no data-affecting query params in the URL
                 var q = context.Request.Query;
                 var hasCustomParams = q.ContainsKey("skip") || q.ContainsKey("top") || q.ContainsKey("q") ||
-                                      q.ContainsKey("sort") || q.ContainsKey("dir") ||
-                                      q.Keys.Any(k => k.StartsWith("f_", StringComparison.OrdinalIgnoreCase));
+                                      q.ContainsKey("sort") || q.ContainsKey("dir");
+                if (!hasCustomParams)
+                {
+                    foreach (var k in q.Keys)
+                    {
+                        if (k.StartsWith("f_", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasCustomParams = true;
+                            break;
+                        }
+                    }
+                }
                 if (!hasCustomParams)
                     initialDataScript = await TryBuildInitialDataScriptAsync(
                         context, entitySlug, safeNonce, user, context.RequestAborted).ConfigureAwait(false);
@@ -1724,9 +1850,11 @@ public static class RouteRegistrationExtensions
     {
         try
         {
-            var entities = DataScaffold.Entities
-                .Where(e => IsEntityAccessible(e, user, userPermissions))
-                .Select(e => (object)new Dictionary<string, object?>
+            var entitiesMetaList = new List<object>();
+            foreach (var e in DataScaffold.Entities)
+            {
+                if (!IsEntityAccessible(e, user, userPermissions)) continue;
+                entitiesMetaList.Add(new Dictionary<string, object?>
                 {
                     ["slug"]         = e.Slug,
                     ["name"]         = e.Name,
@@ -1735,8 +1863,9 @@ public static class RouteRegistrationExtensions
                     ["navOrder"]     = e.NavOrder,
                     ["viewType"]     = e.ViewType.ToString(),
                     ["rightAligned"] = string.Equals(e.NavGroup, "Admin", StringComparison.OrdinalIgnoreCase)
-                })
-                .ToArray();
+                });
+            }
+            var entities = entitiesMetaList.ToArray();
 
             // Check if user has any elevated permissions
             bool hasElevated = false;
@@ -1814,8 +1943,20 @@ public static class RouteRegistrationExtensions
                 {
                     var userPerms = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
                     var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                    if (required.Length > 0 && !required.All(userPerms.Contains))
-                        return null;
+                    if (required.Length > 0)
+                    {
+                        bool allMatch = true;
+                        foreach (var r in required)
+                        {
+                            if (!userPerms.Contains(r))
+                            {
+                                allMatch = false;
+                                break;
+                            }
+                        }
+                        if (!allMatch)
+                            return null;
+                    }
                 }
             }
 
@@ -1838,7 +1979,10 @@ public static class RouteRegistrationExtensions
 
             var results = await dataTask;
             var total   = await countTask;
-            var payload = results.Cast<object>().Select(item => RouteHandlers.BuildApiModel(meta, item)).ToArray();
+            var payloadList = new List<Dictionary<string, object?>>();
+            foreach (object item in results)
+                payloadList.Add(RouteHandlers.BuildApiModel(meta, item));
+            var payload = payloadList.ToArray();
             // Clamp total (same as DataApiListHandler)
             if (payload.Length < top)
                 total = Math.Min(total, payload.Length);
@@ -1885,7 +2029,12 @@ public static class RouteRegistrationExtensions
         if (payload.Length == 0) return null;
 
         // Only consider lookup fields that are shown in the list view
-        var lookupFields = meta.Fields.Where(f => f.Lookup != null && f.List).ToList();
+        var lookupFields = new List<DataFieldMetadata>();
+        foreach (var f in meta.Fields)
+        {
+            if (f.Lookup != null && f.List)
+                lookupFields.Add(f);
+        }
         if (lookupFields.Count == 0) return null;
 
         var prefetch = new Dictionary<string, Dictionary<string, object?>>(StringComparer.OrdinalIgnoreCase);
@@ -1898,11 +2047,14 @@ public static class RouteRegistrationExtensions
             if (targetMeta == null) continue;
 
             // Collect unique non-null IDs for this field across all payload rows
-            var uniqueIds = payload
-                .Select(item => item.TryGetValue(field.Name, out var val) ? val as string : null)
-                .Where(id => !string.IsNullOrWhiteSpace(id))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var seenIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var uniqueIds = new List<string>();
+            foreach (var item in payload)
+            {
+                var idVal = item.TryGetValue(field.Name, out var val) ? val as string : null;
+                if (!string.IsNullOrWhiteSpace(idVal) && seenIds.Add(idVal))
+                    uniqueIds.Add(idVal);
+            }
 
             if (uniqueIds.Count == 0) continue;
 
@@ -1961,7 +2113,12 @@ public static class RouteRegistrationExtensions
 
     internal static void AppendVNextRightNavItems(StringBuilder sb, List<IMenuOption> options)
     {
-        var rightAligned = options.Where(o => o.RightAligned && o.ShowOnNavBar).ToList();
+        var rightAligned = new List<IMenuOption>();
+        foreach (var o in options)
+        {
+            if (o.RightAligned && o.ShowOnNavBar)
+                rightAligned.Add(o);
+        }
         var renderedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var option in rightAligned)
@@ -1979,9 +2136,12 @@ public static class RouteRegistrationExtensions
                 continue;
 
             renderedGroups.Add(option.Group);
-            var groupItems = rightAligned
-                .Where(o => string.Equals(o.Group, option.Group, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            var groupItems = new List<IMenuOption>();
+            foreach (var o in rightAligned)
+            {
+                if (string.Equals(o.Group, option.Group, StringComparison.OrdinalIgnoreCase))
+                    groupItems.Add(o);
+            }
 
             sb.Append($"<li class=\"nav-item dropdown\"><a class=\"nav-link dropdown-toggle\" href=\"#\" role=\"button\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\">{WebUtility.HtmlEncode(option.Group)}</a>");
             sb.Append("<ul class=\"dropdown-menu dropdown-menu-end\">");
@@ -1995,7 +2155,12 @@ public static class RouteRegistrationExtensions
 
     internal static void AppendVNextLeftNavItems(StringBuilder sb, List<IMenuOption> options)
     {
-        var leftAligned = options.Where(o => !o.RightAligned && o.ShowOnNavBar).ToList();
+        var leftAligned = new List<IMenuOption>();
+        foreach (var o in options)
+        {
+            if (!o.RightAligned && o.ShowOnNavBar)
+                leftAligned.Add(o);
+        }
         var renderedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var option in leftAligned)
@@ -2013,9 +2178,12 @@ public static class RouteRegistrationExtensions
                 continue;
 
             renderedGroups.Add(option.Group);
-            var groupItems = leftAligned
-                .Where(o => string.Equals(o.Group, option.Group, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+            var groupItems = new List<IMenuOption>();
+            foreach (var o in leftAligned)
+            {
+                if (string.Equals(o.Group, option.Group, StringComparison.OrdinalIgnoreCase))
+                    groupItems.Add(o);
+            }
 
             sb.Append($"<li class=\"nav-item dropdown\"><a class=\"nav-link dropdown-toggle\" href=\"#\" role=\"button\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\">{WebUtility.HtmlEncode(option.Group)}</a>");
             sb.Append("<ul class=\"dropdown-menu\">");

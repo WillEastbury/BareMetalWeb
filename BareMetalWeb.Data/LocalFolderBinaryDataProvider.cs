@@ -4,7 +4,7 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
+
 using System.Reflection;
 using System.Text.Json;
 using System.Threading;
@@ -404,7 +404,16 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
 
             if (existing == null)
             {
-                schemaVersion = cache.Versions.Count == 0 ? 1 : cache.Versions.Keys.Max() + 1;
+                schemaVersion = 1;
+                if (cache.Versions.Count > 0)
+                {
+                    var maxKey = int.MinValue;
+                    foreach (var k in cache.Versions.Keys)
+                    {
+                        if (k > maxKey) maxKey = k;
+                    }
+                    schemaVersion = maxKey + 1;
+                }
                 var schemaFile = BuildSchemaFile(currentSchema, schemaVersion);
                 cache.Versions[schemaVersion] = schemaFile;
                 cache.HashToVersion[currentSchema.Hash] = schemaVersion;
@@ -498,12 +507,18 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private void ClearSingletonFlagsOnOtherRecords<T>(T obj) where T : BaseDataObject
     {
         var type = typeof(T);
-        var singletonProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
-            .Where(p => p.PropertyType == typeof(bool)
-                        && p.GetCustomAttribute<SingletonFlagAttribute>() != null
-                        && p.CanRead && p.CanWrite
-                        && true.Equals(p.GetValue(obj)))
-            .ToList();
+        var allProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var singletonProps = new List<PropertyInfo>();
+        foreach (var p in allProps)
+        {
+            if (p.PropertyType == typeof(bool)
+                && p.GetCustomAttribute<SingletonFlagAttribute>() != null
+                && p.CanRead && p.CanWrite
+                && true.Equals(p.GetValue(obj)))
+            {
+                singletonProps.Add(p);
+            }
+        }
 
         if (singletonProps.Count == 0)
             return;
@@ -638,11 +653,24 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                             return Array.Empty<T>();
                         }
 
-                        var filtered = candidates.Where(item => _queryEvaluator.Matches(item, query));
+                        var filtered = new List<T>();
+                        foreach (var item in candidates)
+                        {
+                            if (_queryEvaluator.Matches(item, query))
+                                filtered.Add(item);
+                        }
                         var sorted = _queryEvaluator.ApplySorts(filtered, query);
-                        if (skip > 0 || top != int.MaxValue)
-                            sorted = sorted.Skip(skip).Take(top);
-                        return sorted.ToList();
+                        var resultList = new List<T>();
+                        var skipped = 0;
+                        var taken = 0;
+                        foreach (var item in sorted)
+                        {
+                            if (skipped < skip) { skipped++; continue; }
+                            resultList.Add(item);
+                            taken++;
+                            if (taken >= top) break;
+                        }
+                        return resultList;
                     }
                 }
             }
@@ -736,11 +764,24 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             }
         }
 
-        var filteredAll = all.Where(item => _queryEvaluator.Matches(item, query));
+        var filteredAll = new List<T>();
+        foreach (var item in all)
+        {
+            if (_queryEvaluator.Matches(item, query))
+                filteredAll.Add(item);
+        }
         var sortedAll = _queryEvaluator.ApplySorts(filteredAll, query);
-        if (skip > 0 || top != int.MaxValue)
-            sortedAll = sortedAll.Skip(skip).Take(top);
-        return sortedAll.ToList();
+        var resultAll = new List<T>();
+        var skippedAll = 0;
+        var takenAll = 0;
+        foreach (var item in sortedAll)
+        {
+            if (skippedAll < skip) { skippedAll++; continue; }
+            resultAll.Add(item);
+            takenAll++;
+            if (takenAll >= top) break;
+        }
+        return resultAll;
     }
 
     public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null, CancellationToken cancellationToken = default) where T : BaseDataObject
@@ -1057,7 +1098,14 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         }
 
         if (cache.Versions.Count > 0)
-            cache.CurrentVersion = cache.Versions.Keys.Max();
+        {
+            var maxVer = int.MinValue;
+            foreach (var k in cache.Versions.Keys)
+            {
+                if (k > maxVer) maxVer = k;
+            }
+            cache.CurrentVersion = maxVer;
+        }
 
         return cache;
     }
@@ -1111,15 +1159,20 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     }
 
     private static SchemaDefinitionFile BuildSchemaFile(SchemaDefinition schema, int version)
-        => new SchemaDefinitionFile
+    {
+        var members = new List<MemberSignatureFile>(schema.Members.Length);
+        foreach (var m in schema.Members)
+        {
+            members.Add(new MemberSignatureFile { Name = m.Name, TypeName = m.TypeName, BlittableSize = m.BlittableSize });
+        }
+        return new SchemaDefinitionFile
         {
             Version = version,
             Hash = schema.Hash,
             Architecture = schema.Architecture.ToString(),
-            Members = schema.Members
-                .Select(m => new MemberSignatureFile { Name = m.Name, TypeName = m.TypeName, BlittableSize = m.BlittableSize })
-                .ToList()
+            Members = members
         };
+    }
 
     private static bool TryParseSchemaVersion(Type type, string fileName, out int version)
     {
@@ -1149,9 +1202,16 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
 
     private MemberSignature[] GetCachedSchemaMembers(Type type, SchemaDefinitionFile schemaFile)
         => _schemaMemberCache.GetOrAdd((type, schemaFile.Version), _ =>
-            schemaFile.Members
-                .Select(m => new MemberSignature(m.Name, m.TypeName, AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)), m.BlittableSize))
-                .ToArray());
+        {
+            var members = schemaFile.Members;
+            var result = new MemberSignature[members.Count];
+            for (var i = 0; i < members.Count; i++)
+            {
+                var m = members[i];
+                result[i] = new MemberSignature(m.Name, m.TypeName, AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)), m.BlittableSize);
+            }
+            return result;
+        });
 
     private static SchemaDefinition BuildSchemaFor(ISchemaAwareObjectSerializer serializer, Type type)
         => serializer.BuildSchema(type);

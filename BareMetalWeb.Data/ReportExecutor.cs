@@ -40,14 +40,21 @@ public sealed class ReportExecutor
 
         var query = new ReportQuery().From(definition.RootEntity ?? string.Empty);
 
-        foreach (var join in definition.Joins ?? Enumerable.Empty<ReportJoin>())
-            query.Join(join.FromEntity, join.FromField, join.ToEntity, join.ToField);
+        if (definition.Joins != null)
+        {
+            foreach (var join in definition.Joins)
+                query.Join(join.FromEntity, join.FromField, join.ToEntity, join.ToField);
+        }
 
-        foreach (var col in definition.Columns ?? Enumerable.Empty<ReportColumn>())
-            query.SelectColumn(col.Entity, col.Field, col.Label, col.Format, col.Aggregate);
+        if (definition.Columns != null)
+        {
+            foreach (var col in definition.Columns)
+                query.SelectColumn(col.Entity, col.Field, col.Label, col.Format, col.Aggregate);
+        }
 
         // Apply stored filters, substituting runtime parameters
-        foreach (var filter in definition.Filters ?? Enumerable.Empty<ReportFilter>())
+        if (definition.Filters == null) { /* no filters */ }
+        else foreach (var filter in definition.Filters)
         {
             var value = SubstituteParameter(filter.Value, runtimeParameters);
             query.Where($"{filter.Entity}.{filter.Field}", filter.Operator, value);
@@ -80,16 +87,23 @@ public sealed class ReportExecutor
 
         // Load root entity rows with pushed-down filters
         plan.PushedFilters.TryGetValue(rootSlug, out var rootPushedFilter);
-        var rootRows = (await rootMeta.Handlers.QueryAsync(rootPushedFilter, cancellationToken))
-            .Take(MaxEntityLoadSize).ToList();
+        var rootRowsRaw = await rootMeta.Handlers.QueryAsync(rootPushedFilter, cancellationToken);
+        var rootRows = new List<BaseDataObject>();
+        foreach (var r in rootRowsRaw)
+        {
+            if (rootRows.Count >= MaxEntityLoadSize) break;
+            rootRows.Add(r);
+        }
 
         // Start: each combined row is a dict of entitySlug -> BaseDataObject
-        var combined = rootRows
-            .Select(r => new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase)
+        var combined = new List<Dictionary<string, BaseDataObject>>(rootRows.Count);
+        foreach (var r in rootRows)
+        {
+            combined.Add(new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase)
             {
                 [rootSlug] = r
-            })
-            .ToList();
+            });
+        }
 
         // Process joins (INNER JOIN semantics)
         foreach (var join in query.Joins)
@@ -102,8 +116,13 @@ public sealed class ReportExecutor
 
             // Load join entity rows with pushed-down filters
             plan.PushedFilters.TryGetValue(join.ToEntity, out var joinPushedFilter);
-            var joinRows = (await joinMeta.Handlers.QueryAsync(joinPushedFilter, cancellationToken))
-                .Take(MaxEntityLoadSize).ToList();
+            var joinRowsRaw = await joinMeta.Handlers.QueryAsync(joinPushedFilter, cancellationToken);
+            var joinRows = new List<BaseDataObject>();
+            foreach (var r in joinRowsRaw)
+            {
+                if (joinRows.Count >= MaxEntityLoadSize) break;
+                joinRows.Add(r);
+            }
 
             // Build hash map: toField value -> list of matching join rows
             var toAccessor = FindAccessor(joinMeta, join.ToField);
@@ -199,34 +218,58 @@ public sealed class ReportExecutor
         // Apply filters
         var filters = query.Filters;
         if (filters.Count > 0)
-            combined = combined.Where(row => PassesFilters(row, filters)).ToList();
+        {
+            var filtered = new List<Dictionary<string, BaseDataObject>>(combined.Count);
+            foreach (var row in combined)
+            {
+                if (PassesFilters(row, filters))
+                    filtered.Add(row);
+            }
+            combined = filtered;
+        }
 
         // Resolve columns
         var columns = query.Columns;
         if (columns.Count == 0)
         {
             // Default: emit all root entity fields
-            columns = rootMeta.Fields
-                .Select(f => new ReportColumn
+            var defaultColumns = new List<ReportColumn>(rootMeta.Fields.Count);
+            foreach (var f in rootMeta.Fields)
+            {
+                defaultColumns.Add(new ReportColumn
                 {
                     Entity = rootSlug,
                     Field = f.Name,
                     Label = f.Label
-                })
-                .ToList();
+                });
+            }
+            columns = defaultColumns;
         }
 
-        var headers = columns
-            .Select(c => string.IsNullOrWhiteSpace(c.Label) ? $"{c.Entity}.{c.Field}" : c.Label)
-            .ToArray();
+        var headers = new string[columns.Count];
+        for (int i = 0; i < columns.Count; i++)
+        {
+            var c = columns[i];
+            headers[i] = string.IsNullOrWhiteSpace(c.Label) ? $"{c.Entity}.{c.Field}" : c.Label;
+        }
 
         // Project rows
-        var projected = combined
-            .Select(row => ProjectRow(row, columns))
-            .ToList();
+        var projected = new List<string?[]>(combined.Count);
+        foreach (var row in combined)
+        {
+            projected.Add(ProjectRow(row, columns));
+        }
 
         // Aggregation
-        bool hasAggregates = columns.Any(c => c.Aggregate != AggregateFunction.None);
+        bool hasAggregates = false;
+        foreach (var c in columns)
+        {
+            if (c.Aggregate != AggregateFunction.None)
+            {
+                hasAggregates = true;
+                break;
+            }
+        }
         if (hasAggregates)
             projected = AggregateRows(projected, columns);
 
@@ -237,9 +280,8 @@ public sealed class ReportExecutor
             var colIdx = FindColumnIndex(headers, sortField);
             if (colIdx >= 0)
             {
-                projected = query.SortDescending
-                    ? projected.OrderByDescending(r => r[colIdx], StringComparer.OrdinalIgnoreCase).ToList()
-                    : projected.OrderBy(r => r[colIdx], StringComparer.OrdinalIgnoreCase).ToList();
+                int sortDir = query.SortDescending ? -1 : 1;
+                projected.Sort((a, b) => sortDir * StringComparer.OrdinalIgnoreCase.Compare(a[colIdx], b[colIdx]));
             }
         }
 
@@ -274,8 +316,15 @@ public sealed class ReportExecutor
     private static PropertyInfo? FindAccessor(DataEntityMetadata meta, string fieldName)
     {
         // Check DataField metadata first
-        var field = meta.Fields.FirstOrDefault(f =>
-            string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase));
+        DataFieldMetadata? field = null;
+        foreach (var f in meta.Fields)
+        {
+            if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+            {
+                field = f;
+                break;
+            }
+        }
         if (field != null)
             return field.Property;
 
@@ -402,23 +451,30 @@ public sealed class ReportExecutor
         IReadOnlyList<ReportColumn> columns)
     {
         // Group-by columns are those without an aggregate function
-        var groupByIndices = columns
-            .Select((c, i) => (c, i))
-            .Where(x => x.c.Aggregate == AggregateFunction.None)
-            .Select(x => x.i)
-            .ToArray();
+        var groupByList = new List<int>();
+        for (int i = 0; i < columns.Count; i++)
+        {
+            if (columns[i].Aggregate == AggregateFunction.None)
+                groupByList.Add(i);
+        }
+        var groupByIndices = groupByList.ToArray();
 
-        var aggIndices = columns
-            .Select((c, i) => (c, i))
-            .Where(x => x.c.Aggregate != AggregateFunction.None)
-            .Select(x => (x.c, x.i))
-            .ToArray();
+        var aggList = new List<(ReportColumn c, int i)>();
+        for (int i = 0; i < columns.Count; i++)
+        {
+            if (columns[i].Aggregate != AggregateFunction.None)
+                aggList.Add((columns[i], i));
+        }
+        var aggIndices = aggList.ToArray();
 
         // Group rows by group-by column values
         var groups = new Dictionary<string, List<string?[]>>(StringComparer.Ordinal);
         foreach (var row in rows)
         {
-            var key = string.Join("\x00", groupByIndices.Select(i => row[i] ?? string.Empty));
+            var keyParts = new string[groupByIndices.Length];
+            for (int gi = 0; gi < groupByIndices.Length; gi++)
+                keyParts[gi] = row[groupByIndices[gi]] ?? string.Empty;
+            var key = string.Join("\x00", keyParts);
             if (!groups.TryGetValue(key, out var group))
                 groups[key] = group = new List<string?[]>();
             group.Add(row);

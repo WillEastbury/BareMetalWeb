@@ -305,16 +305,38 @@ public sealed class ProxyRouteHandler
                 && string.Equals(_route.StickySessionMode, "Cookie", StringComparison.OrdinalIgnoreCase)
                 && string.Equals(header.Key, _route.StickySessionKeyName, StringComparison.OrdinalIgnoreCase))
                 continue;
-            if (_route.RemoveHeaders.Contains(header.Key, StringComparer.OrdinalIgnoreCase))
+            if (ListContainsIgnoreCase(_route.RemoveHeaders, header.Key))
                 continue;
 
             if (ContainsCrlf(header.Key))
                 continue;
 
             var rawValues = header.Value.ToArray();
-            var safeValues = rawValues.Any(ContainsCrlf)
-                ? rawValues.Where(v => !ContainsCrlf(v)).ToArray()
-                : rawValues;
+            bool hasCrlf = false;
+            for (int i = 0; i < rawValues.Length; i++)
+            {
+                if (ContainsCrlf(rawValues[i]))
+                {
+                    hasCrlf = true;
+                    break;
+                }
+            }
+
+            string?[] safeValues;
+            if (hasCrlf)
+            {
+                var filtered = new List<string?>();
+                for (int i = 0; i < rawValues.Length; i++)
+                {
+                    if (!ContainsCrlf(rawValues[i]))
+                        filtered.Add(rawValues[i]);
+                }
+                safeValues = filtered.ToArray();
+            }
+            else
+            {
+                safeValues = rawValues;
+            }
             if (safeValues.Length == 0)
                 continue;
 
@@ -391,9 +413,9 @@ public sealed class ProxyRouteHandler
             if (HopByHopHeaders.Contains(header.Key))
                 continue;
 
-            if (!context.Response.Headers.TryAdd(header.Key, new StringValues(header.Value.ToArray())))
+            if (!context.Response.Headers.TryAdd(header.Key, new StringValues(EnumerableToArray(header.Value))))
             {
-                context.Response.Headers[header.Key] = new StringValues(header.Value.ToArray());
+                context.Response.Headers[header.Key] = new StringValues(EnumerableToArray(header.Value));
             }
         }
 
@@ -402,9 +424,9 @@ public sealed class ProxyRouteHandler
             if (HopByHopHeaders.Contains(header.Key))
                 continue;
 
-            if (!context.Response.Headers.TryAdd(header.Key, new StringValues(header.Value.ToArray())))
+            if (!context.Response.Headers.TryAdd(header.Key, new StringValues(EnumerableToArray(header.Value))))
             {
-                context.Response.Headers[header.Key] = new StringValues(header.Value.ToArray());
+                context.Response.Headers[header.Key] = new StringValues(EnumerableToArray(header.Value));
             }
         }
 
@@ -532,9 +554,22 @@ public sealed class ProxyRouteHandler
             return null;
 
         var now = DateTimeOffset.UtcNow;
-        var available = _targets.Where(t => !t.IsOffline(now)).ToList();
+        var available = new List<ProxyTargetState>();
+        for (int i = 0; i < _targets.Count; i++)
+        {
+            if (!_targets[i].IsOffline(now))
+                available.Add(_targets[i]);
+        }
         if (exclude != null && exclude.Count > 0)
-            available = available.Where(t => !exclude.Contains(t)).ToList();
+        {
+            var filtered = new List<ProxyTargetState>();
+            for (int i = 0; i < available.Count; i++)
+            {
+                if (!exclude.Contains(available[i]))
+                    filtered.Add(available[i]);
+            }
+            available = filtered;
+        }
         if (available.Count == 0)
             return null;
 
@@ -556,12 +591,19 @@ public sealed class ProxyRouteHandler
     private bool HasAvailableTargets(HashSet<ProxyTargetState> attempted)
     {
         var now = DateTimeOffset.UtcNow;
-        return _targets.Any(t => !t.IsOffline(now) && !attempted.Contains(t));
+        for (int i = 0; i < _targets.Count; i++)
+        {
+            if (!_targets[i].IsOffline(now) && !attempted.Contains(_targets[i]))
+                return true;
+        }
+        return false;
     }
 
     private ProxyTargetState? SelectTargetByWeight(List<ProxyTargetState> available)
     {
-        var totalWeight = available.Sum(t => t.Weight);
+        int totalWeight = 0;
+        for (int i = 0; i < available.Count; i++)
+            totalWeight += available[i].Weight;
         if (totalWeight <= 0)
             return available[0];
 
@@ -579,7 +621,9 @@ public sealed class ProxyRouteHandler
 
     private ProxyTargetState? SelectTargetByHash(List<ProxyTargetState> available, string key)
     {
-        var totalWeight = available.Sum(t => t.Weight);
+        int totalWeight = 0;
+        for (int i = 0; i < available.Count; i++)
+            totalWeight += available[i].Weight;
         if (totalWeight <= 0)
             return available[0];
 
@@ -653,12 +697,15 @@ public sealed class ProxyRouteHandler
     public ProxyRouteStatus GetStatus()
     {
         var now = DateTimeOffset.UtcNow;
+        var snapshots = new ProxyTargetStatus[_targets.Count];
+        for (int i = 0; i < _targets.Count; i++)
+            snapshots[i] = _targets[i].Snapshot(now);
         return new ProxyRouteStatus
         {
             Route = _route.Route,
             MatchMode = _route.MatchMode,
             LoadBalance = _route.LoadBalance,
-            Targets = _targets.Select(t => t.Snapshot(now)).ToArray()
+            Targets = snapshots
         };
     }
 
@@ -700,5 +747,23 @@ public sealed class ProxyRouteHandler
             target.TakeOffline(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(_route.OfflineSeconds));
             _logger.LogError($"Proxy target {target.BaseUri} taken offline due to failure rate.", exception ?? new Exception("Proxy failure rate exceeded."));
         }
+    }
+
+    private static bool ListContainsIgnoreCase(List<string> list, string value)
+    {
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (string.Equals(list[i], value, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private static string[] EnumerableToArray(IEnumerable<string> values)
+    {
+        var list = new List<string>();
+        foreach (var v in values)
+            list.Add(v);
+        return list.ToArray();
     }
 }
