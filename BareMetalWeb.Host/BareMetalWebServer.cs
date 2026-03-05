@@ -368,6 +368,13 @@ public class BareMetalWebServer : IBareWebHost
         _ = clientPruneTask;
         _ = todoPeriodicityTask;
         _ = scheduledActionTask;
+
+        // WAL segment compaction background service
+        if (DataStoreProvider.PrimaryProvider is WalDataProvider walProvider)
+        {
+            Task compactionTask = new WalCompactor(walProvider.WalStore).RunAsync(cts.Token);
+            _ = compactionTask;
+        }
     }
     public async Task RequestHandler(HttpContext context)
     {
