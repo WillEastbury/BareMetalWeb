@@ -292,48 +292,7 @@ internal sealed class VectorSegment
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private float ComputeDistance(float[] a, float[] b)
-    {
-        return Metric switch
-        {
-            DistanceMetric.Cosine => CosineDistance(a, b),
-            DistanceMetric.DotProduct => DotProductDistance(a, b),
-            DistanceMetric.Euclidean => EuclideanDistance(a, b),
-            _ => CosineDistance(a, b)
-        };
-    }
-
-    private static float CosineDistance(float[] a, float[] b)
-    {
-        float dot = 0, normA = 0, normB = 0;
-        for (int i = 0; i < a.Length; i++)
-        {
-            dot += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
-        }
-        if (normA == 0 || normB == 0) return 1f;
-        return 1f - dot / (MathF.Sqrt(normA) * MathF.Sqrt(normB));
-    }
-
-    private static float DotProductDistance(float[] a, float[] b)
-    {
-        float dot = 0;
-        for (int i = 0; i < a.Length; i++)
-            dot += a[i] * b[i];
-        return -dot; // Negate so smaller = more similar
-    }
-
-    private static float EuclideanDistance(float[] a, float[] b)
-    {
-        float sum = 0;
-        for (int i = 0; i < a.Length; i++)
-        {
-            float d = a[i] - b[i];
-            sum += d * d;
-        }
-        return MathF.Sqrt(sum);
-    }
+    private float ComputeDistance(float[] a, float[] b) => SimdDistance.Compute(Metric, a, b);
 
     private void RecomputeCentroid()
     {
@@ -487,45 +446,5 @@ public sealed class VectorIndexManager
     }
 
     private static float CentroidDistance(float[] query, float[] centroid, DistanceMetric metric)
-    {
-        return metric switch
-        {
-            DistanceMetric.Cosine => CosineDistance(query, centroid),
-            DistanceMetric.DotProduct => DotProductDistance(query, centroid),
-            DistanceMetric.Euclidean => EuclideanDistance(query, centroid),
-            _ => CosineDistance(query, centroid)
-        };
-    }
-
-    private static float CosineDistance(float[] a, float[] b)
-    {
-        float dot = 0, normA = 0, normB = 0;
-        for (int i = 0; i < a.Length; i++)
-        {
-            dot += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
-        }
-        if (normA == 0 || normB == 0) return 1f;
-        return 1f - dot / (MathF.Sqrt(normA) * MathF.Sqrt(normB));
-    }
-
-    private static float DotProductDistance(float[] a, float[] b)
-    {
-        float dot = 0;
-        for (int i = 0; i < a.Length; i++)
-            dot += a[i] * b[i];
-        return -dot;
-    }
-
-    private static float EuclideanDistance(float[] a, float[] b)
-    {
-        float sum = 0;
-        for (int i = 0; i < a.Length; i++)
-        {
-            float d = a[i] - b[i];
-            sum += d * d;
-        }
-        return MathF.Sqrt(sum);
-    }
+        => SimdDistance.Compute(metric, query, centroid);
 }
