@@ -46,8 +46,17 @@ public static class WellKnownSettings
 
     // ── GC tuning ───────────────────────────────────────────────────────
 
-    /// <summary>Enable server GC mode (true/false). Default: true.</summary>
+    /// <summary>Enable server GC mode (true/false). Default: false (workstation GC).
+    /// Informational only — the GC mode is fixed at process start via the runtime config
+    /// or DOTNET_GCServer environment variable; this setting cannot be changed at runtime.</summary>
     public const string GCServerMode = "gc.serverMode";
+
+    /// <summary>GC memory conservation level (0–9). Higher values trade GC throughput for
+    /// a smaller working set by returning memory to the OS more aggressively.
+    /// 0 = no conservation (runtime default), 5 = balanced, 9 = most conservative.
+    /// Informational only — takes effect via the runtime config or DOTNET_GCConserveMemory
+    /// environment variable; this setting cannot be changed at runtime.</summary>
+    public const string GCConserveMemory = "gc.conserveMemory";
 
     // ── Admin ────────────────────────────────────────────────────────────
 
