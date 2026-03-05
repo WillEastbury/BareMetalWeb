@@ -266,24 +266,38 @@ public class HtmlRenderer : IHtmlRenderer
             return false;
 
         var content = token.Slice(5).ToString();
-        var parts = content.Split('|', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 
-        if (parts.Length == 5)
+        // Span-based '|' splitting to avoid string[] allocation
+        var contentSpan = content.AsSpan();
+        // Count '|' separators
+        int pipeCount = 0;
+        foreach (var c in contentSpan) { if (c == '|') pipeCount++; }
+
+        if (pipeCount == 4)
         {
-            var newParts = new string[parts.Length - 1]; Array.Copy(parts, 1, newParts, 0, parts.Length - 1); parts = newParts;
+            // Skip first segment (5 parts -> drop first to get 4)
+            int firstPipe = contentSpan.IndexOf('|');
+            contentSpan = contentSpan[(firstPipe + 1)..];
         }
-
-        if (parts.Length != 4)
+        else if (pipeCount != 3)
             return false;
 
-        if (!int.TryParse(parts[1], out var from))
+        int s1 = contentSpan.IndexOf('|');
+        if (s1 < 0) return false;
+        int s2 = contentSpan[(s1 + 1)..].IndexOf('|'); if (s2 < 0) return false; s2 += s1 + 1;
+        int s3 = contentSpan[(s2 + 1)..].IndexOf('|'); if (s3 < 0) return false; s3 += s2 + 1;
+
+        var variable = contentSpan[..s1].Trim();
+        if (variable.IsEmpty) return false;
+
+        if (!int.TryParse(contentSpan[(s1 + 1)..s2].Trim(), out var from))
             return false;
-        if (!int.TryParse(parts[2], out var to))
+        if (!int.TryParse(contentSpan[(s2 + 1)..s3].Trim(), out var to))
             return false;
-        if (!int.TryParse(parts[3], out var increment) || increment == 0)
+        if (!int.TryParse(contentSpan[(s3 + 1)..].Trim(), out var increment) || increment == 0)
             return false;
 
-        spec = new ForLoopSpec(parts[0], from, to, increment);
+        spec = new ForLoopSpec(variable.ToString(), from, to, increment);
         return !string.IsNullOrWhiteSpace(spec.Variable);
     }
 

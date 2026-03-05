@@ -79,7 +79,7 @@ public static class DeltaApiHandlers
             {
                 using var ms = new MemoryStream();
                 await context.Request.Body.CopyToAsync(ms, context.RequestAborted);
-                delta = MutationDelta.Deserialize(ms.ToArray());
+                delta = MutationDelta.Deserialize(ms.GetBuffer().AsSpan(0, (int)ms.Length));
             }
 
             var (entity, result) = await DeltaMutationEngine.ApplyDeltaAsync(

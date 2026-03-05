@@ -629,19 +629,29 @@ public sealed class IndexStore
         id = string.Empty;
         expiresAtUtcTicks = null;
 
-        var parts = line.Split('|');
-        if (parts.Length < 4 || parts.Length > 5)
+        var span = line.AsSpan();
+        int p0 = span.IndexOf('|'); if (p0 < 0) return false;
+        int p1 = span[(p0 + 1)..].IndexOf('|'); if (p1 < 0) return false; p1 += p0 + 1;
+        int p2 = span[(p1 + 1)..].IndexOf('|'); if (p2 < 0) return false; p2 += p1 + 1;
+        int p3 = span[(p2 + 1)..].IndexOf('|');
+        bool hasFifth = p3 >= 0;
+        if (hasFifth)
+        {
+            p3 += p2 + 1;
+            if (span[(p3 + 1)..].IndexOf('|') >= 0) return false; // too many parts
+        }
+
+        if (!long.TryParse(span[..p0], out ticks))
             return false;
-        if (!long.TryParse(parts[0], out ticks))
+        var opSpan = span[(p0 + 1)..p1];
+        if (opSpan.Length != 1)
             return false;
-        if (parts[1].Length != 1)
-            return false;
-        op = parts[1][0];
+        op = opSpan[0];
         if (op != 'A' && op != 'D')
             return false;
-        key = Decode(parts[2]);
-        id = Decode(parts[3]);
-        if (parts.Length == 5 && long.TryParse(parts[4], out var exp))
+        key = Decode(span[(p1 + 1)..p2].ToString());
+        id = Decode(span[(p2 + 1)..(hasFifth ? p3 : span.Length)].ToString());
+        if (hasFifth && long.TryParse(span[(p3 + 1)..], out var exp))
             expiresAtUtcTicks = exp;
         return true;
     }
@@ -861,12 +871,13 @@ public sealed class IndexStore
         entityName = string.Empty;
         fieldName = string.Empty;
 
-        var parts = line.Split('|');
-        if (parts.Length != 2)
-            return false;
+        var span = line.AsSpan();
+        int sep = span.IndexOf('|');
+        if (sep < 0) return false;
+        if (span[(sep + 1)..].IndexOf('|') >= 0) return false;
 
-        entityName = Decode(parts[0]);
-        fieldName = Decode(parts[1]);
+        entityName = Decode(span[..sep].ToString());
+        fieldName = Decode(span[(sep + 1)..].ToString());
         return !string.IsNullOrWhiteSpace(entityName) && !string.IsNullOrWhiteSpace(fieldName);
     }
     public static string ComposeCompositeKey(params string[] parts)
@@ -965,18 +976,27 @@ public sealed class IndexStore
         id = string.Empty;
         expiresAtUtcTicks = 0;
 
-        var parts = line.Split('|');
-        if (parts.Length < 4 || parts.Length > 5)
+        var span = line.AsSpan();
+        int p0 = span.IndexOf('|'); if (p0 < 0) return false;
+        int p1 = span[(p0 + 1)..].IndexOf('|'); if (p1 < 0) return false; p1 += p0 + 1;
+        int p2 = span[(p1 + 1)..].IndexOf('|'); if (p2 < 0) return false; p2 += p1 + 1;
+        int p3 = span[(p2 + 1)..].IndexOf('|');
+        bool hasFifth = p3 >= 0;
+        if (hasFifth)
+        {
+            p3 += p2 + 1;
+            if (span[(p3 + 1)..].IndexOf('|') >= 0) return false;
+        }
+
+        var opSpan = span[(p0 + 1)..p1];
+        if (opSpan.Length != 1)
             return false;
 
-        if (parts[1].Length != 1)
-            return false;
-
-        op = parts[1][0];
-        key = Decode(parts[2]);
-        id = Decode(parts[3]);
-        if (parts.Length == 5)
-            long.TryParse(parts[4], out expiresAtUtcTicks);
+        op = opSpan[0];
+        key = Decode(span[(p1 + 1)..p2].ToString());
+        id = Decode(span[(p2 + 1)..(hasFifth ? p3 : span.Length)].ToString());
+        if (hasFifth)
+            long.TryParse(span[(p3 + 1)..], out expiresAtUtcTicks);
         return true;
     }
     private static bool TryParseSnapshotLine(string line, out string key, out string id, out long expiresAtUtcTicks)
@@ -985,14 +1005,21 @@ public sealed class IndexStore
         id = string.Empty;
         expiresAtUtcTicks = 0;
 
-        var parts = line.Split('|');
-        if (parts.Length < 2 || parts.Length > 3)
-            return false;
+        var span = line.AsSpan();
+        int sep1 = span.IndexOf('|');
+        if (sep1 < 0) return false;
+        int sep2 = span[(sep1 + 1)..].IndexOf('|');
+        bool hasThird = sep2 >= 0;
+        if (hasThird)
+        {
+            sep2 += sep1 + 1;
+            if (span[(sep2 + 1)..].IndexOf('|') >= 0) return false;
+        }
 
-        key = Decode(parts[0]);
-        id = Decode(parts[1]);
-        if (parts.Length == 3)
-            long.TryParse(parts[2], out expiresAtUtcTicks);
+        key = Decode(span[..sep1].ToString());
+        id = Decode(span[(sep1 + 1)..(hasThird ? sep2 : span.Length)].ToString());
+        if (hasThird)
+            long.TryParse(span[(sep2 + 1)..], out expiresAtUtcTicks);
         return true;
     }
     private static string Encode(string value)

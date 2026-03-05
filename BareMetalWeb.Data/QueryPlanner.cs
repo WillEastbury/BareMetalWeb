@@ -162,9 +162,10 @@ public sealed class QueryPlanner
         // 6. Final projection + sort step — detect missing index on sort field
         if (!string.IsNullOrEmpty(query.SortField))
         {
-            var sortParts = query.SortField.Split('.');
-            var sortEntity = sortParts.Length == 2 ? sortParts[0] : query.RootEntity;
-            var sortField  = sortParts.Length == 2 ? sortParts[1] : query.SortField;
+            var sortSpan = query.SortField.AsSpan();
+            int dotIdx = sortSpan.IndexOf('.');
+            var sortEntity = dotIdx > 0 ? sortSpan[..dotIdx].ToString() : query.RootEntity;
+            var sortField  = dotIdx > 0 ? sortSpan[(dotIdx + 1)..].ToString() : query.SortField;
             if (!IsFieldIndexed(sortEntity, sortField))
                 missingIndexes.Add(new MissingIndexRecommendation(
                     EntitySlug: sortEntity,

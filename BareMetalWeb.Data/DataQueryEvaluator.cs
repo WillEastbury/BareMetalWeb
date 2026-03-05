@@ -230,11 +230,17 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
                 if (string.IsNullOrWhiteSpace(inner))
                     return new List<object?>();
 
-                var parts = inner.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                var list = new List<object?>(parts.Length);
-                foreach (var part in parts)
+                var list = new List<object?>();
+                var remaining = inner.AsSpan();
+                while (remaining.Length > 0)
                 {
-                    var normalized = TrimListToken(part);
+                    int idx = remaining.IndexOf(',');
+                    ReadOnlySpan<char> segment;
+                    if (idx < 0) { segment = remaining; remaining = default; }
+                    else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+                    var part = segment.Trim();
+                    if (part.IsEmpty) continue;
+                    var normalized = TrimListToken(part.ToString());
                     list.Add(ConvertToType(normalized, memberType));
                 }
                 return list;
@@ -242,11 +248,17 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
 
             if (s.IndexOf(',') >= 0)
             {
-                var parts = s.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                var list = new List<object?>(parts.Length);
-                foreach (var part in parts)
+                var list = new List<object?>();
+                var remaining = s.AsSpan();
+                while (remaining.Length > 0)
                 {
-                    var normalized = TrimListToken(part);
+                    int idx = remaining.IndexOf(',');
+                    ReadOnlySpan<char> segment;
+                    if (idx < 0) { segment = remaining; remaining = default; }
+                    else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+                    var part = segment.Trim();
+                    if (part.IsEmpty) continue;
+                    var normalized = TrimListToken(part.ToString());
                     list.Add(ConvertToType(normalized, memberType));
                 }
                 return list;

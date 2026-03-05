@@ -325,7 +325,7 @@ public sealed class ProxyRouteHandler
             string?[] safeValues;
             if (hasCrlf)
             {
-                var filtered = new List<string?>(rawValues.Length);
+                using var filtered = new BmwValueList<string?>(rawValues.Length);
                 for (int i = 0; i < rawValues.Length; i++)
                 {
                     if (!ContainsCrlf(rawValues[i]))
@@ -385,7 +385,7 @@ public sealed class ProxyRouteHandler
         if (context.Request.Cookies == null || context.Request.Cookies.Count == 0)
             return null;
 
-        var builder = new StringBuilder();
+        var builder = new StringBuilder(256);
         foreach (var cookie in context.Request.Cookies)
         {
             if (string.Equals(cookie.Key, UserAuth.SessionCookieName, StringComparison.OrdinalIgnoreCase))
@@ -762,7 +762,7 @@ public sealed class ProxyRouteHandler
     private static string[] EnumerableToArray(IEnumerable<string> values)
     {
         // Use the collection count when available; fall back to 4 as a small-list default
-        var list = new List<string>(values is ICollection<string> col ? col.Count : 4);
+        using var list = new BmwValueList<string>(values is ICollection<string> col ? col.Count : 4);
         foreach (var v in values)
             list.Add(v);
         return list.ToArray();

@@ -48,6 +48,74 @@ public sealed class RouteHandlers : IRouteHandlers
     private static readonly JsonSerializerOptions JsonIndented = new() { WriteIndented = true };
     private static readonly TimeSpan DataQueryTimeout = TimeSpan.FromSeconds(30);
 
+    [ThreadStatic] private static StringBuilder? t_cachedSb;
+    [ThreadStatic] private static Dictionary<string, string?>? t_formDict;
+    [ThreadStatic] private static HashSet<string>? t_permSet;
+
+    private static Dictionary<string, string?> RentFormDictionary(int capacity = 16)
+    {
+        var dict = t_formDict;
+        if (dict != null)
+        {
+            t_formDict = null;
+            dict.Clear();
+            return dict;
+        }
+        return new Dictionary<string, string?>(capacity, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void ReturnFormDictionary(Dictionary<string, string?> dict)
+    {
+        if (dict.Count < 1024)
+        {
+            dict.Clear();
+            t_formDict = dict;
+        }
+    }
+
+    private static HashSet<string> RentPermissionSet(IEnumerable<string> source)
+    {
+        var set = t_permSet;
+        if (set != null)
+        {
+            t_permSet = null;
+            set.Clear();
+            foreach (var item in source)
+                set.Add(item);
+            return set;
+        }
+        return new HashSet<string>(source, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static void ReturnPermissionSet(HashSet<string> set)
+    {
+        if (set.Count < 256)
+        {
+            set.Clear();
+            t_permSet = set;
+        }
+    }
+
+    private static StringBuilder RentStringBuilder(int minimumCapacity = 512)
+    {
+        var sb = t_cachedSb;
+        if (sb != null && sb.Capacity >= minimumCapacity)
+        {
+            t_cachedSb = null;
+            sb.Clear();
+            return sb;
+        }
+        return new StringBuilder(minimumCapacity);
+    }
+    private static void ReturnStringBuilder(StringBuilder sb)
+    {
+        if (sb.Capacity <= 8192)
+        {
+            sb.Clear();
+            t_cachedSb = sb;
+        }
+    }
+
     public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, AuditService auditService,
         IReadOnlyList<(string SettingId, string Value, string Description)>? settingDefaults = null, IBufferedLogger? logger = null)
     {
@@ -863,7 +931,7 @@ public sealed class RouteHandlers : IRouteHandlers
             RegisterSuccess(BuildMfaAttemptKey("setup:secret", currentPendingSecret));
 
             context.SetStringValue("title", "Enable MFA");
-            var backupListBuilder = new StringBuilder();
+            var backupListBuilder = new StringBuilder(512);
             foreach (var codeValue in backupCodes.Codes)
                 backupListBuilder.Append($"<li><code>{WebUtility.HtmlEncode(codeValue)}</code></li>");
             var backupList = backupListBuilder.ToString();
@@ -951,7 +1019,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             ctx.SetStringValue("title", "Users");
 
-            var rows = new List<string[]>();
+            using var rows = new BmwValueList<string[]>(16);
             var users = await DataStoreProvider.Current.QueryAsync<User>(new QueryDefinition()).ConfigureAwait(false);
             foreach (var user in users)
             {
@@ -1087,7 +1155,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static string[] BuildRootPermissions()
     {
-        var permissions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        var permissions = new HashSet<string>(DataScaffold.Entities.Count + 2, StringComparer.OrdinalIgnoreCase)
         {
             "admin",
             "monitoring"
@@ -1659,6 +1727,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // Fetch user once for permission checks in callbacks
         var currentUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        HashSet<string>? _cachedPerms = null;
         bool HasPermissionForMeta(DataEntityMetadata m)
         {
             var permissionsNeeded = m.Permissions?.Trim();
@@ -1670,12 +1739,18 @@ public sealed class RouteHandlers : IRouteHandlers
                 return true;
             if (string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase))
                 return false;
-            var userPermissions = new HashSet<string>(currentUser.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-            var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (required.Length == 0) return true;
-            foreach (var r in required)
+            _cachedPerms ??= new HashSet<string>(currentUser.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            var altLookup = _cachedPerms.GetAlternateLookup<ReadOnlySpan<char>>();
+            var remaining = permissionsNeeded.AsSpan();
+            while (remaining.Length > 0)
             {
-                if (!userPermissions.Contains(r))
+                int idx = remaining.IndexOf(',');
+                ReadOnlySpan<char> segment;
+                if (idx < 0) { segment = remaining; remaining = default; }
+                else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+                var trimmed = segment.Trim();
+                if (trimmed.IsEmpty) continue;
+                if (!altLookup.Contains(trimmed))
                     return false;
             }
             return true;
@@ -1855,6 +1930,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // Fetch user once for permission checks in callbacks
         var currentUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        HashSet<string>? _cachedPerms2 = null;
         bool HasPermissionForMeta(DataEntityMetadata m)
         {
             var permissionsNeeded = m.Permissions?.Trim();
@@ -1866,12 +1942,18 @@ public sealed class RouteHandlers : IRouteHandlers
                 return true;
             if (string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase))
                 return false;
-            var userPermissions = new HashSet<string>(currentUser.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-            var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (required.Length == 0) return true;
-            foreach (var r in required)
+            _cachedPerms2 ??= new HashSet<string>(currentUser.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+            var altLookup = _cachedPerms2.GetAlternateLookup<ReadOnlySpan<char>>();
+            var remaining = permissionsNeeded.AsSpan();
+            while (remaining.Length > 0)
             {
-                if (!userPermissions.Contains(r))
+                int idx = remaining.IndexOf(',');
+                ReadOnlySpan<char> segment;
+                if (idx < 0) { segment = remaining; remaining = default; }
+                else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+                var trimmed = segment.Trim();
+                if (trimmed.IsEmpty) continue;
+                if (!altLookup.Contains(trimmed))
                     return false;
             }
             return true;
@@ -2056,11 +2138,13 @@ public sealed class RouteHandlers : IRouteHandlers
                 break;
             case ExportFormat.SimpleCSV:
             default:
+            {
                 // Fall back to simple CSV (entity fields only, no nested)
                 var viewRows1 = DataScaffold.BuildViewRows(meta, instance);
-                var rows = new string[viewRows1.Count][];
-                for (int ri = 0; ri < viewRows1.Count; ri++)
-                    rows[ri] = new[] { viewRows1[ri].Label, viewRows1[ri].Value };
+                using var rowsList1 = new BmwValueList<string[]>(viewRows1.Count);
+                foreach (var row in viewRows1)
+                    rowsList1.Add(new[] { row.Label, row.Value });
+                var rows = rowsList1.ToArray();
                 if (instance is BaseDataObject dataObject)
                 {
                     var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
@@ -2073,6 +2157,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 var csv = BuildCsv(headers, rows);
                 await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_{WebUtility.UrlEncode(id)}.csv");
                 break;
+            }
         }
     }
 
@@ -2103,9 +2188,10 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var viewRowsRtf = DataScaffold.BuildViewRows(meta, instance);
-        var rows = new string[viewRowsRtf.Count][];
-        for (int ri = 0; ri < viewRowsRtf.Count; ri++)
-            rows[ri] = new[] { viewRowsRtf[ri].Label, viewRowsRtf[ri].Value };
+        using var rowsListRtf = new BmwValueList<string[]>(viewRowsRtf.Count);
+        foreach (var row in viewRowsRtf)
+            rowsListRtf.Add(new[] { row.Label, row.Value });
+        var rows = rowsListRtf.ToArray();
         if (instance is BaseDataObject dataObject)
         {
             var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
@@ -2146,9 +2232,10 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var viewRowsHtml2 = DataScaffold.BuildViewRows(meta, instance);
-        var rows = new string[viewRowsHtml2.Count][];
-        for (int ri = 0; ri < viewRowsHtml2.Count; ri++)
-            rows[ri] = new[] { viewRowsHtml2[ri].Label, viewRowsHtml2[ri].Value };
+        using var rowsListHtml2 = new BmwValueList<string[]>(viewRowsHtml2.Count);
+        foreach (var row in viewRowsHtml2)
+            rowsListHtml2.Add(new[] { row.Label, row.Value });
+        var rows = rowsListHtml2.ToArray();
         if (instance is BaseDataObject dataObject)
         {
             var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
@@ -2313,7 +2400,9 @@ public sealed class RouteHandlers : IRouteHandlers
                 DataScaffold.ApplyAutoGeneratedIds(meta, instance);
             }
 
-            var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            var values = RentFormDictionary(mapping.Count);
+            try
+            {
             foreach (var entry in mapping)
             {
                 if (entry.Value < 0 || entry.Value >= row.Length)
@@ -2344,12 +2433,14 @@ public sealed class RouteHandlers : IRouteHandlers
                 created++;
             else
                 updated++;
+            }
+            finally { ReturnFormDictionary(values); }
         }
 
         var summary = $"<p>Import complete. Created: {created}, Updated: {updated}, Skipped: {skipped}.</p>";
         if (errors.Count > 0)
         {
-            var previewBuilder = new StringBuilder();
+            var previewBuilder = new StringBuilder(1024);
             int previewCount = 0;
             foreach (var err in errors)
             {
@@ -2445,13 +2536,14 @@ public sealed class RouteHandlers : IRouteHandlers
         // Apply auto-generated IDs before binding form values
         DataScaffold.ApplyAutoGeneratedIds(meta, instance);
 
-        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var values = RentFormDictionary(form.Count);
         foreach (var kvp in form)
             values[kvp.Key] = (string?)kvp.Value.ToString();
         var apiKeyInputs = ExtractSystemPrincipalKeys(values);
         var errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: true);
         await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
         ApplyUserPasswordIfNeeded(meta, instance, values, errors, isCreate: true);
+        ReturnFormDictionary(values);
         await ValidateUserUniquenessAsync(meta, instance, excludeId: null, errors, context.RequestAborted).ConfigureAwait(false);
 
         // Run entity-level expression validation (cross-field rules)
@@ -2627,13 +2719,14 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var values = RentFormDictionary(form.Count);
         foreach (var kvp in form)
             values[kvp.Key] = (string?)kvp.Value.ToString();
         var apiKeyInputs = ExtractSystemPrincipalKeys(values);
         var errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
         await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
         ApplyUserPasswordIfNeeded(meta, instance, values, errors, isCreate: false);
+        ReturnFormDictionary(values);
         await ValidateUserUniquenessAsync(meta, instance, excludeId: id, errors, context.RequestAborted).ConfigureAwait(false);
 
         // Run entity-level expression validation (cross-field rules)
@@ -2921,8 +3014,21 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var ids = idsParam.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (ids.Length == 0)
+        // Parse IDs with span-based iteration to avoid string[] allocation
+        using var parsedIds = new BmwValueList<uint>(8);
+        var idsRemaining = idsParam.AsSpan();
+        while (idsRemaining.Length > 0)
+        {
+            int idx = idsRemaining.IndexOf(',');
+            ReadOnlySpan<char> segment;
+            if (idx < 0) { segment = idsRemaining; idsRemaining = default; }
+            else { segment = idsRemaining[..idx]; idsRemaining = idsRemaining[(idx + 1)..]; }
+            var trimmed = segment.Trim();
+            if (trimmed.IsEmpty) continue;
+            if (uint.TryParse(trimmed, out var parsedId))
+                parsedIds.Add(parsedId);
+        }
+        if (parsedIds.Count == 0)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await context.Response.WriteAsync("No records selected.");
@@ -2931,9 +3037,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // Load the selected items
         var items = new List<object>();
-        foreach (var id in ids)
+        for (int i = 0; i < parsedIds.Count; i++)
         {
-            var item = await DataScaffold.LoadAsync(meta, uint.Parse(id));
+            var item = await DataScaffold.LoadAsync(meta, parsedIds[i]);
             if (item != null)
                 items.Add(item);
         }
@@ -2969,7 +3075,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.ContentType = "text/html";
             context.Response.Headers.Append("Content-Disposition", $"attachment; filename=\"{typeSlug}-bulk-export.html\"");
             
-            var html = new StringBuilder();
+            var html = new StringBuilder(4096);
             html.Append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><title>");
             html.Append(WebUtility.HtmlEncode(meta.Name));
             html.Append(" Bulk Export</title></head><body><h1>");
@@ -3250,7 +3356,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 return;
             }
 
-            var payloadList = new List<Dictionary<string, object?>>();
+            using var payloadList = new BmwValueList<Dictionary<string, object?>>(32);
             foreach (var item in results)
                 payloadList.Add(BuildApiModel(meta, (object)item));
             var payload = payloadList.ToArray();
@@ -3259,7 +3365,7 @@ public sealed class RouteHandlers : IRouteHandlers
             // Applies whether or not Top was specified: without a top limit we also know the total is at most skip + payload.Length.
             if (!query.Top.HasValue || payload.Length < query.Top.Value)
                 total = Math.Min(total, (query.Skip ?? 0) + payload.Length);
-            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["items"] = payload, ["total"] = total });
+            await WriteJsonResponseAsync(context, new Dictionary<string, object?>(2) { ["items"] = payload, ["total"] = total });
             return;
         }
 
@@ -3276,7 +3382,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var allPayloadList = new List<Dictionary<string, object?>>();
+        using var allPayloadList = new BmwValueList<Dictionary<string, object?>>(32);
         foreach (var item in allResults)
             allPayloadList.Add(BuildApiModel(meta, (object)item));
         var allPayload = allPayloadList.ToArray();
@@ -3392,7 +3498,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 DataScaffold.ApplyAutoGeneratedIds(meta, instance);
             }
 
-            var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            var values = RentFormDictionary(mapping.Count);
             foreach (var kvp in mapping)
             {
                 var colIdx = kvp.Value;
@@ -3401,6 +3507,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             var fieldErrors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: isCreate || upsertWithExplicitId);
+            ReturnFormDictionary(values);
             if (fieldErrors.Count > 0)
             {
                 importErrors.Add($"Row {rowNumber}: {string.Join(", ", fieldErrors)}");
@@ -3488,11 +3595,12 @@ public sealed class RouteHandlers : IRouteHandlers
         if (context.Request.HasFormContentType)
         {
             var form = await context.Request.ReadFormAsync();
-            var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            var values = RentFormDictionary(form.Count);
             foreach (var kvp in form)
                 values[kvp.Key] = (string?)kvp.Value.ToString();
             errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: true);
             await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
+            ReturnFormDictionary(values);
         }
         else
         {
@@ -3578,12 +3686,13 @@ public sealed class RouteHandlers : IRouteHandlers
         if (context.Request.HasFormContentType)
         {
             var form = await context.Request.ReadFormAsync();
-            var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            var values = RentFormDictionary(form.Count);
             foreach (var kvp in form)
                 values[kvp.Key] = (string?)kvp.Value.ToString();
             errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
             errors = FilterMissingRequiredErrorsForPatchForm(meta, values, errors);
             await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
+            ReturnFormDictionary(values);
         }
         else
         {
@@ -3667,11 +3776,12 @@ public sealed class RouteHandlers : IRouteHandlers
         if (context.Request.HasFormContentType)
         {
             var form = await context.Request.ReadFormAsync();
-            var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            var values = RentFormDictionary(form.Count);
             foreach (var kvp in form)
                 values[kvp.Key] = (string?)kvp.Value.ToString();
             errors = DataScaffold.ApplyValuesFromForm(meta, instance, values, forCreate: false);
             await ApplyUploadFieldsFromFormAsync(context, meta, (BaseDataObject)instance, form, errors).ConfigureAwait(false);
+            ReturnFormDictionary(values);
         }
         else
         {
@@ -4012,7 +4122,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
             var actionsHtml = RenderLogActions(yearEntries, selectedYearKey, selectedMonthKey, date, hour);
 
-            var html = new StringBuilder();
+            var html = new StringBuilder(2048);
             if (!string.IsNullOrWhiteSpace(actionsHtml))
                 html.Append(actionsHtml);
             html.Append("<div class=\"bm-log-layout\">");
@@ -4104,7 +4214,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var root = GetLogRoot(context);
-        var query = new Dictionary<string, StringValues>(StringComparer.OrdinalIgnoreCase)
+        var query = new Dictionary<string, StringValues>(5, StringComparer.OrdinalIgnoreCase)
         {
             ["scope"] = form["scope"],
             ["year"] = form["year"],
@@ -4223,7 +4333,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var errors = new List<string>();
         var registry = RuntimeEntityRegistry.Current;
-        var entityCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var entityCounts = new Dictionary<string, int>(registry.All.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var model in registry.All)
         {
             var count = ParseSampleCount(form, model.Slug, errors);
@@ -4429,7 +4539,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var nonce = context.GetCspNonce();
         var nonceAttr = string.IsNullOrEmpty(nonce) ? string.Empty : $" nonce=\"{WebUtility.HtmlEncode(nonce)}\"";
 
-        var html = new StringBuilder();
+        var html = new StringBuilder(4096);
         html.Append("<div class=\"card\">");
         html.Append("<div class=\"card-body\">");
         html.Append($"<h5 class=\"card-title\" id=\"job-title\">{WebUtility.HtmlEncode(operationName)}</h5>");
@@ -4479,7 +4589,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Wipe All Data");
 
-        var warningHtml = new StringBuilder();
+        var warningHtml = new StringBuilder(1024);
         warningHtml.Append("<div class=\"alert alert-danger\">");
         warningHtml.Append("<h4 class=\"alert-heading\">&#9888; DANGER ZONE &#9888;</h4>");
         warningHtml.Append("<p><strong>This action will permanently delete ALL data in every entity store.</strong></p>");
@@ -4520,7 +4630,7 @@ public sealed class RouteHandlers : IRouteHandlers
         using (var reader = new System.IO.StreamReader(context.Request.Body))
             body = await reader.ReadToEndAsync().ConfigureAwait(false);
 
-        var entityCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var entityCounts = new Dictionary<string, int>(8, StringComparer.OrdinalIgnoreCase);
         bool clearExisting = false;
 
         try
@@ -4847,7 +4957,7 @@ public sealed class RouteHandlers : IRouteHandlers
                     deployedSlugs.Add(pkg.Slug);
             }
 
-            var sb = new StringBuilder();
+            var sb = new StringBuilder(4096);
             sb.Append("<h4>Sample Metadata Gallery</h4>");
             sb.Append("<p class=\"text-muted\">Deploy pre-built entity schemas to get started quickly. Deploying a package imports its <em>EntityDefinition</em>, <em>FieldDefinition</em>, and <em>IndexDefinition</em> records.</p>");
             sb.Append("<div class=\"row g-3\">");
@@ -5091,7 +5201,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     internal static Dictionary<string, object?> BuildApiModel(DataEntityMetadata meta, object instance)
     {
-        var data = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        var data = new Dictionary<string, object?>(meta.ViewFields.Length + 1, StringComparer.OrdinalIgnoreCase);
         var id = instance is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) : null;
         if (!string.IsNullOrWhiteSpace(id))
             data["id"] = id;
@@ -5136,7 +5246,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static string RenderLogTree(IReadOnlyList<LogYearEntry> years, IReadOnlyList<string> hours, IReadOnlyList<LogFileEntry> files, string selectedYearKey, string selectedMonthKey, string selectedDate, string selectedHour, string selectedFile)
     {
-        var html = new StringBuilder();
+        var html = RentStringBuilder(2048);
+        try
+        {
         html.Append("<div class=\"bm-log-tree-header\">Log Tree</div>");
         if (years.Count == 0)
         {
@@ -5221,11 +5333,15 @@ public sealed class RouteHandlers : IRouteHandlers
         }
         html.Append("</ul>");
         return html.ToString();
+        }
+        finally { ReturnStringBuilder(html); }
     }
 
     private static string RenderLogActions(IReadOnlyList<LogYearEntry> years, string selectedYearKey, string selectedMonthKey, string selectedDate, string selectedHour)
     {
-        var html = new StringBuilder();
+        var html = RentStringBuilder(2048);
+        try
+        {
         if (string.IsNullOrWhiteSpace(selectedYearKey) && string.IsNullOrWhiteSpace(selectedMonthKey) && string.IsNullOrWhiteSpace(selectedDate) && string.IsNullOrWhiteSpace(selectedHour))
             return string.Empty;
 
@@ -5302,6 +5418,8 @@ public sealed class RouteHandlers : IRouteHandlers
         html.Append("</ol>");
         html.Append("</nav>");
         return html.ToString();
+        }
+        finally { ReturnStringBuilder(html); }
     }
 
     private static string RenderLogActionButtons(string downloadHref, string pruneHref)
@@ -5311,7 +5429,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static string RenderLogFile(string path, string fileName, bool isError)
     {
-        var html = new StringBuilder();
+        var html = RentStringBuilder(2048);
+        try
+        {
         var headerClass = isError ? "bm-log-viewer-header bm-log-error" : "bm-log-viewer-header";
         html.Append($"<div class=\"{headerClass}\">{WebUtility.HtmlEncode(fileName)}</div>");
 
@@ -5322,8 +5442,10 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         const int maxLines = 2000;
-        var lines = new StringBuilder();
         var truncated = false;
+        var lines = RentStringBuilder(4096);
+        try
+        {
         var count = 0;
         foreach (var line in File.ReadLines(path))
         {
@@ -5340,11 +5462,15 @@ public sealed class RouteHandlers : IRouteHandlers
         html.Append("<pre class=\"bm-log-viewer-content\">");
         html.Append(lines.ToString());
         html.Append("</pre>");
+        }
+        finally { ReturnStringBuilder(lines); }
         if (truncated)
         {
             html.Append("<p class=\"text-muted mt-2 mb-0\">Output truncated.</p>");
         }
         return html.ToString();
+        }
+        finally { ReturnStringBuilder(html); }
     }
 
     private static bool TryResolveLogTarget(IQueryCollection query, string root, out LogTarget target, out string errorMessage)
@@ -5545,7 +5671,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         // Group by year
-        var yearDict = new Dictionary<string, List<LogDayEntry>>(StringComparer.OrdinalIgnoreCase);
+        var yearDict = new Dictionary<string, List<LogDayEntry>>(8, StringComparer.OrdinalIgnoreCase);
         foreach (var entry in dayEntries)
         {
             if (!yearDict.TryGetValue(entry.YearKey, out var yearGroup))
@@ -5565,7 +5691,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 : new DateTime(first.Date.Year, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
             // Group by month within year
-            var monthDict = new Dictionary<string, List<LogDayEntry>>(StringComparer.OrdinalIgnoreCase);
+            var monthDict = new Dictionary<string, List<LogDayEntry>>(12, StringComparer.OrdinalIgnoreCase);
             foreach (var entry in yearGroup)
             {
                 if (!monthDict.TryGetValue(entry.MonthKey, out var monthGroup))
@@ -5753,7 +5879,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static Dictionary<string, string?> ToQueryDictionary(IQueryCollection query)
     {
-        var dict = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        var dict = new Dictionary<string, string?>(query.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var kvp in query)
         {
             dict[kvp.Key] = kvp.Value.ToString();
@@ -5765,7 +5891,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string[][] BuildListPlainRows(DataEntityMetadata metadata, IEnumerable items)
     {
         var rows = DataScaffold.BuildListRows(metadata, items, string.Empty, includeActions: false);
-        var result = new List<string[]>();
+        using var result = new BmwValueList<string[]>(16);
         foreach (var row in rows)
         {
             var cleanRow = new string[row.Length];
@@ -5814,7 +5940,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static string BuildCsv(string[] headers, string[][] rows)
     {
-        var sb = new StringBuilder();
+        var sb = RentStringBuilder(1024);
+        try
+        {
         AppendCsvRow(sb, headers);
         foreach (var row in rows)
         {
@@ -5822,6 +5950,8 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         return sb.ToString();
+        }
+        finally { ReturnStringBuilder(sb); }
     }
 
     private static void AppendCsvRow(StringBuilder sb, string[] cells)
@@ -5900,7 +6030,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static string JoinEncoded(string separator, IReadOnlyList<string> items)
     {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(256);
         for (int i = 0; i < items.Count; i++)
         {
             if (i > 0) sb.Append(separator);
@@ -6194,7 +6324,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static string BuildHtmlTableDocument(string title, string[] headers, string[][] rows)
     {
-        var sb = new StringBuilder();
+        var sb = RentStringBuilder(4096);
+        try
+        {
         sb.Append("<!doctype html><html><head><meta charset=\"utf-8\" />");
         sb.Append($"<title>{WebUtility.HtmlEncode(title)}</title>");
         sb.Append("<style>body{font-family:Arial,Helvetica,sans-serif;margin:24px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:8px;text-align:left;}th{background:#f2f2f2;}</style>");
@@ -6221,11 +6353,15 @@ public sealed class RouteHandlers : IRouteHandlers
         }
         sb.Append("</tbody></table></body></html>");
         return sb.ToString();
+        }
+        finally { ReturnStringBuilder(sb); }
     }
 
     private static string BuildRtfDocument(string title, string[][] rows)
     {
-        var sb = new StringBuilder();
+        var sb = RentStringBuilder(2048);
+        try
+        {
         sb.Append("{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}\\fs20 ");
         sb.Append("\\b ");
         sb.Append(EscapeRtf(title));
@@ -6243,6 +6379,8 @@ public sealed class RouteHandlers : IRouteHandlers
         }
         sb.Append("}");
         return sb.ToString();
+        }
+        finally { ReturnStringBuilder(sb); }
     }
 
     private static string EscapeRtf(string text)
@@ -6318,7 +6456,9 @@ public sealed class RouteHandlers : IRouteHandlers
         
         var dropdownId = id != null ? $"export-dropdown-{WebUtility.UrlEncode(id)}" : "export-dropdown-list";
         
-        var html = new StringBuilder();
+        var html = RentStringBuilder(512);
+        try
+        {
         html.Append("<div class=\"btn-group ms-2\" role=\"group\">");
         html.Append($"<button type=\"button\" class=\"btn btn-sm btn-outline-success dropdown-toggle\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\" id=\"{dropdownId}\">");
         html.Append("<i class=\"bi bi-download\" aria-hidden=\"true\"></i> Export");
@@ -6348,6 +6488,8 @@ public sealed class RouteHandlers : IRouteHandlers
         html.Append("</div>");
         
         return html.ToString();
+        }
+        finally { ReturnStringBuilder(html); }
     }
 
     private const string ApiCsrfHeaderName = "X-Requested-With";
@@ -6375,15 +6517,25 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-        var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (required.Length == 0) return true;
-        foreach (var r in required)
+        var userPermissions = RentPermissionSet(user.Permissions ?? Array.Empty<string>());
+        try
         {
-            if (!userPermissions.Contains(r))
+        var altLookup = userPermissions.GetAlternateLookup<ReadOnlySpan<char>>();
+        var remaining = permissionsNeeded.AsSpan();
+        while (remaining.Length > 0)
+        {
+            int idx = remaining.IndexOf(',');
+            ReadOnlySpan<char> segment;
+            if (idx < 0) { segment = remaining; remaining = default; }
+            else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+            var trimmed = segment.Trim();
+            if (trimmed.IsEmpty) continue;
+            if (!altLookup.Contains(trimmed))
                 return false;
         }
         return true;
+        }
+        finally { ReturnPermissionSet(userPermissions); }
     }
 
     private static List<string[]> ParseCsvRows(string content)
@@ -6393,7 +6545,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return rows;
 
         var current = new List<string>();
-        var field = new StringBuilder();
+        var field = new StringBuilder(128);
         bool inQuotes = false;
 
         for (int i = 0; i < content.Length; i++)
@@ -6471,11 +6623,11 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static Dictionary<string, int> BuildCsvMapping(DataEntityMetadata meta, string[] header, out int idIndex, out int passwordIndex)
     {
-        var mapping = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        var mapping = new Dictionary<string, int>(header.Length, StringComparer.OrdinalIgnoreCase);
         idIndex = -1;
         passwordIndex = -1;
 
-        var fieldMap = new Dictionary<string, DataFieldMetadata>(StringComparer.OrdinalIgnoreCase);
+        var fieldMap = new Dictionary<string, DataFieldMetadata>(meta.Fields.Count * 2, StringComparer.OrdinalIgnoreCase);
         foreach (var field in meta.Fields)
         {
             if (!((field.Create || field.Edit) && !field.ReadOnly))
@@ -6655,7 +6807,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (doc.RootElement.ValueKind != JsonValueKind.Object)
                 return null;
 
-            var payload = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
+            var payload = new Dictionary<string, JsonElement>(16, StringComparer.OrdinalIgnoreCase);
             foreach (var property in doc.RootElement.EnumerateObject())
             {
                 payload[property.Name] = property.Value.Clone();
@@ -6872,7 +7024,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return errors;
 
         const string requiredSuffix = " is required.";
-        var fieldByLabel = new Dictionary<string, DataFieldMetadata>(StringComparer.OrdinalIgnoreCase);
+        var fieldByLabel = new Dictionary<string, DataFieldMetadata>(meta.Fields.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var f in meta.Fields)
             fieldByLabel[f.Label] = f;
         var filtered = new List<string>(errors.Count);
@@ -6988,7 +7140,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static string BuildViewSwitcher(string typeSlug, ViewType currentView, DataEntityMetadata meta)
     {
-        var html = new StringBuilder();
+        var html = RentStringBuilder(512);
+        try
+        {
         html.Append("<div class=\"btn-group btn-group-sm\" role=\"group\" aria-label=\"View Type\">");
         
         var tableActive = currentView == ViewType.Table ? " active" : string.Empty;
@@ -7018,6 +7172,8 @@ public sealed class RouteHandlers : IRouteHandlers
         
         html.Append("</div>");
         return html.ToString();
+        }
+        finally { ReturnStringBuilder(html); }
     }
 
     private static string BuildTimelineViewHtml(
@@ -7028,7 +7184,9 @@ public sealed class RouteHandlers : IRouteHandlers
         string? cloneToken = null,
         string? cloneReturnUrl = null)
     {
-        var html = new StringBuilder();
+        var html = RentStringBuilder(4096);
+        try
+        {
 
         // Find the first two DateOnly/DateTime fields: first is start date, second (if any) is end date
         var dateFields = new List<DataFieldMetadata>();
@@ -7196,6 +7354,8 @@ public sealed class RouteHandlers : IRouteHandlers
         html.Append("</div>"); // bm-gantt-inner
         html.Append("</div>"); // bm-gantt-container
         return html.ToString();
+        }
+        finally { ReturnStringBuilder(html); }
     }
 
     private static string GetDisplayValue(DataEntityMetadata meta, BaseDataObject item)
@@ -7255,7 +7415,9 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string BuildPageSizeSelector(int currentPageSize, string basePath, IDictionary<string, string?> queryParams)
     {
         var sizes = new[] { 10, 25, 50, 100 };
-        var html = new StringBuilder();
+        var html = RentStringBuilder(512);
+        try
+        {
         html.Append(@"<div class=""d-flex align-items-center gap-2"">
     <label class=""form-label mb-0 small text-nowrap"">Page size:</label>
     <select class=""form-select form-select-sm bm-w-auto"" onchange=""window.location.href=this.value;"" aria-label=""Page size"">");
@@ -7269,6 +7431,8 @@ public sealed class RouteHandlers : IRouteHandlers
 
         html.Append("</select></div>");
         return html.ToString();
+        }
+        finally { ReturnStringBuilder(html); }
     }
 
     private static string BuildEnhancedPagination(int currentPage, int totalRecords, int pageSize, string basePath, IDictionary<string, string?> queryParams)
@@ -7277,7 +7441,9 @@ public sealed class RouteHandlers : IRouteHandlers
         var startRecord = totalRecords == 0 ? 0 : (currentPage - 1) * pageSize + 1;
         var endRecord = Math.Min(currentPage * pageSize, totalRecords);
 
-        var html = new StringBuilder();
+        var html = RentStringBuilder(1024);
+        try
+        {
         html.Append(@"<div class=""d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2"">");
         
         // Record count
@@ -7347,12 +7513,19 @@ public sealed class RouteHandlers : IRouteHandlers
 
         html.Append("</ul></nav></div>");
         return html.ToString();
+        }
+        finally { ReturnStringBuilder(html); }
     }
 
     private static string BuildUrlWithParam(string basePath, IDictionary<string, string?> queryParams, string key, string value, string[]? excludeParams = null)
     {
         var parts = new List<string>();
-        var exclude = new HashSet<string>(excludeParams ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        var exclude = new HashSet<string>((excludeParams?.Length ?? 0) + 1, StringComparer.OrdinalIgnoreCase);
+        if (excludeParams != null)
+        {
+            foreach (var p in excludeParams)
+                exclude.Add(p);
+        }
         exclude.Add(key); // Always exclude the key we're setting
 
         foreach (var pair in queryParams)
@@ -7381,7 +7554,9 @@ public sealed class RouteHandlers : IRouteHandlers
         var currentSort = queryParams.TryGetValue("sort", out var sortValue) ? sortValue : null;
         var currentDir = queryParams.TryGetValue("dir", out var dirValue) ? dirValue : "asc";
         
-        var html = new StringBuilder();
+        var html = RentStringBuilder(1024);
+        try
+        {
         html.Append("<thead><tr>");
 
         if (includeBulkSelection)
@@ -7436,11 +7611,15 @@ public sealed class RouteHandlers : IRouteHandlers
 
         html.Append("</tr></thead>");
         return html.ToString();
+        }
+        finally { ReturnStringBuilder(html); }
     }
 
     private static string BuildTableWithSortableHeaders(DataEntityMetadata metadata, IReadOnlyList<string[]> rows, string basePath, IDictionary<string, string?> queryParams, bool includeActions, bool includeBulkSelection = false)
     {
-        var html = new StringBuilder();
+        var html = RentStringBuilder(4096);
+        try
+        {
         html.Append(@"<table class=""table table-striped table-sm align-middle mb-0 bm-table"">");
         
         // Add sortable headers
@@ -7470,11 +7649,13 @@ public sealed class RouteHandlers : IRouteHandlers
         
         html.Append("</tbody></table>");
         return html.ToString();
+        }
+        finally { ReturnStringBuilder(html); }
     }
 
     private static string BuildBulkActionsBar(string typeSlug, string returnUrl, long totalCount, string csrfToken)
     {
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(1024);
         sb.Append($"<div data-bulk-container data-entity-slug=\"{WebUtility.HtmlEncode(typeSlug)}\" data-return-url=\"{WebUtility.HtmlEncode(returnUrl)}\">");
         sb.Append("<div data-bulk-actions-bar class=\"alert alert-info d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2 d-none\" role=\"status\">");
         sb.Append("<div class=\"d-flex align-items-center gap-2\">");
@@ -7518,7 +7699,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string BuildCommandButtonsHtml(DataEntityMetadata meta, string typeSlug, string id, string csrfToken)
     {
         if (meta.Commands.Count == 0) return string.Empty;
-        var sb = new StringBuilder();
+        var sb = new StringBuilder(512);
         var safeId = WebUtility.UrlEncode(id);
         var safeToken = WebUtility.HtmlEncode(csrfToken);
         foreach (var cmd in meta.Commands)
@@ -7660,7 +7841,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
             var dataRoot = _dataRootFolder;
             var walDir   = Path.Combine(dataRoot, "wal");
-            var html     = new StringBuilder();
+            var html     = new StringBuilder(2048);
 
             // ── WAL store ──────────────────────────────────────────────────
             long walSegBytes = 0, walSnapshotBytes = 0, walIdMapBytes = 0;

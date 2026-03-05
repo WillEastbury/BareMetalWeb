@@ -473,9 +473,14 @@ public static class StaticFileService
         if (string.IsNullOrWhiteSpace(relativePath))
             return false;
 
-        var segments = relativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        foreach (var segment in segments)
+        var remaining = relativePath.AsSpan();
+        while (remaining.Length > 0)
         {
+            int idx = remaining.IndexOf('/');
+            ReadOnlySpan<char> segment;
+            if (idx < 0) { segment = remaining; remaining = default; }
+            else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+            if (segment.IsEmpty) continue;
             if (IsDotName(segment))
                 return true;
         }
@@ -499,6 +504,11 @@ public static class StaticFileService
     private static bool IsDotName(string name)
     {
         return name.StartsWith(".", StringComparison.Ordinal);
+    }
+
+    private static bool IsDotName(ReadOnlySpan<char> name)
+    {
+        return name.Length > 0 && name[0] == '.';
     }
 
     private static bool TryResolveDefaultFile(StaticFileConfigOptions options, string rootPath, string relativePath, out string fullPath, out string resolvedRelative)
@@ -546,7 +556,7 @@ public static class StaticFileService
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "text/html; charset=utf-8";
 
-        var builder = new StringBuilder();
+        var builder = new StringBuilder(2048);
         builder.Append("<!DOCTYPE html><html><head><meta charset=\"utf-8\" /><title>Index of ");
         builder.Append(WebUtility.HtmlEncode("/" + relativePath.Trim('/')));
         builder.Append("</title></head><body><h1>Index of ");
@@ -813,10 +823,11 @@ public static class StaticFileService
         if (string.IsNullOrWhiteSpace(contentType))
             return false;
 
-        var value = contentType.Split(';', 2)[0].Trim();
+        int semiIdx = contentType.IndexOf(';');
+        var value = (semiIdx < 0 ? contentType.AsSpan() : contentType.AsSpan(0, semiIdx)).Trim();
         foreach (var prefix in options.CompressibleContentTypePrefixes)
         {
-            if (value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            if (value.StartsWith(prefix.AsSpan(), StringComparison.OrdinalIgnoreCase))
                 return true;
         }
         return false;
@@ -933,14 +944,17 @@ public static class StaticFileService
     private static bool TryParseEtags(string header, out List<string> tags)
     {
         tags = new List<string>();
-        var parts = header.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        foreach (var part in parts)
+        var remaining = header.AsSpan();
+        while (remaining.Length > 0)
         {
-            var value = part.Trim();
-            if (string.IsNullOrWhiteSpace(value))
-                continue;
+            int idx = remaining.IndexOf(',');
+            ReadOnlySpan<char> segment;
+            if (idx < 0) { segment = remaining; remaining = default; }
+            else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+            var trimmed = segment.Trim();
+            if (trimmed.IsEmpty) continue;
 
-            tags.Add(value);
+            tags.Add(trimmed.ToString());
         }
 
         return tags.Count > 0;

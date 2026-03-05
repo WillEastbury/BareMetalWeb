@@ -215,15 +215,14 @@ public static class BinaryApiHandlers
                 }
             }
 
-            // Brotli compress the ordinal data
-            var rawData = ms.ToArray();
+            // Brotli compress the ordinal data — read from internal buffer to avoid ToArray copy
+            var rawBuf = ms.GetBuffer().AsSpan(0, (int)ms.Length);
             using var compressedMs = new System.IO.MemoryStream();
             using (var brotli = new System.IO.Compression.BrotliStream(
                 compressedMs, System.IO.Compression.CompressionLevel.Fastest, leaveOpen: true))
             {
-                brotli.Write(rawData);
+                brotli.Write(rawBuf);
             }
-            var compressed = compressedMs.ToArray();
 
             context.Response.StatusCode = 200;
             context.Response.ContentType = "application/x-bmw-raw";
@@ -235,8 +234,10 @@ public static class BinaryApiHandlers
                 fieldNamesSb.Append(plan[i].Name);
             }
             context.Response.Headers["X-BMW-Fields"] = fieldNamesSb.ToString();
-            context.Response.ContentLength = compressed.Length;
-            await context.Response.Body.WriteAsync(compressed, context.RequestAborted);
+            var compressedLen = (int)compressedMs.Length;
+            context.Response.ContentLength = compressedLen;
+            await context.Response.Body.WriteAsync(
+                compressedMs.GetBuffer().AsMemory(0, compressedLen), context.RequestAborted);
         }
         catch (Exception ex)
         {
@@ -616,21 +617,27 @@ public static class BinaryApiHandlers
                 if (!string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
                 {
                     var userPerms = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                    var required = permissionsNeeded.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-                    if (required.Length > 0)
+                    var altLookup = userPerms.GetAlternateLookup<ReadOnlySpan<char>>();
+                    var remaining = permissionsNeeded.AsSpan();
+                    bool hasRequired = false;
+                    bool allPresent = true;
+                    while (remaining.Length > 0)
                     {
-                        bool allPresent = true;
-                        foreach (var r in required)
+                        int idx = remaining.IndexOf(',');
+                        ReadOnlySpan<char> segment;
+                        if (idx < 0) { segment = remaining; remaining = default; }
+                        else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+                        var trimmed = segment.Trim();
+                        if (trimmed.IsEmpty) continue;
+                        hasRequired = true;
+                        if (!altLookup.Contains(trimmed))
                         {
-                            if (!userPerms.Contains(r))
-                            {
-                                allPresent = false;
-                                break;
-                            }
+                            allPresent = false;
+                            break;
                         }
-                        if (!allPresent)
-                            return (null, typeSlug, (403, "Access denied."));
                     }
+                    if (hasRequired && !allPresent)
+                            return (null, typeSlug, (403, "Access denied."));
                 }
             }
         }
@@ -652,9 +659,11 @@ public static class BinaryApiHandlers
 
     private static async ValueTask<ReadOnlyMemory<byte>> ReadBodyAsync(HttpContext context)
     {
-        using var ms = new MemoryStream();
+        var ms = new MemoryStream();
         await context.Request.Body.CopyToAsync(ms, context.RequestAborted);
-        return ms.ToArray();
+        // Return a view over the internal buffer — avoids a full copy.
+        // MemoryStream() has no unmanaged resources; the backing byte[] lives until GC collects it.
+        return ms.GetBuffer().AsMemory(0, (int)ms.Length);
     }
 
     private static async ValueTask WriteError(HttpContext context, (int StatusCode, string Message) error)
