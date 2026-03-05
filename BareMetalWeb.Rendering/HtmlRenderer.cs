@@ -110,132 +110,137 @@ public class HtmlRenderer : IHtmlRenderer
         string[]? scopedValues
         )
     {
-        for (int i = 0; i < span.Length; i++)
+        int pos = 0;
+        while (pos < span.Length)
         {
-            if (span[i] == '{' &&
-                i + 1 < span.Length &&
-                span[i + 1] == '{')
-            {
-                int start = i + 2;
-                int j = start;
+            // SIMD-accelerated scan: .NET's IndexOf uses SSE2/NEON vectorised search.
+            int openIdx = span.Slice(pos).IndexOf("{{".AsSpan());
 
-                while (j + 1 < span.Length &&
-                       !(span[j] == '}' && span[j + 1] == '}'))
+            if (openIdx < 0)
+            {
+                // No more tokens — write the remainder as one contiguous slice.
+                Write(writer, span.Slice(pos));
+                return;
+            }
+
+            // Write all literal characters before '{{'.
+            if (openIdx > 0)
+                Write(writer, span.Slice(pos, openIdx));
+
+            int bodyStart = pos + openIdx + 2; // first char of token key
+
+            // SIMD-accelerated scan for the closing '}}' delimiter.
+            int closeRelIdx = span.Slice(bodyStart).IndexOf("}}".AsSpan());
+
+            if (closeRelIdx < 0)
+            {
+                // Malformed template — no matching '}}'. Emit literal '{{' and advance.
+                Write(writer, span.Slice(pos + openIdx, 2));
+                pos = pos + openIdx + 1;
+                continue;
+            }
+
+            var keySpan  = span.Slice(bodyStart, closeRelIdx);
+            int tokenEnd = bodyStart + closeRelIdx + 2; // first char after '}}'
+
+            if (TryParseLoopToken(keySpan, out var loopKey) &&
+                TryFindClosingTag(span, tokenEnd, LoopTagKind.Loop, loopKey, out var endTagStart, out var endTagEnd))
+            {
+                if (TryGetLoop(loopKey, templateLoops, out var loop))
                 {
-                    j++;
+                    var loopBody = span.Slice(tokenEnd, endTagStart - tokenEnd);
+                    foreach (var item in loop.Items)
+                    {
+                        var (itemKeys, itemValues) = BuildScopedKeyValues(item, scopedKeys, scopedValues);
+                        RenderSection(writer, loopBody, keys, values, appkeys, appvalues, keysforbytesrendered, bytesrendered, templateLoops, itemKeys, itemValues);
+                    }
                 }
 
-                if (j + 1 < span.Length)
+                pos = endTagEnd + 1;
+                continue;
+            }
+
+            if (TryParseForToken(keySpan, out var forSpec) &&
+                TryFindClosingTag(span, tokenEnd, LoopTagKind.For, forSpec.Variable, out endTagStart, out endTagEnd))
+            {
+                var loopBody = span.Slice(tokenEnd, endTagStart - tokenEnd);
+                foreach (var iterationValue in EnumerateForLoopValues(forSpec))
                 {
-                    var keySpan = span.Slice(start, j - start);
-
-                    if (TryParseLoopToken(keySpan, out var loopKey) &&
-                        TryFindClosingTag(span, j + 2, LoopTagKind.Loop, loopKey, out var endTagStart, out var endTagEnd))
-                    {
-                        if (TryGetLoop(loopKey, templateLoops, out var loop))
+                    var (itemKeys, itemValues) = BuildScopedKeyValues(
+                        new Dictionary<string, string>(StringComparer.Ordinal)
                         {
-                            var loopBody = span.Slice(j + 2, endTagStart - (j + 2));
-                            foreach (var item in loop.Items)
-                            {
-                                var (itemKeys, itemValues) = BuildScopedKeyValues(item, scopedKeys, scopedValues);
-                                RenderSection(writer, loopBody, keys, values, appkeys, appvalues, keysforbytesrendered, bytesrendered, templateLoops, itemKeys, itemValues);
-                            }
-                        }
+                            [forSpec.Variable] = iterationValue
+                        },
+                        scopedKeys,
+                        scopedValues);
 
-                        i = endTagEnd;
-                        continue;
-                    }
+                    RenderSection(writer, loopBody, keys, values, appkeys, appvalues, keysforbytesrendered, bytesrendered, templateLoops, itemKeys, itemValues);
+                }
 
-                    if (TryParseForToken(keySpan, out var forSpec) &&
-                        TryFindClosingTag(span, j + 2, LoopTagKind.For, forSpec.Variable, out endTagStart, out endTagEnd))
+                pos = endTagEnd + 1;
+                continue;
+            }
+
+            bool matched = false;
+
+            if (!matched && scopedKeys != null && scopedValues != null)
+            {
+                for (int k = 0; k < scopedKeys.Length; k++)
+                {
+                    if (keySpan.SequenceEqual(scopedKeys[k]))
                     {
-                        var loopBody = span.Slice(j + 2, endTagStart - (j + 2));
-                        foreach (var iterationValue in EnumerateForLoopValues(forSpec))
-                        {
-                            var (itemKeys, itemValues) = BuildScopedKeyValues(
-                                new Dictionary<string, string>(StringComparer.Ordinal)
-                                {
-                                    [forSpec.Variable] = iterationValue
-                                },
-                                scopedKeys,
-                                scopedValues);
-
-                            RenderSection(writer, loopBody, keys, values, appkeys, appvalues, keysforbytesrendered, bytesrendered, templateLoops, itemKeys, itemValues);
-                        }
-
-                        i = endTagEnd;
-                        continue;
+                        WriteTokenValue(writer, keySpan, scopedValues[k]);
+                        matched = true;
+                        break;
                     }
-
-                    bool matched = false;
-
-                    if (!matched && scopedKeys != null && scopedValues != null)
-                    {
-                        for (int k = 0; k < scopedKeys.Length; k++)
-                        {
-                            if (keySpan.SequenceEqual(scopedKeys[k]))
-                            {
-                                WriteTokenValue(writer, keySpan, scopedValues[k]);
-                                matched = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    // First set: page metadata
-                    if (!matched)
-                    {
-                        for (int k = 0; k < keys.Length; k++)
-                        {
-                            if (keySpan.SequenceEqual(keys[k]))
-                            {
-                                WriteTokenValue(writer, keySpan, values[k]);
-                                matched = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    // Second set: app metadata (only if not matched)
-                    if (!matched)
-                    {
-                        for (int k = 0; k < appkeys.Length; k++)
-                        {
-                            if (keySpan.SequenceEqual(appkeys[k]))
-                            {
-                                WriteTokenValue(writer, keySpan, appvalues[k]);
-                                matched = true;
-                                break;
-                            }
-                        }
-                    }
-                    // Third set - pre-rendered/encoded bytes to insert to replace a token
-                    if (!matched && keysforbytesrendered != null && bytesrendered != null)
-                    {
-                        for (int k = 0; k < keysforbytesrendered.Length; k++)
-                        {
-                            if (keySpan.SequenceEqual(keysforbytesrendered[k]))
-                            {
-                                Write(writer, bytesrendered[k]);
-                                matched = true;
-                                break;
-                            }
-                        }
-                    }
-                    // Lastly drop it if we have a {{unknown}} token
-
-                    // no replace needed make it vanish from output
-                    if (!matched)
-                    {
-                        // Do nothing, effectively removing the unknown token
-                    }
-
-                    i = j + 1;
-                    continue;
                 }
             }
 
-            Write(writer, span[i]);
+            // First set: page metadata
+            if (!matched)
+            {
+                for (int k = 0; k < keys.Length; k++)
+                {
+                    if (keySpan.SequenceEqual(keys[k]))
+                    {
+                        WriteTokenValue(writer, keySpan, values[k]);
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+
+            // Second set: app metadata (only if not matched)
+            if (!matched)
+            {
+                for (int k = 0; k < appkeys.Length; k++)
+                {
+                    if (keySpan.SequenceEqual(appkeys[k]))
+                    {
+                        WriteTokenValue(writer, keySpan, appvalues[k]);
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            // Third set - pre-rendered/encoded bytes to insert to replace a token
+            if (!matched && keysforbytesrendered != null && bytesrendered != null)
+            {
+                for (int k = 0; k < keysforbytesrendered.Length; k++)
+                {
+                    if (keySpan.SequenceEqual(keysforbytesrendered[k]))
+                    {
+                        Write(writer, bytesrendered[k]);
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+            // Lastly drop it if we have a {{unknown}} token
+
+            // no replace needed make it vanish from output
+
+            pos = tokenEnd;
         }
     }
 

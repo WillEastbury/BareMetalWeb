@@ -44,6 +44,22 @@ public static class DataLayerCapabilities
         "Direct ulong word comparison (4 × 64-bit, zero allocation)";
 
     /// <summary>
+    /// The acceleration path used by the Bloom filter bit operations in
+    /// <c>SearchIndexManager</c>. The bits are packed into <c>ulong[]</c> words
+    /// and population counts use <see cref="BitOperations.PopCount"/> which maps
+    /// to the hardware POPCNT instruction on x86 and equivalent on ARM.
+    /// </summary>
+    public static string BloomFilterPath =>
+        "ulong[] bit-packing + BitOperations.PopCount (hardware POPCNT / NEON CNT)";
+
+    /// <summary>
+    /// The acceleration path used by <c>BinaryObjectSerializer.GetSignatureHash</c>
+    /// for schema structural-change detection.
+    /// </summary>
+    public static string SchemaHashPath =>
+        "XxHash64 (hardware-accelerated on x86 via AES/SSE4 and ARM via NEON)";
+
+    /// <summary>
     /// Returns a multi-line human-readable description of all active
     /// data-layer hardware acceleration paths.
     /// </summary>
@@ -54,6 +70,8 @@ public static class DataLayerCapabilities
             $"({Vector<float>.Count} floats/iter, Vector<float> baseline)\n" +
             $"Vector distance     : {VectorDistancePath}\n" +
             $"CRC-32C             : {Crc32CPath}\n" +
-            $"Key comparison      : {KeyComparisonPath}";
+            $"Key comparison      : {KeyComparisonPath}\n" +
+            $"Bloom filter        : {BloomFilterPath}\n" +
+            $"Schema hash         : {SchemaHashPath}";
     }
 }

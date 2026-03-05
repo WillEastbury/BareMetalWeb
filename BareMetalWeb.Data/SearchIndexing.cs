@@ -5,7 +5,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-
+using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -152,11 +152,13 @@ public sealed class SearchIndexManager
         public TreapNode? Right { get; set; }
     }
     
-    // Bloom filter implementation
+    // Bloom filter implementation — bit-packed into ulong[] for POPCNT-accelerated membership tests.
     private sealed class BloomFilterData
     {
-        public BitArray Bits { get; set; }
+        /// <summary>Bit array packed into 64-bit words for POPCNT / cache efficiency.</summary>
+        public ulong[] Bits { get; set; }
         public int HashCount { get; set; }
+        /// <summary>Number of logical bits (not ulong elements).</summary>
         public int Size { get; set; }
         // We still need to store IDs for retrieval (Bloom only tells us "maybe present")
         public Dictionary<string, HashSet<uint>> TokenToIds { get; set; }
@@ -165,8 +167,33 @@ public sealed class SearchIndexManager
         {
             Size = size;
             HashCount = hashCount;
-            Bits = new BitArray(size);
+            Bits = new ulong[(size + 63) / 64];
             TokenToIds = new Dictionary<string, HashSet<uint>>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        /// <summary>Sets bit at <paramref name="bitIndex"/>.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public void SetBit(int bitIndex)
+        {
+            Bits[bitIndex >> 6] |= 1UL << (bitIndex & 63);
+        }
+
+        /// <summary>Tests bit at <paramref name="bitIndex"/>.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public bool TestBit(int bitIndex) =>
+            (Bits[bitIndex >> 6] & (1UL << (bitIndex & 63))) != 0UL;
+
+        /// <summary>
+        /// Returns the total number of set bits using hardware POPCNT
+        /// (<see cref="BitOperations.PopCount"/>) — useful for estimating
+        /// Bloom filter fill rate and false-positive probability.
+        /// </summary>
+        public int PopulationCount()
+        {
+            int count = 0;
+            foreach (ulong word in Bits)
+                count += BitOperations.PopCount(word);
+            return count;
         }
     }
 
@@ -1391,11 +1418,11 @@ public sealed class SearchIndexManager
         
         var bloom = index.BloomFilter!;
         
-        // Add to bloom filter bits
+        // Set bits using packed ulong array (POPCNT-friendly)
         for (int i = 0; i < bloom.HashCount; i++)
         {
-            var hash = ComputeBloomHash(token, i, bloom.Size);
-            bloom.Bits[hash] = true;
+            var bitIndex = ComputeBloomHash(token, i, bloom.Size);
+            bloom.SetBit(bitIndex);
         }
         
         // Store in backing dictionary for retrieval
@@ -1437,12 +1464,12 @@ public sealed class SearchIndexManager
         var bloom = index.BloomFilter;
         var results = new HashSet<uint>();
         
-        // Check if token might be in the bloom filter
+        // Check if token might be in the bloom filter using packed ulong[] bit test
         bool mightExist = true;
         for (int i = 0; i < bloom.HashCount; i++)
         {
-            var hash = ComputeBloomHash(queryToken, i, bloom.Size);
-            if (!bloom.Bits[hash])
+            var bitIndex = ComputeBloomHash(queryToken, i, bloom.Size);
+            if (!bloom.TestBit(bitIndex))
             {
                 mightExist = false;
                 break;

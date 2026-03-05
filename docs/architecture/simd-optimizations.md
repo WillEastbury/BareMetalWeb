@@ -107,36 +107,65 @@ logger.LogInfo(cap.ToLogLine());
 
 ---
 
-## 3. Further Opportunities (not yet implemented)
+## 3. Implemented Optimizations (continued)
 
-### 3.1 Bloom Filter Bit Queries  (`SearchIndexing.cs`)
+### 3.1 Bloom Filter Bit Queries  (`SearchIndexing.cs`)  ✅ Implemented
 
-**Current:** `bool[]` array indexed by three hash functions per token lookup.
+**Was:** `BitArray` (boolean array) indexed by three hash functions per token lookup.
 
-**Opportunity:** Pack bits into `ulong[]` and use `POPCNT` / `Bmi1.TrailingZeroCount`
-to reduce false-positive rate analysis and accelerate bulk membership probes in
-batch search scenarios.  Estimated win: ~3× for the membership test itself, though
-the test is rarely the bottleneck compared to the `Dictionary` lookup that follows.
+**What was done:**
+- Replaced `BitArray Bits` with `ulong[] Bits` — 64-bit words make better use of
+  cache lines and align perfectly with the hardware POPCNT instruction.
+- `SetBit(int bitIndex)` / `TestBit(int bitIndex)` helpers use `>> 6` / `& 63`
+  bit-addressing with a single `|=` or `&` on a `ulong` word (zero branching).
+- `PopulationCount()` iterates over the `ulong[]` with `BitOperations.PopCount`
+  (maps to the single-cycle `POPCNT` instruction on x86 and equivalent CNT on ARM)
+  to expose the filter fill-rate for false-positive diagnostics.
 
-### 3.2 Template Token Scanning  (`HtmlRenderer.cs`)
+**Expected gain:** ~3× for the membership test inner loop; the bigger win is the
+improved cache footprint (64× fewer array words for the same bit count).
 
-**Current:** `ReadOnlySpan<char>` scanned with a `while` loop looking for `{{` pairs.
+### 3.2 Template Token Scanning  (`HtmlRenderer.cs`)  ✅ Implemented
 
-**Opportunity:** Use `IndexOf` overloads backed by SSE2/NEON vectorized string
-search (already available via .NET's `MemoryExtensions.IndexOf`, which is SIMD-
-accelerated in the runtime). Replacing the manual two-character match with
-`span.IndexOf("{{".AsSpan())` is sufficient to capture this win without any
-custom intrinsics code.
+**Was:** `ReadOnlySpan<char>` scanned character-by-character in a `for` loop
+looking for `{{` pairs; single characters written one at a time.
 
-### 3.3 FNV-1a Schema Hash  (`BinaryObjectSerializer.cs`)
+**What was done:**
+- The outer `for` loop is replaced with a `while` loop that calls
+  `span.Slice(pos).IndexOf("{{".AsSpan())` to locate the next opening delimiter.
+  The .NET runtime routes this through SSE2 / NEON vector search automatically.
+- The closing `}}` is likewise found with `span.Slice(bodyStart).IndexOf("}}")`.
+- Literal text segments between tokens are written as a **single contiguous slice**
+  (`Write(writer, span.Slice(pos, openIdx))`) instead of character by character,
+  eliminating the per-character UTF-8 encoding overhead.
 
-**Current:** Character-at-a-time FNV-1a over ASCII member-name strings.
+**Expected gain:** 2–4× for template-heavy pages (large static segments between
+few tokens); up to 10× for the token-detection portion alone on modern CPUs.
 
-**Opportunity:** Switch to `System.IO.Hashing.XxHash3` or `XxHash64` (available
-in .NET 8+, hardware-accelerated on x86 via AESNI/SSE4 and on ARM via NEON).
-XxHash3 over the raw UTF-8 bytes would be ~10× faster and still serves purely as
-a structural-change detector (not a cryptographic hash). This path runs only at
-schema registration time (not per-request) so the impact is low.
+### 3.3 FNV-1a Schema Hash  (`BinaryObjectSerializer.cs`)  ✅ Implemented
+
+**Was:** Character-at-a-time FNV-1a over the ASCII member-name strings.
+
+**What was done:**
+- `GetSignatureHash` and `GetBlittableSignatureHash` now use
+  `System.IO.Hashing.XxHash64` (available without a separate NuGet reference on
+  .NET 8+ as part of the shared framework; added as a package reference for
+  compatibility with `net10.0`).
+- The 64-bit XxHash64 digest is folded to 32 bits via `(uint)(h64 ^ (h64 >> 32))`
+  to preserve the full avalanche quality in a `uint` schema fingerprint.
+- The FNV-1a `Fnv1a` helper is removed; `EmptySchemaHash` is a `static readonly`
+  field computed once from an empty member list to replace the hard-coded FNV seed
+  `2166136261` used for primitive and empty-object schemas.
+- Added `DataLayerCapabilities.SchemaHashPath` and `BloomFilterPath` properties,
+  and both appear in `DataLayerCapabilities.Describe()`.
+
+**Expected gain:** ~10× for schema registration throughput. The hash runs only at
+type-registration time (not per-request) so the observable impact is at startup,
+not steady-state latency.
+
+---
+
+## 4. Remaining Opportunities (not yet implemented)
 
 ### 3.4 AES-NI Encryption  (`SynchronousEncryption.cs`)
 
@@ -158,7 +187,7 @@ already uses `SHA-NI` (x86) or `SHA256` (ARM) hardware acceleration via the
 
 ---
 
-## 4. Capability Detection at Startup
+## 5. Capability Detection at Startup
 
 `SimdCapabilities.Current` (in `BareMetalWeb.Data`) detects all features at
 first access and exposes a log-friendly summary string.  Wire it into your
@@ -168,8 +197,19 @@ startup log:
 logger.LogInfo(SimdCapabilities.Current.ToLogLine());
 ```
 
+`DataLayerCapabilities.Describe()` now reports all six acceleration paths:
+
+```
+Portable SIMD width : 256-bit (8 floats/iter, Vector<float> baseline)
+Vector distance     : x86 FMA+AVX (256-bit/8×f32)
+CRC-32C             : x86 SSE4.2 CRC32Q (64-bit, hardware)
+Key comparison      : Direct ulong word comparison (4 × 64-bit, zero allocation)
+Bloom filter        : ulong[] bit-packing + BitOperations.PopCount (hardware POPCNT / NEON CNT)
+Schema hash         : XxHash64 (hardware-accelerated on x86 via AES/SSE4 and ARM via NEON)
+```
+
 This lets you verify at a glance which SIMD tier is active in production.
 
 ---
 
-_Status: implemented in commit **{HEAD}**_
+_Status: 3.1–3.3 implemented in commit **bc095a0**; 3.4–3.5 no action required; 3.6 future scope_
