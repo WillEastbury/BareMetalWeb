@@ -86,6 +86,8 @@ public class BareMetalWebServer : IBareWebHost
     private readonly Dictionary<string, CompiledRoute> _compiledRoutes = new(StringComparer.Ordinal);
     private List<(string Key, RouteHandlerData Data, CompiledRoute Compiled)>? _sortedRoutes;
     private int _sortedRoutesVersion = -1;
+    private readonly RouteJumpTable _jumpTable = new();
+    private int _jumpTableVersion = -1;
     public BareMetalWebServer(
         string appName,
         string companyDescription,
@@ -321,8 +323,20 @@ public class BareMetalWebServer : IBareWebHost
         }
         return _sortedRoutes;
     }
+
+    /// <summary>Ensures the jump table is rebuilt when routes change.</summary>
+    private void EnsureJumpTable()
+    {
+        if (_jumpTableVersion != _routesVersion)
+        {
+            _jumpTable.Build(routes, _compiledRoutes, BufferedLogger);
+            _jumpTableVersion = _routesVersion;
+        }
+    }
     public Task WireUpRequestHandlingAndLoggerAsyncLifetime()
     {
+        // Build the jump table for O(1) exact-match route dispatch
+        EnsureJumpTable();
         // Single terminal request handler. We deliberately do not use routing, MVC, or minimal APIs. All requests are handled explicitly by RequestHandler.
         app.Use(async (HttpContext context, RequestDelegate _) => await RequestHandler(context));
         // Start everything (logging, request handling etc)
@@ -341,11 +355,13 @@ public class BareMetalWebServer : IBareWebHost
     public async Task RequestHandler(HttpContext context)
     {
         var stopwatch = Stopwatch.StartNew();
-        // Kestrel normalises HTTP methods to uppercase; avoid the extra allocation from ToUpperInvariant().
-        string method = context.Request.Method;
-        string requestPath = context.Request.Path.Value ?? "/";
-        string path = method + " " + requestPath;
-        string sourceIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        // ── Create BmwContext: resolve features once per request ─────────
+        var bmwCtx = BmwContext.CreateFrom(context, this);
+        string method = bmwCtx.Request.Method;
+        string requestPath = bmwCtx.Request.Path;
+        string routeKey = bmwCtx.Request.RouteKey;
+        string sourceIp = bmwCtx.SourceIp;
         context.SetApp(this);
 
         // ── Multitenancy: resolve tenant from Host header ─────────────────────
@@ -362,7 +378,7 @@ public class BareMetalWebServer : IBareWebHost
             var httpsUrl = BuildHttpsRedirectUrl(context, TrustForwardedHeaders, HttpsRedirectHost, HttpsRedirectPort);
             context.Response.StatusCode = StatusCodes.Status301MovedPermanently;
             context.Response.Headers.Location = httpsUrl;
-            BufferedLogger.LogInfo($"{path}|301|{sourceIp}|redirect={httpsUrl}|mode={HttpsRedirectMode}|httpsAvailable={HttpsEndpointAvailable}|trustForwarded={TrustForwardedHeaders}|host={context.Request.Host}");
+            BufferedLogger.LogInfo($"{routeKey}|301|{sourceIp}|redirect={httpsUrl}|mode={HttpsRedirectMode}|httpsAvailable={HttpsEndpointAvailable}|trustForwarded={TrustForwardedHeaders}|host={context.Request.Host}");
             return;
         }
         ApplySecurityHeaders(context, isHttps);
@@ -388,7 +404,7 @@ public class BareMetalWebServer : IBareWebHost
                 ? $"Too many Requests. Retry after {retryAfterSeconds.Value}s."
                 : "Too many Requests.";
             await context.Response.WriteAsync(retryText);
-            BufferedLogger.LogInfo($"{path}|429|{sourceIp}|{throttleReason}");
+            BufferedLogger.LogInfo($"{routeKey}|429|{sourceIp}|{throttleReason}");
             stopwatch.Stop();
             Metrics.RecordThrottled(stopwatch.Elapsed);
             return;
@@ -399,25 +415,25 @@ public class BareMetalWebServer : IBareWebHost
             {
                 context.Response.StatusCode = StatusCodes.Status302Found;
                 context.Response.Headers.Location = "/setup";
-                BufferedLogger.LogInfo($"{path}|302|{sourceIp}|setup=required");
+                BufferedLogger.LogInfo($"{routeKey}|302|{sourceIp}|setup=required");
                 return;
             }
 
             if (await JsBundleService.TryServeAsync(context))
             {
-                BufferedLogger.LogInfo($"{path}|{context.Response.StatusCode}|{sourceIp}|bundle");
+                BufferedLogger.LogInfo($"{routeKey}|{context.Response.StatusCode}|{sourceIp}|bundle");
                 return;
             }
 
             if (await CssBundleService.TryServeAsync(context))
             {
-                BufferedLogger.LogInfo($"{path}|{context.Response.StatusCode}|{sourceIp}|css-bundle");
+                BufferedLogger.LogInfo($"{routeKey}|{context.Response.StatusCode}|{sourceIp}|css-bundle");
                 return;
             }
 
             if (await StaticFileService.TryServeAsync(context, StaticFiles))
             {
-                BufferedLogger.LogInfo($"{path}|{context.Response.StatusCode}|{sourceIp}|static");
+                BufferedLogger.LogInfo($"{routeKey}|{context.Response.StatusCode}|{sourceIp}|static");
                 return;
             }
 
@@ -425,10 +441,10 @@ public class BareMetalWebServer : IBareWebHost
             // not for static assets (bundles, files) served above.
             await BuildAppInfoMenuOptionsAsync(context, context.RequestAborted).ConfigureAwait(false);
 
-            // (simplistic routing and parameter service) - Exact match first
-            if (routes.TryGetValue(path, out RouteHandlerData page))
+            // ── Jump table: O(1) exact-match dispatch ───────────────────────
+            EnsureJumpTable();
+            if (_jumpTable.TryLookup(routeKey, out RouteHandlerData page))
             {
-                // exact match found - no params needed.
                 if (page.PageInfo != null)
                 {
                     context.SetPageInfo(page.PageInfo);
@@ -436,14 +452,15 @@ public class BareMetalWebServer : IBareWebHost
                 if (!await IsAuthorizedAsync(page.PageInfo, context, context.RequestAborted).ConfigureAwait(false))
                 {
                     await RenderForbidden(context);
-                    await LogAccessDeniedAsync(path, sourceIp, context, page.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                    await LogAccessDeniedAsync(routeKey, sourceIp, context, page.PageInfo, context.RequestAborted).ConfigureAwait(false);
                     return;
                 }
                 await page.Handler(context);
-                BufferedLogger.LogInfo($"{path}|200|{sourceIp}");
+                BufferedLogger.LogInfo($"{routeKey}|200|{sourceIp}");
                 return;
             }
-            if (routes.TryGetValue($"ALL {requestPath}", out RouteHandlerData allPage))
+            // Jump table also handles "ALL" verb routes
+            if (_jumpTable.TryLookup(string.Concat("ALL ", requestPath), out RouteHandlerData allPage))
             {
                 if (allPage.PageInfo != null)
                 {
@@ -452,11 +469,11 @@ public class BareMetalWebServer : IBareWebHost
                 if (!await IsAuthorizedAsync(allPage.PageInfo, context, context.RequestAborted).ConfigureAwait(false))
                 {
                     await RenderForbidden(context);
-                    await LogAccessDeniedAsync(path, sourceIp, context, allPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                    await LogAccessDeniedAsync(routeKey, sourceIp, context, allPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                     return;
                 }
                 await allPage.Handler(context);
-                BufferedLogger.LogInfo($"{path}|ALL {requestPath}|200|{sourceIp}");
+                BufferedLogger.LogInfo($"{routeKey}|ALL {requestPath}|200|{sourceIp}");
                 return;
             }
             // Pattern match fallback — iterate most-specific routes first so that literal
@@ -481,7 +498,7 @@ public class BareMetalWebServer : IBareWebHost
                     if (!await IsAuthorizedAsync(injectedPage.PageInfo, context, context.RequestAborted).ConfigureAwait(false))
                     {
                         await RenderForbidden(context);
-                        await LogAccessDeniedAsync(path, sourceIp, context, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                        await LogAccessDeniedAsync(routeKey, sourceIp, context, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                         return;
                     }
                     await injectedPage.Handler(context);
@@ -489,7 +506,7 @@ public class BareMetalWebServer : IBareWebHost
                     int paramIdx = 0;
                     foreach (var p in parameters)
                         paramParts[paramIdx++] = $"{p.Key}={p.Value}";
-                    BufferedLogger.LogInfo($"{path}|{method}|{compiled.Verb}|{string.Join(", ", paramParts)}|200|{sourceIp}");
+                    BufferedLogger.LogInfo($"{routeKey}|{method}|{compiled.Verb}|{string.Join(", ", paramParts)}|200|{sourceIp}");
                     return;
                 }
             }
@@ -513,7 +530,7 @@ public class BareMetalWebServer : IBareWebHost
                     if (!await IsAuthorizedAsync(injectedPage.PageInfo, context, context.RequestAborted).ConfigureAwait(false))
                     {
                         await RenderForbidden(context);
-                        await LogAccessDeniedAsync(path, sourceIp, context, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                        await LogAccessDeniedAsync(routeKey, sourceIp, context, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                         return;
                     }
                     await injectedPage.Handler(context);
@@ -521,7 +538,7 @@ public class BareMetalWebServer : IBareWebHost
                     int paramIdx2 = 0;
                     foreach (var p in parameters)
                         paramParts2[paramIdx2++] = $"{p.Key}={p.Value}";
-                    BufferedLogger.LogInfo($"{path}|{method}|{compiled.Verb}|{string.Join(", ", paramParts2)}|200|{sourceIp}");
+                    BufferedLogger.LogInfo($"{routeKey}|{method}|{compiled.Verb}|{string.Join(", ", paramParts2)}|200|{sourceIp}");
                     return;
                 }
             }
@@ -530,21 +547,21 @@ public class BareMetalWebServer : IBareWebHost
                 context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
                 context.SetPageInfo(ErrorPageInfo);
                 await HtmlRenderer.RenderPage(context);
-                BufferedLogger.LogInfo($"{path}|405|{sourceIp}");
+                BufferedLogger.LogInfo($"{routeKey}|405|{sourceIp}");
                 return;
             }
             context.SetPageInfo(NotFoundPageInfo);
             await HtmlRenderer.RenderPage(context); // Still nothing? 404
-            BufferedLogger.LogInfo($"{path}|404|{sourceIp}");
+            BufferedLogger.LogInfo($"{routeKey}|404|{sourceIp}");
         }
         catch (OperationCanceledException oce)
         {
-            BufferedLogger.LogInfo($"Client disconnected:{path}|{oce.Message}|{sourceIp}");
+            BufferedLogger.LogInfo($"Client disconnected:{routeKey}|{oce.Message}|{sourceIp}");
         }
         catch (Exception ex)
         {
             var errorId = Guid.NewGuid().ToString("N");
-            BufferedLogger.LogError($"Exception: {path} | {sourceIp} | ErrorId={errorId}", ex);
+            BufferedLogger.LogError($"Exception: {routeKey} | {sourceIp} | ErrorId={errorId}", ex);
             if (context.Response.HasStarted)
             {
                 context.Abort();
@@ -564,7 +581,7 @@ public class BareMetalWebServer : IBareWebHost
                 context.SetStringValue("html_message", $"<p>An unexpected error occurred.</p><p>Error ID: <code>{errorId}</code></p>");
                 await HtmlRenderer.RenderPage(context); // Render error page
             }
-            BufferedLogger.LogInfo($"{path}|500|{sourceIp}");
+            BufferedLogger.LogInfo($"{routeKey}|500|{sourceIp}");
         }
         finally
         {
