@@ -177,6 +177,39 @@ sequenceDiagram
 | `GET /api/_lookup/{slug}` | High-cardinality lookup search |
 | `GET /api/metadata/{entity}` | Enhanced per-entity metadata (viewType, parentField, commands) |
 
+### VNext Entity View Types
+
+Each entity can declare a `ViewType` (via `[DataViewType]` attribute) that changes how the list is rendered in the SPA.  Additional view types may be available as optional overlays (toggled via the view-switcher toolbar) when `canShow*` flags are set on the entity metadata.
+
+| ViewType | `canShow*` flag | Trigger condition | Description |
+|----------|----------------|-------------------|-------------|
+| `Table` | — | default | Paginated sortable/filterable table |
+| `TreeView` | — | `[DataViewType(ViewType.TreeView)]` + `parentField` | Nested expandable tree |
+| `OrgChart` | — | `[DataViewType(ViewType.OrgChart)]` + `parentField` | Hierarchy org-chart boxes |
+| `Timeline` | `canShowTimeline` | entity has a date range (start + end date fields) | Gantt-style horizontal timeline |
+| `Timetable` | `canShowTimetable` | entity has a `DayOfWeek` field + time field | Weekly schedule grid |
+| `Sankey` | `canShowSankey` | entity has a self-referential FK (document chain) | Sankey flow diagram |
+| `Calendar` | `canShowCalendar` | entity has any `DateOnly` or `DateTime` field | **Calendar view — day / week / month** (see below) |
+| `Workflow` | `canShowWorkflow` | entity has an `Enum` field | Kanban board grouped by enum stage |
+| `Aggregation` | always available | — | Drill-through aggregation tree |
+| `Chart` | always available | — | Bar/line/pie charts for numeric fields |
+
+#### Calendar View (day / week / month)
+
+The calendar view (`ViewType.Calendar` or the `view=Calendar` URL parameter) renders entity records as calendar events pinned to their date field.
+
+**Sub-views** — selected via the `calMode` URL parameter:
+
+| `calMode` | Description | Navigation params |
+|-----------|-------------|-------------------|
+| `month` (default) | Monthly grid, one cell per day | `calYear`, `calMonth` (0-based) |
+| `week` | 7-column week grid | `calWeekStart` (YYYY-MM-DD of the Sunday) |
+| `day` | Single-day detail card | `calDay` (YYYY-MM-DD) |
+
+**Click to create** — each day cell shows a `+` button (visible on hover) that navigates to `/{slug}/create?{dateField}={YYYY-MM-DD}`, pre-filling the date field on the new-record form.
+
+**Drag to move** — event badges are `draggable="true"`.  Dropping an event onto a different day cell calls `PUT /api/{type}/{id}` with the new date value, then refreshes the view.
+
 ---
 
 ## Report Rendering
