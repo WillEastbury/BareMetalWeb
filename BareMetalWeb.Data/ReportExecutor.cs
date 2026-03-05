@@ -88,7 +88,7 @@ public sealed class ReportExecutor
         // Load root entity rows with pushed-down filters
         plan.PushedFilters.TryGetValue(rootSlug, out var rootPushedFilter);
         var rootRowsRaw = await rootMeta.Handlers.QueryAsync(rootPushedFilter, cancellationToken);
-        var rootRows = new List<BaseDataObject>();
+        using var rootRows = new BmwValueList<BaseDataObject>(64);
         foreach (var r in rootRowsRaw)
         {
             if (rootRows.Count >= MaxEntityLoadSize) break;
@@ -117,7 +117,7 @@ public sealed class ReportExecutor
             // Load join entity rows with pushed-down filters
             plan.PushedFilters.TryGetValue(join.ToEntity, out var joinPushedFilter);
             var joinRowsRaw = await joinMeta.Handlers.QueryAsync(joinPushedFilter, cancellationToken);
-            var joinRows = new List<BaseDataObject>();
+            using var joinRows = new BmwValueList<BaseDataObject>(64);
             foreach (var r in joinRowsRaw)
             {
                 if (joinRows.Count >= MaxEntityLoadSize) break;
@@ -451,7 +451,7 @@ public sealed class ReportExecutor
         IReadOnlyList<ReportColumn> columns)
     {
         // Group-by columns are those without an aggregate function
-        var groupByList = new List<int>(columns.Count);
+        using var groupByList = new BmwValueList<int>(columns.Count);
         for (int i = 0; i < columns.Count; i++)
         {
             if (columns[i].Aggregate == AggregateFunction.None)
@@ -459,7 +459,7 @@ public sealed class ReportExecutor
         }
         var groupByIndices = groupByList.ToArray();
 
-        var aggList = new List<(ReportColumn c, int i)>(columns.Count);
+        using var aggList = new BmwValueList<(ReportColumn c, int i)>(columns.Count);
         for (int i = 0; i < columns.Count; i++)
         {
             if (columns[i].Aggregate != AggregateFunction.None)

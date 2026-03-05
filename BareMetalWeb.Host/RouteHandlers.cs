@@ -972,7 +972,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             ctx.SetStringValue("title", "Users");
 
-            var rows = new List<string[]>();
+            using var rows = new BmwValueList<string[]>(16);
             var users = await DataStoreProvider.Current.QueryAsync<User>(new QueryDefinition()).ConfigureAwait(false);
             foreach (var user in users)
             {
@@ -2089,11 +2089,13 @@ public sealed class RouteHandlers : IRouteHandlers
                 break;
             case ExportFormat.SimpleCSV:
             default:
+            {
                 // Fall back to simple CSV (entity fields only, no nested)
                 var viewRows1 = DataScaffold.BuildViewRows(meta, instance);
-                var rows = new string[viewRows1.Count][];
-                for (int ri = 0; ri < viewRows1.Count; ri++)
-                    rows[ri] = new[] { viewRows1[ri].Label, viewRows1[ri].Value };
+                using var rowsList1 = new BmwValueList<string[]>(viewRows1.Count);
+                foreach (var row in viewRows1)
+                    rowsList1.Add(new[] { row.Label, row.Value });
+                var rows = rowsList1.ToArray();
                 if (instance is BaseDataObject dataObject)
                 {
                     var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
@@ -2106,6 +2108,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 var csv = BuildCsv(headers, rows);
                 await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_{WebUtility.UrlEncode(id)}.csv");
                 break;
+            }
         }
     }
 
@@ -2136,9 +2139,10 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var viewRowsRtf = DataScaffold.BuildViewRows(meta, instance);
-        var rows = new string[viewRowsRtf.Count][];
-        for (int ri = 0; ri < viewRowsRtf.Count; ri++)
-            rows[ri] = new[] { viewRowsRtf[ri].Label, viewRowsRtf[ri].Value };
+        using var rowsListRtf = new BmwValueList<string[]>(viewRowsRtf.Count);
+        foreach (var row in viewRowsRtf)
+            rowsListRtf.Add(new[] { row.Label, row.Value });
+        var rows = rowsListRtf.ToArray();
         if (instance is BaseDataObject dataObject)
         {
             var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
@@ -2179,9 +2183,10 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var viewRowsHtml2 = DataScaffold.BuildViewRows(meta, instance);
-        var rows = new string[viewRowsHtml2.Count][];
-        for (int ri = 0; ri < viewRowsHtml2.Count; ri++)
-            rows[ri] = new[] { viewRowsHtml2[ri].Label, viewRowsHtml2[ri].Value };
+        using var rowsListHtml2 = new BmwValueList<string[]>(viewRowsHtml2.Count);
+        foreach (var row in viewRowsHtml2)
+            rowsListHtml2.Add(new[] { row.Label, row.Value });
+        var rows = rowsListHtml2.ToArray();
         if (instance is BaseDataObject dataObject)
         {
             var recordId = DataScaffold.GetIdValue(dataObject) ?? string.Empty;
@@ -2955,7 +2960,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         // Parse IDs with span-based iteration to avoid string[] allocation
-        var parsedIds = new List<uint>();
+        using var parsedIds = new BmwValueList<uint>(8);
         var idsRemaining = idsParam.AsSpan();
         while (idsRemaining.Length > 0)
         {
@@ -2977,9 +2982,9 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // Load the selected items
         var items = new List<object>();
-        foreach (var id in parsedIds)
+        for (int i = 0; i < parsedIds.Count; i++)
         {
-            var item = await DataScaffold.LoadAsync(meta, id);
+            var item = await DataScaffold.LoadAsync(meta, parsedIds[i]);
             if (item != null)
                 items.Add(item);
         }
@@ -3296,7 +3301,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 return;
             }
 
-            var payloadList = new List<Dictionary<string, object?>>();
+            using var payloadList = new BmwValueList<Dictionary<string, object?>>(32);
             foreach (var item in results)
                 payloadList.Add(BuildApiModel(meta, (object)item));
             var payload = payloadList.ToArray();
@@ -3322,7 +3327,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var allPayloadList = new List<Dictionary<string, object?>>();
+        using var allPayloadList = new BmwValueList<Dictionary<string, object?>>(32);
         foreach (var item in allResults)
             allPayloadList.Add(BuildApiModel(meta, (object)item));
         var allPayload = allPayloadList.ToArray();
@@ -5137,8 +5142,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     internal static Dictionary<string, object?> BuildApiModel(DataEntityMetadata meta, object instance)
     {
-        var data = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        var id = instance is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) : null;
+        var data = new Dictionary<string, object?>(meta.ViewFields.Length + 1, StringComparer.OrdinalIgnoreCase);
         if (!string.IsNullOrWhiteSpace(id))
             data["id"] = id;
 
@@ -5827,7 +5831,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string[][] BuildListPlainRows(DataEntityMetadata metadata, IEnumerable items)
     {
         var rows = DataScaffold.BuildListRows(metadata, items, string.Empty, includeActions: false);
-        var result = new List<string[]>();
+        using var result = new BmwValueList<string[]>(16);
         foreach (var row in rows)
         {
             var cleanRow = new string[row.Length];
