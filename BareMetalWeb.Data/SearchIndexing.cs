@@ -93,7 +93,7 @@ public sealed class DataIndexAttribute : Attribute
     }
 }
 
-internal sealed class SearchIndexManager
+public sealed class SearchIndexManager
 {
     // Cache reflection metadata per type to avoid repeated GetProperties calls
     private sealed class TypeMetadata
