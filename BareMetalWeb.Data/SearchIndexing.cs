@@ -153,51 +153,8 @@ public sealed class SearchIndexManager
     }
     
     // Bloom filter implementation — bit-packed into ulong[] for POPCNT-accelerated membership tests.
-    private sealed class BloomFilterData
-    {
-        /// <summary>Bit array packed into 64-bit words for POPCNT / cache efficiency.</summary>
-        public ulong[] Bits { get; set; }
-        public int HashCount { get; set; }
-        /// <summary>Number of logical bits (not ulong elements).</summary>
-        public int Size { get; set; }
-        // We still need to store IDs for retrieval (Bloom only tells us "maybe present")
-        public Dictionary<string, HashSet<uint>> TokenToIds { get; set; }
-        
-        public BloomFilterData(int size = 10000, int hashCount = 3)
-        {
-            Size = size;
-            HashCount = hashCount;
-            Bits = new ulong[(size + 63) / 64];
-            TokenToIds = new Dictionary<string, HashSet<uint>>(StringComparer.OrdinalIgnoreCase);
-        }
-
-        /// <summary>Sets bit at <paramref name="bitIndex"/>.</summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public void SetBit(int bitIndex)
-        {
-            Bits[bitIndex >> 6] |= 1UL << (bitIndex & 63);
-        }
-
-        /// <summary>Tests bit at <paramref name="bitIndex"/>.</summary>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public bool TestBit(int bitIndex) =>
-            (Bits[bitIndex >> 6] & (1UL << (bitIndex & 63))) != 0UL;
-
-        /// <summary>
-        /// Returns the total number of set bits using hardware POPCNT
-        /// (<see cref="BitOperations.PopCount"/>) — useful for estimating
-        /// Bloom filter fill rate and false-positive probability.
-        /// </summary>
-        public int PopulationCount()
-        {
-            int count = 0;
-            foreach (ulong word in Bits)
-                count += BitOperations.PopCount(word);
-            return count;
-        }
-    }
-
-    /// <summary>
+    // Class is intentionally internal (not private-nested) so the .Data.Tests assembly can unit-test
+    // the MightContain and PopulationCount paths directly via InternalsVisibleTo.
     /// Graph index data: adjacency lists for efficient relationship traversal.
     /// Each node (uint ID) maps to a set of typed edges (target ID + edge type).
     /// </summary>
@@ -1463,18 +1420,14 @@ public sealed class SearchIndexManager
 
         var bloom = index.BloomFilter;
         var results = new HashSet<uint>(8);
-        
-        // Check if token might be in the bloom filter using packed ulong[] bit test
-        bool mightExist = true;
+
+        // Pre-compute all hash bit indices on the stack, then test them with a
+        // 4-wide unrolled word scan (MightContain) for ILP and cache streaming.
+        Span<int> bitIndices = stackalloc int[bloom.HashCount];
         for (int i = 0; i < bloom.HashCount; i++)
-        {
-            var bitIndex = ComputeBloomHash(queryToken, i, bloom.Size);
-            if (!bloom.TestBit(bitIndex))
-            {
-                mightExist = false;
-                break;
-            }
-        }
+            bitIndices[i] = ComputeBloomHash(queryToken, i, bloom.Size);
+
+        bool mightExist = bloom.MightContain(bitIndices);
         
         if (mightExist)
         {
@@ -1676,5 +1629,113 @@ public sealed class SearchIndexManager
             if (index.SpatialIndex == null) return Array.Empty<(uint, double)>();
             return index.SpatialIndex.SearchNearest(centerLat, centerLng, count);
         }
+    }
+}
+
+/// <summary>
+/// Bloom filter bit array — bit-packed into <c>ulong[]</c> words for POPCNT-accelerated
+/// membership tests and ILP-friendly 4-wide word scanning.
+/// Internal so the <c>BareMetalWeb.Data.Tests</c> assembly can unit-test the
+/// <see cref="MightContain"/> and <see cref="PopulationCount"/> paths directly.
+/// </summary>
+internal sealed class BloomFilterData
+{
+    /// <summary>Bit array packed into 64-bit words for POPCNT / cache efficiency.</summary>
+    public ulong[] Bits { get; set; }
+    public int HashCount { get; set; }
+    /// <summary>Number of logical bits (not ulong elements).</summary>
+    public int Size { get; set; }
+    // We still need to store IDs for retrieval (Bloom only tells us "maybe present")
+    public Dictionary<string, HashSet<uint>> TokenToIds { get; set; }
+
+    public BloomFilterData(int size = 10000, int hashCount = 3)
+    {
+        Size = size;
+        HashCount = hashCount;
+        Bits = new ulong[(size + 63) / 64];
+        TokenToIds = new Dictionary<string, HashSet<uint>>(StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Sets bit at <paramref name="bitIndex"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void SetBit(int bitIndex)
+    {
+        Bits[bitIndex >> 6] |= 1UL << (bitIndex & 63);
+    }
+
+    /// <summary>Tests bit at <paramref name="bitIndex"/>.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool TestBit(int bitIndex) =>
+        (Bits[bitIndex >> 6] & (1UL << (bitIndex & 63))) != 0UL;
+
+    /// <summary>
+    /// Tests whether all bit positions in <paramref name="bitIndices"/> are set,
+    /// using a 4-wide unrolled loop for improved instruction-level parallelism
+    /// and cache streaming. Returns <see langword="true"/> if every bit is set
+    /// ("might contain"); returns <see langword="false"/> as soon as any bit is clear.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public bool MightContain(ReadOnlySpan<int> bitIndices)
+    {
+        var bits = Bits;
+        int n = bitIndices.Length;
+        int i = 0;
+
+        // 4-wide unrolled: four independent loads let the CPU issue them in parallel.
+        for (; i <= n - 4; i += 4)
+        {
+            ulong w0 = bits[bitIndices[i]     >> 6];
+            ulong w1 = bits[bitIndices[i + 1] >> 6];
+            ulong w2 = bits[bitIndices[i + 2] >> 6];
+            ulong w3 = bits[bitIndices[i + 3] >> 6];
+
+            ulong m0 = 1UL << (bitIndices[i]     & 63);
+            ulong m1 = 1UL << (bitIndices[i + 1] & 63);
+            ulong m2 = 1UL << (bitIndices[i + 2] & 63);
+            ulong m3 = 1UL << (bitIndices[i + 3] & 63);
+
+            if ((w0 & m0) == 0UL || (w1 & m1) == 0UL || (w2 & m2) == 0UL || (w3 & m3) == 0UL)
+                return false;
+        }
+
+        // Scalar tail for remaining indices.
+        for (; i < n; i++)
+        {
+            if ((bits[bitIndices[i] >> 6] & (1UL << (bitIndices[i] & 63))) == 0UL)
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Returns the total number of set bits using hardware POPCNT
+    /// (<see cref="BitOperations.PopCount"/>) — useful for estimating
+    /// Bloom filter fill rate and false-positive probability.
+    /// Uses a 4-wide unrolled loop for improved instruction-level parallelism.
+    /// </summary>
+    public int PopulationCount()
+    {
+        var bits = Bits;
+        int len = bits.Length;
+        int count = 0;
+        int i = 0;
+
+        // 4-wide unrolled loop — four independent POPCNT instructions per iteration.
+        for (; i <= len - 4; i += 4)
+        {
+            ulong w0 = bits[i];
+            ulong w1 = bits[i + 1];
+            ulong w2 = bits[i + 2];
+            ulong w3 = bits[i + 3];
+            count += BitOperations.PopCount(w0) + BitOperations.PopCount(w1)
+                   + BitOperations.PopCount(w2) + BitOperations.PopCount(w3);
+        }
+
+        // Scalar tail.
+        for (; i < len; i++)
+            count += BitOperations.PopCount(bits[i]);
+
+        return count;
     }
 }
