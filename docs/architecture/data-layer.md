@@ -289,21 +289,45 @@ Sequential IDs are persisted so they survive restarts:
 
 ---
 
-## WAL Segment Integrity: CRC32C Hardware Acceleration
+## Hardware Acceleration in the Data Layer
 
-Each WAL segment entry includes a CRC32C checksum computed by `WalCrc32C`.  The
-implementation selects the fastest available hardware code path at runtime:
+BareMetalWeb uses CPU-specific SIMD intrinsics in several hot paths.  All paths
+are guarded by `IsSupported` checks and fall back gracefully to portable code.
+The `DataLayerCapabilities` class exposes the active code paths as human-readable
+strings for the metrics dashboard.
 
-| CPU feature | Code path | Performance |
+### CRC-32C (WAL checksums) — `WalCrc32C`
+
+Each WAL segment entry includes a CRC-32C checksum.  The implementation selects
+the fastest available hardware path at runtime:
+
+| CPU feature | Code path | Granularity |
 |---|---|---|
-| x86-64 SSE4.2 | `Sse42.X64.Crc32` — 8-byte lanes | Fastest on x86 |
-| x86 SSE4.2 | `Sse42.Crc32` — 4-byte lanes | Compatible fallback |
-| ARM CRC (AArch64) | `Crc32.Arm.ComputeCrc32C` | ARM64 native |
-| Portable | Software lookup-table | Any platform |
+| ARM64 CRC | `Crc32.Arm64.ComputeCrc32C` | 8-byte lanes |
+| x86-64 SSE4.2 | `Sse42.X64.Crc32` | 8-byte lanes |
+| x86 SSE4.2 | `Sse42.Crc32` | 4-byte lanes |
+| Portable | Slicing-by-4 lookup tables (~4× byte-at-a-time) | 4-byte lanes |
 
-This is the **only** place in BareMetalWeb that uses CPU-specific SIMD intrinsics
-(`System.Runtime.Intrinsics.X86` / `System.Runtime.Intrinsics.Arm`).
+### Vector Distance (ANN search) — `SimdDistance`
+
+Cosine, dot-product, and Euclidean distance computations dispatch to the widest
+available SIMD instruction set.  All paths use fused multiply-add (FMA) where
+available to reduce rounding error and improve throughput:
+
+| CPU feature | Code path | Width |
+|---|---|---|
+| AVX-512F | `Avx512F.FusedMultiplyAdd` | 16 floats/iter |
+| AVX2 + FMA | `Fma.MultiplyAdd` | 8 floats/iter |
+| ARM64 AdvSimd | `AdvSimd.FusedMultiplyAdd` (NEON) | 4 floats/iter |
+| Portable | `System.Numerics.Vector<float>` (auto-vectorised by JIT) | platform width |
+
+### Key Comparison — `WalLatin1Key32.CompareTo`
+
+The 32-byte Latin-1 index key is stored internally as four `ulong` words.
+`CompareTo` byte-swaps each word with `BinaryPrimitives.ReverseEndianness` and
+compares the resulting big-endian values directly — a zero-allocation,
+branch-minimal comparison that avoids the prior stackalloc + `SequenceCompareTo`.
 
 ---
 
-_Status: Updated @ commit HEAD (2026-03-05) — added WAL CRC32C hardware acceleration section; fixed storage layout_
+_Status: Updated @ commit HEAD (2026-03-05) — extended hardware acceleration section with SimdDistance FMA paths, WalLatin1Key32 word comparison, CRC slicing-by-4 software fallback_
