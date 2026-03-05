@@ -61,7 +61,6 @@ public class LookupApiHandlerTests : IDisposable
     private readonly MockMetricsTracker _metrics;
     private readonly MockClientRequestTracker _clientRequests;
     private readonly CancellationTokenSource _cts;
-    private readonly WebApplication _app;
     private readonly string _keyRootDirectory;
     private readonly string _testSessionId;
 
@@ -111,11 +110,10 @@ public class LookupApiHandlerTests : IDisposable
         _metrics = new MockMetricsTracker();
         _clientRequests = new MockClientRequestTracker();
         _cts = new CancellationTokenSource();
-        _app = WebApplication.Create();
 
         var pageInfo = CreatePageInfo("Test");
         _server = new BareMetalWebServer(
-            "Test", "Test", "2025", _app, _logger, _renderer,
+            "Test", "Test", "2025", BmwConfig.Load("/tmp"), "/tmp", _logger, _renderer,
             pageInfo, pageInfo, _cts, _metrics, _clientRequests
         );
 
@@ -137,7 +135,6 @@ public class LookupApiHandlerTests : IDisposable
     {
         DataStoreProvider.Current = _originalStore;
         _cts.Cancel();
-        (_app as IDisposable)?.Dispose();
         try { Directory.Delete(_keyRootDirectory, true); } catch { }
     }
 

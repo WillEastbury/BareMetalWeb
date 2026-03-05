@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
@@ -11,9 +12,12 @@ using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Interfaces;
 using BareMetalWeb.Rendering.Models;
 
-var builder = WebApplication.CreateBuilder();
-ProgramSetup.ConfigureKestrel(builder);
-WebApplication app = builder.Build();
+// ── Configuration ──────────────────────────────────────────────────────
+var contentRoot = Directory.GetCurrentDirectory();
+var config = BmwConfig.Load(contentRoot);
+
+// Apply Kestrel + thread-pool tuning from config
+var configureKestrel = ProgramSetup.ConfigureKestrel(config);
 
 // Simple per-IP rate limiter for device code endpoints
 var _deviceRateLimiter = new ConcurrentDictionary<string, (int Count, DateTime Window)>();
@@ -27,7 +31,7 @@ bool DeviceRateCheck(HttpContext ctx, int maxPerMinute = 10)
     return entry.Count <= maxPerMinute;
 }
 
-await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFactory, mainTemplate) =>
+var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, configureRoutes: (appInfo, routeHandlers, pageInfoFactory, mainTemplate) =>
 {
     // Device code auth flow
     appInfo.RegisterRoute("POST /api/device/code", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
@@ -394,18 +398,29 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
     }));
 });
 
-app.Run();
+// ── Direct Kestrel hosting ────────────────────────────────────────────
+await using var host = BmwHost.Create(server, configureKestrel);
+await host.RunAsync();
 
 static class ProgramSetup
 {
-    public static void ConfigureKestrel(WebApplicationBuilder builder)
+    public static Action<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions> ConfigureKestrel(BmwConfig config)
     {
-        var config = builder.Configuration;
-
-        builder.WebHost.ConfigureKestrel(serverOptions =>
+        // Thread pool tuning (applied immediately — not Kestrel-specific)
+        var minWorker = config.GetValue("ThreadPool.MinWorkerThreads", 0);
+        var minIO = config.GetValue("ThreadPool.MinIOThreads", 0);
+        if (minWorker > 0 || minIO > 0)
         {
-            var http2Enabled = config.GetValue("Kestrel:Http2Enabled", true);
-            var http3Enabled = config.GetValue("Kestrel:Http3Enabled", false);
+            ThreadPool.GetMinThreads(out int currentWorker, out int currentIO);
+            ThreadPool.SetMinThreads(
+                minWorker > 0 ? minWorker : currentWorker,
+                minIO > 0 ? minIO : currentIO);
+        }
+
+        return serverOptions =>
+        {
+            var http2Enabled = config.GetValue("Kestrel.Http2Enabled", true);
+            var http3Enabled = config.GetValue("Kestrel.Http3Enabled", false);
 
             serverOptions.ConfigureEndpointDefaults(listenOptions =>
             {
@@ -417,37 +432,26 @@ static class ProgramSetup
                     listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1;
             });
 
-            var maxStreams = config.GetValue("Kestrel:MaxStreamsPerConnection", 100);
+            var maxStreams = config.GetValue("Kestrel.MaxStreamsPerConnection", 100);
             if (maxStreams > 0)
                 serverOptions.Limits.Http2.MaxStreamsPerConnection = maxStreams;
 
-            var connWindowSize = config.GetValue("Kestrel:InitialConnectionWindowSize", 131072);
+            var connWindowSize = config.GetValue("Kestrel.InitialConnectionWindowSize", 131072);
             if (connWindowSize > 0)
                 serverOptions.Limits.Http2.InitialConnectionWindowSize = connWindowSize;
 
-            var streamWindowSize = config.GetValue("Kestrel:InitialStreamWindowSize", 98304);
+            var streamWindowSize = config.GetValue("Kestrel.InitialStreamWindowSize", 98304);
             if (streamWindowSize > 0)
                 serverOptions.Limits.Http2.InitialStreamWindowSize = streamWindowSize;
-        });
-
-        // Thread pool tuning
-        var minWorker = config.GetValue("ThreadPool:MinWorkerThreads", 0);
-        var minIO = config.GetValue("ThreadPool:MinIOThreads", 0);
-        if (minWorker > 0 || minIO > 0)
-        {
-            ThreadPool.GetMinThreads(out int currentWorker, out int currentIO);
-            ThreadPool.SetMinThreads(
-                minWorker > 0 ? minWorker : currentWorker,
-                minIO > 0 ? minIO : currentIO);
-        }
+        };
     }
 
-    public static IBufferedLogger CreateLogger(WebApplication app)
-        => new DiskBufferedLogger(app.Configuration.GetValue("Logging:LogFolder", "Logs"));
+    public static IBufferedLogger CreateLogger(BmwConfig config)
+        => new DiskBufferedLogger(config.GetValue("Logging.LogFolder", "Logs"));
 
-    public static IDataObjectStore CreateDataStore(WebApplication app, ISchemaAwareObjectSerializer serializer, IDataQueryEvaluator queryEvaluator, IBufferedLogger logger)
+    public static IDataObjectStore CreateDataStore(BmwConfig config, string contentRoot, ISchemaAwareObjectSerializer serializer, IDataQueryEvaluator queryEvaluator, IBufferedLogger logger)
     {
-        var dataRoot = app.Configuration.GetValue("Data:Root", Path.Combine(app.Environment.ContentRootPath, "Data"));
+        var dataRoot = config.GetValue("Data.Root", Path.Combine(contentRoot, "Data"));
 
         // Detect and wipe legacy GUID-based data before opening the store
         LegacyDataWipeGuard.WipeIfLegacyDetected(dataRoot, logger);
@@ -465,10 +469,10 @@ static class ProgramSetup
         return dataStore;
     }
 
-    public static void ResetDataIfRequested(WebApplication app, string dataRoot, IBufferedLogger logger)
+    public static void ResetDataIfRequested(BmwConfig config, string contentRoot, string dataRoot, IBufferedLogger logger)
     {
-        var resetFlagPath = Path.Combine(app.Environment.ContentRootPath, "reset-data.flag");
-        var shouldReset = app.Configuration.GetValue("Data:ResetOnStartup", false) || File.Exists(resetFlagPath);
+        var resetFlagPath = Path.Combine(contentRoot, "reset-data.flag");
+        var shouldReset = config.GetValue("Data.ResetOnStartup", false) || File.Exists(resetFlagPath);
         if (!shouldReset)
             return;
 
@@ -514,17 +518,17 @@ static class ProgramSetup
     }
 
 
-    public static IClientRequestTracker CreateClientRequestTracker(WebApplication app, IBufferedLogger logger)
+    public static IClientRequestTracker CreateClientRequestTracker(BmwConfig config, IBufferedLogger logger)
         => new ClientRequestTracker(
             logger,
-            normalRpsThreshold: app.Configuration.GetValue("ClientRequests:NormalRpsThreshold", 20),
-            suspiciousRpsThreshold: app.Configuration.GetValue("ClientRequests:SuspiciousRpsThreshold", 10),
-            blockDuration: TimeSpan.FromMinutes(app.Configuration.GetValue("ClientRequests:BlockDurationMinutes", 1)),
-            allowList: app.Configuration.GetSection("ClientRequests:AllowList").Get<string[]>() ?? Array.Empty<string>(),
-            denyList: app.Configuration.GetSection("ClientRequests:DenyList").Get<string[]>() ?? Array.Empty<string>(),
-            staleThreshold: TimeSpan.FromSeconds(app.Configuration.GetValue("ClientRequests:StaleThresholdSeconds", 120)),
-            pruneInterval: TimeSpan.FromSeconds(app.Configuration.GetValue("ClientRequests:PruneIntervalSeconds", 30)),
-            maxEntries: app.Configuration.GetValue("ClientRequests:MaxEntries", 100000));
+            normalRpsThreshold: config.GetValue("ClientRequests.NormalRpsThreshold", 20),
+            suspiciousRpsThreshold: config.GetValue("ClientRequests.SuspiciousRpsThreshold", 10),
+            blockDuration: TimeSpan.FromMinutes(config.GetValue("ClientRequests.BlockDurationMinutes", 1)),
+            allowList: config.GetArray("ClientRequests.AllowList"),
+            denyList: config.GetArray("ClientRequests.DenyList"),
+            staleThreshold: TimeSpan.FromSeconds(config.GetValue("ClientRequests.StaleThresholdSeconds", 120)),
+            pruneInterval: TimeSpan.FromSeconds(config.GetValue("ClientRequests.PruneIntervalSeconds", 30)),
+            maxEntries: config.GetValue("ClientRequests.MaxEntries", 100000));
 
     public static async ValueTask EnsureRootPermissionsAsync(IBufferedLogger logger, string[] requiredPermissions, CancellationToken cancellationToken = default)
     {
@@ -582,7 +586,8 @@ static class ProgramSetup
     }
 
     public static BareMetalWebServer CreateAppInfo(
-        WebApplication app,
+        BmwConfig config,
+        string contentRoot,
         IBufferedLogger logger,
         IHtmlRenderer htmlRenderer,
         IPageInfoFactory pageInfoFactory,
@@ -591,10 +596,11 @@ static class ProgramSetup
         IClientRequestTracker clientRequests,
         CancellationTokenSource cts)
         => new BareMetalWebServer(
-            app.Configuration.GetValue("AppInfo:Name", "BareMetalWeb"),
-            app.Configuration.GetValue("AppInfo:Company", "BareMetalWeb Inc."),
-            app.Configuration.GetValue("AppInfo:Copyright", "2026"),
-            app,
+            config.GetValue("AppInfo.Name", "BareMetalWeb"),
+            config.GetValue("AppInfo.Company", "BareMetalWeb Inc."),
+            config.GetValue("AppInfo.Copyright", "2026"),
+            config,
+            contentRoot,
             logger,
             htmlRenderer,
             pageInfoFactory.TemplatedPage(mainTemplate, 404, new[] { "title", "message" }, new[] { "404 - Not Found", "<p>The requested page was not found.</p>" }, "", true, 6000),
@@ -603,26 +609,38 @@ static class ProgramSetup
             metrics: metrics,
             clientRequests: clientRequests);
 
-    public static void ConfigureStaticFiles(WebApplication app, BareMetalWebServer appInfo)
+    public static void ConfigureStaticFiles(BmwConfig config, BareMetalWebServer appInfo)
     {
-        var staticFileConfig = app.Configuration.GetSection("StaticFiles").Get<StaticFileOptionsConfig>()
-            ?? new StaticFileOptionsConfig();
+        var staticFileConfig = new StaticFileOptionsConfig
+        {
+            Enabled = config.GetValue("StaticFiles.Enabled", true),
+            RequestPathPrefix = config.GetValue("StaticFiles.RequestPathPrefix", "/static"),
+            RootDirectory = config.GetValue("StaticFiles.RootDirectory", "wwwroot/static"),
+            EnableCaching = config.GetValue("StaticFiles.EnableCaching", true),
+            CacheSeconds = config.GetValue("StaticFiles.CacheSeconds", 86400),
+            AddETag = config.GetValue("StaticFiles.AddETag", true),
+            AddLastModified = config.GetValue("StaticFiles.AddLastModified", true),
+            AllowUnknownMime = config.GetValue("StaticFiles.AllowUnknownMime", false),
+            DefaultMimeType = config.GetValue("StaticFiles.DefaultMimeType", "application/octet-stream"),
+        };
         var staticFileOptions = StaticFileConfigOptions.FromConfig(staticFileConfig);
         staticFileOptions.Normalize();
         appInfo.StaticFiles = staticFileOptions;
     }
 
-    public static void ConfigureCors(WebApplication app, BareMetalWebServer appInfo)
+    public static void ConfigureCors(BmwConfig config, BareMetalWebServer appInfo)
     {
-        appInfo.CorsAllowedOrigins = app.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>() ?? Array.Empty<string>();
+        appInfo.CorsAllowedOrigins = config.GetArray("Cors.AllowedOrigins");
     }
 
-    public static void ConfigureHttps(WebApplication app, BareMetalWebServer appInfo)
+    public static void ConfigureHttps(BmwConfig config, BareMetalWebServer appInfo)
     {
-        appInfo.HttpsRedirectMode = app.Configuration.GetValue("Https:RedirectMode", HttpsRedirectMode.IfAvailable);
-        appInfo.TrustForwardedHeaders = app.Configuration.GetValue("Https:TrustForwardedHeaders", false);
-        var httpsRedirectHost = app.Configuration.GetValue<string>("Https:RedirectHost");
-        var httpsRedirectPort = app.Configuration.GetValue<int>("Https:RedirectPort", 0);
+        var redirectModeStr = config.GetValue("Https.RedirectMode", "IfAvailable");
+        appInfo.HttpsRedirectMode = Enum.TryParse<HttpsRedirectMode>(redirectModeStr, true, out var mode)
+            ? mode : HttpsRedirectMode.IfAvailable;
+        appInfo.TrustForwardedHeaders = config.GetValue("Https.TrustForwardedHeaders", false);
+        var httpsRedirectHost = config.GetValue("Https.RedirectHost", "");
+        var httpsRedirectPort = config.GetValue("Https.RedirectPort", 0);
 
         if (!string.IsNullOrWhiteSpace(httpsRedirectHost))
         {
@@ -634,90 +652,21 @@ static class ProgramSetup
         }
     }
 
-    public static void ConfigureProxyRoutes(WebApplication app, IBareWebHost appInfo, IBufferedLogger logger, IPageInfoFactory pageInfoFactory)
+    public static void ConfigureProxyRoutes(BmwConfig config, IBareWebHost appInfo, IBufferedLogger logger, IPageInfoFactory pageInfoFactory)
     {
-        ProxyRoutingOptions proxyOptions = app.Configuration.GetSection("Proxy").Get<ProxyRoutingOptions>() ?? new ProxyRoutingOptions();
-        List<ProxyRouteHandler> proxyHandlers = new();
-
-        if (proxyOptions.Routes.Count > 0)
+        // BmwConfig doesn't support complex nested object binding, so we handle
+        // the legacy single-route config (Proxy.Route + Proxy.TargetBaseUrl) directly.
+        var proxyRoute = config.GetValue("Proxy.Route", "");
+        var proxyTarget = config.GetValue("Proxy.TargetBaseUrl", "");
+        if (!string.IsNullOrWhiteSpace(proxyRoute) && !string.IsNullOrWhiteSpace(proxyTarget))
         {
-            foreach (var route in proxyOptions.Routes)
+            var legacyRoute = new ProxyRouteConfig
             {
-                var proxyHandler = new ProxyRouteHandler(route, logger);
-                proxyHandlers.Add(proxyHandler);
-                var verb = string.IsNullOrWhiteSpace(route.Verb) ? "ALL" : route.Verb.Trim();
-                var matchMode = route.MatchMode?.Trim() ?? "Equals";
-                var routeTemplate = route.Route;
-                if (string.Equals(matchMode, "StartsWith", StringComparison.OrdinalIgnoreCase))
-                {
-                    var basePath = route.Route.TrimEnd('/');
-                    if (string.IsNullOrWhiteSpace(basePath))
-                        basePath = "/";
-                    routeTemplate = basePath == "/" ? "/{*proxyPath}" : $"{basePath}/{{*proxyPath}}";
-                }
-                else if (string.Equals(matchMode, "Regex", StringComparison.OrdinalIgnoreCase))
-                {
-                    routeTemplate = $"regex:{route.Route}";
-                }
-
-                appInfo.RegisterRoute($"{verb} {routeTemplate}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), proxyHandler.HandleAsync));
-            }
-
-            appInfo.RegisterRoute("GET /proxy/status", new RouteHandlerData(pageInfoFactory.RawPage("admin", false), async context =>
-            {
-                context.Response.ContentType = "application/json";
-                var status = new ProxyRouteStatus[proxyHandlers.Count];
-                for (int si = 0; si < proxyHandlers.Count; si++)
-                    status[si] = proxyHandlers[si].GetStatus();
-
-                await using var stream = context.Response.Body;
-                using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
-                writer.WriteStartArray();
-                foreach (var routeStatus in status)
-                {
-                    writer.WriteStartObject();
-                    writer.WriteString("route", routeStatus.Route);
-                    writer.WriteString("matchMode", routeStatus.MatchMode);
-                    writer.WriteString("loadBalance", routeStatus.LoadBalance);
-                    writer.WriteStartArray("targets");
-                    foreach (var target in routeStatus.Targets)
-                    {
-                        writer.WriteStartObject();
-                        writer.WriteString("uri", target.Uri);
-                        writer.WriteNumber("weight", target.Weight);
-                        writer.WriteBoolean("online", target.Online);
-                        if (target.OfflineUntil.HasValue)
-                            writer.WriteString("offlineUntil", target.OfflineUntil.Value.ToString("O"));
-                        else
-                            writer.WriteNull("offlineUntil");
-                        writer.WriteNumber("successes", target.Successes);
-                        writer.WriteNumber("failures", target.Failures);
-                        writer.WriteNumber("windowTotal", target.WindowTotal);
-                        writer.WriteNumber("windowFailures", target.WindowFailures);
-                        writer.WriteNumber("windowSuccesses", target.WindowSuccesses);
-                        writer.WriteEndObject();
-                    }
-                    writer.WriteEndArray();
-                    writer.WriteEndObject();
-                }
-                writer.WriteEndArray();
-                await writer.FlushAsync();
-            }));
-        }
-        else
-        {
-            var proxyRoute = app.Configuration.GetValue<string>("Proxy:Route");
-            var proxyTarget = app.Configuration.GetValue<string>("Proxy:TargetBaseUrl");
-            if (!string.IsNullOrWhiteSpace(proxyRoute) && !string.IsNullOrWhiteSpace(proxyTarget))
-            {
-                var legacyRoute = new ProxyRouteConfig
-                {
-                    Route = proxyRoute,
-                    TargetBaseUrl = proxyTarget
-                };
-                var proxyHandler = new ProxyRouteHandler(legacyRoute, logger);
-                appInfo.RegisterRoute($"ALL {proxyRoute}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), proxyHandler.HandleAsync));
-            }
+                Route = proxyRoute,
+                TargetBaseUrl = proxyTarget
+            };
+            var proxyHandler = new ProxyRouteHandler(legacyRoute, logger);
+            appInfo.RegisterRoute($"ALL {proxyRoute}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), proxyHandler.HandleAsync));
         }
     }
 }

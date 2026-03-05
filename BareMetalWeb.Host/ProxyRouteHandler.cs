@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;

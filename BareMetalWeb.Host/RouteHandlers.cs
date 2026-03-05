@@ -11,7 +11,6 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Primitives;
 using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
@@ -33,6 +32,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private readonly string _dataRootFolder;
     private readonly AuditService _auditService;
     private readonly IBufferedLogger? _logger;
+    private readonly BmwConfig? _config;
     private readonly IReadOnlyList<(string SettingId, string Value, string Description)> _settingDefaults;
     private const string MfaChallengeCookieName = "mfa_challenge_id";
     private static readonly TimeSpan MfaPendingLifetime = TimeSpan.FromMinutes(5);
@@ -117,7 +117,7 @@ public sealed class RouteHandlers : IRouteHandlers
     }
 
     public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, AuditService auditService,
-        IReadOnlyList<(string SettingId, string Value, string Description)>? settingDefaults = null, IBufferedLogger? logger = null)
+        IReadOnlyList<(string SettingId, string Value, string Description)>? settingDefaults = null, IBufferedLogger? logger = null, BmwConfig? config = null)
     {
         _renderer = renderer;
         _templateStore = templateStore;
@@ -126,6 +126,7 @@ public sealed class RouteHandlers : IRouteHandlers
         _dataRootFolder = mfaKeyRootFolder;
         _auditService = auditService;
         _logger = logger;
+        _config = config;
         _settingDefaults = settingDefaults ?? Array.Empty<(string, string, string)>();
     }
 
@@ -534,29 +535,20 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private EntraIdOptions? GetEntraIdOptions(HttpContext context)
     {
-        var config = context.RequestServices?.GetService(typeof(IConfiguration)) as IConfiguration;
-        var section = config?.GetSection("EntraId");
-        if (section == null || !section.Exists())
+        if (_config == null || !_config.GetValue("EntraId.Enabled", false))
             return null;
 
         var options = new EntraIdOptions
         {
-            Enabled = section.GetValue<bool>("Enabled"),
-            TenantId = section.GetValue<string>("TenantId") ?? string.Empty,
-            ClientId = section.GetValue<string>("ClientId") ?? string.Empty,
-            ClientSecret = section.GetValue<string>("ClientSecret") ?? string.Empty,
-            RedirectUri = section.GetValue<string>("RedirectUri") ?? "/auth/sso/callback",
-            BaseUrl = section.GetValue<string>("BaseUrl") ?? string.Empty,
-            AutoProvisionUsers = section.GetValue("AutoProvisionUsers", true),
-            DefaultPermissions = section.GetValue<string>("DefaultPermissions") ?? "user",
+            Enabled = _config.GetValue("EntraId.Enabled", false),
+            TenantId = _config.GetValue("EntraId.TenantId", ""),
+            ClientId = _config.GetValue("EntraId.ClientId", ""),
+            ClientSecret = _config.GetValue("EntraId.ClientSecret", ""),
+            RedirectUri = _config.GetValue("EntraId.RedirectUri", "/auth/sso/callback"),
+            BaseUrl = _config.GetValue("EntraId.BaseUrl", ""),
+            AutoProvisionUsers = _config.GetValue("EntraId.AutoProvisionUsers", true),
+            DefaultPermissions = _config.GetValue("EntraId.DefaultPermissions", "user"),
         };
-
-        var mappings = section.GetSection("GroupRoleMappings");
-        if (mappings.Exists())
-        {
-            foreach (var child in mappings.GetChildren())
-                options.GroupRoleMappings[child.Key] = child.Value ?? string.Empty;
-        }
 
         return options.Enabled && !string.IsNullOrEmpty(options.TenantId) && !string.IsNullOrEmpty(options.ClientId)
             ? options : null;
@@ -5168,10 +5160,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private string GetUploadRootPath(HttpContext context)
     {
-        var configuration = context.RequestServices.GetService(typeof(IConfiguration)) as IConfiguration;
-        #pragma warning disable IL2026 // ConfigurationBinder.GetValue with string primitive is trim-safe
-        var configured = configuration?.GetValue("Uploads:RootDirectory", "uploads") ?? "uploads";
-        #pragma warning restore IL2026
+        var configured = _config?.GetValue("Uploads.RootDirectory", "uploads") ?? "uploads";
         if (Path.IsPathRooted(configured))
             return configured;
         return Path.Combine(_dataRootFolder, configured);
@@ -5222,10 +5211,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static string GetLogRoot(HttpContext context)
     {
-        var config = context.RequestServices.GetService(typeof(IConfiguration)) as IConfiguration;
-        #pragma warning disable IL2026 // ConfigurationBinder.GetValue with string primitive is trim-safe
-        var logFolder = config?.GetValue("Logging:LogFolder", "Logs") ?? "Logs";
-        #pragma warning restore IL2026
+        var logFolder = "Logs";
         if (Path.IsPathRooted(logFolder))
             return logFolder;
 
