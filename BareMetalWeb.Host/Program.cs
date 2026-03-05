@@ -211,10 +211,11 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
         var resultList = new List<Dictionary<string, object?>>();
         foreach (var e in entities)
         {
-            var commandsList = new List<Dictionary<string, object?>>();
-            foreach (var c in e.Commands)
+            var commandsList = new Dictionary<string, object?>[e.Commands.Count];
+            for (int ci = 0; ci < e.Commands.Count; ci++)
             {
-                commandsList.Add(new Dictionary<string, object?>
+                var c = e.Commands[ci];
+                commandsList[ci] = new Dictionary<string, object?>
                 {
                     ["name"] = c.Name,
                     ["label"] = c.Label,
@@ -222,24 +223,24 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
                     ["confirmMessage"] = c.ConfirmMessage,
                     ["destructive"] = c.Destructive,
                     ["order"] = c.Order
-                });
+                };
             }
 
-            var fieldsList = new List<Dictionary<string, object?>>();
-            foreach (var f in e.Fields)
+            var fieldsList = new Dictionary<string, object?>[e.Fields.Count];
+            for (int fi = 0; fi < e.Fields.Count; fi++)
             {
+                var f = e.Fields[fi];
                 object? enumValues = null;
                 if (f.FieldType == FormFieldType.Enum)
                 {
-                    var enumOptionsList = new List<object>();
-                    foreach (var kv in DataScaffold.BuildEnumOptions(f.Property.PropertyType))
-                    {
-                        enumOptionsList.Add(new { value = kv.Key, label = kv.Value });
-                    }
-                    enumValues = enumOptionsList.ToArray();
+                    var enumOpts = DataScaffold.BuildEnumOptions(f.Property.PropertyType);
+                    var enumOptionsList = new object[enumOpts.Count];
+                    for (int ei = 0; ei < enumOpts.Count; ei++)
+                        enumOptionsList[ei] = new { value = enumOpts[ei].Key, label = enumOpts[ei].Value };
+                    enumValues = enumOptionsList;
                 }
 
-                fieldsList.Add(new Dictionary<string, object?>
+                fieldsList[fi] = new Dictionary<string, object?>
                 {
                     ["name"] = f.Name,
                     ["label"] = f.Label,
@@ -268,7 +269,7 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
                         ["maxImageHeight"] = f.Upload.MaxImageHeight,
                         ["generateThumbnail"] = f.Upload.GenerateThumbnail
                     }
-                });
+                };
             }
 
             resultList.Add(new Dictionary<string, object?>
@@ -281,8 +282,8 @@ await app.UseBareMetalWeb(configureRoutes: (appInfo, routeHandlers, pageInfoFact
                 ["navOrder"] = e.NavOrder,
                 ["viewType"] = e.ViewType.ToString(),
                 ["parentField"] = e.ParentField?.Name,
-                ["commands"] = commandsList.ToArray(),
-                ["fields"] = fieldsList.ToArray()
+                ["commands"] = commandsList,
+                ["fields"] = fieldsList
             });
         }
         var result = resultList.ToArray();
@@ -665,12 +666,9 @@ static class ProgramSetup
             appInfo.RegisterRoute("GET /proxy/status", new RouteHandlerData(pageInfoFactory.RawPage("admin", false), async context =>
             {
                 context.Response.ContentType = "application/json";
-                var statusList = new List<ProxyRouteStatus>();
-                foreach (var handler in proxyHandlers)
-                {
-                    statusList.Add(handler.GetStatus());
-                }
-                var status = statusList.ToArray();
+                var status = new ProxyRouteStatus[proxyHandlers.Count];
+                for (int si = 0; si < proxyHandlers.Count; si++)
+                    status[si] = proxyHandlers[si].GetStatus();
 
                 await using var stream = context.Response.Body;
                 using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
