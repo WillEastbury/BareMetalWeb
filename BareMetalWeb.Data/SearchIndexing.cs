@@ -1036,8 +1036,6 @@ public sealed class SearchIndexManager
         if (value.IsEmpty)
             return;
 
-        // Use stack-allocated buffer for tokens up to 256 chars
-        // For longer tokens, we'll fall back to slower path with array rental
         const int MaxStackTokenSize = 256;
         Span<char> buffer = stackalloc char[MaxStackTokenSize];
         int bufferPos = 0;
@@ -1046,18 +1044,41 @@ public sealed class SearchIndexManager
         for (int i = 0; i < value.Length; i++)
         {
             var ch = value[i];
-            
-            if (char.IsLetterOrDigit(ch))
+
+            // ASCII fast path: range check + bitwise lowercase (no Unicode table lookup)
+            if (ch <= 127)
             {
+                if ((uint)(ch - 'a') <= 'z' - 'a' || (uint)(ch - 'A') <= 'Z' - 'A' || (uint)(ch - '0') <= '9' - '0')
+                {
+                    // Bitwise OR 0x20 lowercases A-Z, is a no-op for 0-9
+                    var lowerCh = (char)(ch | 0x20);
+                    if (bufferPos < MaxStackTokenSize)
+                    {
+                        buffer[bufferPos++] = lowerCh;
+                    }
+                    else
+                    {
+                        if (overflowBuffer == null)
+                        {
+                            overflowBuffer = new List<char>(MaxStackTokenSize * 2);
+                            for (int j = 0; j < bufferPos; j++)
+                                overflowBuffer.Add(buffer[j]);
+                        }
+                        overflowBuffer.Add(lowerCh);
+                    }
+                    continue;
+                }
+            }
+            else if (char.IsLetterOrDigit(ch))
+            {
+                // Unicode path: full table lookup + invariant lowercase
                 var lowerCh = char.ToLowerInvariant(ch);
-                
                 if (bufferPos < MaxStackTokenSize)
                 {
                     buffer[bufferPos++] = lowerCh;
                 }
                 else
                 {
-                    // Rare case: token exceeds stack buffer, switch to heap allocation
                     if (overflowBuffer == null)
                     {
                         overflowBuffer = new List<char>(MaxStackTokenSize * 2);
@@ -1373,9 +1394,8 @@ public sealed class SearchIndexManager
 
     private int ComputeBloomHash(string token, int hashIndex, int size)
     {
-        // Use a simple but effective hash combining the token and hash index
-        var baseHash = token.ToLowerInvariant().GetHashCode();
-        var hash = ((baseHash ^ (hashIndex * 0x9e3779b9)) & 0x7FFFFFFF); // Mix with golden ratio, ensure positive
+        var baseHash = StringComparer.OrdinalIgnoreCase.GetHashCode(token);
+        var hash = ((baseHash ^ (hashIndex * 0x9e3779b9)) & 0x7FFFFFFF);
         return (int)(hash % size);
     }
 
