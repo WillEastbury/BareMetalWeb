@@ -22,6 +22,8 @@ namespace BareMetalWeb.Host;
 /// Each bundle is served at <c>/static/css/themes/{theme}.min.css</c>.
 /// Any theme in <see cref="DefaultThemes"/> that is not yet on disk is
 /// fetched lazily on the first request for that theme.
+/// Custom themes (see <see cref="CustomThemeDefinitions"/>) layer CSS overrides
+/// on top of an existing Bootswatch base theme and are also lazily built on first request.
 /// </summary>
 public static class CssBundleService
 {
@@ -46,6 +48,118 @@ public static class CssBundleService
         "superhero","united",   "vapor",    "yeti",    "zephyr"
     };
 
+    /// <summary>
+    /// Custom, exclusive themes that layer CSS overrides on top of a Bootswatch base theme.
+    /// Key = theme name; Value = (base Bootswatch theme name, CSS overrides to append).
+    /// </summary>
+    public static readonly IReadOnlyDictionary<string, (string BaseTheme, string CustomCss)> CustomThemeDefinitions =
+        new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase)
+        {
+            // Jigsaw: muted, sensory-friendly palette for autistic users.
+            // Soft slate-blue tones, reduced contrast, no harsh colours, minimal motion.
+            ["jigsaw"] = ("lumen",
+                """
+                /* ── Jigsaw theme — muted, sensory-friendly ── */
+                body{background-color:#F6F5F1!important;color:#3D4A52!important;line-height:1.75!important}
+                a{color:#5C7A8E!important}a:hover{color:#3D5E70!important}
+                .navbar,.navbar-dark,.navbar-light{background-color:#3D4A52!important;border-bottom:1px solid #2E3840!important}
+                .navbar .navbar-brand,.navbar-dark .navbar-brand{color:#D8E4EA!important}
+                .navbar .nav-link,.navbar-dark .nav-link{color:rgba(216,228,234,.85)!important}
+                .btn-primary{background-color:#6B8D9E!important;border-color:#5A7A8A!important;color:#fff!important}
+                .btn-primary:hover,.btn-primary:focus{background-color:#5A7A8A!important;border-color:#4A6878!important}
+                .btn-secondary{background-color:#8B9BA8!important;border-color:#7A8A96!important;color:#fff!important}
+                .btn-success{background-color:#78976B!important;border-color:#6A8660!important;color:#fff!important}
+                .btn-danger{background-color:#9E6B6B!important;border-color:#8A5C5C!important;color:#fff!important}
+                .btn-warning{background-color:#A8985E!important;border-color:#907E50!important;color:#fff!important}
+                .btn-info{background-color:#6B9EA8!important;border-color:#5A8A93!important;color:#fff!important}
+                .card{border-color:#D8D5D0!important;box-shadow:none!important}
+                .card-header{background-color:#EDECE8!important;border-bottom-color:#D8D5D0!important}
+                .form-control:focus{border-color:#8AAAB8!important;box-shadow:0 0 0 .25rem rgba(107,141,158,.25)!important}
+                .badge.bg-primary{background-color:#6B8D9E!important}
+                .alert-primary{background-color:#E4ECF0!important;border-color:#B8CEDC!important;color:#2C4A58!important}
+                *,*::before,*::after{transition-duration:50ms!important;animation-duration:50ms!important}
+                """),
+
+            // Rave: neon colours on a near-black background — 80s dance-floor energy.
+            ["rave"] = ("cyborg",
+                """
+                /* ── Rave theme — neon 80s dance culture ── */
+                body{background-color:#06000E!important;color:#F0E8FF!important}
+                .navbar,.navbar-dark{background:linear-gradient(90deg,#1A0030,#001A30)!important;border-bottom:2px solid #FF00CC!important}
+                .navbar .navbar-brand,.navbar-dark .navbar-brand{color:#FF00CC!important;text-shadow:0 0 10px #FF00CC!important}
+                .navbar .nav-link,.navbar-dark .nav-link{color:#00FFFF!important}
+                .navbar .nav-link:hover,.navbar-dark .nav-link:hover{color:#FF00CC!important;text-shadow:0 0 8px #FF00CC!important}
+                .btn-primary{background-color:#FF00CC!important;border-color:#FF00CC!important;color:#000!important;box-shadow:0 0 12px #FF00CC,0 0 30px rgba(255,0,204,.35)!important}
+                .btn-primary:hover,.btn-primary:focus{background-color:#FF33DD!important;box-shadow:0 0 18px #FF00CC,0 0 45px rgba(255,0,204,.55)!important}
+                .btn-secondary{background-color:#00FFFF!important;border-color:#00FFFF!important;color:#000!important;box-shadow:0 0 10px #00FFFF!important}
+                .btn-success{background-color:#00FF66!important;border-color:#00FF66!important;color:#000!important;box-shadow:0 0 10px #00FF66!important}
+                .btn-warning{background-color:#FFFF00!important;border-color:#FFFF00!important;color:#000!important}
+                .btn-danger{background-color:#FF0040!important;border-color:#FF0040!important;color:#fff!important;box-shadow:0 0 12px #FF0040!important}
+                .card{background-color:#0D001A!important;border:1px solid #FF00CC!important;box-shadow:0 0 15px rgba(255,0,204,.2)!important}
+                .card-header{background-color:#1A0030!important;color:#FF00CC!important;border-bottom:1px solid #FF00CC!important}
+                h1,h2,h3{color:#FF00CC!important;text-shadow:0 0 8px rgba(255,0,204,.55)!important}
+                a{color:#00FFFF!important}a:hover{color:#FF00CC!important;text-shadow:0 0 8px #FF00CC!important}
+                .form-control{background-color:#0D001A!important;color:#F0E8FF!important;border-color:#FF00CC!important}
+                .form-control:focus{border-color:#00FFFF!important;box-shadow:0 0 0 .25rem rgba(0,255,255,.3)!important}
+                .table{color:#F0E8FF!important}
+                .table>:not(caption)>*>*{background-color:transparent!important;border-color:rgba(255,0,204,.3)!important}
+                .badge.bg-primary{background-color:#FF00CC!important;color:#000!important}
+                """),
+
+            // Luminescent: deep-space dark with glowing cyan and violet — everything emits light.
+            ["luminescent"] = ("darkly",
+                """
+                /* ── Luminescent theme — glowing, illuminated ── */
+                body{background-color:#04060F!important;color:#B8F0FF!important}
+                .navbar,.navbar-dark{background-color:#070A18!important;border-bottom:1px solid #00F0FF!important;box-shadow:0 2px 20px rgba(0,240,255,.3)!important}
+                .navbar .navbar-brand,.navbar-dark .navbar-brand{color:#00F0FF!important;text-shadow:0 0 12px #00F0FF,0 0 25px rgba(0,240,255,.5)!important}
+                .navbar .nav-link,.navbar-dark .nav-link{color:#B8F0FF!important}
+                .navbar .nav-link:hover,.navbar-dark .nav-link:hover{color:#00F0FF!important;text-shadow:0 0 8px #00F0FF!important}
+                .btn-primary{background-color:#00C8E0!important;border-color:#00B0C8!important;color:#000!important;box-shadow:0 0 12px #00C8E0,0 0 30px rgba(0,200,224,.4)!important}
+                .btn-primary:hover,.btn-primary:focus{background-color:#00E8FF!important;box-shadow:0 0 20px #00E8FF,0 0 50px rgba(0,232,255,.5)!important}
+                .btn-secondary{background-color:#7B00FF!important;border-color:#6A00E0!important;color:#fff!important;box-shadow:0 0 10px #7B00FF,0 0 25px rgba(123,0,255,.4)!important}
+                .btn-success{background-color:#00FF88!important;border-color:#00E07A!important;color:#000!important;box-shadow:0 0 10px #00FF88!important}
+                .btn-danger{background-color:#FF3060!important;border-color:#E02050!important;color:#fff!important;box-shadow:0 0 10px #FF3060!important}
+                .btn-warning{background-color:#FFD700!important;border-color:#E8C000!important;color:#000!important;box-shadow:0 0 10px #FFD700!important}
+                .btn-info{background-color:#00F0FF!important;border-color:#00D0E0!important;color:#000!important;box-shadow:0 0 10px #00F0FF!important}
+                .card{background-color:#080B18!important;border:1px solid rgba(0,240,255,.35)!important;box-shadow:0 0 20px rgba(0,240,255,.15),inset 0 0 30px rgba(0,240,255,.05)!important}
+                .card-header{background-color:#0D1228!important;color:#00F0FF!important;border-bottom:1px solid rgba(0,240,255,.35)!important;text-shadow:0 0 8px rgba(0,240,255,.6)!important}
+                h1,h2,h3{color:#00F0FF!important;text-shadow:0 0 10px rgba(0,240,255,.6),0 0 25px rgba(0,240,255,.3)!important}
+                a{color:#00C8E0!important}a:hover{color:#00F0FF!important;text-shadow:0 0 8px #00F0FF!important}
+                .form-control{background-color:#080B18!important;color:#B8F0FF!important;border-color:rgba(0,240,255,.4)!important}
+                .form-control:focus{border-color:#00F0FF!important;box-shadow:0 0 0 .25rem rgba(0,240,255,.3),0 0 15px rgba(0,240,255,.2)!important}
+                .table{color:#B8F0FF!important}
+                .table>:not(caption)>*>*{background-color:transparent!important;border-color:rgba(0,240,255,.2)!important}
+                .badge.bg-primary{background-color:#00C8E0!important;color:#000!important}
+                """),
+
+            // Geography: cartographic palette — parchment, stone, slate and muted earth tones.
+            ["geography"] = ("sandstone",
+                """
+                /* ── Geography theme — beige, stone and cartographic greys ── */
+                body{background-color:#F2EDD8!important;color:#3A3328!important}
+                .navbar,.navbar-dark,.navbar-light{background-color:#5C5545!important;border-bottom:1px solid #3A3328!important}
+                .navbar .navbar-brand,.navbar-dark .navbar-brand{color:#F2EDD8!important}
+                .navbar .nav-link,.navbar-dark .nav-link{color:rgba(242,237,216,.85)!important}
+                .btn-primary{background-color:#6B7A5E!important;border-color:#5A6850!important;color:#fff!important}
+                .btn-primary:hover,.btn-primary:focus{background-color:#5A6850!important;border-color:#4A5842!important}
+                .btn-secondary{background-color:#8A7E6A!important;border-color:#7A6E5C!important;color:#fff!important}
+                .btn-success{background-color:#5E7A5A!important;border-color:#507050!important;color:#fff!important}
+                .btn-danger{background-color:#8A4A3A!important;border-color:#7A3A2C!important;color:#fff!important}
+                .btn-warning{background-color:#9A7A3A!important;border-color:#886A30!important;color:#fff!important}
+                .btn-info{background-color:#4A6A7A!important;border-color:#3C5C6A!important;color:#fff!important}
+                .card{background-color:#F8F4E8!important;border:1px solid #C8C0A8!important;box-shadow:1px 1px 4px rgba(58,51,40,.15)!important}
+                .card-header{background-color:#E8E0C8!important;border-bottom-color:#C8C0A8!important;color:#3A3328!important}
+                a{color:#4A6070!important}a:hover{color:#2E4050!important}
+                .form-control:focus{border-color:#8A9A7A!important;box-shadow:0 0 0 .25rem rgba(107,122,94,.25)!important}
+                .table{color:#3A3328!important}
+                .table>:not(caption)>*>*{border-color:#C8C0A8!important}
+                .table-striped>tbody>tr:nth-of-type(odd)>*{background-color:rgba(107,122,94,.07)!important}
+                .badge.bg-primary{background-color:#6B7A5E!important}
+                .alert-primary{background-color:#DDE5D8!important;border-color:#A8B8A0!important;color:#2A3824!important}
+                """),
+        };
+
     private sealed class BundleData
     {
         public byte[]? Bytes;
@@ -60,8 +174,8 @@ public static class CssBundleService
         new(StringComparer.OrdinalIgnoreCase);
 
     // Known themes as a set for O(1) lookup during lazy loading.
-    private static readonly HashSet<string> _knownThemes =
-        new(DefaultThemes, StringComparer.OrdinalIgnoreCase);
+    // Includes both DefaultThemes (Bootswatch) and CustomThemeDefinitions keys.
+    private static readonly HashSet<string> _knownThemes = BuildKnownThemes();
 
     // One Lazy<Task<bool>> per theme name; ensures each theme is fetched at most once.
     private static readonly ConcurrentDictionary<string, Lazy<Task<bool>>> _lazyLoads =
@@ -85,6 +199,7 @@ public static class CssBundleService
     ///   <item><description><c>bootstrap.bundle.min.js</c> → <c>{staticRoot}/js/</c></description></item>
     ///   <item><description><c>bootstrap-icons.woff2</c> → <c>{staticRoot}/fonts/</c></description></item>
     ///   <item><description>Per-theme CSS bundles (all <see cref="DefaultThemes"/>) → <c>{staticRoot}/css/themes/</c></description></item>
+    ///   <item><description>Custom theme CSS bundles (all <see cref="CustomThemeDefinitions"/>) → <c>{staticRoot}/css/themes/</c></description></item>
     /// </list>
     ///
     /// Safe to call at startup; skips files that already exist.
@@ -162,6 +277,28 @@ public static class CssBundleService
             catch (Exception ex)
             {
                 log?.Invoke($"  WARNING: Failed to download theme {theme}: {ex.Message}");
+            }
+        }
+
+        // 4. Custom exclusive themes — layer CSS overrides on top of a Bootswatch base
+        foreach (var (themeName, _) in CustomThemeDefinitions)
+        {
+            var themeDest = Path.Combine(themesDir, $"{themeName}.min.css");
+            if (File.Exists(themeDest))
+                continue;
+
+            iconsCss ??= await FetchIconsCssAsync(log).ConfigureAwait(false);
+
+            try
+            {
+                log?.Invoke($"Building custom theme: {themeName}...");
+                var bundle = await BuildCustomThemeBundleAsync(themeName, iconsCss).ConfigureAwait(false);
+                await File.WriteAllTextAsync(themeDest, bundle, Encoding.UTF8).ConfigureAwait(false);
+                log?.Invoke($"  Saved custom theme bundle: {themeName}.min.css");
+            }
+            catch (Exception ex)
+            {
+                log?.Invoke($"  WARNING: Failed to build custom theme {themeName}: {ex.Message}");
             }
         }
 
@@ -300,6 +437,8 @@ public static class CssBundleService
     /// <summary>
     /// Downloads a single theme bundle on first request (lazy load).
     /// Uses <see cref="_staticRoot"/> to know where to persist the file.
+    /// Handles both standard Bootswatch themes and custom themes from
+    /// <see cref="CustomThemeDefinitions"/>.
     /// </summary>
     private static async Task<bool> LazyFetchAndLoadThemeAsync(string themeName)
     {
@@ -334,7 +473,14 @@ public static class CssBundleService
             }
 
             var iconsCss = await FetchIconsCssAsync(null).ConfigureAwait(false);
-            var bundle   = await BuildThemeBundleAsync(themeName, iconsCss).ConfigureAwait(false);
+
+            // Custom themes layer overrides on a base Bootswatch theme; standard themes
+            // are downloaded directly from the Bootswatch CDN.
+            string bundle;
+            if (CustomThemeDefinitions.ContainsKey(themeName))
+                bundle = await BuildCustomThemeBundleAsync(themeName, iconsCss).ConfigureAwait(false);
+            else
+                bundle = await BuildThemeBundleAsync(themeName, iconsCss).ConfigureAwait(false);
 
             await File.WriteAllTextAsync(themeDest, bundle, Encoding.UTF8).ConfigureAwait(false);
             BuildBundles(cssDir);
@@ -384,6 +530,39 @@ public static class CssBundleService
             RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
         return $"/* bootstrap-icons@{BootstrapIconsVersion} */\n{iconsCss}\n\n/* bootswatch@{BootswatchVersion} theme: {themeName} */\n{themeCss}";
+    }
+
+    /// <summary>
+    /// Builds a custom exclusive theme bundle by downloading a base Bootswatch theme
+    /// and appending the custom CSS overrides defined in <see cref="CustomThemeDefinitions"/>.
+    /// </summary>
+    private static async Task<string> BuildCustomThemeBundleAsync(string themeName, string iconsCss)
+    {
+        var (baseTheme, customCss) = CustomThemeDefinitions[themeName];
+
+        var baseThemeCss = await _http.GetStringAsync(
+            $"https://cdn.jsdelivr.net/npm/bootswatch@{BootswatchVersion}/dist/{baseTheme}/bootstrap.min.css")
+            .ConfigureAwait(false);
+
+        // Strip Google Fonts @import — blocked by CSP (font-src 'self').
+        baseThemeCss = Regex.Replace(baseThemeCss,
+            @"@import\s+url\(\s*[""']?https://fonts\.googleapis\.com[^""')]*[""']?\s*\)\s*;?",
+            string.Empty,
+            RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+        return $"/* bootstrap-icons@{BootstrapIconsVersion} */\n{iconsCss}\n\n/* bootswatch@{BootswatchVersion} base theme: {baseTheme} */\n{baseThemeCss}\n\n/* bmw custom theme: {themeName} */\n{customCss}";
+    }
+
+    /// <summary>
+    /// Builds the complete set of known theme names, combining <see cref="DefaultThemes"/>
+    /// (Bootswatch) and <see cref="CustomThemeDefinitions"/> (exclusive custom themes).
+    /// </summary>
+    private static HashSet<string> BuildKnownThemes()
+    {
+        var set = new HashSet<string>(DefaultThemes, StringComparer.OrdinalIgnoreCase);
+        foreach (var key in CustomThemeDefinitions.Keys)
+            set.Add(key);
+        return set;
     }
 
     /// <summary>

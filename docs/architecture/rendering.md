@@ -202,7 +202,35 @@ CSV export is available via `GET /api/reports/{id}` (returns `text/csv`).
 
 ---
 
-## Output Caching
+## CSS Theme Bundle System
+
+`CssBundleService` (in `BareMetalWeb.Host`) manages per-theme CSS bundles served at `/static/css/themes/{theme}.min.css`. Each bundle is self-contained: Bootstrap Icons CSS (with local font path rewritten) + the theme's Bootstrap CSS (Google Fonts `@import` stripped for CSP compliance).
+
+### Theme types
+
+| Type | Source | Count |
+|---|---|---|
+| **Bootswatch** (`DefaultThemes`) | Downloaded from `cdn.jsdelivr.net/npm/bootswatch` at startup or lazily on first request | 25 |
+| **Custom exclusive** (`CustomThemeDefinitions`) | Download a named Bootswatch base theme, then append hand-crafted CSS overrides | 4 |
+
+### Custom exclusive themes
+
+| Theme | Base | Design intent |
+|---|---|---|
+| `jigsaw` | `lumen` | Muted, desaturated palette; reduced motion — sensory-friendly for autistic users |
+| `rave` | `cyborg` | Neon colours on near-black; glow effects — 80s dance-culture energy |
+| `luminescent` | `darkly` | Deep-space dark with glowing cyan/violet accents — everything emits light |
+| `geography` | `sandstone` | Cartographic palette: parchment, stone, slate and muted earth tones |
+
+### Lifecycle
+
+1. **Startup** — `EnsureAssetsAsync(staticRoot)` downloads/writes all Bootswatch themes and builds all custom themes to `wwwroot/static/css/themes/*.min.css`, then calls `BuildBundles` to load them into the in-memory cache (with Brotli and Gzip pre-compressed variants).
+2. **Request** — `TryServeAsync(context)` serves from the in-memory cache. On a cache miss for a known theme, a `Lazy<Task<bool>>` per theme name ensures the bundle is built/downloaded at most once (lazy first-hit load).
+3. **Cache headers** — `Cache-Control: public, max-age=31536000, immutable` + ETag + Last-Modified for aggressive browser caching.
+
+---
+
+
 
 `OutputCache` (in `BareMetalWeb.Rendering`) stores rendered HTML fragments keyed by a cache key.  It is used for fragments that are expensive to regenerate (e.g. navigation menus) with a configurable TTL.  Dynamic per-request content is never cached.
 
@@ -233,4 +261,4 @@ The setting is seeded into the system settings store at startup with a default v
 
 ---
 
-_Status: Updated to clarify VNext (client-side, `/UI`) vs SSR screenchrome rendering (commerce & CMS pages). Verified against codebase @ commit e38d19057e1a55fc1d9a563f5ec6228bb991a0b5_
+_Status: Updated to document CSS Theme Bundle System (custom exclusive themes: jigsaw, rave, luminescent, geography). Verified against codebase._
