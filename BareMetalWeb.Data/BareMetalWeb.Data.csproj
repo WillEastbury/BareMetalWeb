@@ -11,6 +11,7 @@
     <InternalsVisibleTo Include="BareMetalWeb.Data.Tests" />
     <InternalsVisibleTo Include="BareMetalWeb.Runtime" />
     <InternalsVisibleTo Include="BareMetalWeb.Benchmarks" />
+    <InternalsVisibleTo Include="BareMetalWeb.Host" />
   </ItemGroup>
 
   <ItemGroup>

@@ -55,6 +55,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private readonly IDataQueryEvaluator       _queryEvaluator;
     private readonly IBufferedLogger?          _logger;
     private WalStore                  _walStore;
+
+    /// <summary>Exposes the underlying WAL store for background services (e.g. compaction).</summary>
+    internal WalStore WalStore => _walStore;
+
     private IndexStore                _indexStore;
     private SearchIndexManager        _searchIndexManager;
 
