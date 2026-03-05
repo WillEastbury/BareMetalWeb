@@ -29,5 +29,6 @@ public enum FormFieldType
     ReadOnly,
     Tags,
     ChildList,
-    Markdown
+    Markdown,
+    GeoCoordinate
 }

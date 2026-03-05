@@ -52,7 +52,13 @@ public enum IndexKind
     /// Enables efficient traversal queries: neighbours, paths, multi-hop exploration.
     /// Apply to a lookup/FK field to auto-build edges from parent→child relationships.
     /// </summary>
-    Graph
+    Graph,
+    /// <summary>
+    /// Spatial index for geographic coordinate data (lat/lng).
+    /// Stores points in a grid-based spatial hash for fast bounding-box and radius queries.
+    /// Token format: "lat,lng" (e.g. "51.5074,-0.1278").
+    /// </summary>
+    Spatial
 }
 
 /// <summary>
@@ -129,6 +135,9 @@ public sealed class SearchIndexManager
 
         // Graph index data (adjacency lists for relationship traversal)
         public GraphIndexData? GraphIndex { get; set; }
+
+        // Spatial index data (grid-based spatial hash for coordinate queries)
+        public SpatialIndexData? SpatialIndex { get; set; }
     }
     
     // BTree uses SortedDictionary, so no additional node class needed
@@ -231,6 +240,129 @@ public sealed class SearchIndexManager
     }
 
     private readonly record struct GraphEdge(uint TargetId, string EdgeType);
+
+    /// <summary>
+    /// Grid-based spatial hash for fast bounding-box and radius queries on lat/lng coordinates.
+    /// Divides the world into cells of ~1km at the equator (0.01° grid).
+    /// </summary>
+    private sealed class SpatialIndexData
+    {
+        private const double CellSize = 0.01; // ~1.1km at equator
+
+        /// <summary>Point stored in the spatial index.</summary>
+        public readonly record struct GeoPoint(uint Id, double Lat, double Lng);
+
+        /// <summary>Grid cell key → points in that cell.</summary>
+        private readonly Dictionary<(int LatCell, int LngCell), List<GeoPoint>> _grid = new();
+
+        /// <summary>Id → point for fast removal.</summary>
+        private readonly Dictionary<uint, GeoPoint> _points = new();
+
+        public void Add(uint id, double lat, double lng)
+        {
+            var pt = new GeoPoint(id, lat, lng);
+            _points[id] = pt;
+            var cell = GetCell(lat, lng);
+            if (!_grid.TryGetValue(cell, out var list))
+            {
+                list = new List<GeoPoint>();
+                _grid[cell] = list;
+            }
+            list.Add(pt);
+        }
+
+        public void Remove(uint id)
+        {
+            if (!_points.TryGetValue(id, out var pt)) return;
+            _points.Remove(id);
+            var cell = GetCell(pt.Lat, pt.Lng);
+            if (_grid.TryGetValue(cell, out var list))
+            {
+                list.RemoveAll(p => p.Id == id);
+                if (list.Count == 0) _grid.Remove(cell);
+            }
+        }
+
+        /// <summary>Returns all point IDs within the given bounding box.</summary>
+        public HashSet<uint> SearchBoundingBox(double minLat, double maxLat, double minLng, double maxLng)
+        {
+            var results = new HashSet<uint>();
+            var minCell = GetCell(minLat, minLng);
+            var maxCell = GetCell(maxLat, maxLng);
+            for (int latC = minCell.LatCell; latC <= maxCell.LatCell; latC++)
+            {
+                for (int lngC = minCell.LngCell; lngC <= maxCell.LngCell; lngC++)
+                {
+                    if (!_grid.TryGetValue((latC, lngC), out var list)) continue;
+                    foreach (var pt in list)
+                    {
+                        if (pt.Lat >= minLat && pt.Lat <= maxLat && pt.Lng >= minLng && pt.Lng <= maxLng)
+                            results.Add(pt.Id);
+                    }
+                }
+            }
+            return results;
+        }
+
+        /// <summary>Returns all point IDs within radiusKm of (centerLat, centerLng).</summary>
+        public HashSet<uint> SearchRadius(double centerLat, double centerLng, double radiusKm)
+        {
+            // Convert radius to approximate degrees
+            double latDelta = radiusKm / 111.0;
+            double lngDelta = radiusKm / (111.0 * Math.Cos(centerLat * Math.PI / 180.0));
+            if (lngDelta <= 0) lngDelta = latDelta;
+
+            var candidates = SearchBoundingBox(
+                centerLat - latDelta, centerLat + latDelta,
+                centerLng - lngDelta, centerLng + lngDelta);
+
+            // Refine with Haversine distance
+            var results = new HashSet<uint>();
+            foreach (var id in candidates)
+            {
+                if (_points.TryGetValue(id, out var pt) && HaversineKm(centerLat, centerLng, pt.Lat, pt.Lng) <= radiusKm)
+                    results.Add(id);
+            }
+            return results;
+        }
+
+        /// <summary>Gets the nearest N points to a center coordinate.</summary>
+        public List<(uint Id, double DistanceKm)> SearchNearest(double centerLat, double centerLng, int count)
+        {
+            // Start with a small radius and expand until we have enough candidates
+            double radiusKm = 10;
+            HashSet<uint> candidates;
+            do
+            {
+                candidates = SearchRadius(centerLat, centerLng, radiusKm);
+                radiusKm *= 2;
+            } while (candidates.Count < count && radiusKm < 20_000);
+
+            var sorted = new List<(uint Id, double DistanceKm)>();
+            foreach (var id in candidates)
+            {
+                if (_points.TryGetValue(id, out var pt))
+                    sorted.Add((id, HaversineKm(centerLat, centerLng, pt.Lat, pt.Lng)));
+            }
+            sorted.Sort((a, b) => a.DistanceKm.CompareTo(b.DistanceKm));
+            return sorted.Count > count ? sorted.GetRange(0, count) : sorted;
+        }
+
+        private static (int LatCell, int LngCell) GetCell(double lat, double lng) =>
+            ((int)Math.Floor(lat / CellSize), (int)Math.Floor(lng / CellSize));
+
+        /// <summary>Haversine distance in kilometres.</summary>
+        private static double HaversineKm(double lat1, double lng1, double lat2, double lng2)
+        {
+            const double R = 6371.0;
+            double dLat = (lat2 - lat1) * Math.PI / 180.0;
+            double dLng = (lng2 - lng1) * Math.PI / 180.0;
+            double a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                       Math.Cos(lat1 * Math.PI / 180.0) * Math.Cos(lat2 * Math.PI / 180.0) *
+                       Math.Sin(dLng / 2) * Math.Sin(dLng / 2);
+            return R * 2.0 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1.0 - a));
+        }
+    }
 
     private readonly string _indexRoot;
     private readonly IBufferedLogger? _logger;
@@ -341,6 +473,9 @@ public sealed class SearchIndexManager
 
                 if (metadata.IndexKinds.Contains(IndexKind.Graph) && uint.TryParse(token, out var targetId))
                     AddToGraphIndex(index, obj.Key, targetId, type.Name);
+
+                if (metadata.IndexKinds.Contains(IndexKind.Spatial) && TryParseCoordinate(token, out var lat, out var lng))
+                    AddToSpatialIndex(index, obj.Key, lat, lng);
             }
 
             index.IsBuilt = true;
@@ -503,6 +638,10 @@ public sealed class SearchIndexManager
                             tokenResults = index.GraphIndex.Traverse(nodeId, 1);
                         else
                             tokenResults = SearchInverted(index, queryToken);
+                        break;
+
+                    case IndexKind.Spatial:
+                        tokenResults = SearchSpatialFromToken(index, queryToken);
                         break;
                     
                     case IndexKind.Inverted:
@@ -870,6 +1009,10 @@ public sealed class SearchIndexManager
         // Remove graph index entries for this node
         if (metadata.IndexKinds.Contains(IndexKind.Graph))
             RemoveFromGraphIndex(index, id);
+
+        // Remove spatial index entries for this point
+        if (metadata.IndexKinds.Contains(IndexKind.Spatial))
+            RemoveFromSpatialIndex(index, id);
 
         index.IdToTokens.Remove(id);
     }
@@ -1350,6 +1493,100 @@ public sealed class SearchIndexManager
             if (index.GraphIndex == null) return Array.Empty<uint>();
             if (!index.GraphIndex.Reverse.TryGetValue(nodeId, out var edges)) return Array.Empty<uint>();
             return edges.Select(e => e.TargetId).ToArray();
+        }
+    }
+
+    // ── Spatial index helpers ────────────────────────────────────────────
+
+    private static void AddToSpatialIndex(IndexData index, uint id, double lat, double lng)
+    {
+        index.SpatialIndex ??= new SpatialIndexData();
+        index.SpatialIndex.Add(id, lat, lng);
+    }
+
+    private static void RemoveFromSpatialIndex(IndexData index, uint id)
+    {
+        index.SpatialIndex?.Remove(id);
+    }
+
+    /// <summary>
+    /// Parses a spatial query token. Supported formats:
+    /// "lat,lng" — exact point (used during indexing)
+    /// "lat,lng,radiusKm" — radius search
+    /// "minLat,maxLat,minLng,maxLng" — bounding box
+    /// </summary>
+    private static bool TryParseCoordinate(string token, out double lat, out double lng)
+    {
+        lat = lng = 0;
+        var parts = token.Split(',');
+        if (parts.Length < 2) return false;
+        return double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float,
+                   System.Globalization.CultureInfo.InvariantCulture, out lat) &&
+               double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float,
+                   System.Globalization.CultureInfo.InvariantCulture, out lng);
+    }
+
+    private static IEnumerable<uint> SearchSpatialFromToken(IndexData index, string queryToken)
+    {
+        if (index.SpatialIndex == null) return Array.Empty<uint>();
+        var parts = queryToken.Split(',');
+        if (parts.Length == 3 &&
+            double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var lat) &&
+            double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var lng) &&
+            double.TryParse(parts[2].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var radius))
+        {
+            return index.SpatialIndex.SearchRadius(lat, lng, radius);
+        }
+        if (parts.Length == 4 &&
+            double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var minLat) &&
+            double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var maxLat) &&
+            double.TryParse(parts[2].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var minLng) &&
+            double.TryParse(parts[3].Trim(), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var maxLng))
+        {
+            return index.SpatialIndex.SearchBoundingBox(minLat, maxLat, minLng, maxLng);
+        }
+        return Array.Empty<uint>();
+    }
+
+    /// <summary>
+    /// Search for points within a radius of a center coordinate.
+    /// </summary>
+    public IReadOnlyCollection<uint> SearchRadius(Type type, double centerLat, double centerLng, double radiusKm, Func<IEnumerable<BaseDataObject>> loadAll)
+    {
+        EnsureBuilt(type, loadAll);
+        var index = _indexes.GetOrAdd(type, LoadIndex);
+        lock (index.Sync)
+        {
+            if (index.SpatialIndex == null) return Array.Empty<uint>();
+            return index.SpatialIndex.SearchRadius(centerLat, centerLng, radiusKm);
+        }
+    }
+
+    /// <summary>
+    /// Search for points within a bounding box.
+    /// </summary>
+    public IReadOnlyCollection<uint> SearchBoundingBox(Type type, double minLat, double maxLat, double minLng, double maxLng, Func<IEnumerable<BaseDataObject>> loadAll)
+    {
+        EnsureBuilt(type, loadAll);
+        var index = _indexes.GetOrAdd(type, LoadIndex);
+        lock (index.Sync)
+        {
+            if (index.SpatialIndex == null) return Array.Empty<uint>();
+            return index.SpatialIndex.SearchBoundingBox(minLat, maxLat, minLng, maxLng);
+        }
+    }
+
+    /// <summary>
+    /// Find the nearest N points to a center coordinate.
+    /// </summary>
+    public IReadOnlyList<(uint Id, double DistanceKm)> SearchNearest(Type type, double centerLat, double centerLng, int count, Func<IEnumerable<BaseDataObject>> loadAll)
+    {
+        EnsureBuilt(type, loadAll);
+        var index = _indexes.GetOrAdd(type, LoadIndex);
+        lock (index.Sync)
+        {
+            if (index.SpatialIndex == null) return Array.Empty<(uint, double)>();
+            return index.SpatialIndex.SearchNearest(centerLat, centerLng, count);
         }
     }
 }
