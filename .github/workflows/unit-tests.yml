@@ -45,3 +45,16 @@ jobs:
 
       - name: Run unit tests
         run: dotnet test BareMetalWeb.sln --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Jest dependencies
+        working-directory: tests/js-unit
+        run: npm ci
+
+      - name: Run Jest unit tests
+        working-directory: tests/js-unit
+        run: npm test

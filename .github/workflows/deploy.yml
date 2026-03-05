@@ -56,6 +56,19 @@ jobs:
           fi
           echo "All tests passed."
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Jest dependencies
+        working-directory: tests/js-unit
+        run: npm ci
+
+      - name: Run Jest unit tests
+        working-directory: tests/js-unit
+        run: npm test
+
       - name: Publish
         run: dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj --configuration Release --output ./publish -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} -p:FileVersion=${{ steps.version.outputs.assembly_version }} -p:InformationalVersion=${{ steps.version.outputs.info_version }}
 
@@ -69,3 +82,39 @@ jobs:
         with:
           app-name: baremetalweb
           package: ./publish
+
+      - name: Wait for deployment to stabilize
+        run: |
+          echo "Waiting 30 seconds for deployment to complete and app to start..."
+          sleep 30
+
+      - name: Install Playwright dependencies
+        working-directory: tests/playwright
+        run: |
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Run Playwright tests
+        working-directory: tests/playwright
+        env:
+          BASE_URL: https://baremetalweb.azurewebsites.net
+          CIMIGRATE_TEST_USERNAME: ${{ secrets.CIMIGRATE_TEST_USERNAME }}
+          CIMIGRATE_TEST_DISPLAYNAME: ${{ secrets.CIMIGRATE_TEST_DISPLAYNAME }}
+          CIMIGRATE_TEST_PASSWORD: ${{ secrets.CIMIGRATE_TEST_PASSWORD }}
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: tests/playwright/playwright-report/
+          retention-days: 30
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: tests/playwright/test-results.json
+          retention-days: 30
