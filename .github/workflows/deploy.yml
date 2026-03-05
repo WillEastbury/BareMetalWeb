@@ -63,7 +63,13 @@ jobs:
 
       - name: Install Jest dependencies
         working-directory: tests/js-unit
-        run: npm ci
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            echo "::warning::package-lock.json missing in tests/js-unit; falling back to npm install"
+            npm install
+          fi
 
       - name: Run Jest unit tests
         working-directory: tests/js-unit
