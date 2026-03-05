@@ -37,7 +37,6 @@ public class BareMetalWebServerTests : IDisposable
     private readonly MockMetricsTracker _metrics;
     private readonly MockClientRequestTracker _clientRequests;
     private readonly CancellationTokenSource _cts;
-    private readonly WebApplication _app;
     private readonly string _keyRootDirectory;
 
     public BareMetalWebServerTests()
@@ -60,11 +59,6 @@ public class BareMetalWebServerTests : IDisposable
         _clientRequests = new MockClientRequestTracker();
         _cts = new CancellationTokenSource();
 
-        // Create a minimal WebApplication for testing
-        var builder = WebApplication.CreateBuilder(new string[] { });
-        builder.WebHost.UseKestrel();
-        _app = builder.Build();
-
         var notFoundPage = CreatePageInfo("Not Found", 404);
         var errorPage = CreatePageInfo("Error", 500);
 
@@ -72,7 +66,8 @@ public class BareMetalWebServerTests : IDisposable
             "TestApp",
             "Test Company",
             "2026",
-            _app,
+            BmwConfig.Load("/tmp"),
+            "/tmp",
             _logger,
             _renderer,
             notFoundPage,
@@ -87,7 +82,6 @@ public class BareMetalWebServerTests : IDisposable
         DataStoreProvider.Current = _originalStore;
         _cts.Cancel();
         _cts.Dispose();
-        (_app as IDisposable)?.Dispose();
         if (Directory.Exists(_keyRootDirectory))
             Directory.Delete(_keyRootDirectory, true);
     }

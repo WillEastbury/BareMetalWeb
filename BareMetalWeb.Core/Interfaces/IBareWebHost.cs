@@ -1,7 +1,6 @@
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Core.Interfaces;
-using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Host;
 
@@ -10,7 +9,8 @@ namespace BareMetalWeb.Core.Host;
 public interface IBareWebHost
 {
     static abstract string[] appMetaDataKeys { get; set; }
-    WebApplication app { get; set; }
+    BmwConfig Configuration { get; }
+    string ContentRootPath { get; }
     IBufferedLogger BufferedLogger { get; }
     IMetricsTracker Metrics { get; }
     IClientRequestTracker ClientRequests { get; }

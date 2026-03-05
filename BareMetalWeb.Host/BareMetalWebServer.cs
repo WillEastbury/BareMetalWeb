@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
@@ -23,7 +24,8 @@ public class BareMetalWebServer : IBareWebHost
             new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "monitoring" }
         }
     };
-    public WebApplication app { get; set; }
+    public BmwConfig Configuration { get; }
+    public string ContentRootPath { get; }
     public IBufferedLogger BufferedLogger { get; }
     public IMetricsTracker Metrics { get; }
     public IClientRequestTracker ClientRequests { get; }
@@ -92,7 +94,8 @@ public class BareMetalWebServer : IBareWebHost
         string appName,
         string companyDescription,
         string copyrightYear,
-        WebApplication application,
+        BmwConfig configuration,
+        string contentRootPath,
         IBufferedLogger logger,
         IHtmlRenderer htmlRenderer,
         PageInfo NotFoundPage,
@@ -114,7 +117,8 @@ public class BareMetalWebServer : IBareWebHost
             ? trimmed[..plusIdx] + "+" + trimmed[(plusIdx + 1)..(plusIdx + 8)]
             : trimmed;
         AppMetaDataValues = new[] { AppName, CompanyDescription, CopyrightYear, version, ComputePrivacyPolicyLink(_privacyPolicyUrl) };
-        app = application;
+        Configuration = configuration;
+        ContentRootPath = contentRootPath;
         BufferedLogger = logger;
         HtmlRenderer = htmlRenderer;
         Metrics = metrics;
@@ -335,21 +339,16 @@ public class BareMetalWebServer : IBareWebHost
     }
     public Task WireUpRequestHandlingAndLoggerAsyncLifetime()
     {
-        // Build the jump table for O(1) exact-match route dispatch
         EnsureJumpTable();
-        // Single terminal request handler. We deliberately do not use routing, MVC, or minimal APIs. All requests are handled explicitly by RequestHandler.
-        app.Use(async (HttpContext context, RequestDelegate _) => await RequestHandler(context));
-        // Start background services
         StartBackgroundServices();
-        app.Lifetime.ApplicationStopping.Register(() => BufferedLogger.OnApplicationStopping(cts, _loggerTask!));
         BufferedLogger.LogInfo($"WireUpRequestHandlingAndLoggerAsyncLifetime completed and request handling is live.");
         return Task.CompletedTask;
     }
 
     /// <summary>
     /// Prepares the server for direct Kestrel hosting via <see cref="BmwHost"/>.
-    /// Does NOT register ASP.NET middleware — Kestrel calls
-    /// <see cref="BmwApplication.ProcessRequestAsync"/> directly.
+    /// Identical to <see cref="WireUpRequestHandlingAndLoggerAsyncLifetime"/> —
+    /// kept as a separate entry point for clarity.
     /// </summary>
     public Task WireUpDirectHosting()
     {

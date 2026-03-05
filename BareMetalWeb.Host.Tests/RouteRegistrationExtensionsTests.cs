@@ -33,7 +33,6 @@ public class RouteRegistrationExtensionsTests : IDisposable
     private readonly BareMetalWebServer _server;
     private readonly MockBufferedLogger _logger;
     private readonly CancellationTokenSource _cts;
-    private readonly WebApplication _app;
     private readonly string _keyRootDirectory;
     private readonly IPageInfoFactory _pageInfoFactory;
     private readonly IHtmlTemplate _mainTemplate;
@@ -51,16 +50,12 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _logger = new MockBufferedLogger();
         _cts = new CancellationTokenSource();
 
-        var builder = WebApplication.CreateBuilder(Array.Empty<string>());
-        builder.WebHost.UseKestrel();
-        _app = builder.Build();
-
         var template = new MockHtmlTemplate();
         var notFoundPage = CreatePageInfo("Not Found", 404);
         var errorPage = CreatePageInfo("Error", 500);
 
         _server = new BareMetalWebServer(
-            "TestApp", "Test Company", "2026", _app,
+            "TestApp", "Test Company", "2026", BmwConfig.Load("/tmp"), "/tmp",
             _logger, new MockHtmlRenderer(), notFoundPage, errorPage,
             _cts, new MockMetricsTracker(), new MockClientRequestTracker());
 

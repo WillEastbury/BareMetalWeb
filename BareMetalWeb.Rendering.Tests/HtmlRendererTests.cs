@@ -95,6 +95,8 @@ internal sealed class StubBareWebHost : IBareWebHost
     public bool HttpsEndpointAvailable { get; set; }
     public string? HttpsRedirectHost { get; set; }
     public int? HttpsRedirectPort { get; set; }
+    public BmwConfig Configuration { get; set; } = BmwConfig.Load("/tmp");
+    public string ContentRootPath { get; set; } = "/tmp";
     public bool ShowHostDiagnostics { get; set; } = false;
 
     public ValueTask BuildAppInfoMenuOptionsAsync(HttpContext? context = null, CancellationToken cancellationToken = default)

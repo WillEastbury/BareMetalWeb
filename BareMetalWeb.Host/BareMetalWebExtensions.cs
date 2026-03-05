@@ -7,17 +7,18 @@ using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Interfaces;
 using BareMetalWeb.Runtime;
-using Microsoft.AspNetCore.Hosting.Server;
-using Microsoft.AspNetCore.Hosting.Server.Features;
 
 namespace BareMetalWeb.Host;
 
 /// <summary>
 /// Single entry point for wiring up the full BareMetalWeb stack.
-/// Usage:
-///   var app = WebApplication.Create(args);
-///   await app.UseBareMetalWeb();
-///   app.Run();
+/// Usage (direct Kestrel hosting — no Web SDK):
+/// <code>
+///   var config = BmwConfig.Load(contentRoot);
+///   var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot);
+///   await using var host = BmwHost.Create(server, ProgramSetup.ConfigureKestrel(config));
+///   await host.RunAsync();
+/// </code>
 /// </summary>
 public static class BareMetalWebExtensions
 {
@@ -26,17 +27,17 @@ public static class BareMetalWebExtensions
     /// authentication, routing, static files, CORS, HTTPS, and proxy support.
     /// Optionally pass <paramref name="configureRoutes"/> to register additional routes.
     /// </summary>
-    public static async Task<BareMetalWebServer> UseBareMetalWeb(
-        this WebApplication app,
+    public static async Task<BareMetalWebServer> InitializeAsync(
+        BmwConfig config,
+        string contentRoot,
         Action<BareMetalWebServer, IRouteHandlers, IPageInfoFactory, IHtmlTemplate>? configureRoutes = null)
     {
         // Logger & data root
-        IBufferedLogger logger = ProgramSetup.CreateLogger(app);
+        IBufferedLogger logger = ProgramSetup.CreateLogger(config);
         logger.LogInfo("Starting BareMetalWeb server...");
 
-        var contentRoot = app.Environment.ContentRootPath;
-        var dataRoot = app.Configuration.GetValue("Data:Root", Path.Combine(contentRoot, "Data"));
-        ProgramSetup.ResetDataIfRequested(app, dataRoot, logger);
+        var dataRoot = config.GetValue("Data.Root", Path.Combine(contentRoot, "Data"));
+        ProgramSetup.ResetDataIfRequested(config, contentRoot, dataRoot, logger);
         CookieProtection.ConfigureKeyRoot(dataRoot);
 
         // Data store
@@ -60,14 +61,17 @@ public static class BareMetalWebExtensions
         DataScaffold.RegisterEntity<ActionDefinition>();
         DataScaffold.RegisterEntity<ActionCommandDefinition>();
 
-        IDataObjectStore dataStore = ProgramSetup.CreateDataStore(app, serializer, queryEvaluator, logger);
+        IDataObjectStore dataStore = ProgramSetup.CreateDataStore(config, contentRoot, serializer, queryEvaluator, logger);
 
         // ── Multitenancy ──────────────────────────────────────────────────────
         // Build the TenantRegistry and wire up additional per-tenant stores.
         // When multitenancy is disabled this is a no-op and the single system store
         // created above is used for every request, exactly as before.
-        var multitenancyOptions = app.Configuration.GetSection("Multitenancy").Get<MultitenancyOptions>()
-            ?? new MultitenancyOptions();
+        var multitenancyOptions = new MultitenancyOptions
+        {
+            Enabled = config.GetValue("Multitenancy.Enabled", false),
+            DefaultTenantId = config.GetValue("Multitenancy.DefaultTenantId", "_system"),
+        };
         var tenantRegistry = new TenantRegistry(multitenancyOptions, contentRoot);
 
         // Register the system tenant so that it can be used as a fallback.
@@ -76,7 +80,7 @@ public static class BareMetalWebExtensions
         var systemTenant = new TenantContext(
             multitenancyOptions.DefaultTenantId,
             dataRoot,
-            app.Configuration.GetValue("Logging:LogFolder", "Logs"),
+            config.GetValue("Logging.LogFolder", "Logs"),
             dataStore,
             systemProvider);
         tenantRegistry.RegisterSystemTenant(systemTenant);
@@ -99,7 +103,7 @@ public static class BareMetalWebExtensions
         }
 
         // Configure high-cardinality lookup threshold
-        DataScaffold.LargeListThreshold = app.Configuration.GetValue("LookupSearch:LargeListThreshold", 20);
+        DataScaffold.LargeListThreshold = config.GetValue("LookupSearch.LargeListThreshold", 20);
 
         // Runtime entity registry — load persisted EntityDefinitions from storage and compile
         await RuntimeEntityRegistry.BuildAsync(
@@ -137,37 +141,37 @@ public static class BareMetalWebExtensions
         ITemplateStore templateStore = new TemplateStore();
         IPageInfoFactory pageInfoFactory = new PageInfoFactory();
         IMetricsTracker metricsTracker = new MetricsTracker();
-        IClientRequestTracker throttling = ProgramSetup.CreateClientRequestTracker(app, logger);
+        IClientRequestTracker throttling = ProgramSetup.CreateClientRequestTracker(config, logger);
 
         // Route handlers
-        bool allowAccountCreation = app.Configuration.GetValue("Auth:AllowAccountCreation", false);
+        bool allowAccountCreation = config.GetValue("Auth.AllowAccountCreation", false);
         AuditService auditService = new AuditService(DataStoreProvider.Current, logger);
         var settingDefaults = new (string SettingId, string Value, string Description)[]
         {
-            (WellKnownSettings.AppName,      app.Configuration.GetValue("AppInfo:Name",      "BareMetalWeb"),       "Application display name"),
-            (WellKnownSettings.AppCompany,   app.Configuration.GetValue("AppInfo:Company",   "BareMetalWeb Inc."),  "Company name shown in the header and footer"),
-            (WellKnownSettings.AppCopyright, app.Configuration.GetValue("AppInfo:Copyright", "2026"),              "Copyright year or statement shown in the footer"),
-            (WellKnownSettings.AppPrivacyPolicyUrl, app.Configuration.GetValue("AppInfo:PrivacyPolicyUrl", ""),    "Privacy policy URL shown as a link in the footer. Leave empty to hide the link."),
+            (WellKnownSettings.AppName,      config.GetValue("AppInfo.Name",      "BareMetalWeb"),       "Application display name"),
+            (WellKnownSettings.AppCompany,   config.GetValue("AppInfo.Company",   "BareMetalWeb Inc."),  "Company name shown in the header and footer"),
+            (WellKnownSettings.AppCopyright, config.GetValue("AppInfo.Copyright", "2026"),              "Copyright year or statement shown in the footer"),
+            (WellKnownSettings.AppPrivacyPolicyUrl, config.GetValue("AppInfo.PrivacyPolicyUrl", ""),    "Privacy policy URL shown as a link in the footer. Leave empty to hide the link."),
 
             // Kestrel / transport
-            (WellKnownSettings.KestrelHttp2Enabled,                 app.Configuration.GetValue("Kestrel:Http2Enabled", true).ToString(),        "Enable HTTP/2 protocol support"),
-            (WellKnownSettings.KestrelHttp3Enabled,                 app.Configuration.GetValue("Kestrel:Http3Enabled", false).ToString(),       "Enable HTTP/3 (QUIC) protocol support"),
-            (WellKnownSettings.KestrelMaxStreamsPerConnection,      app.Configuration.GetValue("Kestrel:MaxStreamsPerConnection", 100).ToString(), "Max concurrent HTTP/2 streams per connection"),
-            (WellKnownSettings.KestrelInitialConnectionWindowSize,  app.Configuration.GetValue("Kestrel:InitialConnectionWindowSize", 131072).ToString(), "HTTP/2 initial connection-level flow-control window (bytes)"),
-            (WellKnownSettings.KestrelInitialStreamWindowSize,      app.Configuration.GetValue("Kestrel:InitialStreamWindowSize", 98304).ToString(), "HTTP/2 initial per-stream flow-control window (bytes)"),
+            (WellKnownSettings.KestrelHttp2Enabled,                 config.GetValue("Kestrel.Http2Enabled", true).ToString(),        "Enable HTTP/2 protocol support"),
+            (WellKnownSettings.KestrelHttp3Enabled,                 config.GetValue("Kestrel.Http3Enabled", false).ToString(),       "Enable HTTP/3 (QUIC) protocol support"),
+            (WellKnownSettings.KestrelMaxStreamsPerConnection,      config.GetValue("Kestrel.MaxStreamsPerConnection", 100).ToString(), "Max concurrent HTTP/2 streams per connection"),
+            (WellKnownSettings.KestrelInitialConnectionWindowSize,  config.GetValue("Kestrel.InitialConnectionWindowSize", 131072).ToString(), "HTTP/2 initial connection-level flow-control window (bytes)"),
+            (WellKnownSettings.KestrelInitialStreamWindowSize,      config.GetValue("Kestrel.InitialStreamWindowSize", 98304).ToString(), "HTTP/2 initial per-stream flow-control window (bytes)"),
 
             // Thread pool
-            (WellKnownSettings.ThreadPoolMinWorkerThreads, app.Configuration.GetValue("ThreadPool:MinWorkerThreads", 0).ToString(), "Minimum worker threads (0 = runtime default)"),
-            (WellKnownSettings.ThreadPoolMinIOThreads,     app.Configuration.GetValue("ThreadPool:MinIOThreads", 0).ToString(),     "Minimum I/O completion threads (0 = runtime default)"),
+            (WellKnownSettings.ThreadPoolMinWorkerThreads, config.GetValue("ThreadPool.MinWorkerThreads", 0).ToString(), "Minimum worker threads (0 = runtime default)"),
+            (WellKnownSettings.ThreadPoolMinIOThreads,     config.GetValue("ThreadPool.MinIOThreads", 0).ToString(),     "Minimum I/O completion threads (0 = runtime default)"),
 
             // GC — informational only; actual values are baked in at publish time via the
             // project's RuntimeHostConfigurationOption entries. Override at process-start time
             // by setting DOTNET_GCServer=1 (server GC) env variable before launching the process
             // — these cannot be changed while running.
-            (WellKnownSettings.GCServerMode, app.Configuration.GetValue("GC:ServerMode", true).ToString(), "Server GC mode (true = one heap per CPU, false = workstation GC). Fixed at process start; set DOTNET_GCServer env var before launch to override."),
+            (WellKnownSettings.GCServerMode, config.GetValue("GC.ServerMode", true).ToString(), "Server GC mode (true = one heap per CPU, false = workstation GC). Fixed at process start; set DOTNET_GCServer env var before launch to override."),
 
             // Admin
-            (WellKnownSettings.AllowWipeData, app.Configuration.GetValue("Admin:AllowWipeData", string.Empty), "Secret token required to trigger wipe-all-data. Leave empty to disable the endpoint."),
+            (WellKnownSettings.AllowWipeData, config.GetValue("Admin.AllowWipeData", string.Empty), "Secret token required to trigger wipe-all-data. Leave empty to disable the endpoint."),
 
             // Diagnostics
             (WellKnownSettings.ShowHostInfo, "False", "When True, append a diagnostic banner (host, server, RTT, payload) to each page when ?showhst=true is on the request. Default: False."),
@@ -177,14 +181,14 @@ public static class BareMetalWebExtensions
         // requiring a manual edit in the admin UI.
         await SettingsService.EnsureDefaultsAsync(DataStoreProvider.Current, settingDefaults, "system").ConfigureAwait(false);
 
-        IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot, auditService, settingDefaults, logger);
+        IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot, auditService, settingDefaults, logger, config);
         EntraIdService.Init(logger);
         IHtmlTemplate mainTemplate = templateStore.Get("Index");
         CancellationTokenSource cts = new CancellationTokenSource();
 
         // App info — create from config then override with any admin-edited store values
         BareMetalWebServer appInfo = ProgramSetup.CreateAppInfo(
-            app, logger, htmlRenderer, pageInfoFactory, mainTemplate, metricsTracker, throttling, cts);
+            config, contentRoot, logger, htmlRenderer, pageInfoFactory, mainTemplate, metricsTracker, throttling, cts);
         appInfo.AppName            = SettingsService.GetValue(WellKnownSettings.AppName,           appInfo.AppName);
         appInfo.CompanyDescription = SettingsService.GetValue(WellKnownSettings.AppCompany,        appInfo.CompanyDescription);
         appInfo.CopyrightYear      = SettingsService.GetValue(WellKnownSettings.AppCopyright,      appInfo.CopyrightYear);
@@ -213,7 +217,7 @@ public static class BareMetalWebExtensions
         };
 
         // Infrastructure configuration
-        ProgramSetup.ConfigureStaticFiles(app, appInfo);
+        ProgramSetup.ConfigureStaticFiles(config, appInfo);
 
         // Ensure per-theme CSS bundles and bootstrap.bundle.min.js exist on disk (downloads from
         // CDN if missing), then loads them into memory.  Skips files that are already present.
@@ -227,9 +231,9 @@ public static class BareMetalWebExtensions
         // bootstrap.bundle.min.js (downloaded by EnsureAssetsAsync) is available on disk.
         JsBundleService.BuildBundle(Path.Combine(appInfo.StaticFiles.RootPathFull, "js"));
 
-        ProgramSetup.ConfigureCors(app, appInfo);
-        ProgramSetup.ConfigureHttps(app, appInfo);
-        ProgramSetup.ConfigureProxyRoutes(app, appInfo, logger, pageInfoFactory);
+        ProgramSetup.ConfigureCors(config, appInfo);
+        ProgramSetup.ConfigureHttps(config, appInfo);
+        ProgramSetup.ConfigureProxyRoutes(config, appInfo, logger, pageInfoFactory);
 
         // Built-in routes
         appInfo.RegisterStaticRoutes(routeHandlers, pageInfoFactory, mainTemplate);
@@ -275,79 +279,6 @@ public static class BareMetalWebExtensions
         await appInfo.BuildAppInfoMenuOptionsAsync();
         await appInfo.WireUpRequestHandlingAndLoggerAsyncLifetime();
 
-        app.Lifetime.ApplicationStarted.Register(() =>
-        {
-            var addresses = app.Services.GetService(typeof(IServer)) is IServer server
-                ? server.Features.Get<IServerAddressesFeature>()?.Addresses
-                : null;
-            var list = addresses is null || addresses.Count == 0
-                ? (app.Urls ?? Array.Empty<string>())
-                : addresses;
-            var display = list.Count > 0 ? string.Join(", ", list) : "unknown";
-            logger.LogInfo($"BareMetalWeb server is ready — PID {Environment.ProcessId} — listening for requests on {display}");
-            Console.WriteLine($"BareMetalWeb server is ready — PID {Environment.ProcessId} — listening for requests on {display}");
-
-            var httpsConfig = $"HTTPS redirect settings: mode={appInfo.HttpsRedirectMode}, trustForwardedHeaders={appInfo.TrustForwardedHeaders}, redirectHost={(string.IsNullOrWhiteSpace(appInfo.HttpsRedirectHost) ? "(auto)" : appInfo.HttpsRedirectHost)}, redirectPort={(appInfo.HttpsRedirectPort.HasValue ? appInfo.HttpsRedirectPort.Value.ToString() : "(auto)")}";
-            logger.LogInfo(httpsConfig);
-            Console.WriteLine(httpsConfig);
-
-            string? httpsAddress = null;
-            foreach (var a in list)
-            {
-                if (a.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-                {
-                    httpsAddress = a;
-                    break;
-                }
-            }
-            appInfo.HttpsEndpointAvailable = !string.IsNullOrWhiteSpace(httpsAddress);
-            if (appInfo.HttpsEndpointAvailable && Uri.TryCreate(httpsAddress, UriKind.Absolute, out var httpsUri))
-            {
-                if (string.IsNullOrWhiteSpace(appInfo.HttpsRedirectHost))
-                    appInfo.HttpsRedirectHost = httpsUri.Host;
-                if (!appInfo.HttpsRedirectPort.HasValue || appInfo.HttpsRedirectPort.Value <= 0)
-                    appInfo.HttpsRedirectPort = httpsUri.IsDefaultPort ? 443 : httpsUri.Port;
-            }
-
-            if (!appInfo.HttpsEndpointAvailable)
-            {
-                var warn = "HTTPS endpoint not configured. Configure HTTPS (ASPNETCORE_URLS / Kestrel) to expose an https:// address.";
-                logger.LogInfo(warn);
-                Console.WriteLine(warn);
-            }
-        });
-
         return appInfo;
-    }
-
-    /// <summary>
-    /// Configures the full BareMetalWeb stack and returns a <see cref="BmwHost"/>
-    /// for direct Kestrel hosting — no ASP.NET middleware pipeline.
-    /// <para>
-    /// Uses <see cref="UseBareMetalWeb"/> for initialization, then replaces the
-    /// serving layer with a direct <c>KestrelServer</c> + <see cref="BmwApplication"/>.
-    /// </para>
-    /// <example>
-    /// <code>
-    /// var builder = WebApplication.CreateBuilder();
-    /// var app = builder.Build();
-    /// await using var host = await app.UseBareMetalWebDirect(
-    ///     configureKestrel: opts => opts.ListenAnyIP(5000));
-    /// await host.RunAsync();
-    /// </code>
-    /// </example>
-    /// </summary>
-    public static async Task<BmwHost> UseBareMetalWebDirect(
-        this WebApplication app,
-        Action<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>? configureKestrel = null,
-        Action<BareMetalWebServer, IRouteHandlers, IPageInfoFactory, IHtmlTemplate>? configureRoutes = null)
-    {
-        // Initialize the full stack via UseBareMetalWeb but capture the server instance
-        BareMetalWebServer? appInfo = await app.UseBareMetalWeb(configureRoutes);
-
-        // Re-wire for direct hosting: stop the middleware path, start the direct path
-        await appInfo.WireUpDirectHosting();
-
-        return BmwHost.Create(appInfo, configureKestrel);
     }
 }
