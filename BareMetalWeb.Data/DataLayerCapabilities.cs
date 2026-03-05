@@ -60,6 +60,18 @@ public static class DataLayerCapabilities
     }
 
     /// <summary>
+    /// The path used by <c>SearchIndexManager</c> for bloom filter hashing.
+    /// </summary>
+    public static string BloomFilterPath =>
+        "OrdinalIgnoreCase hash (zero-allocation, software)";
+
+    /// <summary>
+    /// The path used for schema hash computation.
+    /// </summary>
+    public static string SchemaHashPath =>
+        "SHA256 (managed, software)";
+
+    /// <summary>
     /// Returns a multi-line human-readable description of all active
     /// data-layer hardware acceleration paths.
     /// </summary>
