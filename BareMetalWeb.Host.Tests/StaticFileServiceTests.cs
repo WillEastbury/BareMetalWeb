@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using System;
 using System.IO;
 using System.Threading.Tasks;
@@ -55,7 +56,7 @@ public class StaticFileServiceTests : IDisposable
     public async Task TryServeAsync_NullOptions_ReturnsFalse()
     {
         var context = CreateContext("GET", "/static/test.css");
-        var result = await StaticFileService.TryServeAsync(context, null);
+        var result = await StaticFileService.TryServeAsync(context.ToBmw(), null);
         Assert.False(result);
     }
 
@@ -64,7 +65,7 @@ public class StaticFileServiceTests : IDisposable
     {
         _options.Enabled = false;
         var context = CreateContext("GET", "/static/test.css");
-        var result = await StaticFileService.TryServeAsync(context, _options);
+        var result = await StaticFileService.TryServeAsync(context.ToBmw(), _options);
         Assert.False(result);
     }
 
@@ -72,7 +73,7 @@ public class StaticFileServiceTests : IDisposable
     public async Task TryServeAsync_WrongPrefix_ReturnsFalse()
     {
         var context = CreateContext("GET", "/assets/test.css");
-        var result = await StaticFileService.TryServeAsync(context, _options);
+        var result = await StaticFileService.TryServeAsync(context.ToBmw(), _options);
         Assert.False(result);
     }
 
@@ -80,7 +81,7 @@ public class StaticFileServiceTests : IDisposable
     public async Task TryServeAsync_PostMethod_Returns405()
     {
         var context = CreateContext("POST", "/static/test.css");
-        var result = await StaticFileService.TryServeAsync(context, _options);
+        var result = await StaticFileService.TryServeAsync(context.ToBmw(), _options);
         Assert.True(result);
         Assert.Equal(405, context.Response.StatusCode);
     }
@@ -90,7 +91,7 @@ public class StaticFileServiceTests : IDisposable
     {
         CreateFile("style.css", "body { color: red; }");
         var context = CreateContext("GET", "/static/style.css");
-        var result = await StaticFileService.TryServeAsync(context, _options);
+        var result = await StaticFileService.TryServeAsync(context.ToBmw(), _options);
         Assert.True(result);
         Assert.Equal(200, context.Response.StatusCode);
     }
@@ -100,7 +101,7 @@ public class StaticFileServiceTests : IDisposable
     {
         CreateFile("app.js", "console.log('hi');");
         var context = CreateContext("GET", "/static/app.js");
-        await StaticFileService.TryServeAsync(context, _options);
+        await StaticFileService.TryServeAsync(context.ToBmw(), _options);
         Assert.Equal("application/javascript", context.Response.ContentType);
     }
 
@@ -108,7 +109,7 @@ public class StaticFileServiceTests : IDisposable
     public async Task TryServeAsync_MissingFile_Returns404()
     {
         var context = CreateContext("GET", "/static/nonexistent.css");
-        var result = await StaticFileService.TryServeAsync(context, _options);
+        var result = await StaticFileService.TryServeAsync(context.ToBmw(), _options);
         Assert.True(result);
         Assert.Equal(404, context.Response.StatusCode);
     }
@@ -118,7 +119,7 @@ public class StaticFileServiceTests : IDisposable
     {
         CreateFile("secret.txt", "secret");
         var context = CreateContext("GET", "/static/../secret.txt");
-        var result = await StaticFileService.TryServeAsync(context, _options);
+        var result = await StaticFileService.TryServeAsync(context.ToBmw(), _options);
         Assert.True(result);
         Assert.Equal(404, context.Response.StatusCode);
     }
@@ -128,7 +129,7 @@ public class StaticFileServiceTests : IDisposable
     {
         CreateFile("head.txt", "content");
         var context = CreateContext("HEAD", "/static/head.txt");
-        var result = await StaticFileService.TryServeAsync(context, _options);
+        var result = await StaticFileService.TryServeAsync(context.ToBmw(), _options);
         Assert.True(result);
         Assert.Equal(200, context.Response.StatusCode);
         context.Response.Body.Seek(0, SeekOrigin.Begin);
@@ -140,7 +141,7 @@ public class StaticFileServiceTests : IDisposable
     {
         CreateFile("page.html", "<h1>Hello</h1>");
         var context = CreateContext("GET", "/static/page.html");
-        await StaticFileService.TryServeAsync(context, _options);
+        await StaticFileService.TryServeAsync(context.ToBmw(), _options);
         Assert.StartsWith("text/html", context.Response.ContentType);
     }
 
@@ -149,7 +150,7 @@ public class StaticFileServiceTests : IDisposable
     {
         CreateFile("css/main.css", "body{}");
         var context = CreateContext("GET", "/static/css/main.css");
-        var result = await StaticFileService.TryServeAsync(context, _options);
+        var result = await StaticFileService.TryServeAsync(context.ToBmw(), _options);
         Assert.True(result);
         Assert.Equal(200, context.Response.StatusCode);
     }
@@ -159,7 +160,7 @@ public class StaticFileServiceTests : IDisposable
     {
         CreateFile(".keys/secret.key", "key");
         var context = CreateContext("GET", "/static/.keys/secret.key");
-        var result = await StaticFileService.TryServeAsync(context, _options);
+        var result = await StaticFileService.TryServeAsync(context.ToBmw(), _options);
         Assert.True(result);
         Assert.Equal(404, context.Response.StatusCode);
     }
@@ -181,7 +182,7 @@ public class StaticFileServiceTests : IDisposable
         options.Normalize();
 
         var context = CreateContext("GET", "/static/cached.css");
-        var result = await StaticFileService.TryServeAsync(context, options);
+        var result = await StaticFileService.TryServeAsync(context.ToBmw(), options);
         Assert.True(result);
         Assert.Equal(200, context.Response.StatusCode);
         Assert.Equal("public, max-age=3600", context.Response.Headers.CacheControl.ToString());
@@ -205,14 +206,14 @@ public class StaticFileServiceTests : IDisposable
 
         // First request to get ETag
         var firstContext = CreateContext("GET", "/static/revalidate.css");
-        await StaticFileService.TryServeAsync(context: firstContext, options: options);
+        await StaticFileService.TryServeAsync(context: firstContext.ToBmw(), options: options);
         var etag = firstContext.Response.Headers.ETag.ToString();
         Assert.False(string.IsNullOrWhiteSpace(etag));
 
         // Second request with If-None-Match (simulating browser revalidation)
         var secondContext = CreateContext("GET", "/static/revalidate.css");
         secondContext.Request.Headers.IfNoneMatch = etag;
-        var result = await StaticFileService.TryServeAsync(secondContext, options);
+        var result = await StaticFileService.TryServeAsync(secondContext.ToBmw(), options);
 
         Assert.True(result);
         Assert.Equal(304, secondContext.Response.StatusCode);
@@ -238,14 +239,14 @@ public class StaticFileServiceTests : IDisposable
 
         // First request to get Last-Modified
         var firstContext = CreateContext("GET", "/static/revalidate2.css");
-        await StaticFileService.TryServeAsync(firstContext, options);
+        await StaticFileService.TryServeAsync(firstContext.ToBmw(), options);
         var lastModified = firstContext.Response.Headers.LastModified.ToString();
         Assert.False(string.IsNullOrWhiteSpace(lastModified));
 
         // Second request using a future date to simulate "file hasn't changed"
         var secondContext = CreateContext("GET", "/static/revalidate2.css");
         secondContext.Request.Headers.IfModifiedSince = DateTimeOffset.UtcNow.AddHours(1).ToString("R");
-        var result = await StaticFileService.TryServeAsync(secondContext, options);
+        var result = await StaticFileService.TryServeAsync(secondContext.ToBmw(), options);
 
         Assert.True(result);
         Assert.Equal(304, secondContext.Response.StatusCode);

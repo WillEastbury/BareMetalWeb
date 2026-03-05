@@ -20,7 +20,7 @@ public static class CheckoutApiHandlers
     /// Body: { email, shippingAddress, paymentMethod }
     /// Creates an Order from the user's open basket and marks the basket as CheckedOut.
     /// </summary>
-    public static async ValueTask CheckoutHandler(HttpContext context)
+    public static async ValueTask CheckoutHandler(BmwContext context)
     {
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted);
         var userId = user?.Key.ToString() ?? GetAnonymousId(context);
@@ -67,7 +67,7 @@ public static class CheckoutApiHandlers
         }
 
         // Parse request
-        using var doc = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+        using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, cancellationToken: context.RequestAborted);
         var root = doc.RootElement;
         var email = root.TryGetProperty("email", out var e) ? e.GetString() ?? "" : "";
         var address = root.TryGetProperty("shippingAddress", out var a) ? a.GetString() ?? "" : "";
@@ -116,7 +116,7 @@ public static class CheckoutApiHandlers
     /// Body: { orderKey, paymentReference }
     /// Confirms payment and updates order status to Paid.
     /// </summary>
-    public static async ValueTask ConfirmPaymentHandler(HttpContext context)
+    public static async ValueTask ConfirmPaymentHandler(BmwContext context)
     {
         if (!DataScaffold.TryGetEntity("orders", out var orderMeta))
         {
@@ -125,7 +125,7 @@ public static class CheckoutApiHandlers
             return;
         }
 
-        using var doc = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+        using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, cancellationToken: context.RequestAborted);
         var root = doc.RootElement;
         var orderKey = root.TryGetProperty("orderKey", out var ok) ? ok.GetUInt32() : 0u;
         var paymentRef = root.TryGetProperty("paymentReference", out var pr) ? pr.GetString() ?? "" : "";
@@ -158,10 +158,10 @@ public static class CheckoutApiHandlers
         }));
     }
 
-    private static string GetAnonymousId(HttpContext context)
+    private static string GetAnonymousId(BmwContext context)
     {
         const string cookieName = "bm-anon-id";
-        if (context.Request.Cookies.TryGetValue(cookieName, out var id) && !string.IsNullOrEmpty(id))
+        if (context.HttpRequest.Cookies.TryGetValue(cookieName, out var id) && !string.IsNullOrEmpty(id))
             return id;
         id = Guid.NewGuid().ToString("N")[..12];
         context.Response.Cookies.Append(cookieName, id, new CookieOptions

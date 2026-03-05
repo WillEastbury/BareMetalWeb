@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using System.Text.Json;
 using BareMetalWeb.Data;
 using Microsoft.AspNetCore.Http;
@@ -26,7 +27,7 @@ public static class VectorApiHandlers
     public static void Initialize(VectorIndexManager manager) => _manager = manager;
 
     /// <summary>POST /api/vector/search</summary>
-    public static async ValueTask SearchHandler(HttpContext context)
+    public static async ValueTask SearchHandler(BmwContext context)
     {
         if (_manager == null)
         {
@@ -35,7 +36,7 @@ public static class VectorApiHandlers
             return;
         }
 
-        using var doc = await JsonDocument.ParseAsync(context.Request.Body);
+        using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body);
         var root = doc.RootElement;
 
         var entity = root.GetProperty("entity").GetString() ?? "";
@@ -73,11 +74,11 @@ public static class VectorApiHandlers
     }
 
     /// <summary>POST /api/vector/upsert</summary>
-    public static async ValueTask UpsertHandler(HttpContext context)
+    public static async ValueTask UpsertHandler(BmwContext context)
     {
         if (_manager == null) { context.Response.StatusCode = 503; return; }
 
-        using var doc = await JsonDocument.ParseAsync(context.Request.Body);
+        using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body);
         var root = doc.RootElement;
 
         var entity = root.GetProperty("entity").GetString() ?? "";
@@ -103,11 +104,11 @@ public static class VectorApiHandlers
     }
 
     /// <summary>POST /api/vector/delete</summary>
-    public static async ValueTask DeleteHandler(HttpContext context)
+    public static async ValueTask DeleteHandler(BmwContext context)
     {
         if (_manager == null) { context.Response.StatusCode = 503; return; }
 
-        using var doc = await JsonDocument.ParseAsync(context.Request.Body);
+        using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body);
         var root = doc.RootElement;
 
         var entity = root.GetProperty("entity").GetString() ?? "";
@@ -119,7 +120,7 @@ public static class VectorApiHandlers
     }
 
     /// <summary>GET /api/vector/indexes</summary>
-    public static async ValueTask ListIndexesHandler(HttpContext context)
+    public static async ValueTask ListIndexesHandler(BmwContext context)
     {
         if (_manager == null) { context.Response.StatusCode = 503; return; }
 
@@ -143,11 +144,11 @@ public static class VectorApiHandlers
     }
 
     /// <summary>POST /api/vector/register — register a new vector index.</summary>
-    public static async ValueTask RegisterHandler(HttpContext context)
+    public static async ValueTask RegisterHandler(BmwContext context)
     {
         if (_manager == null) { context.Response.StatusCode = 503; return; }
 
-        using var doc = await JsonDocument.ParseAsync(context.Request.Body);
+        using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body);
         var root = doc.RootElement;
 
         var entity = root.GetProperty("entity").GetString() ?? "";

@@ -99,11 +99,11 @@ internal sealed class StubBareWebHost : IBareWebHost
     public string ContentRootPath { get; set; } = "/tmp";
     public bool ShowHostDiagnostics { get; set; } = false;
 
-    public ValueTask BuildAppInfoMenuOptionsAsync(HttpContext? context = null, CancellationToken cancellationToken = default)
+    public ValueTask BuildAppInfoMenuOptionsAsync(BmwContext? context = null, CancellationToken cancellationToken = default)
         => ValueTask.CompletedTask;
 
     public void RegisterRoute(string path, RouteHandlerData routeHandler) { }
-    public Task RenderForbidden(HttpContext context) => Task.CompletedTask;
+    public Task RenderForbidden(BmwContext context) => Task.CompletedTask;
     public Task RequestHandler(HttpContext context) => Task.CompletedTask;
     public Task WireUpRequestHandlingAndLoggerAsyncLifetime() => Task.CompletedTask;
 }

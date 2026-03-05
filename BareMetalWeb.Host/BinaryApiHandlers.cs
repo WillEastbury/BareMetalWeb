@@ -115,7 +115,7 @@ public static class BinaryApiHandlers
     /// Returns the HMAC signing key (base64) for authenticated users.
     /// The client needs this to sign/verify binary payloads.
     /// </summary>
-    public static async ValueTask KeyHandler(HttpContext context)
+    public static async ValueTask KeyHandler(BmwContext context)
     {
         // Require authentication — only logged-in users get the signing key
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted);
@@ -139,7 +139,7 @@ public static class BinaryApiHandlers
     /// GET /api/_binary/{type}/_schema
     /// Returns JSON schema descriptor so the JS client can build its own field plan.
     /// </summary>
-    public static async ValueTask SchemaHandler(HttpContext context)
+    public static async ValueTask SchemaHandler(BmwContext context)
     {
         var (meta, _, error) = await ValidateAsync(context);
         if (meta == null) { await WriteError(context, error!.Value); return; }
@@ -153,7 +153,7 @@ public static class BinaryApiHandlers
     /// GET /api/_binary/{type}
     /// Returns entity list in binary or JSON based on Accept header.
     /// </summary>
-    public static async ValueTask ListHandler(HttpContext context)
+    public static async ValueTask ListHandler(BmwContext context)
     {
         var (meta, _, error) = await ValidateAsync(context);
         if (meta == null) { await WriteError(context, error!.Value); return; }
@@ -182,7 +182,7 @@ public static class BinaryApiHandlers
     /// Client decompresses with DecompressionStream, then reads field values by ordinal.
     /// Format: [uint32 rowCount][uint16 fieldCount][rows: [field0_len][field0_bytes]...]
     /// </summary>
-    public static async ValueTask RawListHandler(HttpContext context)
+    public static async ValueTask RawListHandler(BmwContext context)
     {
         var (meta, _, error) = await ValidateAsync(context);
         if (meta == null) { await WriteError(context, error!.Value); return; }
@@ -250,7 +250,7 @@ public static class BinaryApiHandlers
     /// GET /api/_binary/{type}/_aggregations
     /// Returns list of AggregationDefinition records for this entity type.
     /// </summary>
-    public static async ValueTask AggregationDefsHandler(HttpContext context)
+    public static async ValueTask AggregationDefsHandler(BmwContext context)
     {
         var (meta, typeSlug, error) = await ValidateAsync(context);
         if (meta == null) { await WriteError(context, error!.Value); return; }
@@ -314,13 +314,13 @@ public static class BinaryApiHandlers
     /// GET /api/_binary/{type}/_aggregate?fn=count|sum|avg|min|max|stddev&amp;field=FieldName
     /// Returns aggregation result. Supports multiple aggregates via repeated fn/field params.
     /// </summary>
-    public static async ValueTask AggregateHandler(HttpContext context)
+    public static async ValueTask AggregateHandler(BmwContext context)
     {
         var (meta, _, error) = await ValidateAsync(context);
         if (meta == null) { await WriteError(context, error!.Value); return; }
 
-        var fn = context.Request.Query["fn"].ToString().ToLowerInvariant();
-        var fieldName = context.Request.Query["field"].ToString();
+        var fn = context.HttpRequest.Query["fn"].ToString().ToLowerInvariant();
+        var fieldName = context.HttpRequest.Query["field"].ToString();
 
         if (string.IsNullOrWhiteSpace(fn))
         {
@@ -384,7 +384,7 @@ public static class BinaryApiHandlers
     /// GET /api/_binary/{type}/{id}
     /// Returns a single entity in binary or JSON based on Accept header.
     /// </summary>
-    public static async ValueTask GetHandler(HttpContext context)
+    public static async ValueTask GetHandler(BmwContext context)
     {
         var (meta, _, error) = await ValidateAsync(context);
         if (meta == null) { await WriteError(context, error!.Value); return; }
@@ -416,7 +416,7 @@ public static class BinaryApiHandlers
     /// POST /api/_binary/{type}
     /// Accepts binary or JSON entity, saves it, returns in matching format.
     /// </summary>
-    public static async ValueTask CreateHandler(HttpContext context)
+    public static async ValueTask CreateHandler(BmwContext context)
     {
         if (!HasValidApiContentType(context)) { await WriteError(context, (415, "Unsupported Content-Type.")); return; }
         if (!await CheckBodySizeAsync(context)) return;
@@ -444,7 +444,7 @@ public static class BinaryApiHandlers
     /// PUT /api/_binary/{type}/{id}
     /// Accepts binary or JSON entity, updates it, returns in matching format.
     /// </summary>
-    public static async ValueTask UpdateHandler(HttpContext context)
+    public static async ValueTask UpdateHandler(BmwContext context)
     {
         if (!HasValidApiContentType(context)) { await WriteError(context, (415, "Unsupported Content-Type.")); return; }
         if (!await CheckBodySizeAsync(context)) return;
@@ -482,7 +482,7 @@ public static class BinaryApiHandlers
     /// DELETE /api/_binary/{type}/{id}
     /// Deletes an entity by key.
     /// </summary>
-    public static async ValueTask DeleteHandler(HttpContext context)
+    public static async ValueTask DeleteHandler(BmwContext context)
     {
         var (meta, _, error) = await ValidateAsync(context);
         if (meta == null) { await WriteError(context, error!.Value); return; }
@@ -511,17 +511,17 @@ public static class BinaryApiHandlers
     private const long MaxRequestBodyBytes = 10 * 1024 * 1024; // 10 MB
 
     /// <summary>Reject requests without a recognized Content-Type (CSRF mitigation).</summary>
-    internal static bool HasValidApiContentType(HttpContext context)
+    internal static bool HasValidApiContentType(BmwContext context)
     {
-        var ct = context.Request.ContentType ?? string.Empty;
+        var ct = context.HttpRequest.ContentType ?? string.Empty;
         return ct.Contains("application/json", StringComparison.OrdinalIgnoreCase)
             || ct.Contains(BinaryContentType, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>Returns 413 if Content-Length exceeds the limit. Returns true if OK.</summary>
-    internal static async ValueTask<bool> CheckBodySizeAsync(HttpContext context, long maxBytes = MaxRequestBodyBytes)
+    internal static async ValueTask<bool> CheckBodySizeAsync(BmwContext context, long maxBytes = MaxRequestBodyBytes)
     {
-        if (context.Request.ContentLength.HasValue && context.Request.ContentLength.Value > maxBytes)
+        if (context.HttpRequest.ContentLength.HasValue && context.HttpRequest.ContentLength.Value > maxBytes)
         {
             await WriteError(context, (StatusCodes.Status413PayloadTooLarge, $"Request body exceeds {maxBytes / (1024 * 1024)}MB limit."));
             return false;
@@ -529,20 +529,20 @@ public static class BinaryApiHandlers
         return true;
     }
 
-    private static bool WantsJson(HttpContext context)
+    private static bool WantsJson(BmwContext context)
     {
-        var accept = context.Request.Headers.Accept.ToString();
+        var accept = context.HttpRequest.Headers.Accept.ToString();
         // Default to binary; only use JSON if explicitly requested
         return accept.Contains("application/json", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool RequestIsJson(HttpContext context)
+    private static bool RequestIsJson(BmwContext context)
     {
-        var ct = context.Request.ContentType ?? string.Empty;
+        var ct = context.HttpRequest.ContentType ?? string.Empty;
         return ct.Contains("application/json", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static async ValueTask WriteEntityResponse(HttpContext context, object entity, MetadataWireSerializer.FieldPlan[] plan, int statusCode = StatusCodes.Status200OK)
+    private static async ValueTask WriteEntityResponse(BmwContext context, object entity, MetadataWireSerializer.FieldPlan[] plan, int statusCode = StatusCodes.Status200OK)
     {
         context.Response.StatusCode = statusCode;
         if (WantsJson(context))
@@ -561,7 +561,7 @@ public static class BinaryApiHandlers
         }
     }
 
-    private static async ValueTask WriteListResponse(HttpContext context, List<object> list, MetadataWireSerializer.FieldPlan[] plan)
+    private static async ValueTask WriteListResponse(BmwContext context, List<object> list, MetadataWireSerializer.FieldPlan[] plan)
     {
         if (WantsJson(context))
         {
@@ -579,11 +579,11 @@ public static class BinaryApiHandlers
         }
     }
 
-    private static async ValueTask<object?> ReadEntityFromRequest(HttpContext context, MetadataWireSerializer.FieldPlan[] plan, Type entityType)
+    private static async ValueTask<object?> ReadEntityFromRequest(BmwContext context, MetadataWireSerializer.FieldPlan[] plan, Type entityType)
     {
         if (RequestIsJson(context))
         {
-            using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+            using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.HttpRequest.Body, cancellationToken: context.RequestAborted);
             return MetadataWireSerializer.DeserializeFromJson(doc.RootElement, plan, entityType);
         }
         else
@@ -593,7 +593,7 @@ public static class BinaryApiHandlers
         }
     }
 
-    private static async ValueTask<(DataEntityMetadata? Meta, string TypeSlug, (int StatusCode, string Message)? Error)> ValidateAsync(HttpContext context)
+    private static async ValueTask<(DataEntityMetadata? Meta, string TypeSlug, (int StatusCode, string Message)? Error)> ValidateAsync(BmwContext context)
     {
         var typeSlug = GetRouteValue(context, "type") ?? string.Empty;
         if (string.IsNullOrWhiteSpace(typeSlug))
@@ -645,7 +645,7 @@ public static class BinaryApiHandlers
         return (meta, typeSlug, null);
     }
 
-    internal static string? GetRouteValue(HttpContext context, string key)
+    internal static string? GetRouteValue(BmwContext context, string key)
     {
         var pageContext = context.GetPageContext();
         if (pageContext == null) return null;
@@ -657,16 +657,16 @@ public static class BinaryApiHandlers
         return null;
     }
 
-    private static async ValueTask<ReadOnlyMemory<byte>> ReadBodyAsync(HttpContext context)
+    private static async ValueTask<ReadOnlyMemory<byte>> ReadBodyAsync(BmwContext context)
     {
         var ms = new MemoryStream();
-        await context.Request.Body.CopyToAsync(ms, context.RequestAborted);
+        await context.HttpRequest.Body.CopyToAsync(ms, context.RequestAborted);
         // Return a view over the internal buffer — avoids a full copy.
         // MemoryStream() has no unmanaged resources; the backing byte[] lives until GC collects it.
         return ms.GetBuffer().AsMemory(0, (int)ms.Length);
     }
 
-    private static async ValueTask WriteError(HttpContext context, (int StatusCode, string Message) error)
+    private static async ValueTask WriteError(BmwContext context, (int StatusCode, string Message) error)
     {
         context.Response.StatusCode = error.StatusCode;
         context.Response.ContentType = "application/json";

@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using System;
 using System.IO;
 using System.Text;
@@ -169,7 +170,7 @@ public class CssBundleServiceTests : IDisposable
         CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
 
         var context = CreateContext("GET", "/static/css/themes/flatly.min.css");
-        var result = await CssBundleService.TryServeAsync(context);
+        var result = await CssBundleService.TryServeAsync(context.ToBmw());
 
         Assert.True(result);
         Assert.Equal(200, context.Response.StatusCode);
@@ -179,7 +180,7 @@ public class CssBundleServiceTests : IDisposable
     public async Task TryServeAsync_UnknownPath_ReturnsFalse()
     {
         var context = CreateContext("GET", "/static/js/bundle.js");
-        var result = await CssBundleService.TryServeAsync(context);
+        var result = await CssBundleService.TryServeAsync(context.ToBmw());
 
         Assert.False(result);
     }
@@ -190,7 +191,7 @@ public class CssBundleServiceTests : IDisposable
         // A path with a theme name that is NOT in DefaultThemes (and never will be)
         // must always return false, regardless of what other tests have done.
         var context = CreateContext("GET", "/static/css/themes/nonexistent-xyz-abc.min.css");
-        var result = await CssBundleService.TryServeAsync(context);
+        var result = await CssBundleService.TryServeAsync(context.ToBmw());
 
         Assert.False(result);
     }
@@ -202,7 +203,7 @@ public class CssBundleServiceTests : IDisposable
         CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
 
         var context = CreateContext("GET", "/static/css/themes/darkly.min.css");
-        await CssBundleService.TryServeAsync(context);
+        await CssBundleService.TryServeAsync(context.ToBmw());
 
         Assert.Equal("text/css; charset=utf-8", context.Response.ContentType);
     }
@@ -214,7 +215,7 @@ public class CssBundleServiceTests : IDisposable
         CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
 
         var context = CreateContext("GET", "/static/css/themes/slate.min.css");
-        await CssBundleService.TryServeAsync(context);
+        await CssBundleService.TryServeAsync(context.ToBmw());
 
         Assert.False(string.IsNullOrEmpty(context.Response.Headers.ETag.ToString()));
     }
@@ -226,12 +227,12 @@ public class CssBundleServiceTests : IDisposable
         CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
 
         var first = CreateContext("GET", "/static/css/themes/lux.min.css");
-        await CssBundleService.TryServeAsync(first);
+        await CssBundleService.TryServeAsync(first.ToBmw());
         var etag = first.Response.Headers.ETag.ToString();
 
         var second = CreateContext("GET", "/static/css/themes/lux.min.css");
         second.Request.Headers.IfNoneMatch = etag;
-        var result = await CssBundleService.TryServeAsync(second);
+        var result = await CssBundleService.TryServeAsync(second.ToBmw());
 
         Assert.True(result);
         Assert.Equal(304, second.Response.StatusCode);
@@ -244,7 +245,7 @@ public class CssBundleServiceTests : IDisposable
         CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
 
         var context = CreateContext("POST", "/static/css/themes/superhero.min.css");
-        var result = await CssBundleService.TryServeAsync(context);
+        var result = await CssBundleService.TryServeAsync(context.ToBmw());
 
         Assert.True(result);
         Assert.Equal(405, context.Response.StatusCode);
@@ -257,7 +258,7 @@ public class CssBundleServiceTests : IDisposable
         CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
 
         var context = CreateContext("HEAD", "/static/css/themes/cyborg.min.css");
-        await CssBundleService.TryServeAsync(context);
+        await CssBundleService.TryServeAsync(context.ToBmw());
 
         Assert.Equal(200, context.Response.StatusCode);
         Assert.Equal(0, context.Response.Body.Length);
@@ -270,7 +271,7 @@ public class CssBundleServiceTests : IDisposable
         CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
 
         var context = CreateContext("GET", "/static/css/themes/minty.min.css");
-        await CssBundleService.TryServeAsync(context);
+        await CssBundleService.TryServeAsync(context.ToBmw());
 
         Assert.Contains("public", context.Response.Headers.CacheControl.ToString());
         Assert.Contains("max-age=31536000", context.Response.Headers.CacheControl.ToString());
@@ -365,7 +366,7 @@ public class CssBundleServiceTests : IDisposable
         foreach (var theme in CssBundleService.DefaultThemes)
         {
             var context = CreateContext("GET", $"/static/css/themes/{theme}.min.css");
-            var result = await CssBundleService.TryServeAsync(context);
+            var result = await CssBundleService.TryServeAsync(context.ToBmw());
             Assert.True(result, $"Theme '{theme}' should be served after EnsureAssetsAsync");
             Assert.Equal(200, context.Response.StatusCode);
         }
@@ -374,7 +375,7 @@ public class CssBundleServiceTests : IDisposable
         foreach (var theme in CssBundleService.CustomThemeDefinitions.Keys)
         {
             var context = CreateContext("GET", $"/static/css/themes/{theme}.min.css");
-            var result = await CssBundleService.TryServeAsync(context);
+            var result = await CssBundleService.TryServeAsync(context.ToBmw());
             Assert.True(result, $"Custom theme '{theme}' should be served after EnsureAssetsAsync");
             Assert.Equal(200, context.Response.StatusCode);
         }

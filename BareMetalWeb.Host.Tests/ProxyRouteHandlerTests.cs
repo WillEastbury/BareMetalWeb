@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Reflection;
 using System.Text;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Host;
 using Microsoft.AspNetCore.Http;
@@ -130,7 +131,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/api");
 
         // Act
-        await handler.HandleAsync(context);
+        await handler.HandleAsync(context.ToBmw());
 
         // Assert
         Assert.Equal(503, context.Response.StatusCode);
@@ -990,7 +991,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/api");
 
         // Act
-        await handler.HandleAsync(context);
+        await handler.HandleAsync(context.ToBmw());
 
         // Assert
         Assert.Equal(503, context.Response.StatusCode);

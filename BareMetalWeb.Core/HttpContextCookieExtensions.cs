@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Host;
 
@@ -25,4 +26,15 @@ public static class HttpContextCookieExtensions
     {
         context.Response.Cookies.Delete(name);
     }
+
+    // ── BmwContext overloads ────────────────────────────────────────────
+
+    public static string? GetCookie(this BmwContext context, string name)
+        => context.HttpContext.GetCookie(name);
+
+    public static void SetCookie(this BmwContext context, string name, string value, CookieOptions? options = null)
+        => context.HttpContext.SetCookie(name, value, options);
+
+    public static void DeleteCookie(this BmwContext context, string name)
+        => context.HttpContext.DeleteCookie(name);
 }
