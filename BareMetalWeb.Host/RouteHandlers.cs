@@ -1479,13 +1479,6 @@ public sealed class RouteHandlers : IRouteHandlers
         return $"<script nonce=\"{nonce}\">setupOtpValidation('{action}');</script>";
     }
 
-    private static async ValueTask NotImplementedHandler(HttpContext context, string message)
-    {
-        context.Response.StatusCode = StatusCodes.Status404NotFound;
-        context.Response.ContentType = "text/plain";
-        await context.Response.WriteAsync(message);
-    }
-
     private static string BuildMfaAttemptKey(string scope, string key)
         => $"{scope}:{key}";
 
@@ -6774,32 +6767,6 @@ public sealed class RouteHandlers : IRouteHandlers
         return DataScaffold.GetIdValue(item) ?? "Unknown";
     }
 
-    private static string FormatFieldValue(DataFieldMetadata field, object? value, Func<DataEntityMetadata, bool>? canRenderLookupLink)
-    {
-        if (value == null)
-            return "<em class=\"text-muted\">null</em>";
-        
-        if (field.Lookup != null)
-        {
-            // For lookup fields, show the value as-is (it would be the ID)
-            return WebUtility.HtmlEncode(value.ToString() ?? string.Empty);
-        }
-        
-        return field.FieldType switch
-        {
-            FormFieldType.DateOnly => value is DateOnly dateOnly 
-                ? WebUtility.HtmlEncode(dateOnly.ToString("yyyy-MM-dd")) 
-                : WebUtility.HtmlEncode(value.ToString() ?? string.Empty),
-            FormFieldType.DateTime => value is DateTime dateTime 
-                ? WebUtility.HtmlEncode(dateTime.ToString("yyyy-MM-dd HH:mm:ss")) 
-                : WebUtility.HtmlEncode(value.ToString() ?? string.Empty),
-            FormFieldType.YesNo => value is bool boolVal 
-                ? (boolVal ? "<i class=\"bi bi-check-circle text-success\"></i>" : "<i class=\"bi bi-x-circle text-danger\"></i>") 
-                : WebUtility.HtmlEncode(value.ToString() ?? string.Empty),
-            _ => WebUtility.HtmlEncode(value.ToString() ?? string.Empty)
-        };
-    }
-
     private static string GetViewTypeName(ViewType viewType)
     {
         return viewType switch
@@ -6810,21 +6777,6 @@ public sealed class RouteHandlers : IRouteHandlers
             ViewType.Timetable => "Timetable",
             _ => "Table View"
         };
-    }
-
-    private static string BuildSearchBox(string? currentSearchText, string actionUrl)
-    {
-        var safeSearchText = WebUtility.HtmlEncode(currentSearchText ?? string.Empty);
-        return $@"<div class=""mb-3"">
-    <form method=""get"" action=""{WebUtility.HtmlEncode(actionUrl)}"" class=""row g-2"">
-        <div class=""col-auto flex-grow-1"">
-            <input type=""search"" class=""form-control"" name=""q"" placeholder=""Search..."" value=""{safeSearchText}"" aria-label=""Search"" />
-        </div>
-        <div class=""col-auto"">
-            <button type=""submit"" class=""btn btn-primary""><i class=""bi bi-search"" aria-hidden=""true""></i> Search</button>
-        </div>
-    </form>
-</div>";
     }
 
     private static string BuildPageSizeSelector(int currentPageSize, string basePath, IDictionary<string, string?> queryParams)

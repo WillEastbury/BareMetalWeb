@@ -152,7 +152,7 @@ public static class ActionApiHandlers
         {
             await WriteError(context, 409, "Lock acquisition timed out. Retry later.");
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             await WriteError(context, 500, "An internal error occurred.");
         }

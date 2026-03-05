@@ -23,7 +23,7 @@ public class EntityDefinition : RenderableDataObject
 
     /// <summary>Schema version, incremented on every field-set change.</summary>
     [DataField(Label = "Version", Order = 4, ReadOnly = true)]
-    public int Version { get; set; } = 1;
+    public new int Version { get; set; } = 1;
 
     /// <summary>ID auto-generation strategy: "guid", "sequential", or "none".</summary>
     [DataField(Label = "ID Strategy", Order = 5, Placeholder = "guid | sequential | none")]

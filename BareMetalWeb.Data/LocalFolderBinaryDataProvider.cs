@@ -908,8 +908,6 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private string GetPagedEntityFolder(string entityName)
         => Path.Combine(_rootPath, DefaultPagedFolderName, SanitizeFilePart(entityName));
 
-    private static string GetDataPagedFileName(string id) => $"{DataPagedFilePrefix}{id}";
-
     private static bool TryParseDataPagedFileName(string baseName, out string id)
     {
         id = string.Empty;
@@ -1035,10 +1033,6 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private string GetSchemaFilePattern(Type type)
         => $"schema-{type.Name}-*.json";
 
-    private string GetLegacySchemaPath(Type type) => Path.Combine(GetTypeFolder(type), "schema.json");
-
-    private string GetLegacySchemaBinPath(Type type) => Path.Combine(GetTypeFolder(type), "schema.bin");
-
     private SchemaCache LoadSchemaCache(Type type)
         => _schemaCache.GetOrAdd(type, LoadSchemaCacheCore);
 
@@ -1138,116 +1132,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         return int.TryParse(numberSpan, out version) && version > 0;
     }
 
-    private void MigrateLegacySchemas(Type type, SchemaCache cache)
-    {
-        var legacyPath = GetLegacySchemaPath(type);
-        var legacyBinPath = GetLegacySchemaBinPath(type);
-        SchemaRegistryFile? registry = null;
-
-        if (File.Exists(legacyBinPath))
-        {
-            try
-            {
-                var bytes = File.ReadAllBytes(legacyBinPath);
-                var schema = _serializer.BuildSchema(typeof(SchemaRegistryFile));
-                if (_serializer is BinaryObjectSerializer binarySerializer)
-                {
-                    registry = binarySerializer.Deserialize<SchemaRegistryFile>(bytes, schema, SchemaReadMode.BestEffort);
-                }
-                else
-                {
-                    registry = _serializer.Deserialize<SchemaRegistryFile>(bytes, schema);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError($"Legacy schema.bin load failed for {type.Name}.", ex);
-            }
-        }
-
-        if (registry == null && File.Exists(legacyPath))
-        {
-            try
-            {
-                var legacyBytes = File.ReadAllBytes(legacyPath);
-                registry = ParseLegacySchema(legacyBytes);
-            }
-            catch (Exception ex)
-            {
-                _logger?.LogError($"Legacy schema.json load failed for {type.Name}.", ex);
-            }
-        }
-
-        if (registry == null)
-            return;
-
-        lock (GetSchemaLock(type))
-        {
-            foreach (var schema in registry.Versions)
-            {
-                cache.Versions[schema.Version] = schema;
-                cache.HashToVersion[schema.Hash] = schema.Version;
-                SaveSchemaFile(type, schema);
-            }
-
-            cache.CurrentVersion = registry.CurrentVersion > 0
-                ? registry.CurrentVersion
-                : (cache.Versions.Count == 0 ? 0 : cache.Versions.Keys.Max());
-        }
-    }
-
     private object GetSchemaLock(Type type)
         => _schemaLocks.GetOrAdd(type, _ => new object());
-
-    private static SchemaRegistryFile ParseLegacySchema(ReadOnlySpan<byte> bytes)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(bytes.ToArray());
-            var root = doc.RootElement;
-            var registry = new SchemaRegistryFile();
-
-            if (root.TryGetProperty("CurrentVersion", out var currentVersion) && currentVersion.TryGetInt32(out var current))
-                registry.CurrentVersion = current;
-
-            if (root.TryGetProperty("Versions", out var versions) && versions.ValueKind == JsonValueKind.Array)
-            {
-                foreach (var versionElement in versions.EnumerateArray())
-                {
-                    var schema = new SchemaDefinitionFile();
-                    if (versionElement.TryGetProperty("Version", out var versionValue) && versionValue.TryGetInt32(out var version))
-                        schema.Version = version;
-                    if (versionElement.TryGetProperty("Hash", out var hashValue) && hashValue.TryGetUInt32(out var hash))
-                        schema.Hash = hash;
-                    if (versionElement.TryGetProperty("Architecture", out var archValue) && archValue.ValueKind == JsonValueKind.String)
-                        schema.Architecture = archValue.GetString();
-
-                    if (versionElement.TryGetProperty("Members", out var members) && members.ValueKind == JsonValueKind.Array)
-                    {
-                        foreach (var memberElement in members.EnumerateArray())
-                        {
-                            var member = new MemberSignatureFile();
-                            if (memberElement.TryGetProperty("Name", out var nameValue) && nameValue.ValueKind == JsonValueKind.String)
-                                member.Name = nameValue.GetString() ?? string.Empty;
-                            if (memberElement.TryGetProperty("TypeName", out var typeNameValue) && typeNameValue.ValueKind == JsonValueKind.String)
-                                member.TypeName = typeNameValue.GetString() ?? string.Empty;
-                            if (memberElement.TryGetProperty("BlittableSize", out var sizeValue) && sizeValue.TryGetInt32(out var size))
-                                member.BlittableSize = size;
-                            schema.Members.Add(member);
-                        }
-                    }
-
-                    registry.Versions.Add(schema);
-                }
-            }
-
-            return registry;
-        }
-        catch
-        {
-            return new SchemaRegistryFile();
-        }
-    }
 
     private static BinaryArchitecture ParseArchitecture(string? value)
     {
@@ -1277,7 +1163,6 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     {
         // Use BestEffort mode to support schema evolution: records saved before a field was added or
         // removed will still load correctly, with missing fields receiving their default values.
-        // This follows the same pattern as legacy schema loading (see MigrateLegacySchemas).
         if (serializer is BinaryObjectSerializer binarySerializer)
             return binarySerializer.Deserialize<T>(bytes, schema, SchemaReadMode.BestEffort);
         return serializer.Deserialize<T>(bytes, schema);
