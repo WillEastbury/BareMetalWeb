@@ -71,6 +71,8 @@ public static class DataLayerCapabilities
             $"Vector distance     : {VectorDistancePath}\n" +
             $"Column query scan   : {ColumnQueryPath}\n" +
             $"CRC-32C             : {Crc32CPath}\n" +
-            $"Key comparison      : {KeyComparisonPath}";
+            $"Key comparison      : {KeyComparisonPath}\n" +
+            $"Bloom filter        : {BloomFilterPath}\n" +
+            $"Schema hash         : {SchemaHashPath}";
     }
 }

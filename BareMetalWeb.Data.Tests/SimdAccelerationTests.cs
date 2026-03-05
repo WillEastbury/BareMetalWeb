@@ -1,6 +1,11 @@
 using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Numerics;
 using System.Text;
+using BareMetalWeb.Core.Interfaces;
+using BareMetalWeb.Data;
 using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
@@ -281,13 +286,150 @@ public sealed class SimdAccelerationTests
     }
 
     [Fact]
+    public void DataLayerCapabilities_BloomFilterPath_IsNonEmpty()
+    {
+        Assert.False(string.IsNullOrWhiteSpace(DataLayerCapabilities.BloomFilterPath));
+    }
+
+    [Fact]
+    public void DataLayerCapabilities_SchemaHashPath_IsNonEmpty()
+    {
+        Assert.False(string.IsNullOrWhiteSpace(DataLayerCapabilities.SchemaHashPath));
+    }
+
+    [Fact]
     public void DataLayerCapabilities_Describe_ContainsAllSections()
     {
         string desc = DataLayerCapabilities.Describe();
         Assert.False(string.IsNullOrWhiteSpace(desc));
         Assert.Contains("CRC", desc, StringComparison.OrdinalIgnoreCase);
         Assert.Contains("distance", desc, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Bloom", desc, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Schema", desc, StringComparison.OrdinalIgnoreCase);
     }
+
+    // ── Bloom filter ulong[] bit-packing + POPCNT ─────────────────────────
+
+    [Fact]
+    public void BloomFilter_AddAndSearch_FindsExactToken()
+    {
+        // Arrange
+        var testRoot = Path.Combine(Path.GetTempPath(), "SimdBloomTest_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(testRoot);
+        try
+        {
+            var mgr = new SearchIndexManager(testRoot, logger: null);
+            var item = new TestSearchableItem { Key = 1, Description = "hello world" };
+            mgr.IndexObject(item);
+
+            // Act
+            var results = mgr.Search(typeof(TestSearchableItem), "hello", () => new[] { item }, IndexKind.Bloom);
+
+            // Assert: token found
+            Assert.Contains(1u, results);
+        }
+        finally
+        {
+            Directory.Delete(testRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BloomFilter_NegativeProbe_ReturnsEmpty()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), "SimdBloomNeg_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(testRoot);
+        try
+        {
+            var mgr = new SearchIndexManager(testRoot, logger: null);
+            var item = new TestSearchableItem { Key = 1, Description = "hello world" };
+            mgr.IndexObject(item);
+
+            // A token that was never inserted must not be returned
+            var results = mgr.Search(typeof(TestSearchableItem), "zzznomatch999", () => new[] { item }, IndexKind.Bloom);
+            Assert.DoesNotContain(1u, results);
+        }
+        finally
+        {
+            Directory.Delete(testRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void BloomFilter_MultipleItems_AllFound()
+    {
+        var testRoot = Path.Combine(Path.GetTempPath(), "SimdBloomMulti_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(testRoot);
+        try
+        {
+            var mgr = new SearchIndexManager(testRoot, logger: null);
+            var items = Enumerable.Range(1, 50)
+                .Select(i => new TestSearchableItem { Key = (uint)i, Description = $"token{i} extra" })
+                .ToArray();
+            foreach (var it in items)
+                mgr.IndexObject(it);
+
+            // Every inserted token must resolve back to its ID
+            for (uint i = 1; i <= 50; i++)
+            {
+                var results = mgr.Search(typeof(TestSearchableItem), $"token{i}", () => items, IndexKind.Bloom);
+                Assert.Contains(i, results);
+            }
+        }
+        finally
+        {
+            Directory.Delete(testRoot, recursive: true);
+        }
+    }
+
+    // ── XxHash64 Schema Hash ──────────────────────────────────────────────
+
+    [Fact]
+    public void SchemaHash_SameType_ProducesSameHash()
+    {
+        var ser = new BinaryObjectSerializer();
+        var schema1 = ser.BuildSchema(typeof(SimpleHashItem));
+        var schema2 = ser.BuildSchema(typeof(SimpleHashItem));
+        Assert.Equal(schema1.Hash, schema2.Hash);
+    }
+
+    [Fact]
+    public void SchemaHash_DifferentTypes_ProduceDifferentHashes()
+    {
+        var ser = new BinaryObjectSerializer();
+        var schemaA = ser.BuildSchema(typeof(SimpleHashItem));
+        var schemaB = ser.BuildSchema(typeof(AnotherHashItem));
+        Assert.NotEqual(schemaA.Hash, schemaB.Hash);
+    }
+
+    [Fact]
+    public void SchemaHash_RoundTrip_SerializeDeserialize_Succeeds()
+    {
+        var ser = new BinaryObjectSerializer();
+        var original = new SimpleHashItem { Name = "test", Value = 42 };
+        var schema = ser.CreateSchema(1, ser.BuildSchema(typeof(SimpleHashItem)).Members);
+
+        byte[] bytes = ser.Serialize(original, 1);
+        var restored = ser.Deserialize<SimpleHashItem>(bytes, schema);
+
+        Assert.NotNull(restored);
+        Assert.Equal(original.Name, restored.Name);
+        Assert.Equal(original.Value, restored.Value);
+    }
+}
+
+/// <summary>Simple POCO used to verify XxHash64 schema hash stability.</summary>
+file class SimpleHashItem
+{
+    public string? Name { get; set; }
+    public int Value { get; set; }
+}
+
+/// <summary>Different POCO to verify schema hashes differ across types.</summary>
+file class AnotherHashItem
+{
+    public Guid Id { get; set; }
+    public double Score { get; set; }
 }
 
 /// <summary>Tiny fluent helper to keep test array initialisation readable.</summary>
