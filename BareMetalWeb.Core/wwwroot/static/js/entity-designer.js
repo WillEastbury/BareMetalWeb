@@ -15,7 +15,7 @@
         { value: 'lookup', label: 'Lookup (FK)' }
     ];
 
-    var VIEW_TYPES = ['Table', 'TreeView', 'OrgChart', 'Timeline', 'Timetable'];
+    var VIEW_TYPES = ['Table', 'TreeView', 'OrgChart', 'Timeline', 'Timetable', 'Sankey', 'Calendar', 'Kanban'];
     var ID_STRATEGIES = ['guid', 'sequential', 'none'];
 
     var entity = {
@@ -62,7 +62,7 @@
         html += '<div class="col-md-3"><label class="form-label" title="How new record IDs are generated. guid = random UUID (recommended); sequential = auto-increment integer; none = you must supply the ID yourself.">ID Strategy <i class="bi bi-question-circle text-muted small"></i></label><select class="form-select form-select-sm" id="ed-idStrategy" title="How new record IDs are generated. guid = random UUID; sequential = auto-increment integer; none = supply your own.">';
         ID_STRATEGIES.forEach(function (s) { html += '<option' + (entity.idStrategy === s ? ' selected' : '') + '>' + s + '</option>'; });
         html += '</select></div>';
-        html += '<div class="col-md-3"><label class="form-label" title="Default view layout for the entity list page. Table is the default. TreeView and OrgChart require a Parent Field. Timeline requires a date field.">View Type <i class="bi bi-question-circle text-muted small"></i></label><select class="form-select form-select-sm" id="ed-viewType" title="Default view layout. Table is the default. TreeView/OrgChart require a Parent Field. Timeline requires a date field."><option value="">Table (default)</option>';
+        html += '<div class="col-md-3"><label class="form-label" title="Default view layout for the entity list page. Table is the default. TreeView and OrgChart require a Parent Field. Timeline requires a date field. Kanban requires an Enum field.">View Type <i class="bi bi-question-circle text-muted small"></i></label><select class="form-select form-select-sm" id="ed-viewType" title="Default view layout. Table is the default. TreeView/OrgChart require a Parent Field. Timeline requires a date field. Kanban requires an Enum field."><option value="">Table (default)</option>';
         VIEW_TYPES.forEach(function (v) { html += '<option value="' + v + '"' + (entity.viewType === v ? ' selected' : '') + '>' + v + '</option>'; });
         html += '</select></div>';
         html += '<div class="col-md-3"><label class="form-label" title="Space-separated role names required to access this entity. Leave blank to allow any authenticated user.">Permissions <i class="bi bi-question-circle text-muted small"></i></label><input type="text" class="form-control form-control-sm" id="ed-permissions" value="' + escHtml(entity.permissions || '') + '" placeholder="e.g. admin" title="Space-separated role names required to access this entity. Leave blank for any authenticated user."></div>';

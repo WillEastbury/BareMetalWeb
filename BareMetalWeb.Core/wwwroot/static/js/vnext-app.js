@@ -514,8 +514,8 @@
             // Hierarchy/calendar views need all items (no pagination)
             var vt = meta.viewType || '';
             var activeView = query.view || '';
-            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' || vt === 'Sankey' ||
-                activeView === 'TreeView' || activeView === 'OrgChart' || activeView === 'Timeline' || activeView === 'Timetable' || activeView === 'Sankey');
+            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' || vt === 'Sankey' || vt === 'Kanban' ||
+                activeView === 'TreeView' || activeView === 'OrgChart' || activeView === 'Timeline' || activeView === 'Timetable' || activeView === 'Sankey' || activeView === 'Workflow' || activeView === 'Kanban');
 
             var effectiveSkip = isHierarchyView ? 0 : skip;
             var effectiveTop  = isHierarchyView ? 10000 : top;
@@ -616,7 +616,7 @@
             if (meta.canShowTimetable) html += '<a class="btn btn-outline-secondary' + (activeView === 'Timetable' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Timetable' })) + '" title="Timetable"><i class="bi bi-calendar3"></i></a>';
             if (viewType === 'Sankey' || meta.canShowSankey) html += '<a class="btn btn-outline-secondary' + (activeView === 'Sankey' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Sankey' })) + '" title="Document Chain (Sankey)"><i class="bi bi-diagram-2-fill"></i></a>';
             if (viewType === 'Calendar' || meta.canShowCalendar) html += '<a class="btn btn-outline-secondary' + (activeView === 'Calendar' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar' })) + '" title="Calendar"><i class="bi bi-calendar-month"></i></a>';
-            if (meta.canShowWorkflow) html += '<a class="btn btn-outline-secondary' + (activeView === 'Workflow' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Workflow' })) + '" title="Workflow Board"><i class="bi bi-kanban"></i></a>';
+            if (viewType === 'Kanban' || meta.canShowWorkflow) html += '<a class="btn btn-outline-secondary' + (activeView === 'Workflow' || activeView === 'Kanban' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Workflow' })) + '" title="Kanban Board"><i class="bi bi-kanban"></i></a>';
             html += '<a class="btn btn-outline-secondary' + (activeView === 'Aggregation' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Aggregation' })) + '" title="Aggregations"><i class="bi bi-bar-chart-line"></i></a>';
             html += '<a class="btn btn-outline-secondary' + (activeView === 'Chart' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Chart' })) + '" title="Charts"><i class="bi bi-graph-up"></i></a>';
             html += '</div>';
@@ -637,7 +637,7 @@
             html += renderCalendarView(meta, items, slug, baseUrl, query);
         } else if (activeView === 'Aggregation') {
             html += renderAggregationView(meta, items, slug, baseUrl, query);
-        } else if (activeView === 'Workflow') {
+        } else if (activeView === 'Workflow' || activeView === 'Kanban' || (activeView === '' && viewType === 'Kanban')) {
             html += renderWorkflowView(meta, items, slug, baseUrl, query);
         } else if (activeView === 'Chart') {
             html += renderChartView(meta, items, slug, baseUrl, query);
@@ -1569,7 +1569,7 @@
 
     // ── Workflow / Kanban Board View ─────────────────────────────────────────
     function renderWorkflowView(meta, items, slug, baseUrl, query) {
-        // Find the first enum field to use as the workflow stage
+        // Find the flow field (enum) - from query.flowField or auto-detect
         var flowField = query.flowField
             ? meta.fields.find(function (f) { return f.name === query.flowField; })
             : null;
@@ -1579,11 +1579,38 @@
             });
         }
         if (!flowField || !flowField.enumValues) {
-            return '<div class="bm-empty-state"><i class="bi bi-kanban"></i><p>No enum field found for workflow view</p></div>';
+            return '<div class="bm-empty-state"><i class="bi bi-kanban"></i><p>No enum field found for Kanban view.</p><small>Add at least one Enum field to use Kanban view.</small></div>';
         }
 
         var labelField = meta.fields.find(function (f) { return f.list && f.type === 'Text'; }) || meta.fields[0];
         var stages = flowField.enumValues;
+
+        // Parse WIP limits from query: wipLimit_StageName=N
+        var wipLimits = {};
+        Object.keys(query).forEach(function (k) {
+            if (k.indexOf('wipLimit_') === 0) {
+                var stageName = k.slice('wipLimit_'.length);
+                var lim = parseInt(query[k], 10);
+                if (!isNaN(lim) && lim > 0) wipLimits[stageName] = lim;
+            }
+        });
+
+        // Parse automation hooks from query: hook_StageName=commandName
+        var hooks = {};
+        Object.keys(query).forEach(function (k) {
+            if (k.indexOf('hook_') === 0) {
+                var stageName = k.slice('hook_'.length);
+                if (query[k]) hooks[stageName] = query[k];
+            }
+        });
+
+        // Collect available enum fields for the flow field picker
+        var enumFields = meta.fields.filter(function (f) {
+            return f.type === 'Enum' && f.enumValues && f.enumValues.length > 0;
+        });
+
+        // Collect available commands for automation hook selection
+        var commands = meta.commands || [];
 
         // Group items by stage
         var stageMap = {};
@@ -1595,25 +1622,93 @@
         });
 
         var colors = ['primary', 'info', 'warning', 'success', 'secondary', 'danger'];
-        var html = '<div class="d-flex gap-3 overflow-auto pb-3" style="min-height:400px">';
+        var uniqueId = 'bm-kb-' + slug;
+
+        // Toolbar: flow field picker + WIP config + hook config
+        var html = '<div class="mb-3 d-flex flex-wrap gap-2 align-items-center">';
+        // Flow field selector (only shown when multiple enum fields exist)
+        if (enumFields.length > 1) {
+            html += '<div class="d-flex align-items-center gap-1">';
+            html += '<label class="form-label mb-0 small fw-semibold">Column field:</label>';
+            html += '<select class="form-select form-select-sm" style="width:auto" onchange="(function(v){var u=new URL(location.href);u.searchParams.set(\'view\',\'Workflow\');u.searchParams.set(\'flowField\',v);location.href=u.toString();})(this.value)">';
+            enumFields.forEach(function (f) {
+                html += '<option value="' + escHtml(f.name) + '"' + (f.name === flowField.name ? ' selected' : '') + '>' + escHtml(f.label || f.name) + '</option>';
+            });
+            html += '</select>';
+            html += '</div>';
+        }
+        // WIP limits toggle button
+        html += '<button type="button" class="btn btn-outline-secondary btn-sm" onclick="document.getElementById(\'bm-kb-settings-' + slug + '\').classList.toggle(\'d-none\')">';
+        html += '<i class="bi bi-sliders"></i> Board settings</button>';
+        html += '</div>';
+
+        // Board settings panel (collapsed by default)
+        html += '<div id="bm-kb-settings-' + slug + '" class="card mb-3 d-none">';
+        html += '<div class="card-header fw-semibold"><i class="bi bi-sliders me-2"></i>Board Settings</div>';
+        html += '<div class="card-body">';
+        html += '<p class="small text-muted mb-2">Settings are stored in the URL and preserved per bookmark/link.</p>';
+        html += '<div class="row g-3">';
+        stages.forEach(function (stage, idx) {
+            var color = colors[idx % colors.length];
+            html += '<div class="col-md-4">';
+            html += '<div class="card border-' + color + '-subtle">';
+            html += '<div class="card-header bg-' + color + '-subtle text-' + color + '-emphasis small fw-semibold">' + escHtml(stage) + '</div>';
+            html += '<div class="card-body p-2">';
+            // WIP limit input
+            html += '<div class="mb-2">';
+            html += '<label class="form-label small mb-1">WIP limit <span class="text-muted">(0 = unlimited)</span></label>';
+            html += '<input type="number" min="0" class="form-control form-control-sm bm-kb-wip" data-stage="' + escHtml(stage) + '" value="' + (wipLimits[stage] || 0) + '">';
+            html += '</div>';
+            // Automation hook select
+            if (commands.length > 0) {
+                html += '<div>';
+                html += '<label class="form-label small mb-1">Automation hook <span class="text-muted">(run on move)</span></label>';
+                html += '<select class="form-select form-select-sm bm-kb-hook" data-stage="' + escHtml(stage) + '">';
+                html += '<option value="">(none)</option>';
+                commands.forEach(function (cmd) {
+                    var cmdName = cmd.name || cmd;
+                    html += '<option value="' + escHtml(cmdName) + '"' + (hooks[stage] === cmdName ? ' selected' : '') + '>' + escHtml(cmd.label || cmdName) + '</option>';
+                });
+                html += '</select>';
+                html += '</div>';
+            }
+            html += '</div></div></div>';
+        });
+        html += '</div>';
+        html += '<div class="mt-3">';
+        html += '<button type="button" class="btn btn-primary btn-sm" onclick="bmKanbanApplySettings(\'' + escHtml(slug) + '\')">';
+        html += '<i class="bi bi-check-lg"></i> Apply</button>';
+        html += '</div>';
+        html += '</div></div>';
+
+        // Kanban board
+        html += '<div class="d-flex gap-3 overflow-auto pb-3" id="' + uniqueId + '" style="min-height:400px">';
         stages.forEach(function (stage, idx) {
             var stageItems = stageMap[stage] || [];
             var color = colors[idx % colors.length];
-            html += '<div class="card flex-shrink-0" style="min-width:260px;max-width:320px;flex:1">';
+            var wipLimit = wipLimits[stage] || 0;
+            var wipExceeded = wipLimit > 0 && stageItems.length > wipLimit;
+
+            html += '<div class="card flex-shrink-0 bm-kb-col" data-stage="' + escHtml(stage) + '" data-slug="' + escHtml(slug) + '" data-field="' + escHtml(flowField.name) + '" style="min-width:260px;max-width:320px;flex:1">';
             html += '<div class="card-header bg-' + color + '-subtle text-' + color + '-emphasis d-flex justify-content-between align-items-center">';
-            html += '<span class="fw-semibold">' + escHtml(stage) + '</span>';
-            html += '<span class="badge bg-' + color + '">' + stageItems.length + '</span>';
+            html += '<span class="fw-semibold"><i class="bi bi-kanban me-1"></i>' + escHtml(stage) + '</span>';
+            html += '<span>';
+            html += '<span class="badge bg-' + color + (wipExceeded ? ' border border-danger' : '') + '" title="' + stageItems.length + ' items' + (wipLimit > 0 ? ' (WIP limit: ' + wipLimit + ')' : '') + '">' + stageItems.length + (wipLimit > 0 ? '/' + wipLimit : '') + '</span>';
+            if (wipExceeded) html += ' <span class="badge bg-danger" title="WIP limit exceeded!"><i class="bi bi-exclamation-triangle-fill"></i></span>';
+            html += '</span>';
             html += '</div>';
-            html += '<div class="card-body p-2" style="max-height:60vh;overflow-y:auto">';
+            // Drop zone
+            html += '<div class="card-body p-2 bm-kb-dropzone" data-stage="' + escHtml(stage) + '" style="min-height:80px;max-height:60vh;overflow-y:auto">';
             if (stageItems.length === 0) {
-                html += '<div class="text-center text-muted small py-3"><i class="bi bi-inbox"></i><br>Empty</div>';
+                html += '<div class="text-center text-muted small py-3 bm-kb-empty"><i class="bi bi-inbox"></i><br>Drop cards here</div>';
             }
             stageItems.forEach(function (item) {
                 var id = item.id || item.Id || item.key || item.Key || '';
                 var label = nestedGet(item, labelField.name) || '(untitled)';
-                html += '<a href="' + baseUrl + '/' + encodeURIComponent(id) + '" class="card mb-2 text-decoration-none bm-entity-card">';
-                html += '<div class="card-body p-2">';
-                html += '<div class="fw-semibold small">' + escHtml(label) + '</div>';
+                html += '<div class="card mb-2 bm-kb-card" draggable="true" data-id="' + escHtml(id) + '" data-stage="' + escHtml(stage) + '" data-label="' + escHtml(label) + '">';
+                html += '<div class="card-body p-2 d-flex justify-content-between align-items-start">';
+                html += '<div style="flex:1;min-width:0">';
+                html += '<div class="fw-semibold small text-truncate">' + escHtml(label) + '</div>';
                 // Show a secondary field if available
                 var secondaryField = meta.fields.find(function (f) {
                     return f.list && f.name !== labelField.name && f.name !== flowField.name && f.type !== 'YesNo';
@@ -1622,11 +1717,130 @@
                     var secVal = nestedGet(item, secondaryField.name);
                     if (secVal) html += '<div class="text-muted small text-truncate">' + escHtml(secVal.toString()) + '</div>';
                 }
-                html += '</div></a>';
+                html += '</div>';
+                html += '<a href="' + baseUrl + '/' + encodeURIComponent(id) + '" class="btn btn-sm btn-link p-0 ms-1 text-muted" title="Open record" onclick="event.stopPropagation()"><i class="bi bi-box-arrow-up-right"></i></a>';
+                html += '</div></div>';
             });
             html += '</div></div>';
         });
         html += '</div>';
+
+        // Inline script for drag/drop, WIP limits, automation hooks
+        html += '<script>(function() {\n';
+        // Store hooks config so the JS can access it
+        html += 'var _bmKbHooks = ' + JSON.stringify(hooks) + ';\n';
+        html += 'var _bmKbWipLimits = ' + JSON.stringify(wipLimits) + ';\n';
+        html += 'function bmKbInit() {\n';
+        html += '  var cards = document.querySelectorAll(".bm-kb-card");\n';
+        html += '  var zones = document.querySelectorAll(".bm-kb-dropzone");\n';
+        html += '  var dragSrc = null;\n';
+        html += '  cards.forEach(function(card) {\n';
+        html += '    card.addEventListener("dragstart", function(e) {\n';
+        html += '      dragSrc = card;\n';
+        html += '      card.style.opacity = "0.4";\n';
+        html += '      e.dataTransfer.effectAllowed = "move";\n';
+        html += '      e.dataTransfer.setData("text/plain", card.dataset.id);\n';
+        html += '    });\n';
+        html += '    card.addEventListener("dragend", function() {\n';
+        html += '      card.style.opacity = "1";\n';
+        html += '      document.querySelectorAll(".bm-kb-dropzone").forEach(function(z) { z.classList.remove("bm-kb-drag-over"); });\n';
+        html += '    });\n';
+        html += '  });\n';
+        html += '  zones.forEach(function(zone) {\n';
+        html += '    zone.addEventListener("dragover", function(e) {\n';
+        html += '      e.preventDefault();\n';
+        html += '      e.dataTransfer.dropEffect = "move";\n';
+        html += '      zone.classList.add("bm-kb-drag-over");\n';
+        html += '    });\n';
+        html += '    zone.addEventListener("dragleave", function() { zone.classList.remove("bm-kb-drag-over"); });\n';
+        html += '    zone.addEventListener("drop", function(e) {\n';
+        html += '      e.preventDefault();\n';
+        html += '      zone.classList.remove("bm-kb-drag-over");\n';
+        html += '      if (!dragSrc) return;\n';
+        html += '      var itemId = dragSrc.dataset.id;\n';
+        html += '      var fromStage = dragSrc.dataset.stage;\n';
+        html += '      var toStage = zone.dataset.stage;\n';
+        html += '      if (fromStage === toStage) return;\n';
+        html += '      var col = zone.closest(".bm-kb-col");\n';
+        html += '      var slug2 = col ? col.dataset.slug : "";\n';
+        html += '      var field = col ? col.dataset.field : "";\n';
+        html += '      if (!slug2 || !field) return;\n';
+        html += '      // WIP limit check\n';
+        html += '      var wipLimit = _bmKbWipLimits[toStage] || 0;\n';
+        html += '      var currentCount = zone.querySelectorAll(".bm-kb-card").length;\n';
+        html += '      if (wipLimit > 0 && currentCount >= wipLimit) {\n';
+        html += '        if (!confirm("WIP limit of " + wipLimit + " reached for column \\"" + toStage + "\\". Move anyway?")) return;\n';
+        html += '      }\n';
+        html += '      // Move card in DOM immediately for responsiveness\n';
+        html += '      var empty = zone.querySelector(".bm-kb-empty");\n';
+        html += '      if (empty) empty.remove();\n';
+        html += '      dragSrc.dataset.stage = toStage;\n';
+        html += '      zone.appendChild(dragSrc);\n';
+        html += '      // Remove empty placeholder from source if no cards remain\n';
+        html += '      var srcZone = document.querySelector(".bm-kb-dropzone[data-stage=\\"" + CSS.escape(fromStage) + "\\"]");\n';
+        html += '      if (srcZone && srcZone.querySelectorAll(".bm-kb-card").length === 0) {\n';
+        html += '        srcZone.innerHTML = \'<div class="text-center text-muted small py-3 bm-kb-empty"><i class="bi bi-inbox"></i><br>Drop cards here</div>\';\n';
+        html += '      }\n';
+        html += '      // PATCH the field value via API\n';
+        html += '      var patch = {};\n';
+        html += '      patch[field] = toStage;\n';
+        html += '      var csrfToken = document.querySelector(\'meta[name="csrf-token"]\');\n';
+        html += '      var headers = { "Content-Type": "application/json" };\n';
+        html += '      if (csrfToken) headers["X-CSRF-Token"] = csrfToken.content;\n';
+        html += '      fetch("/api/" + encodeURIComponent(slug2) + "/" + encodeURIComponent(itemId), {\n';
+        html += '        method: "PATCH",\n';
+        html += '        headers: headers,\n';
+        html += '        body: JSON.stringify(patch),\n';
+        html += '        credentials: "same-origin"\n';
+        html += '      }).then(function(r) {\n';
+        html += '        if (!r.ok) {\n';
+        html += '          r.text().then(function(t) { alert("Move failed: " + t); });\n';
+        html += '          return null;\n';
+        html += '        }\n';
+        html += '        return r.json();\n';
+        html += '      }).then(function(updated) {\n';
+        html += '        if (!updated) return;\n';
+        html += '        // Automation hook: run command if configured for target stage\n';
+        html += '        var hookCmd = _bmKbHooks[toStage];\n';
+        html += '        if (hookCmd) {\n';
+        html += '          var hookHeaders = { "Content-Type": "application/json" };\n';
+        html += '          if (csrfToken) hookHeaders["X-CSRF-Token"] = csrfToken.content;\n';
+        html += '          fetch("/api/" + encodeURIComponent(slug2) + "/" + encodeURIComponent(itemId) + "/_command/" + encodeURIComponent(hookCmd), {\n';
+        html += '            method: "POST",\n';
+        html += '            headers: hookHeaders,\n';
+        html += '            body: JSON.stringify(updated),\n';
+        html += '            credentials: "same-origin"\n';
+        html += '          }).then(function(hr) {\n';
+        html += '            if (!hr.ok) hr.text().then(function(t) { console.warn("Hook command failed:", t); });\n';
+        html += '            else console.log("Hook \\\"" + hookCmd + "\\\" executed for item " + itemId);\n';
+        html += '          }).catch(function(err) { console.warn("Hook error:", err); });\n';
+        html += '        }\n';
+        html += '      }).catch(function(err) { alert("Network error: " + err.message); });\n';
+        html += '    });\n';
+        html += '  });\n';
+        html += '}\n';
+        // bmKanbanApplySettings — reads WIP inputs + hook selects, rebuilds URL params, navigates
+        html += 'window.bmKanbanApplySettings = function(slug3) {\n';
+        html += '  var url = new URL(location.href);\n';
+        html += '  // Clear old wip/hook params\n';
+        html += '  var toDelete = [];\n';
+        html += '  url.searchParams.forEach(function(v, k) { if (k.indexOf("wipLimit_") === 0 || k.indexOf("hook_") === 0) toDelete.push(k); });\n';
+        html += '  toDelete.forEach(function(k) { url.searchParams.delete(k); });\n';
+        html += '  document.querySelectorAll(".bm-kb-wip").forEach(function(inp) {\n';
+        html += '    var v = parseInt(inp.value, 10);\n';
+        html += '    if (v > 0) url.searchParams.set("wipLimit_" + inp.dataset.stage, v);\n';
+        html += '  });\n';
+        html += '  document.querySelectorAll(".bm-kb-hook").forEach(function(sel) {\n';
+        html += '    if (sel.value) url.searchParams.set("hook_" + sel.dataset.stage, sel.value);\n';
+        html += '  });\n';
+        html += '  location.href = url.toString();\n';
+        html += '};\n';
+        html += 'if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", bmKbInit); } else { bmKbInit(); }\n';
+        html += '}());<\/script>';
+
+        // Drag-over highlight style (injected once)
+        html += '<style>.bm-kb-dropzone.bm-kb-drag-over{background:rgba(13,110,253,.08);border:2px dashed #0d6efd;border-radius:.375rem}.bm-kb-card{cursor:grab}.bm-kb-card:active{cursor:grabbing}<\/style>';
+
         return html;
     }
 
