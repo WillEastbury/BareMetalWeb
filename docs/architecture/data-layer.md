@@ -451,6 +451,60 @@ bitmask intersection, so correctness is maintained for any mix of clause types.
 and activation threshold at runtime (logged at startup and shown in the metrics
 dashboard).
 
+### Branchless Bitmask Filter Pipeline — `BitmaskFilterPipeline`
+
+A lower-level, allocation-free predicate evaluation primitive that works on raw
+`ReadOnlySpan<T>` column slices rather than entity-object lists.  Designed for
+cases where the caller owns flat columnar buffers and wants sub-microsecond
+compound filtering without reflection or heap allocation.
+
+**Method signature (as required by the issue):**
+```csharp
+public static int EvaluateFilter(
+    ReadOnlySpan<int>    age,
+    ReadOnlySpan<double> score,
+    ReadOnlySpan<byte>   active,
+    Span<int>            outputIndexes)
+```
+
+**How it works:**
+
+1. Rows are processed in blocks of **64** — one 64-bit `ulong` mask covers
+   exactly one block.
+2. For each block, a separate 64-bit mask is built per predicate using the
+   `BuildMask*` helpers.  Each helper iterates the block and sets bit `k` when
+   row `baseIndex+k` satisfies the predicate.  The comparisons compile to
+   branchless `SETG` / `SETL` / `SETE` (x86) or `CSET` (ARM64) sequences —
+   no branch mispredictions even for random-selectivity data.
+3. The per-predicate masks are intersected with bitwise AND:
+   `combined = maskAge & maskScore & maskActive`.
+4. Matching row indices are collected via
+   `BitOperations.TrailingZeroCount(combined)` + clear-lowest-set-bit
+   (`combined &= combined - 1`).  This inner loop fires only for matching rows;
+   zero-bit positions are skipped in O(1).
+5. Scanning continues until all rows are processed.
+
+**Why this outperforms branch-heavy loops:**
+- A naïve per-row loop with `if (age > 30 && score < 90 && active == 1)` incurs
+  branch mispredictions whenever the hit pattern is irregular.  The bitmask
+  pipeline evaluates all three predicates unconditionally and collapses them to
+  a single `ulong`, so the only branch is in the 64-row outer loop — which is
+  almost always predicted correctly.
+- Column arrays provide sequential, cache-friendly memory access vs. chasing
+  object references through the heap.
+
+**SIMD upgrade path:**
+The `BuildMask*` helpers use simple scalar loops.  They are structured so the
+inner comparison can be replaced with a `Vector<T>` sweep or an AVX-512
+mask-register intrinsic (`_mm512_cmpgt_epi32_mask`) without changing the outer
+64-wide aggregation logic.
+
+**Allocation policy:** zero allocations.  The caller provides the output buffer
+(`Span<int> outputIndexes`).
+
+`DataLayerCapabilities.BitmaskFilterPipelinePath` describes the active path at
+runtime.
+
 ---
 
-_Status: Updated @ commit HEAD (2026-03-05) — extended hardware acceleration section with SimdDistance FMA paths, WalLatin1Key32 word comparison, CRC slicing-by-4 software fallback; added striped WalHeadMap description; added WAL Segment Compaction section documenting materialised-view compaction strategy_
+_Status: Updated @ commit HEAD (2026-03-06) — added BitmaskFilterPipeline section; extended hardware acceleration section with SimdDistance FMA paths, WalLatin1Key32 word comparison, CRC slicing-by-4 software fallback; added striped WalHeadMap description; added WAL Segment Compaction section documenting materialised-view compaction strategy_
