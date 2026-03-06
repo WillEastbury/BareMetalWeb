@@ -290,6 +290,85 @@ Sequential IDs are persisted so they survive restarts:
 
 ---
 
+## WAL Segment Compaction
+
+### Background
+
+Each `WalStore` segment is an append-only file.  When a record is updated the new
+version is appended to the current active segment and the old version is never
+deleted.  Over time a single segment may contain dozens of superseded versions of
+the same key, wasting disk space and slowing sequential recovery scans.
+
+Compaction collapses a segment to a single-version-per-key snapshot.
+
+### Materialised-View Compaction Strategy (`CompactSegmentFromMaterialisedView`)
+
+`WalStore.CompactSegmentFromMaterialisedView(uint segmentId)` implements a
+**read-free compaction** approach that avoids scanning the full original segment
+sequentially.  Instead it rebuilds the segment exclusively from the in-memory
+state:
+
+```
+Old approach (sequential read):
+  read full WAL segment (64 MiB)  →  deduplicate versions  →  write compacted segment
+
+New approach (materialised view):
+  scan HeadMap (memory)  →  targeted reads (one per live key)  →  write compacted segment
+```
+
+**Algorithm (five steps):**
+
+1. **Snapshot HeadMap** (outside the write lock).  `WalHeadMap.CopyArrays()` returns
+   sorted parallel `ulong[]` arrays.  Filter to entries whose pointer's upper 32 bits
+   equal `segmentId` — these are the live keys whose latest version resides in the
+   target segment.  Keys superseded by a newer commit in a later segment are
+   naturally excluded.
+
+2. **Targeted disk reads** (outside the write lock).  Open the original segment with
+   `FileShare.ReadWrite | FileOptions.RandomAccess` and call
+   `TryReadRawOpFromStream()` for each live key using the exact offset from the
+   HeadMap.  Raw (potentially compressed) bytes are read and preserved without
+   decompression/recompression.  Tombstone ops (`OpTypeDeleteTombstone`) are
+   dropped.
+
+3. **Write compacted segment to `.compact` temp file** (outside the write lock).
+   Each live key is written as a separate single-op commit batch via
+   `WalSegmentWriter`, so each key gets its own unique `Ptr` after compaction.
+   A footer index is written at the end.  The file is flushed and fsynced.
+
+4. **Atomic swap under the write lock**.
+   a. Atomically rename `wal_seg_N.log.compact` → `wal_seg_N.log` (readers opening
+      by filename now see the compacted content).
+   b. For each key whose current HeadMap entry still points to `segmentId` (keys
+      committed to a newer segment since the HeadMap snapshot are skipped),
+      update the HeadMap with the new Ptr (new offset in the compacted file).
+      Uses `HeadMap.BatchSetHeads(keys[], ptrs[])` with sorted key arrays.
+   The window between rename and HeadMap update is microseconds; any reads in
+   this window that fail are acceptable (they return `null`, which the caller can
+   retry).
+
+5. **Fsync directory** (outside the write lock, best-effort; no-op on Windows
+   where NTFS commits renames atomically).
+
+**Concurrency guarantees:**
+- Concurrent readers continue reading the old segment file by name until the
+  rename completes.
+- Concurrent writes are unblocked for the entire preparation phase (steps 1–3).
+- The write lock is held only for the brief rename + HeadMap update in step 4.
+- Keys committed to a newer segment between steps 1 and 4 are never downgraded:
+  the conditional check in step 4b ensures only keys still resident in
+  `segmentId` are touched.
+
+**Precondition:** `segmentId` must not be the currently active segment (the one
+being written by live commits).  Call `RotateSegment()` (or wait for auto-rotation)
+before compacting a segment.
+
+**Exposed surface:**
+- `WalStore.CompactSegmentFromMaterialisedView(uint segmentId)` — core implementation
+- `WalDataProvider.CompactSegmentFromMaterialisedView(uint segmentId)` — thin wrapper on `WalStore`
+
+---
+
 ## Hardware Acceleration in the Data Layer
 
 BareMetalWeb uses CPU-specific SIMD intrinsics in several hot paths.  All paths
@@ -374,4 +453,4 @@ dashboard).
 
 ---
 
-_Status: Updated @ commit HEAD (2026-03-05) — extended hardware acceleration section with SimdDistance FMA paths, WalLatin1Key32 word comparison, CRC slicing-by-4 software fallback; added striped WalHeadMap description_
+_Status: Updated @ commit HEAD (2026-03-05) — extended hardware acceleration section with SimdDistance FMA paths, WalLatin1Key32 word comparison, CRC slicing-by-4 software fallback; added striped WalHeadMap description; added WAL Segment Compaction section documenting materialised-view compaction strategy_
