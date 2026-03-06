@@ -538,7 +538,6 @@ internal static class ColumnQueryExecutor
     {
         if (v is int i)    return i;
         if (v is bool b)   return b ? 1 : 0;
-        if (v is Enum)     return (int)Convert.ChangeType(v, typeof(int));
         if (v == null)     return 0;
         try { return Convert.ToInt32(v); } catch { return 0; }
     }

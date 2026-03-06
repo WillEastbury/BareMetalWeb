@@ -824,7 +824,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterAdmin > afterMonitoring);
         Assert.True(afterLookup > afterAdmin);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 20 + 4 + 13 + 5 + 25, total);
+        Assert.Equal(staticCount + 20 + 4 + 13 + 25 + 5 + 21, total); // 3+20+4+13+25+5+21=91
     }
 
     [Fact]
@@ -995,6 +995,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask CommentsEditHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask CommentsDeleteHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiFileGetHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask GlobalSearchHandler(BmwContext context) => ValueTask.CompletedTask;
     }
 
     // ──────────────────────────────────────────────────────────────

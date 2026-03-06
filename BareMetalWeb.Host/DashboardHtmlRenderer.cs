@@ -264,13 +264,14 @@ public static class DashboardHtmlRenderer
         if (groups.Count == 0) return [];
 
         var bars = new List<SparklineBar>(groups.Count);
-        foreach (var kvp in groups.OrderBy(k => k.Key))
+        foreach (var kvp in groups)
         {
             double value = fn == "sum" ? kvp.Value.Sum
                 : fn == "avg" ? (kvp.Value.Count > 0 ? kvp.Value.Sum / kvp.Value.Count : 0)
                 : kvp.Value.Count;
             bars.Add(new SparklineBar(kvp.Key, value));
         }
+        bars.Sort((a, b) => string.Compare(a.Label, b.Label, StringComparison.Ordinal));
         return bars;
     }
 

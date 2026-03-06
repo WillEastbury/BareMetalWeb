@@ -133,17 +133,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     public T? Deserialize<T>(byte[] data, SchemaDefinition schema)
     {
         if (data is null) throw new ArgumentNullException(nameof(data));
-        if (schema is null) throw new ArgumentNullException(nameof(schema));
-        ValidateSignature(data);
-        using var stream = new MemoryStream(data);
-        using var reader = new BinaryReader(stream, Utf8, leaveOpen: true);
-        var schemaVersion = ReadHeader(reader, out var architecture);
-        if (schemaVersion != schema.Version)
-            throw new InvalidOperationException($"Schema version mismatch for {typeof(T).Name}. Expected {schema.Version}, payload is {schemaVersion}.");
-        ValidateArchitecture(schema, architecture);
-        ValidateSchema(typeof(T), schema, SchemaReadMode.Strict);
-        var value = ReadValue(reader, typeof(T), schema, 0);
-        return (T?)value;
+        return Deserialize<T>(data.AsSpan(), schema);
     }
 
     public T? Deserialize<T>(ReadOnlySpan<byte> data, SchemaDefinition schema)
@@ -154,17 +144,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     public T? Deserialize<T>(byte[] data, SchemaDefinition schema, SchemaReadMode mode)
     {
         if (data is null) throw new ArgumentNullException(nameof(data));
-        if (schema is null) throw new ArgumentNullException(nameof(schema));
-        ValidateSignature(data);
-        using var stream = new MemoryStream(data);
-        using var reader = new BinaryReader(stream, Utf8, leaveOpen: true);
-        var schemaVersion = ReadHeader(reader, out var architecture);
-        if (schemaVersion != schema.Version)
-            throw new InvalidOperationException($"Schema version mismatch for {typeof(T).Name}. Expected {schema.Version}, payload is {schemaVersion}.");
-        ValidateArchitecture(schema, architecture);
-        ValidateSchema(typeof(T), schema, mode);
-        var value = ReadValue(reader, typeof(T), schema, 0);
-        return (T?)value;
+        return Deserialize<T>(data.AsSpan(), schema, mode);
     }
 
     public T? Deserialize<T>(ReadOnlySpan<byte> data, SchemaDefinition schema, SchemaReadMode mode)
@@ -184,9 +164,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     public int ReadSchemaVersion(byte[] data)
     {
         if (data is null) throw new ArgumentNullException(nameof(data));
-        using var stream = new MemoryStream(data);
-        using var reader = new BinaryReader(stream, Utf8, leaveOpen: true);
-        return ReadHeader(reader, out _);
+        return ReadSchemaVersion(data.AsSpan());
     }
 
     public int ReadSchemaVersion(ReadOnlySpan<byte> data)
