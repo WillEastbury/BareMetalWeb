@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 
 using System.Text.Json;
@@ -97,7 +98,7 @@ public static class LookupApiHandlers
         {
             var queryDef = BuildQueryFromRequest(context, meta);
             var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
-            var results = new List<Dictionary<string, object?>>();
+            var results = new List<Dictionary<string, object?>>(entities is ICollection entColl ? entColl.Count : 16);
             foreach (var e in entities)
                 results.Add(await EntityToJsonAsync(e, meta, traverse, context.RequestAborted));
 
@@ -139,8 +140,8 @@ public static class LookupApiHandlers
                 return;
             }
 
-            ids = new List<string>();
-            var seen = new HashSet<string>(StringComparer.Ordinal);
+            ids = new List<string>(Math.Min(idsElement.GetArrayLength(), 500));
+            var seen = new HashSet<string>(Math.Min(idsElement.GetArrayLength(), 500), StringComparer.Ordinal);
             foreach (var e in idsElement.EnumerateArray())
             {
                 if (ids.Count >= 500) break;

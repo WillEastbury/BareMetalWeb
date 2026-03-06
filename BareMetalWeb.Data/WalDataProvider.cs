@@ -434,10 +434,10 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         var idMap = GetOrLoadIdMap(typeName);
         if (idMap.Count == 0) { sw.Stop(); OnWalReadComplete?.Invoke(sw.Elapsed); return Array.Empty<ReadOnlyMemory<byte>>(); }
 
-        var results = new List<ReadOnlyMemory<byte>>();
-
         int skip = query?.Skip ?? 0;
         int top  = query?.Top  ?? DefaultQueryLimit;
+
+        var results = new List<ReadOnlyMemory<byte>>(Math.Min(top, idMap.Count));
         int skipped = 0;
         int taken = 0;
 
@@ -570,7 +570,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
                 {
                     filtered = loaded;
                 }
-                var sortedList = new List<T>();
+                var sortedList = new List<T>(filtered.Count);
                 foreach (var item in _queryEvaluator.ApplySorts(filtered, query))
                     sortedList.Add(item);
                 if (skip > 0 || top != DefaultQueryLimit)
@@ -869,7 +869,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
         if (!canShortCircuit)
         {
-            var sortedList = new List<T>();
+            var sortedList = new List<T>(scanResults.Count);
             foreach (var item in _queryEvaluator.ApplySorts(scanResults, query))
                 sortedList.Add(item);
             if (skip > 0 || top != int.MaxValue)
@@ -1278,7 +1278,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         if (skip < 0) skip = 0;
         if (top <= 0) return Array.Empty<DataRecord>();
 
-        var results = new List<DataRecord>();
+        var results = new List<DataRecord>(Math.Min(top, idMap.Count));
         foreach (var kvp in idMap)
         {
             var record = LoadRecord(kvp.Key, schema);
