@@ -2883,7 +2883,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
             catch (Exception ex)
             {
-                _logger?.LogError($"GlobalSearch|query-error|entity={entityMeta.Slug}|q={q}|msg={ex.Message}");
+                _logger?.LogError($"GlobalSearch|query-error|entity={entityMeta.Slug}|q={q}|msg={ex.Message}", ex);
                 continue;
             }
 
@@ -7155,5 +7155,33 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync("{\"status\":\"cancellation requested\"}").ConfigureAwait(false);
+    }
+
+    private static bool IsEntityAccessible(DataEntityMetadata entity, User? user, string[] userPermissions)
+    {
+        var perms = entity.Permissions ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(perms) || string.Equals(perms, "Public", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (string.Equals(perms, "Authenticated", StringComparison.OrdinalIgnoreCase))
+            return user != null;
+
+        var remaining = perms.AsSpan();
+        bool hasMatchingPermission = false;
+        while (remaining.Length > 0)
+        {
+            int idx = remaining.IndexOf(',');
+            ReadOnlySpan<char> segment;
+            if (idx < 0) { segment = remaining; remaining = default; }
+            else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+            var trimmed = segment.Trim();
+            if (trimmed.IsEmpty) continue;
+            foreach (var p in userPermissions)
+            {
+                if (trimmed.Equals(p.AsSpan(), StringComparison.OrdinalIgnoreCase))
+                { hasMatchingPermission = true; break; }
+            }
+            if (hasMatchingPermission) break;
+        }
+        return hasMatchingPermission;
     }
 }

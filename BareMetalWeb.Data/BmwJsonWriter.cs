@@ -439,7 +439,6 @@ public static class BmwJsonWriter
 
     private static void WriteEnumAsJson(Stream output, ref SpanReader reader, WireFieldType underlying)
     {
-        Span<byte> buf = stackalloc byte[24];
         long raw = underlying switch
         {
             WireFieldType.Byte => reader.ReadByte(),
@@ -452,6 +451,7 @@ public static class BmwJsonWriter
             WireFieldType.UInt64 => (long)reader.ReadUInt64(),
             _ => reader.ReadInt32(),
         };
+        Span<byte> buf = stackalloc byte[64];
         FormatAndWriteInt64(output, raw, buf);
     }
 

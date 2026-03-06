@@ -168,8 +168,7 @@ public static class BmwJsonReader
             // Read property name
             if (pos >= json.Length || json[pos] != (byte)'"')
                 throw new InvalidOperationException("Expected '\"' for property name.");
-            var propName = ReadJsonStringSpan(json, pos, out var propEnd);
-            pos = propEnd;
+            pos = ReadJsonString(json, pos, out var propName);
 
             // Colon
             pos = SkipWhitespace(json, pos);
@@ -293,9 +292,8 @@ public static class BmwJsonReader
         else if (json[pos] == (byte)'"')
         {
             // String "true"/"false"
-            var str = ReadJsonStringSpan(json, pos, out var strEnd);
+            endPos = ReadJsonString(json, pos, out var str);
             val = str.SequenceEqual("true"u8);
-            endPos = strEnd;
         }
         else
         {
@@ -316,9 +314,8 @@ public static class BmwJsonReader
         if (json[pos] == (byte)'"')
         {
             // Quoted number
-            var str = ReadJsonStringSpan(json, pos, out var strEnd);
+            endPos = ReadJsonString(json, pos, out var str);
             numSpan = str;
-            endPos = strEnd;
         }
         else
         {
@@ -395,7 +392,7 @@ public static class BmwJsonReader
 
     private static (byte[] value, int endPos) ParseCharValue(ReadOnlySpan<byte> json, int pos, bool isNullable)
     {
-        var str = ReadJsonStringSpan(json, pos, out var strEnd);
+        int strEnd = ReadJsonString(json, pos, out var str);
         char ch = '\0';
         if (str.Length > 0)
         {
@@ -413,9 +410,10 @@ public static class BmwJsonReader
 
     private static (byte[] value, int endPos) ParseStringValue(ReadOnlySpan<byte> json, int pos, bool isNullable)
     {
+        int strEnd;
         if (json[pos] == (byte)'"')
         {
-            var str = ReadJsonStringSpan(json, pos, out var strEnd);
+            strEnd = ReadJsonString(json, pos, out var str);
             var byteCount = str.Length;
 
             // Encode: [nullable indicator?] + [int32 length] + [utf8 bytes]
@@ -444,7 +442,7 @@ public static class BmwJsonReader
 
     private static (byte[] value, int endPos) ParseGuidValue(ReadOnlySpan<byte> json, int pos, bool isNullable)
     {
-        var str = ReadJsonStringSpan(json, pos, out var strEnd);
+        int strEnd = ReadJsonString(json, pos, out var str);
         Guid guid = Guid.Empty;
         if (str.Length > 0)
         {
@@ -462,7 +460,7 @@ public static class BmwJsonReader
 
     private static (byte[] value, int endPos) ParseDateTimeValue(ReadOnlySpan<byte> json, int pos, bool isNullable)
     {
-        var str = ReadJsonStringSpan(json, pos, out var strEnd);
+        int strEnd = ReadJsonString(json, pos, out var str);
         DateTime dt = default;
         if (str.Length > 0)
         {
@@ -483,7 +481,7 @@ public static class BmwJsonReader
 
     private static (byte[] value, int endPos) ParseDateOnlyValue(ReadOnlySpan<byte> json, int pos, bool isNullable)
     {
-        var str = ReadJsonStringSpan(json, pos, out var strEnd);
+        int strEnd = ReadJsonString(json, pos, out var str);
         DateOnly d = default;
         if (str.Length > 0)
         {
@@ -501,7 +499,7 @@ public static class BmwJsonReader
 
     private static (byte[] value, int endPos) ParseTimeOnlyValue(ReadOnlySpan<byte> json, int pos, bool isNullable)
     {
-        var str = ReadJsonStringSpan(json, pos, out var strEnd);
+        int strEnd = ReadJsonString(json, pos, out var str);
         TimeOnly t = default;
         if (str.Length > 0)
         {
@@ -519,7 +517,7 @@ public static class BmwJsonReader
 
     private static (byte[] value, int endPos) ParseDateTimeOffsetValue(ReadOnlySpan<byte> json, int pos, bool isNullable)
     {
-        var str = ReadJsonStringSpan(json, pos, out var strEnd);
+        int strEnd = ReadJsonString(json, pos, out var str);
         DateTimeOffset dto = default;
         if (str.Length > 0)
         {
@@ -540,7 +538,7 @@ public static class BmwJsonReader
 
     private static (byte[] value, int endPos) ParseTimeSpanValue(ReadOnlySpan<byte> json, int pos, bool isNullable)
     {
-        var str = ReadJsonStringSpan(json, pos, out var strEnd);
+        int strEnd = ReadJsonString(json, pos, out var str);
         TimeSpan ts = default;
         if (str.Length > 0)
         {
@@ -558,7 +556,7 @@ public static class BmwJsonReader
 
     private static (byte[] value, int endPos) ParseIdentifierValue(ReadOnlySpan<byte> json, int pos, bool isNullable)
     {
-        var str = ReadJsonStringSpan(json, pos, out var strEnd);
+        int strEnd = ReadJsonString(json, pos, out var str);
         IdentifierValue id = IdentifierValue.Empty;
         if (str.Length > 0)
         {
@@ -583,9 +581,8 @@ public static class BmwJsonReader
         {
             // String enum name — we can't resolve by name without the CLR type,
             // so we try parsing as an integer string
-            var str = ReadJsonStringSpan(json, pos, out var strEnd);
+            endPos = ReadJsonString(json, pos, out var str);
             Utf8Parser.TryParse(str, out enumInt, out _);
-            endPos = strEnd;
         }
         else
         {
@@ -850,10 +847,10 @@ public static class BmwJsonReader
     }
 
     /// <summary>
-    /// Reads a JSON string starting at the opening quote, returns the unescaped
-    /// UTF-8 content and the position after the closing quote.
+    /// Reads a JSON string starting at the opening quote, returns the position after the closing quote,
+    /// and outputs the unescaped UTF-8 content via the content parameter.
     /// </summary>
-    private static void ReadJsonString(ReadOnlySpan<byte> json, int pos, out byte[] unescapedBuf, out int contentStart, out int contentLen, out int endPos)
+    private static int ReadJsonString(ReadOnlySpan<byte> json, int pos, out ReadOnlySpan<byte> content)
     {
         if (json[pos] != (byte)'"')
             throw new InvalidOperationException("Expected '\"'.");
@@ -869,11 +866,8 @@ public static class BmwJsonReader
             {
                 if (!hasEscapes)
                 {
-                    unescapedBuf = null!;
-                    contentStart = start;
-                    contentLen = pos - start;
-                    endPos = pos + 1;
-                    return;
+                    content = json[start..pos];
+                    return pos + 1;
                 }
                 break;
             }
@@ -890,7 +884,7 @@ public static class BmwJsonReader
             throw new InvalidOperationException("Unterminated JSON string.");
 
         // Slow path: unescape
-        var buf = new byte[pos - start];
+        var unescaped = new byte[pos - start];
         int writeIdx = 0;
         int readIdx = start;
         while (readIdx < pos)
@@ -900,7 +894,7 @@ public static class BmwJsonReader
             {
                 readIdx++;
                 byte esc = json[readIdx];
-                buf[writeIdx++] = esc switch
+                unescaped[writeIdx++] = esc switch
                 {
                     (byte)'"' => (byte)'"',
                     (byte)'\\' => (byte)'\\',
@@ -910,34 +904,20 @@ public static class BmwJsonReader
                     (byte)'t' => (byte)'\t',
                     (byte)'b' => (byte)'\b',
                     (byte)'f' => 0x0C,
-                    (byte)'u' => HandleUnicodeEscape(json, ref readIdx, buf, ref writeIdx),
+                    (byte)'u' => HandleUnicodeEscape(json, ref readIdx, unescaped, ref writeIdx),
                     _ => esc,
                 };
                 readIdx++;
             }
             else
             {
-                buf[writeIdx++] = b;
+                unescaped[writeIdx++] = b;
                 readIdx++;
             }
         }
 
-        unescapedBuf = buf;
-        contentStart = 0;
-        contentLen = writeIdx;
-        endPos = pos + 1;
-    }
-
-    /// <summary>
-    /// Convenience wrapper: reads a JSON string and returns the content as a ReadOnlySpan.
-    /// The span is valid only while the source json span (or the returned buf) is alive.
-    /// </summary>
-    private static ReadOnlySpan<byte> ReadJsonStringSpan(ReadOnlySpan<byte> json, int pos, out int endPos)
-    {
-        ReadJsonString(json, pos, out var buf, out var start, out var len, out endPos);
-        if (buf != null)
-            return buf.AsSpan(start, len);
-        return json.Slice(start, len);
+        content = unescaped.AsSpan(0, writeIdx);
+        return pos + 1;
     }
 
     private static byte HandleUnicodeEscape(ReadOnlySpan<byte> json, ref int readIdx, byte[] dest, ref int writeIdx)
@@ -980,8 +960,7 @@ public static class BmwJsonReader
         // String
         if (b == (byte)'"')
         {
-            _ = ReadJsonStringSpan(json, pos, out var endPos);
-            return endPos;
+            return ReadJsonString(json, pos, out _);
         }
 
         // Object
@@ -993,7 +972,7 @@ public static class BmwJsonReader
             {
                 if (json[pos] == (byte)'{') depth++;
                 else if (json[pos] == (byte)'}') depth--;
-                else if (json[pos] == (byte)'"') { _ = ReadJsonStringSpan(json, pos, out pos); continue; }
+                else if (json[pos] == (byte)'"') { pos = ReadJsonString(json, pos, out _); continue; }
                 pos++;
             }
             return pos;
@@ -1008,7 +987,7 @@ public static class BmwJsonReader
             {
                 if (json[pos] == (byte)'[') depth++;
                 else if (json[pos] == (byte)']') depth--;
-                else if (json[pos] == (byte)'"') { _ = ReadJsonStringSpan(json, pos, out pos); continue; }
+                else if (json[pos] == (byte)'"') { pos = ReadJsonString(json, pos, out _); continue; }
                 pos++;
             }
             return pos;

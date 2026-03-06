@@ -420,6 +420,9 @@ static class ProgramSetup
 
         return serverOptions =>
         {
+            var listenPort = config.GetValue("Kestrel.Port", 5000);
+            serverOptions.ListenAnyIP(listenPort);
+
             var http2Enabled = config.GetValue("Kestrel.Http2Enabled", true);
             var http3Enabled = config.GetValue("Kestrel.Http3Enabled", false);
 
