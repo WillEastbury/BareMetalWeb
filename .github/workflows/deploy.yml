@@ -185,10 +185,9 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: baremetalweb
-          package: ./publish
+        run: |
+          cd ./publish
+          az webapp up --name baremetalweb --os-type Linux --runtime "DOTNETCORE:10.0"
 
       - name: Wait for deployment to stabilize
         run: |

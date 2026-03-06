@@ -189,10 +189,9 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
       - name: Deploy to baremetalweb (Canary / CI base)
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: baremetalweb
-          package: ./publish
+        run: |
+          cd ./publish
+          az webapp up --name baremetalweb --os-type Linux --runtime "DOTNETCORE:10.0"
 
       - name: Wait for deployment to stabilise
         run: |
@@ -268,10 +267,9 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS_UPGRADE }}
 
       - name: Deploy to baremetalweb-upgrade (no data reset)
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: baremetalweb-upgrade
-          package: ./publish
+        run: |
+          cd ./publish
+          az webapp up --name baremetalweb-upgrade --os-type Linux --runtime "DOTNETCORE:10.0"
 
       - name: Wait for deployment to stabilise
         run: |
@@ -666,10 +664,9 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS_CANARY }}
 
       - name: Deploy to baremetalweb-canary (Ring 0)
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: baremetalweb-canary
-          package: ./publish
+        run: |
+          cd ./publish
+          az webapp up --name baremetalweb-canary --os-type Linux --runtime "DOTNETCORE:10.0"
 
       - name: Wait for deployment to stabilise
         run: |

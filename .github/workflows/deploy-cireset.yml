@@ -58,10 +58,9 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS_CIRESET }}
 
       - name: Deploy to Azure Web App (CI Reset)
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: baremetalweb-cireset
-          package: ./publish
+        run: |
+          cd ./publish
+          az webapp up --name baremetalweb-cireset --os-type Linux --runtime "DOTNETCORE:10.0"
 
       - name: Wait for deployment to stabilize
         run: |

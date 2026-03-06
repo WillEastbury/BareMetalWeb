@@ -59,10 +59,9 @@ jobs:
           creds: ${{ secrets.azure-credentials }}
 
       - name: Deploy to ${{ inputs.app-name }}
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: ${{ inputs.app-name }}
-          package: ./publish
+        run: |
+          cd ./publish
+          az webapp up --name ${{ inputs.app-name }} --os-type Linux --runtime "DOTNETCORE:10.0"
 
       - name: Wait for deployment to stabilise
         run: |
