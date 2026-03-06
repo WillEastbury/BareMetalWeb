@@ -2,7 +2,6 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -18,7 +17,6 @@ public sealed class AuditService
 {
     private readonly IDataObjectStore _store;
     private readonly IBufferedLogger? _logger;
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
 
     // Cache of compiled property accessors per type — avoids per-call GetProperties/GetValue reflection
     private static readonly ConcurrentDictionary<Type, (string Name, Func<object, object?> Getter)[]> _accessorCache = new();
