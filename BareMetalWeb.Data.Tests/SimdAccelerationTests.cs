@@ -668,6 +668,189 @@ public sealed class BloomFilterDataTests
         Assert.True(falsePositives > 0,
             "Zero false positives is statistically implausible — possible test bug.");
     }
+
+    // ── SimdByteScanner ────────────────────────────────────────────────────
+
+    [Fact]
+    public void SimdByteScanner_FindByte_ReturnsFirstMatch()
+    {
+        var data = new byte[1024];
+        data[512] = 0xAA;
+        data[700] = 0xAA;
+
+        Assert.Equal(512, SimdByteScanner.FindByte(data, 0xAA));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_ReturnsMinusOneWhenAbsent()
+    {
+        var data = new byte[256];
+        for (int i = 0; i < data.Length; i++) data[i] = 0x42;
+
+        Assert.Equal(-1, SimdByteScanner.FindByte(data, 0xFF));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_EmptySpan()
+    {
+        Assert.Equal(-1, SimdByteScanner.FindByte(ReadOnlySpan<byte>.Empty, 0x00));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_FirstByte()
+    {
+        var data = new byte[] { 0xBB, 0x00, 0x00, 0x00 };
+        Assert.Equal(0, SimdByteScanner.FindByte(data, 0xBB));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_LastByte()
+    {
+        var data = new byte[65];
+        data[64] = 0xCC; // past any 32-byte or 16-byte aligned block
+        Assert.Equal(64, SimdByteScanner.FindByte(data, 0xCC));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_LargeBuffer_EveryPosition()
+    {
+        for (int size = 0; size <= 128; size++)
+        {
+            var data = new byte[size];
+            for (int pos = 0; pos < size; pos++)
+            {
+                Array.Clear(data);
+                data[pos] = 0xFE;
+                int found = SimdByteScanner.FindByte(data, 0xFE);
+                Assert.Equal(pos, found);
+            }
+        }
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindAnyOfTwo_FindsBothTargets()
+    {
+        var data = new byte[256];
+        data[100] = 0x0A;
+        data[50]  = 0x7C;
+
+        Assert.Equal(50, SimdByteScanner.FindAnyOfTwo(data, 0x0A, 0x7C));
+        Assert.Equal(50, SimdByteScanner.FindAnyOfTwo(data, 0x7C, 0x0A));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindAnyOfTwo_ReturnsMinusOneWhenAbsent()
+    {
+        var data = new byte[128];
+        for (int i = 0; i < data.Length; i++) data[i] = 0x42;
+
+        Assert.Equal(-1, SimdByteScanner.FindAnyOfTwo(data, 0x0A, 0x0D));
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_CorrectCount()
+    {
+        var data = new byte[1024];
+        int expected = 0;
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (i % 7 == 0) { data[i] = 0xDD; expected++; }
+        }
+
+        Assert.Equal(expected, SimdByteScanner.CountByte(data, 0xDD));
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_AllMatch()
+    {
+        var data = new byte[200];
+        Array.Fill(data, (byte)0x99);
+        Assert.Equal(200, SimdByteScanner.CountByte(data, 0x99));
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_NoneMatch()
+    {
+        var data = new byte[200];
+        Assert.Equal(0, SimdByteScanner.CountByte(data, 0xFF));
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_Empty()
+    {
+        Assert.Equal(0, SimdByteScanner.CountByte(ReadOnlySpan<byte>.Empty, 0x00));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_MatchesSpanIndexOf()
+    {
+        var rng = new Random(42);
+        for (int trial = 0; trial < 200; trial++)
+        {
+            int len = rng.Next(0, 2048);
+            var data = new byte[len];
+            rng.NextBytes(data);
+            byte target = (byte)rng.Next(256);
+
+            int expected = ((ReadOnlySpan<byte>)data).IndexOf(target);
+            int actual = SimdByteScanner.FindByte(data, target);
+            Assert.Equal(expected, actual);
+        }
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_MatchesLinqCount()
+    {
+        var rng = new Random(123);
+        for (int trial = 0; trial < 100; trial++)
+        {
+            int len = rng.Next(0, 2048);
+            var data = new byte[len];
+            rng.NextBytes(data);
+            byte target = (byte)rng.Next(256);
+
+            int expected = data.Count(b => b == target);
+            int actual = SimdByteScanner.CountByte(data, target);
+            Assert.Equal(expected, actual);
+        }
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindNextRecordMagic_Integration()
+    {
+        var data = new byte[4096];
+        var rng = new Random(99);
+        rng.NextBytes(data);
+
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+            data.AsSpan(1000), 0x52454331u);
+
+        int found = WalSegmentReader.FindNextRecordMagic(data);
+        Assert.True(found >= 0 && found <= 1000,
+            $"Expected magic at or before 1000, found at {found}");
+    }
+
+    [Fact]
+    public void SimdByteScanner_Throughput_LargeBuffer()
+    {
+        const int size = 4 * 1024 * 1024;
+        var data = new byte[size];
+        data[size - 1] = 0xFF;
+
+        SimdByteScanner.FindByte(data, 0xFF); // warm up
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        const int iterations = 50;
+        for (int i = 0; i < iterations; i++)
+            SimdByteScanner.FindByte(data, 0xFF);
+        sw.Stop();
+
+        long totalBytes = (long)size * iterations;
+        double gbPerSec = totalBytes / (sw.Elapsed.TotalSeconds * 1024 * 1024 * 1024);
+
+        Assert.True(gbPerSec > 0.5,
+            $"Throughput {gbPerSec:F2} GB/s is suspiciously low — SIMD path may not be active");
+    }
 }
 
 /// <summary>Simple POCO used to verify XxHash64 schema hash stability.</summary>
