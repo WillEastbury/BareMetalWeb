@@ -14,6 +14,18 @@ namespace BareMetalWeb.Data;
 /// </summary>
 public static class SimdByteScanner
 {
+    /// <summary>Describes the active SIMD path at runtime.</summary>
+    public static string ActivePath
+    {
+        get
+        {
+            if (Avx2.IsSupported) return "x86 AVX2 (32 bytes/cycle)";
+            if (Sse2.IsSupported) return "x86 SSE2 (16 bytes/cycle)";
+            if (AdvSimd.IsSupported) return "ARM AdvSimd/NEON (16 bytes/cycle)";
+            return "Scalar fallback";
+        }
+    }
+
     /// <summary>
     /// Returns the index of the first occurrence of <paramref name="target"/> in <paramref name="data"/>,
     /// or -1 if not found. Uses AVX2/SSE2/NEON when available.

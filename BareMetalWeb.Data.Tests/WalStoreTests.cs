@@ -1039,4 +1039,204 @@ public sealed class WalStoreTests : IDisposable
         Assert.False(store2.TryGetHead(key1, out _));
         Assert.False(store2.TryGetHead(key2, out _));
     }
+
+    // ── CompactSegmentFromMaterialisedView ───────────────────────────────────
+
+    [Fact]
+    public async Task CompactSegmentFromMaterialisedView_LiveRecordsReadableAfterCompaction()
+    {
+        // Arrange: commit several records so they land in segment 0
+        using var store = new WalStore(_dir);
+        ulong key1 = store.AllocateKey(tableId: 80);
+        ulong key2 = store.AllocateKey(tableId: 80);
+        var payload1 = Encoding.UTF8.GetBytes("hello compaction");
+        var payload2 = Encoding.UTF8.GetBytes("second record");
+
+        ulong ptr1 = await store.CommitAsync(new[] { WalOp.Upsert(key1, payload1) });
+        ulong ptr2 = await store.CommitAsync(new[] { WalOp.Upsert(key2, payload2) });
+
+        uint segId = (uint)(ptr1 >> 32); // both should be in segment 0
+
+        // Act: compact segment 0
+        // Rotate so the segment is no longer active, then compact
+        store.RotateSegmentForTest();
+        store.CompactSegmentFromMaterialisedView(segId);
+
+        // Assert: both keys are still readable via TryReadOpPayload
+        Assert.True(store.TryGetHead(key1, out ulong newPtr1));
+        Assert.True(store.TryReadOpPayload(newPtr1, key1, out var got1));
+        Assert.Equal(payload1, got1.ToArray());
+
+        Assert.True(store.TryGetHead(key2, out ulong newPtr2));
+        Assert.True(store.TryReadOpPayload(newPtr2, key2, out var got2));
+        Assert.Equal(payload2, got2.ToArray());
+    }
+
+    [Fact]
+    public async Task CompactSegmentFromMaterialisedView_UpdatesHeadMapToNewOffsets()
+    {
+        // Arrange: commit key1 twice (two versions) and key2 once in seg 0.
+        // After compaction, only the latest version of each key is kept,
+        // so key1's head must move to a new (lower) offset than before.
+        using var store = new WalStore(_dir);
+        ulong key1 = store.AllocateKey(tableId: 81);
+        ulong key2 = store.AllocateKey(tableId: 81);
+
+        var payload1v1 = Encoding.UTF8.GetBytes("record A version 1 — superseded");
+        var payload1v2 = Encoding.UTF8.GetBytes("record A version 2 — latest");
+        var payload2   = Encoding.UTF8.GetBytes("record B");
+
+        await store.CommitAsync(new[] { WalOp.Upsert(key1, payload1v1) }); // seg0, offset A
+        await store.CommitAsync(new[] { WalOp.Upsert(key2, payload2)   }); // seg0, offset B
+        ulong prePtr1 = 0;
+        Assert.True(store.TryGetHead(key1, out prePtr1)); // prePtr1 = seg0:A
+
+        // Overwrite key1 — its head now points to a later record in seg0
+        await store.CommitAsync(new[] { WalOp.Upsert(key1, payload1v2) }); // seg0, offset C > A
+        Assert.True(store.TryGetHead(key1, out ulong prePtrAfterUpdate));
+        Assert.NotEqual(prePtr1, prePtrAfterUpdate); // confirm head advanced
+
+        uint segId = (uint)(prePtrAfterUpdate >> 32);
+        store.RotateSegmentForTest();
+
+        // Act
+        store.CompactSegmentFromMaterialisedView(segId);
+
+        // Assert: HeadMap pointers updated
+        Assert.True(store.TryGetHead(key1, out ulong postPtr1));
+        Assert.True(store.TryGetHead(key2, out ulong postPtr2));
+
+        // Segment ID unchanged; key1's offset should differ from the pre-compaction head
+        // (it was at offset C; after compaction the single-op batch is at a lower offset)
+        Assert.Equal(segId, (uint)(postPtr1 >> 32));
+        Assert.Equal(segId, (uint)(postPtr2 >> 32));
+        Assert.NotEqual(prePtrAfterUpdate, postPtr1); // compacted offset differs from the multi-version offset
+
+        // Data must still be intact (latest versions only)
+        Assert.True(store.TryReadOpPayload(postPtr1, key1, out var gotA));
+        Assert.Equal(payload1v2, gotA.ToArray()); // only the latest version
+        Assert.True(store.TryReadOpPayload(postPtr2, key2, out var gotB));
+        Assert.Equal(payload2, gotB.ToArray());
+    }
+
+    [Fact]
+    public async Task CompactSegmentFromMaterialisedView_SkipsTombstones()
+    {
+        // Arrange: commit a record, then delete it (tombstone), then compact
+        using var store = new WalStore(_dir);
+        ulong keyLive    = store.AllocateKey(tableId: 82);
+        ulong keyDeleted = store.AllocateKey(tableId: 82);
+
+        var livePayload = Encoding.UTF8.GetBytes("I survive");
+        await store.CommitAsync(new[] { WalOp.Upsert(keyLive,    livePayload) });
+        await store.CommitAsync(new[] { WalOp.Upsert(keyDeleted, Encoding.UTF8.GetBytes("doomed")) });
+        // Rotate so tombstone and live record land in the same segment
+        store.RotateSegmentForTest();
+
+        // Delete keyDeleted: its head now points to a tombstone in a new segment
+        await store.CommitAsync(new[] { WalOp.Delete(keyDeleted) });
+        store.RotateSegmentForTest(); // rotate again so the tombstone is in seg 1
+
+        // The live record's head still points to seg 0; compact that segment
+        Assert.True(store.TryGetHead(keyLive, out ulong livePtr));
+        uint targetSegId = (uint)(livePtr >> 32);
+        store.CompactSegmentFromMaterialisedView(targetSegId);
+
+        // Live record still readable
+        Assert.True(store.TryGetHead(keyLive, out ulong newPtr));
+        Assert.True(store.TryReadOpPayload(newPtr, keyLive, out var gotLive));
+        Assert.Equal(livePayload, gotLive.ToArray());
+
+        // keyDeleted is NOT in the compacted segment (its head points to the tombstone
+        // in seg 1, so it was never in targetSegId's candidate set after the delete)
+    }
+
+    [Fact]
+    public async Task CompactSegmentFromMaterialisedView_SupersededKeyNotDowngraded()
+    {
+        // A key committed to seg 0, then updated to seg 1 — compacting seg 0
+        // must NOT move the key back to seg 0.
+        using var store = new WalStore(_dir);
+        ulong key = store.AllocateKey(tableId: 83);
+        var v1 = Encoding.UTF8.GetBytes("version one");
+        var v2 = Encoding.UTF8.GetBytes("version two — newer");
+
+        ulong ptr0 = await store.CommitAsync(new[] { WalOp.Upsert(key, v1) });
+        uint  seg0  = (uint)(ptr0 >> 32);
+
+        // Rotate so next commit lands in seg 1
+        store.RotateSegmentForTest();
+        ulong ptr1 = await store.CommitAsync(new[] { WalOp.Upsert(key, v2) });
+        uint  seg1  = (uint)(ptr1 >> 32);
+        Assert.NotEqual(seg0, seg1); // confirm different segments
+
+        // Rotate again before compacting seg 0
+        store.RotateSegmentForTest();
+
+        // Act: compact seg 0 — key's head already points to seg 1
+        store.CompactSegmentFromMaterialisedView(seg0);
+
+        // Assert: key's head still points to seg 1 (v2), NOT to the compacted seg 0
+        Assert.True(store.TryGetHead(key, out ulong currentPtr));
+        Assert.Equal(seg1, (uint)(currentPtr >> 32));
+
+        Assert.True(store.TryReadOpPayload(currentPtr, key, out var got));
+        Assert.Equal(v2, got.ToArray());
+    }
+
+    [Fact]
+    public async Task CompactSegmentFromMaterialisedView_EmptySegment_IsNoOp()
+    {
+        // Arrange: commit to seg 0, then update all records (seg 1) and compact seg 0
+        using var store = new WalStore(_dir);
+        ulong key = store.AllocateKey(tableId: 84);
+        var v1 = Encoding.UTF8.GetBytes("first");
+        var v2 = Encoding.UTF8.GetBytes("second");
+
+        await store.CommitAsync(new[] { WalOp.Upsert(key, v1) });
+        store.RotateSegmentForTest();  // rotate to seg 1
+
+        ulong ptr1 = await store.CommitAsync(new[] { WalOp.Upsert(key, v2) });
+        store.RotateSegmentForTest();  // rotate to seg 2
+
+        // seg 0 has no live keys (key was updated to seg 1) — compaction is a no-op
+        store.CompactSegmentFromMaterialisedView(0u);
+
+        // key's head still points to the seg 1 version
+        Assert.True(store.TryGetHead(key, out ulong currentPtr));
+        Assert.Equal((uint)(ptr1 >> 32), (uint)(currentPtr >> 32));
+        Assert.True(store.TryReadOpPayload(currentPtr, key, out var got));
+        Assert.Equal(v2, got.ToArray());
+    }
+
+    [Fact]
+    public async Task CompactSegmentFromMaterialisedView_DataSurvivesFullRecovery()
+    {
+        // Arrange: write records, compact, close store, reopen and verify data intact
+        uint segId;
+        ulong key1, key2;
+        var payload1 = Encoding.UTF8.GetBytes("persisted after compaction A");
+        var payload2 = Encoding.UTF8.GetBytes("persisted after compaction B");
+
+        using (var store = new WalStore(_dir))
+        {
+            key1 = store.AllocateKey(tableId: 85);
+            key2 = store.AllocateKey(tableId: 85);
+            ulong ptr = await store.CommitAsync(new[] { WalOp.Upsert(key1, payload1) });
+            await store.CommitAsync(new[] { WalOp.Upsert(key2, payload2) });
+            segId = (uint)(ptr >> 32);
+            store.RotateSegmentForTest();
+            store.CompactSegmentFromMaterialisedView(segId);
+        } // Dispose writes snapshot + footer
+
+        // Re-open and verify both records are readable
+        using var store2 = new WalStore(_dir);
+        Assert.True(store2.TryGetHead(key1, out ulong rPtr1));
+        Assert.True(store2.TryReadOpPayload(rPtr1, key1, out var rGot1));
+        Assert.Equal(payload1, rGot1.ToArray());
+
+        Assert.True(store2.TryGetHead(key2, out ulong rPtr2));
+        Assert.True(store2.TryReadOpPayload(rPtr2, key2, out var rGot2));
+        Assert.Equal(payload2, rGot2.ToArray());
+    }
 }
