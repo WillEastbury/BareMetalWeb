@@ -1,11 +1,9 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-#if NET7_0_OR_GREATER
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
-#endif
 
 namespace BareMetalWeb.Data;
 
@@ -23,14 +21,12 @@ public static class SimdByteScanner
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int FindByte(ReadOnlySpan<byte> data, byte target)
     {
-#if NET7_0_OR_GREATER
         if (Avx2.IsSupported)
             return FindByteAvx2(data, target);
         if (Sse2.IsSupported)
             return FindByteSse2(data, target);
         if (AdvSimd.IsSupported)
             return FindByteAdvSimd(data, target);
-#endif
         return FindByteScalar(data, target);
     }
 
@@ -42,14 +38,12 @@ public static class SimdByteScanner
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int FindAnyOfTwo(ReadOnlySpan<byte> data, byte a, byte b)
     {
-#if NET7_0_OR_GREATER
         if (Avx2.IsSupported)
             return FindAnyOfTwoAvx2(data, a, b);
         if (Sse2.IsSupported)
             return FindAnyOfTwoSse2(data, a, b);
         if (AdvSimd.IsSupported)
             return FindAnyOfTwoAdvSimd(data, a, b);
-#endif
         return FindAnyOfTwoScalar(data, a, b);
     }
 
@@ -60,14 +54,12 @@ public static class SimdByteScanner
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int CountByte(ReadOnlySpan<byte> data, byte target)
     {
-#if NET7_0_OR_GREATER
         if (Avx2.IsSupported)
             return CountByteAvx2(data, target);
         if (Sse2.IsSupported)
             return CountByteSse2(data, target);
         if (AdvSimd.IsSupported)
             return CountByteAdvSimd(data, target);
-#endif
         return CountByteScalar(data, target);
     }
 
@@ -102,7 +94,6 @@ public static class SimdByteScanner
         return count;
     }
 
-#if NET7_0_OR_GREATER
 
     // ── AVX2 paths (32 bytes per iteration) ─────────────────────────────────
 
@@ -409,6 +400,4 @@ public static class SimdByteScanner
 
         return count;
     }
-
-#endif
 }

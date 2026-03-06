@@ -51,12 +51,11 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
     if (keys.Length != values.Length)
         throw new ArgumentException("Keys and values must be of equal length.");
 
-    // Estimate: template.Length * 2 = worst case after substitution
     ReadOnlySpan<char> input = template.AsSpan();
     var buffer = new ArrayBufferWriter<char>();
 
-    int i = 0;
-    while (i < input.Length)
+    int pos = 0;
+    while (pos < input.Length)
     {
         // SIMD-accelerated: find next '{' in one vectorised pass
         int braceIdx = input.Slice(i).IndexOf('{');
@@ -80,32 +79,34 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
             int start = absIdx + 2;
             int end = input.Slice(start).IndexOf("}}");
 
-            if (end >= 0)
+        // Write all literal characters before '{{'.
+        if (openIdx > 0)
+            buffer.Write(input.Slice(pos, openIdx));
+
+        int start = pos + openIdx + 2;
+        int end   = input.Slice(start).IndexOf("}}".AsSpan());
+
+        if (end >= 0)
+        {
+            var token = input.Slice(start, end);
+
+            bool matched = false;
+            for (int k = 0; k < keys.Length; k++)
             {
-                var token = input.Slice(start, end);
-
-                bool matched = false;
-                for (int k = 0; k < keys.Length; k++)
+                if (token.SequenceEqual(keys[k].AsSpan().Slice(2, keys[k].Length - 4))) // remove {{ }}
                 {
-                    if (token.SequenceEqual(keys[k].AsSpan().Slice(2, keys[k].Length - 4))) // remove {{ }}
-                    {
-                        buffer.Write(values[k]);
-                        matched = true;
-                        break;
-                    }
+                    buffer.Write(values[k]);
+                    matched = true;
+                    break;
                 }
-
-                if (!matched)
-                {
-                    buffer.Write("{{");
-                    buffer.Write(token);
-                    buffer.Write("}}");
-                }
-
-                i = start + end + 2; // past the }}
-                continue;
             }
-        }
+
+            if (!matched)
+            {
+                buffer.Write("{{");
+                buffer.Write(token);
+                buffer.Write("}}");
+            }
 
         // Single '{' or unmatched — write it and advance
         buffer.Write(input.Slice(absIdx, 1));
@@ -127,8 +128,8 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
 
     ReadOnlySpan<char> input = template.AsSpan();
 
-    int i = 0;
-    while (i < input.Length)
+    int pos = 0;
+    while (pos < input.Length)
     {
         // SIMD-accelerated: find next '{' in one vectorised pass
         int braceIdx = input.Slice(i).IndexOf('{');
@@ -152,32 +153,34 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
             int start = absIdx + 2;
             int end = input.Slice(start).IndexOf("}}");
 
-            if (end >= 0)
+        // Write all literal characters before '{{'.
+        if (openIdx > 0)
+            WriteUtf8(writer, input.Slice(pos, openIdx));
+
+        int start = pos + openIdx + 2;
+        int end   = input.Slice(start).IndexOf("}}".AsSpan());
+
+        if (end >= 0)
+        {
+            var token = input.Slice(start, end);
+
+            bool matched = false;
+            for (int k = 0; k < keys.Length; k++)
             {
-                var token = input.Slice(start, end);
-
-                bool matched = false;
-                for (int k = 0; k < keys.Length; k++)
+                if (token.SequenceEqual(keys[k].AsSpan().Slice(2, keys[k].Length - 4))) // remove {{ }}
                 {
-                    if (token.SequenceEqual(keys[k].AsSpan().Slice(2, keys[k].Length - 4))) // remove {{ }}
-                    {
-                        WriteUtf8(writer, values[k].AsSpan());
-                        matched = true;
-                        break;
-                    }
+                    WriteUtf8(writer, values[k].AsSpan());
+                    matched = true;
+                    break;
                 }
-
-                if (!matched)
-                {
-                    WriteUtf8(writer, "{{".AsSpan());
-                    WriteUtf8(writer, token);
-                    WriteUtf8(writer, "}}".AsSpan());
-                }
-
-                i = start + end + 2; // past the }}
-                continue;
             }
-        }
+
+            if (!matched)
+            {
+                WriteUtf8(writer, "{{".AsSpan());
+                WriteUtf8(writer, token);
+                WriteUtf8(writer, "}}".AsSpan());
+            }
 
         // Single '{' or unmatched — write it and advance
         WriteUtf8(writer, input.Slice(absIdx, 1));
