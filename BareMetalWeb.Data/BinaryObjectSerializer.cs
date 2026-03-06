@@ -1175,7 +1175,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     }
 
     // Violation #008 fixed: Use compiled Expression.Lambda delegates via PropertyAccessorFactory
-    // instead of PropertyInfo.GetValue/SetValue (~50-200ns → ~1ns per access).
+    // instead of PropertyInfo.GetValue/SetValue reflection overhead.
     private static Func<object, object?> CreatePropertyGetter(PropertyInfo property)
     {
         return PropertyAccessorFactory.BuildGetter(property);
@@ -1188,7 +1188,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 
     private static Func<object, object?> CreateFieldGetter(FieldInfo field)
     {
-        // Compile Expression.Lambda delegate — eliminates per-call FieldInfo.GetValue reflection (~50-200ns → ~1ns).
+        // Compile Expression.Lambda delegate — eliminates per-call FieldInfo.GetValue reflection overhead.
         // Built once per type via GetTypeShape; result is cached.
         var param = Expression.Parameter(typeof(object), "instance");
         var declaringType = field.DeclaringType ?? typeof(object);

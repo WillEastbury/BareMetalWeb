@@ -1306,7 +1306,7 @@ public static class RouteRegistrationExtensions
             fd["subFields"] = DataScaffold.BuildSubFieldSchemas(f);
             if (f.FieldType == FormFieldType.Enum)
             {
-                var enumOptions = DataScaffold.BuildEnumOptions(f.Property.PropertyType);
+                var enumOptions = DataScaffold.BuildEnumOptions(f.ClrType);
                 var enumArr = new object[enumOptions.Count];
                 for (int ei = 0; ei < enumOptions.Count; ei++)
                     enumArr[ei] = new { value = enumOptions[ei].Key, label = enumOptions[ei].Value };

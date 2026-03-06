@@ -397,8 +397,8 @@ public sealed class SearchIndexManager
                 foreach (var field in meta.Fields)
                 {
                     if (!field.IsIndexed) continue;
-                    // Find DataIndexAttribute via field metadata
-                    var attr = field.Property.GetCustomAttribute<DataIndexAttribute>();
+                    // Use DataIndex populated at registration time — no per-call GetCustomAttribute reflection.
+                    var attr = field.DataIndex;
                     if (attr == null) continue;
                     names.Add(field.Name);
                     types.Add(field.ClrType);

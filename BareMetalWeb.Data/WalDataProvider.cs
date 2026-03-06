@@ -65,15 +65,16 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             var meta = DataScaffold.GetEntityByType(t);
             if (meta != null)
             {
+                // Use HasSingletonFlag populated at registration time — no per-call reflection.
                 foreach (var field in meta.Fields)
                 {
-                    if (field.ClrType == typeof(bool)
-                        && field.Property.GetCustomAttribute<SingletonFlagAttribute>() != null)
+                    if (field.HasSingletonFlag)
                         result.Add((field.Name, field.GetValueFn, field.SetValueFn));
                 }
             }
             else
             {
+                // Fallback for unregistered types (compiled once per type, result cached).
                 foreach (var p in t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
                 {
                     if (p.PropertyType == typeof(bool)

@@ -62,6 +62,18 @@ public sealed record DataFieldMetadata(
 
     /// <summary>The CLR type of this field's property. Avoids <c>Property.PropertyType</c> reflection in hot paths.</summary>
     public Type ClrType => Property.PropertyType;
+
+    /// <summary>
+    /// The <see cref="DataIndexAttribute"/> for this field, if it is decorated with one; otherwise null.
+    /// Populated at entity registration time to avoid per-call <c>GetCustomAttribute</c> reflection.
+    /// </summary>
+    public DataIndexAttribute? DataIndex { get; init; }
+
+    /// <summary>
+    /// True if this boolean field is decorated with <see cref="SingletonFlagAttribute"/>.
+    /// Populated at entity registration time to avoid per-call <c>GetCustomAttribute</c> reflection.
+    /// </summary>
+    public bool HasSingletonFlag { get; init; }
 }
 
 public sealed record DataEntityMetadata(
@@ -3747,6 +3759,7 @@ public static class DataScaffold
             var calculatedAttribute = prop.GetCustomAttribute<CalculatedFieldAttribute>();
             var dataIndexAttribute = prop.GetCustomAttribute<DataIndexAttribute>();
             var relatedDocAttribute = prop.GetCustomAttribute<RelatedDocumentAttribute>();
+            var singletonFlagAttribute = prop.GetCustomAttribute<SingletonFlagAttribute>();
             if (fieldAttribute == null && imageFieldAttribute == null && fileFieldAttribute == null)
                 continue;
 
@@ -3846,8 +3859,11 @@ public static class DataScaffold
                 calculatedAttribute,
                 ValidationService.BuildValidationConfig(prop),
                 dataIndexAttribute != null,
-                relatedDoc
-            ));
+                relatedDoc)
+            {
+                DataIndex = dataIndexAttribute,
+                HasSingletonFlag = prop.PropertyType == typeof(bool) && singletonFlagAttribute != null
+            });
         }
 
         var name = entityAttribute?.Name ?? Pluralize(DeCamelcaseWithId(type.Name));

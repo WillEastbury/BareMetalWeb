@@ -120,48 +120,26 @@ public static class BinaryApiHandlers
 
     private static MetadataWireSerializer.FieldPlan[] BuildPlanFromMetadata(DataEntityMetadata meta)
     {
-        // Build a lookup from metadata fields for getter/setter reuse
-        var metaFieldsByName = new Dictionary<string, DataFieldMetadata>(StringComparer.Ordinal);
-        foreach (var f in meta.Fields)
-            metaFieldsByName[f.Name] = f;
+        // Use EntityLayoutCompiler which already sorts all public read/write properties by name
+        // (same ordering as BinaryObjectSerializer). All reflection happens in EntityLayoutCompiler
+        // once per type; hot paths reuse its compiled getter/setter delegates.
+        var layout = EntityLayoutCompiler.GetOrCompile(meta);
 
-        // Collect ALL public properties on the CLR type — same set the BinaryObjectSerializer uses.
-        // Sort by name (Ordinal compare) to match binary serializer member ordering.
-        var unsortedProps = meta.Type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-        var propsList = new List<System.Reflection.PropertyInfo>(unsortedProps);
-        propsList.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
-        var props = propsList.ToArray();
-
-        var descriptors = new List<MetadataWireSerializer.FieldPlanDescriptor>(props.Length);
-        foreach (var prop in props)
+        var descriptors = new List<MetadataWireSerializer.FieldPlanDescriptor>(layout.Fields.Length);
+        foreach (var field in layout.Fields)
         {
-            if (!prop.CanRead || !prop.CanWrite) continue;
-
-            var (wireType, isNullable, enumUnderlying) = MetadataWireSerializer.ResolveWireType(prop.PropertyType);
-            var effectiveType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
-
-            // Reuse pre-compiled delegates from metadata when available
-            Func<object, object?> getter;
-            Action<object, object?> setter;
-            if (metaFieldsByName.TryGetValue(prop.Name, out var fieldMeta))
-            {
-                getter = fieldMeta.GetValueFn;
-                setter = fieldMeta.SetValueFn;
-            }
-            else
-            {
-                getter = PropertyAccessorFactory.BuildGetter(prop);
-                setter = PropertyAccessorFactory.BuildSetter(prop);
-            }
+            var (wireType, _, enumUnderlying) = MetadataWireSerializer.ResolveWireType(field.ClrType);
+            // Nullability is already correctly determined by EntityLayoutCompiler from NullabilityInfoContext.
+            bool isNullable = (field.Flags & FieldFlags.Nullable) != 0;
 
             descriptors.Add(new MetadataWireSerializer.FieldPlanDescriptor
             {
-                Name = prop.Name,
+                Name = field.Name,
                 WireType = wireType,
                 IsNullable = isNullable,
-                Getter = getter,
-                Setter = setter,
-                ClrType = effectiveType,
+                Getter = field.Getter,
+                Setter = field.Setter,
+                ClrType = field.ClrType,
                 EnumUnderlying = enumUnderlying,
             });
         }
