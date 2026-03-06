@@ -57,7 +57,7 @@ jobs:
 
       - name: Deploy to Azure Web App
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-cimigrate --src-path ../deploy.zip --type zip --async true
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-cimigrate --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --async true
 
   integration-tests:
     runs-on: ubuntu-latest

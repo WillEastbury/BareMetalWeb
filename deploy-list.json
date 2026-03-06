@@ -1,44 +1,94 @@
 {
   "_readme": [
-    "BareMetalWeb tenant rollout configuration.",
+    "BareMetalWeb deployment ring configuration.",
     "",
-    "early_access  – Tenants that receive the canary release first (L2.2).",
-    "                All deployments here run in parallel after canary ring-0 passes.",
-    "                A 20-minute monitoring window follows before L2.3 is triggered.",
+    "Each entry defines a deployment target with:",
+    "  id             – Unique identifier used in workflow job names.",
+    "  name           – Human-readable name (shown in GitHub Actions UI).",
+    "  app_name       – Azure Web App name.",
+    "  resource_group – Azure Resource Group containing the Web App.",
+    "  plan_name      – Azure App Service Plan name.",
+    "  url            – Public URL of the deployed app.",
+    "  ring           – Pipeline stage that triggers deployment.",
+    "  secret         – GitHub secret name holding Azure SP credentials.",
     "",
-    "main_rollout  – Remaining tenants deployed at L2.3 after manual approval",
-    "                via the 'production-rollout' GitHub Environment.",
-    "",
-    "Fields per entry:",
-    "  id        – Unique identifier used in workflow job names.",
-    "  name      – Human-readable tenant name (shown in GitHub Actions UI).",
-    "  app_name  – Azure Web App name (must match the target App Service).",
-    "",
-    "Credentials:",
-    "  All entries use the AZURE_CREDENTIALS_TENANTS repository secret.",
-    "  That service principal must have 'Website Contributor' (or Contributor)",
-    "  rights on every app_name listed here.",
-    "  For tenants in different subscriptions, use a service principal with",
-    "  cross-subscription Contributor access, or split into multiple secrets",
-    "  and add dedicated jobs in ci-cd-pipeline.yml."
+    "Rings (pipeline stages):",
+    "  ci-reset       – L1.1 fresh deploy with data wipe + smoke tests",
+    "  ci-upgrade     – L1.1 upgrade deploy preserving existing data",
+    "  canary         – L2.1 canary ring-0 + monitoring window",
+    "  early-access   – L2.2 parallel deploy after canary passes",
+    "  production     – L2.3 gated by manual approval"
   ],
-  "early_access": [
+  "targets": [
+    {
+      "id": "ci-base",
+      "name": "CI Base (Reset)",
+      "app_name": "baremetalweb-cireset",
+      "resource_group": "baremetalweb-rg",
+      "plan_name": "baremetalweb-plan",
+      "url": "https://baremetalweb-cireset.azurewebsites.net",
+      "ring": "ci-reset",
+      "secret": "AZURE_CREDENTIALS"
+    },
+    {
+      "id": "ci-upgrade",
+      "name": "CI Upgrade",
+      "app_name": "baremetalweb-upgrade",
+      "resource_group": "baremetalweb-rg",
+      "plan_name": "baremetalweb-plan",
+      "url": "https://baremetalweb-upgrade.azurewebsites.net",
+      "ring": "ci-upgrade",
+      "secret": "AZURE_CREDENTIALS_UPGRADE"
+    },
+    {
+      "id": "canary",
+      "name": "Canary Ring 0",
+      "app_name": "baremetalweb-canary",
+      "resource_group": "baremetalweb-rg",
+      "plan_name": "baremetalweb-plan",
+      "url": "https://baremetalweb-canary.azurewebsites.net",
+      "ring": "canary",
+      "secret": "AZURE_CREDENTIALS_CANARY"
+    },
+    {
+      "id": "staging",
+      "name": "Staging",
+      "app_name": "baremetalweb",
+      "resource_group": "baremetalweb-rg",
+      "plan_name": "baremetalweb-plan",
+      "url": "https://baremetalweb.azurewebsites.net",
+      "ring": "canary",
+      "secret": "AZURE_CREDENTIALS"
+    },
     {
       "id": "memoryforaitodo",
       "name": "Memory for AI Todo",
-      "app_name": "memoryforaitodo"
+      "app_name": "memoryforaitodo",
+      "resource_group": "baremetalweb-rg",
+      "plan_name": "baremetalweb-plan",
+      "url": "https://memoryforaitodo.azurewebsites.net",
+      "ring": "early-access",
+      "secret": "AZURE_CREDENTIALS_TENANTS"
     },
     {
       "id": "metalsamples",
       "name": "Metal Samples",
-      "app_name": "metalsamples"
-    }
-  ],
-  "main_rollout": [
+      "app_name": "metalsamples",
+      "resource_group": "baremetalweb-rg",
+      "plan_name": "baremetalweb-plan",
+      "url": "https://metalsamples.azurewebsites.net",
+      "ring": "early-access",
+      "secret": "AZURE_CREDENTIALS_TENANTS"
+    },
     {
       "id": "oldoaklaboratoryschool",
       "name": "Old Oak Laboratory School",
-      "app_name": "oldoaklaboratoryschool"
+      "app_name": "oldoaklaboratoryschool",
+      "resource_group": "baremetalweb-rg",
+      "plan_name": "baremetalweb-plan",
+      "url": "https://oldoaklaboratoryschool.azurewebsites.net",
+      "ring": "production",
+      "secret": "AZURE_CREDENTIALS_TENANTS"
     }
   ]
 }

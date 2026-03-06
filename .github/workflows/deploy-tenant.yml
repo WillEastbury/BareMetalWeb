@@ -28,10 +28,19 @@ on:
         description: 'Azure Web App name to deploy to'
         required: true
         type: string
+      resource-group:
+        description: 'Azure Resource Group containing the Web App'
+        required: true
+        type: string
       artifact-name:
         description: 'Name of the GitHub Actions artifact containing the publish directory'
         required: true
         type: string
+      health-check-url:
+        description: 'URL to health-check after deployment'
+        required: false
+        type: string
+        default: ''
     secrets:
       azure-credentials:
         description: 'Azure service principal credentials JSON'
@@ -60,7 +69,7 @@ jobs:
 
       - name: Deploy to ${{ inputs.app-name }}
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name ${{ inputs.app-name }} --src-path ../deploy.zip --type zip --async true
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }} --src-path ../deploy.zip --type zip --async true
 
       - name: Wait for deployment to stabilise
         run: |
@@ -69,7 +78,10 @@ jobs:
 
       - name: Health check
         run: |
-          APP_URL="https://${{ inputs.app-name }}.azurewebsites.net/"
+          APP_URL="${{ inputs.health-check-url }}"
+          if [ -z "$APP_URL" ]; then
+            APP_URL="https://${{ inputs.app-name }}.azurewebsites.net/"
+          fi
           echo "Running health check for ${{ inputs.app-name }} at ${APP_URL}"
           for i in {1..6}; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "${APP_URL}" || echo "000")
