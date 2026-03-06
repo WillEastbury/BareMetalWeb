@@ -60,6 +60,7 @@ public static class BareMetalWebExtensions
         DataScaffold.RegisterEntity<IndexDefinition>();
         DataScaffold.RegisterEntity<ActionDefinition>();
         DataScaffold.RegisterEntity<ActionCommandDefinition>();
+        DataScaffold.RegisterEntity<DashboardDefinition>();
 
         IDataObjectStore dataStore = ProgramSetup.CreateDataStore(config, contentRoot, serializer, queryEvaluator, logger);
 
@@ -280,6 +281,7 @@ public static class BareMetalWebExtensions
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
         appInfo.RegisterVNextRoutes(pageInfoFactory, templateStore);
         appInfo.RegisterReportRoutes(pageInfoFactory);
+        appInfo.RegisterDashboardRoutes(pageInfoFactory);
         appInfo.RegisterMcpRoutes(pageInfoFactory);
         appInfo.RegisterOpenApiRoute(pageInfoFactory);
 
