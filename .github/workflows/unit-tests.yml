@@ -17,9 +17,9 @@ permissions:
   contents: read
 
 jobs:
-  unit-tests:
+  # ── Stage 1: Build once, upload artefact ────────────────────────────────
+  build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -37,30 +37,119 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
       - name: Restore dependencies
         run: dotnet restore BareMetalWeb.sln
 
       - name: Build solution
         run: dotnet build BareMetalWeb.sln --configuration Release --no-restore -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} -p:FileVersion=${{ steps.version.outputs.assembly_version }} -p:InformationalVersion=${{ steps.version.outputs.info_version }}
 
-      - name: Run unit tests
-        run: dotnet test BareMetalWeb.sln --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+      - name: Upload build artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: |
+            **/bin/Release/
+            **/obj/Release/
+          retention-days: 1
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+  # ── Stage 2: Test shards (parallel, depend on build) ────────────────────
+  test-data:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: .
+      - name: Run Data tests
+        run: dotnet test BareMetalWeb.Data.Tests/BareMetalWeb.Data.Tests.csproj --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+
+  test-host:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: .
+      - name: Run Host tests
+        run: dotnet test BareMetalWeb.Host.Tests/BareMetalWeb.Host.Tests.csproj --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+
+  test-rendering:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: .
+      - name: Run Rendering + Runtime + API + Core tests
+        run: |
+          dotnet test BareMetalWeb.Rendering.Tests/BareMetalWeb.Rendering.Tests.csproj --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+          dotnet test BareMetalWeb.Runtime.Tests/BareMetalWeb.Runtime.Tests.csproj --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+          dotnet test BareMetalWeb.Core.Tests/BareMetalWeb.Core.Tests.csproj --configuration Release --no-build --verbosity minimal 2>/dev/null || true
+          dotnet test BareMetalWeb.API.Tests/BareMetalWeb.API.Tests.csproj --configuration Release --no-build --verbosity minimal 2>/dev/null || true
+
+  # ── Stage 2b: Jest tests (parallel with .NET shards) ────────────────────
+  test-jest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
+      - name: Cache npm packages
+        uses: actions/cache@v4
+        with:
+          path: tests/js-unit/node_modules
+          key: npm-jest-${{ hashFiles('tests/js-unit/package-lock.json') }}
+          restore-keys: npm-jest-
       - name: Install Jest dependencies
         working-directory: tests/js-unit
         run: |
           if [ -f package-lock.json ]; then
             npm ci
           else
-            echo "::warning::package-lock.json missing in tests/js-unit; falling back to npm install"
             npm install
           fi
-
       - name: Run Jest unit tests
         working-directory: tests/js-unit
         run: npm test

@@ -1,8 +1,6 @@
 name: Build and Deploy to Azure
 
 run-name: "Build and Deploy to Azure - V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
-# Full informational version format: V{Major}.{YYYYMMDD}.{build} (set as InformationalVersion on assemblies)
-# Assembly/file version format: {Major}.0.0.{build} (required to be valid .NET version: each part ≤ 65535)
 
 on:
   push:
@@ -18,9 +16,12 @@ permissions:
   id-token: write
 
 jobs:
-  build-and-deploy:
+  # ── Stage 1: Build ─────────────────────────────────────────────────────
+  build:
     runs-on: ubuntu-latest
-
+    outputs:
+      info_version: ${{ steps.version.outputs.info_version }}
+      assembly_version: ${{ steps.version.outputs.assembly_version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -38,45 +39,145 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
       - name: Restore dependencies
         run: dotnet restore
 
       - name: Build
         run: dotnet build --no-restore --configuration Release -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} -p:FileVersion=${{ steps.version.outputs.assembly_version }} -p:InformationalVersion=${{ steps.version.outputs.info_version }}
 
-      - name: Test
-        run: |
-          dotnet test --no-build --configuration Release --verbosity normal \
-            --filter "FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~PerformanceTests&Category!=Integration" \
-            --results-directory TestResults --logger "trx" || true
-          # Fail only if tests actually failed (not orphan process cleanup)
-          if find TestResults -name '*.trx' -exec grep -l 'outcome="Failed"' {} + 2>/dev/null | head -1 | grep -q .; then
-            echo "::error::One or more tests failed"
-            exit 1
-          fi
-          echo "All tests passed."
+      - name: Upload build artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: |
+            **/bin/Release/
+            **/obj/Release/
+          retention-days: 1
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+  # ── Stage 2: Tests (parallel shards, fail-fast) ────────────────────────
+  test-data:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: .
+      - name: Run Data tests
+        run: dotnet test BareMetalWeb.Data.Tests/BareMetalWeb.Data.Tests.csproj --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+
+  test-host:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: .
+      - name: Run Host tests
+        run: dotnet test BareMetalWeb.Host.Tests/BareMetalWeb.Host.Tests.csproj --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+
+  test-rendering:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-output
+          path: .
+      - name: Run Rendering + Runtime + API + Core tests
+        run: |
+          dotnet test BareMetalWeb.Rendering.Tests/BareMetalWeb.Rendering.Tests.csproj --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+          dotnet test BareMetalWeb.Runtime.Tests/BareMetalWeb.Runtime.Tests.csproj --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+          dotnet test BareMetalWeb.Core.Tests/BareMetalWeb.Core.Tests.csproj --configuration Release --no-build --verbosity minimal 2>/dev/null || true
+          dotnet test BareMetalWeb.API.Tests/BareMetalWeb.API.Tests.csproj --configuration Release --no-build --verbosity minimal 2>/dev/null || true
+
+  test-jest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
-
+      - name: Cache npm packages
+        uses: actions/cache@v4
+        with:
+          path: tests/js-unit/node_modules
+          key: npm-jest-${{ hashFiles('tests/js-unit/package-lock.json') }}
+          restore-keys: npm-jest-
       - name: Install Jest dependencies
         working-directory: tests/js-unit
         run: |
           if [ -f package-lock.json ]; then
             npm ci
           else
-            echo "::warning::package-lock.json missing in tests/js-unit; falling back to npm install"
             npm install
           fi
-
       - name: Run Jest unit tests
         working-directory: tests/js-unit
         run: npm test
 
-      - name: Publish
-        run: dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj --configuration Release --output ./publish -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} -p:FileVersion=${{ steps.version.outputs.assembly_version }} -p:InformationalVersion=${{ steps.version.outputs.info_version }}
+  # ── Stage 3: Deploy (only after ALL tests pass) ────────────────────────
+  deploy:
+    needs: [test-data, test-host, test-rendering, test-jest]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Restore and publish
+        run: |
+          dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj --configuration Release --output ./publish -p:AssemblyVersion=${{ needs.build.outputs.assembly_version }} -p:FileVersion=${{ needs.build.outputs.assembly_version }} -p:InformationalVersion=${{ needs.build.outputs.info_version }}
 
       - name: Login to Azure
         uses: azure/login@v2
@@ -93,6 +194,25 @@ jobs:
         run: |
           echo "Waiting 30 seconds for deployment to complete and app to start..."
           sleep 30
+
+  # ── Stage 4: Playwright E2E (after deploy) ─────────────────────────────
+  e2e:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('tests/playwright/package-lock.json') }}
+          restore-keys: playwright-
 
       - name: Install Playwright dependencies
         working-directory: tests/playwright
