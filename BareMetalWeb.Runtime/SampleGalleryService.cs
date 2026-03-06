@@ -105,6 +105,7 @@ public static class SampleGalleryService
         ArgumentNullException.ThrowIfNull(store);
 
         var deployed = new List<string>();
+        var deployedSlugs = new List<string>();
 
         // Load existing EntityDefinitions so we can skip or overwrite
         var existingDefs = new List<EntityDefinition>(await store.QueryAsync<EntityDefinition>(null, cancellationToken)
@@ -333,10 +334,11 @@ public static class SampleGalleryService
             foreach (var rule in package.WorkflowRules) if (string.Equals(rule.SourceEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) ruleCount++;
             logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es), {actionCount} action(s), {reportCount} report(s), {aggCount} aggregation(s), {ruleCount} workflow rule(s).");
             deployed.Add(srcEntity.Name);
+            deployedSlugs.Add(slug);
         }
 
-        // Deploy package-level RBAC definitions
-        await DeployRbacAsync(package, logger, cancellationToken).ConfigureAwait(false);
+        // Deploy package-level RBAC definitions + auto-generate defaults for each deployed entity
+        await DeployRbacAsync(package, deployedSlugs, store, logger, cancellationToken).ConfigureAwait(false);
 
         return deployed;
     }
@@ -345,14 +347,19 @@ public static class SampleGalleryService
 
     private static async Task DeployRbacAsync(
         SamplePackage package,
+        IReadOnlyList<string> deployedSlugs,
+        IDataObjectStore store,
         Action<string>? logger,
         CancellationToken ct)
     {
-        if (package.Permissions.Count == 0 && package.Roles.Count == 0)
+        if (!DataScaffold.TryGetEntity("permissions", out var permMeta))
             return;
 
-        // Deploy permissions
-        if (package.Permissions.Count > 0 && DataScaffold.TryGetEntity("permissions", out var permMeta))
+        // Track which entity slugs already have explicit package-defined permissions
+        var coveredSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Deploy explicit package permissions
+        if (package.Permissions.Count > 0)
         {
             foreach (var srcPerm in package.Permissions)
             {
@@ -366,12 +373,15 @@ public static class SampleGalleryService
                     dr.SetField(dr.Schema, "RequiresElevation", srcPerm.RequiresElevation);
                     await DataScaffold.SaveAsync(permMeta, rec, ct).ConfigureAwait(false);
                 }
+                if (!string.IsNullOrEmpty(srcPerm.TargetEntity) && srcPerm.TargetEntity != "*")
+                    coveredSlugs.Add(srcPerm.TargetEntity);
             }
-            logger?.Invoke($"Deployed {package.Permissions.Count} permission(s).");
+            logger?.Invoke($"Deployed {package.Permissions.Count} explicit permission(s).");
         }
 
-        // Deploy roles
-        if (package.Roles.Count > 0 && DataScaffold.TryGetEntity("roles", out var roleMeta))
+        // Deploy explicit package roles
+        DataScaffold.TryGetEntity("roles", out var roleMeta);
+        if (package.Roles.Count > 0 && roleMeta != null)
         {
             foreach (var srcRole in package.Roles)
             {
@@ -384,8 +394,127 @@ public static class SampleGalleryService
                     await DataScaffold.SaveAsync(roleMeta, rec, ct).ConfigureAwait(false);
                 }
             }
-            logger?.Invoke($"Deployed {package.Roles.Count} role(s).");
+            logger?.Invoke($"Deployed {package.Roles.Count} explicit role(s).");
         }
+
+        // Auto-generate default CRUD permissions + admin role for each deployed entity
+        // that doesn't already have explicit package permissions
+        var allNewPermCodes = new List<string>();
+        string[] crudActions = { "Read", "Create", "Update", "Delete" };
+
+        foreach (var slug in deployedSlugs)
+        {
+            if (coveredSlugs.Contains(slug))
+                continue;
+
+            var entityPermCodes = new List<string>(4);
+            foreach (var action in crudActions)
+            {
+                var code = $"{slug}.{action.ToLowerInvariant()}";
+                entityPermCodes.Add(code);
+
+                var rec = permMeta.Handlers.Create();
+                if (rec is DataRecord dr && dr.Schema != null)
+                {
+                    dr.SetField(dr.Schema, "Code", code);
+                    dr.SetField(dr.Schema, "Description", $"{action} access for {slug}");
+                    dr.SetField(dr.Schema, "TargetEntity", slug);
+                    dr.SetField(dr.Schema, "Actions", action);
+                    dr.SetField(dr.Schema, "RequiresElevation", false);
+                    await DataScaffold.SaveAsync(permMeta, rec, ct).ConfigureAwait(false);
+                }
+            }
+            allNewPermCodes.AddRange(entityPermCodes);
+
+            // Create an admin role for this entity with all CRUD permissions
+            if (roleMeta != null)
+            {
+                var roleRec = roleMeta.Handlers.Create();
+                if (roleRec is DataRecord dr && dr.Schema != null)
+                {
+                    dr.SetField(dr.Schema, "RoleName", $"{slug}-admin");
+                    dr.SetField(dr.Schema, "Description", $"Full access to {slug}");
+                    dr.SetField(dr.Schema, "PermissionCodes", string.Join(",", entityPermCodes));
+                    await DataScaffold.SaveAsync(roleMeta, roleRec, ct).ConfigureAwait(false);
+                }
+            }
+
+            logger?.Invoke($"Auto-created CRUD permissions and admin role for '{slug}'.");
+        }
+
+        // Also include any explicit package permission codes for admin grant
+        foreach (var srcPerm in package.Permissions)
+        {
+            if (!string.IsNullOrEmpty(srcPerm.Code))
+                allNewPermCodes.Add(srcPerm.Code);
+        }
+
+        // Grant all new permission codes to admin users
+        if (allNewPermCodes.Count > 0)
+            await GrantPermissionsToAdminUsersAsync(store, allNewPermCodes, logger, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Finds all users with "admin" permission and adds the specified permission codes
+    /// to their Permissions array if not already present.
+    /// </summary>
+    private static async Task GrantPermissionsToAdminUsersAsync(
+        IDataObjectStore store,
+        List<string> permCodes,
+        Action<string>? logger,
+        CancellationToken ct)
+    {
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "admin" }
+            }
+        };
+
+        var users = await store.QueryAsync<User>(query, ct).ConfigureAwait(false);
+        int grantCount = 0;
+
+        foreach (var user in users)
+        {
+            if (user is null || !user.IsActive) continue;
+
+            var perms = user.Permissions != null
+                ? new List<string>(user.Permissions)
+                : new List<string>();
+            bool changed = false;
+
+            foreach (var code in permCodes)
+            {
+                if (string.IsNullOrWhiteSpace(code)) continue;
+                bool alreadyHas = false;
+                foreach (var p in perms)
+                {
+                    if (string.Equals(p, code, StringComparison.OrdinalIgnoreCase))
+                    {
+                        alreadyHas = true;
+                        break;
+                    }
+                }
+                if (!alreadyHas)
+                {
+                    perms.Add(code);
+                    changed = true;
+                }
+            }
+
+            if (!changed) continue;
+
+            user.Permissions = perms.ToArray();
+            await store.SaveAsync(user, ct).ConfigureAwait(false);
+            grantCount++;
+        }
+
+        if (grantCount > 0)
+            logger?.Invoke($"Granted {permCodes.Count} permission(s) to {grantCount} admin user(s).");
+
+        // Invalidate the permission resolver cache so changes take effect immediately
+        PermissionResolver.Invalidate();
     }
 
     private static async Task DeleteChildRecordsAsync(

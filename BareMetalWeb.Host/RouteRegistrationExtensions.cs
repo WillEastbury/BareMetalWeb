@@ -769,7 +769,7 @@ public static class RouteRegistrationExtensions
     {
         // List accessible entities for the current user
         host.RegisterRoute("GET /meta/objects", new RouteHandlerData(
-            pageInfoFactory.RawPage("Authenticated", false),
+            pageInfoFactory.RawPage("Public", false),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);

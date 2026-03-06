@@ -4127,6 +4127,7 @@ public sealed class RouteHandlers : IRouteHandlers
             {
                 await RuntimeEntityRegistry.RebuildAsync().ConfigureAwait(false);
                 MetadataCompiler.CompileAndSwap(DataScaffold.Entities);
+                PermissionResolver.Invalidate();
                 _logger?.LogInfo($"Gallery|deployed|{packageSlug}|entities={deployed.Count}|registry-rebuilt");
             }
             catch (Exception ex)
