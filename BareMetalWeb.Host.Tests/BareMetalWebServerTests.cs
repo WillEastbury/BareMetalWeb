@@ -37,7 +37,6 @@ public class BareMetalWebServerTests : IDisposable
     private readonly MockMetricsTracker _metrics;
     private readonly MockClientRequestTracker _clientRequests;
     private readonly CancellationTokenSource _cts;
-    private readonly WebApplication _app;
     private readonly string _keyRootDirectory;
 
     public BareMetalWebServerTests()
@@ -60,11 +59,6 @@ public class BareMetalWebServerTests : IDisposable
         _clientRequests = new MockClientRequestTracker();
         _cts = new CancellationTokenSource();
 
-        // Create a minimal WebApplication for testing
-        var builder = WebApplication.CreateBuilder(new string[] { });
-        builder.WebHost.UseKestrel();
-        _app = builder.Build();
-
         var notFoundPage = CreatePageInfo("Not Found", 404);
         var errorPage = CreatePageInfo("Error", 500);
 
@@ -72,7 +66,8 @@ public class BareMetalWebServerTests : IDisposable
             "TestApp",
             "Test Company",
             "2026",
-            _app,
+            BmwConfig.Load("/tmp"),
+            "/tmp",
             _logger,
             _renderer,
             notFoundPage,
@@ -87,7 +82,6 @@ public class BareMetalWebServerTests : IDisposable
         DataStoreProvider.Current = _originalStore;
         _cts.Cancel();
         _cts.Dispose();
-        (_app as IDisposable)?.Dispose();
         if (Directory.Exists(_keyRootDirectory))
             Directory.Delete(_keyRootDirectory, true);
     }
@@ -654,7 +648,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContext("GET", "/");
 
         // Act
-        await _server.BuildAppInfoMenuOptionsAsync(context);
+        await _server.BuildAppInfoMenuOptionsAsync(BmwContext.CreateFrom(context, _server));
 
         // Assert
         Assert.Empty(_server.MenuOptionsList);
@@ -679,7 +673,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContextWithSession("GET", "/", session);
 
         // Act
-        await _server.BuildAppInfoMenuOptionsAsync(context);
+        await _server.BuildAppInfoMenuOptionsAsync(BmwContext.CreateFrom(context, _server));
 
         // Assert
         Assert.NotEmpty(_server.MenuOptionsList);
@@ -705,7 +699,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContextWithSession("GET", "/", session);
 
         // Act
-        await _server.BuildAppInfoMenuOptionsAsync(context);
+        await _server.BuildAppInfoMenuOptionsAsync(BmwContext.CreateFrom(context, _server));
 
         // Assert
         Assert.DoesNotContain(_server.MenuOptionsList, m => m.Href == "/admin");
@@ -728,12 +722,13 @@ public class BareMetalWebServerTests : IDisposable
         ));
 
         var context = CreateHttpContextWithSession("GET", "/", session);
+        var bmwContext = BmwContext.CreateFrom(context, _server);
 
         // Act - Build menu twice
-        await _server.BuildAppInfoMenuOptionsAsync(context);
+        await _server.BuildAppInfoMenuOptionsAsync(bmwContext);
         var firstBuildCount = _server.MenuOptionsList.Count;
 
-        await _server.BuildAppInfoMenuOptionsAsync(context);
+        await _server.BuildAppInfoMenuOptionsAsync(bmwContext);
         var secondBuildCount = _server.MenuOptionsList.Count;
 
         // Assert
@@ -757,9 +752,10 @@ public class BareMetalWebServerTests : IDisposable
         ));
 
         var context = CreateHttpContextWithSession("GET", "/", session);
+        var bmwContext = BmwContext.CreateFrom(context, _server);
 
         // Act
-        await _server.BuildAppInfoMenuOptionsAsync(context);
+        await _server.BuildAppInfoMenuOptionsAsync(bmwContext);
         var firstCount = _server.MenuOptionsList.Count;
 
         // Add another route
@@ -769,7 +765,7 @@ public class BareMetalWebServerTests : IDisposable
             async (ctx) => await Task.CompletedTask
         ));
 
-        await _server.BuildAppInfoMenuOptionsAsync(context);
+        await _server.BuildAppInfoMenuOptionsAsync(bmwContext);
         var secondCount = _server.MenuOptionsList.Count;
 
         // Assert

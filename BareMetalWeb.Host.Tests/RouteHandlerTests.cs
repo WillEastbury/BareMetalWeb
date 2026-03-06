@@ -372,21 +372,21 @@ public class RouteHandlerTests : IDisposable
     public void BuildPageHandler_ActionOverload_NullConfigure_ThrowsArgumentNull()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            _handlers.BuildPageHandler((Action<HttpContext>)null!));
+            _handlers.BuildPageHandler((Action<BmwContext>)null!));
     }
 
     [Fact]
     public void BuildPageHandler_AsyncOverload_NullConfigure_ThrowsArgumentNull()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            _handlers.BuildPageHandler((Func<HttpContext, ValueTask>)null!));
+            _handlers.BuildPageHandler((Func<BmwContext, ValueTask>)null!));
     }
 
     [Fact]
     public void BuildPageHandler_BoolAsyncOverload_NullConfigure_ThrowsArgumentNull()
     {
         Assert.Throws<ArgumentNullException>(() =>
-            _handlers.BuildPageHandler((Func<HttpContext, ValueTask<bool>>)null!, true));
+            _handlers.BuildPageHandler((Func<BmwContext, ValueTask<bool>>)null!, true));
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -426,7 +426,7 @@ public class RouteHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/time/raw");
 
         // Act
-        await _handlers.TimeRawHandler(context);
+        await _handlers.TimeRawHandler(context.ToBmw());
 
         // Assert
         Assert.Equal("text/plain", context.Response.ContentType);
@@ -447,7 +447,7 @@ public class RouteHandlerTests : IDisposable
         context.Request.ContentType = "application/json";
 
         // Act
-        await _handlers.LoginPostHandler(context);
+        await _handlers.LoginPostHandler(context.ToBmw());
 
         // Assert — non-form requests fail CSRF validation and render login page with an error;
         // the request is NOT processed as a login attempt (no redirect to home)
@@ -477,7 +477,7 @@ public class RouteHandlerTests : IDisposable
         var context = CreateHttpContext("POST", "/register");
 
         // Act
-        await disabledHandlers.RegisterPostHandler(context);
+        await disabledHandlers.RegisterPostHandler(context.ToBmw());
 
         // Assert – the handler should set the title and message and render
         var pc = context.GetPageContext();
@@ -500,7 +500,7 @@ public class RouteHandlerTests : IDisposable
         context.Request.ContentType = "application/json";
 
         // Act
-        await _handlers.RegisterPostHandler(context);
+        await _handlers.RegisterPostHandler(context.ToBmw());
 
         // Assert
         var pc = context.GetPageContext();
@@ -523,7 +523,7 @@ public class RouteHandlerTests : IDisposable
         context.Request.ContentType = "application/json";
 
         // Act
-        await _handlers.LogoutPostHandler(context);
+        await _handlers.LogoutPostHandler(context.ToBmw());
 
         // Assert
         var pc = context.GetPageContext();
@@ -545,7 +545,7 @@ public class RouteHandlerTests : IDisposable
         var context = CreateHttpContext("POST", "/mfa");
 
         // Act
-        await _handlers.MfaChallengePostHandler(context);
+        await _handlers.MfaChallengePostHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(StatusCodes.Status302Found, context.Response.StatusCode);
@@ -849,7 +849,7 @@ public class RouteHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/test");
 
         // Act
-        await handler(context);
+        await handler(context.ToBmw());
 
         // Assert
         Assert.True(configured);
@@ -869,7 +869,7 @@ public class RouteHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/test");
 
         // Act
-        await handler(context);
+        await handler(context.ToBmw());
 
         // Assert
         Assert.True(configured);
@@ -884,7 +884,7 @@ public class RouteHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/test");
 
         // Act – should complete without error and render
-        await handler(context);
+        await handler(context.ToBmw());
 
         // Assert – no exception means success; renderer was called
         Assert.Equal(200, context.Response.StatusCode);
@@ -1017,7 +1017,7 @@ public class RouteHandlerTests : IDisposable
         context.Request.ContentType = "application/json";
 
         // Act
-        await _handlers.SampleDataPostHandler(context);
+        await _handlers.SampleDataPostHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(StatusCodes.Status400BadRequest, context.Response.StatusCode);
@@ -1042,7 +1042,7 @@ public class RouteHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/register");
 
         // Act
-        await disabledHandlers.RegisterHandler(context);
+        await disabledHandlers.RegisterHandler(context.ToBmw());
 
         // Assert
         var pc = context.GetPageContext();
@@ -1064,7 +1064,7 @@ public class RouteHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/mfa");
 
         // Act
-        await _handlers.MfaChallengeHandler(context);
+        await _handlers.MfaChallengeHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(StatusCodes.Status302Found, context.Response.StatusCode);
@@ -1182,7 +1182,7 @@ public class RouteHandlerTests : IDisposable
         context.Request.QueryString = new QueryString("?skip=0&top=2");
 
         // Act
-        await _handlers.DataApiListHandler(context);
+        await _handlers.DataApiListHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -1233,7 +1233,7 @@ public class RouteHandlerTests : IDisposable
             PageMetaDataValues: new[] { slug }));
 
         // Act
-        await _handlers.DataApiListHandler(context);
+        await _handlers.DataApiListHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -1282,7 +1282,7 @@ public class RouteHandlerTests : IDisposable
         context.Request.QueryString = new QueryString("?skip=25&top=25");
 
         // Act
-        await _handlers.DataApiListHandler(context);
+        await _handlers.DataApiListHandler(context.ToBmw());
 
         // Assert: total should be clamped to skip+0=25, not the inflated 50
         Assert.Equal(200, context.Response.StatusCode);
@@ -1341,7 +1341,7 @@ public class RouteHandlerTests : IDisposable
         context.Request.QueryString = new QueryString("?skip=0&top=25");
 
         // Act
-        await _handlers.DataApiListHandler(context);
+        await _handlers.DataApiListHandler(context.ToBmw());
 
         // Assert: 3 items returned < 25 requested, so total is clamped to 0+3=3
         Assert.Equal(200, context.Response.StatusCode);

@@ -1,4 +1,5 @@
 using System;
+using BareMetalWeb.Core;
 using Microsoft.AspNetCore.Http;
 using Xunit;
 
@@ -10,7 +11,7 @@ public class CsrfProtectionTests
     public void EnsureToken_CreatesTokenAndSetsCookie()
     {
         var context = new DefaultHttpContext();
-        var token = CsrfProtection.EnsureToken(context);
+        var token = CsrfProtection.EnsureToken(context.ToBmw());
 
         Assert.False(string.IsNullOrWhiteSpace(token));
     }
@@ -22,7 +23,7 @@ public class CsrfProtectionTests
         // Simulate a cookie already present
         context.Request.Headers["Cookie"] = "csrf_token=existing-token-value";
 
-        var token = CsrfProtection.EnsureToken(context);
+        var token = CsrfProtection.EnsureToken(context.ToBmw());
         Assert.Equal("existing-token-value", token);
     }
 
@@ -34,7 +35,7 @@ public class CsrfProtectionTests
         context.Request.Headers["Cookie"] = $"csrf_token={tokenValue}";
         context.Request.Headers[CsrfProtection.ApiTokenHeaderName] = tokenValue;
 
-        Assert.True(CsrfProtection.ValidateApiToken(context));
+        Assert.True(CsrfProtection.ValidateApiToken(context.ToBmw()));
     }
 
     [Fact]
@@ -43,7 +44,7 @@ public class CsrfProtectionTests
         var context = new DefaultHttpContext();
         context.Request.Headers["Cookie"] = "csrf_token=test-token";
 
-        Assert.False(CsrfProtection.ValidateApiToken(context));
+        Assert.False(CsrfProtection.ValidateApiToken(context.ToBmw()));
     }
 
     [Fact]
@@ -52,7 +53,7 @@ public class CsrfProtectionTests
         var context = new DefaultHttpContext();
         context.Request.Headers[CsrfProtection.ApiTokenHeaderName] = "test-token";
 
-        Assert.False(CsrfProtection.ValidateApiToken(context));
+        Assert.False(CsrfProtection.ValidateApiToken(context.ToBmw()));
     }
 
     [Fact]
@@ -62,14 +63,14 @@ public class CsrfProtectionTests
         context.Request.Headers["Cookie"] = "csrf_token=token-one";
         context.Request.Headers[CsrfProtection.ApiTokenHeaderName] = "token-two";
 
-        Assert.False(CsrfProtection.ValidateApiToken(context));
+        Assert.False(CsrfProtection.ValidateApiToken(context.ToBmw()));
     }
 
     [Fact]
     public void ValidateApiToken_ReturnsFalse_WhenBothEmpty()
     {
         var context = new DefaultHttpContext();
-        Assert.False(CsrfProtection.ValidateApiToken(context));
+        Assert.False(CsrfProtection.ValidateApiToken(context.ToBmw()));
     }
 
     [Fact]
@@ -85,7 +86,7 @@ public class CsrfProtectionTests
         context.Request.Headers["ApiKey"] = "some-raw-api-key";
 
         // No CSRF cookie or token set — should still pass because API key bypasses CSRF
-        Assert.True(CsrfProtection.ValidateApiToken(context));
+        Assert.True(CsrfProtection.ValidateApiToken(context.ToBmw()));
     }
 
     [Fact]
@@ -95,6 +96,6 @@ public class CsrfProtectionTests
         context.Request.Headers["Authorization"] = "ApiKey some-raw-api-key";
 
         // No CSRF cookie or token set — should still pass because API key bypasses CSRF
-        Assert.True(CsrfProtection.ValidateApiToken(context));
+        Assert.True(CsrfProtection.ValidateApiToken(context.ToBmw()));
     }
 }

@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
@@ -61,7 +62,7 @@ public static class EntraIdService
     /// </summary>
     public static string BuildAuthorizeUrl(
         EntraIdOptions options,
-        Microsoft.AspNetCore.Http.HttpContext context)
+        BmwContext context)
     {
         // Generate PKCE verifier + challenge
         var verifier = GenerateCodeVerifier();
@@ -77,7 +78,7 @@ public static class EntraIdService
         var cookieOptions = new Microsoft.AspNetCore.Http.CookieOptions
         {
             HttpOnly = true,
-            Secure = context.Request.IsHttps,
+            Secure = context.HttpRequest.IsHttps,
             SameSite = Microsoft.AspNetCore.Http.SameSiteMode.Lax,
             MaxAge = StateLifetime,
             Path = "/auth/sso"
@@ -107,7 +108,7 @@ public static class EntraIdService
     /// <summary>
     /// Validates the callback state parameter against the cookie.
     /// </summary>
-    public static bool ValidateState(Microsoft.AspNetCore.Http.HttpContext context, string state)
+    public static bool ValidateState(BmwContext context, string state)
     {
         var protectedState = context.GetCookie(StateCookieName);
         if (string.IsNullOrEmpty(protectedState))
@@ -123,7 +124,7 @@ public static class EntraIdService
     /// </summary>
     public static async Task<EntraIdUserInfo?> ExchangeCodeAsync(
         EntraIdOptions options,
-        Microsoft.AspNetCore.Http.HttpContext context,
+        BmwContext context,
         string code,
         CancellationToken cancellationToken = default)
     {
@@ -283,7 +284,7 @@ public static class EntraIdService
     /// Builds the post-logout redirect URI using the configured BaseUrl when available,
     /// avoiding reliance on the user-controlled HTTP Host header.
     /// </summary>
-    public static string BuildPostLogoutRedirectUri(EntraIdOptions options, Microsoft.AspNetCore.Http.HttpContext context)
+    public static string BuildPostLogoutRedirectUri(EntraIdOptions options, BmwContext context)
     {
         return BuildAbsoluteRedirectUri(options, context, "/login");
     }
@@ -301,15 +302,15 @@ public static class EntraIdService
 
     private static string BuildAbsoluteRedirectUri(
         EntraIdOptions options,
-        Microsoft.AspNetCore.Http.HttpContext context,
+        BmwContext context,
         string relativePath)
     {
         // Use configured BaseUrl when available to avoid relying on user-controlled Host header
         if (!string.IsNullOrWhiteSpace(options.BaseUrl))
             return options.BaseUrl.TrimEnd('/') + relativePath;
 
-        var scheme = context.Request.IsHttps ? "https" : "http";
-        var host = context.Request.Host.Value;
+        var scheme = context.HttpRequest.IsHttps ? "https" : "http";
+        var host = context.HttpRequest.Host.Value;
         return $"{scheme}://{host}{relativePath}";
     }
 

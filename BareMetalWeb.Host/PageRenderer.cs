@@ -31,7 +31,7 @@ public static partial class PageRenderer
     }
 
     /// <summary>Configures context for GET /page/{slug} inside platform chrome.</summary>
-    public static async ValueTask ConfigurePageAsync(HttpContext context)
+    public static async ValueTask ConfigurePageAsync(BmwContext context)
     {
         var slug = BinaryApiHandlers.GetRouteValue(context, "slug") ?? string.Empty;
 
@@ -103,7 +103,7 @@ public static partial class PageRenderer
     }
 
     /// <summary>API handler: GET /api/pages — list published pages for navigation.</summary>
-    public static async ValueTask ListPagesHandler(HttpContext context)
+    public static async ValueTask ListPagesHandler(BmwContext context)
     {
         if (!DataScaffold.TryGetEntity("pages", out var meta))
         {

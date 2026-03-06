@@ -57,15 +57,27 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
     int pos = 0;
     while (pos < input.Length)
     {
-        // SIMD-accelerated scan: IndexOf uses SSE2/NEON vector search internally.
-        int openIdx = input.Slice(pos).IndexOf("{{".AsSpan());
+        // SIMD-accelerated: find next '{' in one vectorised pass
+        int braceIdx = input.Slice(i).IndexOf('{');
 
-        if (openIdx < 0)
+        if (braceIdx < 0)
         {
-            // No more tokens — write the remainder as one contiguous slice.
-            buffer.Write(input.Slice(pos));
+            // No more braces — bulk write remainder
+            buffer.Write(input.Slice(i));
             break;
         }
+
+        int absIdx = i + braceIdx;
+
+        // Bulk write everything before the brace
+        if (braceIdx > 0)
+            buffer.Write(input.Slice(i, braceIdx));
+
+        // Check for {{ pattern
+        if (absIdx + 1 < input.Length && input[absIdx + 1] == '{')
+        {
+            int start = absIdx + 2;
+            int end = input.Slice(start).IndexOf("}}");
 
         // Write all literal characters before '{{'.
         if (openIdx > 0)
@@ -96,16 +108,9 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
                 buffer.Write("}}");
             }
 
-            pos = start + end + 2; // past the }}
-        }
-        else
-        {
-            // Unmatched '{{' with no closing '}}' — emit as literal and advance.
-            // `start` already equals `pos + openIdx + 2`, so assigning `pos = start`
-            // is the same as `pos += openIdx + 2`, which moves past the '{{'.
-            buffer.Write(input.Slice(pos + openIdx, 2));
-            pos = start; // identical to: pos = pos + openIdx + 2
-        }
+        // Single '{' or unmatched — write it and advance
+        buffer.Write(input.Slice(absIdx, 1));
+        i = absIdx + 1;
     }
 
     return new string(buffer.WrittenSpan);
@@ -126,15 +131,27 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
     int pos = 0;
     while (pos < input.Length)
     {
-        // SIMD-accelerated scan: IndexOf uses SSE2/NEON vector search internally.
-        int openIdx = input.Slice(pos).IndexOf("{{".AsSpan());
+        // SIMD-accelerated: find next '{' in one vectorised pass
+        int braceIdx = input.Slice(i).IndexOf('{');
 
-        if (openIdx < 0)
+        if (braceIdx < 0)
         {
-            // No more tokens — write the remainder as one contiguous UTF-8 slice.
-            WriteUtf8(writer, input.Slice(pos));
-            return;
+            // No more braces — bulk write remainder
+            WriteUtf8(writer, input.Slice(i));
+            break;
         }
+
+        int absIdx = i + braceIdx;
+
+        // Bulk write everything before the brace
+        if (braceIdx > 0)
+            WriteUtf8(writer, input.Slice(i, braceIdx));
+
+        // Check for {{ pattern
+        if (absIdx + 1 < input.Length && input[absIdx + 1] == '{')
+        {
+            int start = absIdx + 2;
+            int end = input.Slice(start).IndexOf("}}");
 
         // Write all literal characters before '{{'.
         if (openIdx > 0)
@@ -165,16 +182,9 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
                 WriteUtf8(writer, "}}".AsSpan());
             }
 
-            pos = start + end + 2; // past the }}
-        }
-        else
-        {
-            // Unmatched '{{' with no closing '}}' — emit as literal and advance.
-            // `start` already equals `pos + openIdx + 2`, so assigning `pos = start`
-            // is the same as `pos += openIdx + 2`, which moves past the '{{'.
-            WriteUtf8(writer, input.Slice(pos + openIdx, 2));
-            pos = start; // identical to: pos = pos + openIdx + 2
-        }
+        // Single '{' or unmatched — write it and advance
+        WriteUtf8(writer, input.Slice(absIdx, 1));
+        i = absIdx + 1;
     }
 }
 

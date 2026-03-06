@@ -416,6 +416,441 @@ public sealed class SimdAccelerationTests
         Assert.Equal(original.Name, restored.Name);
         Assert.Equal(original.Value, restored.Value);
     }
+
+    [Fact]
+    public void SchemaHash_100k_RandomSchemas_CollisionRate_BelowExpected()
+    {
+        // Generate 100,000 random schemas with unique member signatures and verify
+        // that the XxHash64-folded-to-32-bit collision rate is within birthday-paradox
+        // expectations. For 100k items in a 2^32 space, expected unique ≈ 99,999
+        // (collision probability per pair ≈ 2.3e-10, expected collisions ≈ 1.2).
+        // We allow up to 50 collisions — still well below any quality concern.
+        const int count = 100_000;
+        const int maxAllowedCollisions = 50;
+        var ser = new BinaryObjectSerializer();
+        var hashes = new HashSet<uint>(count);
+        var rng = new Random(42); // deterministic seed for reproducibility
+        int collisions = 0;
+
+        string[] typeNames = { "String", "Int32", "Double", "Boolean", "Guid", "DateTime", "Byte[]", "Decimal" };
+
+        for (int i = 0; i < count; i++)
+        {
+            int memberCount = rng.Next(1, 8);
+            var members = new MemberSignature[memberCount];
+            for (int m = 0; m < memberCount; m++)
+            {
+                string name = $"Field_{i}_{m}_{rng.Next()}";
+                string typeName = typeNames[rng.Next(typeNames.Length)];
+                int? blittableSize = rng.Next(3) == 0 ? rng.Next(1, 64) : null;
+                members[m] = new MemberSignature(name, typeName, typeof(string), blittableSize);
+            }
+
+            var schema = ser.CreateSchema(1, members);
+            if (!hashes.Add(schema.Hash))
+                collisions++;
+        }
+
+        Assert.True(collisions <= maxAllowedCollisions,
+            $"Schema hash collision count {collisions} exceeds maximum allowed {maxAllowedCollisions}.");
+    }
+}
+
+// ── BloomFilterData unit tests ────────────────────────────────────────────
+
+/// <summary>
+/// Direct unit tests for <see cref="BloomFilterData.MightContain"/> and
+/// <see cref="BloomFilterData.PopulationCount"/>, covering both the 4-wide
+/// unrolled path and the scalar tail.
+/// </summary>
+public sealed class BloomFilterDataTests
+{
+    // ── MightContain ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public void MightContain_EmptySpan_ReturnsTrue()
+    {
+        // An empty set of required bits is trivially satisfied.
+        var bf = new BloomFilterData(size: 256, hashCount: 3);
+        Assert.True(bf.MightContain(ReadOnlySpan<int>.Empty));
+    }
+
+    [Fact]
+    public void MightContain_AllBitsSet_ReturnsTrue()
+    {
+        // Set all 8 bits explicitly, then ask whether they are all present.
+        var bf = new BloomFilterData(size: 256, hashCount: 8);
+        int[] indices = { 0, 7, 63, 64, 127, 128, 200, 255 };
+        foreach (var idx in indices)
+            bf.SetBit(idx);
+
+        // Exercises the 4-wide unrolled path (n=8 >= 4) and produces no false negatives.
+        Assert.True(bf.MightContain(indices));
+    }
+
+    [Fact]
+    public void MightContain_OneBitClearInUnrolledSection_ReturnsFalse()
+    {
+        // Set 7 of 8 bits; the missing one falls inside the 4-wide unrolled region (i < 4).
+        var bf = new BloomFilterData(size: 256, hashCount: 8);
+        int[] indices = { 0, 7, 63, 64, 127, 128, 200, 255 };
+        foreach (var idx in indices)
+            bf.SetBit(idx);
+
+        // Clear the second bit (index 1 in the span → inside the first 4-wide iteration).
+        bf.Bits[7 >> 6] &= ~(1UL << (7 & 63));
+
+        Assert.False(bf.MightContain(indices));
+    }
+
+    [Fact]
+    public void MightContain_OneBitClearInScalarTail_ReturnsFalse()
+    {
+        // n=5 → 4-wide loop runs once (i=0..3), scalar tail handles i=4.
+        // Clear the tail bit so the scalar path returns false.
+        var bf = new BloomFilterData(size: 256, hashCount: 5);
+        int[] indices = { 0, 7, 63, 64, 200 };
+        foreach (var idx in indices)
+            bf.SetBit(idx);
+
+        // Clear the last index (200) — processed by the scalar tail.
+        bf.Bits[200 >> 6] &= ~(1UL << (200 & 63));
+
+        Assert.False(bf.MightContain(indices));
+    }
+
+    [Fact]
+    public void MightContain_SpanLengthNotDivisibleByFour_ScalarTailCorrect()
+    {
+        // n=7 → one full 4-wide pass (i=0..3) + scalar tail (i=4,5,6).
+        var bf = new BloomFilterData(size: 512, hashCount: 7);
+        int[] indices = { 1, 10, 50, 100, 150, 200, 300 };
+        foreach (var idx in indices)
+            bf.SetBit(idx);
+
+        Assert.True(bf.MightContain(indices));
+    }
+
+    [Fact]
+    public void MightContain_ScalarOnlyPath_ThreeIndices_AllSet()
+    {
+        // hashCount=3 is the default: exercises only the scalar tail (n < 4).
+        var bf = new BloomFilterData(size: 10000, hashCount: 3);
+        int[] indices = { 42, 1000, 9999 };
+        foreach (var idx in indices)
+            bf.SetBit(idx);
+
+        Assert.True(bf.MightContain(indices));
+    }
+
+    [Fact]
+    public void MightContain_ScalarOnlyPath_ThreeIndices_OneClear()
+    {
+        var bf = new BloomFilterData(size: 10000, hashCount: 3);
+        int[] indices = { 42, 1000, 9999 };
+        bf.SetBit(42);
+        bf.SetBit(1000);
+        // 9999 is NOT set
+
+        Assert.False(bf.MightContain(indices));
+    }
+
+    // ── PopulationCount ───────────────────────────────────────────────────────
+
+    [Fact]
+    public void PopulationCount_EmptyBits_ReturnsZero()
+    {
+        var bf = new BloomFilterData(size: 64, hashCount: 1);
+        // Bits array has exactly 1 ulong; no bits set.
+        Assert.Equal(0, bf.PopulationCount());
+    }
+
+    [Fact]
+    public void PopulationCount_LessThanFourWords_ScalarTailOnly()
+    {
+        // size=192 → Bits has 3 ulongs (< 4), so only the scalar tail executes.
+        var bf = new BloomFilterData(size: 192, hashCount: 1);
+        bf.SetBit(0);   // word 0, bit 0
+        bf.SetBit(64);  // word 1, bit 0
+        bf.SetBit(128); // word 2, bit 0
+        Assert.Equal(3, bf.PopulationCount());
+    }
+
+    [Fact]
+    public void PopulationCount_ExactlyFourWords_NoScalarTail()
+    {
+        // size=256 → Bits has exactly 4 ulongs; the unrolled loop runs once, tail is empty.
+        var bf = new BloomFilterData(size: 256, hashCount: 1);
+        bf.SetBit(0);   // word 0
+        bf.SetBit(64);  // word 1
+        bf.SetBit(128); // word 2
+        bf.SetBit(192); // word 3
+        Assert.Equal(4, bf.PopulationCount());
+    }
+
+    [Fact]
+    public void PopulationCount_MoreThanFourWords_CorrectCount()
+    {
+        // size=448 → 7 ulongs: one 4-wide pass + 3-word scalar tail.
+        var bf = new BloomFilterData(size: 448, hashCount: 1);
+        // Set two bits per word (7 words × 2 bits = 14)
+        for (int w = 0; w < 7; w++)
+        {
+            bf.SetBit(w * 64);
+            bf.SetBit(w * 64 + 1);
+        }
+        Assert.Equal(14, bf.PopulationCount());
+    }
+
+    [Fact]
+    public void PopulationCount_KnownPattern_MatchesBruteForce()
+    {
+        // Set bits at positions 0, 1, 63, 64, 127, 255.
+        var bf = new BloomFilterData(size: 512, hashCount: 1);
+        int[] setBits = { 0, 1, 63, 64, 127, 255 };
+        foreach (var b in setBits)
+            bf.SetBit(b);
+
+        int expected = setBits.Length;
+        Assert.Equal(expected, bf.PopulationCount());
+    }
+
+    // ── False positive rate ──────────────────────────────────────────────────
+
+    [Fact]
+    public void BloomFilter_FalsePositiveRate_WithinExpectedBounds()
+    {
+        // Insert 1,000 tokens into a bloom filter sized for 10,000 bits with 3 hashes.
+        // Then probe 100,000 tokens that were NOT inserted and measure the false positive rate.
+        // For m=10000, k=3, n=1000: expected FPR ≈ (1 - e^(-kn/m))^k ≈ 3.6%
+        // We allow up to 10% to account for hash distribution variance.
+        const int size = 10_000;
+        const int hashCount = 3;
+        const int insertCount = 1_000;
+        const int probeCount = 100_000;
+        const double maxAllowedFpr = 0.10;
+
+        var bf = new BloomFilterData(size, hashCount);
+
+        // Insert tokens
+        for (int i = 0; i < insertCount; i++)
+        {
+            string token = $"inserted_{i}";
+            for (int h = 0; h < hashCount; h++)
+            {
+                int hash = ((StringComparer.OrdinalIgnoreCase.GetHashCode(token)
+                             ^ (h * unchecked((int)0x9e3779b9))) & 0x7FFFFFFF);
+                bf.SetBit((int)(hash % size));
+            }
+        }
+
+        // Probe tokens that were never inserted
+        int falsePositives = 0;
+        for (int i = 0; i < probeCount; i++)
+        {
+            string probe = $"notinserted_{i + insertCount}";
+            Span<int> indices = stackalloc int[hashCount];
+            for (int h = 0; h < hashCount; h++)
+            {
+                int hash = ((StringComparer.OrdinalIgnoreCase.GetHashCode(probe)
+                             ^ (h * unchecked((int)0x9e3779b9))) & 0x7FFFFFFF);
+                indices[h] = (int)(hash % size);
+            }
+            if (bf.MightContain(indices))
+                falsePositives++;
+        }
+
+        double fpr = (double)falsePositives / probeCount;
+        Assert.True(fpr < maxAllowedFpr,
+            $"False positive rate {fpr:P2} exceeds maximum allowed {maxAllowedFpr:P0}. " +
+            $"({falsePositives}/{probeCount} false positives)");
+        // Sanity: rate should be > 0 (a perfect filter with this config would be suspicious)
+        Assert.True(falsePositives > 0,
+            "Zero false positives is statistically implausible — possible test bug.");
+    }
+
+    // ── SimdByteScanner ────────────────────────────────────────────────────
+
+    [Fact]
+    public void SimdByteScanner_FindByte_ReturnsFirstMatch()
+    {
+        var data = new byte[1024];
+        data[512] = 0xAA;
+        data[700] = 0xAA;
+
+        Assert.Equal(512, SimdByteScanner.FindByte(data, 0xAA));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_ReturnsMinusOneWhenAbsent()
+    {
+        var data = new byte[256];
+        for (int i = 0; i < data.Length; i++) data[i] = 0x42;
+
+        Assert.Equal(-1, SimdByteScanner.FindByte(data, 0xFF));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_EmptySpan()
+    {
+        Assert.Equal(-1, SimdByteScanner.FindByte(ReadOnlySpan<byte>.Empty, 0x00));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_FirstByte()
+    {
+        var data = new byte[] { 0xBB, 0x00, 0x00, 0x00 };
+        Assert.Equal(0, SimdByteScanner.FindByte(data, 0xBB));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_LastByte()
+    {
+        var data = new byte[65];
+        data[64] = 0xCC; // past any 32-byte or 16-byte aligned block
+        Assert.Equal(64, SimdByteScanner.FindByte(data, 0xCC));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_LargeBuffer_EveryPosition()
+    {
+        for (int size = 0; size <= 128; size++)
+        {
+            var data = new byte[size];
+            for (int pos = 0; pos < size; pos++)
+            {
+                Array.Clear(data);
+                data[pos] = 0xFE;
+                int found = SimdByteScanner.FindByte(data, 0xFE);
+                Assert.Equal(pos, found);
+            }
+        }
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindAnyOfTwo_FindsBothTargets()
+    {
+        var data = new byte[256];
+        data[100] = 0x0A;
+        data[50]  = 0x7C;
+
+        Assert.Equal(50, SimdByteScanner.FindAnyOfTwo(data, 0x0A, 0x7C));
+        Assert.Equal(50, SimdByteScanner.FindAnyOfTwo(data, 0x7C, 0x0A));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindAnyOfTwo_ReturnsMinusOneWhenAbsent()
+    {
+        var data = new byte[128];
+        for (int i = 0; i < data.Length; i++) data[i] = 0x42;
+
+        Assert.Equal(-1, SimdByteScanner.FindAnyOfTwo(data, 0x0A, 0x0D));
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_CorrectCount()
+    {
+        var data = new byte[1024];
+        int expected = 0;
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (i % 7 == 0) { data[i] = 0xDD; expected++; }
+        }
+
+        Assert.Equal(expected, SimdByteScanner.CountByte(data, 0xDD));
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_AllMatch()
+    {
+        var data = new byte[200];
+        Array.Fill(data, (byte)0x99);
+        Assert.Equal(200, SimdByteScanner.CountByte(data, 0x99));
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_NoneMatch()
+    {
+        var data = new byte[200];
+        Assert.Equal(0, SimdByteScanner.CountByte(data, 0xFF));
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_Empty()
+    {
+        Assert.Equal(0, SimdByteScanner.CountByte(ReadOnlySpan<byte>.Empty, 0x00));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_MatchesSpanIndexOf()
+    {
+        var rng = new Random(42);
+        for (int trial = 0; trial < 200; trial++)
+        {
+            int len = rng.Next(0, 2048);
+            var data = new byte[len];
+            rng.NextBytes(data);
+            byte target = (byte)rng.Next(256);
+
+            int expected = ((ReadOnlySpan<byte>)data).IndexOf(target);
+            int actual = SimdByteScanner.FindByte(data, target);
+            Assert.Equal(expected, actual);
+        }
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_MatchesLinqCount()
+    {
+        var rng = new Random(123);
+        for (int trial = 0; trial < 100; trial++)
+        {
+            int len = rng.Next(0, 2048);
+            var data = new byte[len];
+            rng.NextBytes(data);
+            byte target = (byte)rng.Next(256);
+
+            int expected = data.Count(b => b == target);
+            int actual = SimdByteScanner.CountByte(data, target);
+            Assert.Equal(expected, actual);
+        }
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindNextRecordMagic_Integration()
+    {
+        var data = new byte[4096];
+        var rng = new Random(99);
+        rng.NextBytes(data);
+
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+            data.AsSpan(1000), 0x52454331u);
+
+        int found = WalSegmentReader.FindNextRecordMagic(data);
+        Assert.True(found >= 0 && found <= 1000,
+            $"Expected magic at or before 1000, found at {found}");
+    }
+
+    [Fact]
+    public void SimdByteScanner_Throughput_LargeBuffer()
+    {
+        const int size = 4 * 1024 * 1024;
+        var data = new byte[size];
+        data[size - 1] = 0xFF;
+
+        SimdByteScanner.FindByte(data, 0xFF); // warm up
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        const int iterations = 50;
+        for (int i = 0; i < iterations; i++)
+            SimdByteScanner.FindByte(data, 0xFF);
+        sw.Stop();
+
+        long totalBytes = (long)size * iterations;
+        double gbPerSec = totalBytes / (sw.Elapsed.TotalSeconds * 1024 * 1024 * 1024);
+
+        Assert.True(gbPerSec > 0.5,
+            $"Throughput {gbPerSec:F2} GB/s is suspiciously low — SIMD path may not be active");
+    }
 }
 
 /// <summary>Simple POCO used to verify XxHash64 schema hash stability.</summary>

@@ -294,7 +294,8 @@ public class AuthorizationTests : IClassFixture<DataStoreFixture>
         if (method == null)
             throw new InvalidOperationException("Could not find IsAuthorizedAsync method via reflection");
 
-        var task = (ValueTask<bool>)method.Invoke(null, new object?[] { pageInfo, context, CancellationToken.None })!;
+        var bmwCtx = BmwContext.CreateFrom(context, null!);
+        var task = (ValueTask<bool>)method.Invoke(null, new object?[] { pageInfo, bmwCtx, CancellationToken.None })!;
         return task.AsTask().GetAwaiter().GetResult();
     }
 

@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using System;
 using System.Security.Cryptography;
 using System.Text;
@@ -10,7 +11,7 @@ public static class CsrfProtection
     public const string CookieName = "csrf_token";
     public const string FormFieldName = "csrf_token";
 
-    public static string EnsureToken(HttpContext context)
+    public static string EnsureToken(BmwContext context)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
 
@@ -22,7 +23,7 @@ public static class CsrfProtection
         var options = new CookieOptions
         {
             HttpOnly = true,
-            Secure = context.Request.IsHttps,
+            Secure = context.HttpRequest.IsHttps,
             SameSite = SameSiteMode.Lax
         };
 
@@ -30,7 +31,7 @@ public static class CsrfProtection
         return token;
     }
 
-    public static bool ValidateFormToken(HttpContext context, IFormCollection form)
+    public static bool ValidateFormToken(BmwContext context, IFormCollection form)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
         if (form == null) throw new ArgumentNullException(nameof(form));
@@ -57,7 +58,7 @@ public static class CsrfProtection
     /// Requests authenticated via an API key header bypass this check because
     /// CSRF attacks rely on browser session cookies and cannot forge explicit API key headers.
     /// </summary>
-    public static bool ValidateApiToken(HttpContext context)
+    public static bool ValidateApiToken(BmwContext context)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
 
@@ -69,7 +70,7 @@ public static class CsrfProtection
         if (string.IsNullOrWhiteSpace(cookieToken))
             return false;
 
-        var headerToken = context.Request.Headers[ApiTokenHeaderName].ToString();
+        var headerToken = context.HttpRequest.Headers[ApiTokenHeaderName].ToString();
         if (string.IsNullOrWhiteSpace(headerToken))
             return false;
 

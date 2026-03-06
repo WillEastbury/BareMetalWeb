@@ -8,207 +8,63 @@ using System.Runtime.Intrinsics.X86;
 namespace BareMetalWeb.Data;
 
 /// <summary>
-/// High-performance SIMD byte scanner for <c>ReadOnlySpan&lt;byte&gt;</c> buffers.
-/// Locates the first occurrence of a single target byte using the widest
-/// available SIMD register width, with a scalar fallback for CPUs that lack
-/// hardware vector support.
-///
-/// <para>Dispatch order (widest / fastest first):</para>
-/// <list type="number">
-///   <item>x86-64 AVX2 — 256-bit / 32 bytes per iteration (~20+ GB/s on modern hardware)</item>
-///   <item>ARM AdvSimd (NEON) — 128-bit / 16 bytes per iteration</item>
-///   <item>Portable <see cref="Vector{T}"/> — JIT-selected width (8 or 16 bytes/iter)</item>
-///   <item>Scalar fallback — one byte per iteration</item>
-/// </list>
-///
-/// <para>Zero allocations; uses <c>MemoryMarshal</c> and <c>Vector*.LoadUnsafe</c>
-/// to avoid requiring an <c>unsafe</c> compilation context.</para>
-///
-/// <para><b>Performance goal:</b> scan buffers &gt;1 MB at memory-bandwidth speeds.
-/// Run <c>ByteScannerBenchmarks</c> in <c>BareMetalWeb.Benchmarks</c> to measure.</para>
+/// SIMD-accelerated byte scanner for high-throughput buffer searching.
+/// Dispatch order: AVX2 (32 bytes/cycle) → SSE2 (16 bytes/cycle) → AdvSimd/NEON (16 bytes/cycle) → Scalar.
+/// All paths return identical results.
 /// </summary>
 public static class SimdByteScanner
 {
-    // ─── Diagnostics ──────────────────────────────────────────────────────────
-
     /// <summary>
-    /// Human-readable label for the active acceleration path on this CPU.
-    /// Use in startup log lines and the metrics dashboard.
+    /// Returns the index of the first occurrence of <paramref name="target"/> in <paramref name="data"/>,
+    /// or -1 if not found. Uses AVX2/SSE2/NEON when available.
     /// </summary>
-    public static string ActivePath
-    {
-        get
-        {
-            if (Avx2.IsSupported)
-                return $"x86 AVX2 (256-bit / 32 bytes per iteration)";
-            if (AdvSimd.IsSupported)
-                return $"ARM AdvSimd/NEON (128-bit / 16 bytes per iteration)";
-            int vw = Vector<byte>.Count;
-            if (vw > 1)
-                return $"Portable Vector<byte> ({vw * 8}-bit / {vw} bytes per iteration)";
-            return "Scalar (no SIMD)";
-        }
-    }
-
-    // ─── Public API ───────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Returns the zero-based index of the first occurrence of <paramref name="target"/>
-    /// in <paramref name="data"/>, or <c>-1</c> if not found.
-    /// </summary>
-    /// <remarks>
-    /// The method dispatches to the highest-performance path available at runtime:
-    /// AVX2 → ARM AdvSimd → portable Vector&lt;byte&gt; → scalar.
-    /// All paths produce identical results.
-    /// </remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int FindByte(ReadOnlySpan<byte> data, byte target)
     {
-        if (data.IsEmpty) return -1;
-
-        // Fast-path: delegate to the .NET runtime's own optimised search when the
-        // buffer is small enough that SIMD setup overhead would dominate.
-        if (data.Length < 32)
-            return FindByteScalar(data, target);
-
         if (Avx2.IsSupported)
             return FindByteAvx2(data, target);
-
+        if (Sse2.IsSupported)
+            return FindByteSse2(data, target);
         if (AdvSimd.IsSupported)
             return FindByteAdvSimd(data, target);
-
-        int vw = Vector<byte>.Count;
-        if (data.Length >= vw && vw > 1)
-            return FindByteVector(data, target);
-
         return FindByteScalar(data, target);
     }
 
-    // ─── x86 AVX2: 256-bit / 32 bytes per iteration ──────────────────────────
-
-    private static int FindByteAvx2(ReadOnlySpan<byte> data, byte target)
-    {
-        // Broadcast the target byte into all 32 lanes of a 256-bit register.
-        // Every compare will check 32 bytes simultaneously.
-        var targetVec = Vector256.Create(target);
-
-        // Pin a ref to the first byte so LoadUnsafe can stride through the buffer
-        // without allocating or using a fixed/unsafe block.
-        ref byte origin = ref MemoryMarshal.GetReference(data);
-
-        int i = 0;
-        int limit = data.Length - 31; // last safe start position for a 32-byte load
-
-        for (; i < limit; i += 32)
-        {
-            // Step 1: Load 32 consecutive bytes starting at data[i].
-            var v = Vector256.LoadUnsafe(ref origin, (nuint)i);
-
-            // Step 2: Compare each of the 32 byte-lanes with the target.
-            //         Each lane becomes 0xFF (255) on a match, 0x00 otherwise.
-            var cmp = Avx2.CompareEqual(v, targetVec);
-
-            // Step 3: Pack the high bit of each byte-lane into a 32-bit integer.
-            //         Bit j == 1  ⟺  data[i + j] == target.
-            int mask = Avx2.MoveMask(cmp);
-
-            // Step 4: If any bit is set, the position of the lowest set bit
-            //         (trailing-zero count) is the lane index of the first match.
-            if (mask != 0)
-                return i + BitOperations.TrailingZeroCount(mask);
-        }
-
-        // Handle any remaining bytes that did not fill a full 32-byte vector.
-        for (; i < data.Length; i++)
-        {
-            if (data[i] == target) return i;
-        }
-
-        return -1;
-    }
-
-    // ─── ARM AdvSimd (NEON): 128-bit / 16 bytes per iteration ─────────────────
-
-    private static int FindByteAdvSimd(ReadOnlySpan<byte> data, byte target)
-    {
-        // Broadcast the target byte to all 16 lanes of a 128-bit NEON register.
-        var targetVec = Vector128.Create(target);
-
-        ref byte origin = ref MemoryMarshal.GetReference(data);
-        int i = 0;
-        int limit = data.Length - 15; // last safe start for a 16-byte load
-
-        for (; i < limit; i += 16)
-        {
-            // Load 16 consecutive bytes.
-            var v = Vector128.LoadUnsafe(ref origin, (nuint)i);
-
-            // Compare each byte-lane; matches become 0xFF.
-            var cmp = AdvSimd.CompareEqual(v, targetVec);
-
-            // MaxAcross collapses the 16 lanes to the single highest byte value.
-            // A non-zero result means at least one lane matched.
-            if (AdvSimd.Arm64.MaxAcross(cmp).ToScalar() != 0)
-            {
-                // Pinpoint which byte in the 16-byte window matched.
-                for (int j = i; j < i + 16; j++)
-                {
-                    if (data[j] == target) return j;
-                }
-            }
-        }
-
-        // Scalar tail for the remaining < 16 bytes.
-        for (; i < data.Length; i++)
-        {
-            if (data[i] == target) return i;
-        }
-
-        return -1;
-    }
-
-    // ─── Portable SIMD – System.Numerics.Vector<byte> ────────────────────────
-    // The JIT selects the underlying register width:
-    //   AVX2  → Vector<byte>.Count == 32 (256-bit)
-    //   SSE2 / NEON → Vector<byte>.Count == 16 (128-bit)
-
-    private static int FindByteVector(ReadOnlySpan<byte> data, byte target)
-    {
-        int vLen = Vector<byte>.Count;
-        var targetVec = new Vector<byte>(target);
-        int i = 0;
-
-        for (; i <= data.Length - vLen; i += vLen)
-        {
-            // Load one full vector-width chunk.
-            var v = new Vector<byte>(data.Slice(i, vLen));
-
-            // Equals: each matching lane becomes 0xFF, others 0x00.
-            var cmp = Vector.Equals(v, targetVec);
-
-            // If any lane matched, narrow down to the exact byte.
-            if (cmp != Vector<byte>.Zero)
-            {
-                for (int j = i; j < i + vLen; j++)
-                {
-                    if (data[j] == target) return j;
-                }
-            }
-        }
-
-        // Scalar tail for remaining bytes.
-        for (; i < data.Length; i++)
-        {
-            if (data[i] == target) return i;
-        }
-
-        return -1;
-    }
-
-    // ─── Scalar fallback ──────────────────────────────────────────────────────
-    // Runs when the buffer is small, or when no SIMD is available.
-
+    /// <summary>
+    /// Returns the index of the first occurrence of either <paramref name="a"/> or <paramref name="b"/>
+    /// in <paramref name="data"/>, or -1 if neither is found.
+    /// Useful for delimiter scanning (e.g. searching for '|' or '\n' simultaneously).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int FindAnyOfTwo(ReadOnlySpan<byte> data, byte a, byte b)
+    {
+        if (Avx2.IsSupported)
+            return FindAnyOfTwoAvx2(data, a, b);
+        if (Sse2.IsSupported)
+            return FindAnyOfTwoSse2(data, a, b);
+        if (AdvSimd.IsSupported)
+            return FindAnyOfTwoAdvSimd(data, a, b);
+        return FindAnyOfTwoScalar(data, a, b);
+    }
+
+    /// <summary>
+    /// Counts occurrences of <paramref name="target"/> in <paramref name="data"/> using SIMD.
+    /// Processes 32 bytes per iteration on AVX2 with POPCNT for mask counting.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int CountByte(ReadOnlySpan<byte> data, byte target)
+    {
+        if (Avx2.IsSupported)
+            return CountByteAvx2(data, target);
+        if (Sse2.IsSupported)
+            return CountByteSse2(data, target);
+        if (AdvSimd.IsSupported)
+            return CountByteAdvSimd(data, target);
+        return CountByteScalar(data, target);
+    }
+
+    // ── Scalar fallbacks ────────────────────────────────────────────────────
+
     private static int FindByteScalar(ReadOnlySpan<byte> data, byte target)
     {
         for (int i = 0; i < data.Length; i++)
@@ -216,5 +72,332 @@ public static class SimdByteScanner
             if (data[i] == target) return i;
         }
         return -1;
+    }
+
+    private static int FindAnyOfTwoScalar(ReadOnlySpan<byte> data, byte a, byte b)
+    {
+        for (int i = 0; i < data.Length; i++)
+        {
+            byte v = data[i];
+            if (v == a || v == b) return i;
+        }
+        return -1;
+    }
+
+    private static int CountByteScalar(ReadOnlySpan<byte> data, byte target)
+    {
+        int count = 0;
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (data[i] == target) count++;
+        }
+        return count;
+    }
+
+
+    // ── AVX2 paths (32 bytes per iteration) ─────────────────────────────────
+
+    private static unsafe int FindByteAvx2(ReadOnlySpan<byte> data, byte target)
+    {
+        int length = data.Length;
+        if (length == 0) return -1;
+
+        fixed (byte* ptr = &MemoryMarshal.GetReference(data))
+        {
+            // Broadcast target byte to all 32 lanes of a 256-bit vector
+            Vector256<byte> needle = Vector256.Create(target);
+            int i = 0;
+
+            // Process 32 bytes per iteration
+            int vectorEnd = length - 31;
+            for (; i < vectorEnd; i += 32)
+            {
+                // Load 32 bytes from the buffer
+                Vector256<byte> chunk = Avx.LoadVector256(ptr + i);
+
+                // Compare each byte lane: 0xFF where equal, 0x00 where not
+                Vector256<byte> cmp = Avx2.CompareEqual(chunk, needle);
+
+                // Collapse comparison to a 32-bit mask (one bit per byte lane)
+                int mask = Avx2.MoveMask(cmp);
+
+                if (mask != 0)
+                {
+                    // TrailingZeroCount gives the index of the first set bit
+                    return i + BitOperations.TrailingZeroCount((uint)mask);
+                }
+            }
+
+            // Handle remaining bytes with scalar fallback
+            for (; i < length; i++)
+            {
+                if (ptr[i] == target) return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static unsafe int FindAnyOfTwoAvx2(ReadOnlySpan<byte> data, byte a, byte b)
+    {
+        int length = data.Length;
+        if (length == 0) return -1;
+
+        fixed (byte* ptr = &MemoryMarshal.GetReference(data))
+        {
+            Vector256<byte> needleA = Vector256.Create(a);
+            Vector256<byte> needleB = Vector256.Create(b);
+            int i = 0;
+
+            int vectorEnd = length - 31;
+            for (; i < vectorEnd; i += 32)
+            {
+                Vector256<byte> chunk = Avx.LoadVector256(ptr + i);
+
+                // Compare against both targets, OR the results
+                Vector256<byte> cmpA = Avx2.CompareEqual(chunk, needleA);
+                Vector256<byte> cmpB = Avx2.CompareEqual(chunk, needleB);
+                Vector256<byte> combined = Avx2.Or(cmpA, cmpB);
+
+                int mask = Avx2.MoveMask(combined);
+                if (mask != 0)
+                    return i + BitOperations.TrailingZeroCount((uint)mask);
+            }
+
+            for (; i < length; i++)
+            {
+                byte v = ptr[i];
+                if (v == a || v == b) return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static unsafe int CountByteAvx2(ReadOnlySpan<byte> data, byte target)
+    {
+        int length = data.Length;
+        if (length == 0) return 0;
+
+        int count = 0;
+        fixed (byte* ptr = &MemoryMarshal.GetReference(data))
+        {
+            Vector256<byte> needle = Vector256.Create(target);
+            int i = 0;
+
+            int vectorEnd = length - 31;
+            for (; i < vectorEnd; i += 32)
+            {
+                Vector256<byte> chunk = Avx.LoadVector256(ptr + i);
+                Vector256<byte> cmp = Avx2.CompareEqual(chunk, needle);
+                int mask = Avx2.MoveMask(cmp);
+
+                // POPCNT counts the number of set bits = number of matching bytes
+                count += BitOperations.PopCount((uint)mask);
+            }
+
+            for (; i < length; i++)
+            {
+                if (ptr[i] == target) count++;
+            }
+        }
+
+        return count;
+    }
+
+    // ── SSE2 paths (16 bytes per iteration) ─────────────────────────────────
+
+    private static unsafe int FindByteSse2(ReadOnlySpan<byte> data, byte target)
+    {
+        int length = data.Length;
+        if (length == 0) return -1;
+
+        fixed (byte* ptr = &MemoryMarshal.GetReference(data))
+        {
+            Vector128<byte> needle = Vector128.Create(target);
+            int i = 0;
+
+            int vectorEnd = length - 15;
+            for (; i < vectorEnd; i += 16)
+            {
+                Vector128<byte> chunk = Sse2.LoadVector128(ptr + i);
+                Vector128<byte> cmp = Sse2.CompareEqual(chunk, needle);
+                int mask = Sse2.MoveMask(cmp);
+
+                if (mask != 0)
+                    return i + BitOperations.TrailingZeroCount((uint)mask);
+            }
+
+            for (; i < length; i++)
+            {
+                if (ptr[i] == target) return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static unsafe int FindAnyOfTwoSse2(ReadOnlySpan<byte> data, byte a, byte b)
+    {
+        int length = data.Length;
+        if (length == 0) return -1;
+
+        fixed (byte* ptr = &MemoryMarshal.GetReference(data))
+        {
+            Vector128<byte> needleA = Vector128.Create(a);
+            Vector128<byte> needleB = Vector128.Create(b);
+            int i = 0;
+
+            int vectorEnd = length - 15;
+            for (; i < vectorEnd; i += 16)
+            {
+                Vector128<byte> chunk = Sse2.LoadVector128(ptr + i);
+                Vector128<byte> cmpA = Sse2.CompareEqual(chunk, needleA);
+                Vector128<byte> cmpB = Sse2.CompareEqual(chunk, needleB);
+                Vector128<byte> combined = Sse2.Or(cmpA, cmpB);
+
+                int mask = Sse2.MoveMask(combined);
+                if (mask != 0)
+                    return i + BitOperations.TrailingZeroCount((uint)mask);
+            }
+
+            for (; i < length; i++)
+            {
+                byte v = ptr[i];
+                if (v == a || v == b) return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static unsafe int CountByteSse2(ReadOnlySpan<byte> data, byte target)
+    {
+        int length = data.Length;
+        if (length == 0) return 0;
+
+        int count = 0;
+        fixed (byte* ptr = &MemoryMarshal.GetReference(data))
+        {
+            Vector128<byte> needle = Vector128.Create(target);
+            int i = 0;
+
+            int vectorEnd = length - 15;
+            for (; i < vectorEnd; i += 16)
+            {
+                Vector128<byte> chunk = Sse2.LoadVector128(ptr + i);
+                Vector128<byte> cmp = Sse2.CompareEqual(chunk, needle);
+                int mask = Sse2.MoveMask(cmp);
+                count += BitOperations.PopCount((uint)mask);
+            }
+
+            for (; i < length; i++)
+            {
+                if (ptr[i] == target) count++;
+            }
+        }
+
+        return count;
+    }
+
+    // ── ARM AdvSimd/NEON paths (16 bytes per iteration) ─────────────────────
+
+    private static int FindByteAdvSimd(ReadOnlySpan<byte> data, byte target)
+    {
+        int length = data.Length;
+        if (length == 0) return -1;
+
+        var vecs = MemoryMarshal.Cast<byte, Vector128<byte>>(data);
+        Vector128<byte> needle = Vector128.Create(target);
+
+        for (int k = 0; k < vecs.Length; k++)
+        {
+            Vector128<byte> cmp = AdvSimd.CompareEqual(vecs[k], needle);
+
+            // MaxAcross reduces all 16 lanes to a single max; non-zero means a hit
+            if (AdvSimd.Arm64.MaxAcross(cmp).ToScalar() != 0)
+            {
+                int baseIdx = k * 16;
+                for (int j = 0; j < 16 && baseIdx + j < length; j++)
+                {
+                    if (data[baseIdx + j] == target)
+                        return baseIdx + j;
+                }
+            }
+        }
+
+        for (int i = vecs.Length * 16; i < length; i++)
+        {
+            if (data[i] == target) return i;
+        }
+
+        return -1;
+    }
+
+    private static int FindAnyOfTwoAdvSimd(ReadOnlySpan<byte> data, byte a, byte b)
+    {
+        int length = data.Length;
+        if (length == 0) return -1;
+
+        var vecs = MemoryMarshal.Cast<byte, Vector128<byte>>(data);
+        Vector128<byte> needleA = Vector128.Create(a);
+        Vector128<byte> needleB = Vector128.Create(b);
+
+        for (int k = 0; k < vecs.Length; k++)
+        {
+            Vector128<byte> cmpA = AdvSimd.CompareEqual(vecs[k], needleA);
+            Vector128<byte> cmpB = AdvSimd.CompareEqual(vecs[k], needleB);
+            Vector128<byte> combined = AdvSimd.Or(cmpA, cmpB);
+
+            if (AdvSimd.Arm64.MaxAcross(combined).ToScalar() != 0)
+            {
+                int baseIdx = k * 16;
+                for (int j = 0; j < 16 && baseIdx + j < length; j++)
+                {
+                    byte v = data[baseIdx + j];
+                    if (v == a || v == b)
+                        return baseIdx + j;
+                }
+            }
+        }
+
+        for (int i = vecs.Length * 16; i < length; i++)
+        {
+            byte v = data[i];
+            if (v == a || v == b) return i;
+        }
+
+        return -1;
+    }
+
+    private static int CountByteAdvSimd(ReadOnlySpan<byte> data, byte target)
+    {
+        int length = data.Length;
+        if (length == 0) return 0;
+
+        int count = 0;
+        var vecs = MemoryMarshal.Cast<byte, Vector128<byte>>(data);
+        Vector128<byte> needle = Vector128.Create(target);
+        // Each matching lane is 0xFF. We use subtraction from a zero accumulator:
+        // 0 - 0xFF = wraps, so instead we just sum each chunk's scalar count.
+        // Simple and correct: extract the match count via AddAcross.
+
+        for (int k = 0; k < vecs.Length; k++)
+        {
+            Vector128<byte> cmp = AdvSimd.CompareEqual(vecs[k], needle);
+            // Each matching lane = 0xFF. Negate (0-0xFF wraps to 1 in signed)
+            // is tricky; simpler: horizontally add all bytes then divide by 255.
+            // AddAcross sums all 16 byte lanes into one ushort.
+            ushort laneSum = AdvSimd.Arm64.AddAcross(cmp).ToScalar();
+            // Each match contributes 0xFF=255, so matches = laneSum / 255
+            count += laneSum / 255;
+        }
+
+        for (int i = vecs.Length * 16; i < length; i++)
+        {
+            if (data[i] == target) count++;
+        }
+
+        return count;
     }
 }

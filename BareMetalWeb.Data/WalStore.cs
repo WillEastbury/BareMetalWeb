@@ -43,6 +43,9 @@ public sealed class WalStore : IDisposable
     /// <summary>In-memory head map: key → Ptr of the latest committed record for that key.</summary>
     public WalHeadMap HeadMap { get; } = new();
 
+    /// <summary>In-memory segment index: segmentId → set of WAL keys in that segment.</summary>
+    public WalSegmentIndex SegmentIndex { get; } = new();
+
     /// <summary>
     /// Global monotonic commit watermark (V2 spec §3.1 VisibleCommitPtr).
     /// Queries and projections should only observe versions ≤ this value.
@@ -61,6 +64,9 @@ public sealed class WalStore : IDisposable
     /// Use <see cref="AllocateKey"/> to generate a fully-packed WAL key with an auto-numbered recordId.
     /// </summary>
     public WalTableKeyAllocator KeyAllocator { get; private set; } = null!;
+
+    /// <summary>The directory containing segment files (internal for compaction).</summary>
+    internal string SegmentDirectory => _directory;
 
     /// <summary>Convenience proxy for <see cref="WalHeadMap.TryGetHead"/>.</summary>
     public bool TryGetHead(ulong key, out ulong ptr) => HeadMap.TryGetHead(key, out ptr);
@@ -165,6 +171,21 @@ public sealed class WalStore : IDisposable
                 opKeys[i] = filledOps[i].Key;
             HeadMap.BatchSetHeads(opKeys, ptr);
 
+            // Maintain segment index
+            var (newSegId, _) = WalConstants.UnpackPtr(ptr);
+            for (int i = 0; i < filledOps.Length; i++)
+            {
+                if (filledOps[i].PrevPtr != WalConstants.NullPtr)
+                {
+                    var (oldSegId, _) = WalConstants.UnpackPtr(filledOps[i].PrevPtr);
+                    SegmentIndex.Move(filledOps[i].Key, oldSegId, newSegId);
+                }
+                else
+                {
+                    SegmentIndex.Add(filledOps[i].Key, newSegId);
+                }
+            }
+
             Volatile.Write(ref _visibleCommitPtr, ptr);
         }
 
@@ -225,6 +246,7 @@ public sealed class WalStore : IDisposable
         ProjectionManager.Dispose();
         KeyAllocator.Dispose();
         HeadMap.Dispose();
+        SegmentIndex.Dispose();
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -290,6 +312,14 @@ public sealed class WalStore : IDisposable
             }
         }
 
+        // Rebuild segment index from head map
+        HeadMap.CopyArrays(out var skeys, out var sheads);
+        for (int i = 0; i < skeys.Length; i++)
+        {
+            var (segId, _) = WalConstants.UnpackPtr(sheads[i]);
+            SegmentIndex.Add(skeys[i], segId);
+        }
+
         // Always start a new segment; don't resume the previous active segment.
         _nextSegmentId = segments.Count > 0 ? segments[0].segId + 1 : 0;
     }
@@ -326,6 +356,269 @@ public sealed class WalStore : IDisposable
         _activeWriter?.WriteFooterAndClose();
         _activeWriter = null;
         OpenNewSegment();
+    }
+
+    // ── Compaction ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Compacts a single WAL segment by rewriting it with only the latest version of each
+    /// key whose head pointer still references this segment (the materialised-view approach).
+    /// Tombstones are dropped.  Must not be called on the active segment.
+    /// </summary>
+    public void CompactSegment(uint segmentId)
+    {
+        string originalPath = Path.Combine(_directory, WalConstants.SegmentFileName(segmentId));
+        if (!File.Exists(originalPath)) return;
+
+        long startTicks = EngineMetrics.StartTiming();
+        long originalSize = new FileInfo(originalPath).Length;
+
+        // ── 1. Get keys from segment index ────────────────────────────────
+        SegmentIndex.GetKeys(segmentId, out ulong[] matchKeys);
+
+        if (matchKeys.Length == 0)
+        {
+            // No live keys reference this segment — it can be deleted
+            try { File.Delete(originalPath); } catch { /* best effort */ }
+            EngineMetrics.RecordCompaction(EngineMetrics.ElapsedUs(startTicks), originalSize);
+            return;
+        }
+
+        // ── 2. Look up head pointers for each key ──────────────────────────
+        var matchHeads = new ulong[matchKeys.Length];
+        for (int i = 0; i < matchKeys.Length; i++)
+        {
+            HeadMap.TryGetHead(matchKeys[i], out matchHeads[i]);
+        }
+
+        // ── 3. Read payloads from disk, skipping tombstones ─────────────────
+        var ops    = new WalOp[matchKeys.Length];
+        var opKeys = new ulong[matchKeys.Length]; // keys for head map update
+        int opCount = 0;
+        var deadKeys = new ulong[matchKeys.Length]; // keys to remove from segment index
+        int deadCount = 0;
+
+        for (int i = 0; i < matchKeys.Length; i++)
+        {
+            if (!TryReadFullOp(matchHeads[i], matchKeys[i], out WalOp op))
+            {
+                deadKeys[deadCount++] = matchKeys[i];
+                continue;
+            }
+            if (op.OpType == WalConstants.OpTypeDeleteTombstone)
+            {
+                deadKeys[deadCount++] = matchKeys[i];
+                continue;
+            }
+
+            ops[opCount]    = op;
+            opKeys[opCount] = matchKeys[i];
+            opCount++;
+        }
+
+        // Remove dead keys from segment index
+        for (int i = 0; i < deadCount; i++)
+            SegmentIndex.Remove(deadKeys[i], segmentId);
+
+        if (opCount == 0)
+        {
+            // All entries were tombstones — delete the segment
+            try { File.Delete(originalPath); } catch { /* best effort */ }
+            EngineMetrics.RecordCompaction(EngineMetrics.ElapsedUs(startTicks), originalSize);
+            return;
+        }
+
+        // ── 4. Write compacted segment to a temp file ───────────────────────
+        string tmpPath = originalPath + ".compact";
+        var newPtrs = new ulong[opCount];
+
+        try
+        {
+            using (var writer = new WalSegmentWriter(tmpPath, segmentId))
+            {
+                // Write all surviving ops as a single commit batch
+                var batch = new WalOp[opCount];
+                Array.Copy(ops, batch, opCount);
+
+                ulong ptr = writer.AppendCommitBatch(0, batch);
+
+                // All ops in the batch share the same record offset (same commit batch)
+                for (int i = 0; i < opCount; i++)
+                    newPtrs[i] = ptr;
+
+                writer.WriteFooterAndClose();
+            }
+
+            // ── 5. Fsync temp file, then atomic rename ──────────────────────
+            // Fsync is handled by WriteFooterAndClose above.
+            // Atomic rename over the original segment.
+            File.Move(tmpPath, originalPath, overwrite: true);
+        }
+        catch
+        {
+            // Clean up temp file on failure
+            try { File.Delete(tmpPath); } catch { /* best effort */ }
+            throw;
+        }
+
+        // ── 6. Update head map under write lock ─────────────────────────────
+        lock (_writeLock)
+        {
+            // Re-check: only update pointers that still reference this segment.
+            // A concurrent commit may have moved some keys to a newer segment.
+            for (int i = 0; i < opCount; i++)
+            {
+                if (HeadMap.TryGetHead(opKeys[i], out ulong currentPtr))
+                {
+                    var (curSeg, _) = WalConstants.UnpackPtr(currentPtr);
+                    if (curSeg == segmentId)
+                        HeadMap.SetHead(opKeys[i], newPtrs[i]);
+                }
+            }
+        }
+
+        // ── 7. Record metrics ───────────────────────────────────────────────
+        long newSize = File.Exists(originalPath) ? new FileInfo(originalPath).Length : 0;
+        long reclaimed = originalSize - newSize;
+        if (reclaimed < 0) reclaimed = 0;
+        EngineMetrics.RecordCompaction(EngineMetrics.ElapsedUs(startTicks), reclaimed);
+    }
+
+    /// <summary>
+    /// Returns the segment ID of the currently active (being-written-to) segment,
+    /// or <c>null</c> if no segment is active.
+    /// </summary>
+    internal uint? ActiveSegmentId
+    {
+        get
+        {
+            lock (_writeLock)
+            {
+                return _activeWriter?.SegmentId;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Returns all segment IDs discovered on disk, sorted ascending.
+    /// </summary>
+    internal List<uint> GetSegmentIds()
+    {
+        var list = new List<uint>();
+        foreach (string file in Directory.EnumerateFiles(_directory, "wal_seg_*.log"))
+        {
+            string name = Path.GetFileName(file);
+            if (WalConstants.TryParseSegmentId(name, out uint segId))
+                list.Add(segId);
+        }
+        list.Sort();
+        return list;
+    }
+
+    /// <summary>
+    /// Reads the full <see cref="WalOp"/> (including OpType, Codec, SchemaSignature, Flags)
+    /// for a given key at the specified pointer. Used by compaction to preserve op metadata.
+    /// </summary>
+    private bool TryReadFullOp(ulong ptr, ulong key, out WalOp op)
+    {
+        op = default;
+        if (ptr == WalConstants.NullPtr) return false;
+
+        var (segId, offset32) = WalConstants.UnpackPtr(ptr);
+        string path = Path.Combine(_directory, WalConstants.SegmentFileName(segId));
+        if (!File.Exists(path)) return false;
+
+        try
+        {
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite, 4096);
+            return TryReadFullOpFromStream(fs, offset32, key, out op, Encryption);
+        }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
+    }
+
+    private static bool TryReadFullOpFromStream(FileStream fs, uint offset32,
+        ulong targetKey, out WalOp op, WalEnvelopeEncryption? encryption = null)
+    {
+        op = default;
+
+        if (offset32 + WalConstants.RecordHeaderBytes > fs.Length) return false;
+        fs.Seek(offset32, SeekOrigin.Begin);
+
+        Span<byte> recHdr = stackalloc byte[WalConstants.RecordHeaderBytes];
+        if (fs.Read(recHdr) != WalConstants.RecordHeaderBytes) return false;
+
+        if (BinaryPrimitives.ReadUInt32LittleEndian(recHdr[0..]) != WalConstants.RecordMagic)
+            return false;
+        if (BinaryPrimitives.ReadUInt16LittleEndian(recHdr[4..]) != WalConstants.RecordTypeCommitBatch)
+            return false;
+
+        uint totalBytes = BinaryPrimitives.ReadUInt32LittleEndian(recHdr[8..]);
+        long minSize = WalConstants.RecordHeaderBytes + WalConstants.RecordTrailerBytes;
+        if (totalBytes < minSize || offset32 + totalBytes > fs.Length) return false;
+
+        fs.Seek(offset32, SeekOrigin.Begin);
+        var recordBuf = new byte[totalBytes];
+        if (fs.Read(recordBuf) != (int)totalBytes) return false;
+
+        if (!WalSegmentReader.VerifyRecordCrc(recordBuf)) return false;
+
+        var span = recordBuf.AsSpan();
+        int off = WalConstants.RecordHeaderBytes;
+
+        if (off + 16 > span.Length) return false;
+        uint opCount = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 8)..]);
+        off += 16;
+
+        for (uint i = 0; i < opCount; i++)
+        {
+            if (off + 44 > span.Length) return false;
+
+            ulong key             = BinaryPrimitives.ReadUInt64LittleEndian(span[off..]);
+            ulong prevPtr         = BinaryPrimitives.ReadUInt64LittleEndian(span[(off + 8)..]);
+            ulong schemaSig       = BinaryPrimitives.ReadUInt64LittleEndian(span[(off + 16)..]);
+            ushort opType         = BinaryPrimitives.ReadUInt16LittleEndian(span[(off + 24)..]);
+            ushort codec          = BinaryPrimitives.ReadUInt16LittleEndian(span[(off + 26)..]);
+            uint   uncompressedLen = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 28)..]);
+            uint   compressedLen  = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 32)..]);
+            uint   flags          = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 36)..]);
+
+            if (key == targetKey)
+            {
+                off += 44;
+
+                ReadOnlyMemory<byte> payload;
+                if (compressedLen == 0)
+                {
+                    payload = ReadOnlyMemory<byte>.Empty;
+                }
+                else
+                {
+                    if (off + compressedLen > span.Length) return false;
+                    // Keep raw compressed payload — avoids decompress/recompress round-trip
+                    payload = span.Slice(off, (int)compressedLen).ToArray();
+                }
+
+                op = new WalOp
+                {
+                    Key             = key,
+                    PrevPtr         = WalConstants.NullPtr, // compacted; no chain
+                    SchemaSignature = schemaSig,
+                    OpType          = opType,
+                    Codec           = codec,
+                    UncompressedLen = uncompressedLen,
+                    Flags           = flags,
+                    Payload         = payload,
+                };
+                return true;
+            }
+
+            off += 44 + (int)compressedLen;
+            if (off > span.Length) return false;
+        }
+
+        return false;
     }
 
     // ── Read-back internals ───────────────────────────────────────────────────

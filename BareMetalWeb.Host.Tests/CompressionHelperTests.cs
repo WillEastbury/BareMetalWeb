@@ -3,6 +3,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Text;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Host;
 using Microsoft.AspNetCore.Http;
 using Xunit;
@@ -164,7 +165,7 @@ public class JsBundleServiceCompressionTests : IDisposable
     public async Task TryServeAsync_WithBrotliAcceptEncoding_SetsBrContentEncoding()
     {
         var context = CreateContext("GET", JsBundleService.BundlePath, "br");
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         Assert.Equal("br", context.Response.Headers.ContentEncoding.ToString());
         Assert.Contains("Accept-Encoding", context.Response.Headers.Vary.ToString());
@@ -174,7 +175,7 @@ public class JsBundleServiceCompressionTests : IDisposable
     public async Task TryServeAsync_WithGzipAcceptEncoding_SetsGzipContentEncoding()
     {
         var context = CreateContext("GET", JsBundleService.BundlePath, "gzip");
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         Assert.Equal("gzip", context.Response.Headers.ContentEncoding.ToString());
         Assert.Contains("Accept-Encoding", context.Response.Headers.Vary.ToString());
@@ -184,7 +185,7 @@ public class JsBundleServiceCompressionTests : IDisposable
     public async Task TryServeAsync_WithNoAcceptEncoding_NoContentEncodingHeader()
     {
         var context = CreateContext("GET", JsBundleService.BundlePath);
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         Assert.Empty(context.Response.Headers.ContentEncoding.ToString());
     }
@@ -193,7 +194,7 @@ public class JsBundleServiceCompressionTests : IDisposable
     public async Task TryServeAsync_WithBrotliAcceptEncoding_BodyIsDecompressibleBrotli()
     {
         var context = CreateContext("GET", JsBundleService.BundlePath, "br");
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         context.Response.Body.Seek(0, SeekOrigin.Begin);
         using var bs = new BrotliStream(context.Response.Body, CompressionMode.Decompress);
@@ -239,7 +240,7 @@ public class CssBundleServiceCompressionTests : IDisposable
     public async Task TryServeAsync_WithBrotliAcceptEncoding_SetsBrContentEncoding()
     {
         var context = CreateContext("GET", CssBundleService.ThemePathPrefix + "vapor.min.css", "br");
-        await CssBundleService.TryServeAsync(context);
+        await CssBundleService.TryServeAsync(context.ToBmw());
 
         Assert.Equal("br", context.Response.Headers.ContentEncoding.ToString());
         Assert.Contains("Accept-Encoding", context.Response.Headers.Vary.ToString());
@@ -249,7 +250,7 @@ public class CssBundleServiceCompressionTests : IDisposable
     public async Task TryServeAsync_WithGzipAcceptEncoding_SetsGzipContentEncoding()
     {
         var context = CreateContext("GET", CssBundleService.ThemePathPrefix + "vapor.min.css", "gzip");
-        await CssBundleService.TryServeAsync(context);
+        await CssBundleService.TryServeAsync(context.ToBmw());
 
         Assert.Equal("gzip", context.Response.Headers.ContentEncoding.ToString());
         Assert.Contains("Accept-Encoding", context.Response.Headers.Vary.ToString());
@@ -259,7 +260,7 @@ public class CssBundleServiceCompressionTests : IDisposable
     public async Task TryServeAsync_WithNoAcceptEncoding_NoContentEncodingHeader()
     {
         var context = CreateContext("GET", CssBundleService.ThemePathPrefix + "vapor.min.css");
-        await CssBundleService.TryServeAsync(context);
+        await CssBundleService.TryServeAsync(context.ToBmw());
 
         Assert.Empty(context.Response.Headers.ContentEncoding.ToString());
     }
