@@ -59,7 +59,9 @@ public class BmwJsonWriterTests
     /// <summary>
     /// Builds a BSO1 binary payload for a single field value using SpanWriter.
     /// </summary>
-    private static byte[] BuildBinary(FieldPlan[] plan, Action<SpanWriter> writeFields)
+    private delegate void SpanWriterAction(ref SpanWriter writer);
+
+    private static byte[] BuildBinary(FieldPlan[] plan, SpanWriterAction writeFields)
     {
         var buf = new ArrayBufferWriter<byte>();
         var w = new SpanWriter(buf);
@@ -74,7 +76,7 @@ public class BmwJsonWriterTests
         // Entity null indicator
         w.WriteByte(1);
 
-        writeFields(w);
+        writeFields(ref w);
         w.Commit();
         return buf.WrittenSpan.ToArray();
     }
@@ -95,7 +97,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_Bool_EmitsCorrectJson(bool value)
     {
         var plan = MakePlan("active", WireFieldType.Bool);
-        var binary = BuildBinary(plan, w => w.WriteBoolean(value));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteBoolean(value));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -108,7 +110,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_Int32_EmitsCorrectJson()
     {
         var plan = MakePlan("count", WireFieldType.Int32);
-        var binary = BuildBinary(plan, w => w.WriteInt32(42));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteInt32(42));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -119,7 +121,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_Int32_Negative_EmitsCorrectJson()
     {
         var plan = MakePlan("balance", WireFieldType.Int32);
-        var binary = BuildBinary(plan, w => w.WriteInt32(-100));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteInt32(-100));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -130,7 +132,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_Int64_EmitsCorrectJson()
     {
         var plan = MakePlan("bigNum", WireFieldType.Int64);
-        var binary = BuildBinary(plan, w => w.WriteInt64(9_876_543_210L));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteInt64(9_876_543_210L));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -141,7 +143,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_UInt32_EmitsCorrectJson()
     {
         var plan = MakePlan("key", WireFieldType.UInt32);
-        var binary = BuildBinary(plan, w => w.WriteUInt32(12345u));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteUInt32(12345u));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -152,7 +154,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_Byte_EmitsCorrectJson()
     {
         var plan = MakePlan("level", WireFieldType.Byte);
-        var binary = BuildBinary(plan, w => w.WriteByte(255));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteByte(255));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -165,7 +167,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_Float32_EmitsCorrectJson()
     {
         var plan = MakePlan("rate", WireFieldType.Float32);
-        var binary = BuildBinary(plan, w => w.WriteSingle(3.14f));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteSingle(3.14f));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -177,7 +179,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_Float64_EmitsCorrectJson()
     {
         var plan = MakePlan("precise", WireFieldType.Float64);
-        var binary = BuildBinary(plan, w => w.WriteDouble(2.718281828));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteDouble(2.718281828));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -189,7 +191,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_Decimal_EmitsCorrectJson()
     {
         var plan = MakePlan("price", WireFieldType.Decimal);
-        var binary = BuildBinary(plan, w => w.WriteDecimal(99.99m));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteDecimal(99.99m));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -204,7 +206,7 @@ public class BmwJsonWriterTests
     {
         var plan = MakePlan("name", WireFieldType.String, isNullable: true);
         var value = "Hello, World!";
-        var binary = BuildBinary(plan, w =>
+        var binary = BuildBinary(plan, (ref SpanWriter w) =>
         {
             w.WriteByte(1); // nullable: has value
             var bytes = Encoding.UTF8.GetBytes(value);
@@ -221,7 +223,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_String_Null_EmitsNull()
     {
         var plan = MakePlan("name", WireFieldType.String, isNullable: true);
-        var binary = BuildBinary(plan, w =>
+        var binary = BuildBinary(plan, (ref SpanWriter w) =>
         {
             w.WriteByte(0); // nullable: null
         });
@@ -235,7 +237,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_String_Empty_EmitsEmptyString()
     {
         var plan = MakePlan("name", WireFieldType.String, isNullable: true);
-        var binary = BuildBinary(plan, w =>
+        var binary = BuildBinary(plan, (ref SpanWriter w) =>
         {
             w.WriteByte(1); // has value
             w.WriteInt32(0); // zero-length string
@@ -251,7 +253,7 @@ public class BmwJsonWriterTests
     {
         var plan = MakePlan("msg", WireFieldType.String, isNullable: true);
         var value = "Hello \"World\"\nNew\tLine\\Backslash";
-        var binary = BuildBinary(plan, w =>
+        var binary = BuildBinary(plan, (ref SpanWriter w) =>
         {
             w.WriteByte(1);
             var bytes = Encoding.UTF8.GetBytes(value);
@@ -274,7 +276,7 @@ public class BmwJsonWriterTests
     {
         var plan = MakePlan("id", WireFieldType.Guid);
         var guid = Guid.Parse("12345678-1234-1234-1234-123456789abc");
-        var binary = BuildBinary(plan, w =>
+        var binary = BuildBinary(plan, (ref SpanWriter w) =>
         {
             Span<byte> buf = stackalloc byte[16];
             guid.TryWriteBytes(buf);
@@ -293,7 +295,7 @@ public class BmwJsonWriterTests
     {
         var plan = MakePlan("created", WireFieldType.DateTime);
         var dt = new DateTime(2024, 6, 15, 10, 30, 0, DateTimeKind.Utc);
-        var binary = BuildBinary(plan, w =>
+        var binary = BuildBinary(plan, (ref SpanWriter w) =>
         {
             w.WriteInt64(dt.Ticks);
             w.WriteByte((byte)dt.Kind);
@@ -312,7 +314,7 @@ public class BmwJsonWriterTests
     {
         var plan = MakePlan("birthday", WireFieldType.DateOnly);
         var d = new DateOnly(2000, 1, 15);
-        var binary = BuildBinary(plan, w => w.WriteInt32(d.DayNumber));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteInt32(d.DayNumber));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -326,7 +328,7 @@ public class BmwJsonWriterTests
     {
         var plan = MakePlan("startTime", WireFieldType.TimeOnly);
         var t = new TimeOnly(14, 30, 0);
-        var binary = BuildBinary(plan, w => w.WriteInt64(t.Ticks));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteInt64(t.Ticks));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -340,7 +342,7 @@ public class BmwJsonWriterTests
     {
         var plan = MakePlan("duration", WireFieldType.TimeSpan);
         var ts = new TimeSpan(1, 2, 3, 4);
-        var binary = BuildBinary(plan, w => w.WriteInt64(ts.Ticks));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteInt64(ts.Ticks));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -354,7 +356,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_Enum_EmitsIntegerValue()
     {
         var plan = MakePlan("status", WireFieldType.Enum, enumUnderlying: WireFieldType.Int32);
-        var binary = BuildBinary(plan, w => w.WriteInt32(3));
+        var binary = BuildBinary(plan, (ref SpanWriter w) => w.WriteInt32(3));
 
         var json = WriteEntityToString(binary, plan);
 
@@ -367,7 +369,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_NullableInt32_WithValue_EmitsValue()
     {
         var plan = MakePlan("score", WireFieldType.Int32, isNullable: true);
-        var binary = BuildBinary(plan, w =>
+        var binary = BuildBinary(plan, (ref SpanWriter w) =>
         {
             w.WriteByte(1); // has value
             w.WriteInt32(99);
@@ -382,7 +384,7 @@ public class BmwJsonWriterTests
     public void WriteEntity_NullableInt32_Null_EmitsNull()
     {
         var plan = MakePlan("score", WireFieldType.Int32, isNullable: true);
-        var binary = BuildBinary(plan, w =>
+        var binary = BuildBinary(plan, (ref SpanWriter w) =>
         {
             w.WriteByte(0); // null
         });
@@ -403,7 +405,7 @@ public class BmwJsonWriterTests
             ("active", WireFieldType.Bool, false)
         );
 
-        var binary = BuildBinary(plan, w =>
+        var binary = BuildBinary(plan, (ref SpanWriter w) =>
         {
             // id
             w.WriteUInt32(42);
@@ -429,9 +431,9 @@ public class BmwJsonWriterTests
         var plan = MakePlan("value", WireFieldType.Int32);
         var frags = BmwJsonWriter.BuildFragments(plan);
 
-        var row1 = BuildBinary(plan, w => w.WriteInt32(10));
-        var row2 = BuildBinary(plan, w => w.WriteInt32(20));
-        var row3 = BuildBinary(plan, w => w.WriteInt32(30));
+        var row1 = BuildBinary(plan, (ref SpanWriter w) => w.WriteInt32(10));
+        var row2 = BuildBinary(plan, (ref SpanWriter w) => w.WriteInt32(20));
+        var row3 = BuildBinary(plan, (ref SpanWriter w) => w.WriteInt32(30));
         var rows = new List<ReadOnlyMemory<byte>> { row1, row2, row3 };
 
         using var ms = new MemoryStream();

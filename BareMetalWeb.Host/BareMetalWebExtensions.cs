@@ -60,6 +60,9 @@ public static class BareMetalWebExtensions
         DataScaffold.RegisterEntity<IndexDefinition>();
         DataScaffold.RegisterEntity<ActionDefinition>();
         DataScaffold.RegisterEntity<ActionCommandDefinition>();
+        DataScaffold.RegisterEntity<DomainEventSubscription>();
+        DataScaffold.RegisterEntity<ScheduledActionDefinition>();
+        DataScaffold.RegisterEntity<NotificationDefinition>();
         DataScaffold.RegisterEntity<DashboardDefinition>();
         DataScaffold.RegisterEntity<ViewDefinition>();
         DataScaffold.RegisterEntity<FileAttachment>();

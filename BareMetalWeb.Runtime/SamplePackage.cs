@@ -61,6 +61,10 @@ public sealed class SamplePackage
 
     [JsonPropertyName("scheduledActions")]
     public List<ScheduledActionDefinition> ScheduledActions { get; set; } = new();
+
+    /// <summary>Workflow / automation rules to create when deploying this package.</summary>
+    [JsonPropertyName("workflowRules")]
+    public List<DomainEventSubscription> WorkflowRules { get; set; } = new();
 }
 
 /// <summary>
