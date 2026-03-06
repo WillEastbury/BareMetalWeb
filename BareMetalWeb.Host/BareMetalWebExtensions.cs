@@ -231,6 +231,19 @@ public static class BareMetalWebExtensions
         // bootstrap.bundle.min.js (downloaded by EnsureAssetsAsync) is available on disk.
         JsBundleService.BuildBundle(Path.Combine(appInfo.StaticFiles.RootPathFull, "js"));
 
+        // Build the pre-compressed in-memory static asset cache.
+        // All compressible files up to InMemoryCacheMaxFileSizeBytes are Brotli- and
+        // Gzip-compressed and packed into a single contiguous buffer.  Requests are
+        // then served via an O(1) lookup + zero-copy PipeWriter write, bypassing
+        // disk I/O and per-request compression entirely.
+        if (appInfo.StaticFiles.EnableInMemoryCache)
+        {
+            StaticAssetCache.Build(
+                appInfo.StaticFiles.RootPathFull,
+                appInfo.StaticFiles,
+                msg => logger.LogInfo(msg));
+        }
+
         ProgramSetup.ConfigureCors(config, appInfo);
         ProgramSetup.ConfigureHttps(config, appInfo);
         ProgramSetup.ConfigureProxyRoutes(config, appInfo, logger, pageInfoFactory);

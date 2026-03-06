@@ -39,6 +39,21 @@ public sealed class StaticFileOptionsConfig
         "application/xml",
         "image/svg+xml"
     };
+    /// <summary>
+    /// When <c>true</c> (default), all static files up to
+    /// <see cref="InMemoryCacheMaxFileSizeBytes"/> are pre-compressed (Brotli + Gzip)
+    /// at startup and served from a single in-memory buffer using the Kestrel
+    /// PipeWriter zero-copy path.  Large files or files not matched by the cache
+    /// fall through to disk-based serving.
+    /// </summary>
+    public bool EnableInMemoryCache { get; set; } = true;
+    /// <summary>
+    /// Maximum byte size of an individual file that will be loaded into the
+    /// pre-compressed in-memory cache.  Files larger than this threshold are served
+    /// directly from disk.  Defaults to 5 MB (5_242_880 bytes).  Set to 0 to
+    /// disable the size guard (all files are cached regardless of size).
+    /// </summary>
+    public long InMemoryCacheMaxFileSizeBytes { get; set; } = 5 * 1024 * 1024; // 5 MB
 }
 
 public sealed class StaticFileConfigOptions
@@ -76,6 +91,19 @@ public sealed class StaticFileConfigOptions
         "application/xml",
         "image/svg+xml"
     };
+    /// <summary>
+    /// When <c>true</c> (default), all static files up to
+    /// <see cref="InMemoryCacheMaxFileSizeBytes"/> are pre-compressed (Brotli + Gzip)
+    /// at startup and served from a single in-memory buffer using the Kestrel
+    /// PipeWriter zero-copy path.
+    /// </summary>
+    public bool EnableInMemoryCache { get; set; } = true;
+    /// <summary>
+    /// Maximum byte size of a single file eligible for the pre-compressed in-memory
+    /// cache.  Files larger than this threshold are served directly from disk.
+    /// Defaults to 5 MB.  Set to 0 to cache all files regardless of size.
+    /// </summary>
+    public long InMemoryCacheMaxFileSizeBytes { get; set; } = 5 * 1024 * 1024; // 5 MB
     public string NormalizedRequestPathPrefix { get; private set; } = "/static";
     public string RootPathFull { get; private set; } = string.Empty;
     public FileExtensionContentTypeProvider ContentTypeProvider { get; private set; } = new();
@@ -141,6 +169,8 @@ public sealed class StaticFileConfigOptions
         options.MaxRanges = config.MaxRanges;
         options.MetadataCacheMaxEntries = config.MetadataCacheMaxEntries;
         options.CompressibleContentTypePrefixes = config.CompressibleContentTypePrefixes != null ? new List<string>(config.CompressibleContentTypePrefixes) : new List<string>();
+        options.EnableInMemoryCache = config.EnableInMemoryCache;
+        options.InMemoryCacheMaxFileSizeBytes = config.InMemoryCacheMaxFileSizeBytes;
 
         return options;
     }

@@ -95,6 +95,38 @@ public static class StaticFileService
             return true;
         }
 
+        // ── In-memory cache fast path ────────────────────────────────────────
+        // O(1) lookup → zero-copy PipeWriter write.  Falls through on miss to the
+        // standard disk-based path below (handles directory browsing, range requests,
+        // on-the-fly dynamic compression, and files that exceed the size threshold).
+        if (options.EnableInMemoryCache && StaticAssetCache.IsBuilt &&
+            StaticAssetCache.TryGetEntry(relativePath, out var cachedEntry))
+        {
+            var requestedEncoding = CompressionHelper.SelectEncoding(context);
+
+            if (options.EnableCaching)
+            {
+                var ifNoneMatch = context.HttpRequest.Headers.IfNoneMatch.ToString();
+                if (!string.IsNullOrEmpty(ifNoneMatch) && ifNoneMatch == cachedEntry.ETag)
+                {
+                    context.Response.StatusCode = StatusCodes.Status304NotModified;
+                    return true;
+                }
+
+                if (context.HttpRequest.Headers.IfModifiedSince.Count > 0 &&
+                    DateTimeOffset.TryParse(context.HttpRequest.Headers.IfModifiedSince.ToString(), out var modifiedSince) &&
+                    DateTimeOffset.TryParse(cachedEntry.LastModified, out var entryLastModified) &&
+                    modifiedSince >= entryLastModified)
+                {
+                    context.Response.StatusCode = StatusCodes.Status304NotModified;
+                    return true;
+                }
+            }
+
+            await StaticAssetCache.ServeAsync(context, cachedEntry, requestedEncoding, options);
+            return true;
+        }
+
         var compressionSelection = context.HttpRequest.Headers.AcceptEncoding.Count == 0
             ? CompressionSelection.None
             : SelectCompression(context, options);
