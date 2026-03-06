@@ -42,6 +42,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private static readonly TimeSpan MfaAttemptWindow = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan MfaBaseBlockDuration = TimeSpan.FromSeconds(10);
     private static readonly ConcurrentDictionary<string, AttemptTracker> MfaAttempts = new(StringComparer.Ordinal);
+    private static DateTime _lastMfaScavenge = DateTime.UtcNow;
     private const int LoginIpMaxAttempts = 10;
     private const int LoginUserMaxAttempts = 5;
     private const int SsoCallbackIpMaxAttempts = 10;
@@ -1586,6 +1587,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private static bool IsThrottled(string key, int maxAttempts, out TimeSpan? retryAfter)
     {
         retryAfter = null;
+        ScavengeMfaAttempts();
         var tracker = MfaAttempts.GetOrAdd(key, _ => new AttemptTracker());
         return tracker.IsBlocked(MfaAttemptWindow, maxAttempts, MfaBaseBlockDuration, out retryAfter);
     }
@@ -1598,8 +1600,22 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static void RegisterSuccess(string key)
     {
-        if (MfaAttempts.TryGetValue(key, out var tracker))
-            tracker.Reset();
+        if (MfaAttempts.TryRemove(key, out _)) { }
+    }
+
+    /// <summary>Evict MFA attempt trackers idle for longer than the attempt window (5 min). Runs at most once per minute.</summary>
+    private static void ScavengeMfaAttempts()
+    {
+        var now = DateTime.UtcNow;
+        if ((now - _lastMfaScavenge).TotalSeconds < 60) return;
+        _lastMfaScavenge = now;
+
+        var cutoff = now - MfaAttemptWindow - MfaAttemptWindow; // 2x window = 10 min stale
+        foreach (var kvp in MfaAttempts)
+        {
+            if (kvp.Value.LastActivityUtc < cutoff)
+                MfaAttempts.TryRemove(kvp.Key, out _);
+        }
     }
 
     private static string FormatThrottleMessage(TimeSpan? retryAfter)
@@ -1647,12 +1663,14 @@ public sealed class RouteHandlers : IRouteHandlers
         private DateTime _windowStartUtc = DateTime.UtcNow;
         private DateTime? _blockedUntilUtc;
         private int _count;
+        public DateTime LastActivityUtc = DateTime.UtcNow;
 
         public bool IsBlocked(TimeSpan window, int maxAttempts, TimeSpan baseBlock, out TimeSpan? retryAfter)
         {
             lock (_sync)
             {
                 var now = DateTime.UtcNow;
+                LastActivityUtc = now;
                 if (_blockedUntilUtc.HasValue && _blockedUntilUtc.Value > now)
                 {
                     retryAfter = _blockedUntilUtc.Value - now;
@@ -1676,6 +1694,7 @@ public sealed class RouteHandlers : IRouteHandlers
             lock (_sync)
             {
                 var now = DateTime.UtcNow;
+                LastActivityUtc = now;
                 if (now - _windowStartUtc > window)
                 {
                     _windowStartUtc = now;

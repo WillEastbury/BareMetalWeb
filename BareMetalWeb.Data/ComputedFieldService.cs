@@ -17,6 +17,8 @@ public static class ComputedFieldService
 {
     private static readonly ConcurrentDictionary<string, ComputedValueCacheEntry> _cache = new();
     private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> _getterCache = new();
+    private static DateTime _lastCacheScavenge = DateTime.UtcNow;
+    private const int MaxCacheEntries = 10_000;
 
     private sealed record ComputedValueCacheEntry(object? Value, DateTime ExpiresUtc);
 
@@ -78,6 +80,7 @@ public static class ComputedFieldService
 
         if (config.Strategy == ComputedStrategy.CachedLive)
         {
+            ScavengeExpiredEntries();
             var cacheKey = $"{metadata.Type.FullName}.{instance.Key}.{field.Name}";
             if (_cache.TryGetValue(cacheKey, out var cached) && cached.ExpiresUtc > DateTime.UtcNow)
             {
@@ -113,6 +116,24 @@ public static class ComputedFieldService
     public static void ClearAllCache()
     {
         _cache.Clear();
+    }
+
+    /// <summary>Evict expired entries and enforce max size. Runs at most once per 30 seconds.</summary>
+    private static void ScavengeExpiredEntries()
+    {
+        var now = DateTime.UtcNow;
+        if ((now - _lastCacheScavenge).TotalSeconds < 30) return;
+        _lastCacheScavenge = now;
+
+        foreach (var kvp in _cache)
+        {
+            if (kvp.Value.ExpiresUtc < now)
+                _cache.TryRemove(kvp.Key, out _);
+        }
+
+        // Hard cap: if still over limit, remove oldest entries
+        if (_cache.Count > MaxCacheEntries)
+            _cache.Clear();
     }
 
     private static async ValueTask<object?> ComputeValueAsync(
