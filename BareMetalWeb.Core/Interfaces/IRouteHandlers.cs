@@ -91,4 +91,5 @@ public interface IRouteHandlers
     ValueTask CommentsAddHandler(BmwContext context);
     ValueTask CommentsEditHandler(BmwContext context);
     ValueTask CommentsDeleteHandler(BmwContext context);
+    ValueTask GlobalSearchHandler(BmwContext context);
 }
