@@ -203,12 +203,14 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Stop app and clear package-run mode
+      - name: Stop app and configure for AOT binary
         run: |
           az webapp stop --name baremetalweb --resource-group baremetalweb-rg
           az webapp config appsettings set --name baremetalweb --resource-group baremetalweb-rg \
             --settings WEBSITE_RUN_FROM_PACKAGE=0 --output none
-          echo "✓ App stopped, WEBSITE_RUN_FROM_PACKAGE=0"
+          az webapp config set --name baremetalweb --resource-group baremetalweb-rg \
+            --startup-file "./BareMetalWeb.Host" --output none
+          echo "✓ App stopped, WEBSITE_RUN_FROM_PACKAGE=0, startup-file set"
 
       - name: Deploy to Azure Web App
         run: |

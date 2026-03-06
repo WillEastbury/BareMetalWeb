@@ -67,12 +67,14 @@ jobs:
         with:
           creds: ${{ secrets.azure-credentials }}
 
-      - name: Stop app and clear package-run mode
+      - name: Stop app and configure for AOT binary
         run: |
           az webapp stop --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }}
           az webapp config appsettings set --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }} \
             --settings WEBSITE_RUN_FROM_PACKAGE=0 --output none
-          echo "✓ App stopped, WEBSITE_RUN_FROM_PACKAGE=0"
+          az webapp config set --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }} \
+            --startup-file "./BareMetalWeb.Host" --output none
+          echo "✓ App stopped, WEBSITE_RUN_FROM_PACKAGE=0, startup-file set"
 
       - name: Deploy to ${{ inputs.app-name }}
         run: |
