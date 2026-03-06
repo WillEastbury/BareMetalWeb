@@ -78,6 +78,21 @@ public static class DataLayerCapabilities
     public static string ByteScanPath => SimdByteScanner.ActivePath;
 
     /// <summary>
+    /// Describes the branchless bitmask predicate pipeline
+    /// (<see cref="BitmaskFilterPipeline"/>).
+    ///
+    /// <para>
+    /// The pipeline processes rows in 64-wide blocks, producing one 64-bit mask per
+    /// predicate, combining masks with bitwise AND, and materialising matching indices
+    /// via <c>BitOperations.TrailingZeroCount</c> — zero heap allocations, zero
+    /// per-row branches.  The scalar helpers are structured for straightforward upgrade
+    /// to AVX-512 mask intrinsics.
+    /// </para>
+    /// </summary>
+    public static string BitmaskFilterPipelinePath =>
+        "Branchless 64-wide bitmask pipeline (SETG/SETL/SETE + TrailingZeroCount, zero allocation)";
+
+    /// <summary>
     /// Returns a multi-line human-readable description of all active
     /// data-layer hardware acceleration paths.
     /// </summary>
@@ -88,6 +103,7 @@ public static class DataLayerCapabilities
             $"({Vector<float>.Count} floats/iter, Vector<float> baseline)\n" +
             $"Vector distance     : {VectorDistancePath}\n" +
             $"Column query scan   : {ColumnQueryPath}\n" +
+            $"Bitmask filter      : {BitmaskFilterPipelinePath}\n" +
             $"CRC-32C             : {Crc32CPath}\n" +
             $"Key comparison      : {KeyComparisonPath}\n" +
             $"Bloom filter        : {BloomFilterPath}\n" +
