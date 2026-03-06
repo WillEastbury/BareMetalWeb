@@ -26,6 +26,16 @@ public class ViewTypeTests
     }
 
     [Fact]
+    public void ViewType_HasKanbanOption()
+    {
+        // Arrange & Act
+        var kanbanValue = ViewType.Kanban;
+
+        // Assert
+        Assert.Equal(7, (int)kanbanValue);
+    }
+
+    [Fact]
     public void ViewType_AllValuesAreUnique()
     {
         // Arrange
@@ -35,7 +45,10 @@ public class ViewTypeTests
             (int)ViewType.TreeView,
             (int)ViewType.OrgChart,
             (int)ViewType.Timeline,
-            (int)ViewType.Timetable
+            (int)ViewType.Timetable,
+            (int)ViewType.Sankey,
+            (int)ViewType.Calendar,
+            (int)ViewType.Kanban
         };
         
         // Act

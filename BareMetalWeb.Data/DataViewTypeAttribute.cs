@@ -8,7 +8,8 @@ public enum ViewType
     Timeline = 3,
     Timetable = 4,
     Sankey = 5,
-    Calendar = 6
+    Calendar = 6,
+    Kanban = 7
 }
 
 [AttributeUsage(AttributeTargets.Class, Inherited = true, AllowMultiple = false)]

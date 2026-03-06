@@ -27,7 +27,7 @@ The designer produces a JSON snippet ready to drop into your `virtualEntities.js
 | **Nav Group** | | Navigation menu group. Entities in the same group appear together in the sidebar. Defaults to `Admin`. Examples: `Admin`, `System`, `Sales`. |
 | **Nav Order** | | Sort order within the Nav Group (ascending). Lower numbers appear higher in the menu. Defaults to `0`. |
 | **ID Strategy** | | How new record IDs are generated: `guid` (random UUID, recommended default), `sequential` (auto-increment integer), or `none` (caller must supply the ID). |
-| **View Type** | | Default view layout for the entity list page. Options: `Table` (default), `TreeView`, `OrgChart`, `Timeline`, `Timetable`. See notes below. |
+| **View Type** | | Default view layout for the entity list page. Options: `Table` (default), `TreeView`, `OrgChart`, `Timeline`, `Timetable`, `Sankey`, `Calendar`, `Kanban`. See notes below. |
 | **Permissions** | | Space-separated role names required to access this entity. Leave blank to allow any authenticated user. Example: `admin manager`. |
 | **Show in Nav** | | When checked, the entity appears as a link in the navigation sidebar. |
 | **Parent Field** | | Field name that links a child record back to its parent in the same entity. Required for `TreeView` and `OrgChart` view types. Example: `ParentId`. |
@@ -39,6 +39,9 @@ The designer produces a JSON snippet ready to drop into your `virtualEntities.js
 - **OrgChart** — Visual hierarchy chart. Also requires a **Parent Field**.
 - **Timeline** — Chronological timeline grouped by date. Requires at least one `date` or `datetime` field.
 - **Timetable** — Schedule/calendar view. Requires `date`/`datetime` fields.
+- **Sankey** — Document pipeline / flow visualisation. Requires `[RelatedDocument]` fields.
+- **Calendar** — Monthly calendar view. Requires at least one `date` or `datetime` field.
+- **Kanban** — Drag-and-drop Kanban board with WIP limits and automation hooks. Requires at least one `Enum` field (columns are the enum values). Cards can be dragged between columns; the enum field value is updated via PATCH. Configure WIP limits and per-column automation hooks via the **Board settings** toolbar.
 
 ---
 
