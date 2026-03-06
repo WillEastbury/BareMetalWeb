@@ -119,12 +119,14 @@ public static class DashboardHtmlRenderer
         IReadOnlyList<DashboardTile> tiles,
         CancellationToken cancellationToken = default)
     {
-        var results = new ResolvedTile[tiles.Count];
+        // Resolve all tiles in parallel — each tile is an independent aggregate query.
+        var tasks = new Task<ResolvedTile>[tiles.Count];
         for (int i = 0; i < tiles.Count; i++)
         {
-            results[i] = await ResolveSingleTileAsync(tiles[i], cancellationToken);
+            var tile = tiles[i];
+            tasks[i] = ResolveSingleTileAsync(tile, cancellationToken).AsTask();
         }
-        return results;
+        return await Task.WhenAll(tasks).ConfigureAwait(false);
     }
 
     // ── Private helpers ───────────────────────────────────────────────────────
@@ -230,14 +232,31 @@ public static class DashboardHtmlRenderer
         {
             var groupVal = groupGetter(entity);
             if (groupVal == null) continue;
-            var key = groupVal.ToString() ?? string.Empty;
+            // Convert groupVal to string only once; use InvariantCulture for value types.
+            var key = groupVal is IFormattable f ? f.ToString(null, System.Globalization.CultureInfo.InvariantCulture) : groupVal.ToString() ?? string.Empty;
 
             groups.TryGetValue(key, out var acc);
             double addend = 0;
             if (aggGetter != null)
             {
                 var fv = aggGetter(entity);
-                if (fv != null && double.TryParse(fv.ToString(), out var d)) addend = d;
+                // Cast numeric types directly to avoid string round-trip allocations.
+                if (fv != null)
+                {
+                    addend = fv switch
+                    {
+                        double dv   => dv,
+                        float fv2   => fv2,
+                        decimal dv  => (double)dv,
+                        int iv      => iv,
+                        long lv     => lv,
+                        short sv    => sv,
+                        byte bv     => bv,
+                        _ when double.TryParse(fv.ToString(), System.Globalization.NumberStyles.Any,
+                                System.Globalization.CultureInfo.InvariantCulture, out var parsed) => parsed,
+                        _ => 0
+                    };
+                }
             }
             groups[key] = (acc.Count + 1, acc.Sum + addend);
         }

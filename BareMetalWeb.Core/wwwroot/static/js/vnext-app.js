@@ -4543,6 +4543,9 @@
   // Module-local entity list cache (separate from BareMetalRendering's internal cache)
   let _entityList = null;
 
+  // Auto-refresh handle for the dashboard view — cleared on every navigation.
+  let _dashboardRefreshHandle = null;
+
   function wire() {
     R.querySelectorAll('[data-go]').forEach(a =>
       a.addEventListener('click', e => { e.preventDefault(); go(a.getAttribute('href')); })
@@ -5081,16 +5084,20 @@
     refreshBtn.addEventListener('click', loadDashboard);
     loadDashboard();
 
-    // Auto-refresh every 60 seconds
-    var autoRefreshHandle = setInterval(loadDashboard, 60000);
-    // Clean up interval on navigation
-    window.addEventListener('popstate', function () { clearInterval(autoRefreshHandle); }, { once: true });
+    // Auto-refresh every 60 seconds; use module-level variable so route() can clear it on navigation.
+    _dashboardRefreshHandle = setInterval(loadDashboard, 60000);
   }
 
   async function route() {
     const p      = location.pathname.replace(/^\//, '').split('/').filter(Boolean);
     const slug   = p[0], rawId = p[1], action = p[2];
     const id     = (rawId && rawId !== 'create') ? rawId : null;
+
+    // Clear any running dashboard auto-refresh on every navigation.
+    if (_dashboardRefreshHandle !== null) {
+      clearInterval(_dashboardRefreshHandle);
+      _dashboardRefreshHandle = null;
+    }
 
     R.replaceChildren(
       el('div', { className: 'd-flex justify-content-center mt-5' }, [
