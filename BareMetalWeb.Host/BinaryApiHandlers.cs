@@ -216,8 +216,20 @@ public static class BinaryApiHandlers
         if (meta == null) { await WriteError(context, error!.Value); return; }
 
         var schema = GetOrBuildSchema(meta);
-        context.Response.ContentType = "application/json";
-        await JsonSerializer.SerializeAsync(context.Response.Body, schema, JsonOpts, context.RequestAborted);
+        var schemaDict = new Dictionary<string, object?>
+        {
+            ["slug"] = schema.Slug,
+            ["version"] = schema.Version,
+            ["members"] = Array.ConvertAll(schema.Members, m => (object?)new Dictionary<string, object?>
+            {
+                ["name"] = m.Name,
+                ["ordinal"] = m.Ordinal,
+                ["wireType"] = m.WireType,
+                ["isNullable"] = m.IsNullable,
+                ["enumUnderlying"] = m.EnumUnderlying,
+            })
+        };
+        await JsonWriterHelper.WriteResponseAsync(context.Response, schemaDict, ct: context.RequestAborted);
     }
 
     /// <summary>
@@ -800,14 +812,12 @@ public static class BinaryApiHandlers
     private static async ValueTask WriteError(BmwContext context, (int StatusCode, string Message) error)
     {
         context.Response.StatusCode = error.StatusCode;
-        context.Response.ContentType = "application/json";
-        await JsonSerializer.SerializeAsync(context.Response.Body,
-            new { error = error.Message, status = error.StatusCode }, JsonOpts, context.RequestAborted);
+        await JsonWriterHelper.WriteResponseAsync(context.Response, new Dictionary<string, object?>
+        {
+            ["error"] = error.Message,
+            ["status"] = error.StatusCode
+        }, ct: context.RequestAborted);
     }
 
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = false,
-    };
+
 }

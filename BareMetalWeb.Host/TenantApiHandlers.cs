@@ -17,12 +17,6 @@ public static class TenantApiHandlers
     private static Func<string, string, (IDataObjectStore, IDataProvider)>? _storeFactory;
     private static IBufferedLogger? _logger;
 
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = false,
-    };
-
     /// <summary>Initialize with references needed by all handlers.</summary>
     public static void Initialize(
         TenantRegistry registry,
@@ -43,24 +37,23 @@ public static class TenantApiHandlers
             return;
         }
 
-        var tenants = new List<object>();
+        var tenants = new List<Dictionary<string, object?>>();
         foreach (var t in _registry!.AllTenants)
         {
-            tenants.Add(new
+            tenants.Add(new Dictionary<string, object?>
             {
-                t.TenantId,
-                t.DataRoot,
-                t.LogFolder,
-                t.DisplayName,
-                t.LogoUrl,
-                t.PrimaryColor,
-                t.MaxRecords,
-                t.MaxStorageBytes,
+                ["tenantId"] = t.TenantId,
+                ["dataRoot"] = t.DataRoot,
+                ["logFolder"] = t.LogFolder,
+                ["displayName"] = t.DisplayName,
+                ["logoUrl"] = t.LogoUrl,
+                ["primaryColor"] = t.PrimaryColor,
+                ["maxRecords"] = t.MaxRecords,
+                ["maxStorageBytes"] = t.MaxStorageBytes,
             });
         }
 
-        context.Response.ContentType = "application/json";
-        await JsonSerializer.SerializeAsync(context.Response.Body, tenants, JsonOpts);
+        await JsonWriterHelper.WriteResponseAsync(context.Response, tenants);
     }
 
     /// <summary>GET /api/tenants/{id} — gets a single tenant by ID.</summary>
@@ -86,18 +79,17 @@ public static class TenantApiHandlers
             return;
         }
 
-        context.Response.ContentType = "application/json";
-        await JsonSerializer.SerializeAsync(context.Response.Body, new
+        await JsonWriterHelper.WriteResponseAsync(context.Response, new Dictionary<string, object?>
         {
-            tenant.TenantId,
-            tenant.DataRoot,
-            tenant.LogFolder,
-            tenant.DisplayName,
-            tenant.LogoUrl,
-            tenant.PrimaryColor,
-            tenant.MaxRecords,
-            tenant.MaxStorageBytes,
-        }, JsonOpts);
+            ["tenantId"] = tenant.TenantId,
+            ["dataRoot"] = tenant.DataRoot,
+            ["logFolder"] = tenant.LogFolder,
+            ["displayName"] = tenant.DisplayName,
+            ["logoUrl"] = tenant.LogoUrl,
+            ["primaryColor"] = tenant.PrimaryColor,
+            ["maxRecords"] = tenant.MaxRecords,
+            ["maxStorageBytes"] = tenant.MaxStorageBytes,
+        });
     }
 
     /// <summary>POST /api/tenants — provisions a new tenant at runtime.</summary>
@@ -119,7 +111,18 @@ public static class TenantApiHandlers
         TenantOptions? opts;
         try
         {
-            opts = await JsonSerializer.DeserializeAsync<TenantOptions>(context.HttpRequest.Body, JsonOpts);
+            using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body);
+            var root = doc.RootElement;
+            opts = new TenantOptions();
+            if (root.TryGetProperty("host", out var h)) opts.Host = h.GetString() ?? "";
+            if (root.TryGetProperty("tenantId", out var ti)) opts.TenantId = ti.GetString();
+            if (root.TryGetProperty("dataRoot", out var dr)) opts.DataRoot = dr.GetString() ?? "";
+            if (root.TryGetProperty("logFolder", out var lf)) opts.LogFolder = lf.GetString() ?? "";
+            if (root.TryGetProperty("displayName", out var dn2)) opts.DisplayName = dn2.GetString();
+            if (root.TryGetProperty("logoUrl", out var lu2)) opts.LogoUrl = lu2.GetString();
+            if (root.TryGetProperty("primaryColor", out var pc2)) opts.PrimaryColor = pc2.GetString();
+            if (root.TryGetProperty("maxRecords", out var mr2)) opts.MaxRecords = mr2.GetInt64();
+            if (root.TryGetProperty("maxStorageBytes", out var ms2)) opts.MaxStorageBytes = ms2.GetInt64();
         }
         catch
         {
@@ -143,13 +146,12 @@ public static class TenantApiHandlers
         }
 
         context.Response.StatusCode = 201;
-        context.Response.ContentType = "application/json";
-        await JsonSerializer.SerializeAsync(context.Response.Body, new
+        await JsonWriterHelper.WriteResponseAsync(context.Response, new Dictionary<string, object?>
         {
-            tenant.TenantId,
-            tenant.DataRoot,
-            tenant.DisplayName,
-        }, JsonOpts);
+            ["tenantId"] = tenant.TenantId,
+            ["dataRoot"] = tenant.DataRoot,
+            ["displayName"] = tenant.DisplayName,
+        });
     }
 
     /// <summary>PUT /api/tenants/{id}/branding — updates display name, logo, primary color.</summary>
@@ -227,15 +229,14 @@ public static class TenantApiHandlers
     {
         var tenant = DataStoreProvider.CurrentTenant;
 
-        context.Response.ContentType = "application/json";
-        await JsonSerializer.SerializeAsync(context.Response.Body, new
+        await JsonWriterHelper.WriteResponseAsync(context.Response, new Dictionary<string, object?>
         {
-            tenantId     = tenant?.TenantId,
-            displayName  = tenant?.DisplayName,
-            logoUrl      = tenant?.LogoUrl,
-            primaryColor = tenant?.PrimaryColor,
-            multitenancy = _registry?.IsEnabled ?? false,
-        }, JsonOpts);
+            ["tenantId"] = tenant?.TenantId,
+            ["displayName"] = tenant?.DisplayName,
+            ["logoUrl"] = tenant?.LogoUrl,
+            ["primaryColor"] = tenant?.PrimaryColor,
+            ["multitenancy"] = _registry?.IsEnabled ?? false,
+        });
     }
 
     private static bool IsSystemAdmin(BmwContext context)

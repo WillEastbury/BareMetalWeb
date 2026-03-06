@@ -158,7 +158,7 @@ public sealed class AuditService
                 TimestampUtc = DateTime.UtcNow,
                 UserName = userName,
                 CommandName = commandName,
-                CommandParameters = parameters != null ? JsonSerializer.Serialize(parameters, JsonOptions) : null,
+                CommandParameters = parameters != null ? DataJsonWriter.ToJsonString(parameters) : null,
                 CommandResult = result != null ? $"Success: {result.Success}, Message: {result.Message}" : null,
                 Notes = $"Remote command '{commandName}' executed"
             };
@@ -353,7 +353,7 @@ public sealed class AuditService
                 return value.ToString();
 
             // For complex types, use JSON
-            return JsonSerializer.Serialize(value, JsonOptions);
+            return DataJsonWriter.ToJsonString(value);
         }
         catch
         {

@@ -22,8 +22,8 @@ namespace BareMetalWeb.Host;
 /// </summary>
 public static class RouteRegistrationExtensions
 {
-    private static readonly JsonSerializerOptions JsonCompact = new() { WriteIndented = false };
-    private static readonly JsonSerializerOptions JsonIndented = new() { WriteIndented = true };
+    private static readonly JsonWriterOptions s_compactWriterOptions = new();
+    private static readonly JsonWriterOptions s_indentedWriterOptions = new() { Indented = true };
 
     /// <summary>
     /// Register static/public page routes (home, status).
@@ -324,8 +324,10 @@ public static class RouteRegistrationExtensions
                 };
 
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(
-                    JsonSerializer.Serialize(result, JsonCompact));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, result);
+                }
             }));
     }
 
@@ -541,8 +543,6 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var jsonOpts = JsonCompact;
-
                 // ── Upstream: walk RelatedDocument fields to find parent documents ──────────
                 var upstream = new List<object>();
                 if (meta.DocumentRelationFields is { Count: > 0 })
@@ -661,7 +661,10 @@ public static class RouteRegistrationExtensions
                 };
 
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(result, jsonOpts));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, result);
+                }
             }));
 
         // Sankey graph: aggregate document chain counts across all entities with RelatedDocument fields
@@ -669,8 +672,6 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("Authenticated", false),
             async context =>
             {
-                var jsonOpts = JsonCompact;
-
                 var nodes = new List<object>();
                 var links = new List<object>();
                 var seenSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -718,9 +719,10 @@ public static class RouteRegistrationExtensions
                 }
 
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(
-                    new Dictionary<string, object?> { ["nodes"] = nodes, ["links"] = links },
-                    jsonOpts));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, new Dictionary<string, object?> { ["nodes"] = nodes, ["links"] = links });
+                }
             }));
 
         // List and create
@@ -794,8 +796,10 @@ public static class RouteRegistrationExtensions
 
                 context.Response.ContentType = "application/json";
                 context.Response.Headers["Cache-Control"] = "private, max-age=300";
-                await context.Response.WriteAsync(
-                    JsonSerializer.Serialize(entities, JsonCompact));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, entities);
+                }
             }));
 
         // Full schema for a single entity, including fields, lookups, computed, and commands
@@ -815,8 +819,10 @@ public static class RouteRegistrationExtensions
                 var result = BuildEntitySchema(metadata);
                 context.Response.ContentType = "application/json";
                 context.Response.Headers["Cache-Control"] = "private, max-age=300";
-                await context.Response.WriteAsync(
-                    JsonSerializer.Serialize(result, JsonCompact));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, result);
+                }
             }));
 
         // VNext SPA shell — nav entry visible in the Admin dropdown.
@@ -850,7 +856,6 @@ public static class RouteRegistrationExtensions
     {
         var queryService = new BareMetalWeb.Runtime.QueryService();
         var commandService = new BareMetalWeb.Runtime.CommandService();
-        var jsonOptions = JsonCompact;
 
         // GET /meta/entity/{name} — RuntimeEntityModel schema + DataEntityMetadata fields
         host.RegisterRoute("GET /meta/entity/{name}", new RouteHandlerData(
@@ -950,7 +955,10 @@ public static class RouteRegistrationExtensions
                 };
 
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(result, jsonOptions));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, result);
+                }
             }));
 
         // POST /query — { "entity": "slug", "clauses": [...], "sorts": [...], "skip": 0, "top": 50 }
@@ -974,8 +982,12 @@ public static class RouteRegistrationExtensions
                 {
                     context.Response.StatusCode = 400;
                     context.Response.ContentType = "application/json";
-                    await context.Response.WriteAsync(
-                        JsonSerializer.Serialize(new { error = ex.Message }, jsonOptions));
+                    await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                    {
+                        w.WriteStartObject();
+                        w.WriteString("error", ex.Message);
+                        w.WriteEndObject();
+                    }
                     return;
                 }
 
@@ -989,7 +1001,10 @@ public static class RouteRegistrationExtensions
 
                 var results = await queryService.QueryAsync(entitySlug, query, context.RequestAborted).ConfigureAwait(false);
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(results, jsonOptions));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, results);
+                }
             }));
 
         // POST /intent — CommandIntent body
@@ -1003,22 +1018,52 @@ public static class RouteRegistrationExtensions
                 BareMetalWeb.Runtime.CommandIntent intent;
                 try
                 {
-                    intent = JsonSerializer.Deserialize<BareMetalWeb.Runtime.CommandIntent>(body, jsonOptions)
-                             ?? throw new InvalidOperationException("Request body could not be parsed as a CommandIntent.");
+                    using var jdoc = JsonDocument.Parse(body);
+                    var root = jdoc.RootElement;
+                    intent = new BareMetalWeb.Runtime.CommandIntent
+                    {
+                        EntitySlug = root.TryGetProperty("entitySlug", out var es) ? es.GetString() ?? string.Empty : string.Empty,
+                        EntityId = root.TryGetProperty("entityId", out var ei) ? ei.GetString() : null,
+                        Operation = root.TryGetProperty("operation", out var op) ? op.GetString() ?? string.Empty : string.Empty,
+                        Fields = root.TryGetProperty("fields", out var fp) && fp.ValueKind == JsonValueKind.Object
+                            ? new Dictionary<string, string?>(fp.EnumerateObject().Count(), StringComparer.OrdinalIgnoreCase)
+                            : new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+                    };
+                    if (fp.ValueKind == JsonValueKind.Object)
+                    {
+                        foreach (var prop in fp.EnumerateObject())
+                            intent.Fields[prop.Name] = prop.Value.ValueKind == JsonValueKind.Null ? null : prop.Value.ToString();
+                    }
                 }
                 catch (Exception ex)
                 {
                     context.Response.StatusCode = 400;
                     context.Response.ContentType = "application/json";
-                    await context.Response.WriteAsync(
-                        JsonSerializer.Serialize(new { error = ex.Message }, jsonOptions));
+                    await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                    {
+                        w.WriteStartObject();
+                        w.WriteString("error", ex.Message);
+                        w.WriteEndObject();
+                    }
                     return;
                 }
 
                 var result = await commandService.ExecuteAsync(intent, context.RequestAborted).ConfigureAwait(false);
                 context.Response.StatusCode = result.Success ? 200 : 400;
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(result, jsonOptions));
+                await using (var w2 = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    w2.WriteStartObject();
+                    w2.WriteBoolean("success", result.Success);
+                    if (result.Error != null) w2.WriteString("error", result.Error);
+                    if (result.EntityId != null) w2.WriteString("entityId", result.EntityId);
+                    if (result.Data != null)
+                    {
+                        w2.WritePropertyName("data");
+                        JsonWriterHelper.WriteValue(w2, result.Data);
+                    }
+                    w2.WriteEndObject();
+                }
             }));
 
         // GET /api/meta/registered-types — lists C# entity types available for metadata import
@@ -1050,7 +1095,10 @@ public static class RouteRegistrationExtensions
                 }
 
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(types, jsonOptions));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, types);
+                }
             }));
 
         // POST /api/meta/seed-from-types — seeds EntityDefinition records for registered C# entity types
@@ -1071,10 +1119,16 @@ public static class RouteRegistrationExtensions
                     .ConfigureAwait(false);
 
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(
-                    JsonSerializer.Serialize(
-                        new { seeded, count = seeded.Count, messages },
-                        jsonOptions));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    w.WriteStartObject();
+                    w.WritePropertyName("seeded");
+                    JsonWriterHelper.WriteValue(w, seeded);
+                    w.WriteNumber("count", seeded.Count);
+                    w.WritePropertyName("messages");
+                    JsonWriterHelper.WriteValue(w, messages);
+                    w.WriteEndObject();
+                }
             }));
     }
 
@@ -1602,7 +1656,12 @@ public static class RouteRegistrationExtensions
                 {
                     context.Response.StatusCode = 500;
                     context.Response.ContentType = "application/json";
-                    await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }));
+                    await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                    {
+                        w.WriteStartObject();
+                        w.WriteString("error", ex.Message);
+                        w.WriteEndObject();
+                    }
                     return;
                 }
 
@@ -1643,17 +1702,20 @@ public static class RouteRegistrationExtensions
                 }
 
                 // Default: JSON
-                var json = new
-                {
-                    name = def.Name,
-                    generatedAt = result.GeneratedAt,
-                    totalRows = result.TotalRows,
-                    isTruncated = result.IsTruncated,
-                    columns = result.ColumnLabels,
-                    rows = rowsList.ToArray()
-                };
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(json, JsonCompact));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    w.WriteStartObject();
+                    w.WriteString("name", def.Name);
+                    w.WriteString("generatedAt", result.GeneratedAt);
+                    w.WriteNumber("totalRows", result.TotalRows);
+                    w.WriteBoolean("isTruncated", result.IsTruncated);
+                    w.WritePropertyName("columns");
+                    JsonWriterHelper.WriteValue(w, result.ColumnLabels);
+                    w.WritePropertyName("rows");
+                    JsonWriterHelper.WriteValue(w, rowsList.ToArray());
+                    w.WriteEndObject();
+                }
             }));
 
         // GET /api/reports/_distinct/{entity}/{field} — distinct field values for dropdown population
@@ -1668,7 +1730,10 @@ public static class RouteRegistrationExtensions
 
                 context.Response.StatusCode = 200;
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(values, JsonCompact));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, values);
+                }
             }));
     }
 
@@ -1837,7 +1902,7 @@ public static class RouteRegistrationExtensions
                 hasElevated = resolved.HasElevatedPermissions;
             }
 
-            var json = EscapeJsonForInlineScript(JsonSerializer.Serialize(entities, JsonCompact));
+            var json = EscapeJsonForInlineScript(JsonWriterHelper.ToJsonString(entities));
             var sb = new StringBuilder(256);
             sb.Append($"<script nonce=\"{safeNonce}\">window.__BMW_META_OBJECTS__={json};");
             if (hasElevated)
@@ -1865,9 +1930,9 @@ public static class RouteRegistrationExtensions
                 return null;
 
             var schema = BuildEntitySchema(meta);
-            var schemaJson = EscapeJsonForInlineScript(JsonSerializer.Serialize(schema, JsonCompact));
+            var schemaJson = EscapeJsonForInlineScript(JsonWriterHelper.ToJsonString(schema));
 
-            var safeSlug = JsonSerializer.Serialize(slug);
+            var safeSlug = JsonWriterHelper.ToJsonString(slug);
             return $"<script nonce=\"{safeNonce}\">window.__BMW_META_SLUG__=window.__BMW_META_SLUG__||{{}};window.__BMW_META_SLUG__[{safeSlug}]={schemaJson};</script>";
         }
         catch
@@ -1962,14 +2027,14 @@ public static class RouteRegistrationExtensions
                 ["total"] = total
             };
 
-            var initialJson = EscapeJsonForInlineScript(JsonSerializer.Serialize(initialData, JsonCompact));
+            var initialJson = EscapeJsonForInlineScript(JsonWriterHelper.ToJsonString(initialData));
 
             // Pre-resolve FK lookup values for all lookup fields visible in the list view.
             // This allows the client to skip the /api/_lookup/{slug}/_batch round-trips.
             var lookupPrefetch = await BuildLookupPrefetchAsync(meta, payload, cancellationToken).ConfigureAwait(false);
             string? prefetchJson = null;
             if (lookupPrefetch != null)
-                prefetchJson = EscapeJsonForInlineScript(JsonSerializer.Serialize(lookupPrefetch, JsonCompact));
+                prefetchJson = EscapeJsonForInlineScript(JsonWriterHelper.ToJsonString(lookupPrefetch));
 
             var scriptContent = $"window.__BMW_INITIAL_DATA__={initialJson};";
             if (prefetchJson != null)
@@ -2391,15 +2456,18 @@ public static class RouteRegistrationExtensions
 
                 var dashboards = new List<DashboardDefinition>(DataStoreProvider.Current.Query<DashboardDefinition>(null));
                 dashboards.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
-                var list = dashboards.Select(d => new
+                var list = dashboards.Select(d => new Dictionary<string, object?>
                 {
-                    id = d.Key,
-                    name = d.Name,
-                    description = d.Description,
-                    tileCount = d.Tiles.Count
+                    ["id"] = d.Key,
+                    ["name"] = d.Name,
+                    ["description"] = d.Description,
+                    ["tileCount"] = d.Tiles.Count
                 });
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(list, JsonCompact));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, list);
+                }
             }));
 
         // ── GET /api/dashboards/{id} — JSON with resolved KPI values ─────────
@@ -2421,26 +2489,28 @@ public static class RouteRegistrationExtensions
                 { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Dashboard not found\"}"); return; }
 
                 var resolvedTiles = await DashboardHtmlRenderer.ResolveTilesAsync(def.Tiles, context.RequestAborted);
-                var tileProjections = resolvedTiles.Select(r => new
+                var tileProjections = resolvedTiles.Select(r => new Dictionary<string, object?>
                 {
-                    title = r.Tile.Title,
-                    icon = r.Tile.Icon,
-                    color = r.Tile.Color,
-                    entitySlug = r.Tile.EntitySlug,
-                    aggregateFunction = r.Tile.AggregateFunction,
-                    displayValue = r.DisplayValue,
-                    rawValue = r.RawValue?.ToString(),
-                    sparkline = r.Sparkline?.Select(b => new { label = b.Label, value = b.Value }).ToArray()
+                    ["title"] = r.Tile.Title,
+                    ["icon"] = r.Tile.Icon,
+                    ["color"] = r.Tile.Color,
+                    ["entitySlug"] = r.Tile.EntitySlug,
+                    ["aggregateFunction"] = r.Tile.AggregateFunction,
+                    ["displayValue"] = r.DisplayValue,
+                    ["rawValue"] = r.RawValue?.ToString(),
+                    ["sparkline"] = r.Sparkline?.Select(b => new Dictionary<string, object?> { ["label"] = b.Label, ["value"] = b.Value }).ToArray()
                 }).ToArray();
-                var json = new
-                {
-                    id = def.Key,
-                    name = def.Name,
-                    description = def.Description,
-                    tiles = tileProjections
-                };
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(json, JsonIndented));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_indentedWriterOptions))
+                {
+                    w.WriteStartObject();
+                    w.WriteNumber("id", def.Key);
+                    w.WriteString("name", def.Name);
+                    w.WriteString("description", def.Description);
+                    w.WritePropertyName("tiles");
+                    JsonWriterHelper.WriteValue(w, tileProjections);
+                    w.WriteEndObject();
+                }
             }));
     }
 
@@ -2593,19 +2663,22 @@ public static class RouteRegistrationExtensions
                 for (int i = 0; i < views.Count; i++)
                 {
                     var v = views[i];
-                    items[i] = new
+                    items[i] = new Dictionary<string, object?>
                     {
-                        id          = v.Key,
-                        viewName    = v.ViewName,
-                        rootEntity  = v.RootEntity,
-                        limit       = v.Limit,
-                        offset      = v.Offset,
-                        materialised = v.Materialised,
+                        ["id"]          = v.Key,
+                        ["viewName"]    = v.ViewName,
+                        ["rootEntity"]  = v.RootEntity,
+                        ["limit"]       = v.Limit,
+                        ["offset"]      = v.Offset,
+                        ["materialised"] = v.Materialised,
                     };
                 }
 
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(items, JsonIndented));
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_indentedWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, items);
+                }
             }));
 
         // ── GET /api/views/{id} ── execute view → JSON ────────────────────────
@@ -2654,7 +2727,12 @@ public static class RouteRegistrationExtensions
                 {
                     context.Response.StatusCode = 500;
                     context.Response.ContentType = "application/json";
-                    await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }));
+                    await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                    {
+                        w.WriteStartObject();
+                        w.WriteString("error", ex.Message);
+                        w.WriteEndObject();
+                    }
                     return;
                 }
 
@@ -2691,18 +2769,8 @@ public static class RouteRegistrationExtensions
                     rowsList.Add(dict);
                 }
 
-                var json = new
-                {
-                    viewName     = def.ViewName,
-                    rootEntity   = def.RootEntity,
-                    generatedAt  = result.GeneratedAt,
-                    totalRows    = result.TotalRows,
-                    isTruncated  = result.IsTruncated,
-                    columns      = result.ColumnLabels,
-                    rows         = rowsList.ToArray(),
-                };
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(json, JsonIndented));
+                await WriteViewResultJsonAsync(context, def.ViewName, def.RootEntity, result, rowsList);
             }));
 
         // ── POST /api/views/execute ── ad-hoc view execution ──────────────────
@@ -2728,7 +2796,7 @@ public static class RouteRegistrationExtensions
                 {
                     using var bodyDoc = await System.Text.Json.JsonDocument.ParseAsync(
                         context.HttpRequest.Body, cancellationToken: context.RequestAborted).ConfigureAwait(false);
-                    def = System.Text.Json.JsonSerializer.Deserialize<ViewDefinition>(bodyDoc.RootElement.GetRawText());
+                    def = ParseViewDefinition(bodyDoc.RootElement);
                 }
                 catch
                 {
@@ -2755,7 +2823,12 @@ public static class RouteRegistrationExtensions
                 {
                     context.Response.StatusCode = 500;
                     context.Response.ContentType = "application/json";
-                    await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }));
+                    await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                    {
+                        w.WriteStartObject();
+                        w.WriteString("error", ex.Message);
+                        w.WriteEndObject();
+                    }
                     return;
                 }
 
@@ -2771,18 +2844,8 @@ public static class RouteRegistrationExtensions
                     rowsList.Add(dict);
                 }
 
-                var json = new
-                {
-                    viewName     = def.ViewName,
-                    rootEntity   = def.RootEntity,
-                    generatedAt  = result.GeneratedAt,
-                    totalRows    = result.TotalRows,
-                    isTruncated  = result.IsTruncated,
-                    columns      = result.ColumnLabels,
-                    rows         = rowsList.ToArray(),
-                };
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(json, JsonIndented));
+                await WriteViewResultJsonAsync(context, def.ViewName, def.RootEntity, result, rowsList);
             }));
     }
 
@@ -2822,18 +2885,21 @@ public static class RouteRegistrationExtensions
             var messages = DataStoreProvider.Current.Query<InboxMessage>(query).ToList();
 
             context.Response.ContentType = "application/json";
-            var payload = messages.Select(m => new
+            var payload = messages.Select(m => new Dictionary<string, object?>
             {
-                id           = m.Key,
-                subject      = m.Subject,
-                body         = m.Body,
-                category     = m.Category,
-                isRead       = m.IsRead,
-                createdAtUtc = m.CreatedAtUtc,
-                entitySlug   = m.EntitySlug,
-                entityId     = m.EntityId
+                ["id"]           = m.Key,
+                ["subject"]      = m.Subject,
+                ["body"]         = m.Body,
+                ["category"]     = m.Category,
+                ["isRead"]       = m.IsRead,
+                ["createdAtUtc"] = m.CreatedAtUtc,
+                ["entitySlug"]   = m.EntitySlug,
+                ["entityId"]     = m.EntityId
             }).ToArray();
-            await context.Response.WriteAsync(JsonSerializer.Serialize(payload, JsonCompact));
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                JsonWriterHelper.WriteValue(w, payload);
+            }
         }));
 
         // GET /api/inbox/unread-count — return the number of unread messages
@@ -2853,7 +2919,12 @@ public static class RouteRegistrationExtensions
             var count = DataStoreProvider.Current.Query<InboxMessage>(query).Count();
 
             context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new { count }, JsonCompact));
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                w.WriteStartObject();
+                w.WriteNumber("count", count);
+                w.WriteEndObject();
+            }
         }));
 
         // POST /api/inbox/{id}/read — mark a single message as read
@@ -2900,7 +2971,70 @@ public static class RouteRegistrationExtensions
                 await DataStoreProvider.Current.SaveAsync(msg, context.RequestAborted).ConfigureAwait(false);
             }
             context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new { marked = unread.Count }, JsonCompact));
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                w.WriteStartObject();
+                w.WriteNumber("marked", unread.Count);
+                w.WriteEndObject();
+            }
         }));
+    }
+
+    private static async ValueTask WriteViewResultJsonAsync(
+        BmwContext context,
+        string viewName,
+        string rootEntity,
+        ReportResult result,
+        List<Dictionary<string, string?>> rowsList)
+    {
+        await using var w = new Utf8JsonWriter(context.Response.Body, s_indentedWriterOptions);
+        w.WriteStartObject();
+        w.WriteString("viewName", viewName);
+        w.WriteString("rootEntity", rootEntity);
+        w.WriteString("generatedAt", result.GeneratedAt.ToString("O"));
+        w.WriteNumber("totalRows", result.TotalRows);
+        w.WriteBoolean("isTruncated", result.IsTruncated);
+        w.WritePropertyName("columns");
+        JsonWriterHelper.WriteValue(w, result.ColumnLabels);
+        w.WritePropertyName("rows");
+        JsonWriterHelper.WriteValue(w, rowsList.ToArray());
+        w.WriteEndObject();
+    }
+
+    private static ViewDefinition? ParseViewDefinition(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Object)
+            return null;
+
+        var def = new ViewDefinition
+        {
+            ViewName = root.TryGetProperty("viewName", out var vn) || root.TryGetProperty("ViewName", out vn) ? vn.GetString() ?? string.Empty : string.Empty,
+            RootEntity = root.TryGetProperty("rootEntity", out var re) || root.TryGetProperty("RootEntity", out re) ? re.GetString() ?? string.Empty : string.Empty,
+            Limit = root.TryGetProperty("limit", out var lim) || root.TryGetProperty("Limit", out lim) ? lim.GetInt32() : 10_000,
+            Offset = root.TryGetProperty("offset", out var off) || root.TryGetProperty("Offset", out off) ? off.GetInt32() : 0,
+            Materialised = root.TryGetProperty("materialised", out var mat) || root.TryGetProperty("Materialised", out mat) ? mat.GetBoolean() : false,
+        };
+
+        if ((root.TryGetProperty("projectionsJson", out var pj) || root.TryGetProperty("ProjectionsJson", out pj)) && pj.ValueKind == JsonValueKind.String)
+            def.ProjectionsJson = pj.GetString() ?? "[]";
+        else if ((root.TryGetProperty("projections", out var pa) || root.TryGetProperty("Projections", out pa)) && pa.ValueKind == JsonValueKind.Array)
+            def.ProjectionsJson = pa.GetRawText();
+
+        if ((root.TryGetProperty("joinsJson", out var jj) || root.TryGetProperty("JoinsJson", out jj)) && jj.ValueKind == JsonValueKind.String)
+            def.JoinsJson = jj.GetString() ?? "[]";
+        else if ((root.TryGetProperty("joins", out var ja) || root.TryGetProperty("Joins", out ja)) && ja.ValueKind == JsonValueKind.Array)
+            def.JoinsJson = ja.GetRawText();
+
+        if ((root.TryGetProperty("filtersJson", out var fj) || root.TryGetProperty("FiltersJson", out fj)) && fj.ValueKind == JsonValueKind.String)
+            def.FiltersJson = fj.GetString() ?? "[]";
+        else if ((root.TryGetProperty("filters", out var fa) || root.TryGetProperty("Filters", out fa)) && fa.ValueKind == JsonValueKind.Array)
+            def.FiltersJson = fa.GetRawText();
+
+        if ((root.TryGetProperty("sortsJson", out var sj) || root.TryGetProperty("SortsJson", out sj)) && sj.ValueKind == JsonValueKind.String)
+            def.SortsJson = sj.GetString() ?? "[]";
+        else if ((root.TryGetProperty("sorts", out var sa) || root.TryGetProperty("Sorts", out sa)) && sa.ValueKind == JsonValueKind.Array)
+            def.SortsJson = sa.GetRawText();
+
+        return def;
     }
 }

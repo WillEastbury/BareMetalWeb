@@ -53,16 +53,15 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
         };
         DataStoreProvider.Current.Save(dc);
         var baseUrl = $"{context.HttpRequest.Scheme}://{context.HttpRequest.Host}";
-        var json = JsonSerializer.Serialize(new Dictionary<string, object>
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
         {
             ["device_code"] = dc.DeviceCode,
             ["user_code"] = dc.UserCode,
             ["verification_url"] = $"{baseUrl}/device",
             ["expires_in"] = 900,
             ["interval"] = 5
-        });
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(json);
+        }));
     }));
     appInfo.RegisterRoute("POST /api/device/token", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
     {
@@ -114,7 +113,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
                 dc.Status = "consumed";
                 DataStoreProvider.Current.Save(dc);
                 context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(new Dictionary<string, object>
+                await context.Response.WriteAsync(JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
                 {
                     ["status"] = "approved",
                     ["user"] = user.DisplayName ?? user.UserName
@@ -293,7 +292,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
         }
         var result = resultList.ToArray();
         context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true }));
+        await JsonWriterHelper.WriteResponseAsync(context.Response, result, indented: true);
     }));
     
     // Ideas/search page (metadata-driven — works with any entity that has Title, Notes, Deadline, IsCompleted fields)

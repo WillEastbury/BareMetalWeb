@@ -46,7 +46,6 @@ public sealed class RouteHandlers : IRouteHandlers
     private const int LoginIpMaxAttempts = 10;
     private const int LoginUserMaxAttempts = 5;
     private const int SsoCallbackIpMaxAttempts = 10;
-    private static readonly JsonSerializerOptions JsonIndented = new() { WriteIndented = true };
     private static readonly TimeSpan DataQueryTimeout = TimeSpan.FromSeconds(30);
 
     [ThreadStatic] private static StringBuilder? t_cachedSb;
@@ -1971,9 +1970,20 @@ public sealed class RouteHandlers : IRouteHandlers
             }
         }
 
-        var result = new { created, updated, skipped, errors = importErrors };
         context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(result));
+        await using (var w = new Utf8JsonWriter(context.Response.Body))
+        {
+            w.WriteStartObject();
+            w.WriteNumber("created", created);
+            w.WriteNumber("updated", updated);
+            w.WriteNumber("skipped", skipped);
+            w.WritePropertyName("errors");
+            w.WriteStartArray();
+            foreach (var e in importErrors)
+                w.WriteStringValue(e);
+            w.WriteEndArray();
+            w.WriteEndObject();
+        }
     }
 
     public async ValueTask DataApiGetHandler(BmwContext context)
@@ -2417,8 +2427,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 result.Add(BuildAttachmentApiModel(a));
         }
 
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonIndented)).ConfigureAwait(false);
+        await WriteJsonResponseAsync(context, result);
         ReturnDictList(result);
     }
 
@@ -2548,8 +2557,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         context.Response.StatusCode = StatusCodes.Status201Created;
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(BuildAttachmentApiModel(attachment), JsonIndented)).ConfigureAwait(false);
+        await WriteJsonResponseAsync(context, BuildAttachmentApiModel(attachment));
     }
 
     /// <summary>GET /api/_attachments/{id}/download — stream an attachment file to the client.</summary>
@@ -2704,8 +2712,7 @@ public sealed class RouteHandlers : IRouteHandlers
         foreach (var v in versionList)
             result.Add(BuildAttachmentApiModel(v));
 
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonIndented)).ConfigureAwait(false);
+        await WriteJsonResponseAsync(context, result);
     }
 
     // ── Record comment endpoints ────────────────────────────────────────────────
@@ -2767,8 +2774,7 @@ public sealed class RouteHandlers : IRouteHandlers
         // Sort by creation time ascending (oldest first, chat-style)
         result.Sort((a, b) => ((DateTime)a["createdAt"]!).CompareTo((DateTime)b["createdAt"]!));
 
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonIndented)).ConfigureAwait(false);
+        await WriteJsonResponseAsync(context, result);
         ReturnDictList(result);
     }
 
@@ -2801,7 +2807,13 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             using var reader = new StreamReader(context.HttpRequest.Body);
             var body = await reader.ReadToEndAsync().ConfigureAwait(false);
-            var doc = JsonSerializer.Deserialize<Dictionary<string, string>>(body);
+            Dictionary<string, string> doc;
+            using (var jdoc = JsonDocument.Parse(body))
+            {
+                doc = new Dictionary<string, string>();
+                foreach (var prop in jdoc.RootElement.EnumerateObject())
+                    doc[prop.Name] = prop.Value.GetString() ?? "";
+            }
             text = doc?.GetValueOrDefault("text");
         }
         else if (context.HttpRequest.HasFormContentType)
@@ -2830,8 +2842,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await DataScaffold.SaveAsync(commentMeta, comment, context.RequestAborted).ConfigureAwait(false);
 
         context.Response.StatusCode = StatusCodes.Status201Created;
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(BuildCommentApiModel(comment), JsonIndented)).ConfigureAwait(false);
+        await WriteJsonResponseAsync(context, BuildCommentApiModel(comment));
     }
 
     /// <summary>PATCH /api/_comments/{id} — edit a comment (own comments only).</summary>
@@ -2873,7 +2884,13 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             using var reader = new StreamReader(context.HttpRequest.Body);
             var body = await reader.ReadToEndAsync().ConfigureAwait(false);
-            var doc = JsonSerializer.Deserialize<Dictionary<string, string>>(body);
+            Dictionary<string, string> doc;
+            using (var jdoc = JsonDocument.Parse(body))
+            {
+                doc = new Dictionary<string, string>();
+                foreach (var prop in jdoc.RootElement.EnumerateObject())
+                    doc[prop.Name] = prop.Value.GetString() ?? "";
+            }
             text = doc?.GetValueOrDefault("text");
         }
 
@@ -2888,8 +2905,7 @@ public sealed class RouteHandlers : IRouteHandlers
         comment.Touch(userName);
         await DataScaffold.SaveAsync(commentMeta, comment, context.RequestAborted).ConfigureAwait(false);
 
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(BuildCommentApiModel(comment), JsonIndented)).ConfigureAwait(false);
+        await WriteJsonResponseAsync(context, BuildCommentApiModel(comment));
     }
 
     /// <summary>DELETE /api/_comments/{id} — delete a comment (own comments only).</summary>
@@ -3796,8 +3812,12 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync(
-                JsonSerializer.Serialize(new { error = string.Join(" ", errors) })).ConfigureAwait(false);
+            await using (var w = new Utf8JsonWriter(context.Response.Body))
+            {
+                w.WriteStartObject();
+                w.WriteString("error", string.Join(" ", errors));
+                w.WriteEndObject();
+            }
             return;
         }
 
@@ -3895,8 +3915,15 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.Headers["Location"] = statusUrl;
         context.Response.Headers["Retry-After"] = "2";
         context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(
-            JsonSerializer.Serialize(new { jobId, status = "queued", operationName = "Generate Sample Data", statusUrl })).ConfigureAwait(false);
+        await using (var w = new Utf8JsonWriter(context.Response.Body))
+        {
+            w.WriteStartObject();
+            w.WriteString("jobId", jobId);
+            w.WriteString("status", "queued");
+            w.WriteString("operationName", "Generate Sample Data");
+            w.WriteString("statusUrl", statusUrl);
+            w.WriteEndObject();
+        }
     }
 
     /// <summary>
@@ -3978,8 +4005,15 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.Headers["Location"] = statusUrl;
         context.Response.Headers["Retry-After"] = "2";
         context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(
-            JsonSerializer.Serialize(new { jobId, status = "queued", operationName = "Wipe All Data", statusUrl })).ConfigureAwait(false);
+        await using (var w = new Utf8JsonWriter(context.Response.Body))
+        {
+            w.WriteStartObject();
+            w.WriteString("jobId", jobId);
+            w.WriteString("status", "queued");
+            w.WriteString("operationName", "Wipe All Data");
+            w.WriteString("statusUrl", statusUrl);
+            w.WriteEndObject();
+        }
     }
 
     /// <summary>
@@ -5178,24 +5212,20 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private async ValueTask ExportHierarchicalJson(BmwContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
     {
-        var jsonOptions = JsonIndented;
-        #pragma warning disable IL2026 // Serializing IReadOnlyList<object?> — all entity types preserved via TrimmerRootAssembly
-        var json = JsonSerializer.Serialize(items, jsonOptions);
-        #pragma warning restore IL2026
         context.Response.ContentType = "application/json";
         context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_export.json\"";
-        await context.Response.WriteAsync(json);
+        await using var writer = new Utf8JsonWriter(context.Response.Body, new JsonWriterOptions { Indented = true });
+        WriteJsonValue(writer, items);
+        await writer.FlushAsync();
     }
 
     private async ValueTask ExportSingleHierarchicalJson(BmwContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
     {
-        var jsonOptions = JsonIndented;
-        #pragma warning disable IL2026 // Serializing entity instance — all entity types preserved via TrimmerRootAssembly
-        var json = JsonSerializer.Serialize(instance, jsonOptions);
-        #pragma warning restore IL2026
         context.Response.ContentType = "application/json";
         context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_{WebUtility.UrlEncode(id)}.json\"";
-        await context.Response.WriteAsync(json);
+        await using var writer = new Utf8JsonWriter(context.Response.Body, new JsonWriterOptions { Indented = true });
+        WriteJsonValue(writer, instance);
+        await writer.FlushAsync();
     }
 
     private async ValueTask ExportFlatCsv(BmwContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
@@ -6035,6 +6065,23 @@ public sealed class RouteHandlers : IRouteHandlers
         writer.WriteStringValue(value?.ToString() ?? "");
     }
 
+    private static void WriteJobSnapshot(Utf8JsonWriter w, string jobId, string operationName,
+        string status, int percentComplete, string? description,
+        string startedAt, string? completedAt, string? error, string? resultUrl)
+    {
+        w.WriteStartObject();
+        w.WriteString("jobId", jobId);
+        w.WriteString("operationName", operationName);
+        w.WriteString("status", status);
+        w.WriteNumber("percentComplete", percentComplete);
+        w.WriteString("description", description);
+        w.WriteString("startedAt", startedAt);
+        if (completedAt != null) w.WriteString("completedAt", completedAt); else w.WriteNull("completedAt");
+        if (error != null) w.WriteString("error", error); else w.WriteNull("error");
+        if (resultUrl != null) w.WriteString("resultUrl", resultUrl); else w.WriteNull("resultUrl");
+        w.WriteEndObject();
+    }
+
     private static void AppendUserPasswordFieldsIfNeeded(DataEntityMetadata meta, List<FormField> fields, bool isCreate)
     {
         if (meta.Type != typeof(User))
@@ -6828,7 +6875,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (meta == null || string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(commandName))
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
-            await WriteJsonResponseAsync(context, new { success = false, message = errorMessage ?? "Not found." });
+            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = false, ["message"] = errorMessage ?? "Not found." });
             return;
         }
 
@@ -6844,7 +6891,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (cmd == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
-            await WriteJsonResponseAsync(context, new { success = false, message = $"Command '{commandName}' not found." });
+            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = false, ["message"] = $"Command '{commandName}' not found." });
             return;
         }
 
@@ -6854,7 +6901,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                await WriteJsonResponseAsync(context, new { success = false, message = "Access denied." });
+                await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = false, ["message"] = "Access denied." });
                 return;
             }
         }
@@ -6863,7 +6910,7 @@ public sealed class RouteHandlers : IRouteHandlers
             (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context)))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await WriteJsonResponseAsync(context, new { success = false, message = "CSRF validation failed." });
+            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = false, ["message"] = "CSRF validation failed." });
             return;
         }
 
@@ -6885,7 +6932,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (user == null || !hasPermission)
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                await WriteJsonResponseAsync(context, new { success = false, message = "Insufficient permissions." });
+                await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = false, ["message"] = "Insufficient permissions." });
                 return;
             }
         }
@@ -6894,7 +6941,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
-            await WriteJsonResponseAsync(context, new { success = false, message = "Item not found." });
+            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = false, ["message"] = "Item not found." });
             return;
         }
 
@@ -6930,12 +6977,12 @@ public sealed class RouteHandlers : IRouteHandlers
 
             context.Response.StatusCode = result.Success ? StatusCodes.Status200OK : StatusCodes.Status422UnprocessableEntity;
             var entityData = result.Success ? BuildApiModel(meta, instance) : null;
-            await WriteJsonResponseAsync(context, new { success = result.Success, message = result.Message, redirectUrl = result.RedirectUrl, data = entityData });
+            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = result.Success, ["message"] = result.Message, ["redirectUrl"] = result.RedirectUrl, ["data"] = entityData });
         }
         catch (Exception ex)
         {
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            await WriteJsonResponseAsync(context, new { success = false, message = $"Command failed: {ex.InnerException?.Message ?? ex.Message}" });
+            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = false, ["message"] = $"Command failed: {ex.InnerException?.Message ?? ex.Message}" });
         }
     }
 
@@ -7142,20 +7189,13 @@ public sealed class RouteHandlers : IRouteHandlers
             _                             => "unknown"
         };
 
-        var json = JsonSerializer.Serialize(new
+        await using (var w = new Utf8JsonWriter(context.Response.Body))
         {
-            jobId            = snapshot.JobId,
-            operationName    = snapshot.OperationName,
-            status           = statusStr,
-            percentComplete  = snapshot.PercentComplete,
-            description      = snapshot.Description,
-            startedAt        = snapshot.StartedAt.ToString("O"),
-            completedAt      = snapshot.CompletedAt?.ToString("O"),
-            error            = snapshot.Error,
-            resultUrl        = snapshot.ResultUrl
-        });
-
-        await context.Response.WriteAsync(json).ConfigureAwait(false);
+            WriteJobSnapshot(w, snapshot.JobId, snapshot.OperationName, statusStr,
+                snapshot.PercentComplete, snapshot.Description,
+                snapshot.StartedAt.ToString("O"), snapshot.CompletedAt?.ToString("O"),
+                snapshot.Error, snapshot.ResultUrl);
+        }
     }
 
     /// <summary>
@@ -7168,34 +7208,29 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var jobsList = new List<JobStatusSnapshot>(jobs);
         jobsList.Sort((a, b) => b.StartedAt.CompareTo(a.StartedAt));
-        var items = new object[jobsList.Count];
-        for (int ji = 0; ji < jobsList.Count; ji++)
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "application/json";
+        await using (var w = new Utf8JsonWriter(context.Response.Body))
         {
-            var snapshot = jobsList[ji];
-            items[ji] = new
+            w.WriteStartArray();
+            for (int ji = 0; ji < jobsList.Count; ji++)
             {
-                jobId           = snapshot.JobId,
-                operationName   = snapshot.OperationName,
-                status          = snapshot.Status switch
+                var snapshot = jobsList[ji];
+                var statusStr = snapshot.Status switch
                 {
                     BackgroundJobStatus.Queued    => "queued",
                     BackgroundJobStatus.Running   => "running",
                     BackgroundJobStatus.Succeeded => "succeeded",
                     BackgroundJobStatus.Failed    => "failed",
                     _                             => "unknown"
-                },
-                percentComplete = snapshot.PercentComplete,
-                description     = snapshot.Description,
-                startedAt       = snapshot.StartedAt.ToString("O"),
-                completedAt     = snapshot.CompletedAt?.ToString("O"),
-                error           = snapshot.Error,
-                resultUrl       = snapshot.ResultUrl
-            };
+                };
+                WriteJobSnapshot(w, snapshot.JobId, snapshot.OperationName, statusStr,
+                    snapshot.PercentComplete, snapshot.Description,
+                    snapshot.StartedAt.ToString("O"), snapshot.CompletedAt?.ToString("O"),
+                    snapshot.Error, snapshot.ResultUrl);
+            }
+            w.WriteEndArray();
         }
-
-        context.Response.StatusCode = StatusCodes.Status200OK;
-        context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(items)).ConfigureAwait(false);
     }
 
     /// <summary>

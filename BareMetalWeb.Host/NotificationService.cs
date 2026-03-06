@@ -66,11 +66,11 @@ public sealed class WebhookSmsChannel : INotificationChannel
 
     public async ValueTask SendAsync(string recipient, string subject, string body, CancellationToken ct)
     {
-        var payload = System.Text.Json.JsonSerializer.Serialize(new
+        var payload = JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
         {
-            from = _from,
-            to = recipient,
-            message = $"{subject}\n{body}"
+            ["from"] = _from,
+            ["to"] = recipient,
+            ["message"] = $"{subject}\n{body}"
         });
         using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
         {
@@ -99,12 +99,12 @@ public sealed class WebhookNotificationChannel : INotificationChannel
 
     public async ValueTask SendAsync(string recipient, string subject, string body, CancellationToken ct)
     {
-        var payload = JsonSerializer.Serialize(new
+        var payload = JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
         {
-            recipient,
-            subject,
-            body,
-            timestamp = DateTime.UtcNow
+            ["recipient"] = recipient,
+            ["subject"] = subject,
+            ["body"] = body,
+            ["timestamp"] = DateTime.UtcNow
         });
         using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
         {

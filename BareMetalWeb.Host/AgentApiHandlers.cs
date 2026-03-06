@@ -18,12 +18,6 @@ namespace BareMetalWeb.Host;
 /// </summary>
 public static class AgentApiHandlers
 {
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = false,
-    };
-
     /// <summary>POST /api/agent/chat</summary>
     public static async ValueTask ChatHandler(BmwContext context)
     {
@@ -41,8 +35,7 @@ public static class AgentApiHandlers
             reply = $"Error: {ex.Message}";
         }
 
-        context.Response.ContentType = "application/json";
-        await JsonSerializer.SerializeAsync(context.Response.Body, new { reply }, JsonOpts);
+        await JsonWriterHelper.WriteResponseAsync(context.Response, new Dictionary<string, object?> { ["reply"] = reply });
     }
 
     private static async ValueTask<string> ProcessMessageAsync(string message, CancellationToken ct)

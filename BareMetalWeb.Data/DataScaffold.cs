@@ -621,7 +621,7 @@ public static class DataScaffold
                 {
                     var parser = new ExpressionParser();
                     var ast = parser.Parse(calculated.Expression);
-                    jsExpression = JsonSerializer.Serialize(ast.ToJsonAst());
+                    jsExpression = DataJsonWriter.ToJsonString(ast.ToJsonAst());
                 }
                 catch (Exception ex)
                 {
@@ -2687,7 +2687,7 @@ public static class DataScaffold
         {
             try
             {
-                var parsed = JsonSerializer.Deserialize<List<Dictionary<string, string>>>(jsonValue);
+                var parsed = DataJsonWriter.ParseListOfStringDicts(jsonValue);
                 if (parsed != null) rows = parsed;
             }
             catch { /* ignore corrupt JSON */ }
@@ -2786,7 +2786,7 @@ public static class DataScaffold
     {
         var fieldId = WebUtility.HtmlEncode(field.Name);
 
-        var json = JsonSerializer.Serialize(rows);
+        var json = DataJsonWriter.ToJsonString(rows);
         var modalId = $"modal_{field.Name}";
         var tableId = $"table_{field.Name}";
         var formId = $"form_{field.Name}";
@@ -2827,7 +2827,7 @@ public static class DataScaffold
                 {
                     var parser = new ExpressionParser();
                     var ast = parser.Parse(child.Calculated.Expression);
-                    jsExpression = JsonSerializer.Serialize(ast.ToJsonAst());
+                    jsExpression = DataJsonWriter.ToJsonString(ast.ToJsonAst());
                 }
                 catch
                 {
@@ -2923,7 +2923,7 @@ public static class DataScaffold
             }
             lookupMaps[child.Name] = map;
         }
-        sb.Append(JsonSerializer.Serialize(lookupMaps));
+        sb.Append(DataJsonWriter.ToJsonString(lookupMaps));
         sb.Append(";" );
 
         // CSP-safe calculated field helpers — no eval/new Function used.
@@ -3056,8 +3056,7 @@ public static class DataScaffold
 
         try
         {
-            var rows = JsonSerializer.Deserialize<List<Dictionary<string, string>>>(rawValue)
-                ?? new List<Dictionary<string, string>>();
+            var rows = DataJsonWriter.ParseListOfStringDicts(rawValue);
             var typedList = (IList)listFactory();
             var childFields = GetChildFieldMetadata(childType);
 
@@ -3174,7 +3173,7 @@ public static class DataScaffold
             }
         }
 
-        var json = JsonSerializer.Serialize(rows);
+        var json = DataJsonWriter.ToJsonString(rows);
         var modalId = $"modal_{field.Name}";
         var tableId = $"table_{field.Name}";
         var formId = $"form_{field.Name}";
@@ -3269,8 +3268,7 @@ public static class DataScaffold
 
         try
         {
-            var list = JsonSerializer.Deserialize<List<Dictionary<string, string>>>(rawValue)
-                ?? new List<Dictionary<string, string>>();
+            var list = DataJsonWriter.ParseListOfStringDicts(rawValue);
             var result = (IDictionary)dictFactory();
 
             foreach (var row in list)

@@ -26,12 +26,6 @@ namespace BareMetalWeb.Host;
 /// </summary>
 internal static class McpRouteHandler
 {
-    private static readonly JsonSerializerOptions _jsonOptions = new()
-    {
-        WriteIndented = false,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     private const string ProtocolVersion = "2024-11-05";
     private const string ServerName = "BareMetalWeb";
 
@@ -335,7 +329,7 @@ internal static class McpRouteHandler
         var list = new List<Dictionary<string, object?>>();
         foreach (var item in results)
             list.Add(item);
-        return BuildToolTextResult(JsonSerializer.Serialize(list, _jsonOptions));
+        return BuildToolTextResult(JsonWriterHelper.ToJsonString(list));
     }
 
     private static async ValueTask<object> ExecuteGetAsync(
@@ -354,7 +348,7 @@ internal static class McpRouteHandler
         if (item is null)
             return BuildToolErrorResult("Record not found.");
 
-        return BuildToolTextResult(JsonSerializer.Serialize(item, _jsonOptions));
+        return BuildToolTextResult(JsonWriterHelper.ToJsonString(item));
     }
 
     private static async ValueTask<object> ExecuteCreateAsync(
@@ -368,7 +362,7 @@ internal static class McpRouteHandler
             .ConfigureAwait(false);
 
         return result.Success
-            ? BuildToolTextResult(JsonSerializer.Serialize(new { id = result.EntityId, data = result.Data }, _jsonOptions))
+            ? BuildToolTextResult(JsonWriterHelper.ToJsonString(new Dictionary<string, object?> { ["id"] = result.EntityId, ["data"] = result.Data }))
             : BuildToolErrorResult(result.Error ?? "Create failed.");
     }
 
@@ -389,7 +383,7 @@ internal static class McpRouteHandler
             .ConfigureAwait(false);
 
         return result.Success
-            ? BuildToolTextResult(JsonSerializer.Serialize(new { id = result.EntityId, data = result.Data }, _jsonOptions))
+            ? BuildToolTextResult(JsonWriterHelper.ToJsonString(new Dictionary<string, object?> { ["id"] = result.EntityId, ["data"] = result.Data }))
             : BuildToolErrorResult(result.Error ?? "Update failed.");
     }
 
@@ -429,7 +423,7 @@ internal static class McpRouteHandler
             .ConfigureAwait(false);
 
         return result.Success
-            ? BuildToolTextResult(JsonSerializer.Serialize(new { id = result.EntityId, data = result.Data }, _jsonOptions))
+            ? BuildToolTextResult(JsonWriterHelper.ToJsonString(new Dictionary<string, object?> { ["id"] = result.EntityId, ["data"] = result.Data }))
             : BuildToolErrorResult(result.Error ?? "Command failed.");
     }
 
@@ -595,15 +589,15 @@ internal static class McpRouteHandler
 
     // ── Helper: MCP tool result builders ─────────────────────────────────────
 
-    private static object BuildToolTextResult(string text) => new
+    private static Dictionary<string, object?> BuildToolTextResult(string text) => new()
     {
-        content = new[] { new { type = "text", text } }
+        ["content"] = new[] { new Dictionary<string, object?> { ["type"] = "text", ["text"] = text } }
     };
 
-    private static object BuildToolErrorResult(string message) => new
+    private static Dictionary<string, object?> BuildToolErrorResult(string message) => new()
     {
-        content = new[] { new { type = "text", text = message } },
-        isError = true
+        ["content"] = new[] { new Dictionary<string, object?> { ["type"] = "text", ["text"] = message } },
+        ["isError"] = true
     };
 
     // ── Helper: build MCP tool descriptor ─────────────────────────────────────
@@ -620,26 +614,25 @@ internal static class McpRouteHandler
     // ── Helper: JSON-RPC envelope builders ───────────────────────────────────
 
     private static string BuildSuccessEnvelope(JsonElement id, object result)
-        => JsonSerializer.Serialize(new
+        => JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
         {
-            jsonrpc = "2.0",
-            id = id,
-            result
-        }, _jsonOptions);
+            ["jsonrpc"] = "2.0",
+            ["id"] = id,
+            ["result"] = result
+        });
 
     private static string BuildErrorEnvelope(
         JsonElement? id, int code, string message, string? data = null)
     {
-        var error = data is null
-            ? (object)new { code, message }
-            : new { code, message, data };
+        var error = new Dictionary<string, object?> { ["code"] = code, ["message"] = message };
+        if (data is not null) error["data"] = data;
 
-        return JsonSerializer.Serialize(new
+        return JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
         {
-            jsonrpc = "2.0",
-            id = id,
-            error
-        }, _jsonOptions);
+            ["jsonrpc"] = "2.0",
+            ["id"] = (object?)id,
+            ["error"] = error
+        });
     }
 
     private static Task WriteRawAsync(BmwContext context, string json)
