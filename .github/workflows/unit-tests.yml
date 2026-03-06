@@ -62,7 +62,7 @@ jobs:
           MAJOR="${{ vars.MAJOR_VERSION || '1' }}"
           DATE="$(date +%Y%m%d)"
           BUILD="${{ github.run_number }}"
-          echo "info_version=V${MAJOR}.${DATE}.${BUILD}" >> $GITHUB_OUTPUT
+          echo "info_version=${MAJOR}.${DATE}.${BUILD}+${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
           echo "assembly_version=${MAJOR}.0.0.${BUILD}" >> $GITHUB_OUTPUT
 
       - name: Setup .NET
