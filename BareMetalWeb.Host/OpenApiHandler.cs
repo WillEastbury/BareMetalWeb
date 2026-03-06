@@ -42,9 +42,7 @@ internal static class OpenApiHandler
                 filteredEntities.Add(e);
         }
         filteredEntities.Sort((a, b) => string.Compare(a.Slug, b.Slug, StringComparison.Ordinal));
-        var accessibleEntities = filteredEntities.ToArray();
-
-        var document = BuildDocument(context, accessibleEntities);
+        var document = BuildDocument(context, filteredEntities);
 
         context.Response.ContentType = "application/json; charset=utf-8";
         context.Response.Headers["Cache-Control"] = "no-store";
@@ -57,7 +55,7 @@ internal static class OpenApiHandler
 
     private static Dictionary<string, object?> BuildDocument(
         BmwContext context,
-        DataEntityMetadata[] entities)
+        List<DataEntityMetadata> entities)
     {
         var request = context.HttpRequest;
         var scheme = request.IsHttps ? "https" : "http";

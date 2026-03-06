@@ -119,7 +119,7 @@ public sealed class ProxyRouteHandler
             }
             catch (InvalidOperationException)
             {
-                context.Response.StatusCode = StatusCodes.Status502BadGateway;
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
                 await context.Response.WriteAsync("Proxy target blocked.");
                 return;
             }
@@ -229,7 +229,7 @@ public sealed class ProxyRouteHandler
 
         // Block path traversal sequences
         if (requestPath.Contains(".."))
-            requestPath = requestPath.Replace("..", string.Empty);
+            throw new InvalidOperationException("Path traversal detected");
 
         if (!string.IsNullOrWhiteSpace(_route.RewritePath))
         {

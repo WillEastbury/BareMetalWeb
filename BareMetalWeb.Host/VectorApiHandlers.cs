@@ -15,6 +15,13 @@ namespace BareMetalWeb.Host;
 /// </summary>
 public static class VectorApiHandlers
 {
+    private static readonly Dictionary<string, DistanceMetric> DistanceMetricLookup = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Cosine"] = DistanceMetric.Cosine,
+        ["DotProduct"] = DistanceMetric.DotProduct,
+        ["Euclidean"] = DistanceMetric.Euclidean,
+    };
+
     private static VectorIndexManager? _manager;
 
     private static readonly JsonSerializerOptions JsonOpts = new()
@@ -154,9 +161,8 @@ public static class VectorApiHandlers
         var entity = root.GetProperty("entity").GetString() ?? "";
         var field = root.GetProperty("field").GetString() ?? "";
         var dimension = root.GetProperty("dimension").GetUInt16();
-        var metric = root.TryGetProperty("metric", out var mEl)
-            ? Enum.TryParse<DistanceMetric>(mEl.GetString(), true, out var m) ? m : DistanceMetric.Cosine
-            : DistanceMetric.Cosine;
+        var metric = root.TryGetProperty("metric", out var mEl) && mEl.GetString() is { } ms
+            && DistanceMetricLookup.TryGetValue(ms, out var m) ? m : DistanceMetric.Cosine;
         var maxDegree = root.TryGetProperty("maxDegree", out var mdEl) ? mdEl.GetInt32() : 32;
 
         var def = new VectorIndexDefinition
