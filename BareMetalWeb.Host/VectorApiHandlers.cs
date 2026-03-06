@@ -24,12 +24,6 @@ public static class VectorApiHandlers
 
     private static VectorIndexManager? _manager;
 
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        WriteIndented = false,
-    };
-
     /// <summary>Initialize with the vector index manager.</summary>
     public static void Initialize(VectorIndexManager manager) => _manager = manager;
 
@@ -67,17 +61,16 @@ public static class VectorApiHandlers
 
         var results = _manager.Search(entity, field, vector, top);
 
-        var projectedResults = new List<object>(results.Count);
+        var projectedResults = new List<Dictionary<string, object?>>(results.Count);
         foreach (var r in results)
-            projectedResults.Add(new { id = r.Id, distance = r.Distance });
-        context.Response.ContentType = "application/json";
-        await JsonSerializer.SerializeAsync(context.Response.Body, new
+            projectedResults.Add(new Dictionary<string, object?> { ["id"] = r.Id, ["distance"] = r.Distance });
+        await JsonWriterHelper.WriteResponseAsync(context.Response, new Dictionary<string, object?>
         {
-            entity,
-            field,
-            count = results.Count,
-            results = projectedResults,
-        }, JsonOpts);
+            ["entity"] = entity,
+            ["field"] = field,
+            ["count"] = results.Count,
+            ["results"] = projectedResults,
+        });
     }
 
     /// <summary>POST /api/vector/upsert</summary>
@@ -132,22 +125,21 @@ public static class VectorApiHandlers
         if (_manager == null) { context.Response.StatusCode = 503; return; }
 
         var rawDefs = _manager.GetDefinitions();
-        var defs = new List<object>();
+        var defs = new List<Dictionary<string, object?>>();
         foreach (var d in rawDefs)
         {
-            defs.Add(new
+            defs.Add(new Dictionary<string, object?>
             {
-                entity = d.EntityType,
-                field = d.Field,
-                dimension = d.Def.Dimension,
-                metric = d.Def.Metric.ToString(),
-                maxDegree = d.Def.MaxDegree,
-                count = _manager.Count(d.EntityType, d.Field),
+                ["entity"] = d.EntityType,
+                ["field"] = d.Field,
+                ["dimension"] = d.Def.Dimension,
+                ["metric"] = d.Def.Metric.ToString(),
+                ["maxDegree"] = d.Def.MaxDegree,
+                ["count"] = _manager.Count(d.EntityType, d.Field),
             });
         }
 
-        context.Response.ContentType = "application/json";
-        await JsonSerializer.SerializeAsync(context.Response.Body, defs, JsonOpts);
+        await JsonWriterHelper.WriteResponseAsync(context.Response, defs);
     }
 
     /// <summary>POST /api/vector/register — register a new vector index.</summary>

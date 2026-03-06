@@ -17,7 +17,6 @@ namespace BareMetalWeb.Host;
 /// </summary>
 public static class LookupApiHandlers
 {
-    private static readonly JsonSerializerOptions JsonCamelCase = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = false };
     private static IBufferedLogger? _logger;
 
     /// <summary>Initialise with a logger for error diagnostics.</summary>
@@ -609,16 +608,14 @@ public static class LookupApiHandlers
 
     private static async ValueTask WriteJsonAsync(BmwContext context, object data)
     {
-        context.Response.ContentType = "application/json";
         context.Response.StatusCode = StatusCodes.Status200OK;
-        await JsonSerializer.SerializeAsync(context.Response.Body, data, JsonCamelCase);
+        await JsonWriterHelper.WriteResponseAsync(context.Response, data);
     }
 
     private static async ValueTask WriteJsonErrorAsync(BmwContext context, int statusCode, string message)
     {
-        context.Response.ContentType = "application/json";
         context.Response.StatusCode = statusCode;
-        await JsonSerializer.SerializeAsync(context.Response.Body, new Dictionary<string, object>
+        await JsonWriterHelper.WriteResponseAsync(context.Response, new Dictionary<string, object?>
         {
             ["error"] = message,
             ["status"] = statusCode

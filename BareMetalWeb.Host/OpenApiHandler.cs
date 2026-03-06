@@ -20,12 +20,6 @@ namespace BareMetalWeb.Host;
 /// </summary>
 internal static class OpenApiHandler
 {
-    private static readonly JsonSerializerOptions _writeOptions = new()
-    {
-        WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
-
     // ── Entry point ───────────────────────────────────────────────────────────
 
     internal static async ValueTask HandleAsync(BmwContext context)
@@ -47,7 +41,7 @@ internal static class OpenApiHandler
         context.Response.ContentType = "application/json; charset=utf-8";
         context.Response.Headers["Cache-Control"] = "no-store";
         await context.Response.WriteAsync(
-            JsonSerializer.Serialize(document, _writeOptions),
+            JsonWriterHelper.ToJsonString(document, indented: true),
             context.RequestAborted).ConfigureAwait(false);
     }
 
