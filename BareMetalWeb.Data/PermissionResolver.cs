@@ -31,7 +31,12 @@ public static class PermissionResolver
     }
 
     /// <summary>Invalidate all cached permission sets (call on group/role/permission save).</summary>
-    public static void Invalidate() => Interlocked.Increment(ref _generation);
+    public static void Invalidate()
+    {
+        Interlocked.Increment(ref _generation);
+        // Clear all stale entries to prevent unbounded growth from inactive users
+        _cache.Clear();
+    }
 
     /// <summary>Invalidate a specific principal's cache.</summary>
     public static void Invalidate(uint principalKey) => _cache.TryRemove(principalKey, out _);
