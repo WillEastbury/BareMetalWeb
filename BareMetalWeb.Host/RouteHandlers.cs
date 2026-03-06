@@ -9,6 +9,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
@@ -45,8 +46,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private const int LoginIpMaxAttempts = 10;
     private const int LoginUserMaxAttempts = 5;
     private const int SsoCallbackIpMaxAttempts = 10;
-    private static readonly ConcurrentDictionary<Type, System.Reflection.PropertyInfo[]> JsonPropertyCache = new();
-    private static readonly JsonSerializerOptions JsonIndented = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions JsonIndented= new() { WriteIndented = true };
     private static readonly TimeSpan DataQueryTimeout = TimeSpan.FromSeconds(30);
 
     [ThreadStatic] private static StringBuilder? t_cachedSb;
@@ -2635,6 +2635,8 @@ public sealed class RouteHandlers : IRouteHandlers
         await _renderer.RenderPage(context.HttpContext);
     }
 
+    [UnconditionalSuppressMessage("AOT", "IL2026", Justification = "Audit trail clone uses runtime serialization of entity types preserved via TrimmerRootAssembly.")]
+    [UnconditionalSuppressMessage("AOT", "IL3050", Justification = "Audit trail clone uses runtime serialization of entity types preserved via TrimmerRootAssembly.")]
     public async ValueTask DataEditPostHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
@@ -7457,34 +7459,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        // Fallback: serialize complex objects via reflection as JSON objects
-        var valueType = value.GetType();
-        if (valueType.IsClass)
-        {
-            writer.WriteStartObject();
-            var props = JsonPropertyCache.GetOrAdd(valueType, static t =>
-            {
-                #pragma warning disable IL2070, IL2075
-                var allProps = t.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                var filtered = new List<System.Reflection.PropertyInfo>();
-                foreach (var p in allProps)
-                {
-                    if (p.CanRead && p.GetIndexParameters().Length == 0)
-                        filtered.Add(p);
-                }
-                return filtered.ToArray();
-                #pragma warning restore IL2070, IL2075
-            });
-            foreach (var prop in props)
-            {
-                writer.WritePropertyName(prop.Name);
-                WriteJsonValue(writer, prop.GetValue(value));
-            }
-            writer.WriteEndObject();
-            return;
-        }
-
-        writer.WriteStringValue(value.ToString());
+        writer.WriteStringValue(value?.ToString() ?? "");
     }
 
     private static void AppendUserPasswordFieldsIfNeeded(DataEntityMetadata meta, List<FormField> fields, bool isCreate)
