@@ -5740,13 +5740,13 @@ public sealed class RouteHandlers : IRouteHandlers
         if (field == null)
             return;
 
-        if (DataScaffold.TryConvertValue(value, field.Property.PropertyType, out var converted) && converted != null)
+        if (DataScaffold.TryConvertValue(value, field.ClrType, out var converted) && converted != null)
         {
             field.SetValueFn(instance, converted);
             return;
         }
 
-        var effectiveType = Nullable.GetUnderlyingType(field.Property.PropertyType) ?? field.Property.PropertyType;
+        var effectiveType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
         if (effectiveType == typeof(string))
         {
             field.SetValueFn(instance, value);
@@ -6215,7 +6215,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var ganttItems = new List<(BaseDataObject Item, DateOnly Start, DateOnly End, string Label)>();
         foreach (var item in itemsList)
         {
-            var startValue = startField.Property.GetValue(item);
+            var startValue = startField.GetValueFn(item);
             DateOnly? startDate = startValue switch
             {
                 DateOnly d => d,
@@ -6228,7 +6228,7 @@ public sealed class RouteHandlers : IRouteHandlers
             DateOnly endDate;
             if (endField != null)
             {
-                var endValue = endField.Property.GetValue(item);
+                var endValue = endField.GetValueFn(item);
                 endDate = endValue switch
                 {
                     DateOnly d => d,
@@ -6374,7 +6374,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
         if (nameField != null)
         {
-            var value = nameField.Property.GetValue(item)?.ToString();
+            var value = nameField.GetValueFn(item)?.ToString();
             if (!string.IsNullOrWhiteSpace(value))
                 return value;
         }
@@ -6391,7 +6391,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
         if (displayField != null)
         {
-            var value = displayField.Property.GetValue(item)?.ToString();
+            var value = displayField.GetValueFn(item)?.ToString();
             if (!string.IsNullOrWhiteSpace(value))
                 return value;
         }

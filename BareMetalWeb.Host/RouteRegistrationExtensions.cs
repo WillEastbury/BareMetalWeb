@@ -1,5 +1,4 @@
 using System.Net;
-using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -1029,7 +1028,7 @@ public static class RouteRegistrationExtensions
                 var filteredTypes = new List<DataEntityMetadata>();
                 foreach (var m in DataScaffold.Entities)
                 {
-                    if (m.Type != typeof(DataRecord) && m.Type.GetCustomAttribute<DataEntityAttribute>() != null)
+                    if (m.Type != typeof(DataRecord))
                         filteredTypes.Add(m);
                 }
                 filteredTypes.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));

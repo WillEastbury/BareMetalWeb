@@ -141,7 +141,16 @@ public static class ComputedFieldService
     {
         return _getterCache.GetOrAdd((type, name), static key =>
         {
-            var prop = key.Item1.GetProperty(key.Item2);
+            // Prefer metadata-compiled delegate for registered entity types.
+            var meta = DataScaffold.GetEntityByType(key.Item1);
+            if (meta != null)
+            {
+                var f = meta.FindField(key.Item2);
+                if (f != null) return f.GetValueFn;
+            }
+            // Fall back to compiling from PropertyInfo for unregistered types (once per type/field).
+            var prop = key.Item1.GetProperty(key.Item2,
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
             return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;
         });
     }
@@ -197,7 +206,7 @@ public static class ComputedFieldService
             // Try to query for child entities if the collection isn't loaded
             // This would require knowing the child entity type and foreign key relationship
             // For now, return default value
-            return GetDefaultValueForAggregate(config.Aggregate, field.Property.PropertyType);
+            return GetDefaultValueForAggregate(config.Aggregate, field.ClrType);
         }
 
         var items = new List<object>();
@@ -212,7 +221,7 @@ public static class ComputedFieldService
             if (config.Aggregate == AggregateFunction.Count)
                 return items.Count;
             
-            return GetDefaultValueForAggregate(config.Aggregate, field.Property.PropertyType);
+            return GetDefaultValueForAggregate(config.Aggregate, field.ClrType);
         }
 
         // Get values from the source field (cache lookup per item type)
@@ -233,7 +242,7 @@ public static class ComputedFieldService
             }
         }
 
-        return ApplyAggregateFunction(config.Aggregate, values, field.Property.PropertyType);
+        return ApplyAggregateFunction(config.Aggregate, values, field.ClrType);
     }
 
     private static object? ApplyAggregateFunction(AggregateFunction aggregate, List<object?> values, Type targetType)

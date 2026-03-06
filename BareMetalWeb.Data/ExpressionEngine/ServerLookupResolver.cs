@@ -137,7 +137,7 @@ public sealed class ServerLookupResolver : ILookupResolver
         if (currentEntity == null)
             return null;
 
-        // Steps 2..n-1: traverse intermediate FK fields using DataLookupAttribute reflection
+        // Steps 2..n-1: traverse intermediate FK fields using entity metadata
         for (int i = 1; i < chain.Count - 1; i++)
         {
             var nextFkField = chain[i];
@@ -150,19 +150,14 @@ public sealed class ServerLookupResolver : ILookupResolver
                 return null;
 
             DataEntityMetadata? nextMeta = null;
-            PropertyInfo? lookupProp = null;
-            foreach (var p in currentEntity.GetType()
-                .GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            // Use DataScaffold metadata to find the FK field's lookup target (no reflection).
+            var currentEntityMeta = DataScaffold.GetEntityByType(currentEntity.GetType());
+            if (currentEntityMeta != null)
             {
-                if (string.Equals(p.Name, nextFkField, StringComparison.OrdinalIgnoreCase))
-                {
-                    lookupProp = p;
-                    break;
-                }
+                var fkFieldMeta = currentEntityMeta.FindField(nextFkField);
+                if (fkFieldMeta?.Lookup != null)
+                    nextMeta = DataScaffold.GetEntityByType(fkFieldMeta.Lookup.TargetType);
             }
-            var lookupAttr = lookupProp?.GetCustomAttribute<DataLookupAttribute>();
-            if (lookupAttr != null)
-                nextMeta = DataScaffold.GetEntityByType(lookupAttr.TargetType);
 
             if (nextMeta == null)
                 return null;
@@ -175,15 +170,30 @@ public sealed class ServerLookupResolver : ILookupResolver
         return ExtractFieldValue(currentEntity, chain[chain.Count - 1]);
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(Type, string), Func<object, object?>?> _extractorCache = new();
+
     private static object? ExtractFieldValue(object entity, string fieldName)
     {
         if (entity is DataRecord rec && rec.Schema != null)
             return rec.GetField(rec.Schema, fieldName);
 
-        // Reflection for compiled entities
-        var prop = entity.GetType().GetProperty(fieldName,
-            BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-        return prop?.GetValue(entity);
+        var type = entity.GetType();
+        // Use metadata-compiled delegate for registered entity types.
+        var meta = DataScaffold.GetEntityByType(type);
+        if (meta != null)
+        {
+            var f = meta.FindField(fieldName);
+            if (f != null) return f.GetValueFn(entity);
+        }
+
+        // Fall back to cached compiled getter for unregistered types (once per type/field).
+        var getter = _extractorCache.GetOrAdd((type, fieldName), static key =>
+        {
+            var prop = key.Item1.GetProperty(key.Item2,
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;
+        });
+        return getter?.Invoke(entity);
     }
 
     private static bool ValuesEqual(object? a, object? b)

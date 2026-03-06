@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Reflection;
 using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
@@ -110,7 +109,9 @@ public class BareMetalWebServer : IBareWebHost
         AppName = appName;
         CompanyDescription = companyDescription;
         CopyrightYear = copyrightYear;
-        var rawVersion = typeof(BareMetalWebServer).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+        var rawVersion = (typeof(BareMetalWebServer).Assembly
+            .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false)
+            .FirstOrDefault() as System.Reflection.AssemblyInformationalVersionAttribute)?.InformationalVersion
             ?? typeof(BareMetalWebServer).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
         // Strip leading 'v'/'V' (template already adds 'v') and shorten full commit SHA after '+' to 7 chars
         var trimmed = rawVersion.TrimStart('v').TrimStart('V');

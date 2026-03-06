@@ -98,7 +98,7 @@ internal static class ColumnQueryExecutor
         int wordCount)
         where T : BaseDataObject
     {
-        var propType = Nullable.GetUnderlyingType(field.Property.PropertyType) ?? field.Property.PropertyType;
+        var propType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
 
         // Int-range types: int, uint, short, ushort, byte, sbyte, bool, enum
         if (IsIntType(propType) && TryConvertToInt(clause.Value, propType, out int iTarget))

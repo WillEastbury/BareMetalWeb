@@ -50,6 +50,42 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     // Monotonic ETag counter — cheaper than Guid.NewGuid() per save
     private static long _etagCounter = DateTime.UtcNow.Ticks;
 
+    // Cached singleton-flag field descriptors per type (built once, avoids per-call GetProperties reflection).
+    private static readonly ConcurrentDictionary<Type, (string Name, Func<object, object?> Getter, Action<object, object?> Setter)[]> s_singletonFlagFields = new();
+
+    /// <summary>
+    /// Returns the singleton-flag field descriptors for <paramref name="type"/>.
+    /// Compiled delegates are built once per type and cached.
+    /// </summary>
+    internal static (string Name, Func<object, object?> Getter, Action<object, object?> Setter)[] GetSingletonFlagFields(Type type)
+    {
+        return s_singletonFlagFields.GetOrAdd(type, static t =>
+        {
+            var result = new List<(string Name, Func<object, object?> Getter, Action<object, object?> Setter)>();
+            var meta = DataScaffold.GetEntityByType(t);
+            if (meta != null)
+            {
+                foreach (var field in meta.Fields)
+                {
+                    if (field.ClrType == typeof(bool)
+                        && field.Property.GetCustomAttribute<SingletonFlagAttribute>() != null)
+                        result.Add((field.Name, field.GetValueFn, field.SetValueFn));
+                }
+            }
+            else
+            {
+                foreach (var p in t.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                {
+                    if (p.PropertyType == typeof(bool)
+                        && p.GetCustomAttribute<SingletonFlagAttribute>() != null
+                        && p.CanRead && p.CanWrite)
+                        result.Add((p.Name, PropertyAccessorFactory.BuildGetter(p), PropertyAccessorFactory.BuildSetter(p)));
+                }
+            }
+            return result.ToArray();
+        });
+    }
+
     // ── Fields ────────────────────────────────────────────────────────────────
 
     private readonly string                    _rootPath;
@@ -249,7 +285,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             var idMap    = GetOrLoadIdMap(type.Name);
             bool isInsert = !idMap.ContainsKey(obj.Key);
             T? oldObj    = null;
-            List<PropertyInfo> indexedFields = new();
+            List<(string Name, Type ClrType, Func<object, object?> Getter)> indexedFields = new();
             if (_searchIndexManager.HasIndexedFields(type, out indexedFields) && !isInsert)
                 oldObj = Load<T>(obj.Key);
 
@@ -283,17 +319,17 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             if (indexedFields.Count > 0)
             {
                 var keyStr = obj.Key.ToString();
-                foreach (var prop in indexedFields)
+                foreach (var (fieldName, _, getter) in indexedFields)
                 {
-                    var newValue = prop.GetValue(obj)?.ToString() ?? string.Empty;
+                    var newValue = getter(obj)?.ToString() ?? string.Empty;
                     if (oldObj != null)
                     {
-                        var oldValue = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
+                        var oldValue = getter(oldObj)?.ToString() ?? string.Empty;
                         if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
                             continue; // value unchanged — existing index entry is still valid
-                        _indexStore.AppendEntry(type.Name, prop.Name, oldValue, keyStr, 'D');
+                        _indexStore.AppendEntry(type.Name, fieldName, oldValue, keyStr, 'D');
                     }
-                    _indexStore.AppendEntry(type.Name, prop.Name, newValue, keyStr, 'A');
+                    _indexStore.AppendEntry(type.Name, fieldName, newValue, keyStr, 'A');
                 }
                 _searchIndexManager.IndexObject(obj);
             }
@@ -474,8 +510,9 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             foreach (var clause in query.Clauses)
             {
                 if (clause.Value == null) continue;
-                var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
-                if (prop == null) continue;
+                var propIdx = indexedFields.FindIndex(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
+                if (propIdx < 0) continue;
+                var prop = indexedFields[propIdx];
 
                 HashSet<uint>? clauseCandidates = null;
 
@@ -635,9 +672,10 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             // Sort by an indexed field — use forward index to sort keys by value
             if (_searchIndexManager.HasIndexedFields(typeof(T), out var sortIndexedFields))
             {
-                var sortProp = sortIndexedFields.Find(p => string.Equals(p.Name, sort.Field, StringComparison.OrdinalIgnoreCase));
-                if (sortProp != null)
+                var sortPropIdx = sortIndexedFields.FindIndex(p => string.Equals(p.Name, sort.Field, StringComparison.OrdinalIgnoreCase));
+                if (sortPropIdx >= 0)
                 {
+                    var sortProp = sortIndexedFields[sortPropIdx];
                     var forwardIndex = _indexStore.ReadLatestValueIndex(typeName, sortProp.Name);
                     if (forwardIndex.Count > 0)
                     {
@@ -907,8 +945,9 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             foreach (var clause in query.Clauses)
             {
                 if (clause.Value == null) continue;
-                var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
-                if (prop == null) continue;
+                var propIdx = indexedFields.FindIndex(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
+                if (propIdx < 0) continue;
+                var prop = indexedFields[propIdx];
 
                 HashSet<uint>? clauseCandidates = null;
 
@@ -1003,7 +1042,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
         // Load the old object before deleting so we can remove its index entries
         T? oldObj = null;
-        List<PropertyInfo> indexedFields = new();
+        List<(string Name, Type ClrType, Func<object, object?> Getter)> indexedFields = new();
         if (_searchIndexManager.HasIndexedFields(type, out indexedFields))
             oldObj = Load<T>(key);
 
@@ -1029,10 +1068,10 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         if (indexedFields.Count > 0 && oldObj != null)
         {
             var keyStr = key.ToString();
-            foreach (var prop in indexedFields)
+            foreach (var (fieldName, _, getter) in indexedFields)
             {
-                var value = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
-                _indexStore.AppendEntry(typeName, prop.Name, value, keyStr, 'D');
+                var value = getter(oldObj)?.ToString() ?? string.Empty;
+                _indexStore.AppendEntry(typeName, fieldName, value, keyStr, 'D');
             }
             _searchIndexManager.RemoveObject(type, key);
         }
@@ -1926,31 +1965,30 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
     private void ClearSingletonFlagsOnOtherRecords<T>(T obj) where T : BaseDataObject
     {
-        var type           = typeof(T);
-        var allProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var singletonProps = new List<PropertyInfo>();
-        foreach (var p in allProps)
+        var type = typeof(T);
+
+        // Get singleton-flag field descriptors for this type (compiled once and cached).
+        var singletonFields = GetSingletonFlagFields(type);
+
+        // Filter to fields that are currently true on the new/updated object.
+        var activeSingletons = new List<(string Name, Func<object, object?> Getter, Action<object, object?> Setter)>(singletonFields.Length);
+        foreach (var f in singletonFields)
         {
-            if (p.PropertyType == typeof(bool)
-                && p.GetCustomAttribute<SingletonFlagAttribute>() != null
-                && p.CanRead && p.CanWrite
-                && true.Equals(p.GetValue(obj)))
-            {
-                singletonProps.Add(p);
-            }
+            if (true.Equals(f.Getter(obj)))
+                activeSingletons.Add(f);
         }
 
-        if (singletonProps.Count == 0) return;
+        if (activeSingletons.Count == 0) return;
 
         foreach (var record in Query<T>())
         {
             if (record.Key == obj.Key) continue;
             bool changed = false;
-            foreach (var prop in singletonProps)
+            foreach (var (_, getter, setter) in activeSingletons)
             {
-                if (true.Equals(prop.GetValue(record)))
+                if (true.Equals(getter(record)))
                 {
-                    prop.SetValue(record, false);
+                    setter(record, false);
                     changed = true;
                 }
             }

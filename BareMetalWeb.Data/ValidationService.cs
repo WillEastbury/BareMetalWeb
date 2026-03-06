@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data.ExpressionEngine;
@@ -37,7 +36,6 @@ public static class ValidationService
     /// Build a ValidationConfig from a property's attributes.
     /// Called at registration time only (not per-request).
     /// </summary>
-    [RequiresUnreferencedCode("Attribute scanning requires property metadata to be preserved.")]
     public static ValidationConfig? BuildValidationConfig(PropertyInfo property)
     {
         var validators = new List<ValidationAttribute>();
@@ -106,7 +104,6 @@ public static class ValidationService
     /// Get entity-level validation rules (applied to the class, not individual properties).
     /// Results are cached per type to avoid repeated attribute scanning.
     /// </summary>
-    [RequiresUnreferencedCode("Attribute scanning requires entity type metadata to be preserved.")]
     public static IReadOnlyList<ValidationRuleAttribute> GetEntityRules(Type entityType)
     {
         return _entityRulesCache.GetOrAdd(entityType, static t =>
@@ -154,7 +151,7 @@ public static class ValidationService
         {
             try
             {
-                context[field.Name] = field.Property.GetValue(instance);
+                context[field.Name] = field.GetValueFn(instance);
             }
             catch
             {

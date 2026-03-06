@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Concurrent;
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Net;
 using System.Reflection;
@@ -60,6 +59,9 @@ public sealed record DataFieldMetadata(
 
     /// <summary>Writes a value to this field on a boxed entity instance via a compiled delegate.</summary>
     public Action<object, object?> SetValueFn => _setValueFn ??= PropertyAccessorFactory.BuildSetter(Property);
+
+    /// <summary>The CLR type of this field's property. Avoids <c>Property.PropertyType</c> reflection in hot paths.</summary>
+    public Type ClrType => Property.PropertyType;
 }
 
 public sealed record DataEntityMetadata(
@@ -148,11 +150,34 @@ public static class DataScaffold
     private static readonly long LookupCachePruneCooldownTicks = TimeSpan.FromSeconds(60).Ticks;
     private static long _lastLookupCachePruneTicks;
     private static readonly IIdGenerator IdGenerator = new DefaultIdGenerator();
-    // Cached compiled property accessor delegates — avoids per-call PropertyInfo.GetValue reflection.
+    // Cached compiled property accessor delegates — avoids per-call reflection.
+    // Populated from entity metadata first; falls back to PropertyInfo for unregistered child types.
     private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> PropertyAccessorCache = new();
     private static readonly ConcurrentDictionary<Type, Func<object>> ListFactoryCache = new();
     private static readonly ConcurrentDictionary<Type, Func<object>> InstanceFactoryCache = new();
     private static readonly ConcurrentDictionary<(Type, Type), Func<object>> DictFactoryCache = new();
+
+    /// <summary>
+    /// Returns a compiled getter for <paramref name="fieldName"/> on <paramref name="type"/>.
+    /// Prefers the pre-compiled delegate from entity metadata when the type is registered;
+    /// falls back to <see cref="PropertyAccessorFactory.BuildGetter"/> for child/unregistered types.
+    /// </summary>
+    private static Func<object, object?>? GetOrBuildGetter(Type type, string fieldName)
+    {
+        return PropertyAccessorCache.GetOrAdd((type, fieldName), static key =>
+        {
+            // Prefer metadata-compiled delegate for registered entity types.
+            if (EntitiesByType.TryGetValue(key.Item1, out var meta))
+            {
+                var f = meta.FindField(key.Item2);
+                if (f != null) return f.GetValueFn;
+            }
+            // Fall back for child/unregistered types: compile once from PropertyInfo (startup cost only).
+            var prop = key.Item1.GetProperty(key.Item2,
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;
+        });
+    }
 
     /// <summary>
     /// Fallback JSON AST (serialized) used when expression parsing fails.
@@ -314,7 +339,7 @@ public static class DataScaffold
                 foreach (var f in metadata.Fields)
                 {
                     if (f.IdGeneration == IdGenerationStrategy.Sequential &&
-                        string.Equals(f.Property.Name, nameof(BaseDataObject.Key), StringComparison.Ordinal))
+                        string.Equals(f.Name, nameof(BaseDataObject.Key), StringComparison.Ordinal))
                     {
                         seqField = f;
                         break;
@@ -511,7 +536,7 @@ public static class DataScaffold
     private static QueryOperator GetDefaultOperatorForField(DataFieldMetadata field)
     {
         // For numeric and date fields, default to equals
-        var fieldType = field.Property.PropertyType;
+        var fieldType = field.ClrType;
         var underlyingType = Nullable.GetUnderlyingType(fieldType) ?? fieldType;
         
         if (underlyingType == typeof(int) || underlyingType == typeof(long) || 
@@ -577,7 +602,7 @@ public static class DataScaffold
 
                 // Get the computed value (for edit forms and view)
                 var computedValue = instance != null ? field.GetValueFn(instance) : null;
-                var computedStringValue = ToInputString(computedValue, field.Property.PropertyType, field.FieldType);
+                var computedStringValue = ToInputString(computedValue, field.ClrType, field.FieldType);
 
                 // Render as readonly with computed indicator
                 fields.Add(new FormField(
@@ -599,7 +624,7 @@ public static class DataScaffold
                 
                 // Get current value (for display, will be updated by JS)
                 var calculatedValue = instance != null ? field.GetValueFn(instance) : null;
-                var calculatedStringValue = ToInputString(calculatedValue, field.Property.PropertyType, field.FieldType);
+                var calculatedStringValue = ToInputString(calculatedValue, field.ClrType, field.FieldType);
 
                 // Generate JSON AST from the expression for CSP-safe client evaluation
                 string jsExpression;
@@ -647,7 +672,7 @@ public static class DataScaffold
                 continue;
             }
 
-            if (IsChildListType(field.Property.PropertyType, out var childType))
+            if (IsChildListType(field.ClrType, out var childType))
             {
                 var html = BuildChildListEditorHtml(field, childType, value as IEnumerable, cspNonce);
                 fields.Add(new FormField(
@@ -659,7 +684,7 @@ public static class DataScaffold
                 continue;
             }
 
-            if (IsDictionaryType(field.Property.PropertyType, out var valueType))
+            if (IsDictionaryType(field.ClrType, out var valueType))
             {
                 var html = BuildDictionaryEditorHtml(field, valueType, value as IEnumerable, cspNonce);
                 fields.Add(new FormField(
@@ -670,7 +695,7 @@ public static class DataScaffold
                     Html: html));
                 continue;
             }
-            var effectiveType = Nullable.GetUnderlyingType(field.Property.PropertyType) ?? field.Property.PropertyType;
+            var effectiveType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
             var effectiveFieldType = effectiveType == typeof(DateOnly) && field.FieldType == FormFieldType.DateTime
                 ? FormFieldType.DateOnly
                 : field.FieldType;
@@ -699,7 +724,7 @@ public static class DataScaffold
                 }
             }
 
-            var stringValue = ToInputString(value, field.Property.PropertyType, effectiveFieldType);
+            var stringValue = ToInputString(value, field.ClrType, effectiveFieldType);
             if (metadata.Type == typeof(SystemPrincipal)
                 && string.Equals(field.Name, nameof(SystemPrincipal.ApiKeyHashes), StringComparison.OrdinalIgnoreCase))
             {
@@ -712,9 +737,9 @@ public static class DataScaffold
                     stringValue = string.Empty;
                 }
             }
-            if (forCreate && IsDefaultValue(value, field.Property.PropertyType))
+            if (forCreate && IsDefaultValue(value, field.ClrType))
             {
-                var defaultValue = GetCreateDefaultInputString(field.Property.PropertyType, effectiveFieldType);
+                var defaultValue = GetCreateDefaultInputString(field.ClrType, effectiveFieldType);
                 if (defaultValue != null)
                     stringValue = defaultValue;
             }
@@ -725,7 +750,7 @@ public static class DataScaffold
                     : null;
 
             lookupOptions ??= effectiveFieldType == FormFieldType.Enum
-                ? BuildEnumOptions(field.Property.PropertyType)
+                ? BuildEnumOptions(field.ClrType)
                 : null;
 
             string? lookupTargetType = null;
@@ -818,7 +843,7 @@ public static class DataScaffold
                 continue;
             }
 
-            rows.Add((field.Label, ToDisplayString(value, field.Property.PropertyType)));
+            rows.Add((field.Label, ToDisplayString(value, field.ClrType)));
         }
 
         return rows;
@@ -843,14 +868,14 @@ public static class DataScaffold
                 continue;
             }
 
-            if (IsChildListType(field.Property.PropertyType, out var childType))
+            if (IsChildListType(field.ClrType, out var childType))
             {
                 var html = BuildChildListViewHtml(field, childType, value as IEnumerable);
                 rows.Add((field.Label, html, true));
                 continue;
             }
 
-            if (IsDictionaryType(field.Property.PropertyType, out var valueType))
+            if (IsDictionaryType(field.ClrType, out var valueType))
             {
                 var html = BuildDictionaryViewHtml(field, valueType, value as IEnumerable);
                 rows.Add((field.Label, html, true));
@@ -864,7 +889,7 @@ public static class DataScaffold
                 continue;
             }
             // Handle string representation of bool (from DataRecord / virtual entities)
-            if (value is string boolStr && field.Property.PropertyType == typeof(bool) && bool.TryParse(boolStr, out var parsedBool))
+            if (value is string boolStr && field.ClrType == typeof(bool) && bool.TryParse(boolStr, out var parsedBool))
             {
                 rows.Add((field.Label, BuildBooleanCheckboxHtml(parsedBool), true));
                 continue;
@@ -885,7 +910,7 @@ public static class DataScaffold
                 continue;
             }
 
-            rows.Add((field.Label, ToDisplayString(value, field.Property.PropertyType), false));
+            rows.Add((field.Label, ToDisplayString(value, field.ClrType), false));
         }
 
         return rows;
@@ -921,7 +946,7 @@ public static class DataScaffold
         var nested = new List<(DataFieldMetadata, Type)>();
         foreach (var field in metadata.ViewFields)
         {
-            if (IsChildListType(field.Property.PropertyType, out var childType))
+            if (IsChildListType(field.ClrType, out var childType))
             {
                 nested.Add((field, childType));
             }
@@ -939,7 +964,7 @@ public static class DataScaffold
     /// </summary>
     public static IReadOnlyList<Dictionary<string, object?>>? BuildSubFieldSchemas(DataFieldMetadata field)
     {
-        if (!IsChildListType(field.Property.PropertyType, out var childType))
+        if (!IsChildListType(field.ClrType, out var childType))
             return null;
 
         var result = new List<Dictionary<string, object?>>();
@@ -1053,7 +1078,7 @@ public static class DataScaffold
         
         foreach (var field in metadata.ViewFields)
         {
-            if (!IsChildListType(field.Property.PropertyType, out var childType))
+            if (!IsChildListType(field.ClrType, out var childType))
                 continue;
                 
             var value = field.GetValueFn(instance);
@@ -1160,13 +1185,13 @@ public static class DataScaffold
                     continue;
                 }
                 // Handle string representation of bool (from DataRecord / virtual entities)
-                if (rawValue is string boolStr && field.Property.PropertyType == typeof(bool) && bool.TryParse(boolStr, out var parsedBool))
+                if (rawValue is string boolStr && field.ClrType == typeof(bool) && bool.TryParse(boolStr, out var parsedBool))
                 {
                     values.Add(BuildBooleanCheckboxHtml(parsedBool));
                     continue;
                 }
 
-                values.Add(WebUtility.HtmlEncode(ToDisplayString(rawValue, field.Property.PropertyType)));
+                values.Add(WebUtility.HtmlEncode(ToDisplayString(rawValue, field.ClrType)));
             }
 
             if (includeActions && item is BaseDataObject dataObject)
@@ -1635,7 +1660,7 @@ public static class DataScaffold
         {
             var dayKey = dayGroupEntry.Key;
             var dayGroup = dayGroupEntry.Value;
-            var dayName = Enum.GetName(dayField.Property.PropertyType, dayKey) ?? dayKey.ToString();
+            var dayName = Enum.GetName(dayField.ClrType, dayKey) ?? dayKey.ToString();
             html.Append($"<div class=\"bm-timetable-day-section mb-4\">");
             html.Append($"<h3 class=\"bm-timetable-day-header\">{WebUtility.HtmlEncode(dayName)}</h3>");
 
@@ -1726,7 +1751,7 @@ public static class DataScaffold
                     }
                     else
                     {
-                        displayValue = WebUtility.HtmlEncode(ToDisplayString(rawValue, field.Property.PropertyType));
+                        displayValue = WebUtility.HtmlEncode(ToDisplayString(rawValue, field.ClrType));
                     }
 
                     html.Append($"<td>{displayValue}</td>");
@@ -1852,7 +1877,7 @@ public static class DataScaffold
             if (field.IdGeneration != IdGenerationStrategy.None)
                 continue;
 
-            if (IsChildListType(field.Property.PropertyType, out var childType))
+            if (IsChildListType(field.ClrType, out var childType))
             {
                 if (!TryGetFormValue(values, field.Name, out var rawList) || rawList == null)
                 {
@@ -1871,7 +1896,7 @@ public static class DataScaffold
                 continue;
             }
 
-            if (IsDictionaryType(field.Property.PropertyType, out var dictValueType))
+            if (IsDictionaryType(field.ClrType, out var dictValueType))
             {
                 if (!TryGetFormValue(values, field.Name, out var rawDict) || rawDict == null)
                 {
@@ -1902,7 +1927,7 @@ public static class DataScaffold
                     if (field.FieldType == FormFieldType.File || field.FieldType == FormFieldType.Image)
                         continue;
 
-                    if (IsBooleanField(field, field.Property.PropertyType))
+                    if (IsBooleanField(field, field.ClrType))
                     {
                         field.SetValueFn(instance, false);
                         if (field.Required)
@@ -1922,9 +1947,9 @@ public static class DataScaffold
                 continue;
             }
 
-            if (!TryConvertValue(rawValue, field.Property.PropertyType, out var converted))
+            if (!TryConvertValue(rawValue, field.ClrType, out var converted))
             {
-                if (!TryFallbackConvert(rawValue, field.Property.PropertyType, out converted))
+                if (!TryFallbackConvert(rawValue, field.ClrType, out converted))
                 {
                     errors.Add($"{field.Label} is invalid.");
                     continue;
@@ -1966,13 +1991,13 @@ public static class DataScaffold
                 continue;
             }
 
-            if (!TryConvertJson(rawElement, field.Property.PropertyType, out var converted))
+            if (!TryConvertJson(rawElement, field.ClrType, out var converted))
             {
                 // For Money fields, if the JSON is an object with an "amount" property, extract it as a decimal
                 if (field.FieldType == FormFieldType.Money
                     && rawElement.ValueKind == JsonValueKind.Object
                     && rawElement.TryGetProperty("amount", out var amountElement)
-                    && TryConvertJson(amountElement, field.Property.PropertyType, out converted))
+                    && TryConvertJson(amountElement, field.ClrType, out converted))
                 {
                     // Successfully extracted amount from Money JSON object; fall through to SetValue
                 }
@@ -2317,14 +2342,7 @@ public static class DataScaffold
                 return displayVal?.ToString();
             }
 
-            var displayGetter = PropertyAccessorCache.GetOrAdd(
-                (lookup.TargetType, lookup.DisplayField),
-                static key =>
-                {
-                    var p = key.Item1.GetProperty(key.Item2,
-                        BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                    return p != null ? PropertyAccessorFactory.BuildGetter(p) : null;
-                });
+            var displayGetter = GetOrBuildGetter(lookup.TargetType, lookup.DisplayField);
             var displayPropVal = displayGetter?.Invoke(entity);
             return displayPropVal?.ToString();
         }
@@ -2376,18 +2394,8 @@ public static class DataScaffold
             if (itemType != cachedType)
             {
                 cachedType = itemType;
-                valueGetter = PropertyAccessorCache.GetOrAdd((itemType, effectiveValueField),
-                    static key =>
-                    {
-                        var p = key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                        return p != null ? PropertyAccessorFactory.BuildGetter(p) : null;
-                    });
-                displayGetter = PropertyAccessorCache.GetOrAdd((itemType, displayField),
-                    static key =>
-                    {
-                        var p = key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                        return p != null ? PropertyAccessorFactory.BuildGetter(p) : null;
-                    });
+                valueGetter = GetOrBuildGetter(itemType, effectiveValueField);
+                displayGetter = GetOrBuildGetter(itemType, displayField);
             }
             if (valueGetter == null || displayGetter == null)
                 continue;
@@ -2539,7 +2547,7 @@ public static class DataScaffold
     /// <summary>
     /// Gets child field metadata without resolving lookups (for export scenarios where we don't need lookup data)
     /// </summary>
-    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadataSimple([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
+    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadataSimple(Type childType)
     {
         var fields = new List<ChildFieldMeta>();
         var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
@@ -2575,12 +2583,12 @@ public static class DataScaffold
     // Cached child field metadata — avoids re-reflecting on every form render.
     private static readonly ConcurrentDictionary<Type, IReadOnlyList<ChildFieldMeta>> ChildFieldMetadataCache = new();
 
-    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
+    private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadata(Type childType)
     {
         return ChildFieldMetadataCache.GetOrAdd(childType, static type => BuildChildFieldMetadata(type));
     }
 
-    private static IReadOnlyList<ChildFieldMeta> BuildChildFieldMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
+    private static IReadOnlyList<ChildFieldMeta> BuildChildFieldMetadata(Type childType)
     {
         var fields = new List<ChildFieldMeta>();
         var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
@@ -2744,7 +2752,7 @@ public static class DataScaffold
         return fields;
     }
 
-    private static string BuildChildListEditorHtml(DataFieldMetadata field, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType, IEnumerable? listValue, string? cspNonce = null)
+    private static string BuildChildListEditorHtml(DataFieldMetadata field, Type childType, IEnumerable? listValue, string? cspNonce = null)
     {
         var childFields = GetChildFieldMetadata(childType);
         var rows = new List<Dictionary<string, string>>();
@@ -2981,7 +2989,7 @@ public static class DataScaffold
         return sb.ToString();
     }
 
-    private static string BuildChildListViewHtml(DataFieldMetadata field, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType, IEnumerable? listValue)
+    private static string BuildChildListViewHtml(DataFieldMetadata field, Type childType, IEnumerable? listValue)
     {
         var childFields = GetChildFieldMetadata(childType);
         var sb = new StringBuilder(2048);
@@ -3026,8 +3034,7 @@ public static class DataScaffold
     }
 
     // Child list parsing uses cached GetChildFieldMetadata with pre-compiled setter delegates.
-    [RequiresUnreferencedCode("Child list parsing requires compiled entity types to be preserved.")]
-    private static bool TryParseChildList(string rawValue, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type childType, out object? list)
+    private static bool TryParseChildList(string rawValue, Type childType, out object? list)
     {
         list = null;
         var listFactory = ListFactoryCache.GetOrAdd(childType, static t =>
@@ -3243,7 +3250,6 @@ public static class DataScaffold
         return sb.ToString();
     }
 
-    [RequiresUnreferencedCode("Dictionary parsing requires compiled entity types to be preserved.")]
     private static bool TryParseDictionary(string rawValue, Type valueType, out object? dictionary)
     {
         dictionary = null;
@@ -3616,7 +3622,6 @@ public static class DataScaffold
     /// Deserialises a JSON array of objects into a <c>List&lt;T&gt;</c> where T is a child entity type.
     /// Uses cached child field metadata with pre-compiled setter delegates (no per-call reflection).
     /// </summary>
-    [RequiresUnreferencedCode("JSON child list deserialization requires compiled entity types to be preserved.")]
     private static bool TryConvertJsonChildList(JsonElement element, Type childType, out object? list)
     {
         list = null;
@@ -3977,7 +3982,8 @@ public static class DataScaffold
         if (instance is null)
             return false;
 
-        var value = property.GetValue(instance);
+        var getter = PropertyAccessorFactory.BuildGetter(property);
+        var value = getter(instance);
         return !IsDefaultValue(value, property.PropertyType);
     }
 

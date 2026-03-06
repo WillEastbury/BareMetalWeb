@@ -438,7 +438,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             // Load existing object only on updates (existing location found) to track previous indexed field values.
             // New inserts skip this load since there are no prior index entries to clean up.
             T? oldObj = null;
-            List<PropertyInfo> indexedFields = new();
+            List<(string Name, Type ClrType, Func<object, object?> Getter)> indexedFields = new();
             if (_searchIndexManager.HasIndexedFields(type, out indexedFields) && TryGetClusteredLocation(type.Name, keyStr, out _))
                 oldObj = Load<T>(obj.Key);
 
@@ -470,17 +470,17 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             // Update secondary field indexes and full-text search index
             if (indexedFields.Count > 0)
             {
-                foreach (var prop in indexedFields)
+                foreach (var (fieldName, _, getter) in indexedFields)
                 {
-                    var newValue = prop.GetValue(obj)?.ToString() ?? string.Empty;
+                    var newValue = getter(obj)?.ToString() ?? string.Empty;
                     if (oldObj != null)
                     {
-                        var oldValue = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
+                        var oldValue = getter(oldObj)?.ToString() ?? string.Empty;
                         if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
                             continue; // value unchanged — existing index entry is still valid
-                        _indexStore.AppendEntry(type.Name, prop.Name, oldValue, keyStr, 'D');
+                        _indexStore.AppendEntry(type.Name, fieldName, oldValue, keyStr, 'D');
                     }
-                    _indexStore.AppendEntry(type.Name, prop.Name, newValue, keyStr, 'A');
+                    _indexStore.AppendEntry(type.Name, fieldName, newValue, keyStr, 'A');
                 }
                 _searchIndexManager.IndexObject(obj);
             }
@@ -507,20 +507,19 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private void ClearSingletonFlagsOnOtherRecords<T>(T obj) where T : BaseDataObject
     {
         var type = typeof(T);
-        var allProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var singletonProps = new List<PropertyInfo>();
-        foreach (var p in allProps)
+
+        // Get singleton-flag field descriptors for this type (compiled once and cached).
+        var singletonFields = WalDataProvider.GetSingletonFlagFields(type);
+
+        // Filter to fields that are currently true on the new/updated object.
+        var activeSingletons = new List<(string Name, Func<object, object?> Getter, Action<object, object?> Setter)>(singletonFields.Length);
+        foreach (var f in singletonFields)
         {
-            if (p.PropertyType == typeof(bool)
-                && p.GetCustomAttribute<SingletonFlagAttribute>() != null
-                && p.CanRead && p.CanWrite
-                && true.Equals(p.GetValue(obj)))
-            {
-                singletonProps.Add(p);
-            }
+            if (true.Equals(f.Getter(obj)))
+                activeSingletons.Add(f);
         }
 
-        if (singletonProps.Count == 0)
+        if (activeSingletons.Count == 0)
             return;
 
         // Only load all records if there is at least one active singleton flag.
@@ -531,11 +530,11 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
                 continue;
 
             bool changed = false;
-            foreach (var prop in singletonProps)
+            foreach (var (_, getter, setter) in activeSingletons)
             {
-                if (true.Equals(prop.GetValue(record)))
+                if (true.Equals(getter(record)))
                 {
-                    prop.SetValue(record, false);
+                    setter(record, false);
                     changed = true;
                 }
             }
@@ -628,9 +627,10 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             {
                 if (clause.Operator == QueryOperator.Equals && clause.Value != null)
                 {
-                    var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
-                    if (prop != null)
+                    var propIdx = indexedFields.FindIndex(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
+                    if (propIdx >= 0)
                     {
+                        var prop = indexedFields[propIdx];
                         var fieldValue = clause.Value.ToString() ?? string.Empty;
                         var fieldIndex = _indexStore.ReadIndex(type.Name, prop.Name);
                         if (fieldIndex.Count == 0)
@@ -848,7 +848,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         {
             // Load old object for field index cleanup before deleting
             T? oldObj = null;
-            List<PropertyInfo> indexedFields = new();
+            List<(string Name, Type ClrType, Func<object, object?> Getter)> indexedFields = new();
             if (_searchIndexManager.HasIndexedFields(type, out indexedFields))
                 oldObj = Load<T>(key);
 
@@ -861,10 +861,10 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             // Remove from secondary field indexes and full-text search index
             if (indexedFields.Count > 0 && oldObj != null)
             {
-                foreach (var prop in indexedFields)
+                foreach (var (fieldName, _, getter) in indexedFields)
                 {
-                    var value = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
-                    _indexStore.AppendEntry(type.Name, prop.Name, value, keyStr, 'D');
+                    var value = getter(oldObj)?.ToString() ?? string.Empty;
+                    _indexStore.AppendEntry(type.Name, fieldName, value, keyStr, 'D');
                 }
                 _searchIndexManager.RemoveObject(type, key);
             }

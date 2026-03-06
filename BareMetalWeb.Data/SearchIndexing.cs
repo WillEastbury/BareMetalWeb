@@ -9,6 +9,7 @@ using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data.Interfaces;
 
@@ -101,10 +102,16 @@ public sealed class DataIndexAttribute : Attribute
 
 public sealed class SearchIndexManager
 {
-    // Cache reflection metadata per type to avoid repeated GetProperties calls
+    // Cache compiled field-access metadata per type to avoid repeated GetProperties calls.
+    // Uses compiled getter delegates instead of PropertyInfo to eliminate per-call reflection.
     private sealed class TypeMetadata
     {
-        public PropertyInfo[] IndexedProperties { get; init; } = Array.Empty<PropertyInfo>();
+        /// <summary>Name of each indexed field.</summary>
+        public string[] FieldNames { get; init; } = Array.Empty<string>();
+        /// <summary>CLR type of each indexed field (parallel to FieldNames).</summary>
+        public Type[] FieldTypes { get; init; } = Array.Empty<Type>();
+        /// <summary>Compiled getter delegate for each indexed field (parallel to FieldNames).</summary>
+        public Func<object, object?>[] Getters { get; init; } = Array.Empty<Func<object, object?>>();
         public DataIndexAttribute[] Attributes { get; init; } = Array.Empty<DataIndexAttribute>();
         public HashSet<IndexKind> IndexKinds { get; init; } = new();
     }
@@ -360,10 +367,16 @@ public sealed class SearchIndexManager
         _logger = logger;
     }
 
-    public bool HasIndexedFields(Type type, out List<PropertyInfo> fields)
+    /// <summary>
+    /// Returns true if the type has indexed fields, and provides compiled getter descriptors
+    /// for each field (name, CLR type, getter delegate).
+    /// </summary>
+    public bool HasIndexedFields(Type type, out List<(string Name, Type ClrType, Func<object, object?> Getter)> fields)
     {
         var metadata = GetOrCreateTypeMetadata(type);
-        fields = new List<PropertyInfo>(metadata.IndexedProperties);
+        fields = new List<(string, Type, Func<object, object?>)>(metadata.FieldNames.Length);
+        for (int i = 0; i < metadata.FieldNames.Length; i++)
+            fields.Add((metadata.FieldNames[i], metadata.FieldTypes[i], metadata.Getters[i]));
         return fields.Count > 0;
     }
 
@@ -371,17 +384,40 @@ public sealed class SearchIndexManager
     {
         return _typeMetadata.GetOrAdd(type, t =>
         {
-            var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-            var indexedProps = new List<PropertyInfo>(props.Length);
-            var attrs = new List<DataIndexAttribute>(props.Length);
+            var names = new List<string>();
+            var types = new List<Type>();
+            var getters = new List<Func<object, object?>>();
+            var attrs = new List<DataIndexAttribute>();
             var kinds = new HashSet<IndexKind>(4);
 
-            foreach (var prop in props)
+            // Prefer metadata-compiled delegates for registered entity types.
+            var meta = DataScaffold.GetEntityByType(t);
+            if (meta != null)
             {
-                var attr = prop.GetCustomAttribute<DataIndexAttribute>();
-                if (attr != null)
+                foreach (var field in meta.Fields)
                 {
-                    indexedProps.Add(prop);
+                    if (!field.IsIndexed) continue;
+                    // Find DataIndexAttribute via field metadata
+                    var attr = field.Property.GetCustomAttribute<DataIndexAttribute>();
+                    if (attr == null) continue;
+                    names.Add(field.Name);
+                    types.Add(field.ClrType);
+                    getters.Add(field.GetValueFn);
+                    attrs.Add(attr);
+                    kinds.Add(attr.Kind);
+                }
+            }
+            else
+            {
+                // Fallback for unregistered types: compile delegates once per type.
+                var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+                foreach (var prop in props)
+                {
+                    var attr = prop.GetCustomAttribute<DataIndexAttribute>();
+                    if (attr == null) continue;
+                    names.Add(prop.Name);
+                    types.Add(Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType);
+                    getters.Add(PropertyAccessorFactory.BuildGetter(prop));
                     attrs.Add(attr);
                     kinds.Add(attr.Kind);
                 }
@@ -389,7 +425,9 @@ public sealed class SearchIndexManager
 
             return new TypeMetadata
             {
-                IndexedProperties = indexedProps.ToArray(),
+                FieldNames = names.ToArray(),
+                FieldTypes = types.ToArray(),
+                Getters = getters.ToArray(),
                 Attributes = attrs.ToArray(),
                 IndexKinds = kinds
             };
@@ -908,16 +946,16 @@ public sealed class SearchIndexManager
         var type = obj.GetType();
         var metadata = GetOrCreateTypeMetadata(type);
 
-        for (int i = 0; i < metadata.IndexedProperties.Length; i++)
+        for (int i = 0; i < metadata.FieldNames.Length; i++)
         {
-            var prop = metadata.IndexedProperties[i];
+            var getter = metadata.Getters[i];
             var attr = metadata.Attributes[i];
 
-            var value = prop.GetValue(obj);
+            var value = getter(obj);
             if (value == null)
                 continue;
 
-            var valueType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+            var valueType = metadata.FieldTypes[i];
             if (valueType == typeof(string))
             {
                 AddTokensFromString(tokens, value.ToString());

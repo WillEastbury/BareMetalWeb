@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using BareMetalWeb.Core;
@@ -17,9 +16,12 @@ public static class CalculatedFieldService
     private const int MaxExpressionCacheSize = 4096;
     private static readonly ConcurrentDictionary<Type, List<CalculatedFieldInfo>> _calculatedFieldsByType = new();
     private static readonly ConcurrentDictionary<Type, Dictionary<string, HashSet<string>>> _dependencyGraph = new();
+    // Cached context-builder delegates for unregistered types (avoids per-call GetProperties reflection).
+    private static readonly ConcurrentDictionary<Type, (string Name, Func<object, object?> Getter)[]> _contextGettersCache = new();
 
     private sealed record CalculatedFieldInfo(
-        PropertyInfo Property,
+        string FieldName,
+        Type PropertyType,
         Action<object, object?> SetValue,
         CalculatedFieldAttribute Attribute,
         ExpressionNode Expression,
@@ -74,14 +76,14 @@ public static class CalculatedFieldService
             try
             {
                 var result = fieldInfo.Expression.Evaluate(context);
-                fieldInfo.SetValue(instance, ConvertToPropertyType(result, fieldInfo.Property.PropertyType));
+                fieldInfo.SetValue(instance, ConvertToPropertyType(result, fieldInfo.PropertyType));
 
-                context[fieldInfo.Property.Name] = result;
+                context[fieldInfo.FieldName] = result;
             }
             catch (Exception ex)
             {
                 throw new InvalidOperationException(
-                    $"Error evaluating calculated field '{fieldInfo.Property.Name}' with expression '{fieldInfo.Attribute.Expression}': {ex.Message}",
+                    $"Error evaluating calculated field '{fieldInfo.FieldName}' with expression '{fieldInfo.Attribute.Expression}': {ex.Message}",
                     ex);
             }
         }
@@ -133,13 +135,13 @@ public static class CalculatedFieldService
             try
             {
                 var result = await fieldInfo.Expression.EvaluateAsync(context, resolver, cancellationToken);
-                fieldInfo.SetValue(instance, ConvertToPropertyType(result, fieldInfo.Property.PropertyType));
-                context[fieldInfo.Property.Name] = result;
+                fieldInfo.SetValue(instance, ConvertToPropertyType(result, fieldInfo.PropertyType));
+                context[fieldInfo.FieldName] = result;
             }
             catch (Exception ex)
             {
                 throw new InvalidOperationException(
-                    $"Error evaluating calculated field '{fieldInfo.Property.Name}' with expression '{fieldInfo.Attribute.Expression}': {ex.Message}",
+                    $"Error evaluating calculated field '{fieldInfo.FieldName}' with expression '{fieldInfo.Attribute.Expression}': {ex.Message}",
                     ex);
             }
         }
@@ -159,7 +161,7 @@ public static class CalculatedFieldService
 
         foreach (var fieldInfo in orderedFields)
         {
-            var fieldName = fieldInfo.Property.Name;
+            var fieldName = fieldInfo.FieldName;
             var jsExpression = fieldInfo.Expression.ToJavaScript();
             jsLines.Add($"    updateCalculatedField('{fieldName}', {jsExpression});");
         }
@@ -201,6 +203,23 @@ public static class CalculatedFieldService
         {
             var fields = new List<CalculatedFieldInfo>();
 
+            // Check metadata registry first (preferred — no per-type reflection).
+            var meta = DataScaffold.GetEntityByType(t);
+            if (meta != null)
+            {
+                foreach (var fieldMeta in meta.Fields)
+                {
+                    if (fieldMeta.Calculated == null || string.IsNullOrWhiteSpace(fieldMeta.CalculatedExpression))
+                        continue;
+
+                    var expression = GetCompiledExpression(fieldMeta.CalculatedExpression!);
+                    var dependencies = ExtractDependencies(expression);
+                    fields.Add(new CalculatedFieldInfo(fieldMeta.Name, fieldMeta.ClrType, fieldMeta.SetValueFn, fieldMeta.Calculated, expression, dependencies));
+                }
+                return fields;
+            }
+
+            // Fallback for types not registered in DataScaffold (startup cost only).
             foreach (var prop in t.GetProperties())
             {
                 var attr = prop.GetCustomAttribute<CalculatedFieldAttribute>();
@@ -209,8 +228,7 @@ public static class CalculatedFieldService
 
                 var expression = GetCompiledExpression(attr.Expression);
                 var dependencies = ExtractDependencies(expression);
-
-                fields.Add(new CalculatedFieldInfo(prop, PropertyAccessorFactory.BuildSetter(prop), attr, expression, dependencies));
+                fields.Add(new CalculatedFieldInfo(prop.Name, prop.PropertyType, PropertyAccessorFactory.BuildSetter(prop), attr, expression, dependencies));
             }
 
             return fields;
@@ -222,7 +240,7 @@ public static class CalculatedFieldService
         var fields = GetCalculatedFields(type);
         var graph = GetDependencyGraph(type);
         var fieldMap = new Dictionary<string, CalculatedFieldInfo>(fields.Count);
-        foreach (var f in fields) fieldMap[f.Property.Name] = f;
+        foreach (var f in fields) fieldMap[f.FieldName] = f;
 
         var sorted = new List<CalculatedFieldInfo>();
         var visited = new HashSet<string>();
@@ -253,7 +271,7 @@ public static class CalculatedFieldService
 
         foreach (var field in fields)
         {
-            Visit(field.Property.Name);
+            Visit(field.FieldName);
         }
 
         return sorted;
@@ -268,7 +286,7 @@ public static class CalculatedFieldService
 
             foreach (var field in fields)
             {
-                graph[field.Property.Name] = field.Dependencies;
+                graph[field.FieldName] = field.Dependencies;
             }
 
             return graph;
@@ -306,7 +324,7 @@ public static class CalculatedFieldService
         return dependencies;
     }
 
-    private static Dictionary<string, object?> BuildContext(BaseDataObject instance, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
+    private static Dictionary<string, object?> BuildContext(BaseDataObject instance, Type type)
     {
         // Use compiled layout for efficient field access when available
         var meta = DataScaffold.GetEntityByType(type);
@@ -323,12 +341,19 @@ public static class CalculatedFieldService
             return context;
         }
 
-        // Fallback for unregistered types
-        var ctx = new Dictionary<string, object?>();
-        foreach (var prop in type.GetProperties())
+        // Fallback for unregistered types: use cached compiled getter delegates (built once per type).
+        var getters = _contextGettersCache.GetOrAdd(type, static t =>
         {
-            ctx[prop.Name] = prop.GetValue(instance);
-        }
+            var props = t.GetProperties();
+            var result = new (string Name, Func<object, object?>)[props.Length];
+            for (int i = 0; i < props.Length; i++)
+                result[i] = (props[i].Name, PropertyAccessorFactory.BuildGetter(props[i]));
+            return result;
+        });
+
+        var ctx = new Dictionary<string, object?>(getters.Length + 1);
+        foreach (var (name, getter) in getters)
+            ctx[name] = getter(instance);
         return ctx;
     }
 

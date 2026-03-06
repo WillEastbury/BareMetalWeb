@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data.Interfaces;
@@ -314,31 +313,27 @@ public sealed class ReportExecutor
 
     // ── Field access helpers ─────────────────────────────────────────────────
 
-    private static PropertyInfo? FindAccessor(DataEntityMetadata meta, string fieldName)
+    private static Func<object, object?>? FindAccessor(DataEntityMetadata meta, string fieldName)
     {
-        // Check DataField metadata first
-        DataFieldMetadata? field = null;
-        foreach (var f in meta.Fields)
-        {
-            if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase))
-            {
-                field = f;
-                break;
-            }
-        }
+        // Check DataField metadata first — use compiled delegate (no reflection per call).
+        var field = meta.FindField(fieldName);
         if (field != null)
-            return field.Property;
+            return field.GetValueFn;
 
-        // Fall back to BaseDataObject base properties (Id, CreatedOnUtc, etc.)
-        return typeof(BaseDataObject).GetProperty(fieldName,
-            BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+        // Fall back to BaseDataObject base properties (Key, CreatedOnUtc, etc.) via cached getter.
+        return AccessorCache.GetOrAdd((typeof(BaseDataObject), fieldName), static key =>
+        {
+            var prop = key.Item1.GetProperty(key.Item2,
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;
+        });
     }
 
-    private static string GetStringValue(PropertyInfo prop, object obj)
-        => prop.GetValue(obj)?.ToString() ?? string.Empty;
+    private static string GetStringValue(Func<object, object?> getter, object obj)
+        => getter(obj)?.ToString() ?? string.Empty;
 
-    private static string? GetNullableStringValue(PropertyInfo? prop, BaseDataObject obj)
-        => prop?.GetValue(obj)?.ToString();
+    private static string? GetNullableStringValue(Func<object, object?>? getter, BaseDataObject obj)
+        => getter?.Invoke(obj)?.ToString();
 
     // ── Row projection ───────────────────────────────────────────────────────
 
@@ -370,10 +365,18 @@ public sealed class ReportExecutor
         return cells;
     }
 
-    private static Func<object, object?>? FindAccessorOnObject([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type, string fieldName)
+    private static Func<object, object?>? FindAccessorOnObject(Type type, string fieldName)
     {
         return AccessorCache.GetOrAdd((type, fieldName), static key =>
         {
+            // Prefer metadata-compiled delegate for registered entity types.
+            var meta = DataScaffold.GetEntityByType(key.Item1);
+            if (meta != null)
+            {
+                var f = meta.FindField(key.Item2);
+                if (f != null) return f.GetValueFn;
+            }
+            // Fall back for unregistered/base types (once per type/field).
             var prop = key.Item1.GetProperty(key.Item2,
                 BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
             return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;

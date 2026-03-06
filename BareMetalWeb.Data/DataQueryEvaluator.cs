@@ -1,7 +1,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Rendering;
@@ -395,8 +394,8 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
                 var fieldMeta = meta.FindField(field);
                 if (fieldMeta != null)
                 {
-                    value = fieldMeta.Property.GetValue(dataObject);
-                    memberType = fieldMeta.Property.PropertyType;
+                    value = fieldMeta.GetValueFn(dataObject);
+                    memberType = fieldMeta.ClrType;
                     return true;
                 }
             }
