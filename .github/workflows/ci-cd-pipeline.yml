@@ -190,7 +190,7 @@ jobs:
 
       - name: Deploy to baremetalweb (Canary / CI base)
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --src-path ../deploy.zip --type zip --async true
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --async true
 
       - name: Wait for deployment to stabilise
         run: |
@@ -267,7 +267,7 @@ jobs:
 
       - name: Deploy to baremetalweb-upgrade (no data reset)
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-upgrade --src-path ../deploy.zip --type zip --async true
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-upgrade --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --async true
 
       - name: Wait for deployment to stabilise
         run: |
@@ -663,7 +663,7 @@ jobs:
 
       - name: Deploy to baremetalweb-canary (Ring 0)
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-canary --src-path ../deploy.zip --type zip --async true
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-canary --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --async true
 
       - name: Wait for deployment to stabilise
         run: |
@@ -728,9 +728,9 @@ jobs:
       - name: Build early-access deploy matrix from deploy-list.json
         id: matrix
         run: |
-          COUNT=$(jq '.early_access | length' deploy-list.json)
+          COUNT=$(jq '[.targets[] | select(.ring == "early-access")] | length' deploy-list.json)
           echo "Early-access tenants to deploy: $COUNT"
-          MATRIX=$(jq -c '{ include: .early_access }' deploy-list.json)
+          MATRIX=$(jq -c '{ include: [.targets[] | select(.ring == "early-access")] }' deploy-list.json)
           echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
 
   l2-2-early-access:
@@ -743,9 +743,11 @@ jobs:
     uses: ./.github/workflows/deploy-tenant.yml
     with:
       app-name:        ${{ matrix.app_name }}
+      resource-group:  ${{ matrix.resource_group }}
       artifact-name:   deploy-package
+      health-check-url: ${{ matrix.url }}
     secrets:
-      azure-credentials: ${{ secrets.AZURE_CREDENTIALS_TENANTS }}
+      azure-credentials: ${{ secrets[matrix.secret] }}
 
   l2-2-monitor-early-access:
     name: "L2.2 · Monitor Early-Access Tenants (20 min)"
@@ -758,7 +760,7 @@ jobs:
           echo ""
           echo "Please review error logs for each early-access tenant before approving L2.3."
           echo "Use the Azure Portal or Azure CLI to inspect logs for each app:"
-          TENANTS=$(jq -r '.early_access[] | "  \(.name): az webapp log tail --name \(.app_name) --resource-group <rg>"' deploy-list.json)
+          TENANTS=$(jq -r '[.targets[] | select(.ring == "early-access")] | .[] | "  \(.name): az webapp log tail --name \(.app_name) --resource-group \(.resource_group)"' deploy-list.json)
           echo "$TENANTS"
           echo ""
           echo "Waiting 20 minutes before making the full rollout available for approval..."
@@ -784,9 +786,9 @@ jobs:
       - name: Build full-rollout deploy matrix from deploy-list.json
         id: matrix
         run: |
-          COUNT=$(jq '.main_rollout | length' deploy-list.json)
+          COUNT=$(jq '[.targets[] | select(.ring == "production")] | length' deploy-list.json)
           echo "Main-rollout tenants to deploy: $COUNT"
-          MATRIX=$(jq -c '{ include: .main_rollout }' deploy-list.json)
+          MATRIX=$(jq -c '{ include: [.targets[] | select(.ring == "production")] }' deploy-list.json)
           echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
 
   l2-3-full-rollout:
@@ -799,6 +801,8 @@ jobs:
     uses: ./.github/workflows/deploy-tenant.yml
     with:
       app-name:      ${{ matrix.app_name }}
+      resource-group: ${{ matrix.resource_group }}
       artifact-name: deploy-package
+      health-check-url: ${{ matrix.url }}
     secrets:
-      azure-credentials: ${{ secrets.AZURE_CREDENTIALS_TENANTS }}
+      azure-credentials: ${{ secrets[matrix.secret] }}

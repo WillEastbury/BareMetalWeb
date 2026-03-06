@@ -203,7 +203,7 @@ jobs:
 
       - name: Deploy to Azure Web App
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --src-path ../deploy.zip --type zip --async true
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --async true
 
       - name: Wait for deployment to stabilize
         run: |
