@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
@@ -14,6 +15,18 @@ namespace BareMetalWeb.Host;
 public static class DeltaApiHandlers
 {
     private const string BinaryContentType = "application/octet-stream";
+
+    // Cached enum name→value lookups per CLR type (avoids Enum.Parse reflection on every request)
+    private static readonly ConcurrentDictionary<Type, Dictionary<string, object>> _enumLookups = new();
+
+    private static Dictionary<string, object> BuildEnumLookup(Type enumType)
+    {
+        var names = Enum.GetNames(enumType);
+        var dict = new Dictionary<string, object>(names.Length, StringComparer.OrdinalIgnoreCase);
+        foreach (var n in names)
+            dict[n] = Enum.Parse(enumType, n);
+        return dict;
+    }
 
     /// <summary>
     /// PATCH /api/_binary/{type}/{id}
@@ -272,7 +285,9 @@ public static class DeltaApiHandlers
             FieldType.Identifier => IdentifierValue.Parse(el.GetString()!),
             FieldType.EnumInt32 => el.ValueKind == JsonValueKind.Number
                 ? Enum.ToObject(field.ClrType, el.GetInt32())
-                : Enum.Parse(field.ClrType, el.GetString()!, true),
+                : _enumLookups.GetOrAdd(field.ClrType, BuildEnumLookup).TryGetValue(el.GetString()!, out var ev)
+                    ? ev
+                    : Enum.ToObject(field.ClrType, 0),
             _ => el.GetString(),
         };
     }

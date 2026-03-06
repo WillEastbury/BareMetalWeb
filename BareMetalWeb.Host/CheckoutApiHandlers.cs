@@ -13,6 +13,13 @@ namespace BareMetalWeb.Host;
 /// </summary>
 public static class CheckoutApiHandlers
 {
+    private static readonly Dictionary<string, PaymentMethod> PaymentMethodLookup = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Stripe"] = PaymentMethod.Stripe,
+        ["PayPal"] = PaymentMethod.PayPal,
+        ["Manual"] = PaymentMethod.Manual,
+    };
+
     private static long _orderSeq = DateTime.UtcNow.Ticks % 100_000;
 
     /// <summary>
@@ -81,7 +88,7 @@ public static class CheckoutApiHandlers
         order.UserId = userId;
         order.Email = email;
         order.ShippingAddress = address;
-        order.PaymentMethod = Enum.TryParse<PaymentMethod>(method, true, out var pmEnum) ? pmEnum : PaymentMethod.Stripe;
+        order.PaymentMethod = PaymentMethodLookup.TryGetValue(method, out var pmEnum) ? pmEnum : PaymentMethod.Stripe;
         decimal subtotal = 0;
         foreach (var i in items) subtotal += i.LineTotal;
         order.Subtotal = subtotal;
