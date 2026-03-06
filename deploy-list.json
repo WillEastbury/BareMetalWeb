@@ -24,16 +24,21 @@
   ],
   "early_access": [
     {
-      "id": "tenant-example-ea",
-      "name": "Example Early-Access Tenant",
-      "app_name": "baremetalweb-tenant-example-ea"
+      "id": "memoryforaitodo",
+      "name": "Memory for AI Todo",
+      "app_name": "memoryforaitodo"
+    },
+    {
+      "id": "metalsamples",
+      "name": "Metal Samples",
+      "app_name": "metalsamples"
     }
   ],
   "main_rollout": [
     {
-      "id": "tenant-example-prod",
-      "name": "Example Production Tenant",
-      "app_name": "baremetalweb-tenant-example-prod"
+      "id": "oldoaklaboratoryschool",
+      "name": "Old Oak Laboratory School",
+      "app_name": "oldoaklaboratoryschool"
     }
   ]
 }

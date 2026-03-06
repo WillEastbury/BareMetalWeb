@@ -108,3 +108,50 @@ resource webAppCanary 'Microsoft.Web/sites@2023-01-01' = {
     }
   }
 }
+
+// ── Tenant Web Apps ──────────────────────────────────────────────────────────
+
+// P1 Early-access: Memory for AI Todo
+resource webAppMemoryForAiTodo 'Microsoft.Web/sites@2023-01-01' = {
+  name: 'memoryforaitodo'
+  location: location
+  properties: {
+    serverFarmId: appServicePlan.id
+    httpsOnly: true
+    siteConfig: {
+      alwaysOn: true
+      netFrameworkVersion: 'v9.0'
+      use32BitWorkerProcess: false
+    }
+  }
+}
+
+// P1 Early-access: Metal Samples
+resource webAppMetalSamples 'Microsoft.Web/sites@2023-01-01' = {
+  name: 'metalsamples'
+  location: location
+  properties: {
+    serverFarmId: appServicePlan.id
+    httpsOnly: true
+    siteConfig: {
+      alwaysOn: true
+      netFrameworkVersion: 'v9.0'
+      use32BitWorkerProcess: false
+    }
+  }
+}
+
+// P2 Standard rollout: Old Oak Laboratory School
+resource webAppOldOakLaboratorySchool 'Microsoft.Web/sites@2023-01-01' = {
+  name: 'oldoaklaboratoryschool'
+  location: location
+  properties: {
+    serverFarmId: appServicePlan.id
+    httpsOnly: true
+    siteConfig: {
+      alwaysOn: true
+      netFrameworkVersion: 'v9.0'
+      use32BitWorkerProcess: false
+    }
+  }
+}
