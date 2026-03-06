@@ -1,0 +1,118 @@
+name: Large Performance Stress Tests
+
+run-name: "Perf Stress Tests (Large) - V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# L1.4 – Heavy performance testing with large data sets (10k-100k entities).
+# Runs nightly and on-demand; too slow for every PR.
+#
+# Tests:
+#   - Bulk insert throughput (ops/sec)
+#   - Full-table scan latency
+#   - Filtered query performance
+#   - Binary serialization at scale
+#   - Search index build time
+#
+# Results are uploaded as artifacts for trend analysis.
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # Nightly at 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      scale:
+        description: 'Data scale multiplier (1x = 10k entities, 10x = 100k)'
+        type: choice
+        options: ['1', '2', '5', '10']
+        default: '1'
+
+concurrency:
+  group: perf-large
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  stress-test:
+    name: "Large data set stress test"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Build performance tests
+        run: dotnet build BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj --configuration Release
+
+      - name: Determine scale
+        id: scale
+        run: |
+          MULTIPLIER="${{ github.event.inputs.scale || '1' }}"
+          ADDRESSES=$((10000 * MULTIPLIER))
+          CUSTOMERS=$((5000 * MULTIPLIER))
+          PRODUCTS=$((2500 * MULTIPLIER))
+          UNITS=$((500 * MULTIPLIER))
+          echo "addresses=${ADDRESSES}" >> $GITHUB_OUTPUT
+          echo "customers=${CUSTOMERS}" >> $GITHUB_OUTPUT
+          echo "products=${PRODUCTS}" >> $GITHUB_OUTPUT
+          echo "units=${UNITS}" >> $GITHUB_OUTPUT
+          echo "multiplier=${MULTIPLIER}" >> $GITHUB_OUTPUT
+          TOTAL=$((ADDRESSES + CUSTOMERS + PRODUCTS + UNITS))
+          echo "Scale: ${MULTIPLIER}x — ${TOTAL} total entities"
+
+      - name: Run large stress test
+        run: |
+          echo "=========================================="
+          echo "Large Performance Stress Test (${{ steps.scale.outputs.multiplier }}x scale)"
+          echo "=========================================="
+          echo ""
+          dotnet run --project BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj \
+            --configuration Release --no-build \
+            -- --addresses ${{ steps.scale.outputs.addresses }} \
+               --customers ${{ steps.scale.outputs.customers }} \
+               --products ${{ steps.scale.outputs.products }} \
+               --units ${{ steps.scale.outputs.units }} \
+            2>&1 | tee perf-large-results.txt
+
+      - name: Generate summary
+        if: always()
+        run: |
+          echo "## Large Perf Test Results (${{ steps.scale.outputs.multiplier }}x scale)" > perf-large-summary.md
+          echo "" >> perf-large-summary.md
+          echo "| Metric | Value |" >> perf-large-summary.md
+          echo "|--------|-------|" >> perf-large-summary.md
+          echo "| Scale | ${{ steps.scale.outputs.multiplier }}x |" >> perf-large-summary.md
+          echo "| Addresses | ${{ steps.scale.outputs.addresses }} |" >> perf-large-summary.md
+          echo "| Customers | ${{ steps.scale.outputs.customers }} |" >> perf-large-summary.md
+          echo "| Products | ${{ steps.scale.outputs.products }} |" >> perf-large-summary.md
+          echo "| Units | ${{ steps.scale.outputs.units }} |" >> perf-large-summary.md
+          echo "| Date | $(date -u +%Y-%m-%dT%H:%M:%SZ) |" >> perf-large-summary.md
+          echo "" >> perf-large-summary.md
+          echo '```' >> perf-large-summary.md
+          cat perf-large-results.txt >> perf-large-summary.md
+          echo '```' >> perf-large-summary.md
+          cat perf-large-summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload stress test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-large-${{ steps.scale.outputs.multiplier }}x-${{ github.run_number }}
+          path: |
+            perf-large-results.txt
+            perf-large-summary.md
+          retention-days: 90
