@@ -64,6 +64,8 @@ public static class BareMetalWebExtensions
         DataScaffold.RegisterEntity<ViewDefinition>();
         DataScaffold.RegisterEntity<FileAttachment>();
         DataScaffold.RegisterEntity<RecordComment>();
+        DataScaffold.RegisterEntity<NotificationDefinition>();
+        DataScaffold.RegisterEntity<InboxMessage>();
 
         IDataObjectStore dataStore = ProgramSetup.CreateDataStore(config, contentRoot, serializer, queryEvaluator, logger);
 
@@ -259,6 +261,7 @@ public static class BareMetalWebExtensions
         appInfo.RegisterRuntimeApiRoutes(pageInfoFactory);       // /meta/entity/{name}, POST /query, POST /intent
         appInfo.RegisterLookupApiRoutes(pageInfoFactory);       // must be before RegisterApiRoutes
         ActionApiHandlers.Initialize();                           // action engine lock manager
+        NotificationService.Initialize(logger);                   // notification channels
 
         // Initialize cluster state with local lease (single-instance default)
         var clusterState = new BareMetalWeb.Data.ClusterState(new BareMetalWeb.Data.LocalLeaseAuthority());
@@ -282,6 +285,7 @@ public static class BareMetalWebExtensions
 
         appInfo.RegisterBinaryApiRoutes(routeHandlers, pageInfoFactory, mainTemplate);       // binary wire-format API
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
+        appInfo.RegisterInboxRoutes(pageInfoFactory);
         appInfo.RegisterVNextRoutes(pageInfoFactory, templateStore);
         appInfo.RegisterReportRoutes(pageInfoFactory);
         appInfo.RegisterDashboardRoutes(pageInfoFactory);

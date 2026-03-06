@@ -646,6 +646,22 @@ public class RouteRegistrationExtensionsTests : IDisposable
     // ──────────────────────────────────────────────────────────────
 
     [Fact]
+    public void RegisterInboxRoutes_RegistersFourRoutes()
+    {
+        // Arrange & Act
+        _server.RegisterInboxRoutes(_pageInfoFactory);
+
+        // Assert — exactly 4 routes registered
+        Assert.Equal(4, _server.routes.Count);
+        Assert.True(_server.routes.ContainsKey("GET /api/inbox"));
+        Assert.True(_server.routes.ContainsKey("GET /api/inbox/unread-count"));
+        Assert.True(_server.routes.ContainsKey("POST /api/inbox/{id}/read"));
+        Assert.True(_server.routes.ContainsKey("POST /api/inbox/read-all"));
+    }
+
+    // ──────────────────────────────────────────────────────────────
+
+    [Fact]
     public void RegisterRoute_DuplicateKey_OverwritesPreviousRoute()
     {
         // Arrange

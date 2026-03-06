@@ -2785,4 +2785,122 @@ public static class RouteRegistrationExtensions
                 await context.Response.WriteAsync(JsonSerializer.Serialize(json, JsonIndented));
             }));
     }
+
+    /// <summary>
+    /// Registers in-app inbox API routes:
+    /// <list type="bullet">
+    ///   <item>GET  /api/inbox               — list the current user's inbox messages (newest first)</item>
+    ///   <item>GET  /api/inbox/unread-count   — return unread message count for the current user</item>
+    ///   <item>POST /api/inbox/{id}/read      — mark a single message as read</item>
+    ///   <item>POST /api/inbox/read-all       — mark all messages for the current user as read</item>
+    /// </list>
+    /// </summary>
+    public static void RegisterInboxRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        var raw = pageInfoFactory.RawPage("Authenticated", false);
+
+        // GET /api/inbox — list inbox messages for the current user
+        host.RegisterRoute("GET /api/inbox", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            var query = new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "RecipientUserName", Operator = QueryOperator.Equals, Value = user.UserName }
+                },
+                Sorts = new List<SortClause>
+                {
+                    new() { Field = "CreatedAtUtc", Direction = SortDirection.Desc }
+                },
+                Top = 50
+            };
+            var messages = DataStoreProvider.Current.Query<InboxMessage>(query).ToList();
+
+            context.Response.ContentType = "application/json";
+            var payload = messages.Select(m => new
+            {
+                id           = m.Key,
+                subject      = m.Subject,
+                body         = m.Body,
+                category     = m.Category,
+                isRead       = m.IsRead,
+                createdAtUtc = m.CreatedAtUtc,
+                entitySlug   = m.EntitySlug,
+                entityId     = m.EntityId
+            }).ToArray();
+            await context.Response.WriteAsync(JsonSerializer.Serialize(payload, JsonCompact));
+        }));
+
+        // GET /api/inbox/unread-count — return the number of unread messages
+        host.RegisterRoute("GET /api/inbox/unread-count", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            var query = new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "RecipientUserName", Operator = QueryOperator.Equals, Value = user.UserName },
+                    new() { Field = "IsRead",            Operator = QueryOperator.Equals, Value = false }
+                }
+            };
+            var count = DataStoreProvider.Current.Query<InboxMessage>(query).Count();
+
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new { count }, JsonCompact));
+        }));
+
+        // POST /api/inbox/{id}/read — mark a single message as read
+        host.RegisterRoute("POST /api/inbox/{id}/read", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            var idStr = GetRouteParam(context, "id");
+            if (!uint.TryParse(idStr, out var msgKey))
+            { context.Response.StatusCode = 400; await context.Response.WriteAsync("{\"error\":\"Invalid id\"}"); return; }
+
+            var msg = await DataStoreProvider.Current.LoadAsync<InboxMessage>(msgKey, context.RequestAborted).ConfigureAwait(false);
+            if (msg == null || !string.Equals(msg.RecipientUserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            { context.Response.StatusCode = 404; await context.Response.WriteAsync("{\"error\":\"Not found\"}"); return; }
+
+            if (!msg.IsRead)
+            {
+                msg.IsRead = true;
+                await DataStoreProvider.Current.SaveAsync(msg, context.RequestAborted).ConfigureAwait(false);
+            }
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"ok\":true}");
+        }));
+
+        // POST /api/inbox/read-all — mark all current user messages as read
+        host.RegisterRoute("POST /api/inbox/read-all", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            var query = new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "RecipientUserName", Operator = QueryOperator.Equals, Value = user.UserName },
+                    new() { Field = "IsRead",            Operator = QueryOperator.Equals, Value = false }
+                }
+            };
+            var unread = DataStoreProvider.Current.Query<InboxMessage>(query).ToList();
+            foreach (var msg in unread)
+            {
+                msg.IsRead = true;
+                await DataStoreProvider.Current.SaveAsync(msg, context.RequestAborted).ConfigureAwait(false);
+            }
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(new { marked = unread.Count }, JsonCompact));
+        }));
+    }
 }
