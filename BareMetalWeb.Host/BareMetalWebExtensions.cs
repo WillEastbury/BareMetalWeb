@@ -209,6 +209,11 @@ public static class BareMetalWebExtensions
         appInfo.PrivacyPolicyUrl   = SettingsService.GetValue(WellKnownSettings.AppPrivacyPolicyUrl, "");
         appInfo.ShowHostDiagnostics = string.Equals(SettingsService.GetValue(WellKnownSettings.ShowHostInfo, "False"), "True", StringComparison.OrdinalIgnoreCase);
 
+        // Wire up metrics callbacks for subsystem timers
+        BmwJsonWriter.OnSerializationComplete = elapsed => metricsTracker.RecordSerialization(elapsed);
+        WalDataProvider.OnWalReadComplete = elapsed => metricsTracker.RecordWalRead(elapsed);
+        BareMetalWeb.Rendering.HtmlRenderer.OnRenderComplete = elapsed => metricsTracker.RecordUiRender(elapsed);
+
         // Wire up the tenant registry so RequestHandler can resolve tenants per-request.
         if (multitenancyOptions.Enabled)
             appInfo.TenantRegistry = tenantRegistry;

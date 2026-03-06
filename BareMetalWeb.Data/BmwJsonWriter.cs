@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Buffers.Text;
 using System.Collections;
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using WireFieldType = BareMetalWeb.Data.MetadataWireSerializer.WireFieldType;
@@ -20,6 +21,8 @@ namespace BareMetalWeb.Data;
 /// </summary>
 public static class BmwJsonWriter
 {
+    internal static Action<TimeSpan>? OnSerializationComplete;
+
     private const int HeaderSize = 45; // magic(4) + version(4) + schema(4) + arch(1) + sig(32)
     private const int MaxStringBytes = 4 * 1024 * 1024;
 
@@ -86,6 +89,7 @@ public static class BmwJsonWriter
     /// </summary>
     public static void WriteEntity(Stream output, ReadOnlySpan<byte> rowBinary, JsonFieldFragment[] fragments)
     {
+        var sw = Stopwatch.StartNew();
         if (rowBinary.Length < HeaderSize + 1)
             throw new InvalidOperationException("Binary payload too short for BSO1 header.");
 
@@ -97,12 +101,16 @@ public static class BmwJsonWriter
         if (hasValue == 0)
         {
             output.Write(JsonNull);
+            sw.Stop();
+            OnSerializationComplete?.Invoke(sw.Elapsed);
             return;
         }
 
         output.Write(JsonObjectStart);
         WriteFieldsFromBinary(output, ref reader, fragments);
         output.Write(JsonObjectEnd);
+        sw.Stop();
+        OnSerializationComplete?.Invoke(sw.Elapsed);
     }
 
     /// <summary>
@@ -111,6 +119,7 @@ public static class BmwJsonWriter
     /// </summary>
     public static void WriteEntityList(Stream output, IReadOnlyList<ReadOnlyMemory<byte>> rows, JsonFieldFragment[] fragments, int count)
     {
+        var sw = Stopwatch.StartNew();
         output.Write(JsonObjectStart);
         output.Write(DataPrefix);
         output.Write(JsonArrayStart);
@@ -132,6 +141,8 @@ public static class BmwJsonWriter
             output.Write("0"u8);
 
         output.Write(JsonObjectEnd);
+        sw.Stop();
+        OnSerializationComplete?.Invoke(sw.Elapsed);
     }
 
     /// <summary>
@@ -147,6 +158,7 @@ public static class BmwJsonWriter
         MetadataWireSerializer serializer,
         int count)
     {
+        var sw = Stopwatch.StartNew();
         output.Write(JsonObjectStart);
         output.Write(DataPrefix);
         output.Write(JsonArrayStart);
@@ -169,6 +181,8 @@ public static class BmwJsonWriter
         else
             output.Write("0"u8);
         output.Write(JsonObjectEnd);
+        sw.Stop();
+        OnSerializationComplete?.Invoke(sw.Elapsed);
     }
 
     // ────────────── Field iteration ──────────────

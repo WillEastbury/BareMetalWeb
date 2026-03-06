@@ -18,5 +18,17 @@ public readonly record struct MetricsSnapshot(
     int ProcessId,
     long WorkingSet64,
     long VirtualMemorySize64,
-    TimeSpan ProcessUptime
+    TimeSpan ProcessUptime,
+    long RouteDispatchCount,
+    TimeSpan RouteDispatchAverage,
+    long WalReadCount,
+    TimeSpan WalReadAverage,
+    long UiRenderCount,
+    TimeSpan UiRenderAverage,
+    long SerializationCount,
+    TimeSpan SerializationAverage,
+    int GcGen0Collections,
+    int GcGen1Collections,
+    int GcGen2Collections,
+    long GcTotalAllocatedBytes
 );

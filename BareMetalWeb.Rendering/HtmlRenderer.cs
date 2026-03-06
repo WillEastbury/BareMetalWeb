@@ -1,6 +1,6 @@
 using System.Buffers;
 using System.Collections.Generic;
-
+using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Net;
 using System.Text;
@@ -16,6 +16,8 @@ namespace BareMetalWeb.Rendering;
 
 public class HtmlRenderer : IHtmlRenderer
 {
+    public static Action<TimeSpan>? OnRenderComplete;
+
     private static readonly Encoding Utf8 = Encoding.UTF8;
     private readonly IHtmlFragmentRenderer _fragments;
 
@@ -548,6 +550,7 @@ public class HtmlRenderer : IHtmlRenderer
 
     public async ValueTask RenderPage(HttpContext context, PageInfo page, IBareWebHost app)
     {
+        var renderSw = Stopwatch.StartNew();
         // Ensure CSP nonce is in page context — search without List allocation
         var pageContext = page.PageContext;
         var existingKeys = pageContext.PageMetaDataKeys;
@@ -638,6 +641,8 @@ public class HtmlRenderer : IHtmlRenderer
         CompressionHelper.ApplyHeaders(context.Response, encoding);
         context.Response.ContentLength = responseBytes.Length;
         await context.Response.BodyWriter.WriteAsync(responseBytes);
+        renderSw.Stop();
+        OnRenderComplete?.Invoke(renderSw.Elapsed);
 
     }
 
