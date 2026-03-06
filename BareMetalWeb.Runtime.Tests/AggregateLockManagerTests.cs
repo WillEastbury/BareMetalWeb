@@ -10,6 +10,13 @@ namespace BareMetalWeb.Runtime.Tests;
 /// <summary>Tests for <see cref="AggregateLockManager"/>.</summary>
 public class AggregateLockManagerTests
 {
+    private static void WaitUntil(Func<bool> condition, int timeoutMs = 5000, int intervalMs = 25)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
+            Thread.Sleep(intervalMs);
+    }
+
     private static AggregateLockManager MakeManager() => new();
 
     private static readonly TimeSpan ShortExpiry = TimeSpan.FromSeconds(10);
@@ -111,7 +118,7 @@ public class AggregateLockManagerTests
     {
         var mgr = MakeManager();
         mgr.TryAcquire("agg-1", "tx-1", TimeSpan.FromMilliseconds(1)); // expires almost immediately
-        Thread.Sleep(10); // let it expire
+        WaitUntil(() => mgr.TryAcquire("agg-1", "tx-2", ShortExpiry));
         var ok = mgr.TryAcquire("agg-1", "tx-2", ShortExpiry);
         Assert.True(ok, "Expired lock should be replaced by new owner");
     }

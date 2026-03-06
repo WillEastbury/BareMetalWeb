@@ -6,6 +6,14 @@ namespace BareMetalWeb.Host.Tests;
 
 public class BackgroundJobServiceTests
 {
+    private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 5000, int intervalMs = 25)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
+            await Task.Delay(intervalMs);
+        Assert.True(condition(), $"Condition not met within {timeoutMs}ms");
+    }
+
     // ── StartJob / TryGetJob ──────────────────────────────────────
 
     [Fact]
@@ -71,8 +79,7 @@ public class BackgroundJobServiceTests
         });
 
         await tcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        // Give the task a moment to set Succeeded.
-        await Task.Delay(50);
+        await WaitUntilAsync(() => { svc.TryGetJob(jobId, out var s); return s?.Status == BackgroundJobStatus.Succeeded; });
 
         svc.TryGetJob(jobId, out var snapshot);
         Assert.Equal(BackgroundJobStatus.Succeeded, snapshot!.Status);
@@ -93,8 +100,7 @@ public class BackgroundJobServiceTests
         });
 
         await started.WaitAsync(TimeSpan.FromSeconds(5));
-        // Give the task time to transition to Failed after throwing.
-        await Task.Delay(100);
+        await WaitUntilAsync(() => { svc.TryGetJob(jobId, out var s); return s?.Status == BackgroundJobStatus.Failed; });
 
         svc.TryGetJob(jobId, out var snapshot);
         Assert.Equal(BackgroundJobStatus.Failed, snapshot!.Status);
@@ -193,7 +199,7 @@ public class BackgroundJobServiceTests
         });
 
         await done.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await Task.Delay(50); // let the finally block run
+        await WaitUntilAsync(() => { svc.TryGetJob(jobId, out var s); return s?.CompletedAt != null; });
 
         svc.TryGetJob(jobId, out var snapshot);
         Assert.NotNull(snapshot!.CompletedAt);
@@ -214,7 +220,7 @@ public class BackgroundJobServiceTests
         });
 
         await done.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await Task.Delay(50); // let Status become Succeeded
+        await WaitUntilAsync(() => { svc.TryGetJob(jobId, out var s); return s?.Status == BackgroundJobStatus.Succeeded; });
 
         // Retrieve the raw entry via the internal Jobs dictionary.
         var jobsField = typeof(BackgroundJobService).GetField("_jobs",

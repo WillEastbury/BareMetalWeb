@@ -8,6 +8,13 @@ namespace BareMetalWeb.Rendering.Tests;
 
 public class OutputCacheTests
 {
+    private static void WaitUntil(Func<bool> condition, int timeoutMs = 5000, int intervalMs = 25)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
+            Thread.Sleep(intervalMs);
+    }
+
     [Fact]
     public void TryGet_EmptyCache_ReturnsFalse()
     {
@@ -69,7 +76,7 @@ public class OutputCacheTests
 
         // Act
         cache.Store(path, body, "text/html", 200, expiry: 1);
-        Thread.Sleep(1100); // Wait for expiry
+        WaitUntil(() => !cache.TryGet(path, out _));
         var result = cache.TryGet(path, out _);
 
         // Assert
@@ -135,7 +142,7 @@ public class OutputCacheTests
         Assert.True(cache.TryGet(path, out _));
         
         // Wait and check again
-        Thread.Sleep(2100);
+        WaitUntil(() => !cache.TryGet(path, out _));
         Assert.False(cache.TryGet(path, out _));
     }
 
@@ -152,7 +159,7 @@ public class OutputCacheTests
         
         // Even with 0 expiry, it might be retrievable for a very short time
         // But after any wait, it should be expired
-        Thread.Sleep(10);
+        WaitUntil(() => !cache.TryGet(path, out _));
         var result = cache.TryGet(path, out _);
 
         // Assert
@@ -313,7 +320,7 @@ public class OutputCacheTests
             cache.Store(p, body, "text/html", 200, expiry: 0);
 
         // Wait long enough for all entries to expire.
-        Thread.Sleep(50);
+        WaitUntil(() => !cache.TryGet("/expired1", out _));
 
         // Act: store a new entry – this triggers PruneExpired internally.
         cache.Store("/new", body, "text/html", 200, expiry: 30);
