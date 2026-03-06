@@ -150,6 +150,9 @@ public static class DataScaffold
     private static readonly IIdGenerator IdGenerator = new DefaultIdGenerator();
     // Cached compiled property accessor delegates — avoids per-call PropertyInfo.GetValue reflection.
     private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> PropertyAccessorCache = new();
+    private static readonly ConcurrentDictionary<Type, Func<object>> ListFactoryCache = new();
+    private static readonly ConcurrentDictionary<Type, Func<object>> InstanceFactoryCache = new();
+    private static readonly ConcurrentDictionary<(Type, Type), Func<object>> DictFactoryCache = new();
 
     /// <summary>
     /// Fallback JSON AST (serialized) used when expression parsing fails.
@@ -3027,9 +3030,16 @@ public static class DataScaffold
     private static bool TryParseChildList(string rawValue, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type childType, out object? list)
     {
         list = null;
+        var listFactory = ListFactoryCache.GetOrAdd(childType, static t =>
+        {
+            var lt = typeof(List<>).MakeGenericType(t);
+            return () => Activator.CreateInstance(lt)!;
+        });
+        var instanceFactory = InstanceFactoryCache.GetOrAdd(childType, static t => () => Activator.CreateInstance(t)!);
+
         if (string.IsNullOrWhiteSpace(rawValue))
         {
-            list = Activator.CreateInstance(typeof(List<>).MakeGenericType(childType));
+            list = listFactory();
             return true;
         }
 
@@ -3037,13 +3047,12 @@ public static class DataScaffold
         {
             var rows = JsonSerializer.Deserialize<List<Dictionary<string, string>>>(rawValue)
                 ?? new List<Dictionary<string, string>>();
-            var listType = typeof(List<>).MakeGenericType(childType);
-            var typedList = (IList)Activator.CreateInstance(listType)!;
+            var typedList = (IList)listFactory();
             var childFields = GetChildFieldMetadata(childType);
 
             foreach (var row in rows)
             {
-                var instance = Activator.CreateInstance(childType);
+                var instance = instanceFactory();
                 if (instance == null)
                     continue;
 
@@ -3238,9 +3247,15 @@ public static class DataScaffold
     private static bool TryParseDictionary(string rawValue, Type valueType, out object? dictionary)
     {
         dictionary = null;
+        var dictFactory = DictFactoryCache.GetOrAdd((typeof(string), valueType), static key =>
+        {
+            var dt = typeof(Dictionary<,>).MakeGenericType(key.Item1, key.Item2);
+            return () => Activator.CreateInstance(dt)!;
+        });
+
         if (string.IsNullOrWhiteSpace(rawValue))
         {
-            dictionary = Activator.CreateInstance(typeof(Dictionary<,>).MakeGenericType(typeof(string), valueType));
+            dictionary = dictFactory();
             return true;
         }
 
@@ -3248,8 +3263,7 @@ public static class DataScaffold
         {
             var list = JsonSerializer.Deserialize<List<Dictionary<string, string>>>(rawValue)
                 ?? new List<Dictionary<string, string>>();
-            var dictType = typeof(Dictionary<,>).MakeGenericType(typeof(string), valueType);
-            var result = (IDictionary)Activator.CreateInstance(dictType)!;
+            var result = (IDictionary)dictFactory();
 
             foreach (var row in list)
             {
@@ -3606,17 +3620,22 @@ public static class DataScaffold
     private static bool TryConvertJsonChildList(JsonElement element, Type childType, out object? list)
     {
         list = null;
-        var listType = typeof(List<>).MakeGenericType(childType);
+        var listFactory = ListFactoryCache.GetOrAdd(childType, static t =>
+        {
+            var lt = typeof(List<>).MakeGenericType(t);
+            return () => Activator.CreateInstance(lt)!;
+        });
+        var instanceFactory = InstanceFactoryCache.GetOrAdd(childType, static t => () => Activator.CreateInstance(t)!);
 
         if (element.ValueKind == JsonValueKind.Null)
         {
-            list = Activator.CreateInstance(listType);
+            list = listFactory();
             return true;
         }
 
         try
         {
-            var typedList = (IList)Activator.CreateInstance(listType)!;
+            var typedList = (IList)listFactory();
             var childFields = GetChildFieldMetadata(childType);
 
             foreach (var row in element.EnumerateArray())
@@ -3624,7 +3643,7 @@ public static class DataScaffold
                 if (row.ValueKind != JsonValueKind.Object)
                     continue;
 
-                var instance = Activator.CreateInstance(childType);
+                var instance = instanceFactory();
                 if (instance == null)
                     continue;
 

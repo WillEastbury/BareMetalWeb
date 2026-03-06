@@ -640,7 +640,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
 
         // Assert
-        Assert.Equal(26, _server.routes.Count);
+        Assert.Equal(27, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -824,7 +824,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterAdmin > afterMonitoring);
         Assert.True(afterLookup > afterAdmin);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 20 + 4 + 13 + 5 + 25, total);
+        Assert.Equal(staticCount + 20 + 4 + 13 + 5 + 26, total);
     }
 
     [Fact]
@@ -995,6 +995,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask CommentsEditHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask CommentsDeleteHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiFileGetHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask GlobalSearchHandler(BmwContext context) => ValueTask.CompletedTask;
     }
 
     // ──────────────────────────────────────────────────────────────

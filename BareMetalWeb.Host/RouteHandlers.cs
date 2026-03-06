@@ -45,7 +45,6 @@ public sealed class RouteHandlers : IRouteHandlers
     private const int LoginIpMaxAttempts = 10;
     private const int LoginUserMaxAttempts = 5;
     private const int SsoCallbackIpMaxAttempts = 10;
-    private static readonly ConcurrentDictionary<Type, System.Reflection.PropertyInfo[]> JsonPropertyCache = new();
     private static readonly JsonSerializerOptions JsonIndented = new() { WriteIndented = true };
     private static readonly TimeSpan DataQueryTimeout = TimeSpan.FromSeconds(30);
 
@@ -2850,7 +2849,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         foreach (var entityMeta in DataScaffold.Entities)
         {
-            if (!IsEntityAccessible(entityMeta, user, userPermissions))
+            if (!string.IsNullOrEmpty(entityMeta.Permissions) && !userPermissions.Contains(entityMeta.Permissions))
                 continue;
 
             // Build OR-group of Contains clauses for each searchable string list field
@@ -2883,7 +2882,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
             catch (Exception ex)
             {
-                _logger?.LogError($"GlobalSearch|query-error|entity={entityMeta.Slug}|q={q}|msg={ex.Message}");
+                _logger?.LogError($"GlobalSearch|query-error|entity={entityMeta.Slug}|q={q}|msg={ex.Message}", ex);
                 continue;
             }
 
@@ -5925,34 +5924,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        // Fallback: serialize complex objects via reflection as JSON objects
-        var valueType = value.GetType();
-        if (valueType.IsClass)
-        {
-            writer.WriteStartObject();
-            var props = JsonPropertyCache.GetOrAdd(valueType, static t =>
-            {
-                #pragma warning disable IL2070, IL2075
-                var allProps = t.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-                var filtered = new List<System.Reflection.PropertyInfo>();
-                foreach (var p in allProps)
-                {
-                    if (p.CanRead && p.GetIndexParameters().Length == 0)
-                        filtered.Add(p);
-                }
-                return filtered.ToArray();
-                #pragma warning restore IL2070, IL2075
-            });
-            foreach (var prop in props)
-            {
-                writer.WritePropertyName(prop.Name);
-                WriteJsonValue(writer, prop.GetValue(value));
-            }
-            writer.WriteEndObject();
-            return;
-        }
-
-        writer.WriteStringValue(value.ToString());
+        writer.WriteStringValue(value?.ToString() ?? "");
     }
 
     private static void AppendUserPasswordFieldsIfNeeded(DataEntityMetadata meta, List<FormField> fields, bool isCreate)
