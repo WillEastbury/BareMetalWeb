@@ -333,61 +333,73 @@ public static class BmwJsonReader
 
     private static byte[] EncodeNumeric(ReadOnlySpan<byte> utf8Num, FieldPlan fp)
     {
-        var buf = new ArrayBufferWriter<byte>(fp.IsNullable ? 17 : 16);
-        var writer = new SpanWriter(buf);
+        // Max numeric field: nullable(1) + decimal(16) = 17 bytes
+        Span<byte> buf = stackalloc byte[17];
+        int off = 0;
 
-        if (fp.IsNullable) writer.WriteByte(1); // has value
+        if (fp.IsNullable) buf[off++] = 1; // has value
 
         switch (fp.WireType)
         {
             case WireFieldType.Byte:
                 Utf8Parser.TryParse(utf8Num, out byte byteVal, out _);
-                writer.WriteByte(byteVal);
+                buf[off++] = byteVal;
                 break;
             case WireFieldType.SByte:
                 Utf8Parser.TryParse(utf8Num, out sbyte sbyteVal, out _);
-                writer.WriteSByte(sbyteVal);
+                buf[off++] = unchecked((byte)sbyteVal);
                 break;
             case WireFieldType.Int16:
                 Utf8Parser.TryParse(utf8Num, out short i16, out _);
-                writer.WriteInt16(i16);
+                BinaryPrimitives.WriteInt16LittleEndian(buf.Slice(off), i16);
+                off += 2;
                 break;
             case WireFieldType.UInt16:
                 Utf8Parser.TryParse(utf8Num, out ushort u16, out _);
-                writer.WriteUInt16(u16);
+                BinaryPrimitives.WriteUInt16LittleEndian(buf.Slice(off), u16);
+                off += 2;
                 break;
             case WireFieldType.Int32:
                 Utf8Parser.TryParse(utf8Num, out int i32, out _);
-                writer.WriteInt32(i32);
+                BinaryPrimitives.WriteInt32LittleEndian(buf.Slice(off), i32);
+                off += 4;
                 break;
             case WireFieldType.UInt32:
                 Utf8Parser.TryParse(utf8Num, out uint u32, out _);
-                writer.WriteUInt32(u32);
+                BinaryPrimitives.WriteUInt32LittleEndian(buf.Slice(off), u32);
+                off += 4;
                 break;
             case WireFieldType.Int64:
                 Utf8Parser.TryParse(utf8Num, out long i64, out _);
-                writer.WriteInt64(i64);
+                BinaryPrimitives.WriteInt64LittleEndian(buf.Slice(off), i64);
+                off += 8;
                 break;
             case WireFieldType.UInt64:
                 Utf8Parser.TryParse(utf8Num, out ulong u64, out _);
-                writer.WriteUInt64(u64);
+                BinaryPrimitives.WriteUInt64LittleEndian(buf.Slice(off), u64);
+                off += 8;
                 break;
             case WireFieldType.Float32:
                 Utf8Parser.TryParse(utf8Num, out float f32, out _);
-                writer.WriteSingle(f32);
+                BinaryPrimitives.WriteInt32LittleEndian(buf.Slice(off), BitConverter.SingleToInt32Bits(f32));
+                off += 4;
                 break;
             case WireFieldType.Float64:
                 Utf8Parser.TryParse(utf8Num, out double f64, out _);
-                writer.WriteDouble(f64);
+                BinaryPrimitives.WriteInt64LittleEndian(buf.Slice(off), BitConverter.DoubleToInt64Bits(f64));
+                off += 8;
                 break;
             case WireFieldType.Decimal:
                 Utf8Parser.TryParse(utf8Num, out decimal dec, out _);
-                writer.WriteDecimal(dec);
+                var bits = decimal.GetBits(dec);
+                BinaryPrimitives.WriteInt32LittleEndian(buf.Slice(off), bits[0]); off += 4;
+                BinaryPrimitives.WriteInt32LittleEndian(buf.Slice(off), bits[1]); off += 4;
+                BinaryPrimitives.WriteInt32LittleEndian(buf.Slice(off), bits[2]); off += 4;
+                BinaryPrimitives.WriteInt32LittleEndian(buf.Slice(off), bits[3]); off += 4;
                 break;
         }
 
-        writer.Commit();
-        return buf.WrittenSpan.ToArray();
+        return buf[..off].ToArray();
     }
 
     private static (byte[] value, int endPos) ParseCharValue(ReadOnlySpan<byte> json, int pos, bool isNullable)
@@ -594,26 +606,32 @@ public static class BmwJsonReader
             endPos = numEnd;
         }
 
-        // Encode as the underlying type
+        // Encode as the underlying type using stackalloc (max 9 bytes: nullable + int64)
         var underlying = fp.EnumUnderlying == default ? WireFieldType.Int32 : fp.EnumUnderlying;
-        var buf = new ArrayBufferWriter<byte>(fp.IsNullable ? 9 : 8);
-        var writer = new SpanWriter(buf);
-        if (fp.IsNullable) writer.WriteByte(1);
+        Span<byte> buf = stackalloc byte[9];
+        int off = 0;
+        if (fp.IsNullable) buf[off++] = 1;
 
         switch (underlying)
         {
-            case WireFieldType.Byte: writer.WriteByte((byte)enumInt); break;
-            case WireFieldType.SByte: writer.WriteSByte((sbyte)enumInt); break;
-            case WireFieldType.Int16: writer.WriteInt16((short)enumInt); break;
-            case WireFieldType.UInt16: writer.WriteUInt16((ushort)enumInt); break;
-            case WireFieldType.Int32: writer.WriteInt32(enumInt); break;
-            case WireFieldType.UInt32: writer.WriteUInt32((uint)enumInt); break;
-            case WireFieldType.Int64: writer.WriteInt64(enumInt); break;
-            case WireFieldType.UInt64: writer.WriteUInt64((ulong)enumInt); break;
-            default: writer.WriteInt32(enumInt); break;
+            case WireFieldType.Byte: buf[off++] = (byte)enumInt; break;
+            case WireFieldType.SByte: buf[off++] = unchecked((byte)(sbyte)enumInt); break;
+            case WireFieldType.Int16:
+                BinaryPrimitives.WriteInt16LittleEndian(buf.Slice(off), (short)enumInt); off += 2; break;
+            case WireFieldType.UInt16:
+                BinaryPrimitives.WriteUInt16LittleEndian(buf.Slice(off), (ushort)enumInt); off += 2; break;
+            case WireFieldType.Int32:
+                BinaryPrimitives.WriteInt32LittleEndian(buf.Slice(off), enumInt); off += 4; break;
+            case WireFieldType.UInt32:
+                BinaryPrimitives.WriteUInt32LittleEndian(buf.Slice(off), (uint)enumInt); off += 4; break;
+            case WireFieldType.Int64:
+                BinaryPrimitives.WriteInt64LittleEndian(buf.Slice(off), enumInt); off += 8; break;
+            case WireFieldType.UInt64:
+                BinaryPrimitives.WriteUInt64LittleEndian(buf.Slice(off), (ulong)enumInt); off += 8; break;
+            default:
+                BinaryPrimitives.WriteInt32LittleEndian(buf.Slice(off), enumInt); off += 4; break;
         }
-        writer.Commit();
-        return (buf.WrittenSpan.ToArray(), endPos);
+        return (buf[..off].ToArray(), endPos);
     }
 
     // ────────────── Binary assembly ──────────────
@@ -1041,8 +1059,44 @@ public static class BmwJsonReader
         if (input is MemoryStream ms && ms.TryGetBuffer(out var msBuffer))
             return msBuffer.Array!.AsSpan(msBuffer.Offset, msBuffer.Count).ToArray();
 
-        using var buffer = new MemoryStream();
-        input.CopyTo(buffer);
-        return buffer.ToArray();
+        // Use ArrayPool to avoid MemoryStream + double-copy
+        int length;
+        byte[] rented;
+        if (input.CanSeek)
+        {
+            length = (int)input.Length;
+            rented = ArrayPool<byte>.Shared.Rent(Math.Max(length, 256));
+            int read = 0;
+            while (read < length)
+            {
+                int n = input.Read(rented, read, length - read);
+                if (n == 0) break;
+                read += n;
+            }
+            length = read;
+        }
+        else
+        {
+            rented = ArrayPool<byte>.Shared.Rent(4096);
+            length = 0;
+            while (true)
+            {
+                if (length == rented.Length)
+                {
+                    var bigger = ArrayPool<byte>.Shared.Rent(rented.Length * 2);
+                    rented.AsSpan(0, length).CopyTo(bigger);
+                    ArrayPool<byte>.Shared.Return(rented);
+                    rented = bigger;
+                }
+                int n = input.Read(rented, length, rented.Length - length);
+                if (n == 0) break;
+                length += n;
+            }
+        }
+
+        // Copy exact slice and return rental
+        var result = rented.AsSpan(0, length).ToArray();
+        ArrayPool<byte>.Shared.Return(rented);
+        return result;
     }
 }
