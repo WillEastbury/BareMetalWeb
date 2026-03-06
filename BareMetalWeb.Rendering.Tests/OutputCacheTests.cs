@@ -8,12 +8,8 @@ namespace BareMetalWeb.Rendering.Tests;
 
 public class OutputCacheTests
 {
-    private static void WaitUntil(Func<bool> condition, int timeoutMs = 5000, int intervalMs = 25)
-    {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
-            Thread.Sleep(intervalMs);
-    }
+    private static void WaitUntil(Func<bool> condition, int timeoutMs = 5000)
+        => SpinWait.SpinUntil(condition, timeoutMs);
 
     [Fact]
     public void TryGet_EmptyCache_ReturnsFalse()

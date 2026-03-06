@@ -93,7 +93,11 @@ jobs:
           path: ./publish
           retention-days: 1
 
-  # ── Stage 2: Test shards (parallel, test Debug build) ──────────────────
+  # ── Stage 2: Test shards (all parallel, each on a separate runner) ──────
+  # Each shard: download the pre-built Debug artifact, run --no-build.
+  # All shards are independent – they fan out from build-debug and
+  # converge at the tests-passed summary job so callers have a single gate.
+
   test-data:
     needs: build-debug
     runs-on: ubuntu-latest
@@ -113,7 +117,18 @@ jobs:
           name: build-debug
           path: .
       - name: Run Data tests
-        run: dotnet test BareMetalWeb.Data.Tests/BareMetalWeb.Data.Tests.csproj --configuration Debug --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+        run: |
+          dotnet test BareMetalWeb.Data.Tests/BareMetalWeb.Data.Tests.csproj \
+            --configuration Debug --no-build --verbosity minimal \
+            --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration" \
+            --results-directory TestResults --logger "trx"
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-data
+          path: TestResults/
+          retention-days: 7
 
   test-host:
     needs: build-debug
@@ -134,7 +149,18 @@ jobs:
           name: build-debug
           path: .
       - name: Run Host tests
-        run: dotnet test BareMetalWeb.Host.Tests/BareMetalWeb.Host.Tests.csproj --configuration Debug --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+        run: |
+          dotnet test BareMetalWeb.Host.Tests/BareMetalWeb.Host.Tests.csproj \
+            --configuration Debug --no-build --verbosity minimal \
+            --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration" \
+            --results-directory TestResults --logger "trx"
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-host
+          path: TestResults/
+          retention-days: 7
 
   test-rendering:
     needs: build-debug
@@ -154,12 +180,113 @@ jobs:
         with:
           name: build-debug
           path: .
-      - name: Run Rendering + Runtime + API + Core tests
+      - name: Run Rendering tests
         run: |
-          dotnet test BareMetalWeb.Rendering.Tests/BareMetalWeb.Rendering.Tests.csproj --configuration Debug --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
-          dotnet test BareMetalWeb.Runtime.Tests/BareMetalWeb.Runtime.Tests.csproj --configuration Debug --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
-          dotnet test BareMetalWeb.Core.Tests/BareMetalWeb.Core.Tests.csproj --configuration Debug --no-build --verbosity minimal 2>/dev/null || true
-          dotnet test BareMetalWeb.API.Tests/BareMetalWeb.API.Tests.csproj --configuration Debug --no-build --verbosity minimal 2>/dev/null || true
+          dotnet test BareMetalWeb.Rendering.Tests/BareMetalWeb.Rendering.Tests.csproj \
+            --configuration Debug --no-build --verbosity minimal \
+            --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration" \
+            --results-directory TestResults --logger "trx"
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-rendering
+          path: TestResults/
+          retention-days: 7
+
+  test-runtime:
+    needs: build-debug
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-debug
+          path: .
+      - name: Run Runtime tests
+        run: |
+          dotnet test BareMetalWeb.Runtime.Tests/BareMetalWeb.Runtime.Tests.csproj \
+            --configuration Debug --no-build --verbosity minimal \
+            --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration" \
+            --results-directory TestResults --logger "trx"
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-runtime
+          path: TestResults/
+          retention-days: 7
+
+  test-core:
+    needs: build-debug
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-debug
+          path: .
+      - name: Run Core tests
+        run: |
+          dotnet test BareMetalWeb.Core.Tests/BareMetalWeb.Core.Tests.csproj \
+            --configuration Debug --no-build --verbosity minimal \
+            --results-directory TestResults --logger "trx" 2>/dev/null || true
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-core
+          path: TestResults/
+          retention-days: 7
+
+  test-api:
+    needs: build-debug
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-debug
+          path: .
+      - name: Run API tests
+        run: |
+          dotnet test BareMetalWeb.API.Tests/BareMetalWeb.API.Tests.csproj \
+            --configuration Debug --no-build --verbosity minimal \
+            --results-directory TestResults --logger "trx" 2>/dev/null || true
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-api
+          path: TestResults/
+          retention-days: 7
 
   # ── Stage 2b: Jest tests (no .NET build dependency) ────────────────────
   test-jest:
@@ -186,3 +313,28 @@ jobs:
       - name: Run Jest unit tests
         working-directory: tests/js-unit
         run: npm test
+
+  # ── Stage 3: Summary gate – all shards must pass ───────────────────────
+  # External jobs (e.g. ci-cd-pipeline.yml) can depend on this single job
+  # instead of enumerating every shard.
+  tests-passed:
+    needs: [test-data, test-host, test-rendering, test-runtime, test-core, test-api, test-jest]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check all shards passed
+        run: |
+          results=(
+            "${{ needs.test-data.result }}"
+            "${{ needs.test-host.result }}"
+            "${{ needs.test-rendering.result }}"
+            "${{ needs.test-runtime.result }}"
+            "${{ needs.test-jest.result }}"
+          )
+          for r in "${results[@]}"; do
+            if [ "$r" != "success" ]; then
+              echo "::error::One or more test shards failed (results: ${results[*]})"
+              exit 1
+            fi
+          done
+          echo "All test shards passed ✓"
