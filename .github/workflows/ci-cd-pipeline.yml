@@ -188,18 +188,20 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Ensure app runs from deployed files
+      - name: Stop app and clear package-run mode
         run: |
+          az webapp stop --name baremetalweb --resource-group baremetalweb-rg
           az webapp config appsettings set --name baremetalweb --resource-group baremetalweb-rg \
             --settings WEBSITE_RUN_FROM_PACKAGE=0 --output none
+          echo "✓ App stopped, WEBSITE_RUN_FROM_PACKAGE=0"
 
       - name: Deploy to baremetalweb (Canary / CI base)
         run: |
           cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --clean true
 
-      - name: Restart app
+      - name: Start app
         run: |
-          az webapp restart --name baremetalweb --resource-group baremetalweb-rg
+          az webapp start --name baremetalweb --resource-group baremetalweb-rg
           echo "Waiting 30 s for app to start..."
           sleep 30
 
@@ -271,18 +273,20 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS_UPGRADE }}
 
-      - name: Ensure app runs from deployed files
+      - name: Stop app and clear package-run mode
         run: |
+          az webapp stop --name baremetalweb-upgrade --resource-group baremetalweb-rg
           az webapp config appsettings set --name baremetalweb-upgrade --resource-group baremetalweb-rg \
             --settings WEBSITE_RUN_FROM_PACKAGE=0 --output none
+          echo "✓ App stopped, WEBSITE_RUN_FROM_PACKAGE=0"
 
       - name: Deploy to baremetalweb-upgrade (no data reset)
         run: |
           cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-upgrade --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --clean true
 
-      - name: Restart app
+      - name: Start app
         run: |
-          az webapp restart --name baremetalweb-upgrade --resource-group baremetalweb-rg
+          az webapp start --name baremetalweb-upgrade --resource-group baremetalweb-rg
           echo "Waiting 30 s for app to start..."
           sleep 30
 
@@ -673,18 +677,20 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS_CANARY }}
 
-      - name: Ensure app runs from deployed files
+      - name: Stop app and clear package-run mode
         run: |
+          az webapp stop --name baremetalweb-canary --resource-group baremetalweb-rg
           az webapp config appsettings set --name baremetalweb-canary --resource-group baremetalweb-rg \
             --settings WEBSITE_RUN_FROM_PACKAGE=0 --output none
+          echo "✓ App stopped, WEBSITE_RUN_FROM_PACKAGE=0"
 
       - name: Deploy to baremetalweb-canary (Ring 0)
         run: |
           cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-canary --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --clean true
 
-      - name: Restart app
+      - name: Start app
         run: |
-          az webapp restart --name baremetalweb-canary --resource-group baremetalweb-rg
+          az webapp start --name baremetalweb-canary --resource-group baremetalweb-rg
           echo "Waiting 60 s for app to start..."
           sleep 60
 
