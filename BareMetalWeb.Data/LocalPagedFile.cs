@@ -86,19 +86,6 @@ internal sealed class LocalPagedFile : IPagedFile
         return bytesRead;
     }
 
-    public async ValueTask<int> ReadPageAsync(long pageIndex, Memory<byte> buffer, CancellationToken cancellationToken = default)
-    {
-        if (buffer.Length < _pageSize)
-            throw new ArgumentException("Buffer must be at least one page in size.", nameof(buffer));
-
-        var bytesRead = await EnsureCacheLoadedAsync(pageIndex, cancellationToken).ConfigureAwait(false);
-        if (bytesRead == 0)
-            return 0;
-
-        _pageCache.AsSpan(0, bytesRead).CopyTo(buffer.Span);
-        return bytesRead;
-    }
-
     public void WritePage(long pageIndex, ReadOnlySpan<byte> data)
     {
         EnsureWritable();
@@ -111,31 +98,11 @@ internal sealed class LocalPagedFile : IPagedFile
         MarkPageAllocated(pageIndex);
     }
 
-    public ValueTask WritePageAsync(long pageIndex, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
-    {
-        EnsureWritable();
-        if (data.Length != _pageSize)
-            throw new ArgumentException("Data must be exactly one page in size.", nameof(data));
-
-        EnsureCacheForWrite(pageIndex);
-        data.CopyTo(_pageCache.AsMemory(0, _pageSize));
-        _cacheDirty = true;
-        MarkPageAllocated(pageIndex);
-        return ValueTask.CompletedTask;
-    }
-
     public void Flush()
     {
         FlushCache();
         FlushMap();
         _stream.Flush();
-    }
-
-    public async ValueTask FlushAsync(CancellationToken cancellationToken = default)
-    {
-        await FlushCacheAsync(cancellationToken).ConfigureAwait(false);
-        await FlushMapAsync(cancellationToken).ConfigureAwait(false);
-        await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
     public void Dispose()
@@ -256,17 +223,6 @@ internal sealed class LocalPagedFile : IPagedFile
         return ReadPageIntoCache(pageIndex);
     }
 
-    private async ValueTask<int> EnsureCacheLoadedAsync(long pageIndex, CancellationToken cancellationToken)
-    {
-        if (_cachedPageIndex == pageIndex)
-            return _cacheDirty ? _pageSize : GetCachedBytesAvailable(pageIndex);
-
-        await FlushCacheAsync(cancellationToken).ConfigureAwait(false);
-        _cachedPageIndex = pageIndex;
-        _cacheDirty = false;
-        return await ReadPageIntoCacheAsync(pageIndex, cancellationToken).ConfigureAwait(false);
-    }
-
     private void EnsureCacheForWrite(long pageIndex)
     {
         if (_cachedPageIndex == pageIndex)
@@ -293,36 +249,12 @@ internal sealed class LocalPagedFile : IPagedFile
         return bytesRead;
     }
 
-    private async ValueTask<int> ReadPageIntoCacheAsync(long pageIndex, CancellationToken cancellationToken)
-    {
-        var offset = GetOffset(pageIndex);
-        if (offset >= _stream.Length)
-        {
-            Array.Clear(_pageCache, 0, _pageSize);
-            return 0;
-        }
-
-        _stream.Seek(offset, SeekOrigin.Begin);
-        var bytesRead = await _stream.ReadAsync(_pageCache.AsMemory(0, _pageSize), cancellationToken).ConfigureAwait(false);
-        if (bytesRead < _pageSize)
-            Array.Clear(_pageCache, bytesRead, _pageSize - bytesRead);
-        return bytesRead;
-    }
-
     private void FlushCache()
     {
         if (!_cacheDirty || _cachedPageIndex < 0)
             return;
 
         WriteCacheToDisk();
-    }
-
-    private async ValueTask FlushCacheAsync(CancellationToken cancellationToken)
-    {
-        if (!_cacheDirty || _cachedPageIndex < 0)
-            return;
-
-        await WriteCacheToDiskAsync(cancellationToken).ConfigureAwait(false);
     }
 
     private void WriteCacheToDisk()
@@ -333,30 +265,12 @@ internal sealed class LocalPagedFile : IPagedFile
         _cacheDirty = false;
     }
 
-    private async ValueTask WriteCacheToDiskAsync(CancellationToken cancellationToken)
-    {
-        var offset = GetOffset(_cachedPageIndex);
-        _stream.Seek(offset, SeekOrigin.Begin);
-        await _stream.WriteAsync(_pageCache.AsMemory(0, _pageSize), cancellationToken).ConfigureAwait(false);
-        _cacheDirty = false;
-    }
-
     private void FlushMap()
     {
         if (!_mapDirty)
             return;
 
         WriteMapPages();
-    }
-
-    private async ValueTask FlushMapAsync(CancellationToken cancellationToken)
-    {
-        if (!_mapDirty)
-            return;
-
-        _stream.Seek(_pageSize, SeekOrigin.Begin);
-        await _stream.WriteAsync(_mapBytes.AsMemory(0, _pageSize * _mapPageCount), cancellationToken).ConfigureAwait(false);
-        _mapDirty = false;
     }
 
     private void MarkPageAllocated(long pageIndex)

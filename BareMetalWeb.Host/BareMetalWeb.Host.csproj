@@ -15,8 +15,10 @@
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>full</TrimMode>
     <SuppressTrimAnalysisWarnings>false</SuppressTrimAnalysisWarnings>
-    <!-- Required: app uses reflection-based JsonSerializer throughout -->
+    <!-- All JSON serialization now uses Utf8JsonWriter/JsonDocument directly -->
     <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- No culture-specific formatting — all dates use ISO format, all comparisons use Ordinal -->
+    <InvariantGlobalization>true</InvariantGlobalization>
     <!-- AOT readiness: surface AOT compatibility warnings at build time.
          Full PublishAot requires eliminating remaining Expression.Compile
          and Assembly.GetTypes calls (tracked in #791). -->
