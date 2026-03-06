@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
@@ -341,6 +342,9 @@ public sealed class ReportExecutor
 
     // ── Row projection ───────────────────────────────────────────────────────
 
+    // Cached compiled property accessors — avoids per-cell reflection in report projection.
+    private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> AccessorCache = new();
+
     private static string?[] ProjectRow(Dictionary<string, BaseDataObject> row, IReadOnlyList<ReportColumn> columns)
     {
         var cells = new string?[columns.Count];
@@ -353,25 +357,28 @@ public sealed class ReportExecutor
                 continue;
             }
 
-            var prop = FindAccessorOnObject(obj.GetType(), col.Field);
-            if (prop == null)
+            var getter = FindAccessorOnObject(obj.GetType(), col.Field);
+            if (getter == null)
             {
                 cells[i] = null;
                 continue;
             }
 
-            var raw = prop.GetValue(obj);
+            var raw = getter(obj);
             cells[i] = FormatValue(raw, col.Format);
         }
         return cells;
     }
 
-    // TODO [violation-006]: type.GetProperty() called per cell per report row is reflection in hot path.
-    // Replace with DataEntityMetadata.FindField(fieldName).GetValueFn delegate lookup.
-    // See docs/violations/006-report-executor-reflection-per-row.md
-    private static PropertyInfo? FindAccessorOnObject([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type, string fieldName)
-        => type.GetProperty(fieldName,
-            BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+    private static Func<object, object?>? FindAccessorOnObject([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type, string fieldName)
+    {
+        return AccessorCache.GetOrAdd((type, fieldName), static key =>
+        {
+            var prop = key.Item1.GetProperty(key.Item2,
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;
+        });
+    }
 
     private static string? FormatValue(object? value, string format)
     {
@@ -404,8 +411,8 @@ public sealed class ReportExecutor
             if (!row.TryGetValue(filter.Entity, out var obj))
                 return false;
 
-            var prop = FindAccessorOnObject(obj.GetType(), filter.Field);
-            var rawValue = prop?.GetValue(obj)?.ToString() ?? string.Empty;
+            var getter = FindAccessorOnObject(obj.GetType(), filter.Field);
+            var rawValue = getter?.Invoke(obj)?.ToString() ?? string.Empty;
 
             if (!EvaluateFilter(rawValue, filter.Operator, filter.Value))
                 return false;

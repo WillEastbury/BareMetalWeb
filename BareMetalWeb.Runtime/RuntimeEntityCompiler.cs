@@ -244,93 +244,15 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
         };
     }
 
-    // ── CLR enum type cache ────────────────────────────────────────────────────
-
-    private static readonly Dictionary<string, Type> EnumTypeCache = new(StringComparer.Ordinal);
-    private static readonly object EnumTypeLock = new();
+    // ── Metadata-driven enum handling (no Reflection.Emit) ─────────────────────
 
     /// <summary>
-    /// Builds (and caches) a CLR enum type from the supplied member names.
-    /// Returns <see cref="string"/> if the list is empty.
+    /// Enum fields are stored as strings with allowed values held in
+    /// <see cref="RuntimeFieldModel.EnumValues"/>. No dynamic CLR enum type
+    /// is needed — the rendering system reads EnumValues directly.
     /// </summary>
     private static Type BuildEnumType(IReadOnlyList<string> enumValues)
-    {
-        if (enumValues.Count == 0)
-            return typeof(string);
-
-        var key = string.Join("|", enumValues);
-        lock (EnumTypeLock)
-        {
-            if (EnumTypeCache.TryGetValue(key, out var cached))
-                return cached;
-        }
-
-        Type type;
-        try
-        {
-            type = CreateRuntimeEnum(enumValues);
-        }
-        catch
-        {
-            // Enum creation failed (e.g. all values were unsanitary) — fall back to string
-            return typeof(string);
-        }
-
-        lock (EnumTypeLock)
-        {
-            EnumTypeCache.TryAdd(key, type);
-        }
-
-        return type;
-    }
-
-    // TODO [violation-001]: Reflection.Emit violates the "avoid reflection" guideline and is not AOT-safe.
-    // Replace with a RuntimeEnumDefinition(string[] Labels) metadata record.
-    // See docs/violations/001-reflection-emit-dynamic-enum.md
-    private static Type CreateRuntimeEnum(IReadOnlyList<string> values)
-    {
-        var enumTypeName = $"RuntimeEnum_{Guid.NewGuid():N}";
-        var assemblyName = new System.Reflection.AssemblyName(enumTypeName);
-        var assemblyBuilder = System.Reflection.Emit.AssemblyBuilder.DefineDynamicAssembly(
-            assemblyName, System.Reflection.Emit.AssemblyBuilderAccess.Run);
-        var moduleBuilder = assemblyBuilder.DefineDynamicModule("Module");
-        var enumBuilder = moduleBuilder.DefineEnum(enumTypeName,
-            System.Reflection.TypeAttributes.Public, typeof(int));
-
-        for (int i = 0; i < values.Count; i++)
-        {
-            var sanitized = SanitizeIdentifier(values[i]);
-            if (!string.IsNullOrEmpty(sanitized))
-                enumBuilder.DefineLiteral(sanitized, i);
-        }
-
-        var created = enumBuilder.CreateType();
-        if (created == null)
-            throw new InvalidOperationException($"Failed to create enum type from values: {string.Join(", ", values)}");
-
-        return created;
-    }
-
-    private static string SanitizeIdentifier(string input)
-    {
-        if (string.IsNullOrWhiteSpace(input))
-            return string.Empty;
-
-        var sb = new StringBuilder();
-        foreach (var c in input)
-        {
-            if (char.IsLetterOrDigit(c) || c == '_')
-                sb.Append(c);
-        }
-
-        var result = sb.ToString();
-        if (result.Length == 0)
-            return string.Empty;
-        if (char.IsDigit(result[0]))
-            result = "_" + result;
-
-        return result;
-    }
+        => typeof(string);
 
     // ── Helpers ────────────────────────────────────────────────────────────────
 

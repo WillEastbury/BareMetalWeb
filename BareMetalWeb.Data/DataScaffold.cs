@@ -148,10 +148,8 @@ public static class DataScaffold
     private static readonly long LookupCachePruneCooldownTicks = TimeSpan.FromSeconds(60).Ticks;
     private static long _lastLookupCachePruneTicks;
     private static readonly IIdGenerator IdGenerator = new DefaultIdGenerator();
-    // TODO [violation-007]: PropertyCache stores PropertyInfo (reflection-backed). Replace with
-    // metadata-driven DataFieldMetadata.GetValueFn/SetValueFn delegates from the entity registry.
-    // See docs/violations/007-propertycache-reflection-backed.md
-    private static readonly ConcurrentDictionary<(Type, string), PropertyInfo?> PropertyCache = new();
+    // Cached compiled property accessor delegates — avoids per-call PropertyInfo.GetValue reflection.
+    private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> PropertyAccessorCache = new();
 
     /// <summary>
     /// Fallback JSON AST (serialized) used when expression parsing fails.
@@ -2316,12 +2314,16 @@ public static class DataScaffold
                 return displayVal?.ToString();
             }
 
-            var displayProp = PropertyCache.GetOrAdd(
+            var displayGetter = PropertyAccessorCache.GetOrAdd(
                 (lookup.TargetType, lookup.DisplayField),
-                static key => key.Item1.GetProperty(key.Item2,
-                    BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase));
-            var displayPropVal = displayProp?.GetValue(entity);
-            return displayPropVal != null ? ToDisplayString(displayPropVal, displayProp!.PropertyType) : null;
+                static key =>
+                {
+                    var p = key.Item1.GetProperty(key.Item2,
+                        BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                    return p != null ? PropertyAccessorFactory.BuildGetter(p) : null;
+                });
+            var displayPropVal = displayGetter?.Invoke(entity);
+            return displayPropVal?.ToString();
         }
         catch
         {
@@ -2333,8 +2335,8 @@ public static class DataScaffold
     {
         var options = new List<KeyValuePair<string, string>>();
         var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        PropertyInfo? valueProp = null;
-        PropertyInfo? displayProp = null;
+        Func<object, object?>? valueGetter = null;
+        Func<object, object?>? displayGetter = null;
         Type? cachedType = null;
 
         // Normalize "Id" → "Key" for DataRecord compatibility
@@ -2366,20 +2368,28 @@ public static class DataScaffold
                 continue;
             }
 
-            // Compiled entities: use reflection
+            // Compiled entities: use cached compiled delegates
             var itemType = item.GetType();
             if (itemType != cachedType)
             {
                 cachedType = itemType;
-                valueProp = PropertyCache.GetOrAdd((itemType, effectiveValueField),
-                    static key => key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase));
-                displayProp = PropertyCache.GetOrAdd((itemType, displayField),
-                    static key => key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase));
+                valueGetter = PropertyAccessorCache.GetOrAdd((itemType, effectiveValueField),
+                    static key =>
+                    {
+                        var p = key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                        return p != null ? PropertyAccessorFactory.BuildGetter(p) : null;
+                    });
+                displayGetter = PropertyAccessorCache.GetOrAdd((itemType, displayField),
+                    static key =>
+                    {
+                        var p = key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+                        return p != null ? PropertyAccessorFactory.BuildGetter(p) : null;
+                    });
             }
-            if (valueProp == null || displayProp == null)
+            if (valueGetter == null || displayGetter == null)
                 continue;
 
-            var val = valueProp.GetValue(item);
+            var val = valueGetter(item);
             if (val == null)
                 continue;
 
@@ -2387,10 +2397,8 @@ public static class DataScaffold
             if (!seenKeys.Add(valStr))
                 continue;
 
-            var disp = displayProp.GetValue(item);
-            var dispText = disp != null
-                ? ToDisplayString(disp, displayProp.PropertyType)
-                : valStr;
+            var disp = displayGetter(item);
+            var dispText = disp?.ToString() ?? valStr;
 
             options.Add(new KeyValuePair<string, string>(valStr, dispText));
         }
@@ -2561,10 +2569,15 @@ public static class DataScaffold
         return fields;
     }
 
-    // TODO [violation-004]: GetChildFieldMetadata uses reflection (GetProperties, GetCustomAttribute) per call.
-    // Cache result in a ConcurrentDictionary<Type, IReadOnlyList<ChildFieldMeta>>, or preferably
-    // derive from the pre-compiled EntityLayout at startup. See docs/violations/004-child-field-metadata-reflection.md
+    // Cached child field metadata — avoids re-reflecting on every form render.
+    private static readonly ConcurrentDictionary<Type, IReadOnlyList<ChildFieldMeta>> ChildFieldMetadataCache = new();
+
     private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
+    {
+        return ChildFieldMetadataCache.GetOrAdd(childType, static type => BuildChildFieldMetadata(type));
+    }
+
+    private static IReadOnlyList<ChildFieldMeta> BuildChildFieldMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
     {
         var fields = new List<ChildFieldMeta>();
         var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
@@ -3009,9 +3022,7 @@ public static class DataScaffold
         return sb.ToString();
     }
 
-    // TODO [violation-005]: TryParseChildList uses reflection (GetProperties, Activator.CreateInstance,
-    // PropertyInfo.SetValue). AOT-unsafe ([RequiresUnreferencedCode]). Replace with metadata-driven
-    // ordinal setters from EntityLayout/FieldRuntime. See docs/violations/005-child-list-json-reflection.md
+    // Child list parsing uses cached GetChildFieldMetadata with pre-compiled setter delegates.
     [RequiresUnreferencedCode("Child list parsing requires compiled entity types to be preserved.")]
     private static bool TryParseChildList(string rawValue, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type childType, out object? list)
     {
@@ -3589,12 +3600,8 @@ public static class DataScaffold
 
     /// <summary>
     /// Deserialises a JSON array of objects into a <c>List&lt;T&gt;</c> where T is a child entity type.
-    /// Each element's properties are matched against the child type's public writable properties
-    /// and individually converted with <see cref="TryConvertJson"/>.
+    /// Uses cached child field metadata with pre-compiled setter delegates (no per-call reflection).
     /// </summary>
-    // TODO [violation-005]: Activator.CreateInstance, GetProperties, PropertyInfo.SetValue violate the
-    // "avoid reflection" guideline and are AOT-unsafe. Replace with metadata-driven ordinal setters
-    // from the registered EntityLayout/FieldRuntime. See docs/violations/005-child-list-json-reflection.md
     [RequiresUnreferencedCode("JSON child list deserialization requires compiled entity types to be preserved.")]
     private static bool TryConvertJsonChildList(JsonElement element, Type childType, out object? list)
     {
@@ -3610,12 +3617,7 @@ public static class DataScaffold
         try
         {
             var typedList = (IList)Activator.CreateInstance(listType)!;
-            var props = new Dictionary<string, System.Reflection.PropertyInfo>(StringComparer.OrdinalIgnoreCase);
-            foreach (var p in childType.GetProperties(BindingFlags.Public | BindingFlags.Instance))
-            {
-                if (p.CanRead && p.CanWrite)
-                    props[p.Name] = p;
-            }
+            var childFields = GetChildFieldMetadata(childType);
 
             foreach (var row in element.EnumerateArray())
             {
@@ -3628,11 +3630,20 @@ public static class DataScaffold
 
                 foreach (var prop in row.EnumerateObject())
                 {
-                    if (!props.TryGetValue(prop.Name, out var pi))
-                        continue;
+                    // Find matching child field by name (case-insensitive)
+                    ChildFieldMeta? match = null;
+                    foreach (var cf in childFields)
+                    {
+                        if (string.Equals(cf.Name, prop.Name, StringComparison.OrdinalIgnoreCase))
+                        {
+                            match = cf;
+                            break;
+                        }
+                    }
+                    if (match == null) continue;
 
-                    if (TryConvertJson(prop.Value, pi.PropertyType, out var val))
-                        pi.SetValue(instance, val);
+                    if (TryConvertJson(prop.Value, match.FieldType, out var val))
+                        match.Setter(instance, val);
                 }
 
                 typedList.Add(instance);
