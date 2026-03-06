@@ -163,7 +163,7 @@ public sealed class PrefixRouter
         if (entitySlug.IsEmpty) return false;
 
         // Resolve entity via hash table
-        if (!_entityTable.TryResolve(entitySlug, out var resolvedSlug))
+        if (!_entityTable.TryResolve(entitySlug, out var resolvedSlug, out var entityOrdinal))
             return false;
 
         // Stage 3: Classify verb + remaining path suffix
@@ -176,6 +176,7 @@ public sealed class PrefixRouter
 
         // Set fast-path fields on BmwContext (zero allocation for entity slug)
         context.EntitySlug = resolvedSlug;
+        context.EntityOrdinal = entityOrdinal;
         if (!idSpan.IsEmpty)
             context.EntityId = idSpan.ToString();
         if (!extraSpan.IsEmpty)

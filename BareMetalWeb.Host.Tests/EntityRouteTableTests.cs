@@ -17,7 +17,7 @@ public class EntityRouteTableTests
     {
         var table = new EntityRouteTable();
         table.Build(Array.Empty<string>());
-        Assert.False(table.TryResolve("users".AsSpan(), out _));
+        Assert.False(table.TryResolve("users".AsSpan(), out _, out _));
     }
 
     [Fact]
@@ -35,7 +35,7 @@ public class EntityRouteTableTests
         var original = "users";
         table.Build(new[] { original });
 
-        Assert.True(table.TryResolve("users".AsSpan(), out var resolved));
+        Assert.True(table.TryResolve("users".AsSpan(), out var resolved, out _));
         Assert.Same(original, resolved); // Same reference — zero allocation
     }
 
@@ -44,7 +44,7 @@ public class EntityRouteTableTests
     {
         var table = new EntityRouteTable();
         table.Build(new[] { "users", "orders" });
-        Assert.False(table.TryResolve("products".AsSpan(), out _));
+        Assert.False(table.TryResolve("products".AsSpan(), out _, out _));
     }
 
     [Fact]
@@ -53,8 +53,8 @@ public class EntityRouteTableTests
         var table = new EntityRouteTable();
         table.Build(new[] { "users" });
 
-        Assert.True(table.TryResolve("Users".AsSpan(), out var r1));
-        Assert.True(table.TryResolve("USERS".AsSpan(), out var r2));
+        Assert.True(table.TryResolve("Users".AsSpan(), out var r1, out _));
+        Assert.True(table.TryResolve("USERS".AsSpan(), out var r2, out _));
         Assert.Equal("users", r1);
         Assert.Equal("users", r2);
     }
@@ -69,7 +69,7 @@ public class EntityRouteTableTests
         Assert.Equal(5, table.Count);
         foreach (var slug in slugs)
         {
-            Assert.True(table.TryResolve(slug.AsSpan(), out var resolved), $"Failed to resolve: {slug}");
+            Assert.True(table.TryResolve(slug.AsSpan(), out var resolved, out _), $"Failed to resolve: {slug}");
             Assert.Equal(slug, resolved);
         }
     }
@@ -88,7 +88,7 @@ public class EntityRouteTableTests
         Assert.Equal(100, table.Count);
         foreach (var slug in slugs)
         {
-            Assert.True(table.TryResolve(slug.AsSpan(), out var resolved), $"Failed: {slug}");
+            Assert.True(table.TryResolve(slug.AsSpan(), out var resolved, out _), $"Failed: {slug}");
             Assert.Equal(slug, resolved);
         }
     }
@@ -100,9 +100,9 @@ public class EntityRouteTableTests
         table.Build(new[] { "users", "orders" });
 
         // System prefixes should NOT be in entity table
-        Assert.False(table.TryResolve("_binary".AsSpan(), out _));
-        Assert.False(table.TryResolve("_lookup".AsSpan(), out _));
-        Assert.False(table.TryResolve("metadata".AsSpan(), out _));
+        Assert.False(table.TryResolve("_binary".AsSpan(), out _, out _));
+        Assert.False(table.TryResolve("_lookup".AsSpan(), out _, out _));
+        Assert.False(table.TryResolve("metadata".AsSpan(), out _, out _));
     }
 
     [Fact]
@@ -110,10 +110,10 @@ public class EntityRouteTableTests
     {
         var table = new EntityRouteTable();
         table.Build(new[] { "users" });
-        Assert.True(table.TryResolve("users".AsSpan(), out _));
+        Assert.True(table.TryResolve("users".AsSpan(), out _, out _));
 
         table.Build(new[] { "orders" });
-        Assert.False(table.TryResolve("users".AsSpan(), out _));
-        Assert.True(table.TryResolve("orders".AsSpan(), out _));
+        Assert.False(table.TryResolve("users".AsSpan(), out _, out _));
+        Assert.True(table.TryResolve("orders".AsSpan(), out _, out _));
     }
 }

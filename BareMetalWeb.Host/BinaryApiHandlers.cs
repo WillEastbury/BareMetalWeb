@@ -709,7 +709,18 @@ public static class BinaryApiHandlers
         if (string.IsNullOrWhiteSpace(typeSlug))
             return (null, typeSlug, (400, "Entity type not specified."));
 
-        if (!DataScaffold.TryGetEntity(typeSlug, out var meta))
+        // Fast path: use compiled ordinal from PrefixRouter → O(1) array index
+        DataEntityMetadata? meta = null;
+        var snapshot = RuntimeSnapshot.Current;
+        if (context.EntityOrdinal >= 0 && snapshot != null)
+        {
+            var entities = snapshot.Entities;
+            if ((uint)context.EntityOrdinal < (uint)entities.Count)
+                meta = entities.Metadata[context.EntityOrdinal];
+        }
+
+        // Fallback: dictionary lookup
+        if (meta == null && !DataScaffold.TryGetEntity(typeSlug, out meta))
             return (null, typeSlug, (404, "Not found."));
 
         // Permission check

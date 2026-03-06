@@ -52,7 +52,18 @@ public static class DeltaApiHandlers
             return;
         }
 
-        if (!DataScaffold.TryGetEntity(typeSlug, out var meta))
+        // Fast path: use compiled ordinal from PrefixRouter → O(1) array index
+        DataEntityMetadata? meta = null;
+        var snapshot = RuntimeSnapshot.Current;
+        if (context.EntityOrdinal >= 0 && snapshot != null)
+        {
+            var entities = snapshot.Entities;
+            if ((uint)context.EntityOrdinal < (uint)entities.Count)
+                meta = entities.Metadata[context.EntityOrdinal];
+        }
+
+        // Fallback: dictionary lookup
+        if (meta == null && !DataScaffold.TryGetEntity(typeSlug, out meta))
         {
             await WriteResult(context, 404, MutationResult.EntityNotFound, "Not found.");
             return;
@@ -162,7 +173,18 @@ public static class DeltaApiHandlers
     public static async ValueTask LayoutHandler(BmwContext context)
     {
         var typeSlug = BinaryApiHandlers.GetRouteValue(context, "type") ?? string.Empty;
-        if (!DataScaffold.TryGetEntity(typeSlug, out var meta))
+
+        // Fast path: compiled ordinal → O(1) array index
+        DataEntityMetadata? meta = null;
+        var snapshot2 = RuntimeSnapshot.Current;
+        if (context.EntityOrdinal >= 0 && snapshot2 != null)
+        {
+            var entities = snapshot2.Entities;
+            if ((uint)context.EntityOrdinal < (uint)entities.Count)
+                meta = entities.Metadata[context.EntityOrdinal];
+        }
+
+        if (meta == null && !DataScaffold.TryGetEntity(typeSlug, out meta))
         {
             context.Response.StatusCode = 404;
             return;
