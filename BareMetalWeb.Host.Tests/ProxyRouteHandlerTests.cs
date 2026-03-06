@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Reflection;
 using System.Text;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Host;
 using Microsoft.AspNetCore.Http;
@@ -130,7 +131,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/api");
 
         // Act
-        await handler.HandleAsync(context);
+        await handler.HandleAsync(context.ToBmw());
 
         // Assert
         Assert.Equal(503, context.Response.StatusCode);
@@ -210,7 +211,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/hello");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080"))!;
 
         // Assert
         Assert.Equal("http://backend:8080/hello", uri.ToString());
@@ -226,7 +227,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/search", "?q=test&page=1");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080"))!;
 
         // Assert
         Assert.Contains("q=test", uri.Query);
@@ -243,7 +244,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/search", "?q=test");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080"))!;
 
         // Assert
         Assert.Empty(uri.Query);
@@ -259,7 +260,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/api/users");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080"))!;
 
         // Assert
         Assert.Equal("http://backend:8080/users", uri.ToString());
@@ -275,7 +276,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/users");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080"))!;
 
         // Assert
         Assert.Equal("http://backend:8080/v2/users", uri.ToString());
@@ -291,7 +292,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/anything");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080"))!;
 
         // Assert
         Assert.Equal("/fixed-path", uri.AbsolutePath);
@@ -308,7 +309,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/proxy/data");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080"))!;
 
         // Assert
         Assert.Equal("http://backend:8080/upstream/data", uri.ToString());
@@ -323,7 +324,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/resource");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080/base"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080/base"))!;
 
         // Assert
         Assert.Equal("http://backend:8080/base/resource", uri.ToString());
@@ -400,7 +401,7 @@ public sealed class ProxyRouteHandlerTests
         var requestMessage = new HttpRequestMessage(HttpMethod.Get, "http://backend:8080/");
 
         // Act
-        InvokePrivate(handler, "CopyRequestHeaders", context, requestMessage);
+        InvokePrivate(handler, "CopyRequestHeaders", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.False(requestMessage.Headers.Contains("Host"));
@@ -421,7 +422,7 @@ public sealed class ProxyRouteHandlerTests
         var requestMessage = new HttpRequestMessage(HttpMethod.Get, "http://backend:8080/");
 
         // Act
-        InvokePrivate(handler, "CopyRequestHeaders", context, requestMessage);
+        InvokePrivate(handler, "CopyRequestHeaders", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.False(requestMessage.Headers.Contains("Connection"));
@@ -443,7 +444,7 @@ public sealed class ProxyRouteHandlerTests
         var requestMessage = new HttpRequestMessage(HttpMethod.Get, "http://backend:8080/");
 
         // Act
-        InvokePrivate(handler, "CopyRequestHeaders", context, requestMessage);
+        InvokePrivate(handler, "CopyRequestHeaders", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.False(requestMessage.Headers.Contains("X-Internal-Secret"));
@@ -464,7 +465,7 @@ public sealed class ProxyRouteHandlerTests
         var requestMessage = new HttpRequestMessage(HttpMethod.Get, "http://backend:8080/");
 
         // Act
-        InvokePrivate(handler, "CopyRequestHeaders", context, requestMessage);
+        InvokePrivate(handler, "CopyRequestHeaders", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.True(requestMessage.Headers.Contains("X-Custom-Header"));
@@ -484,7 +485,7 @@ public sealed class ProxyRouteHandlerTests
         var requestMessage = new HttpRequestMessage(HttpMethod.Get, "http://backend:8080/");
 
         // Act
-        InvokePrivate(handler, "CopyRequestHeaders", context, requestMessage);
+        InvokePrivate(handler, "CopyRequestHeaders", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.Equal("10.0.0.1", requestMessage.Headers.GetValues("X-Forwarded-For").First());
@@ -503,7 +504,7 @@ public sealed class ProxyRouteHandlerTests
         var requestMessage = new HttpRequestMessage(HttpMethod.Get, "http://backend:8080/");
 
         // Act
-        InvokePrivate(handler, "CopyRequestHeaders", context, requestMessage);
+        InvokePrivate(handler, "CopyRequestHeaders", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.True(requestMessage.Headers.Contains("Authorization"));
@@ -523,7 +524,7 @@ public sealed class ProxyRouteHandlerTests
         var requestMessage = new HttpRequestMessage(HttpMethod.Post, "http://backend:8080/");
 
         // Act
-        InvokePrivate(handler, "CopyRequestHeaders", context, requestMessage);
+        InvokePrivate(handler, "CopyRequestHeaders", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.False(requestMessage.Headers.Contains("X-Proxy-Retry-All"));
@@ -543,7 +544,7 @@ public sealed class ProxyRouteHandlerTests
         responseMessage.Content.Headers.Add("X-Content-Custom", "value2");
 
         // Act
-        InvokeStatic("CopyResponseHeaders", context, responseMessage);
+        InvokeStatic("CopyResponseHeaders", context.ToBmw(), responseMessage);
 
         // Assert
         Assert.Equal("value1", context.Response.Headers["X-Custom-Response"].ToString());
@@ -560,7 +561,7 @@ public sealed class ProxyRouteHandlerTests
         responseMessage.Content = new StringContent("body");
 
         // Act
-        InvokeStatic("CopyResponseHeaders", context, responseMessage);
+        InvokeStatic("CopyResponseHeaders", context.ToBmw(), responseMessage);
 
         // Assert
         Assert.True(context.Response.Headers.ContainsKey("X-Normal"));
@@ -577,7 +578,7 @@ public sealed class ProxyRouteHandlerTests
         responseMessage.Content = new StringContent("body");
 
         // Act
-        InvokeStatic("CopyResponseHeaders", context, responseMessage);
+        InvokeStatic("CopyResponseHeaders", context.ToBmw(), responseMessage);
 
         // Assert
         Assert.False(context.Response.Headers.ContainsKey("transfer-encoding"));
@@ -597,7 +598,7 @@ public sealed class ProxyRouteHandlerTests
         var requestMessage = new HttpRequestMessage(HttpMethod.Get, "http://backend:8080/");
 
         // Act
-        InvokePrivate(handler, "ApplyTraceId", context, requestMessage);
+        InvokePrivate(handler, "ApplyTraceId", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.Equal("trace-123", requestMessage.Headers.GetValues("X-Trace-ID").First());
@@ -615,7 +616,7 @@ public sealed class ProxyRouteHandlerTests
         var requestMessage = new HttpRequestMessage(HttpMethod.Get, "http://backend:8080/");
 
         // Act
-        InvokePrivate(handler, "ApplyTraceId", context, requestMessage);
+        InvokePrivate(handler, "ApplyTraceId", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.False(requestMessage.Headers.Contains("X-Trace-ID"));
@@ -633,7 +634,7 @@ public sealed class ProxyRouteHandlerTests
         var requestMessage = new HttpRequestMessage(HttpMethod.Get, "http://backend:8080/");
 
         // Act
-        InvokePrivate(handler, "ApplyTraceId", context, requestMessage);
+        InvokePrivate(handler, "ApplyTraceId", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.True(requestMessage.Headers.Contains("X-Request-ID"));
@@ -655,7 +656,7 @@ public sealed class ProxyRouteHandlerTests
         requestMessage.Headers.TryAddWithoutValidation("X-Trace-ID", "existing-trace");
 
         // Act
-        InvokePrivate(handler, "ApplyTraceId", context, requestMessage);
+        InvokePrivate(handler, "ApplyTraceId", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.Equal("existing-trace", requestMessage.Headers.GetValues("X-Trace-ID").First());
@@ -672,7 +673,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext();
 
         // Act
-        var result = (string?)InvokePrivate(handler, "BuildFilteredCookieHeader", context);
+        var result = (string?)InvokePrivate(handler, "BuildFilteredCookieHeader", context.ToBmw());
 
         // Assert
         Assert.Null(result);
@@ -688,7 +689,7 @@ public sealed class ProxyRouteHandlerTests
         context.Request.Headers["Cookie"] = "session_id=abc; other=xyz";
 
         // Act
-        var result = (string?)InvokePrivate(handler, "BuildFilteredCookieHeader", context);
+        var result = (string?)InvokePrivate(handler, "BuildFilteredCookieHeader", context.ToBmw());
 
         // Assert
         Assert.NotNull(result);
@@ -709,7 +710,7 @@ public sealed class ProxyRouteHandlerTests
         context.Request.Headers["Cookie"] = "X-Proxy-Session=abc; app_data=xyz";
 
         // Act
-        var result = (string?)InvokePrivate(handler, "BuildFilteredCookieHeader", context);
+        var result = (string?)InvokePrivate(handler, "BuildFilteredCookieHeader", context.ToBmw());
 
         // Assert
         Assert.NotNull(result);
@@ -727,7 +728,7 @@ public sealed class ProxyRouteHandlerTests
         context.Request.Headers["Cookie"] = "session_id=abc";
 
         // Act
-        var result = (string?)InvokePrivate(handler, "BuildFilteredCookieHeader", context);
+        var result = (string?)InvokePrivate(handler, "BuildFilteredCookieHeader", context.ToBmw());
 
         // Assert
         Assert.Null(result);
@@ -911,7 +912,7 @@ public sealed class ProxyRouteHandlerTests
         requestMessage.Content = new StringContent("test-body");
 
         // Act
-        InvokePrivate(handler, "CopyRequestHeaders", context, requestMessage);
+        InvokePrivate(handler, "CopyRequestHeaders", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.True(requestMessage.Headers.Contains("X-Api-Key") ||
@@ -929,7 +930,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080"))!;
 
         // Assert
         Assert.Equal("/", uri.AbsolutePath);
@@ -945,7 +946,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/api/items");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080"))!;
 
         // Assert
         Assert.Equal("/items", uri.AbsolutePath);
@@ -965,7 +966,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext(method, "/resource/123");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080"))!;
 
         // Assert
         Assert.Equal("http://backend:8080/resource/123", uri.ToString());
@@ -990,7 +991,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/api");
 
         // Act
-        await handler.HandleAsync(context);
+        await handler.HandleAsync(context.ToBmw());
 
         // Assert
         Assert.Equal(503, context.Response.StatusCode);
@@ -1008,7 +1009,7 @@ public sealed class ProxyRouteHandlerTests
         context.Request.Headers["Cookie"] = "a=1; b=2; c=3";
 
         // Act
-        var result = (string?)InvokePrivate(handler, "BuildFilteredCookieHeader", context);
+        var result = (string?)InvokePrivate(handler, "BuildFilteredCookieHeader", context.ToBmw());
 
         // Assert
         Assert.NotNull(result);
@@ -1030,7 +1031,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/original", "?foo=bar");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080"))!;
 
         // Assert
         Assert.Equal("/fixed", uri.AbsolutePath);
@@ -1049,7 +1050,7 @@ public sealed class ProxyRouteHandlerTests
         var context = CreateHttpContext("GET", "/search", "?q=hello&sort=asc&limit=10");
 
         // Act
-        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context, new Uri("http://backend:8080"))!;
+        var uri = (Uri)InvokePrivate(handler, "BuildTargetUri", context.ToBmw(), new Uri("http://backend:8080"))!;
 
         // Assert
         Assert.Contains("q=hello", uri.Query);
@@ -1071,7 +1072,7 @@ public sealed class ProxyRouteHandlerTests
         var requestMessage = new HttpRequestMessage(HttpMethod.Get, "http://backend:8080/");
 
         // Act
-        InvokePrivate(handler, "CopyRequestHeaders", context, requestMessage);
+        InvokePrivate(handler, "CopyRequestHeaders", context.ToBmw(), requestMessage);
 
         // Assert - Cookie is rebuilt via BuildFilteredCookieHeader, not directly copied
         // The Accept header should be present
@@ -1142,7 +1143,7 @@ public sealed class ProxyRouteHandlerTests
         var requestMessage = new HttpRequestMessage(HttpMethod.Get, "http://backend:8080/");
 
         // Act
-        InvokePrivate(handler, "ApplyTraceId", context, requestMessage);
+        InvokePrivate(handler, "ApplyTraceId", context.ToBmw(), requestMessage);
 
         // Assert
         Assert.Equal("existing-response-trace", context.Response.Headers["X-Trace-ID"].ToString());

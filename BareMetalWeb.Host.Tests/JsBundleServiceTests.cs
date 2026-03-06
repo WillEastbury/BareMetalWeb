@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Host;
 using Microsoft.AspNetCore.Http;
 using Xunit;
@@ -52,7 +53,7 @@ public class JsBundleServiceTests : IDisposable
         JsBundleService.BuildBundle(_tempDir);
 
         var context = CreateContext("GET", JsBundleService.BundlePath);
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         var body = ReadResponseBody(context);
         var themeIdx = body.IndexOf("theme-switcher.js", StringComparison.Ordinal);
@@ -78,7 +79,7 @@ public class JsBundleServiceTests : IDisposable
         JsBundleService.BuildBundle(_tempDir);
 
         var context = CreateContext("GET", "/static/js/theme-switcher.js");
-        var result = await JsBundleService.TryServeAsync(context);
+        var result = await JsBundleService.TryServeAsync(context.ToBmw());
 
         Assert.False(result);
     }
@@ -90,7 +91,7 @@ public class JsBundleServiceTests : IDisposable
         JsBundleService.BuildBundle(_tempDir);
 
         var context = CreateContext("GET", JsBundleService.BundlePath);
-        var result = await JsBundleService.TryServeAsync(context);
+        var result = await JsBundleService.TryServeAsync(context.ToBmw());
 
         Assert.True(result);
         Assert.Equal(200, context.Response.StatusCode);
@@ -103,7 +104,7 @@ public class JsBundleServiceTests : IDisposable
         JsBundleService.BuildBundle(_tempDir);
 
         var context = CreateContext("GET", JsBundleService.BundlePath);
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         Assert.Equal("application/javascript; charset=utf-8", context.Response.ContentType);
     }
@@ -115,7 +116,7 @@ public class JsBundleServiceTests : IDisposable
         JsBundleService.BuildBundle(_tempDir);
 
         var context = CreateContext("GET", JsBundleService.BundlePath);
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         Assert.False(string.IsNullOrEmpty(context.Response.Headers.ETag.ToString()));
     }
@@ -128,13 +129,13 @@ public class JsBundleServiceTests : IDisposable
 
         // First request to get the ETag
         var first = CreateContext("GET", JsBundleService.BundlePath);
-        await JsBundleService.TryServeAsync(first);
+        await JsBundleService.TryServeAsync(first.ToBmw());
         var etag = first.Response.Headers.ETag.ToString();
 
         // Second request with matching ETag
         var context = CreateContext("GET", JsBundleService.BundlePath);
         context.Request.Headers.IfNoneMatch = etag;
-        var result = await JsBundleService.TryServeAsync(context);
+        var result = await JsBundleService.TryServeAsync(context.ToBmw());
 
         Assert.True(result);
         Assert.Equal(304, context.Response.StatusCode);
@@ -147,7 +148,7 @@ public class JsBundleServiceTests : IDisposable
         JsBundleService.BuildBundle(_tempDir);
 
         var context = CreateContext("POST", JsBundleService.BundlePath);
-        var result = await JsBundleService.TryServeAsync(context);
+        var result = await JsBundleService.TryServeAsync(context.ToBmw());
 
         Assert.True(result);
         Assert.Equal(405, context.Response.StatusCode);
@@ -160,7 +161,7 @@ public class JsBundleServiceTests : IDisposable
         JsBundleService.BuildBundle(_tempDir);
 
         var context = CreateContext("HEAD", JsBundleService.BundlePath);
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         Assert.Equal(200, context.Response.StatusCode);
         Assert.Equal(0, context.Response.Body.Length);
@@ -173,7 +174,7 @@ public class JsBundleServiceTests : IDisposable
         JsBundleService.BuildBundle(_tempDir);
 
         var context = CreateContext("GET", JsBundleService.BundlePath);
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         Assert.Contains("public", context.Response.Headers.CacheControl.ToString());
         Assert.Contains("max-age=31536000", context.Response.Headers.CacheControl.ToString());
@@ -187,7 +188,7 @@ public class JsBundleServiceTests : IDisposable
         JsBundleService.BuildBundle(_tempDir);
 
         var context = CreateContext("GET", JsBundleService.BundlePath);
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         var body = ReadResponseBody(context);
         Assert.Contains("myThemeFunc", body);
@@ -225,7 +226,7 @@ public class JsBundleServiceTests : IDisposable
         JsBundleService.BuildBundle(_tempDir);
 
         var context = CreateContext("GET", JsBundleService.BundlePath);
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         var body = ReadResponseBody(context);
         Assert.Contains("bootstrap bundle", body);
@@ -319,7 +320,7 @@ public class JsBundleServiceTests : IDisposable
         JsBundleService.BuildBundle(_tempDir);
 
         var context = CreateContext("GET", JsBundleService.BundlePath);
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         var body = ReadResponseBody(context);
         Assert.DoesNotContain("comment to strip", body);
@@ -333,7 +334,7 @@ public class JsBundleServiceTests : IDisposable
         JsBundleService.BuildBundle(_tempDir);
 
         var context = CreateContext("GET", JsBundleService.BundlePath);
-        await JsBundleService.TryServeAsync(context);
+        await JsBundleService.TryServeAsync(context.ToBmw());
 
         var body = ReadResponseBody(context);
         Assert.Contains("preserved comment", body);

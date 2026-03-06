@@ -514,8 +514,7 @@
             // Hierarchy/calendar views need all items (no pagination)
             var vt = meta.viewType || '';
             var activeView = query.view || '';
-            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' || vt === 'Sankey' || vt === 'Kanban' ||
-                activeView === 'TreeView' || activeView === 'OrgChart' || activeView === 'Timeline' || activeView === 'Timetable' || activeView === 'Sankey' || activeView === 'Workflow' || activeView === 'Kanban');
+            var isHierarchyView = (vt === 'TreeView' || vt === 'OrgChart' || vt === 'Timeline' || vt === 'Sankey' || vt === 'Kanban' || vt === 'Calendar' || activeView === 'TreeView' || activeView === 'OrgChart' || activeView === 'Timeline' || activeView === 'Timetable' || activeView === 'Sankey' || activeView === 'Workflow' || activeView === 'Kanban' || activeView === 'Calendar');
 
             var effectiveSkip = isHierarchyView ? 0 : skip;
             var effectiveTop  = isHierarchyView ? 10000 : top;
@@ -1484,7 +1483,7 @@
         return html;
     }
 
-    // ── Monthly Calendar View ───────────────────────────────────────────────
+    // ── Calendar View (Day / Week / Month) ─────────────────────────────────
     function renderCalendarView(meta, items, slug, baseUrl, query) {
         var dateField = meta.fields.find(function (f) {
             return f.type === 'DateOnly' || f.type === 'DateTime';
@@ -1492,78 +1491,234 @@
         if (!dateField) return '<p class="text-warning">Calendar view requires a Date field.</p>';
 
         var labelField = meta.fields.find(function (f) { return f.list && f.type === 'Text'; }) || meta.fields[0];
-
-        // Determine current month from query or default to today
+        var calMode = query.calMode || 'month'; // 'month' | 'week' | 'day'
         var now = new Date();
-        var calYear = parseInt(query.calYear) || now.getFullYear();
-        var calMonth = parseInt(query.calMonth); // 0-based
-        if (isNaN(calMonth)) calMonth = now.getMonth();
 
-        var firstDay = new Date(calYear, calMonth, 1);
-        var daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
-        var startDow = firstDay.getDay(); // 0=Sun
+        // Helper: format Date as YYYY-MM-DD
+        function fmtDate(d) {
+            var mm = d.getMonth() + 1, dd = d.getDate();
+            return d.getFullYear() + '-' + (mm < 10 ? '0' : '') + mm + '-' + (dd < 10 ? '0' : '') + dd;
+        }
 
-        // Build date→items map
+        // Helper: build items for a given YYYY-MM-DD string key
         var dateMap = {};
         items.forEach(function (item) {
             var raw = nestedGet(item, dateField.name);
             if (!raw) return;
             var d = new Date(raw);
             if (isNaN(d.getTime())) return;
-            if (d.getFullYear() === calYear && d.getMonth() === calMonth) {
-                var day = d.getDate();
-                if (!dateMap[day]) dateMap[day] = [];
-                dateMap[day].push(item);
-            }
+            var key = fmtDate(d);
+            if (!dateMap[key]) dateMap[key] = [];
+            dateMap[key].push(item);
         });
+
+        // Helper: render a single event badge (draggable)
+        function renderEventBadge(it, dateKey) {
+            var lbl = nestedGet(it, labelField.name) || '(untitled)';
+            var itemId = it.id || it.Id || it.key || it.Key || '';
+            return '<a href="' + baseUrl + '/' + encodeURIComponent(itemId) + '" ' +
+                'class="d-block small text-truncate badge bg-primary-subtle text-primary mb-1 bm-cal-event" ' +
+                'draggable="true" ' +
+                'data-item-id="' + escHtml(itemId) + '" ' +
+                'data-date-field="' + escHtml(dateField.name) + '" ' +
+                'data-src-date="' + escHtml(dateKey) + '" ' +
+                'title="' + escHtml(lbl) + '">' + escHtml(lbl) + '</a>';
+        }
+
+        // Helper: render a droppable day cell with click-to-create
+        function renderDayCell(dateKey, cellClass, showDayNum, dayNum, isToday, minHeight) {
+            var createUrl = baseUrl + '/create?' + encodeURIComponent(dateField.name) + '=' + encodeURIComponent(dateKey);
+            var h = '<td class="bm-cal-cell' + (isToday ? ' table-primary' : '') + (cellClass ? ' ' + cellClass : '') + '" ' +
+                'style="min-height:' + (minHeight || 80) + 'px;vertical-align:top" ' +
+                'data-cal-date="' + escHtml(dateKey) + '">';
+            if (showDayNum) {
+                h += '<div class="d-flex justify-content-between align-items-start">';
+                h += '<span class="fw-bold small ' + (isToday ? 'text-primary' : 'text-muted') + '">' + dayNum + '</span>';
+                h += '<a href="' + createUrl + '" class="bm-cal-add-btn text-muted text-decoration-none small" title="New item on this day" tabindex="-1">+</a>';
+                h += '</div>';
+            }
+            var dayItems = dateMap[dateKey] || [];
+            dayItems.forEach(function (it) { h += renderEventBadge(it, dateKey); });
+            h += '</td>';
+            return h;
+        }
 
         var monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+        var dayAbbr    = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+        // ── Sub-view toggle bar ──────────────────────────────────────────────
+        function modeUrl(m) { return buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calMode: m })); }
         var html = '';
-
-        // Month navigation
-        var prevMonth = calMonth - 1, prevYear = calYear;
-        if (prevMonth < 0) { prevMonth = 11; prevYear--; }
-        var nextMonth = calMonth + 1, nextYear = calYear;
-        if (nextMonth > 11) { nextMonth = 0; nextYear++; }
-
-        html += '<div class="d-flex justify-content-between align-items-center mb-3">';
-        html += '<a class="btn btn-outline-secondary btn-sm" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calYear: prevYear, calMonth: prevMonth })) + '"><i class="bi bi-chevron-left"></i></a>';
-        html += '<h4 class="mb-0">' + monthNames[calMonth] + ' ' + calYear + '</h4>';
-        html += '<a class="btn btn-outline-secondary btn-sm" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calYear: nextYear, calMonth: nextMonth })) + '"><i class="bi bi-chevron-right"></i></a>';
+        html += '<div class="btn-group btn-group-sm mb-3" role="group" aria-label="Calendar mode">';
+        ['day','week','month'].forEach(function (m) {
+            var label = m.charAt(0).toUpperCase() + m.slice(1);
+            html += '<a class="btn btn-outline-secondary' + (calMode === m ? ' active' : '') + '" href="' + modeUrl(m) + '">' + label + '</a>';
+        });
         html += '</div>';
 
-        // Calendar grid
-        html += '<table class="table table-bordered bm-calendar-table"><thead><tr>';
-        ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(function (d) {
-            html += '<th class="text-center small text-muted" style="width:14.28%">' + d + '</th>';
-        });
-        html += '</tr></thead><tbody>';
+        // ─────────────────────────────────────────────────────────────────────
+        if (calMode === 'month') {
+            var calYear  = parseInt(query.calYear)  || now.getFullYear();
+            var calMonth = parseInt(query.calMonth);
+            if (isNaN(calMonth)) calMonth = now.getMonth();
 
-        var day = 1;
-        var today = now.getDate();
-        var isCurrentMonth = (calYear === now.getFullYear() && calMonth === now.getMonth());
-        for (var week = 0; day <= daysInMonth; week++) {
-            html += '<tr>';
-            for (var dow = 0; dow < 7; dow++) {
-                if ((week === 0 && dow < startDow) || day > daysInMonth) {
-                    html += '<td class="bg-light" style="min-height:80px;vertical-align:top">&nbsp;</td>';
-                } else {
-                    var isToday = isCurrentMonth && day === today;
-                    html += '<td style="min-height:80px;vertical-align:top" class="' + (isToday ? 'table-primary' : '') + '">';
-                    html += '<div class="fw-bold small ' + (isToday ? 'text-primary' : 'text-muted') + '">' + day + '</div>';
-                    var dayItems = dateMap[day] || [];
-                    dayItems.forEach(function (it) {
-                        var lbl = nestedGet(it, labelField.name) || '(untitled)';
-                        var itemId = it.id || it.Id || it.key || it.Key || '';
-                        html += '<a href="' + baseUrl + '/' + encodeURIComponent(itemId) + '" class="d-block small text-truncate badge bg-primary-subtle text-primary mb-1" title="' + escHtml(lbl) + '">' + escHtml(lbl) + '</a>';
-                    });
-                    html += '</td>';
-                    day++;
+            var firstDay   = new Date(calYear, calMonth, 1);
+            var daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+            var startDow   = firstDay.getDay();
+
+            var prevMonth = calMonth - 1, prevYear = calYear;
+            if (prevMonth < 0) { prevMonth = 11; prevYear--; }
+            var nextMonth = calMonth + 1, nextYear = calYear;
+            if (nextMonth > 11) { nextMonth = 0; nextYear++; }
+
+            html += '<div class="d-flex justify-content-between align-items-center mb-2">';
+            html += '<a class="btn btn-outline-secondary btn-sm" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calMode: 'month', calYear: prevYear, calMonth: prevMonth })) + '"><i class="bi bi-chevron-left"></i></a>';
+            html += '<h5 class="mb-0">' + monthNames[calMonth] + ' ' + calYear + '</h5>';
+            html += '<a class="btn btn-outline-secondary btn-sm" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calMode: 'month', calYear: nextYear, calMonth: nextMonth })) + '"><i class="bi bi-chevron-right"></i></a>';
+            html += '</div>';
+
+            html += '<table class="table table-bordered bm-calendar-table"><thead><tr>';
+            dayAbbr.forEach(function (d) { html += '<th class="text-center small text-muted" style="width:14.28%">' + d + '</th>'; });
+            html += '</tr></thead><tbody>';
+
+            var day = 1;
+            var isCurrentMonth = (calYear === now.getFullYear() && calMonth === now.getMonth());
+            for (var week = 0; day <= daysInMonth; week++) {
+                html += '<tr>';
+                for (var dow = 0; dow < 7; dow++) {
+                    if ((week === 0 && dow < startDow) || day > daysInMonth) {
+                        html += '<td class="bg-light bm-cal-cell" style="min-height:80px;vertical-align:top">&nbsp;</td>';
+                    } else {
+                        var dateKey = fmtDate(new Date(calYear, calMonth, day));
+                        var isToday = isCurrentMonth && day === now.getDate();
+                        html += renderDayCell(dateKey, '', true, day, isToday, 80);
+                        day++;
+                    }
                 }
+                html += '</tr>';
             }
-            html += '</tr>';
+            html += '</tbody></table>';
+
+        } else if (calMode === 'week') {
+            // Determine the week start (Sunday) from calWeekStart or today
+            var weekStartStr = query.calWeekStart;
+            var weekStart;
+            if (weekStartStr) {
+                weekStart = new Date(weekStartStr);
+                if (isNaN(weekStart.getTime())) weekStart = null;
+            }
+            if (!weekStart) {
+                weekStart = new Date(now);
+                weekStart.setDate(now.getDate() - now.getDay()); // snap to Sunday
+            }
+            weekStart.setHours(0, 0, 0, 0);
+
+            var prevWeekStart = new Date(weekStart); prevWeekStart.setDate(weekStart.getDate() - 7);
+            var nextWeekStart = new Date(weekStart); nextWeekStart.setDate(weekStart.getDate() + 7);
+            var weekEnd   = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 6);
+
+            var wLabel = monthNames[weekStart.getMonth()] + ' ' + weekStart.getDate() + ' – ' +
+                (weekStart.getMonth() !== weekEnd.getMonth() ? monthNames[weekEnd.getMonth()] + ' ' : '') +
+                weekEnd.getDate() + ', ' + weekEnd.getFullYear();
+
+            html += '<div class="d-flex justify-content-between align-items-center mb-2">';
+            html += '<a class="btn btn-outline-secondary btn-sm" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calMode: 'week', calWeekStart: fmtDate(prevWeekStart) })) + '"><i class="bi bi-chevron-left"></i></a>';
+            html += '<h5 class="mb-0">' + wLabel + '</h5>';
+            html += '<a class="btn btn-outline-secondary btn-sm" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calMode: 'week', calWeekStart: fmtDate(nextWeekStart) })) + '"><i class="bi bi-chevron-right"></i></a>';
+            html += '</div>';
+
+            html += '<table class="table table-bordered bm-calendar-table"><thead><tr>';
+            for (var wi = 0; wi < 7; wi++) {
+                var wDay = new Date(weekStart); wDay.setDate(weekStart.getDate() + wi);
+                var isWToday = fmtDate(wDay) === fmtDate(now);
+                html += '<th class="text-center small' + (isWToday ? ' text-primary fw-bold' : ' text-muted') + '" style="width:14.28%">' +
+                    dayAbbr[wDay.getDay()] + '<br><span class="fs-6">' + wDay.getDate() + '</span></th>';
+            }
+            html += '</tr></thead><tbody><tr>';
+            for (var wi2 = 0; wi2 < 7; wi2++) {
+                var wDay2 = new Date(weekStart); wDay2.setDate(weekStart.getDate() + wi2);
+                var wDateKey = fmtDate(wDay2);
+                var isWDay2Today = wDateKey === fmtDate(now);
+                html += renderDayCell(wDateKey, '', false, wDay2.getDate(), isWDay2Today, 160);
+            }
+            html += '</tr></tbody></table>';
+
+        } else { // day
+            var calDayStr = query.calDay || fmtDate(now);
+            var calDayDate = new Date(calDayStr);
+            if (isNaN(calDayDate.getTime())) calDayDate = new Date(now);
+            calDayDate.setHours(0, 0, 0, 0);
+
+            var prevDay = new Date(calDayDate); prevDay.setDate(calDayDate.getDate() - 1);
+            var nextDay = new Date(calDayDate); nextDay.setDate(calDayDate.getDate() + 1);
+            var dayDateKey = fmtDate(calDayDate);
+            var isDayToday = dayDateKey === fmtDate(now);
+            var createUrl = baseUrl + '/create?' + encodeURIComponent(dateField.name) + '=' + encodeURIComponent(dayDateKey);
+
+            html += '<div class="d-flex justify-content-between align-items-center mb-2">';
+            html += '<a class="btn btn-outline-secondary btn-sm" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calMode: 'day', calDay: fmtDate(prevDay) })) + '"><i class="bi bi-chevron-left"></i></a>';
+            html += '<h5 class="mb-0' + (isDayToday ? ' text-primary' : '') + '">' + dayAbbr[calDayDate.getDay()] + ', ' + monthNames[calDayDate.getMonth()] + ' ' + calDayDate.getDate() + ', ' + calDayDate.getFullYear() + '</h5>';
+            html += '<a class="btn btn-outline-secondary btn-sm" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Calendar', calMode: 'day', calDay: fmtDate(nextDay) })) + '"><i class="bi bi-chevron-right"></i></a>';
+            html += '</div>';
+
+            var dayEvents = dateMap[dayDateKey] || [];
+            html += '<div class="card bm-cal-cell' + (isDayToday ? ' border-primary' : '') + '" data-cal-date="' + escHtml(dayDateKey) + '" style="min-height:200px">';
+            html += '<div class="card-body">';
+            if (dayEvents.length === 0) {
+                html += '<div class="text-center text-muted py-4"><i class="bi bi-calendar-x fs-2"></i><br>No events</div>';
+            } else {
+                dayEvents.forEach(function (it) { html += renderEventBadge(it, dayDateKey); });
+            }
+            html += '<div class="mt-3"><a href="' + createUrl + '" class="btn btn-outline-primary btn-sm"><i class="bi bi-plus-lg"></i> New item on this day</a></div>';
+            html += '</div></div>';
         }
-        html += '</tbody></table>';
+
+        // Wire drag-and-drop after HTML is injected
+        setTimeout(function () {
+            // dragstart — store item id, field name, and source date
+            document.querySelectorAll('.bm-cal-event').forEach(function (el) {
+                el.addEventListener('dragstart', function (ev) {
+                    ev.dataTransfer.effectAllowed = 'move';
+                    ev.dataTransfer.setData('text/plain', JSON.stringify({
+                        itemId:    el.dataset.itemId,
+                        dateField: el.dataset.dateField,
+                        srcDate:   el.dataset.srcDate
+                    }));
+                    el.classList.add('opacity-50');
+                });
+                el.addEventListener('dragend', function () { el.classList.remove('opacity-50'); });
+            });
+
+            // dragover — allow drop on table cells
+            document.querySelectorAll('.bm-cal-cell').forEach(function (cell) {
+                cell.addEventListener('dragover', function (ev) {
+                    ev.preventDefault();
+                    ev.dataTransfer.dropEffect = 'move';
+                    cell.classList.add('table-warning');
+                });
+                cell.addEventListener('dragleave', function () { cell.classList.remove('table-warning'); });
+                cell.addEventListener('drop', function (ev) {
+                    ev.preventDefault();
+                    cell.classList.remove('table-warning');
+                    var targetDate = cell.dataset.calDate;
+                    if (!targetDate) return;
+                    var payload;
+                    try { payload = JSON.parse(ev.dataTransfer.getData('text/plain')); } catch (e) { return; }
+                    if (!payload.itemId || payload.srcDate === targetDate) return;
+                    // Patch the record's date field
+                    var patch = {};
+                    patch[payload.dateField] = targetDate;
+                    apiPut(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(payload.itemId), patch)
+                        .then(function () {
+                            showToast('Moved to ' + targetDate, 'success');
+                            // Refresh the calendar view
+                            BMRouter.navigate(window.location.pathname + window.location.search);
+                        })
+                        .catch(function (err) { showToast('Move failed: ' + err.message, 'error'); });
+                });
+            });
+        }, 0);
+
         return html;
     }
 
@@ -2695,10 +2850,10 @@
     }
 
     // ── Edit / Create form ────────────────────────────────────────────────────
-    function renderCreate(slug) {
+    function renderCreate(slug, prefill) {
         showLoading();
         fetchMeta(slug)
-            .then(function (meta) { renderFormView(meta, null, slug, null); })
+            .then(function (meta) { renderFormView(meta, null, slug, null, prefill || {}); })
             .catch(function (err) { showError(err.message); });
     }
 
@@ -2709,8 +2864,9 @@
             .catch(function (err) { showError(err.message); });
     }
 
-    function renderFormView(meta, item, slug, id) {
+    function renderFormView(meta, item, slug, id, prefill) {
         var isCreate = id == null;
+        var prefillData = (isCreate && prefill) ? prefill : {};
         var baseUrl  = BASE + '/' + encodeURIComponent(slug);
         var formFields = meta.fields.filter(function (f) { return isCreate ? f.create : f.edit; })
                                     .sort(function (a, b) { return a.order - b.order; });
@@ -2729,9 +2885,9 @@
 
         var isWizard = (meta.formLayout || '').toLowerCase() === 'wizard';
         if (isWizard) {
-            html += renderWizardFormFields(formFields, function (f) { return item ? nestedGet(item, f.name) : null; }, meta, item, commands, baseUrl, id, isCreate);
+            html += renderWizardFormFields(formFields, function (f) { return item ? nestedGet(item, f.name) : (prefillData[f.name] != null ? prefillData[f.name] : null); }, meta, item, commands, baseUrl, id, isCreate);
         } else {
-            html += renderGroupedFormFields(formFields, function (f) { return item ? nestedGet(item, f.name) : null; }, meta, item);
+            html += renderGroupedFormFields(formFields, function (f) { return item ? nestedGet(item, f.name) : (prefillData[f.name] != null ? prefillData[f.name] : null); }, meta, item);
 
             html += '<div class="mt-4 d-flex gap-2 flex-wrap">';
             html += '<button type="submit" class="btn btn-primary" id="vnext-save-btn"><i class="bi bi-check-lg"></i> Save</button>';
@@ -4299,7 +4455,7 @@
 
         // Register routes
         BMRouter
-            .on(BASE + '/:entity/create', function (p) { renderCreate(p.entity); })
+            .on(BASE + '/:entity/create', function (p, q) { renderCreate(p.entity, q); })
             .on(BASE + '/:entity/:id/edit',   function (p) { renderEdit(p.entity, p.id); })
             .on(BASE + '/:entity/:id/delete', function (p) { renderDelete(p.entity, p.id); })
             .on(BASE + '/:entity/:id',        function (p, q) { renderView(p.entity, p.id); })

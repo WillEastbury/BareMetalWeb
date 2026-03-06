@@ -3,6 +3,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Globalization;
 using Microsoft.AspNetCore.Http;
+using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Host;
 
@@ -72,6 +73,9 @@ public static class CompressionHelper
     /// </summary>
     public static string? SelectEncoding(HttpContext context)
         => SelectEncoding(context.Request.Headers.AcceptEncoding.ToString());
+
+    public static string? SelectEncoding(BmwContext context)
+        => SelectEncoding(context.HttpRequest.Headers.AcceptEncoding.ToString());
 
     /// <summary>Compresses <paramref name="data"/> using Brotli at Fastest level.</summary>
     public static byte[] CompressBrotli(byte[] data)

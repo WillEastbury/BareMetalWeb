@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using System.Text.Json;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
@@ -34,7 +35,7 @@ public static class TenantApiHandlers
     }
 
     /// <summary>GET /api/tenants — lists all registered tenants.</summary>
-    public static async ValueTask ListTenantsHandler(HttpContext context)
+    public static async ValueTask ListTenantsHandler(BmwContext context)
     {
         if (!IsSystemAdmin(context))
         {
@@ -63,7 +64,7 @@ public static class TenantApiHandlers
     }
 
     /// <summary>GET /api/tenants/{id} — gets a single tenant by ID.</summary>
-    public static async ValueTask GetTenantHandler(HttpContext context)
+    public static async ValueTask GetTenantHandler(BmwContext context)
     {
         if (!IsSystemAdmin(context))
         {
@@ -71,7 +72,7 @@ public static class TenantApiHandlers
             return;
         }
 
-        var tenantId = context.Request.RouteValues["id"]?.ToString();
+        var tenantId = context.HttpRequest.RouteValues["id"]?.ToString();
         if (string.IsNullOrEmpty(tenantId))
         {
             context.Response.StatusCode = 400;
@@ -100,7 +101,7 @@ public static class TenantApiHandlers
     }
 
     /// <summary>POST /api/tenants — provisions a new tenant at runtime.</summary>
-    public static async ValueTask ProvisionTenantHandler(HttpContext context)
+    public static async ValueTask ProvisionTenantHandler(BmwContext context)
     {
         if (!IsSystemAdmin(context))
         {
@@ -118,7 +119,7 @@ public static class TenantApiHandlers
         TenantOptions? opts;
         try
         {
-            opts = await JsonSerializer.DeserializeAsync<TenantOptions>(context.Request.Body, JsonOpts);
+            opts = await JsonSerializer.DeserializeAsync<TenantOptions>(context.HttpRequest.Body, JsonOpts);
         }
         catch
         {
@@ -152,7 +153,7 @@ public static class TenantApiHandlers
     }
 
     /// <summary>PUT /api/tenants/{id}/branding — updates display name, logo, primary color.</summary>
-    public static async ValueTask UpdateBrandingHandler(HttpContext context)
+    public static async ValueTask UpdateBrandingHandler(BmwContext context)
     {
         if (!IsSystemAdmin(context))
         {
@@ -160,7 +161,7 @@ public static class TenantApiHandlers
             return;
         }
 
-        var tenantId = context.Request.RouteValues["id"]?.ToString();
+        var tenantId = context.HttpRequest.RouteValues["id"]?.ToString();
         if (string.IsNullOrEmpty(tenantId))
         {
             context.Response.StatusCode = 400;
@@ -174,7 +175,7 @@ public static class TenantApiHandlers
             return;
         }
 
-        using var doc = await JsonDocument.ParseAsync(context.Request.Body);
+        using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body);
         var root = doc.RootElement;
 
         if (root.TryGetProperty("displayName", out var dn))
@@ -188,7 +189,7 @@ public static class TenantApiHandlers
     }
 
     /// <summary>PUT /api/tenants/{id}/quotas — updates record and storage limits.</summary>
-    public static async ValueTask UpdateQuotasHandler(HttpContext context)
+    public static async ValueTask UpdateQuotasHandler(BmwContext context)
     {
         if (!IsSystemAdmin(context))
         {
@@ -196,7 +197,7 @@ public static class TenantApiHandlers
             return;
         }
 
-        var tenantId = context.Request.RouteValues["id"]?.ToString();
+        var tenantId = context.HttpRequest.RouteValues["id"]?.ToString();
         if (string.IsNullOrEmpty(tenantId))
         {
             context.Response.StatusCode = 400;
@@ -210,7 +211,7 @@ public static class TenantApiHandlers
             return;
         }
 
-        using var doc = await JsonDocument.ParseAsync(context.Request.Body);
+        using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body);
         var root = doc.RootElement;
 
         if (root.TryGetProperty("maxRecords", out var mr))
@@ -222,7 +223,7 @@ public static class TenantApiHandlers
     }
 
     /// <summary>GET /api/tenant/branding — returns branding for the current request's tenant.</summary>
-    public static async ValueTask GetCurrentBrandingHandler(HttpContext context)
+    public static async ValueTask GetCurrentBrandingHandler(BmwContext context)
     {
         var tenant = DataStoreProvider.CurrentTenant;
 
@@ -237,9 +238,9 @@ public static class TenantApiHandlers
         }, JsonOpts);
     }
 
-    private static bool IsSystemAdmin(HttpContext context)
+    private static bool IsSystemAdmin(BmwContext context)
     {
-        if (context.User?.Identity?.IsAuthenticated != true)
+        if (context.HttpContext.User?.Identity?.IsAuthenticated != true)
             return false;
 
         if (_registry == null || !_registry.IsEnabled)

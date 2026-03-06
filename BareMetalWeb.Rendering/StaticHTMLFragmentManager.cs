@@ -58,9 +58,26 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
     int i = 0;
     while (i < input.Length)
     {
-        if (input[i] == '{' && i + 1 < input.Length && input[i + 1] == '{')
+        // SIMD-accelerated: find next '{' in one vectorised pass
+        int braceIdx = input.Slice(i).IndexOf('{');
+
+        if (braceIdx < 0)
         {
-            int start = i + 2;
+            // No more braces — bulk write remainder
+            buffer.Write(input.Slice(i));
+            break;
+        }
+
+        int absIdx = i + braceIdx;
+
+        // Bulk write everything before the brace
+        if (braceIdx > 0)
+            buffer.Write(input.Slice(i, braceIdx));
+
+        // Check for {{ pattern
+        if (absIdx + 1 < input.Length && input[absIdx + 1] == '{')
+        {
+            int start = absIdx + 2;
             int end = input.Slice(start).IndexOf("}}");
 
             if (end >= 0)
@@ -90,8 +107,9 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
             }
         }
 
-        buffer.Write(input.Slice(i, 1));
-        i++;
+        // Single '{' or unmatched — write it and advance
+        buffer.Write(input.Slice(absIdx, 1));
+        i = absIdx + 1;
     }
 
     return new string(buffer.WrittenSpan);
@@ -112,9 +130,26 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
     int i = 0;
     while (i < input.Length)
     {
-        if (input[i] == '{' && i + 1 < input.Length && input[i + 1] == '{')
+        // SIMD-accelerated: find next '{' in one vectorised pass
+        int braceIdx = input.Slice(i).IndexOf('{');
+
+        if (braceIdx < 0)
         {
-            int start = i + 2;
+            // No more braces — bulk write remainder
+            WriteUtf8(writer, input.Slice(i));
+            break;
+        }
+
+        int absIdx = i + braceIdx;
+
+        // Bulk write everything before the brace
+        if (braceIdx > 0)
+            WriteUtf8(writer, input.Slice(i, braceIdx));
+
+        // Check for {{ pattern
+        if (absIdx + 1 < input.Length && input[absIdx + 1] == '{')
+        {
+            int start = absIdx + 2;
             int end = input.Slice(start).IndexOf("}}");
 
             if (end >= 0)
@@ -144,8 +179,9 @@ public sealed class HtmlFragmentStore : IHtmlFragmentStore
             }
         }
 
-        WriteUtf8(writer, input.Slice(i, 1));
-        i++;
+        // Single '{' or unmatched — write it and advance
+        WriteUtf8(writer, input.Slice(absIdx, 1));
+        i = absIdx + 1;
     }
 }
 

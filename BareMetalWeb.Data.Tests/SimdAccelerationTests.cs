@@ -416,6 +416,44 @@ public sealed class SimdAccelerationTests
         Assert.Equal(original.Name, restored.Name);
         Assert.Equal(original.Value, restored.Value);
     }
+
+    [Fact]
+    public void SchemaHash_100k_RandomSchemas_CollisionRate_BelowExpected()
+    {
+        // Generate 100,000 random schemas with unique member signatures and verify
+        // that the XxHash64-folded-to-32-bit collision rate is within birthday-paradox
+        // expectations. For 100k items in a 2^32 space, expected unique ≈ 99,999
+        // (collision probability per pair ≈ 2.3e-10, expected collisions ≈ 1.2).
+        // We allow up to 50 collisions — still well below any quality concern.
+        const int count = 100_000;
+        const int maxAllowedCollisions = 50;
+        var ser = new BinaryObjectSerializer();
+        var hashes = new HashSet<uint>(count);
+        var rng = new Random(42); // deterministic seed for reproducibility
+        int collisions = 0;
+
+        string[] typeNames = { "String", "Int32", "Double", "Boolean", "Guid", "DateTime", "Byte[]", "Decimal" };
+
+        for (int i = 0; i < count; i++)
+        {
+            int memberCount = rng.Next(1, 8);
+            var members = new MemberSignature[memberCount];
+            for (int m = 0; m < memberCount; m++)
+            {
+                string name = $"Field_{i}_{m}_{rng.Next()}";
+                string typeName = typeNames[rng.Next(typeNames.Length)];
+                int? blittableSize = rng.Next(3) == 0 ? rng.Next(1, 64) : null;
+                members[m] = new MemberSignature(name, typeName, typeof(string), blittableSize);
+            }
+
+            var schema = ser.CreateSchema(1, members);
+            if (!hashes.Add(schema.Hash))
+                collisions++;
+        }
+
+        Assert.True(collisions <= maxAllowedCollisions,
+            $"Schema hash collision count {collisions} exceeds maximum allowed {maxAllowedCollisions}.");
+    }
 }
 
 // ── BloomFilterData unit tests ────────────────────────────────────────────
@@ -575,6 +613,243 @@ public sealed class BloomFilterDataTests
 
         int expected = setBits.Length;
         Assert.Equal(expected, bf.PopulationCount());
+    }
+
+    // ── False positive rate ──────────────────────────────────────────────────
+
+    [Fact]
+    public void BloomFilter_FalsePositiveRate_WithinExpectedBounds()
+    {
+        // Insert 1,000 tokens into a bloom filter sized for 10,000 bits with 3 hashes.
+        // Then probe 100,000 tokens that were NOT inserted and measure the false positive rate.
+        // For m=10000, k=3, n=1000: expected FPR ≈ (1 - e^(-kn/m))^k ≈ 3.6%
+        // We allow up to 10% to account for hash distribution variance.
+        const int size = 10_000;
+        const int hashCount = 3;
+        const int insertCount = 1_000;
+        const int probeCount = 100_000;
+        const double maxAllowedFpr = 0.10;
+
+        var bf = new BloomFilterData(size, hashCount);
+
+        // Insert tokens
+        for (int i = 0; i < insertCount; i++)
+        {
+            string token = $"inserted_{i}";
+            for (int h = 0; h < hashCount; h++)
+            {
+                int hash = ((StringComparer.OrdinalIgnoreCase.GetHashCode(token)
+                             ^ (h * unchecked((int)0x9e3779b9))) & 0x7FFFFFFF);
+                bf.SetBit((int)(hash % size));
+            }
+        }
+
+        // Probe tokens that were never inserted
+        int falsePositives = 0;
+        for (int i = 0; i < probeCount; i++)
+        {
+            string probe = $"notinserted_{i + insertCount}";
+            Span<int> indices = stackalloc int[hashCount];
+            for (int h = 0; h < hashCount; h++)
+            {
+                int hash = ((StringComparer.OrdinalIgnoreCase.GetHashCode(probe)
+                             ^ (h * unchecked((int)0x9e3779b9))) & 0x7FFFFFFF);
+                indices[h] = (int)(hash % size);
+            }
+            if (bf.MightContain(indices))
+                falsePositives++;
+        }
+
+        double fpr = (double)falsePositives / probeCount;
+        Assert.True(fpr < maxAllowedFpr,
+            $"False positive rate {fpr:P2} exceeds maximum allowed {maxAllowedFpr:P0}. " +
+            $"({falsePositives}/{probeCount} false positives)");
+        // Sanity: rate should be > 0 (a perfect filter with this config would be suspicious)
+        Assert.True(falsePositives > 0,
+            "Zero false positives is statistically implausible — possible test bug.");
+    }
+
+    // ── SimdByteScanner ────────────────────────────────────────────────────
+
+    [Fact]
+    public void SimdByteScanner_FindByte_ReturnsFirstMatch()
+    {
+        var data = new byte[1024];
+        data[512] = 0xAA;
+        data[700] = 0xAA;
+
+        Assert.Equal(512, SimdByteScanner.FindByte(data, 0xAA));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_ReturnsMinusOneWhenAbsent()
+    {
+        var data = new byte[256];
+        for (int i = 0; i < data.Length; i++) data[i] = 0x42;
+
+        Assert.Equal(-1, SimdByteScanner.FindByte(data, 0xFF));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_EmptySpan()
+    {
+        Assert.Equal(-1, SimdByteScanner.FindByte(ReadOnlySpan<byte>.Empty, 0x00));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_FirstByte()
+    {
+        var data = new byte[] { 0xBB, 0x00, 0x00, 0x00 };
+        Assert.Equal(0, SimdByteScanner.FindByte(data, 0xBB));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_LastByte()
+    {
+        var data = new byte[65];
+        data[64] = 0xCC; // past any 32-byte or 16-byte aligned block
+        Assert.Equal(64, SimdByteScanner.FindByte(data, 0xCC));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_LargeBuffer_EveryPosition()
+    {
+        for (int size = 0; size <= 128; size++)
+        {
+            var data = new byte[size];
+            for (int pos = 0; pos < size; pos++)
+            {
+                Array.Clear(data);
+                data[pos] = 0xFE;
+                int found = SimdByteScanner.FindByte(data, 0xFE);
+                Assert.Equal(pos, found);
+            }
+        }
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindAnyOfTwo_FindsBothTargets()
+    {
+        var data = new byte[256];
+        data[100] = 0x0A;
+        data[50]  = 0x7C;
+
+        Assert.Equal(50, SimdByteScanner.FindAnyOfTwo(data, 0x0A, 0x7C));
+        Assert.Equal(50, SimdByteScanner.FindAnyOfTwo(data, 0x7C, 0x0A));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindAnyOfTwo_ReturnsMinusOneWhenAbsent()
+    {
+        var data = new byte[128];
+        for (int i = 0; i < data.Length; i++) data[i] = 0x42;
+
+        Assert.Equal(-1, SimdByteScanner.FindAnyOfTwo(data, 0x0A, 0x0D));
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_CorrectCount()
+    {
+        var data = new byte[1024];
+        int expected = 0;
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (i % 7 == 0) { data[i] = 0xDD; expected++; }
+        }
+
+        Assert.Equal(expected, SimdByteScanner.CountByte(data, 0xDD));
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_AllMatch()
+    {
+        var data = new byte[200];
+        Array.Fill(data, (byte)0x99);
+        Assert.Equal(200, SimdByteScanner.CountByte(data, 0x99));
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_NoneMatch()
+    {
+        var data = new byte[200];
+        Assert.Equal(0, SimdByteScanner.CountByte(data, 0xFF));
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_Empty()
+    {
+        Assert.Equal(0, SimdByteScanner.CountByte(ReadOnlySpan<byte>.Empty, 0x00));
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindByte_MatchesSpanIndexOf()
+    {
+        var rng = new Random(42);
+        for (int trial = 0; trial < 200; trial++)
+        {
+            int len = rng.Next(0, 2048);
+            var data = new byte[len];
+            rng.NextBytes(data);
+            byte target = (byte)rng.Next(256);
+
+            int expected = ((ReadOnlySpan<byte>)data).IndexOf(target);
+            int actual = SimdByteScanner.FindByte(data, target);
+            Assert.Equal(expected, actual);
+        }
+    }
+
+    [Fact]
+    public void SimdByteScanner_CountByte_MatchesLinqCount()
+    {
+        var rng = new Random(123);
+        for (int trial = 0; trial < 100; trial++)
+        {
+            int len = rng.Next(0, 2048);
+            var data = new byte[len];
+            rng.NextBytes(data);
+            byte target = (byte)rng.Next(256);
+
+            int expected = data.Count(b => b == target);
+            int actual = SimdByteScanner.CountByte(data, target);
+            Assert.Equal(expected, actual);
+        }
+    }
+
+    [Fact]
+    public void SimdByteScanner_FindNextRecordMagic_Integration()
+    {
+        var data = new byte[4096];
+        var rng = new Random(99);
+        rng.NextBytes(data);
+
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(
+            data.AsSpan(1000), 0x52454331u);
+
+        int found = WalSegmentReader.FindNextRecordMagic(data);
+        Assert.True(found >= 0 && found <= 1000,
+            $"Expected magic at or before 1000, found at {found}");
+    }
+
+    [Fact]
+    public void SimdByteScanner_Throughput_LargeBuffer()
+    {
+        const int size = 4 * 1024 * 1024;
+        var data = new byte[size];
+        data[size - 1] = 0xFF;
+
+        SimdByteScanner.FindByte(data, 0xFF); // warm up
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        const int iterations = 50;
+        for (int i = 0; i < iterations; i++)
+            SimdByteScanner.FindByte(data, 0xFF);
+        sw.Stop();
+
+        long totalBytes = (long)size * iterations;
+        double gbPerSec = totalBytes / (sw.Elapsed.TotalSeconds * 1024 * 1024 * 1024);
+
+        Assert.True(gbPerSec > 0.5,
+            $"Throughput {gbPerSec:F2} GB/s is suspiciously low — SIMD path may not be active");
     }
 }
 

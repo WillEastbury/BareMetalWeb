@@ -4,11 +4,13 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Numerics;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data.Interfaces;
 
@@ -55,6 +57,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private readonly IDataQueryEvaluator       _queryEvaluator;
     private readonly IBufferedLogger?          _logger;
     private WalStore                  _walStore;
+
+    /// <summary>Exposes the underlying WAL store for background services (e.g. compaction).</summary>
+    internal WalStore WalStore => _walStore;
+
     private IndexStore                _indexStore;
     private SearchIndexManager        _searchIndexManager;
 
@@ -90,6 +96,13 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private readonly ConcurrentDictionary<string, SeqIdRange> _seqIdRanges
         = new(StringComparer.OrdinalIgnoreCase);
     private const int SeqIdBatchSize = 64;
+
+    // Columnar store cache — per-entity in-memory columnar layout for SIMD queries.
+    // Lazily built on first vectorised query, invalidated on Save/Delete.
+    private readonly ConcurrentDictionary<string, ColumnarStore> _columnarStores
+        = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _columnarVersions
+        = new(StringComparer.OrdinalIgnoreCase);
 
     // Optional cluster state for write fencing
     private ClusterState? _clusterState;
@@ -283,6 +296,15 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                     _indexStore.AppendEntry(type.Name, prop.Name, newValue, keyStr, 'A');
                 }
                 _searchIndexManager.IndexObject(obj);
+            }
+
+            // Update columnar store incrementally: upsert the row so SIMD queries stay hot.
+            // Falls back to a full rebuild on the next query if the store hasn't been built yet.
+            if (_columnarStores.TryGetValue(type.Name, out var colStore))
+            {
+                var meta = DataScaffold.GetEntityByType(type);
+                if (meta == null || !colStore.UpsertRow(obj, meta))
+                    colStore.Invalidate();
             }
         }
         catch (Exception ex)
@@ -602,9 +624,118 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         // ── Fallback: filter/sort on non-indexed fields ─────────────────────
         var canShortCircuit = query == null || query.Sorts.Count == 0;
 
+        // ── Columnar store path: SIMD scan over pre-built typed arrays ──────
+        // Avoids loading all objects just to extract columns — scans arrays
+        // directly, then loads only matching rows.
+        if (query != null
+            && idMap.Count >= ColumnQueryExecutor.VectorizationThreshold
+            && query.Groups.Count == 0
+            && query.Clauses.Count > 0)
+        {
+            var meta = DataScaffold.GetEntityByType(typeof(T));
+            if (meta != null)
+            {
+                var store = GetOrBuildColumnarStore<T>(typeName, idMap, meta);
+                if (store != null && store.RowCount >= ColumnQueryExecutor.VectorizationThreshold)
+                {
+                    // Check if all clauses can be served by columnar store
+                    bool allColumnar = true;
+                    foreach (var clause in query.Clauses)
+                    {
+                        if (string.IsNullOrEmpty(clause.Field) || !store.HasColumn(clause.Field))
+                        {
+                            allColumnar = false;
+                            break;
+                        }
+                    }
+
+                    if (allColumnar)
+                    {
+                        // Use Capacity (= HighWater) as the scan range — covers all allocated
+                        // ordinals including reused slots.  ScanWordCount accounts for freed
+                        // slots between live rows; the validity mask in ScanClause ensures
+                        // freed ordinals never appear in results.
+                        int n         = store.Capacity;
+                        int wordCount = store.ScanWordCount;
+                        ulong[]? combined = null;
+
+                        foreach (var clause in query.Clauses)
+                        {
+                            var clauseMask = store.ScanClause(clause.Field, clause.Operator, clause.Value, wordCount);
+                            if (clauseMask == null) { combined = new ulong[wordCount]; break; }
+
+                            if (combined == null)
+                                combined = clauseMask;
+                            else
+                                AndBitmaskInPlace(combined, clauseMask);
+                        }
+
+                        // Materialise matching rows — only load objects that passed the filter
+                        var results = new List<T>(Math.Min(top, n));
+                        int matched = 0;
+
+                        if (combined != null)
+                        {
+                            for (int wordIdx = 0; wordIdx < combined.Length && results.Count < top; wordIdx++)
+                            {
+                                ulong word = combined[wordIdx];
+                                while (word != 0)
+                                {
+                                    int bit = BitOperations.TrailingZeroCount(word);
+                                    int rowIdx = (wordIdx << 6) | bit;
+                                    word &= word - 1;
+
+                                    if (rowIdx >= n) break;
+
+                                    uint objKey = store.GetKeyAtRow(rowIdx);
+                                    if (objKey == 0) continue; // defensive: freed ordinals are already masked by the validity bitmap
+
+                                    if (matched++ < skip) continue;
+                                    try
+                                    {
+                                        T? obj = Load<T>(objKey);
+                                        if (obj != null)
+                                        {
+                                            if (canShortCircuit)
+                                            {
+                                                results.Add(obj);
+                                            }
+                                            else
+                                            {
+                                                results.Add(obj); // will sort below
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger?.LogError($"Deserialization failed for {typeName} Key {objKey}.", ex);
+                                    }
+
+                                    if (canShortCircuit && results.Count >= top) break;
+                                }
+                            }
+                        }
+
+                        if (canShortCircuit)
+                            return results;
+
+                        // With sorts: sort filtered results, then slice
+                        var sortedList = new List<T>(_queryEvaluator.ApplySorts(results, query));
+                        if (skip > 0 || top != int.MaxValue)
+                        {
+                            int end = Math.Min(skip + top, sortedList.Count);
+                            var paged = new List<T>(Math.Max(0, end - skip));
+                            for (int i = skip; i < end; i++) paged.Add(sortedList[i]);
+                            return paged;
+                        }
+                        return sortedList;
+                    }
+                }
+            }
+        }
+
         // ── Vectorised path: pre-load all objects, then apply SIMD column scan ──
-        // Activated when the entity set is large enough to amortise column-extraction
-        // overhead and the query has no nested OR groups.
+        // Fallback when columnar store doesn't cover all clauses.
         if (query != null
             && idMap.Count >= ColumnQueryExecutor.VectorizationThreshold
             && query.Groups.Count == 0
@@ -857,6 +988,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             }
             _searchIndexManager.RemoveObject(type, key);
         }
+
+        // Update columnar store incrementally: remove the row so SIMD queries stay hot.
+        if (_columnarStores.TryGetValue(typeName, out var colStore))
+            colStore.RemoveRow(key);
     }
 
     public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default)
@@ -866,7 +1001,22 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         return ValueTask.CompletedTask;
     }
 
-    // ── DataRecord (non-generic, metadata-driven) ─────────────────────────────
+    // ── WAL compaction ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Compacts the given WAL segment by rebuilding it from the in-memory materialised
+    /// view.  Delegates to <see cref="WalStore.CompactSegmentFromMaterialisedView"/>.
+    ///
+    /// The segment is rebuilt without reading the full original segment from disk;
+    /// only the latest version of each live record in that segment is written,
+    /// eliminating the read phase and reducing disk IO roughly by half compared
+    /// to a sequential read-deduplicate-write approach.
+    ///
+    /// Precondition: <paramref name="segmentId"/> must not be the currently active
+    /// (still-being-written) segment.
+    /// </summary>
+    public void CompactSegmentFromMaterialisedView(uint segmentId)
+        => _walStore.CompactSegmentFromMaterialisedView(segmentId);
     //
     // Fully AOT-safe code path for DataRecord entities. Uses EntitySchema
     // parallel arrays and ordinal-indexed closures instead of generic type
@@ -978,6 +1128,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                 }
                 _indexStore.AppendEntry(entityName, schema.Names[i], newValue, keyStr, 'A');
             }
+
+            // Invalidate columnar store
+            if (_columnarStores.TryGetValue(entityName, out var colStore))
+                colStore.Invalidate();
         }
         catch (Exception ex)
         {
@@ -1628,6 +1782,59 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
     // Cache: (type, schemaVersion) → MemberSignature[]
     private readonly ConcurrentDictionary<(Type, int), MemberSignature[]> _schemaMemberCache = new();
+
+    /// <summary>
+    /// Gets or lazily builds a columnar store for the given entity type.
+    /// Returns null if building fails (e.g. no numeric fields).
+    /// </summary>
+    private ColumnarStore? GetOrBuildColumnarStore<T>(
+        string typeName,
+        ConcurrentDictionary<uint, ulong> idMap,
+        DataEntityMetadata meta) where T : BaseDataObject
+    {
+        var store = _columnarStores.GetOrAdd(typeName, _ => new ColumnarStore(idMap.Count));
+        var lastVersion = _columnarVersions.GetOrAdd(typeName, -1L);
+
+        // Rebuild if stale (version changed due to Save/Delete)
+        if (lastVersion != store.Version || store.RowCount == 0)
+        {
+            var allObjects = new List<T>(idMap.Count);
+            foreach (var (objKey, _) in idMap)
+            {
+                try
+                {
+                    T? obj = Load<T>(objKey);
+                    if (obj != null) allObjects.Add(obj);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError($"Columnar build: deserialization failed for {typeName} Key {objKey}.", ex);
+                }
+            }
+
+            if (allObjects.Count < ColumnQueryExecutor.VectorizationThreshold)
+                return null;
+
+            store.Build(allObjects, meta);
+            _columnarVersions[typeName] = store.Version;
+        }
+
+        return store;
+    }
+
+    /// <summary>SIMD-accelerated bitmask AND (same as ColumnQueryExecutor.AndInPlace).</summary>
+    private static void AndBitmaskInPlace(ulong[] dest, ulong[] src)
+    {
+        int vLen = Vector<ulong>.Count;
+        int i = 0;
+        for (; i <= dest.Length - vLen; i += vLen)
+        {
+            var d = new Vector<ulong>(dest, i);
+            var s = new Vector<ulong>(src, i);
+            (d & s).CopyTo(dest, i);
+        }
+        for (; i < dest.Length; i++) dest[i] &= src[i];
+    }
 
     private T? DeserializePayload<T>(ReadOnlyMemory<byte> memory, uint key) where T : BaseDataObject
     {

@@ -44,6 +44,18 @@ public sealed class BmwContext
     /// </summary>
     public HttpContext HttpContext { get; }
 
+    /// <summary>Bridge: access the HTTP response via the underlying HttpContext.</summary>
+    public HttpResponse Response => HttpContext.Response;
+
+    /// <summary>Bridge: access the HTTP request via the underlying HttpContext.</summary>
+    public HttpRequest HttpRequest => HttpContext.Request;
+
+    /// <summary>Bridge: access the connection info.</summary>
+    public ConnectionInfo Connection => HttpContext.Connection;
+
+    /// <summary>Bridge: access request services (DI container).</summary>
+    public IServiceProvider? RequestServices => HttpContext.RequestServices;
+
     /// <summary>Source IP extracted once from the connection feature.</summary>
     public string SourceIp { get; }
 

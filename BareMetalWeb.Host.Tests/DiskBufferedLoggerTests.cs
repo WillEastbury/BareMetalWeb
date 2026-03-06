@@ -11,6 +11,14 @@ public class DiskBufferedLoggerTests : IDisposable
 {
     private readonly string _tempDir;
 
+    private static async Task WaitUntilAsync(Func<bool> condition, int timeoutMs = 5000, int intervalMs = 25)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
+            await Task.Delay(intervalMs);
+        Assert.True(condition(), $"Condition not met within {timeoutMs}ms");
+    }
+
     public DiskBufferedLoggerTests()
     {
         _tempDir = Path.Combine(Path.GetTempPath(), $"bmw_log_{Guid.NewGuid().ToString("N")[..8]}");
@@ -86,8 +94,8 @@ public class DiskBufferedLoggerTests : IDisposable
         // Act
         logger.LogError("Something broke", new InvalidOperationException("boom"));
 
-        // Give fire-and-forget task time to complete
-        await Task.Delay(500);
+        // Wait for fire-and-forget task to write the error file
+        await WaitUntilAsync(() => Directory.GetFiles(_tempDir, "error_*.log", SearchOption.AllDirectories).Length > 0);
 
         // Assert
         var errorFiles = Directory.GetFiles(_tempDir, "error_*.log", SearchOption.AllDirectories);
@@ -136,7 +144,7 @@ public class DiskBufferedLoggerTests : IDisposable
         var logger = new DiskBufferedLogger(_tempDir);
         logger.LogError("err", new Exception("test"));
 
-        await Task.Delay(500);
+        await WaitUntilAsync(() => Directory.GetFiles(_tempDir, "error_*.log", SearchOption.AllDirectories).Length > 0);
 
         // Assert
         var errorFiles = Directory.GetFiles(_tempDir, "error_*.log", SearchOption.AllDirectories);
@@ -261,7 +269,7 @@ public class DiskBufferedLoggerTests : IDisposable
         var logger = new DiskBufferedLogger(_tempDir);
         logger.LogError("error only", new Exception("fail"));
 
-        await Task.Delay(500);
+        await WaitUntilAsync(() => Directory.GetFiles(_tempDir, "error_*.log", SearchOption.AllDirectories).Length > 0);
 
         // Assert
         var errorFiles = Directory.GetFiles(_tempDir, "error_*.log", SearchOption.AllDirectories);
@@ -280,7 +288,7 @@ public class DiskBufferedLoggerTests : IDisposable
 
         // Act
         logger.LogError("outer message", ex);
-        await Task.Delay(500);
+        await WaitUntilAsync(() => Directory.GetFiles(_tempDir, "error_*.log", SearchOption.AllDirectories).Length > 0);
 
         // Assert
         var errorFiles = Directory.GetFiles(_tempDir, "error_*.log", SearchOption.AllDirectories);
@@ -314,7 +322,7 @@ public class DiskBufferedLoggerTests : IDisposable
             Assert.Null(exception);
 
             // Wait for the fire-and-forget async task to complete
-            await Task.Delay(500);
+            await WaitUntilAsync(() => captured.ToString().Length > 0);
         }
         finally
         {
@@ -506,7 +514,7 @@ public class DiskBufferedLoggerTests : IDisposable
 
         // Act
         logger.LogError("format-err", ex);
-        await Task.Delay(500);
+        await WaitUntilAsync(() => Directory.GetFiles(_tempDir, "error_*.log", SearchOption.AllDirectories).Length > 0);
 
         // Assert
         var errorFiles = Directory.GetFiles(_tempDir, "error_*.log", SearchOption.AllDirectories);
@@ -533,8 +541,8 @@ public class DiskBufferedLoggerTests : IDisposable
                 logger.LogError($"concurrent-err-{i}", new Exception($"err-{i}"))));
         await Task.WhenAll(tasks);
 
-        // Give fire-and-forget tasks time to complete
-        await Task.Delay(1000);
+        // Wait for fire-and-forget tasks to complete
+        await WaitUntilAsync(() => Directory.GetFiles(_tempDir, "error_*.log", SearchOption.AllDirectories).Length > 0);
 
         // Assert – at least some error files exist and no exceptions thrown
         var errorFiles = Directory.GetFiles(_tempDir, "error_*.log", SearchOption.AllDirectories);

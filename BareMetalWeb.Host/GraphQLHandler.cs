@@ -63,7 +63,7 @@ public static class GraphQLHandler
 
     // ── Query execution ───────────────────────────────────────────────────
 
-    public static async ValueTask HandleAsync(HttpContext context)
+    public static async ValueTask HandleAsync(BmwContext context)
     {
         context.Response.ContentType = "application/json; charset=utf-8";
 
@@ -72,7 +72,7 @@ public static class GraphQLHandler
 
         try
         {
-            using var doc = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+            using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, cancellationToken: context.RequestAborted);
             if (doc.RootElement.TryGetProperty("query", out var qProp)) queryText = qProp.GetString();
             if (doc.RootElement.TryGetProperty("variables", out var vProp)) variables = vProp.Clone();
         }

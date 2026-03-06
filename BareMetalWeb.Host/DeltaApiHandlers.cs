@@ -20,11 +20,11 @@ public static class DeltaApiHandlers
     /// Binary body: raw MutationDelta wire format
     /// JSON body: { "expectedVersion": N, "changes": { "FieldName": value, ... } }
     /// </summary>
-    public static async ValueTask DeltaHandler(HttpContext context)
+    public static async ValueTask DeltaHandler(BmwContext context)
     {
         // Content-Type and body size validation (CSRF mitigation + DoS prevention)
         if (!BinaryApiHandlers.HasValidApiContentType(context)
-            && !(context.Request.ContentType ?? "").Contains(BinaryContentType, StringComparison.OrdinalIgnoreCase))
+            && !(context.HttpRequest.ContentType ?? "").Contains(BinaryContentType, StringComparison.OrdinalIgnoreCase))
         {
             await WriteResult(context, 415, MutationResult.EntityNotFound, "Unsupported Content-Type.");
             return;
@@ -78,7 +78,7 @@ public static class DeltaApiHandlers
             else
             {
                 using var ms = new MemoryStream();
-                await context.Request.Body.CopyToAsync(ms, context.RequestAborted);
+                await context.HttpRequest.Body.CopyToAsync(ms, context.RequestAborted);
                 delta = MutationDelta.Deserialize(ms.GetBuffer().AsSpan(0, (int)ms.Length));
             }
 
@@ -137,7 +137,7 @@ public static class DeltaApiHandlers
     /// GET /api/_binary/{type}/_layout
     /// Returns the EntityLayout schema as JSON (field ordinals, types, flags, schema hash).
     /// </summary>
-    public static async ValueTask LayoutHandler(HttpContext context)
+    public static async ValueTask LayoutHandler(BmwContext context)
     {
         var typeSlug = BinaryApiHandlers.GetRouteValue(context, "type") ?? string.Empty;
         if (!DataScaffold.TryGetEntity(typeSlug, out var meta))
@@ -184,16 +184,16 @@ public static class DeltaApiHandlers
 
     // ── Helpers ──
 
-    private static bool WantsJson(HttpContext context)
-        => context.Request.Headers.Accept.ToString().Contains("application/json", StringComparison.OrdinalIgnoreCase);
+    private static bool WantsJson(BmwContext context)
+        => context.HttpRequest.Headers.Accept.ToString().Contains("application/json", StringComparison.OrdinalIgnoreCase);
 
-    private static bool RequestIsJson(HttpContext context)
-        => context.Request.ContentType?.Contains("application/json", StringComparison.OrdinalIgnoreCase) == true;
+    private static bool RequestIsJson(BmwContext context)
+        => context.HttpRequest.ContentType?.Contains("application/json", StringComparison.OrdinalIgnoreCase) == true;
 
     private static async Task<MutationDelta> ParseJsonDelta(
-        HttpContext context, EntityLayout layout, uint entityId)
+        BmwContext context, EntityLayout layout, uint entityId)
     {
-        using var doc = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+        using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, cancellationToken: context.RequestAborted);
         var root = doc.RootElement;
 
         uint expectedVersion = 0;
@@ -308,7 +308,7 @@ public static class DeltaApiHandlers
         writer.WriteEndObject();
     }
 
-    private static async ValueTask WriteResult(HttpContext context, int statusCode, MutationResult result, string message)
+    private static async ValueTask WriteResult(BmwContext context, int statusCode, MutationResult result, string message)
     {
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json";

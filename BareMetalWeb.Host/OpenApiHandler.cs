@@ -28,7 +28,7 @@ internal static class OpenApiHandler
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
-    internal static async ValueTask HandleAsync(HttpContext context)
+    internal static async ValueTask HandleAsync(BmwContext context)
     {
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted)
             .ConfigureAwait(false);
@@ -56,10 +56,10 @@ internal static class OpenApiHandler
     // ── Document builder ──────────────────────────────────────────────────────
 
     private static Dictionary<string, object?> BuildDocument(
-        HttpContext context,
+        BmwContext context,
         DataEntityMetadata[] entities)
     {
-        var request = context.Request;
+        var request = context.HttpRequest;
         var scheme = request.IsHttps ? "https" : "http";
         var host = request.Host.Value ?? "localhost";
         var serverUrl = $"{scheme}://{host}";

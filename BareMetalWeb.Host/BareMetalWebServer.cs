@@ -127,7 +127,7 @@ public class BareMetalWebServer : IBareWebHost
         ErrorPageInfo = ErrorPage;
         cts = _cts;
     }
-    public async ValueTask BuildAppInfoMenuOptionsAsync(HttpContext? context = null, CancellationToken cancellationToken = default)
+    public async ValueTask BuildAppInfoMenuOptionsAsync(BmwContext? context = null, CancellationToken cancellationToken = default)
     {
         MenuOptionsList.Clear();
         var user = context != null ? await UserAuth.GetUserAsync(context, cancellationToken).ConfigureAwait(false) : null;
@@ -368,6 +368,13 @@ public class BareMetalWebServer : IBareWebHost
         _ = clientPruneTask;
         _ = todoPeriodicityTask;
         _ = scheduledActionTask;
+
+        // WAL segment compaction background service
+        if (DataStoreProvider.PrimaryProvider is WalDataProvider walProvider)
+        {
+            Task compactionTask = new WalCompactor(walProvider.WalStore).RunAsync(cts.Token);
+            _ = compactionTask;
+        }
     }
     public async Task RequestHandler(HttpContext context)
     {
@@ -379,7 +386,7 @@ public class BareMetalWebServer : IBareWebHost
         string requestPath = bmwCtx.Request.Path;
         string routeKey = bmwCtx.Request.RouteKey;
         string sourceIp = bmwCtx.SourceIp;
-        context.SetApp(this);
+        bmwCtx.SetApp(this);
 
         // ── Multitenancy: resolve tenant from Host header ─────────────────────
         // When enabled, sets DataStoreProvider.CurrentTenant for the duration of
@@ -436,19 +443,19 @@ public class BareMetalWebServer : IBareWebHost
                 return;
             }
 
-            if (await JsBundleService.TryServeAsync(context))
+            if (await JsBundleService.TryServeAsync(bmwCtx))
             {
                 BufferedLogger.LogInfo($"{routeKey}|{context.Response.StatusCode}|{sourceIp}|bundle");
                 return;
             }
 
-            if (await CssBundleService.TryServeAsync(context))
+            if (await CssBundleService.TryServeAsync(bmwCtx))
             {
                 BufferedLogger.LogInfo($"{routeKey}|{context.Response.StatusCode}|{sourceIp}|css-bundle");
                 return;
             }
 
-            if (await StaticFileService.TryServeAsync(context, StaticFiles))
+            if (await StaticFileService.TryServeAsync(bmwCtx, StaticFiles))
             {
                 BufferedLogger.LogInfo($"{routeKey}|{context.Response.StatusCode}|{sourceIp}|static");
                 return;
@@ -456,7 +463,7 @@ public class BareMetalWebServer : IBareWebHost
 
             // Build the menu/session context now — only for actual page/API requests,
             // not for static assets (bundles, files) served above.
-            await BuildAppInfoMenuOptionsAsync(context, context.RequestAborted).ConfigureAwait(false);
+            await BuildAppInfoMenuOptionsAsync(bmwCtx, context.RequestAborted).ConfigureAwait(false);
 
             // ── Jump table: O(1) exact-match dispatch ───────────────────────
             EnsureJumpTable();
@@ -464,15 +471,15 @@ public class BareMetalWebServer : IBareWebHost
             {
                 if (page.PageInfo != null)
                 {
-                    context.SetPageInfo(page.PageInfo);
+                    bmwCtx.SetPageInfo(page.PageInfo);
                 }
-                if (!await IsAuthorizedAsync(page.PageInfo, context, context.RequestAborted).ConfigureAwait(false))
+                if (!await IsAuthorizedAsync(page.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
                 {
-                    await RenderForbidden(context);
-                    await LogAccessDeniedAsync(routeKey, sourceIp, context, page.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                    await RenderForbidden(bmwCtx);
+                    await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, page.PageInfo, context.RequestAborted).ConfigureAwait(false);
                     return;
                 }
-                await page.Handler(context);
+                await page.Handler(bmwCtx);
                 BufferedLogger.LogInfo($"{routeKey}|200|{sourceIp}");
                 return;
             }
@@ -481,15 +488,15 @@ public class BareMetalWebServer : IBareWebHost
             {
                 if (allPage.PageInfo != null)
                 {
-                    context.SetPageInfo(allPage.PageInfo);
+                    bmwCtx.SetPageInfo(allPage.PageInfo);
                 }
-                if (!await IsAuthorizedAsync(allPage.PageInfo, context, context.RequestAborted).ConfigureAwait(false))
+                if (!await IsAuthorizedAsync(allPage.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
                 {
-                    await RenderForbidden(context);
-                    await LogAccessDeniedAsync(routeKey, sourceIp, context, allPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                    await RenderForbidden(bmwCtx);
+                    await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, allPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                     return;
                 }
-                await allPage.Handler(context);
+                await allPage.Handler(bmwCtx);
                 BufferedLogger.LogInfo($"{routeKey}|ALL {requestPath}|200|{sourceIp}");
                 return;
             }
@@ -510,15 +517,15 @@ public class BareMetalWebServer : IBareWebHost
                     var injectedPage = RouteInfoHelpers.InjectRouteParametersIntoPageInfo(routeData, parameters);
                     if (injectedPage.PageInfo != null)
                     {
-                        context.SetPageInfo(injectedPage.PageInfo);
+                        bmwCtx.SetPageInfo(injectedPage.PageInfo);
                     }
-                    if (!await IsAuthorizedAsync(injectedPage.PageInfo, context, context.RequestAborted).ConfigureAwait(false))
+                    if (!await IsAuthorizedAsync(injectedPage.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
                     {
-                        await RenderForbidden(context);
-                        await LogAccessDeniedAsync(routeKey, sourceIp, context, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                        await RenderForbidden(bmwCtx);
+                        await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                         return;
                     }
-                    await injectedPage.Handler(context);
+                    await injectedPage.Handler(bmwCtx);
                     var paramParts = new string[parameters.Count];
                     int paramIdx = 0;
                     foreach (var p in parameters)
@@ -542,15 +549,15 @@ public class BareMetalWebServer : IBareWebHost
                     var injectedPage = RouteInfoHelpers.InjectRouteParametersIntoPageInfo(routeData, parameters);
                     if (injectedPage.PageInfo != null)
                     {
-                        context.SetPageInfo(injectedPage.PageInfo);
+                        bmwCtx.SetPageInfo(injectedPage.PageInfo);
                     }
-                    if (!await IsAuthorizedAsync(injectedPage.PageInfo, context, context.RequestAborted).ConfigureAwait(false))
+                    if (!await IsAuthorizedAsync(injectedPage.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
                     {
-                        await RenderForbidden(context);
-                        await LogAccessDeniedAsync(routeKey, sourceIp, context, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                        await RenderForbidden(bmwCtx);
+                        await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                         return;
                     }
-                    await injectedPage.Handler(context);
+                    await injectedPage.Handler(bmwCtx);
                     var paramParts2 = new string[parameters.Count];
                     int paramIdx2 = 0;
                     foreach (var p in parameters)
@@ -562,13 +569,13 @@ public class BareMetalWebServer : IBareWebHost
             if (methodNotAllowed)
             {
                 context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
-                context.SetPageInfo(ErrorPageInfo);
-                await HtmlRenderer.RenderPage(context);
+                bmwCtx.SetPageInfo(ErrorPageInfo);
+                await HtmlRenderer.RenderPage(bmwCtx.HttpContext);
                 BufferedLogger.LogInfo($"{routeKey}|405|{sourceIp}");
                 return;
             }
-            context.SetPageInfo(NotFoundPageInfo);
-            await HtmlRenderer.RenderPage(context); // Still nothing? 404
+            bmwCtx.SetPageInfo(NotFoundPageInfo);
+            await HtmlRenderer.RenderPage(bmwCtx.HttpContext); // Still nothing? 404
             BufferedLogger.LogInfo($"{routeKey}|404|{sourceIp}");
         }
         catch (OperationCanceledException oce)
@@ -594,9 +601,9 @@ public class BareMetalWebServer : IBareWebHost
             }
             else
             {
-                context.SetPageInfo(ErrorPageInfo);
-                context.SetStringValue("html_message", $"<p>An unexpected error occurred.</p><p>Error ID: <code>{errorId}</code></p>");
-                await HtmlRenderer.RenderPage(context); // Render error page
+                bmwCtx.SetPageInfo(ErrorPageInfo);
+                bmwCtx.SetStringValue("html_message", $"<p>An unexpected error occurred.</p><p>Error ID: <code>{errorId}</code></p>");
+                await HtmlRenderer.RenderPage(bmwCtx.HttpContext); // Render error page
             }
             BufferedLogger.LogInfo($"{routeKey}|500|{sourceIp}");
         }
@@ -633,7 +640,7 @@ public class BareMetalWebServer : IBareWebHost
         return true;
     }
 
-    private static async ValueTask<bool> IsAuthorizedAsync(PageInfo? pageInfo, HttpContext context, CancellationToken cancellationToken = default)
+    private static async ValueTask<bool> IsAuthorizedAsync(PageInfo? pageInfo, BmwContext context, CancellationToken cancellationToken = default)
     {
         if (pageInfo == null)
             return true;
@@ -728,7 +735,7 @@ public class BareMetalWebServer : IBareWebHost
         return true;
     }
 
-    private async ValueTask LogAccessDeniedAsync(string path, string sourceIp, HttpContext context, PageInfo? pageInfo, CancellationToken cancellationToken = default)
+    private async ValueTask LogAccessDeniedAsync(string path, string sourceIp, BmwContext context, PageInfo? pageInfo, CancellationToken cancellationToken = default)
     {
         var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
         var userName = user?.UserName ?? "anonymous";
@@ -747,7 +754,7 @@ public class BareMetalWebServer : IBareWebHost
             context.Response.Headers["Keep-Alive"] = "timeout=60, max=1000";
     }
 
-    public async Task RenderForbidden(HttpContext context)
+    public async Task RenderForbidden(BmwContext context)
     {
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
 
@@ -765,7 +772,7 @@ public class BareMetalWebServer : IBareWebHost
             }
         };
         context.SetPageInfo(forbiddenPage);
-        await HtmlRenderer.RenderPage(context);
+        await HtmlRenderer.RenderPage(context.HttpContext);
     }
 
     private bool ApplyCors(HttpContext context)

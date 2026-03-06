@@ -1065,6 +1065,47 @@ public sealed class SearchIndexManager
                         }
                         overflowBuffer.Add(lowerCh);
                     }
+
+                    // SIMD fast-skip: consume run of already-lowercase ASCII alphanumerics
+                    // IndexOfAnyExceptInRange is JIT SIMD-accelerated in .NET 8+
+                    if (i + 1 < value.Length && overflowBuffer == null)
+                    {
+                        var remaining = value.Slice(i + 1);
+                        int runLen = remaining.IndexOfAnyExceptInRange('0', 'z');
+                        // IndexOfAnyExceptInRange('0','z') covers 0-9, A-Z, a-z plus a few
+                        // symbols (: ; < = > ? @ [ \ ] ^ _  `). Re-check the boundary char.
+                        if (runLen < 0)
+                            runLen = remaining.Length;
+
+                        // Copy the run, lowercasing each char
+                        for (int r = 0; r < runLen; r++)
+                        {
+                            var rc = remaining[r];
+                            // Filter out the non-alphanumeric chars in the '0'-'z' range
+                            if (!((uint)(rc - 'a') <= 'z' - 'a' || (uint)(rc - 'A') <= 'Z' - 'A' || (uint)(rc - '0') <= '9' - '0'))
+                            {
+                                runLen = r;
+                                break;
+                            }
+                            var lowered = (char)(rc | 0x20);
+                            if (bufferPos < MaxStackTokenSize)
+                            {
+                                buffer[bufferPos++] = lowered;
+                            }
+                            else
+                            {
+                                if (overflowBuffer == null)
+                                {
+                                    overflowBuffer = new List<char>(MaxStackTokenSize * 2);
+                                    for (int j = 0; j < bufferPos; j++)
+                                        overflowBuffer.Add(buffer[j]);
+                                }
+                                overflowBuffer.Add(lowered);
+                            }
+                        }
+                        i += runLen;
+                    }
+
                     continue;
                 }
             }

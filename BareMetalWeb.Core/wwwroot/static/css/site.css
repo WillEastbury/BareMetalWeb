@@ -985,6 +985,25 @@ body {
     font-weight: 500;
     padding: 0.3em 0.5em;
 }
+.bm-cal-add-btn {
+    opacity: 0;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.25rem;
+    transition: opacity 0.15s;
+}
+.bm-cal-cell:hover .bm-cal-add-btn {
+    opacity: 0.6;
+}
+.bm-cal-add-btn:hover {
+    opacity: 1 !important;
+}
+.bm-cal-event[draggable="true"] {
+    cursor: grab;
+}
+.bm-cal-event[draggable="true"]:active {
+    cursor: grabbing;
+}
 
 /* Wizard step indicator */
 .bm-wizard-step-indicator {

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Core;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
@@ -21,7 +22,7 @@ var configureKestrel = ProgramSetup.ConfigureKestrel(config);
 
 // Simple per-IP rate limiter for device code endpoints
 var _deviceRateLimiter = new ConcurrentDictionary<string, (int Count, DateTime Window)>();
-bool DeviceRateCheck(HttpContext ctx, int maxPerMinute = 10)
+bool DeviceRateCheck(BmwContext ctx, int maxPerMinute = 10)
 {
     var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
     var now = DateTime.UtcNow;
@@ -51,7 +52,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
             Status = "pending"
         };
         DataStoreProvider.Current.Save(dc);
-        var baseUrl = $"{context.Request.Scheme}://{context.Request.Host}";
+        var baseUrl = $"{context.HttpRequest.Scheme}://{context.HttpRequest.Host}";
         var json = JsonSerializer.Serialize(new Dictionary<string, object>
         {
             ["device_code"] = dc.DeviceCode,
@@ -73,14 +74,14 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
             return;
         }
         // Validate Content-Type (CSRF mitigation)
-        if (!(context.Request.ContentType ?? "").Contains("application/json", StringComparison.OrdinalIgnoreCase))
+        if (!(context.HttpRequest.ContentType ?? "").Contains("application/json", StringComparison.OrdinalIgnoreCase))
         {
             context.Response.StatusCode = 415;
             await context.Response.WriteAsync("{\"error\":\"Unsupported Content-Type\"}");
             return;
         }
         string body;
-        using (var reader = new System.IO.StreamReader(context.Request.Body))
+        using (var reader = new System.IO.StreamReader(context.HttpRequest.Body))
             body = await reader.ReadToEndAsync();
         var deviceCode = "";
         try { var doc = JsonDocument.Parse(body); deviceCode = doc.RootElement.GetProperty("device_code").GetString() ?? ""; } catch { }
@@ -132,8 +133,8 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
     }));
     appInfo.RegisterRoute("GET /device", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), async context =>
     {
-        var code = context.Request.Query.ContainsKey("code") ? context.Request.Query["code"].ToString() : "";
-        var msg = context.Request.Query.ContainsKey("msg") ? context.Request.Query["msg"].ToString() : "";
+        var code = context.HttpRequest.Query.ContainsKey("code") ? context.HttpRequest.Query["code"].ToString() : "";
+        var msg = context.HttpRequest.Query.ContainsKey("msg") ? context.HttpRequest.Query["msg"].ToString() : "";
         var sb = new System.Text.StringBuilder();
         sb.Append("<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">");
         sb.Append("<title>Device Login - BareMetalWeb</title><style>");
@@ -171,9 +172,9 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
     {
         var user = await UserAuth.GetRequestUserAsync(context);
         string code = "";
-        if (context.Request.HasFormContentType)
+        if (context.HttpRequest.HasFormContentType)
         {
-            var form = await context.Request.ReadFormAsync();
+            var form = await context.HttpRequest.ReadFormAsync();
             // CSRF validation for form-based POST
             if (!BareMetalWeb.Host.CsrfProtection.ValidateFormToken(context, form))
             {
@@ -318,9 +319,9 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
             else if (string.Equals(f.Name, "StartTime", StringComparison.OrdinalIgnoreCase)) startTimeOrd = f.Ordinal;
         }
 
-        var q = context.Request.Query.ContainsKey("q") ? context.Request.Query["q"].ToString() : null;
-        var caller = context.Request.Query.ContainsKey("caller") ? context.Request.Query["caller"].ToString() : null;
-        var source = context.Request.Query.ContainsKey("source") ? context.Request.Query["source"].ToString() : null;
+        var q = context.HttpRequest.Query.ContainsKey("q") ? context.HttpRequest.Query["q"].ToString() : null;
+        var caller = context.HttpRequest.Query.ContainsKey("caller") ? context.HttpRequest.Query["caller"].ToString() : null;
+        var source = context.HttpRequest.Query.ContainsKey("source") ? context.HttpRequest.Query["source"].ToString() : null;
 
         if (!string.IsNullOrWhiteSpace(q))
         {

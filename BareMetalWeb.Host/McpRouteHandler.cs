@@ -37,7 +37,7 @@ internal static class McpRouteHandler
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
-    internal static async ValueTask HandleAsync(HttpContext context)
+    internal static async ValueTask HandleAsync(BmwContext context)
     {
         context.Response.ContentType = "application/json";
 
@@ -53,7 +53,7 @@ internal static class McpRouteHandler
         }
 
         // Body size limit
-        if (context.Request.ContentLength.HasValue && context.Request.ContentLength.Value > 10 * 1024 * 1024)
+        if (context.HttpRequest.ContentLength.HasValue && context.HttpRequest.ContentLength.Value > 10 * 1024 * 1024)
         {
             context.Response.StatusCode = 413;
             await context.Response.WriteAsync(
@@ -63,7 +63,7 @@ internal static class McpRouteHandler
         }
 
         string body;
-        using (var reader = new System.IO.StreamReader(context.Request.Body))
+        using (var reader = new System.IO.StreamReader(context.HttpRequest.Body))
             body = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
 
         if (string.IsNullOrWhiteSpace(body))
@@ -95,7 +95,7 @@ internal static class McpRouteHandler
 
     // ── Dispatch ──────────────────────────────────────────────────────────────
 
-    private static async Task DispatchRequestAsync(HttpContext context, JsonElement root)
+    private static async Task DispatchRequestAsync(BmwContext context, JsonElement root)
     {
         // JSON-RPC notifications (no "id") — acknowledge with 202, no body
         bool hasId = root.TryGetProperty("id", out var id);
@@ -654,6 +654,6 @@ internal static class McpRouteHandler
         }, _jsonOptions);
     }
 
-    private static Task WriteRawAsync(HttpContext context, string json)
+    private static Task WriteRawAsync(BmwContext context, string json)
         => context.Response.WriteAsync(json, context.RequestAborted);
 }

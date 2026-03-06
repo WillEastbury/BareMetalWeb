@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,7 +16,7 @@ public static class UserAuth
     // Sessions extend their expiration time with each access, keeping active users
     // logged in. For RememberMe sessions, the cookie Expires is also reissued to
     // match the extended server-side expiry.
-    public static UserSession? GetSession(HttpContext context)
+    public static UserSession? GetSession(BmwContext context)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
 
@@ -75,7 +76,7 @@ public static class UserAuth
         return session;
     }
 
-    public static async ValueTask<UserSession?> GetSessionAsync(HttpContext context, CancellationToken cancellationToken = default)
+    public static async ValueTask<UserSession?> GetSessionAsync(BmwContext context, CancellationToken cancellationToken = default)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
 
@@ -135,7 +136,7 @@ public static class UserAuth
         return session;
     }
 
-    public static async ValueTask<User?> GetUserAsync(HttpContext context, CancellationToken cancellationToken = default)
+    public static async ValueTask<User?> GetUserAsync(BmwContext context, CancellationToken cancellationToken = default)
     {
         var session = await GetSessionAsync(context, cancellationToken).ConfigureAwait(false);
         if (session == null)
@@ -151,7 +152,7 @@ public static class UserAuth
         return user;
     }
 
-    public static async ValueTask<User?> GetRequestUserAsync(HttpContext context, CancellationToken cancellationToken = default)
+    public static async ValueTask<User?> GetRequestUserAsync(BmwContext context, CancellationToken cancellationToken = default)
     {
         var sessionUser = await GetUserAsync(context, cancellationToken).ConfigureAwait(false);
         if (sessionUser != null)
@@ -166,7 +167,7 @@ public static class UserAuth
         return await SystemPrincipal.FindByApiKeyAsync(apiKey, cancellationToken).ConfigureAwait(false);
     }
 
-    public static async ValueTask SignInAsync(HttpContext context, User user, bool rememberMe, CancellationToken cancellationToken = default)
+    public static async ValueTask SignInAsync(BmwContext context, User user, bool rememberMe, CancellationToken cancellationToken = default)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
         if (user == null) throw new ArgumentNullException(nameof(user));
@@ -191,7 +192,7 @@ public static class UserAuth
         var options = new CookieOptions
         {
             HttpOnly = true,
-            Secure = context.Request.IsHttps,
+            Secure = context.HttpRequest.IsHttps,
             SameSite = SameSiteMode.Lax
         };
 
@@ -202,7 +203,7 @@ public static class UserAuth
         context.SetCookie(SessionCookieName, protectedSessionId, options);
     }
 
-    public static async ValueTask SignOutAsync(HttpContext context, CancellationToken cancellationToken = default)
+    public static async ValueTask SignOutAsync(BmwContext context, CancellationToken cancellationToken = default)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
 
@@ -216,21 +217,21 @@ public static class UserAuth
         context.DeleteCookie(SessionCookieName);
     }
 
-    private static void ReissueCookie(HttpContext context, string protectedSessionId, DateTime expiresUtc)
+    private static void ReissueCookie(BmwContext context, string protectedSessionId, DateTime expiresUtc)
     {
         var options = new CookieOptions
         {
             HttpOnly = true,
-            Secure = context.Request.IsHttps,
+            Secure = context.HttpRequest.IsHttps,
             SameSite = SameSiteMode.Lax,
             Expires = expiresUtc
         };
         context.SetCookie(SessionCookieName, protectedSessionId, options);
     }
 
-    private static bool IsApiRequest(HttpContext context)
+    private static bool IsApiRequest(BmwContext context)
     {
-        return context.Request.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase);
+        return context.HttpRequest.Path.StartsWithSegments("/api", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -239,15 +240,15 @@ public static class UserAuth
     /// CSRF attacks require a browser session cookie and cannot forge explicit API key headers,
     /// so this is sufficient to determine that CSRF protection can be safely bypassed.
     /// </summary>
-    public static bool HasApiKeyHeader(HttpContext context)
+    public static bool HasApiKeyHeader(BmwContext context)
         => TryGetApiKey(context, out _);
 
-    private static bool TryGetApiKey(HttpContext context, out string apiKey)
+    private static bool TryGetApiKey(BmwContext context, out string apiKey)
     {
         apiKey = string.Empty;
 
         // Option 1: ApiKey header with raw value
-        if (context.Request.Headers.TryGetValue("ApiKey", out var apiKeyHeader))
+        if (context.HttpRequest.Headers.TryGetValue("ApiKey", out var apiKeyHeader))
         {
             var raw = apiKeyHeader.ToString().Trim();
             if (!string.IsNullOrWhiteSpace(raw))
@@ -258,7 +259,7 @@ public static class UserAuth
         }
 
         // Option 2: Authorization header with "ApiKey <value>" or "Bearer <value>" prefix
-        if (context.Request.Headers.TryGetValue("Authorization", out var authValues))
+        if (context.HttpRequest.Headers.TryGetValue("Authorization", out var authValues))
         {
             var header = authValues.ToString().Trim();
             const string apiKeyPrefix = "ApiKey ";
@@ -284,7 +285,7 @@ public static class UserAuth
     /// Returns true if the request carries a valid API key that resolves to a known system principal.
     /// Used to bypass CSRF validation for authenticated external API clients (e.g. ChatGPT, OpenAPI clients).
     /// </summary>
-    public static async ValueTask<bool> HasValidApiKeyAsync(HttpContext context, CancellationToken cancellationToken = default)
+    public static async ValueTask<bool> HasValidApiKeyAsync(BmwContext context, CancellationToken cancellationToken = default)
     {
         if (!TryGetApiKey(context, out var apiKey))
             return false;

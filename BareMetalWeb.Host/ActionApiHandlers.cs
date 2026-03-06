@@ -40,7 +40,7 @@ public static class ActionApiHandlers
     /// POST /api/_binary/{type}/_action/{actionId}
     /// Body (JSON): { "aggregateId": 123, "parameters": { "key": "value", ... } }
     /// </summary>
-    public static async ValueTask ExecuteActionHandler(HttpContext context)
+    public static async ValueTask ExecuteActionHandler(BmwContext context)
     {
         // Content-Type and body size validation
         if (!BinaryApiHandlers.HasValidApiContentType(context))
@@ -88,7 +88,7 @@ public static class ActionApiHandlers
 
         try
         {
-            using var doc = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: context.RequestAborted);
+            using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, cancellationToken: context.RequestAborted);
             var root = doc.RootElement;
 
             if (!root.TryGetProperty("aggregateId", out var idEl))
@@ -162,7 +162,7 @@ public static class ActionApiHandlers
     /// GET /api/_binary/{type}/_actions
     /// Returns list of registered actions for the entity type.
     /// </summary>
-    public static async ValueTask ListActionsHandler(HttpContext context)
+    public static async ValueTask ListActionsHandler(BmwContext context)
     {
         var typeSlug = BinaryApiHandlers.GetRouteValue(context, "type") ?? string.Empty;
 
@@ -193,7 +193,7 @@ public static class ActionApiHandlers
     public static int RegisteredActionCount => _actions.Count;
     public static AggregateLockManager? LockManager => _lockManager;
 
-    private static async ValueTask WriteError(HttpContext context, int statusCode, string message)
+    private static async ValueTask WriteError(BmwContext context, int statusCode, string message)
     {
         context.Response.StatusCode = statusCode;
         context.Response.ContentType = "application/json";

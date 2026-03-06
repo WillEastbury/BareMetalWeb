@@ -210,4 +210,37 @@ internal static class WalSegmentReader
 
         return computed == storedHeaderCrc;
     }
+
+    /// <summary>
+    /// Scans a raw byte buffer for the next occurrence of a WAL record magic marker
+    /// using SIMD-accelerated byte scanning. Used during crash recovery to skip past
+    /// corrupt data and find the next valid record boundary.
+    /// Returns the offset within <paramref name="data"/> of the first byte of a
+    /// valid 4-byte RecordMagic, or -1 if not found.
+    /// </summary>
+    internal static int FindNextRecordMagic(ReadOnlySpan<byte> data)
+    {
+        // RecordMagic = 0x52454331 → bytes: 0x31, 0x43, 0x45, 0x52 (little-endian)
+        byte firstByte = (byte)(WalConstants.RecordMagic & 0xFF); // 0x31
+
+        int offset = 0;
+        while (offset + 3 < data.Length)
+        {
+            // SIMD-accelerated scan for the first byte of the magic marker
+            int hit = SimdByteScanner.FindByte(data.Slice(offset), firstByte);
+            if (hit < 0 || offset + hit + 3 >= data.Length)
+                return -1;
+
+            int candidate = offset + hit;
+
+            // Verify remaining 3 bytes of the 4-byte magic
+            if (BinaryPrimitives.ReadUInt32LittleEndian(data.Slice(candidate)) == WalConstants.RecordMagic)
+                return candidate;
+
+            // False positive — advance past this byte and keep scanning
+            offset = candidate + 1;
+        }
+
+        return -1;
+    }
 }

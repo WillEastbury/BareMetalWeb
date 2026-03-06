@@ -454,4 +454,176 @@ public sealed class ColumnQueryExecutorTests : IDisposable
         string path = DataLayerCapabilities.ColumnQueryPath;
         Assert.Contains(ColumnQueryExecutor.VectorizationThreshold.ToString(), path);
     }
+
+    // ── ColumnarStore tests ──────────────────────────────────────────────────
+
+    [Fact]
+    public void ColumnarStore_Build_PopulatesIntColumn()
+    {
+        var rows = MakeRows(300);
+        var meta = DataScaffold.GetEntityByType(typeof(SampleItem))!;
+        var store = new ColumnarStore(rows.Count);
+
+        store.Build(rows, meta);
+
+        Assert.Equal(300, store.RowCount);
+        Assert.True(store.HasColumn("Age"));
+        Assert.True(store.HasColumn("Score"));
+        Assert.True(store.HasColumn("BigNum"));
+        Assert.True(store.HasColumn("Ratio"));
+        Assert.False(store.HasColumn("Name")); // strings not stored
+    }
+
+    [Fact]
+    public void ColumnarStore_ScanInt_EqualsMatchesColumnQueryExecutor()
+    {
+        var rows = MakeRows(512);
+        var meta = DataScaffold.GetEntityByType(typeof(SampleItem))!;
+        var store = new ColumnarStore(rows.Count);
+        store.Build(rows, meta);
+
+        // Scan for Age == 25 via columnar store
+        int wordCount = (store.RowCount + 63) >> 6;
+        var bitmask = store.ScanClause("Age", QueryOperator.Equals, 25, wordCount);
+        Assert.NotNull(bitmask);
+
+        // Count matching rows from bitmask
+        int columnarHits = 0;
+        for (int i = 0; i < bitmask!.Length; i++)
+            columnarHits += System.Numerics.BitOperations.PopCount(bitmask[i]);
+
+        // Compare with ColumnQueryExecutor
+        var query = new QueryDefinition { Clauses = { new QueryClause { Field = "Age", Operator = QueryOperator.Equals, Value = 25 } } };
+        var cqeResult = ColumnQueryExecutor.Filter(rows, query);
+
+        Assert.Equal(cqeResult.Count, columnarHits);
+    }
+
+    [Fact]
+    public void ColumnarStore_ScanInt_GreaterThan()
+    {
+        var rows = MakeRows(512);
+        var meta = DataScaffold.GetEntityByType(typeof(SampleItem))!;
+        var store = new ColumnarStore(rows.Count);
+        store.Build(rows, meta);
+
+        int wordCount = (store.RowCount + 63) >> 6;
+        var bitmask = store.ScanClause("Age", QueryOperator.GreaterThan, 60, wordCount);
+        Assert.NotNull(bitmask);
+
+        int hits = 0;
+        for (int i = 0; i < bitmask!.Length; i++)
+            hits += System.Numerics.BitOperations.PopCount(bitmask[i]);
+
+        // Age ranges 20-69 (20 + i%50), so >60 means ages 61-69 = values where i%50 ∈ [41..49]
+        int expected = rows.Count(r => r.Age > 60);
+        Assert.Equal(expected, hits);
+    }
+
+    [Fact]
+    public void ColumnarStore_ScanDouble_LessThanOrEqual()
+    {
+        var rows = MakeRows(300);
+        var meta = DataScaffold.GetEntityByType(typeof(SampleItem))!;
+        var store = new ColumnarStore(rows.Count);
+        store.Build(rows, meta);
+
+        int wordCount = (store.RowCount + 63) >> 6;
+        var bitmask = store.ScanClause("Score", QueryOperator.LessThanOrEqual, 10.0, wordCount);
+        Assert.NotNull(bitmask);
+
+        int hits = 0;
+        for (int i = 0; i < bitmask!.Length; i++)
+            hits += System.Numerics.BitOperations.PopCount(bitmask[i]);
+
+        int expected = rows.Count(r => r.Score <= 10.0);
+        Assert.Equal(expected, hits);
+    }
+
+    [Fact]
+    public void ColumnarStore_ScanLong_NotEquals()
+    {
+        var rows = MakeRows(300);
+        var meta = DataScaffold.GetEntityByType(typeof(SampleItem))!;
+        var store = new ColumnarStore(rows.Count);
+        store.Build(rows, meta);
+
+        int wordCount = (store.RowCount + 63) >> 6;
+        var bitmask = store.ScanClause("BigNum", QueryOperator.NotEquals, 0L, wordCount);
+        Assert.NotNull(bitmask);
+
+        int hits = 0;
+        for (int i = 0; i < bitmask!.Length; i++)
+            hits += System.Numerics.BitOperations.PopCount(bitmask[i]);
+
+        // Row 0 has BigNum=0, rest are non-zero
+        int expected = rows.Count(r => r.BigNum != 0);
+        Assert.Equal(expected, hits);
+    }
+
+    [Fact]
+    public void ColumnarStore_ScanNonexistentField_ReturnsNull()
+    {
+        var rows = MakeRows(300);
+        var meta = DataScaffold.GetEntityByType(typeof(SampleItem))!;
+        var store = new ColumnarStore(rows.Count);
+        store.Build(rows, meta);
+
+        int wordCount = (store.RowCount + 63) >> 6;
+        var result = store.ScanClause("NonExistent", QueryOperator.Equals, 42, wordCount);
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ColumnarStore_Invalidate_IncrementsVersion()
+    {
+        var rows = MakeRows(300);
+        var meta = DataScaffold.GetEntityByType(typeof(SampleItem))!;
+        var store = new ColumnarStore(rows.Count);
+        store.Build(rows, meta);
+
+        long v1 = store.Version;
+        store.Invalidate();
+        long v2 = store.Version;
+
+        Assert.True(v2 > v1);
+    }
+
+    [Fact]
+    public void ColumnarStore_GetKeyAtRow_MatchesOriginal()
+    {
+        var rows = MakeRows(300);
+        var meta = DataScaffold.GetEntityByType(typeof(SampleItem))!;
+        var store = new ColumnarStore(rows.Count);
+        store.Build(rows, meta);
+
+        for (int i = 0; i < rows.Count; i++)
+            Assert.Equal(rows[i].Key, store.GetKeyAtRow(i));
+    }
+
+    [Fact]
+    public void ColumnarStore_MultiClause_AndComposition()
+    {
+        var rows = MakeRows(512);
+        var meta = DataScaffold.GetEntityByType(typeof(SampleItem))!;
+        var store = new ColumnarStore(rows.Count);
+        store.Build(rows, meta);
+
+        int n = store.RowCount;
+        int wordCount = (n + 63) >> 6;
+
+        // Age > 30 AND Score < 50.0
+        var mask1 = store.ScanClause("Age", QueryOperator.GreaterThan, 30, wordCount)!;
+        var mask2 = store.ScanClause("Score", QueryOperator.LessThan, 50.0, wordCount)!;
+
+        // AND in place
+        for (int i = 0; i < wordCount; i++) mask1[i] &= mask2[i];
+
+        int hits = 0;
+        for (int i = 0; i < mask1.Length; i++)
+            hits += System.Numerics.BitOperations.PopCount(mask1[i]);
+
+        int expected = rows.Count(r => r.Age > 30 && r.Score < 50.0);
+        Assert.Equal(expected, hits);
+    }
 }

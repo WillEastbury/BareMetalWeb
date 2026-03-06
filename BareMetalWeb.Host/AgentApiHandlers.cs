@@ -25,9 +25,9 @@ public static class AgentApiHandlers
     };
 
     /// <summary>POST /api/agent/chat</summary>
-    public static async ValueTask ChatHandler(HttpContext context)
+    public static async ValueTask ChatHandler(BmwContext context)
     {
-        using var doc = await JsonDocument.ParseAsync(context.Request.Body);
+        using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body);
         var root = doc.RootElement;
         var message = root.GetProperty("message").GetString()?.Trim() ?? "";
 

@@ -130,52 +130,52 @@ public sealed class RouteHandlers : IRouteHandlers
         _settingDefaults = settingDefaults ?? Array.Empty<(string, string, string)>();
     }
 
-    public ValueTask DefaultPageHandler(HttpContext context)
-        => _renderer.RenderPage(context);
+    public ValueTask DefaultPageHandler(BmwContext context)
+        => _renderer.RenderPage(context.HttpContext);
 
-    public RouteHandlerDelegate BuildPageHandler(Action<HttpContext> configure)
+    public RouteHandlerDelegate BuildPageHandler(Action<BmwContext> configure)
     {
         if (configure == null) throw new ArgumentNullException(nameof(configure));
         return async context =>
         {
             configure(context);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
         };
     }
 
-    public RouteHandlerDelegate BuildPageHandler(Func<HttpContext, ValueTask> configureAsync)
+    public RouteHandlerDelegate BuildPageHandler(Func<BmwContext, ValueTask> configureAsync)
     {
         if (configureAsync == null) throw new ArgumentNullException(nameof(configureAsync));
         return async context =>
         {
             await configureAsync(context);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
         };
     }
 
-    public RouteHandlerDelegate BuildPageHandler(Func<HttpContext, ValueTask<bool>> configureAsync, bool renderWhenTrue = true)
+    public RouteHandlerDelegate BuildPageHandler(Func<BmwContext, ValueTask<bool>> configureAsync, bool renderWhenTrue = true)
     {
         if (configureAsync == null) throw new ArgumentNullException(nameof(configureAsync));
         return async context =>
         {
             var shouldRender = await configureAsync(context);
             if (shouldRender == renderWhenTrue)
-                await _renderer.RenderPage(context);
+                await _renderer.RenderPage(context.HttpContext);
         };
     }
 
-    public async ValueTask TimeRawHandler(HttpContext context)
+    public async ValueTask TimeRawHandler(BmwContext context)
     {
         context.Response.ContentType = "text/plain";
         await context.Response.WriteAsync($"Current server time is: {DateTime.UtcNow:O}");
     }
 
-    public async ValueTask LoginHandler(HttpContext context)
+    public async ValueTask LoginHandler(BmwContext context)
     {
         await BuildPageHandler(ctx => RenderLoginForm(ctx, null, null))(context);
     }
 
-    public async ValueTask LoginPostHandler(HttpContext context)
+    public async ValueTask LoginPostHandler(BmwContext context)
     {
         // IP-based rate limit — before any DB work
         var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -186,19 +186,19 @@ public sealed class RouteHandlers : IRouteHandlers
             if (ipRetry.HasValue)
                 context.Response.Headers.RetryAfter = ((int)Math.Ceiling(ipRetry.Value.TotalSeconds)).ToString();
             RenderLoginForm(context, FormatThrottleMessage(ipRetry), string.Empty);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
         // Read form data; use empty collection for non-form requests so CSRF check always runs
-        var form = context.Request.HasFormContentType
-            ? await context.Request.ReadFormAsync()
+        var form = context.HttpRequest.HasFormContentType
+            ? await context.HttpRequest.ReadFormAsync()
             : FormCollection.Empty;
 
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderLoginForm(context, "Invalid security token. Please try again.", string.Empty);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -212,7 +212,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.IsNullOrWhiteSpace(identifier) || string.IsNullOrWhiteSpace(password))
         {
             RenderLoginForm(context, "Please enter your email/username and password.", identifier);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -221,7 +221,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             RegisterFailure(ipKey, LoginIpMaxAttempts);
             RenderLoginForm(context, "Invalid credentials.", identifier);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -233,14 +233,14 @@ public sealed class RouteHandlers : IRouteHandlers
             if (userRetry.HasValue)
                 context.Response.Headers.RetryAfter = ((int)Math.Ceiling(userRetry.Value.TotalSeconds)).ToString();
             RenderLoginForm(context, FormatThrottleMessage(userRetry), identifier);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
         if (user.IsLockedOut)
         {
             RenderLoginForm(context, "Account is temporarily locked. Try again later.", identifier);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -251,7 +251,7 @@ public sealed class RouteHandlers : IRouteHandlers
             user.RegisterFailedLogin();
             await Users.SaveAsync(user);
             RenderLoginForm(context, "Invalid credentials.", identifier);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -260,7 +260,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (!TryGetActiveSecret(user, out _, out var upgraded))
             {
                 RenderLoginForm(context, "MFA is misconfigured. Contact support.", identifier);
-                await _renderer.RenderPage(context);
+                await _renderer.RenderPage(context.HttpContext);
                 return;
             }
 
@@ -279,7 +279,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.SetCookie(MfaChallengeCookieName, challenge.Key.ToString(), new CookieOptions
             {
                 HttpOnly = true,
-                Secure = context.Request.IsHttps,
+                Secure = context.HttpRequest.IsHttps,
                 SameSite = SameSiteMode.Lax,
                 Expires = challenge.ExpiresUtc
             });
@@ -297,7 +297,7 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.Redirect("/");
     }
 
-    public async ValueTask MfaChallengeHandler(HttpContext context)
+    public async ValueTask MfaChallengeHandler(BmwContext context)
     {
         await BuildPageHandler(async ctx =>
         {
@@ -313,7 +313,7 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask MfaChallengePostHandler(HttpContext context)
+    public async ValueTask MfaChallengePostHandler(BmwContext context)
     {
         var challenge = await GetMfaChallengeAsync(context, context.RequestAborted).ConfigureAwait(false);
         if (challenge == null)
@@ -323,14 +323,14 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         // Read form data; use empty collection for non-form requests so CSRF check always runs
-        var form = context.Request.HasFormContentType
-            ? await context.Request.ReadFormAsync()
+        var form = context.HttpRequest.HasFormContentType
+            ? await context.HttpRequest.ReadFormAsync()
             : FormCollection.Empty;
 
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderMfaChallengeForm(context, "Invalid security token. Please try again.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -339,7 +339,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             RenderMfaChallengeForm(context, "Please enter your authentication code.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -347,7 +347,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (user == null || !user.IsActive || !user.MfaEnabled || !TryGetActiveSecret(user, out var activeSecret, out var upgraded))
         {
             RenderMfaChallengeForm(context, "MFA is not available for this account.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -359,7 +359,7 @@ public sealed class RouteHandlers : IRouteHandlers
             || IsThrottled(BuildMfaAttemptKey("challenge:ip", remoteIp), MfaChallengeMaxFailures, out retryAfter))
         {
             RenderMfaChallengeForm(context, FormatThrottleMessage(retryAfter));
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -372,14 +372,14 @@ public sealed class RouteHandlers : IRouteHandlers
                 RegisterFailure(BuildMfaAttemptKey("challenge:user", user.Key.ToString()), MfaChallengeMaxFailures);
                 RegisterFailure(BuildMfaAttemptKey("challenge:ip", remoteIp), MfaChallengeMaxFailures);
                 RenderMfaChallengeForm(context, "Invalid authentication code.");
-                await _renderer.RenderPage(context);
+                await _renderer.RenderPage(context.HttpContext);
                 return;
             }
 
             if (matchedStep <= user.MfaLastVerifiedStep)
             {
                 RenderMfaChallengeForm(context, "Authentication code already used. Please wait for a new code.");
-                await _renderer.RenderPage(context);
+                await _renderer.RenderPage(context.HttpContext);
                 return;
             }
 
@@ -405,7 +405,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    public async ValueTask RegisterHandler(HttpContext context)
+    public async ValueTask RegisterHandler(BmwContext context)
     {
         await BuildPageHandler(ctx =>
         {
@@ -420,13 +420,13 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask RegisterPostHandler(HttpContext context)
+    public async ValueTask RegisterPostHandler(BmwContext context)
     {
         if (!_allowAccountCreation)
         {
             context.SetStringValue("title", "Create Account");
             context.SetStringValue("html_message", "<p>Account creation is disabled in this environment.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -436,18 +436,18 @@ public sealed class RouteHandlers : IRouteHandlers
         if (IsThrottled(regIpKey, LoginIpMaxAttempts, out var regRetry))
         {
             RenderRegisterForm(context, $"Too many registration attempts. Try again later.", null, null, null);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             RenderRegisterForm(context, "Invalid registration request.", null, null, null);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         var userName = form["username"].ToString().Trim();
         var displayName = form["displayname"].ToString().Trim();
         var email = form["email"].ToString().Trim();
@@ -457,35 +457,35 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderRegisterForm(context, "Invalid security token. Please try again.", userName, displayName, email);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(userName) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
             RenderRegisterForm(context, "Please complete all required fields.", userName, displayName, email);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
         if (!string.Equals(password, confirm, StringComparison.Ordinal))
         {
             RenderRegisterForm(context, "Passwords do not match.", userName, displayName, email);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
         if (await Users.FindByEmailAsync(email, context.RequestAborted).ConfigureAwait(false) != null)
         {
             RenderRegisterForm(context, "Email is already registered.", userName, displayName, email);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
         if (await Users.FindByUserNameAsync(userName, context.RequestAborted).ConfigureAwait(false) != null)
         {
             RenderRegisterForm(context, "Username is already taken.", userName, displayName, email);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -505,25 +505,25 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.Redirect("/account");
     }
 
-    public async ValueTask LogoutHandler(HttpContext context)
+    public async ValueTask LogoutHandler(BmwContext context)
     {
         await BuildPageHandler(ctx => RenderLogoutForm(ctx, null))(context);
     }
 
-    public async ValueTask LogoutPostHandler(HttpContext context)
+    public async ValueTask LogoutPostHandler(BmwContext context)
     {
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             RenderLogoutForm(context, "Invalid logout request.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderLogoutForm(context, "Invalid security token. Please try again.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -533,7 +533,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     // ── SSO (Entra ID) ────────────────────────────────────────────────
 
-    private EntraIdOptions? GetEntraIdOptions(HttpContext context)
+    private EntraIdOptions? GetEntraIdOptions(BmwContext context)
     {
         if (_config == null || !_config.GetValue("EntraId.Enabled", false))
             return null;
@@ -554,7 +554,7 @@ public sealed class RouteHandlers : IRouteHandlers
             ? options : null;
     }
 
-    public ValueTask SsoLoginHandler(HttpContext context)
+    public ValueTask SsoLoginHandler(BmwContext context)
     {
         var options = GetEntraIdOptions(context);
         if (options == null)
@@ -571,7 +571,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return ValueTask.CompletedTask;
     }
 
-    public async ValueTask SsoCallbackHandler(HttpContext context)
+    public async ValueTask SsoCallbackHandler(BmwContext context)
     {
         var options = GetEntraIdOptions(context);
         if (options == null)
@@ -595,14 +595,14 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var code = context.Request.Query["code"].ToString();
-        var state = context.Request.Query["state"].ToString();
-        var error = context.Request.Query["error"].ToString();
+        var code = context.HttpRequest.Query["code"].ToString();
+        var state = context.HttpRequest.Query["state"].ToString();
+        var error = context.HttpRequest.Query["error"].ToString();
 
         // Handle error from Entra
         if (!string.IsNullOrEmpty(error))
         {
-            var errorDesc = context.Request.Query["error_description"].ToString();
+            var errorDesc = context.HttpRequest.Query["error_description"].ToString();
             _logger?.LogInfo($"SSO|callback-error|{sourceIp}|error={error}");
             RegisterFailure(ssoIpKey, SsoCallbackIpMaxAttempts);
             await BuildPageHandler(ctx =>
@@ -677,7 +677,7 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.Redirect("/");
     }
 
-    public async ValueTask SsoLogoutHandler(HttpContext context)
+    public async ValueTask SsoLogoutHandler(BmwContext context)
     {
         var options = GetEntraIdOptions(context);
         var sourceIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
@@ -699,7 +699,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    public async ValueTask AccountHandler(HttpContext context)
+    public async ValueTask AccountHandler(BmwContext context)
     {
         await BuildPageHandler(async ctx =>
         {
@@ -727,7 +727,7 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask MfaStatusHandler(HttpContext context)
+    public async ValueTask MfaStatusHandler(BmwContext context)
     {
         await BuildPageHandler(async ctx =>
         {
@@ -748,7 +748,7 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask MfaSetupHandler(HttpContext context)
+    public async ValueTask MfaSetupHandler(BmwContext context)
     {
         await BuildPageHandler(async ctx =>
         {
@@ -779,7 +779,7 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask MfaSetupPostHandler(HttpContext context)
+    public async ValueTask MfaSetupPostHandler(BmwContext context)
     {
         var user = await UserAuth.GetUserAsync(context);
         if (user == null)
@@ -788,7 +788,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             if (RegeneratePendingMfaSecret(user, forceNew: false))
                 await Users.SaveAsync(user);
@@ -798,11 +798,11 @@ public sealed class RouteHandlers : IRouteHandlers
                 await Users.SaveAsync(user);
             var otpauth = string.IsNullOrWhiteSpace(pendingSecret) ? string.Empty : MfaTotp.GetOtpAuthUri(issuer, user.Email, pendingSecret);
             RenderMfaSetupForm(context, pendingSecret ?? string.Empty, otpauth, "Invalid setup request.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             if (RegeneratePendingMfaSecret(user, forceNew: false))
@@ -813,7 +813,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 await Users.SaveAsync(user);
             var otpauth = string.IsNullOrWhiteSpace(pendingSecret) ? string.Empty : MfaTotp.GetOtpAuthUri(issuer, user.Email, pendingSecret);
             RenderMfaSetupForm(context, pendingSecret ?? string.Empty, otpauth, "Invalid security token. Please try again.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -826,7 +826,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 await Users.SaveAsync(user);
             var otpauth = string.IsNullOrWhiteSpace(pendingSecret) ? string.Empty : MfaTotp.GetOtpAuthUri(issuer, user.Email, pendingSecret);
             RenderMfaSetupForm(context, pendingSecret ?? string.Empty, otpauth, "Please enter a valid 6-digit code.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -843,7 +843,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 await Users.SaveAsync(user);
             var otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, refreshedSecret ?? string.Empty);
             RenderMfaSetupForm(context, refreshedSecret ?? string.Empty, otpauth, "Setup token expired. A new secret was generated.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -855,7 +855,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var issuer = context.GetApp()?.AppName ?? "BareMetalWeb";
             var otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, currentPendingSecret);
             RenderMfaSetupForm(context, currentPendingSecret, otpauth, FormatThrottleMessage(setupRetry));
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -877,7 +877,7 @@ public sealed class RouteHandlers : IRouteHandlers
                         await Users.SaveAsync(user);
                     otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, refreshedSecret);
                     RenderMfaSetupForm(context, refreshedSecret, otpauth, "Too many failed attempts. A new secret was generated.");
-                    await _renderer.RenderPage(context);
+                    await _renderer.RenderPage(context.HttpContext);
                     return;
                 }
 
@@ -886,7 +886,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 RegisterFailure(BuildMfaAttemptKey("setup:secret", currentPendingSecret), MfaPendingMaxFailures);
 
                 RenderMfaSetupForm(context, currentPendingSecret, otpauth, "Invalid authentication code.");
-                await _renderer.RenderPage(context);
+                await _renderer.RenderPage(context.HttpContext);
                 return;
             }
 
@@ -895,7 +895,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 var issuer = context.GetApp()?.AppName ?? "BareMetalWeb";
                 var otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, currentPendingSecret);
                 RenderMfaSetupForm(context, currentPendingSecret, otpauth, "Authentication code already used. Please wait for a new code.");
-                await _renderer.RenderPage(context);
+                await _renderer.RenderPage(context.HttpContext);
                 return;
             }
 
@@ -926,7 +926,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 ? string.Empty
                 : $"<div class=\"mt-3\"><p><strong>Backup codes (save these now):</strong></p><ul>{backupList}</ul><p class=\"text-warning\">These codes are shown once.</p></div>";
             context.SetStringValue("html_message", "<p>MFA enabled successfully.</p>" + backupHtml + "<p><a href=\"/account\">Back to account</a></p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
         finally
@@ -936,7 +936,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    public async ValueTask MfaResetHandler(HttpContext context)
+    public async ValueTask MfaResetHandler(BmwContext context)
     {
         await BuildPageHandler(async ctx =>
         {
@@ -959,7 +959,7 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask MfaResetPostHandler(HttpContext context)
+    public async ValueTask MfaResetPostHandler(BmwContext context)
     {
         var user = await UserAuth.GetUserAsync(context);
         if (user == null)
@@ -968,18 +968,18 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             RenderMfaResetForm(context, "Invalid request.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderMfaResetForm(context, "Invalid security token. Please try again.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -997,10 +997,10 @@ public sealed class RouteHandlers : IRouteHandlers
 
         context.SetStringValue("title", "Reset MFA");
         context.SetStringValue("html_message", "<p>MFA has been reset.</p><p><a href=\"/account\">Back to account</a></p>");
-        await _renderer.RenderPage(context);
+        await _renderer.RenderPage(context.HttpContext);
     }
 
-    public async ValueTask UsersListHandler(HttpContext context)
+    public async ValueTask UsersListHandler(BmwContext context)
     {
         await BuildPageHandler(async ctx =>
         {
@@ -1029,7 +1029,7 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask SetupHandler(HttpContext context)
+    public async ValueTask SetupHandler(BmwContext context)
     {
         await BuildPageHandler(async ctx =>
         {
@@ -1051,7 +1051,7 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask SetupPostHandler(HttpContext context)
+    public async ValueTask SetupPostHandler(BmwContext context)
     {
         if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
         {
@@ -1060,19 +1060,19 @@ public sealed class RouteHandlers : IRouteHandlers
             {
                 context.SetStringValue("title", "Setup");
                 context.SetStringValue("html_message", "<p>Root user already exists.</p>");
-                await _renderer.RenderPage(context);
+                await _renderer.RenderPage(context.HttpContext);
                 return;
             }
 
             // Read form data; use empty collection for non-form requests so CSRF check always runs
-            var unlockForm = context.Request.HasFormContentType
-                ? await context.Request.ReadFormAsync()
+            var unlockForm = context.HttpRequest.HasFormContentType
+                ? await context.HttpRequest.ReadFormAsync()
                 : FormCollection.Empty;
 
             if (!CsrfProtection.ValidateFormToken(context, unlockForm))
             {
                 RenderUnlockForm(context, "Invalid security token. Please try again.");
-                await _renderer.RenderPage(context);
+                await _renderer.RenderPage(context.HttpContext);
                 return;
             }
 
@@ -1080,7 +1080,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (string.IsNullOrWhiteSpace(unlockPassword) || !lockedUser.VerifyPassword(unlockPassword))
             {
                 RenderUnlockForm(context, "Invalid password. Account remains locked.");
-                await _renderer.RenderPage(context);
+                await _renderer.RenderPage(context.HttpContext);
                 return;
             }
 
@@ -1088,13 +1088,13 @@ public sealed class RouteHandlers : IRouteHandlers
             await Users.SaveAsync(lockedUser);
             context.SetStringValue("title", "Setup");
             context.SetStringValue("html_message", "<p>Account unlocked successfully. You may now sign in.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
         // Read form data; use empty collection for non-form requests so CSRF check always runs
-        var form = context.Request.HasFormContentType
-            ? await context.Request.ReadFormAsync()
+        var form = context.HttpRequest.HasFormContentType
+            ? await context.HttpRequest.ReadFormAsync()
             : FormCollection.Empty;
 
         var userName = form["username"].ToString().Trim();
@@ -1104,14 +1104,14 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderSetupForm(context, "Invalid security token. Please try again.", userName, email);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(userName) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
             RenderSetupForm(context, "Please complete all required fields.", userName, email);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -1225,15 +1225,15 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    public async ValueTask ReloadTemplatesHandler(HttpContext context)
+    public async ValueTask ReloadTemplatesHandler(BmwContext context)
     {
         _templateStore.ReloadAll();
         context.SetStringValue("title", "Reload Templates");
         context.SetStringValue("html_message", "Templates reloaded successfully.");
-        await _renderer.RenderPage(context);
+        await _renderer.RenderPage(context.HttpContext);
     }
 
-    private void RenderLoginForm(HttpContext context, string? message, string? emailValue)
+    private void RenderLoginForm(BmwContext context, string? message, string? emailValue)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Login");
@@ -1271,7 +1271,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private void RenderRegisterForm(HttpContext context, string? message, string? userName, string? displayName, string? email)
+    private void RenderRegisterForm(BmwContext context, string? message, string? userName, string? displayName, string? email)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Create Account");
@@ -1295,7 +1295,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private void RenderSetupForm(HttpContext context, string? message, string? userName, string? email)
+    private void RenderSetupForm(BmwContext context, string? message, string? userName, string? email)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Initial Setup");
@@ -1316,7 +1316,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private void RenderUnlockForm(HttpContext context, string? message)
+    private void RenderUnlockForm(BmwContext context, string? message)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Unlock Admin Account");
@@ -1335,7 +1335,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private void RenderLogoutForm(HttpContext context, string? message)
+    private void RenderLogoutForm(BmwContext context, string? message)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Logout");
@@ -1353,7 +1353,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private void RenderMfaChallengeForm(HttpContext context, string? message)
+    private void RenderMfaChallengeForm(BmwContext context, string? message)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Verify MFA");
@@ -1374,7 +1374,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private void RenderMfaSetupForm(HttpContext context, string secret, string otpauthUrl, string? message)
+    private void RenderMfaSetupForm(BmwContext context, string secret, string otpauthUrl, string? message)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Enable MFA");
@@ -1522,7 +1522,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return new string('*', secret.Length - reveal) + secret[^reveal..];
     }
 
-    private static string BuildOtpClientScript(HttpContext context, string formAction)
+    private static string BuildOtpClientScript(BmwContext context, string formAction)
     {
         var action = formAction.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\"", "\\\"");
         var nonce = context.GetCspNonce();
@@ -1654,7 +1654,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private readonly record struct BackupCodeResult(string[] Codes, string[] Hashes);
 
-    public async ValueTask DataEntitiesHandler(HttpContext context)
+    public async ValueTask DataEntitiesHandler(BmwContext context)
     {
         await BuildPageHandler(ctx =>
         {
@@ -1684,7 +1684,7 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask DataListHandler(HttpContext context)
+    public async ValueTask DataListHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
@@ -1692,7 +1692,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
             context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -1701,7 +1701,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
             context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -1736,11 +1736,11 @@ public sealed class RouteHandlers : IRouteHandlers
             return true;
         }
 
-        var queryDictionary = ToQueryDictionary(context.Request.Query);
+        var queryDictionary = ToQueryDictionary(context.HttpRequest.Query);
         
         // Check for view parameter to override entity's default view type
-        var viewParam = context.Request.Query.TryGetValue("view", out var viewValue) ? viewValue.ToString() : null;
-        var selectedId = context.Request.Query.TryGetValue("selected", out var selectedValue) ? selectedValue.ToString() : null;
+        var viewParam = context.HttpRequest.Query.TryGetValue("view", out var viewValue) ? viewValue.ToString() : null;
+        var selectedId = context.HttpRequest.Query.TryGetValue("selected", out var selectedValue) ? selectedValue.ToString() : null;
         var effectiveViewType = meta.ViewType;
         
         if (!string.IsNullOrWhiteSpace(viewParam))
@@ -1758,7 +1758,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var cloneToken = CsrfProtection.EnsureToken(context);
-        var returnUrl = $"{context.Request.Path}{context.Request.QueryString}";
+        var returnUrl = $"{context.HttpRequest.Path}{context.HttpRequest.QueryString}";
 
         // For tree/org chart/timeline/timetable views, load all items (no pagination)
         if (effectiveViewType == ViewType.TreeView || effectiveViewType == ViewType.OrgChart || effectiveViewType == ViewType.Timeline || effectiveViewType == ViewType.Timetable)
@@ -1797,7 +1797,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.SetStringValue("title", $"{meta.Name} - {GetViewTypeName(effectiveViewType)}");
             context.SetStringValue("html_header_controls", "<div class=\"d-flex align-items-center gap-2 flex-wrap\">" + treeViewSwitcher + treeAddButtonHtml + "</div>");
             context.SetStringValue("html_message", treeToastHtml + viewHtml);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -1815,7 +1815,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
         
         var page = 1;
-        if (context.Request.Query.TryGetValue("page", out var pageValue)
+        if (context.HttpRequest.Query.TryGetValue("page", out var pageValue)
             && int.TryParse(pageValue.ToString(), out var parsedPage)
             && parsedPage > 1)
         {
@@ -1849,7 +1849,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var pageSizeHtml = BuildPageSizeSelector(pageSize, $"/ssr/admin/data/{typeSlug}", queryDictionary);
         var pagerHtml = BuildEnhancedPagination(page, totalCount, pageSize, $"/ssr/admin/data/{typeSlug}", queryDictionary);
         
-        var queryString = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : string.Empty;
+        var queryString = context.HttpRequest.QueryString.HasValue ? context.HttpRequest.QueryString.Value : string.Empty;
         
         // Check if entity has nested components
         var nestedComponents = DataScaffold.GetNestedComponents(meta);
@@ -1883,10 +1883,10 @@ public sealed class RouteHandlers : IRouteHandlers
         context.SetStringValue("title", $"{meta.Name} List");
         context.SetStringValue("html_header_controls", headerControlsHtml);
         context.SetStringValue("html_message", toastHtml + tableHtml + paginationRowHtml + bulkActionsBar);
-        await _renderer.RenderPage(context);
+        await _renderer.RenderPage(context.HttpContext);
     }
 
-    public async ValueTask DataViewHandler(HttpContext context)
+    public async ValueTask DataViewHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -1895,7 +1895,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
             context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -1904,7 +1904,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
             context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -1945,7 +1945,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Not Found");
             context.SetStringValue("html_message", "<p>Item not found.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -1972,10 +1972,10 @@ public sealed class RouteHandlers : IRouteHandlers
         context.SetStringValue("title", $"{meta.Name} Details");
         context.SetStringValue("html_message", $"<p><a class=\"btn btn-sm btn-outline-warning\" href=\"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit\" title=\"Edit\" aria-label=\"Edit\"><i class=\"bi bi-pencil\" aria-hidden=\"true\"></i> Edit</a>{exportDropdown}{rtfHtml}{htmlHtml}{commandButtons}</p>");
         context.AddTable(new[] { "Field", "Value" }, rows);
-        await _renderer.RenderPage(context);
+        await _renderer.RenderPage(context.HttpContext);
     }
 
-    public async ValueTask DataListCsvHandler(HttpContext context)
+    public async ValueTask DataListCsvHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
@@ -1992,7 +1992,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.Request.Query), meta);
+        var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.HttpRequest.Query), meta);
         var results = await DataScaffold.QueryAsync(meta, query);
         var resultsList = new List<object?>();
         foreach (var item in results)
@@ -2003,7 +2003,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_list.csv");
     }
 
-    public async ValueTask DataListHtmlHandler(HttpContext context)
+    public async ValueTask DataListHtmlHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
@@ -2020,7 +2020,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.Request.Query), meta);
+        var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.HttpRequest.Query), meta);
         var results = await DataScaffold.QueryAsync(meta, query);
         var resultsList = new List<object?>();
         foreach (var item in results)
@@ -2032,7 +2032,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteTextResponseAsync(context, "text/html", html, $"{typeSlug}_list.html");
     }
 
-    public async ValueTask DataListExportHandler(HttpContext context)
+    public async ValueTask DataListExportHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
@@ -2049,8 +2049,8 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var options = ExportOptions.FromQuery(context.Request.Query);
-        var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.Request.Query), meta);
+        var options = ExportOptions.FromQuery(context.HttpRequest.Query);
+        var query = DataScaffold.BuildQueryDefinition(ToQueryDictionary(context.HttpRequest.Query), meta);
         var results = await DataScaffold.QueryAsync(meta, query);
         var resultsList = new List<object?>();
         foreach (var item in results)
@@ -2077,7 +2077,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    public async ValueTask DataViewExportHandler(HttpContext context)
+    public async ValueTask DataViewExportHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -2103,7 +2103,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var options = ExportOptions.FromQuery(context.Request.Query);
+        var options = ExportOptions.FromQuery(context.HttpRequest.Query);
         
         switch (options.Format)
         {
@@ -2141,7 +2141,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    public async ValueTask DataViewRtfHandler(HttpContext context)
+    public async ValueTask DataViewRtfHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -2185,7 +2185,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteTextResponseAsync(context, "application/rtf", rtf, $"{typeSlug}_{WebUtility.UrlEncode(id)}.rtf");
     }
 
-    public async ValueTask DataViewHtmlHandler(HttpContext context)
+    public async ValueTask DataViewHtmlHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -2229,7 +2229,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteTextResponseAsync(context, "text/html", html, $"{typeSlug}_{WebUtility.UrlEncode(id)}.html");
     }
 
-    public async ValueTask DataImportHandler(HttpContext context)
+    public async ValueTask DataImportHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
@@ -2237,7 +2237,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Import CSV");
             context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2246,7 +2246,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
             context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2262,10 +2262,10 @@ public sealed class RouteHandlers : IRouteHandlers
         context.SetStringValue("title", $"Import CSV: {meta.Name}");
         context.SetStringValue("html_message", help);
         context.AddFormDefinition(new FormDefinition($"/ssr/admin/data/{typeSlug}/import", "post", "Import CSV", fields));
-        await _renderer.RenderPage(context);
+        await _renderer.RenderPage(context.HttpContext);
     }
 
-    public async ValueTask DataImportPostHandler(HttpContext context)
+    public async ValueTask DataImportPostHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
@@ -2273,7 +2273,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Import CSV");
             context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2282,25 +2282,25 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
             context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Import CSV");
             context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             context.SetStringValue("title", "Import CSV");
             context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2309,7 +2309,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.SetStringValue("title", "Import CSV");
             context.SetStringValue("html_message", "<p>No CSV file uploaded.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2326,7 +2326,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.SetStringValue("title", "Import CSV");
             context.SetStringValue("html_message", "<p>CSV file is empty or missing headers.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2436,10 +2436,10 @@ public sealed class RouteHandlers : IRouteHandlers
 
         context.SetStringValue("title", $"Import CSV: {meta.Name}");
         context.SetStringValue("html_message", summary + $"<p><a class=\"btn btn-sm btn-outline-secondary\" href=\"/ssr/admin/data/{typeSlug}\">Back to list</a></p>");
-        await _renderer.RenderPage(context);
+        await _renderer.RenderPage(context.HttpContext);
     }
 
-    public async ValueTask DataCreateHandler(HttpContext context)
+    public async ValueTask DataCreateHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
@@ -2447,7 +2447,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
             context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2456,7 +2456,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
             context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2465,14 +2465,14 @@ public sealed class RouteHandlers : IRouteHandlers
         AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: true);
         fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken));
 
-        var isPopup = context.Request.Query.ContainsKey("popup");
+        var isPopup = context.HttpRequest.Query.ContainsKey("popup");
         var createAction = isPopup ? $"/ssr/admin/data/{typeSlug}/create?popup=1" : $"/ssr/admin/data/{typeSlug}/create";
         context.SetStringValue("title", $"Create {meta.Name}");
         context.AddFormDefinition(new FormDefinition(createAction, "post", $"Create {meta.Name}", fields));
-        await _renderer.RenderPage(context);
+        await _renderer.RenderPage(context.HttpContext);
     }
 
-    public async ValueTask DataCreatePostHandler(HttpContext context)
+    public async ValueTask DataCreatePostHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
@@ -2480,7 +2480,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
             context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2489,25 +2489,25 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
             context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Invalid Request");
             context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             context.SetStringValue("title", "Invalid Request");
             context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2530,7 +2530,7 @@ public sealed class RouteHandlers : IRouteHandlers
         var validationResult = DataScaffold.ValidateEntity(meta, instance);
         errors.AddRange(validationResult.AllErrors());
 
-        var isPopup = context.Request.Query.ContainsKey("popup");
+        var isPopup = context.HttpRequest.Query.ContainsKey("popup");
 
         if (errors.Count > 0)
         {
@@ -2541,7 +2541,7 @@ public sealed class RouteHandlers : IRouteHandlers
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
             var createAction = isPopup ? $"/ssr/admin/data/{typeSlug}/create?popup=1" : $"/ssr/admin/data/{typeSlug}/create";
             context.AddFormDefinition(new FormDefinition(createAction, "post", $"Create {meta.Name}", fields));
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2592,7 +2592,7 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.Redirect($"/ssr/admin/data/{typeSlug}?toast=created&id={WebUtility.UrlEncode(newId ?? string.Empty)}");
     }
 
-    public async ValueTask DataEditHandler(HttpContext context)
+    public async ValueTask DataEditHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -2601,7 +2601,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
             context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2610,7 +2610,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
             context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2620,7 +2620,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Not Found");
             context.SetStringValue("html_message", "<p>Item not found.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2631,10 +2631,10 @@ public sealed class RouteHandlers : IRouteHandlers
 
         context.SetStringValue("title", $"Edit {meta.Name}");
         context.AddFormDefinition(new FormDefinition($"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit", "post", $"Save {meta.Name}", fields));
-        await _renderer.RenderPage(context);
+        await _renderer.RenderPage(context.HttpContext);
     }
 
-    public async ValueTask DataEditPostHandler(HttpContext context)
+    public async ValueTask DataEditPostHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -2643,7 +2643,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
             context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2652,16 +2652,16 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
             context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Invalid Request");
             context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2671,7 +2671,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Not Found");
             context.SetStringValue("html_message", "<p>Item not found.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2690,12 +2690,12 @@ public sealed class RouteHandlers : IRouteHandlers
             }
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             context.SetStringValue("title", "Invalid Request");
             context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2721,7 +2721,7 @@ public sealed class RouteHandlers : IRouteHandlers
             AppendUserPasswordFieldsIfNeeded(meta, fields, isCreate: false);
             fields.Insert(0, new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: CsrfProtection.EnsureToken(context)));
             context.AddFormDefinition(new FormDefinition($"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/edit", "post", $"Save {meta.Name}", fields));
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2783,13 +2783,13 @@ public sealed class RouteHandlers : IRouteHandlers
         return createdKeys;
     }
 
-    public async ValueTask DataClonePostHandler(HttpContext context)
+    public async ValueTask DataClonePostHandler(BmwContext context)
         => await HandleClonePost(context, redirectToEdit: false);
 
-    public async ValueTask DataCloneEditPostHandler(HttpContext context)
+    public async ValueTask DataCloneEditPostHandler(BmwContext context)
         => await HandleClonePost(context, redirectToEdit: true);
 
-    public async ValueTask DataDeleteHandler(HttpContext context)
+    public async ValueTask DataDeleteHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -2798,7 +2798,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
             context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2807,7 +2807,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
             context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2818,13 +2818,13 @@ public sealed class RouteHandlers : IRouteHandlers
         };
 
             var instance = meta.Handlers.Create();
-            ApplyPrefillFromQuery(meta, instance, context.Request.Query);
+            ApplyPrefillFromQuery(meta, instance, context.HttpRequest.Query);
         context.SetStringValue("html_message", $"<p>Delete this {WebUtility.HtmlEncode(meta.Name)} record? This cannot be undone.</p>");
         context.AddFormDefinition(new FormDefinition($"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/delete", "post", $"Delete {meta.Name}", fields));
-        await _renderer.RenderPage(context);
+        await _renderer.RenderPage(context.HttpContext);
     }
 
-    public async ValueTask DataDeletePostHandler(HttpContext context)
+    public async ValueTask DataDeletePostHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -2833,7 +2833,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             context.SetStringValue("title", "Data");
             context.SetStringValue("html_message", errorMessage ?? "Entity not found.");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2842,25 +2842,25 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             context.SetStringValue("title", "Access denied");
             context.SetStringValue("html_message", "<p>You do not have permission to access this resource.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Invalid Request");
             context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             context.SetStringValue("title", "Invalid Request");
             context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -2896,7 +2896,7 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.Redirect($"/ssr/admin/data/{typeSlug}?toast=deleted&id={WebUtility.UrlEncode(id)}");
     }
 
-    public async ValueTask DataBulkDeleteHandler(HttpContext context)
+    public async ValueTask DataBulkDeleteHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
@@ -2913,14 +2913,14 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await WriteJsonResponseAsync(context, new { success = false, message = "Invalid form submission." });
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -2969,7 +2969,7 @@ public sealed class RouteHandlers : IRouteHandlers
         });
     }
 
-    public async ValueTask DataBulkExportHandler(HttpContext context)
+    public async ValueTask DataBulkExportHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
@@ -2986,7 +2986,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var idsParam = context.Request.Query["ids"].ToString();
+        var idsParam = context.HttpRequest.Query["ids"].ToString();
         if (string.IsNullOrWhiteSpace(idsParam))
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -3032,7 +3032,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         // Determine export format
-        var format = context.Request.Query["format"].ToString()?.ToLowerInvariant() ?? "csv";
+        var format = context.HttpRequest.Query["format"].ToString()?.ToLowerInvariant() ?? "csv";
         
         if (format == "json")
         {
@@ -3138,7 +3138,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return value;
     }
 
-    private async ValueTask HandleClonePost(HttpContext context, bool redirectToEdit)
+    private async ValueTask HandleClonePost(BmwContext context, bool redirectToEdit)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -3156,14 +3156,14 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await context.Response.WriteAsync("Invalid form submission.");
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -3255,14 +3255,14 @@ public sealed class RouteHandlers : IRouteHandlers
             || string.Equals(propertyName, nameof(BaseDataObject.ETag), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static string BuildToastHtml(HttpContext context, string entityName)
+    private static string BuildToastHtml(BmwContext context, string entityName)
     {
-        var toast = context.Request.Query["toast"].ToString();
+        var toast = context.HttpRequest.Query["toast"].ToString();
         if (string.IsNullOrWhiteSpace(toast))
             return string.Empty;
 
         var action = toast.Trim().ToLowerInvariant();
-        var id = context.Request.Query["id"].ToString();
+        var id = context.HttpRequest.Query["id"].ToString();
         var idSuffix = string.IsNullOrWhiteSpace(id) ? string.Empty : $" (ID: {WebUtility.HtmlEncode(id)})";
         var name = WebUtility.HtmlEncode(entityName);
         var apiKeyNote = string.Empty;
@@ -3284,7 +3284,7 @@ public sealed class RouteHandlers : IRouteHandlers
              $"<button type=\"button\" class=\"btn-close btn-close-white me-2 m-auto\" data-bs-dismiss=\"toast\" aria-label=\"Close\"></button></div></div></div>";
     }
 
-    public async ValueTask DataApiListHandler(HttpContext context)
+    public async ValueTask DataApiListHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
@@ -3301,11 +3301,11 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var queryDict = ToQueryDictionary(context.Request.Query);
+        var queryDict = ToQueryDictionary(context.HttpRequest.Query);
         var query = DataScaffold.BuildQueryDefinition(queryDict, meta);
 
-        var format = context.Request.Query["format"].ToString().ToLowerInvariant();
-        var acceptCsv = context.Request.Headers["Accept"].ToString().Contains("text/csv", StringComparison.OrdinalIgnoreCase);
+        var format = context.HttpRequest.Query["format"].ToString().ToLowerInvariant();
+        var acceptCsv = context.HttpRequest.Headers["Accept"].ToString().Contains("text/csv", StringComparison.OrdinalIgnoreCase);
 
         // When pagination parameters are present, run the data and count queries concurrently
         // and return { items, total } so the VNext UI can render page controls correctly.
@@ -3369,7 +3369,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteJsonResponseAsync(context, allPayload);
     }
 
-    public async ValueTask DataApiImportHandler(HttpContext context)
+    public async ValueTask DataApiImportHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out var typeSlug, out var errorMessage);
         if (meta == null)
@@ -3397,7 +3397,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.Response.ContentType = "application/json";
@@ -3405,7 +3405,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         var file = form.Files.GetFile("csv_file");
         if (file == null || file.Length == 0)
         {
@@ -3512,7 +3512,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await context.Response.WriteAsync(System.Text.Json.JsonSerializer.Serialize(result));
     }
 
-    public async ValueTask DataApiGetHandler(HttpContext context)
+    public async ValueTask DataApiGetHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out _, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -3541,7 +3541,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
     }
 
-    public async ValueTask DataApiPostHandler(HttpContext context)
+    public async ValueTask DataApiPostHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out _, out var errorMessage);
         if (meta == null)
@@ -3572,9 +3572,9 @@ public sealed class RouteHandlers : IRouteHandlers
         DataScaffold.ApplyAutoGeneratedIds(meta, instance);
 
         List<string> errors;
-        if (context.Request.HasFormContentType)
+        if (context.HttpRequest.HasFormContentType)
         {
-            var form = await context.Request.ReadFormAsync();
+            var form = await context.HttpRequest.ReadFormAsync();
             var values = RentFormDictionary(form.Count);
             foreach (var kvp in form)
                 values[kvp.Key] = (string?)kvp.Value.ToString();
@@ -3628,7 +3628,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
     }
 
-    public async ValueTask DataApiPutHandler(HttpContext context)
+    public async ValueTask DataApiPutHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out _, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -3663,9 +3663,9 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         List<string> errors;
-        if (context.Request.HasFormContentType)
+        if (context.HttpRequest.HasFormContentType)
         {
-            var form = await context.Request.ReadFormAsync();
+            var form = await context.HttpRequest.ReadFormAsync();
             var values = RentFormDictionary(form.Count);
             foreach (var kvp in form)
                 values[kvp.Key] = (string?)kvp.Value.ToString();
@@ -3718,7 +3718,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
     }
 
-    public async ValueTask DataApiPatchHandler(HttpContext context)
+    public async ValueTask DataApiPatchHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out _, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -3753,9 +3753,9 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         List<string> errors;
-        if (context.Request.HasFormContentType)
+        if (context.HttpRequest.HasFormContentType)
         {
-            var form = await context.Request.ReadFormAsync();
+            var form = await context.HttpRequest.ReadFormAsync();
             var values = RentFormDictionary(form.Count);
             foreach (var kvp in form)
                 values[kvp.Key] = (string?)kvp.Value.ToString();
@@ -3798,7 +3798,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteJsonResponseAsync(context, BuildApiModel(meta, instance));
     }
 
-    public async ValueTask DataApiDeleteHandler(HttpContext context)
+    public async ValueTask DataApiDeleteHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out _, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -3828,7 +3828,7 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.StatusCode = StatusCodes.Status204NoContent;
     }
 
-    public async ValueTask DataApiFileGetHandler(HttpContext context)
+    public async ValueTask DataApiFileGetHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out _, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -3884,7 +3884,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await source.CopyToAsync(context.Response.Body, context.RequestAborted).ConfigureAwait(false);
     }
 
-    public async ValueTask MetricsJsonHandler(HttpContext context)
+    public async ValueTask MetricsJsonHandler(BmwContext context)
     {
         var app = context.GetApp();
         if (app == null)
@@ -3916,7 +3916,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteJsonResponseAsync(context, payload);
     }
 
-    public async ValueTask LogsViewerHandler(HttpContext context)
+    public async ValueTask LogsViewerHandler(BmwContext context)
     {
         await BuildPageHandler(ctx =>
         {
@@ -3929,11 +3929,11 @@ public sealed class RouteHandlers : IRouteHandlers
                 return;
             }
 
-            var date = ctx.Request.Query["date"].ToString();
-            var hour = ctx.Request.Query["hour"].ToString();
-            var file = ctx.Request.Query["file"].ToString();
-            var year = ctx.Request.Query["year"].ToString();
-            var month = ctx.Request.Query["month"].ToString();
+            var date = ctx.HttpRequest.Query["date"].ToString();
+            var hour = ctx.HttpRequest.Query["hour"].ToString();
+            var file = ctx.HttpRequest.Query["file"].ToString();
+            var year = ctx.HttpRequest.Query["year"].ToString();
+            var month = ctx.HttpRequest.Query["month"].ToString();
 
             var dates = new List<string>();
             foreach (var dir in Directory.GetDirectories(root))
@@ -4149,12 +4149,12 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask LogsPruneHandler(HttpContext context)
+    public async ValueTask LogsPruneHandler(BmwContext context)
     {
         await BuildPageHandler(ctx =>
         {
             var root = GetLogRoot(ctx);
-            if (!TryResolveLogTarget(ctx.Request.Query, root, out var target, out var errorMessage))
+            if (!TryResolveLogTarget(ctx.HttpRequest.Query, root, out var target, out var errorMessage))
             {
                 ctx.SetStringValue("title", "Prune Logs");
                 ctx.SetStringValue("html_message", $"<p class=\"text-danger\">{WebUtility.HtmlEncode(errorMessage)}</p>");
@@ -4178,15 +4178,15 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask LogsPrunePostHandler(HttpContext context)
+    public async ValueTask LogsPrunePostHandler(BmwContext context)
     {
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -4219,10 +4219,10 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.Redirect("/admin/logs", permanent: false);
     }
 
-    public async ValueTask LogsDownloadHandler(HttpContext context)
+    public async ValueTask LogsDownloadHandler(BmwContext context)
     {
         var root = GetLogRoot(context);
-        if (!TryResolveLogTarget(context.Request.Query, root, out var target, out var errorMessage))
+        if (!TryResolveLogTarget(context.HttpRequest.Query, root, out var target, out var errorMessage))
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await context.Response.WriteAsync(errorMessage ?? "Invalid log selection.");
@@ -4270,7 +4270,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    public async ValueTask SampleDataHandler(HttpContext context)
+    public async ValueTask SampleDataHandler(BmwContext context)
     {
         var entities = RuntimeEntityRegistry.Current.All;
         if (entities.Count == 0)
@@ -4289,25 +4289,25 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask SampleDataPostHandler(HttpContext context)
+    public async ValueTask SampleDataPostHandler(BmwContext context)
     {
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Generate Sample Data");
             context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             var entities = RuntimeEntityRegistry.Current.All;
             context.SetStringValue("title", "Generate Sample Data");
             context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
             RenderSampleDataForm(context, "<p>Invalid security token. Please try again.</p>", entities, 10, clearExisting: false);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -4327,7 +4327,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.SetStringValue("title", "Generate Sample Data");
             context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{JoinEncoded("<br/>", errors)}</div>");
             RenderSampleDataForm(context, $"<div class=\"alert alert-danger\">{JoinEncoded("<br/>", errors)}</div>", registry.All, 10, clearExisting);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -4424,7 +4424,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await RenderJobProgressPage(context, jobId, statusUrl, returnUrl, "Generate Sample Data");
     }
 
-    public async ValueTask WipeDataHandler(HttpContext context)
+    public async ValueTask WipeDataHandler(BmwContext context)
     {
         var wipeToken = SettingsService.GetValue(WellKnownSettings.AllowWipeData);
         if (string.IsNullOrEmpty(wipeToken))
@@ -4447,7 +4447,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await BuildPageHandler(ctx => RenderWipeDataForm(ctx, null, wipeToken))(context);
     }
 
-    public async ValueTask WipeDataPostHandler(HttpContext context)
+    public async ValueTask WipeDataPostHandler(BmwContext context)
     {
         var wipeToken = SettingsService.GetValue(WellKnownSettings.AllowWipeData);
         if (string.IsNullOrEmpty(wipeToken))
@@ -4458,24 +4458,24 @@ public sealed class RouteHandlers : IRouteHandlers
                 "<div class=\"alert alert-warning\">" +
                 "<h4 class=\"alert-heading\">Endpoint Disabled</h4>" +
                 $"<p>The <code>{WebUtility.HtmlEncode(WellKnownSettings.AllowWipeData)}</code> setting is empty or missing.</p></div>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Wipe All Data");
             context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderWipeDataForm(context, "<div class=\"alert alert-danger\">Invalid security token. Please try again.</div>", wipeToken);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -4483,7 +4483,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!string.Equals(confirmText, wipeToken, StringComparison.Ordinal))
         {
             RenderWipeDataForm(context, "<div class=\"alert alert-danger\">Confirmation text did not match. Enter the configured wipe token exactly to proceed.</div>", wipeToken);
-            await _renderer.RenderPage(context);
+            await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
@@ -4514,7 +4514,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await RenderJobProgressPage(context, jobId, statusUrl, returnUrl, "Wipe All Data");
     }
 
-    private async ValueTask RenderJobProgressPage(HttpContext context, string jobId, string statusUrl, string returnUrl, string operationName)
+    private async ValueTask RenderJobProgressPage(BmwContext context, string jobId, string statusUrl, string returnUrl, string operationName)
     {
         var nonce = context.GetCspNonce();
         var nonceAttr = string.IsNullOrEmpty(nonce) ? string.Empty : $" nonce=\"{WebUtility.HtmlEncode(nonce)}\"";
@@ -4561,10 +4561,10 @@ public sealed class RouteHandlers : IRouteHandlers
 
         context.SetStringValue("title", operationName);
         context.SetStringValue("html_message", html.ToString());
-        await _renderer.RenderPage(context);
+        await _renderer.RenderPage(context.HttpContext);
     }
 
-    private void RenderWipeDataForm(HttpContext context, string? message, string wipeToken)
+    private void RenderWipeDataForm(BmwContext context, string? message, string wipeToken)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Wipe All Data");
@@ -4596,7 +4596,7 @@ public sealed class RouteHandlers : IRouteHandlers
     /// Accepts a JSON body: { entities: { "entity-slug": count, ... }, clearExisting: bool }
     /// Returns 202 Accepted with job info.
     /// </summary>
-    public async ValueTask AdminSampleDataJsonHandler(HttpContext context)
+    public async ValueTask AdminSampleDataJsonHandler(BmwContext context)
     {
         if (!CsrfProtection.ValidateApiToken(context))
         {
@@ -4607,7 +4607,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         string body;
-        using (var reader = new System.IO.StreamReader(context.Request.Body))
+        using (var reader = new System.IO.StreamReader(context.HttpRequest.Body))
             body = await reader.ReadToEndAsync().ConfigureAwait(false);
 
         var entityCounts = new Dictionary<string, int>(8, StringComparer.OrdinalIgnoreCase);
@@ -4740,7 +4740,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 progress.Report(100, $"Done. Created {summary}.");
             });
 
-        var baseUrl   = $"{context.Request.Scheme}://{context.Request.Host}";
+        var baseUrl   = $"{context.HttpRequest.Scheme}://{context.HttpRequest.Host}";
         var statusUrl = $"{baseUrl}/api/jobs/{jobId}";
         context.Response.StatusCode = StatusCodes.Status202Accepted;
         context.Response.Headers["Location"] = statusUrl;
@@ -4755,7 +4755,7 @@ public sealed class RouteHandlers : IRouteHandlers
     /// Accepts a JSON body: { confirmToken }
     /// Returns 202 Accepted with job info.
     /// </summary>
-    public async ValueTask AdminWipeDataJsonHandler(HttpContext context)
+    public async ValueTask AdminWipeDataJsonHandler(BmwContext context)
     {
         if (!CsrfProtection.ValidateApiToken(context))
         {
@@ -4775,7 +4775,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         string body;
-        using (var reader = new System.IO.StreamReader(context.Request.Body))
+        using (var reader = new System.IO.StreamReader(context.HttpRequest.Body))
             body = await reader.ReadToEndAsync().ConfigureAwait(false);
 
         string confirmToken = string.Empty;
@@ -4823,7 +4823,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 progress.Report(100, $"Done. Wiped storage for {done} provider{(done == 1 ? "" : "s")}.");
             });
 
-        var baseUrl   = $"{context.Request.Scheme}://{context.Request.Host}";
+        var baseUrl   = $"{context.HttpRequest.Scheme}://{context.HttpRequest.Host}";
         var statusUrl = $"{baseUrl}/api/jobs/{jobId}";
         context.Response.StatusCode = StatusCodes.Status202Accepted;
         context.Response.Headers["Location"] = statusUrl;
@@ -4837,7 +4837,7 @@ public sealed class RouteHandlers : IRouteHandlers
     /// GET /api/admin/query-plans — returns the in-memory query plan history as JSON.
     /// Each entry includes timing, steps, and missing-index recommendations.
     /// </summary>
-    public async ValueTask QueryPlanHistoryHandler(HttpContext context)
+    public async ValueTask QueryPlanHistoryHandler(BmwContext context)
     {
         var entries = QueryPlanHistory.GetSnapshot();
 
@@ -4890,7 +4890,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteJsonResponseAsync(context, payload);
     }
 
-    public async ValueTask EntityDesignerHandler(HttpContext context)
+    public async ValueTask EntityDesignerHandler(BmwContext context)
     {
         await BuildPageHandler(ctx =>
         {
@@ -4901,7 +4901,7 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask GalleryHandler(HttpContext context)
+    public async ValueTask GalleryHandler(BmwContext context)
     {
         await BuildPageHandler(async ctx =>
         {
@@ -4973,18 +4973,18 @@ public sealed class RouteHandlers : IRouteHandlers
         })(context);
     }
 
-    public async ValueTask GalleryDeployPostHandler(HttpContext context)
+    public async ValueTask GalleryDeployPostHandler(BmwContext context)
     {
         var packageSlug = GetRouteValue(context, "package") ?? string.Empty;
 
-        if (!context.Request.HasFormContentType)
+        if (!context.HttpRequest.HasFormContentType)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             await context.Response.WriteAsync("Invalid form submission.");
             return;
         }
 
-        var form = await context.Request.ReadFormAsync();
+        var form = await context.HttpRequest.ReadFormAsync();
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             await BuildPageHandler(ctx =>
@@ -5038,7 +5038,7 @@ public sealed class RouteHandlers : IRouteHandlers
         _ = message; // redirect supersedes any rendered message
     }
 
-    private async ValueTask ApplyUploadFieldsFromFormAsync(HttpContext context, DataEntityMetadata meta, BaseDataObject instance, IFormCollection form, List<string> errors)
+    private async ValueTask ApplyUploadFieldsFromFormAsync(BmwContext context, DataEntityMetadata meta, BaseDataObject instance, IFormCollection form, List<string> errors)
     {
         foreach (var field in meta.Fields)
         {
@@ -5128,7 +5128,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return string.IsNullOrWhiteSpace(safeName) ? "upload.bin" : safeName;
     }
 
-    private string ResolveUploadPath(HttpContext context, string storageKey)
+    private string ResolveUploadPath(BmwContext context, string storageKey)
     {
         var rootPath = GetUploadRootPath(context);
         return ResolveUploadPathFromRoot(rootPath, storageKey);
@@ -5158,7 +5158,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return full;
     }
 
-    private string GetUploadRootPath(HttpContext context)
+    private string GetUploadRootPath(BmwContext context)
     {
         var configured = _config?.GetValue("Uploads.RootDirectory", "uploads") ?? "uploads";
         if (Path.IsPathRooted(configured))
@@ -5166,7 +5166,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return Path.Combine(_dataRootFolder, configured);
     }
 
-    private void DeleteStoredFile(HttpContext context, StoredFileData storedFile)
+    private void DeleteStoredFile(BmwContext context, StoredFileData storedFile)
     {
         if (string.IsNullOrWhiteSpace(storedFile.StorageKey))
             return;
@@ -5209,7 +5209,7 @@ public sealed class RouteHandlers : IRouteHandlers
     }
 
 
-    private static string GetLogRoot(HttpContext context)
+    private static string GetLogRoot(BmwContext context)
     {
         var logFolder = "Logs";
         if (Path.IsPathRooted(logFolder))
@@ -5817,7 +5817,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private readonly record struct LogFileEntry(string Name, DateTime? Timestamp, bool IsError, DateTime SortKey);
     private readonly record struct LogTarget(string Scope, string? MonthKey, string? DateFolder, string? Hour, string Label, IReadOnlyList<string> Directories, string ZipName);
 
-    private static DataEntityMetadata? ResolveEntity(HttpContext context, out string typeSlug, out string? errorMessage)
+    private static DataEntityMetadata? ResolveEntity(BmwContext context, out string typeSlug, out string? errorMessage)
     {
         typeSlug = GetRouteValue(context, "type") ?? string.Empty;
         if (string.IsNullOrWhiteSpace(typeSlug))
@@ -5836,7 +5836,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return null;
     }
 
-    private static string? GetRouteValue(HttpContext context, string key)
+    private static string? GetRouteValue(BmwContext context, string key)
     {
         var pageContext = context.GetPageContext();
         if (pageContext == null)
@@ -5905,7 +5905,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return output;
     }
 
-    private static async ValueTask WriteTextResponseAsync(HttpContext context, string contentType, string content, string fileName)
+    private static async ValueTask WriteTextResponseAsync(BmwContext context, string contentType, string content, string fileName)
     {
         context.Response.ContentType = contentType;
         context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{fileName}\"";
@@ -6015,7 +6015,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     // Export helper methods for nested/embedded components
 
-    private async ValueTask ExportHierarchicalJson(HttpContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
+    private async ValueTask ExportHierarchicalJson(BmwContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
     {
         var jsonOptions = JsonIndented;
         #pragma warning disable IL2026 // Serializing IReadOnlyList<object?> — all entity types preserved via TrimmerRootAssembly
@@ -6026,7 +6026,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await context.Response.WriteAsync(json);
     }
 
-    private async ValueTask ExportSingleHierarchicalJson(HttpContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
+    private async ValueTask ExportSingleHierarchicalJson(BmwContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
     {
         var jsonOptions = JsonIndented;
         #pragma warning disable IL2026 // Serializing entity instance — all entity types preserved via TrimmerRootAssembly
@@ -6037,7 +6037,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await context.Response.WriteAsync(json);
     }
 
-    private async ValueTask ExportFlatCsv(HttpContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
+    private async ValueTask ExportFlatCsv(BmwContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
     {
         if (!options.IncludeNested || options.MaxDepth < 1)
         {
@@ -6114,7 +6114,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteTextResponseAsync(context, "text/csv", flatCsv, $"{typeSlug}_flat.csv");
     }
 
-    private async ValueTask ExportSingleFlatCsv(HttpContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
+    private async ValueTask ExportSingleFlatCsv(BmwContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
     {
         if (!options.IncludeNested || options.MaxDepth < 1)
         {
@@ -6178,7 +6178,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await WriteTextResponseAsync(context, "text/csv", flatCsv, $"{typeSlug}_{WebUtility.UrlEncode(id)}_flat.csv");
     }
 
-    private async ValueTask ExportMultiSheetZip(HttpContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
+    private async ValueTask ExportMultiSheetZip(BmwContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
     {
         using var memoryStream = new MemoryStream();
         using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
@@ -6255,7 +6255,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await memoryStream.CopyToAsync(context.Response.Body);
     }
 
-    private async ValueTask ExportSingleMultiSheetZip(HttpContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
+    private async ValueTask ExportSingleMultiSheetZip(BmwContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
     {
         using var memoryStream = new MemoryStream();
         using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
@@ -6469,11 +6469,11 @@ public sealed class RouteHandlers : IRouteHandlers
     private const string ApiCsrfHeaderName = "X-Requested-With";
     private const string ApiCsrfHeaderValue = "BareMetalWeb";
 
-    private static bool ValidateApiCsrfHeader(HttpContext context)
+    private static bool ValidateApiCsrfHeader(BmwContext context)
         => UserAuth.HasApiKeyHeader(context) ||
-           string.Equals(context.Request.Headers[ApiCsrfHeaderName], ApiCsrfHeaderValue, StringComparison.Ordinal);
+           string.Equals(context.HttpRequest.Headers[ApiCsrfHeaderName], ApiCsrfHeaderValue, StringComparison.Ordinal);
 
-    private static async ValueTask<bool> HasEntityPermissionAsync(HttpContext context, DataEntityMetadata meta, CancellationToken cancellationToken = default)
+    private static async ValueTask<bool> HasEntityPermissionAsync(BmwContext context, DataEntityMetadata meta, CancellationToken cancellationToken = default)
     {
         var permissionsNeeded = meta.Permissions?.Trim();
         if (string.IsNullOrWhiteSpace(permissionsNeeded) || string.Equals(permissionsNeeded, "Public", StringComparison.OrdinalIgnoreCase))
@@ -6700,7 +6700,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    private void RenderSampleDataForm(HttpContext context, string? message, IReadOnlyList<RuntimeEntityModel> entities, int defaultCount, bool clearExisting)
+    private void RenderSampleDataForm(BmwContext context, string? message, IReadOnlyList<RuntimeEntityModel> entities, int defaultCount, bool clearExisting)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Generate Sample Data");
@@ -6770,14 +6770,14 @@ public sealed class RouteHandlers : IRouteHandlers
         };
     }
 
-    private static async ValueTask<Dictionary<string, JsonElement>?> ReadJsonBodyAsync(HttpContext context)
+    private static async ValueTask<Dictionary<string, JsonElement>?> ReadJsonBodyAsync(BmwContext context)
     {
-        if (context.Request.ContentLength.HasValue && context.Request.ContentLength.Value == 0)
+        if (context.HttpRequest.ContentLength.HasValue && context.HttpRequest.ContentLength.Value == 0)
             return null;
 
         try
         {
-            using var doc = await JsonDocument.ParseAsync(context.Request.Body).ConfigureAwait(false);
+            using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body).ConfigureAwait(false);
             if (doc.RootElement.ValueKind != JsonValueKind.Object)
                 return null;
 
@@ -6795,7 +6795,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    private static async ValueTask WriteJsonResponseAsync(HttpContext context, object payload)
+    private static async ValueTask WriteJsonResponseAsync(BmwContext context, object payload)
     {
         context.Response.ContentType = "application/json";
         await using var writer = new Utf8JsonWriter(context.Response.Body, new JsonWriterOptions { Indented = true });
@@ -7027,7 +7027,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return filtered;
     }
 
-    private void RenderMfaResetForm(HttpContext context, string? message)
+    private void RenderMfaResetForm(BmwContext context, string? message)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Reset MFA");
@@ -7046,7 +7046,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private static async ValueTask<MfaChallenge?> GetMfaChallengeAsync(HttpContext context, CancellationToken cancellationToken = default)
+    private static async ValueTask<MfaChallenge?> GetMfaChallengeAsync(BmwContext context, CancellationToken cancellationToken = default)
     {
         var challengeId = context.GetCookie(MfaChallengeCookieName);
         if (string.IsNullOrWhiteSpace(challengeId))
@@ -7686,7 +7686,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return sb.ToString();
     }
 
-    public async ValueTask DataCommandHandler(HttpContext context)
+    public async ValueTask DataCommandHandler(BmwContext context)
     {
         var meta = ResolveEntity(context, out _, out var errorMessage);
         var id = GetRouteValue(context, "id");
@@ -7807,7 +7807,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     // ── Data & Index Sizing ───────────────────────────────────────────────────
 
-    public async ValueTask DataSizingHandler(HttpContext context)
+    public async ValueTask DataSizingHandler(BmwContext context)
     {
         await BuildPageHandler(ctx =>
         {
@@ -7968,7 +7968,7 @@ public sealed class RouteHandlers : IRouteHandlers
     ///   - 200 OK (+ Location header when a resultUrl was provided) when the job completes.
     ///   - 404 if the job ID is unknown or has been pruned.
     /// </summary>
-    public async ValueTask JobStatusHandler(HttpContext context)
+    public async ValueTask JobStatusHandler(BmwContext context)
     {
         var jobId = GetRouteValue(context, "jobId") ?? string.Empty;
 
@@ -8028,7 +8028,7 @@ public sealed class RouteHandlers : IRouteHandlers
     /// GET /api/jobs
     /// Returns all tracked background jobs (active and recently completed) as a JSON array.
     /// </summary>
-    public async ValueTask JobsListHandler(HttpContext context)
+    public async ValueTask JobsListHandler(BmwContext context)
     {
         var jobs = BackgroundJobService.Instance.GetAllJobs();
 
@@ -8070,7 +8070,7 @@ public sealed class RouteHandlers : IRouteHandlers
     /// requested, 404 if the job is unknown, or 409 Conflict if it has already completed.
     /// Requires admin permission.
     /// </summary>
-    public async ValueTask CancelJobHandler(HttpContext context)
+    public async ValueTask CancelJobHandler(BmwContext context)
     {
         var jobId = GetRouteValue(context, "jobId") ?? string.Empty;
 
