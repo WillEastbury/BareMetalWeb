@@ -72,6 +72,12 @@ public static class DataLayerCapabilities
         "SHA256 (managed, software)";
 
     /// <summary>
+    /// The acceleration path used by <see cref="SimdByteScanner.FindByte"/> for
+    /// scanning raw byte buffers (binary protocol parsing, template byte streams, etc.).
+    /// </summary>
+    public static string ByteScanPath => SimdByteScanner.ActivePath;
+
+    /// <summary>
     /// Returns a multi-line human-readable description of all active
     /// data-layer hardware acceleration paths.
     /// </summary>
@@ -85,6 +91,7 @@ public static class DataLayerCapabilities
             $"CRC-32C             : {Crc32CPath}\n" +
             $"Key comparison      : {KeyComparisonPath}\n" +
             $"Bloom filter        : {BloomFilterPath}\n" +
-            $"Schema hash         : {SchemaHashPath}";
+            $"Schema hash         : {SchemaHashPath}\n" +
+            $"Byte scanner        : {ByteScanPath}";
     }
 }

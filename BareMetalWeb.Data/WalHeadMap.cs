@@ -261,6 +261,52 @@ public sealed class WalHeadMap : IDisposable
                 CollectionsMarshal.AsSpan(ptrGroups[shard]));
     }
 
+    /// <summary>
+    /// Updates multiple heads with per-key ptrs in a single write-lock acquisition
+    /// per shard, accepting both key and ptr arrays as <see cref="ReadOnlySpan{T}"/>
+    /// to avoid array allocation when the caller already has exact-size slices.
+    /// Keys and ptrs must be pre-sorted ascending by key and have equal length.
+    /// </summary>
+    internal void BatchSetHeads(ReadOnlySpan<ulong> keys, ReadOnlySpan<ulong> ptrs)
+    {
+        if (keys.Length == 0) return;
+        if (keys.Length != ptrs.Length)
+            throw new ArgumentException("keys and ptrs must have equal length.");
+
+        // Common case: all keys belong to the same shard
+        int firstShard = ShardFor(keys[0]);
+        bool singleShard = true;
+        for (int i = 1; i < keys.Length; i++)
+        {
+            if (ShardFor(keys[i]) != firstShard) { singleShard = false; break; }
+        }
+
+        if (singleShard)
+        {
+            _shards[firstShard].BatchSetHeads(keys, ptrs);
+            return;
+        }
+
+        // Multi-shard: group (key, ptr) pairs by shard then update each independently
+        var keyGroups = new Dictionary<int, List<ulong>>(_shards.Length);
+        var ptrGroups = new Dictionary<int, List<ulong>>(_shards.Length);
+        for (int i = 0; i < keys.Length; i++)
+        {
+            int s = ShardFor(keys[i]);
+            if (!keyGroups.TryGetValue(s, out var kl))
+                keyGroups[s] = kl = new List<ulong>();
+            if (!ptrGroups.TryGetValue(s, out var pl))
+                ptrGroups[s] = pl = new List<ulong>();
+            kl.Add(keys[i]);
+            pl.Add(ptrs[i]);
+        }
+
+        foreach (var (shard, shardKeys) in keyGroups)
+            _shards[shard].BatchSetHeads(
+                CollectionsMarshal.AsSpan(shardKeys),
+                CollectionsMarshal.AsSpan(ptrGroups[shard]));
+    }
+
     /// <inheritdoc/>
     public void Dispose()
     {

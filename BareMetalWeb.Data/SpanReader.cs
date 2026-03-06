@@ -104,6 +104,27 @@ namespace BareMetalWeb.Data;
 
         public int Remaining => _buffer.Length - _offset;
 
+        /// <summary>
+        /// Returns the index relative to the current read position of the first occurrence
+        /// of <paramref name="marker"/> in the remaining buffer, or <c>-1</c> if not found.
+        /// Uses <see cref="SimdByteScanner.FindByte"/> for hardware-accelerated scanning.
+        /// The reader position is not advanced.
+        /// </summary>
+        public int IndexOfByte(byte marker)
+            => SimdByteScanner.FindByte(_buffer.Slice(_offset), marker);
+
+        /// <summary>
+        /// Advances the read position to the first occurrence of <paramref name="marker"/>
+        /// in the remaining buffer, skipping over any bytes before it.
+        /// If <paramref name="marker"/> is not found the reader is advanced to the end.
+        /// Uses <see cref="SimdByteScanner.FindByte"/> for hardware-accelerated scanning.
+        /// </summary>
+        public void SkipToMarker(byte marker)
+        {
+            int idx = SimdByteScanner.FindByte(_buffer.Slice(_offset), marker);
+            _offset = idx >= 0 ? _offset + idx : _buffer.Length;
+        }
+
         private void EnsureAvailable(int size)
         {
             if (_offset + size > _buffer.Length)
