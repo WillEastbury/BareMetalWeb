@@ -148,6 +148,9 @@ public static class DataScaffold
     private static readonly long LookupCachePruneCooldownTicks = TimeSpan.FromSeconds(60).Ticks;
     private static long _lastLookupCachePruneTicks;
     private static readonly IIdGenerator IdGenerator = new DefaultIdGenerator();
+    // TODO [violation-007]: PropertyCache stores PropertyInfo (reflection-backed). Replace with
+    // metadata-driven DataFieldMetadata.GetValueFn/SetValueFn delegates from the entity registry.
+    // See docs/violations/007-propertycache-reflection-backed.md
     private static readonly ConcurrentDictionary<(Type, string), PropertyInfo?> PropertyCache = new();
 
     /// <summary>
@@ -2558,6 +2561,9 @@ public static class DataScaffold
         return fields;
     }
 
+    // TODO [violation-004]: GetChildFieldMetadata uses reflection (GetProperties, GetCustomAttribute) per call.
+    // Cache result in a ConcurrentDictionary<Type, IReadOnlyList<ChildFieldMeta>>, or preferably
+    // derive from the pre-compiled EntityLayout at startup. See docs/violations/004-child-field-metadata-reflection.md
     private static IReadOnlyList<ChildFieldMeta> GetChildFieldMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type childType)
     {
         var fields = new List<ChildFieldMeta>();
@@ -3003,6 +3009,9 @@ public static class DataScaffold
         return sb.ToString();
     }
 
+    // TODO [violation-005]: TryParseChildList uses reflection (GetProperties, Activator.CreateInstance,
+    // PropertyInfo.SetValue). AOT-unsafe ([RequiresUnreferencedCode]). Replace with metadata-driven
+    // ordinal setters from EntityLayout/FieldRuntime. See docs/violations/005-child-list-json-reflection.md
     [RequiresUnreferencedCode("Child list parsing requires compiled entity types to be preserved.")]
     private static bool TryParseChildList(string rawValue, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type childType, out object? list)
     {
@@ -3583,6 +3592,9 @@ public static class DataScaffold
     /// Each element's properties are matched against the child type's public writable properties
     /// and individually converted with <see cref="TryConvertJson"/>.
     /// </summary>
+    // TODO [violation-005]: Activator.CreateInstance, GetProperties, PropertyInfo.SetValue violate the
+    // "avoid reflection" guideline and are AOT-unsafe. Replace with metadata-driven ordinal setters
+    // from the registered EntityLayout/FieldRuntime. See docs/violations/005-child-list-json-reflection.md
     [RequiresUnreferencedCode("JSON child list deserialization requires compiled entity types to be preserved.")]
     private static bool TryConvertJsonChildList(JsonElement element, Type childType, out object? list)
     {

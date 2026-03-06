@@ -284,6 +284,9 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
         return type;
     }
 
+    // TODO [violation-001]: Reflection.Emit violates the "avoid reflection" guideline and is not AOT-safe.
+    // Replace with a RuntimeEnumDefinition(string[] Labels) metadata record.
+    // See docs/violations/001-reflection-emit-dynamic-enum.md
     private static Type CreateRuntimeEnum(IReadOnlyList<string> values)
     {
         var enumTypeName = $"RuntimeEnum_{Guid.NewGuid():N}";

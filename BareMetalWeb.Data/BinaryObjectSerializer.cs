@@ -1199,6 +1199,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return new MemberAccessor(field.Name, AssumePublicMembers(field.FieldType), getter, setter);
     }
 
+    // TODO [violation-008]: PropertyInfo.GetValue / SetValue are reflection calls (~50-200ns each).
+    // Replace with Expression.Lambda.Compile() delegates or EntityLayout.FieldRuntime.Getter/Setter
+    // for registered entity types. See docs/violations/008-binary-serializer-reflection-accessors.md
     private static Func<object, object?> CreatePropertyGetter(PropertyInfo property)
     {
         // AOT-safe: use PropertyInfo.GetValue instead of Expression.Lambda.Compile.
@@ -1273,6 +1276,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     private static string GetTypeIdentifier(Type type)
         => type.AssemblyQualifiedName ?? type.FullName ?? type.Name;
 
+    // TODO [violation-002]: AppDomain.GetAssemblies() assembly scanning is AOT-unsafe and O(N·M).
+    // Replace with a pre-registered explicit type map (BinaryObjectSerializer.RegisterKnownType<T>()).
+    // See docs/violations/002-assembly-scanning-type-resolution.md
     [RequiresUnreferencedCode("Assembly scanning for type resolution is not AOT-safe.")]
     private static Type ResolveType(string typeName)
     {
