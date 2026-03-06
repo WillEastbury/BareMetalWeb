@@ -197,7 +197,7 @@ public static class ComputedFieldService
             // Try to query for child entities if the collection isn't loaded
             // This would require knowing the child entity type and foreign key relationship
             // For now, return default value
-            return GetDefaultValueForAggregate(config.Aggregate, field.Property.PropertyType);
+            return GetDefaultValueForAggregate(config.Aggregate, field.ClrType);
         }
 
         var items = new List<object>();
@@ -212,7 +212,7 @@ public static class ComputedFieldService
             if (config.Aggregate == AggregateFunction.Count)
                 return items.Count;
             
-            return GetDefaultValueForAggregate(config.Aggregate, field.Property.PropertyType);
+            return GetDefaultValueForAggregate(config.Aggregate, field.ClrType);
         }
 
         // Get values from the source field (cache lookup per item type)
@@ -233,7 +233,7 @@ public static class ComputedFieldService
             }
         }
 
-        return ApplyAggregateFunction(config.Aggregate, values, field.Property.PropertyType);
+        return ApplyAggregateFunction(config.Aggregate, values, field.ClrType);
     }
 
     private static object? ApplyAggregateFunction(AggregateFunction aggregate, List<object?> values, Type targetType)

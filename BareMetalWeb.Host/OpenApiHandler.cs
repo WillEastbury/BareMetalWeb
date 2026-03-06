@@ -352,7 +352,7 @@ internal static class OpenApiHandler
 
     private static Dictionary<string, object?> BuildEnumSchema(DataFieldMetadata field)
     {
-        var enumValues = DataScaffold.BuildEnumOptions(field.Property.PropertyType);
+        var enumValues = DataScaffold.BuildEnumOptions(field.ClrType);
         if (enumValues.Count == 0)
             return SimpleSchema("string", null);
 

@@ -238,7 +238,7 @@ public static class LookupApiHandlers
                 return;
             }
 
-            var value = field.Property.GetValue(entity);
+            var value = field.GetValueFn(entity);
             await WriteJsonAsync(context, new Dictionary<string, object?>
             {
                 ["field"] = field.Name,
@@ -538,7 +538,7 @@ public static class LookupApiHandlers
 
         foreach (var field in meta.ViewFields)
         {
-            var value = field.Property.GetValue(entity);
+            var value = field.GetValueFn(entity);
             result[field.Name] = value;
         }
 

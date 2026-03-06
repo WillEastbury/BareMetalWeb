@@ -150,19 +150,14 @@ public sealed class ServerLookupResolver : ILookupResolver
                 return null;
 
             DataEntityMetadata? nextMeta = null;
-            PropertyInfo? lookupProp = null;
-            foreach (var p in currentEntity.GetType()
-                .GetProperties(BindingFlags.Public | BindingFlags.Instance))
+            // Use DataScaffold metadata (compiled delegates) instead of raw reflection
+            var stepMeta = DataScaffold.GetEntityByType(currentEntity.GetType());
+            if (stepMeta != null)
             {
-                if (string.Equals(p.Name, nextFkField, StringComparison.OrdinalIgnoreCase))
-                {
-                    lookupProp = p;
-                    break;
-                }
+                var fieldMeta = stepMeta.FindField(nextFkField);
+                if (fieldMeta?.Lookup != null)
+                    nextMeta = DataScaffold.GetEntityByType(fieldMeta.Lookup.TargetType);
             }
-            var lookupAttr = lookupProp?.GetCustomAttribute<DataLookupAttribute>();
-            if (lookupAttr != null)
-                nextMeta = DataScaffold.GetEntityByType(lookupAttr.TargetType);
 
             if (nextMeta == null)
                 return null;
@@ -180,11 +175,29 @@ public sealed class ServerLookupResolver : ILookupResolver
         if (entity is DataRecord rec && rec.Schema != null)
             return rec.GetField(rec.Schema, fieldName);
 
-        // Reflection for compiled entities
-        var prop = entity.GetType().GetProperty(fieldName,
-            BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-        return prop?.GetValue(entity);
+        // Use metadata-first lookup (compiled delegates)
+        if (entity is BaseDataObject bdo)
+        {
+            var meta = DataScaffold.GetEntityByType(bdo.GetType());
+            if (meta != null)
+            {
+                var fieldMeta = meta.FindField(fieldName);
+                if (fieldMeta != null)
+                    return fieldMeta.GetValueFn(entity);
+            }
+        }
+
+        // Cached compiled delegate fallback
+        var getter = _extractCache.GetOrAdd((entity.GetType(), fieldName), static key =>
+        {
+            var p = key.Item1.GetProperty(key.Item2,
+                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+            return p != null ? PropertyAccessorFactory.BuildGetter(p) : null;
+        });
+        return getter?.Invoke(entity);
     }
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<(Type, string), Func<object, object?>?> _extractCache = new();
 
     private static bool ValuesEqual(object? a, object? b)
     {

@@ -45,9 +45,14 @@ public sealed record DataFieldMetadata(
     string? CascadeFromField = null,
     string? CascadeFilterField = null,
     string? FieldGroup = null,
-    int ColumnSpan = 12
+    int ColumnSpan = 12,
+    DataIndexAttribute? DataIndex = null,
+    bool HasSingletonFlag = false
 )
 {
+    /// <summary>CLR type of this field, captured once at registration to avoid PropertyInfo access.</summary>
+    public Type ClrType { get; } = Property.PropertyType;
+
     // Lazily compiled delegates avoid per-call PropertyInfo.GetValue / PropertyInfo.SetValue
     // reflection overhead in hot rendering paths.  The ??= assignment is not strictly thread-safe
     // but is idempotent — the worst case is two threads each compile an equivalent delegate; the
@@ -511,7 +516,7 @@ public static class DataScaffold
     private static QueryOperator GetDefaultOperatorForField(DataFieldMetadata field)
     {
         // For numeric and date fields, default to equals
-        var fieldType = field.Property.PropertyType;
+        var fieldType = field.ClrType;
         var underlyingType = Nullable.GetUnderlyingType(fieldType) ?? fieldType;
         
         if (underlyingType == typeof(int) || underlyingType == typeof(long) || 
@@ -577,7 +582,7 @@ public static class DataScaffold
 
                 // Get the computed value (for edit forms and view)
                 var computedValue = instance != null ? field.GetValueFn(instance) : null;
-                var computedStringValue = ToInputString(computedValue, field.Property.PropertyType, field.FieldType);
+                var computedStringValue = ToInputString(computedValue, field.ClrType, field.FieldType);
 
                 // Render as readonly with computed indicator
                 fields.Add(new FormField(
@@ -599,7 +604,7 @@ public static class DataScaffold
                 
                 // Get current value (for display, will be updated by JS)
                 var calculatedValue = instance != null ? field.GetValueFn(instance) : null;
-                var calculatedStringValue = ToInputString(calculatedValue, field.Property.PropertyType, field.FieldType);
+                var calculatedStringValue = ToInputString(calculatedValue, field.ClrType, field.FieldType);
 
                 // Generate JSON AST from the expression for CSP-safe client evaluation
                 string jsExpression;
@@ -647,7 +652,7 @@ public static class DataScaffold
                 continue;
             }
 
-            if (IsChildListType(field.Property.PropertyType, out var childType))
+            if (IsChildListType(field.ClrType, out var childType))
             {
                 var html = BuildChildListEditorHtml(field, childType, value as IEnumerable, cspNonce);
                 fields.Add(new FormField(
@@ -659,7 +664,7 @@ public static class DataScaffold
                 continue;
             }
 
-            if (IsDictionaryType(field.Property.PropertyType, out var valueType))
+            if (IsDictionaryType(field.ClrType, out var valueType))
             {
                 var html = BuildDictionaryEditorHtml(field, valueType, value as IEnumerable, cspNonce);
                 fields.Add(new FormField(
@@ -670,7 +675,7 @@ public static class DataScaffold
                     Html: html));
                 continue;
             }
-            var effectiveType = Nullable.GetUnderlyingType(field.Property.PropertyType) ?? field.Property.PropertyType;
+            var effectiveType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
             var effectiveFieldType = effectiveType == typeof(DateOnly) && field.FieldType == FormFieldType.DateTime
                 ? FormFieldType.DateOnly
                 : field.FieldType;
@@ -699,7 +704,7 @@ public static class DataScaffold
                 }
             }
 
-            var stringValue = ToInputString(value, field.Property.PropertyType, effectiveFieldType);
+            var stringValue = ToInputString(value, field.ClrType, effectiveFieldType);
             if (metadata.Type == typeof(SystemPrincipal)
                 && string.Equals(field.Name, nameof(SystemPrincipal.ApiKeyHashes), StringComparison.OrdinalIgnoreCase))
             {
@@ -712,9 +717,9 @@ public static class DataScaffold
                     stringValue = string.Empty;
                 }
             }
-            if (forCreate && IsDefaultValue(value, field.Property.PropertyType))
+            if (forCreate && IsDefaultValue(value, field.ClrType))
             {
-                var defaultValue = GetCreateDefaultInputString(field.Property.PropertyType, effectiveFieldType);
+                var defaultValue = GetCreateDefaultInputString(field.ClrType, effectiveFieldType);
                 if (defaultValue != null)
                     stringValue = defaultValue;
             }
@@ -725,7 +730,7 @@ public static class DataScaffold
                     : null;
 
             lookupOptions ??= effectiveFieldType == FormFieldType.Enum
-                ? BuildEnumOptions(field.Property.PropertyType)
+                ? BuildEnumOptions(field.ClrType)
                 : null;
 
             string? lookupTargetType = null;
@@ -818,7 +823,7 @@ public static class DataScaffold
                 continue;
             }
 
-            rows.Add((field.Label, ToDisplayString(value, field.Property.PropertyType)));
+            rows.Add((field.Label, ToDisplayString(value, field.ClrType)));
         }
 
         return rows;
@@ -843,14 +848,14 @@ public static class DataScaffold
                 continue;
             }
 
-            if (IsChildListType(field.Property.PropertyType, out var childType))
+            if (IsChildListType(field.ClrType, out var childType))
             {
                 var html = BuildChildListViewHtml(field, childType, value as IEnumerable);
                 rows.Add((field.Label, html, true));
                 continue;
             }
 
-            if (IsDictionaryType(field.Property.PropertyType, out var valueType))
+            if (IsDictionaryType(field.ClrType, out var valueType))
             {
                 var html = BuildDictionaryViewHtml(field, valueType, value as IEnumerable);
                 rows.Add((field.Label, html, true));
@@ -864,7 +869,7 @@ public static class DataScaffold
                 continue;
             }
             // Handle string representation of bool (from DataRecord / virtual entities)
-            if (value is string boolStr && field.Property.PropertyType == typeof(bool) && bool.TryParse(boolStr, out var parsedBool))
+            if (value is string boolStr && field.ClrType == typeof(bool) && bool.TryParse(boolStr, out var parsedBool))
             {
                 rows.Add((field.Label, BuildBooleanCheckboxHtml(parsedBool), true));
                 continue;
@@ -885,7 +890,7 @@ public static class DataScaffold
                 continue;
             }
 
-            rows.Add((field.Label, ToDisplayString(value, field.Property.PropertyType), false));
+            rows.Add((field.Label, ToDisplayString(value, field.ClrType), false));
         }
 
         return rows;
@@ -921,7 +926,7 @@ public static class DataScaffold
         var nested = new List<(DataFieldMetadata, Type)>();
         foreach (var field in metadata.ViewFields)
         {
-            if (IsChildListType(field.Property.PropertyType, out var childType))
+            if (IsChildListType(field.ClrType, out var childType))
             {
                 nested.Add((field, childType));
             }
@@ -939,7 +944,7 @@ public static class DataScaffold
     /// </summary>
     public static IReadOnlyList<Dictionary<string, object?>>? BuildSubFieldSchemas(DataFieldMetadata field)
     {
-        if (!IsChildListType(field.Property.PropertyType, out var childType))
+        if (!IsChildListType(field.ClrType, out var childType))
             return null;
 
         var result = new List<Dictionary<string, object?>>();
@@ -1053,7 +1058,7 @@ public static class DataScaffold
         
         foreach (var field in metadata.ViewFields)
         {
-            if (!IsChildListType(field.Property.PropertyType, out var childType))
+            if (!IsChildListType(field.ClrType, out var childType))
                 continue;
                 
             var value = field.GetValueFn(instance);
@@ -1160,13 +1165,13 @@ public static class DataScaffold
                     continue;
                 }
                 // Handle string representation of bool (from DataRecord / virtual entities)
-                if (rawValue is string boolStr && field.Property.PropertyType == typeof(bool) && bool.TryParse(boolStr, out var parsedBool))
+                if (rawValue is string boolStr && field.ClrType == typeof(bool) && bool.TryParse(boolStr, out var parsedBool))
                 {
                     values.Add(BuildBooleanCheckboxHtml(parsedBool));
                     continue;
                 }
 
-                values.Add(WebUtility.HtmlEncode(ToDisplayString(rawValue, field.Property.PropertyType)));
+                values.Add(WebUtility.HtmlEncode(ToDisplayString(rawValue, field.ClrType)));
             }
 
             if (includeActions && item is BaseDataObject dataObject)
@@ -1635,7 +1640,7 @@ public static class DataScaffold
         {
             var dayKey = dayGroupEntry.Key;
             var dayGroup = dayGroupEntry.Value;
-            var dayName = Enum.GetName(dayField.Property.PropertyType, dayKey) ?? dayKey.ToString();
+            var dayName = Enum.GetName(dayField.ClrType, dayKey) ?? dayKey.ToString();
             html.Append($"<div class=\"bm-timetable-day-section mb-4\">");
             html.Append($"<h3 class=\"bm-timetable-day-header\">{WebUtility.HtmlEncode(dayName)}</h3>");
 
@@ -1726,7 +1731,7 @@ public static class DataScaffold
                     }
                     else
                     {
-                        displayValue = WebUtility.HtmlEncode(ToDisplayString(rawValue, field.Property.PropertyType));
+                        displayValue = WebUtility.HtmlEncode(ToDisplayString(rawValue, field.ClrType));
                     }
 
                     html.Append($"<td>{displayValue}</td>");
@@ -1852,7 +1857,7 @@ public static class DataScaffold
             if (field.IdGeneration != IdGenerationStrategy.None)
                 continue;
 
-            if (IsChildListType(field.Property.PropertyType, out var childType))
+            if (IsChildListType(field.ClrType, out var childType))
             {
                 if (!TryGetFormValue(values, field.Name, out var rawList) || rawList == null)
                 {
@@ -1871,7 +1876,7 @@ public static class DataScaffold
                 continue;
             }
 
-            if (IsDictionaryType(field.Property.PropertyType, out var dictValueType))
+            if (IsDictionaryType(field.ClrType, out var dictValueType))
             {
                 if (!TryGetFormValue(values, field.Name, out var rawDict) || rawDict == null)
                 {
@@ -1902,7 +1907,7 @@ public static class DataScaffold
                     if (field.FieldType == FormFieldType.File || field.FieldType == FormFieldType.Image)
                         continue;
 
-                    if (IsBooleanField(field, field.Property.PropertyType))
+                    if (IsBooleanField(field, field.ClrType))
                     {
                         field.SetValueFn(instance, false);
                         if (field.Required)
@@ -1922,9 +1927,9 @@ public static class DataScaffold
                 continue;
             }
 
-            if (!TryConvertValue(rawValue, field.Property.PropertyType, out var converted))
+            if (!TryConvertValue(rawValue, field.ClrType, out var converted))
             {
-                if (!TryFallbackConvert(rawValue, field.Property.PropertyType, out converted))
+                if (!TryFallbackConvert(rawValue, field.ClrType, out converted))
                 {
                     errors.Add($"{field.Label} is invalid.");
                     continue;
@@ -1966,13 +1971,13 @@ public static class DataScaffold
                 continue;
             }
 
-            if (!TryConvertJson(rawElement, field.Property.PropertyType, out var converted))
+            if (!TryConvertJson(rawElement, field.ClrType, out var converted))
             {
                 // For Money fields, if the JSON is an object with an "amount" property, extract it as a decimal
                 if (field.FieldType == FormFieldType.Money
                     && rawElement.ValueKind == JsonValueKind.Object
                     && rawElement.TryGetProperty("amount", out var amountElement)
-                    && TryConvertJson(amountElement, field.Property.PropertyType, out converted))
+                    && TryConvertJson(amountElement, field.ClrType, out converted))
                 {
                     // Successfully extracted amount from Money JSON object; fall through to SetValue
                 }
@@ -3742,6 +3747,7 @@ public static class DataScaffold
             var calculatedAttribute = prop.GetCustomAttribute<CalculatedFieldAttribute>();
             var dataIndexAttribute = prop.GetCustomAttribute<DataIndexAttribute>();
             var relatedDocAttribute = prop.GetCustomAttribute<RelatedDocumentAttribute>();
+            var hasSingletonFlag = prop.PropertyType == typeof(bool) && prop.GetCustomAttribute<SingletonFlagAttribute>() != null;
             if (fieldAttribute == null && imageFieldAttribute == null && fileFieldAttribute == null)
                 continue;
 
@@ -3841,7 +3847,9 @@ public static class DataScaffold
                 calculatedAttribute,
                 ValidationService.BuildValidationConfig(prop),
                 dataIndexAttribute != null,
-                relatedDoc
+                relatedDoc,
+                DataIndex: dataIndexAttribute,
+                HasSingletonFlag: hasSingletonFlag
             ));
         }
 

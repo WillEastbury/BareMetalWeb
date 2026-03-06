@@ -101,11 +101,12 @@ public sealed class DataIndexAttribute : Attribute
 
 public sealed class SearchIndexManager
 {
-    // Cache reflection metadata per type to avoid repeated GetProperties calls
+    /// <summary>Pre-compiled accessor for an indexed field — avoids PropertyInfo reflection on hot paths.</summary>
+    public readonly record struct IndexedFieldAccessor(string Name, Type ClrType, Func<object, object?> Getter, DataIndexAttribute Attribute);
+
     private sealed class TypeMetadata
     {
-        public PropertyInfo[] IndexedProperties { get; init; } = Array.Empty<PropertyInfo>();
-        public DataIndexAttribute[] Attributes { get; init; } = Array.Empty<DataIndexAttribute>();
+        public IndexedFieldAccessor[] IndexedFields { get; init; } = Array.Empty<IndexedFieldAccessor>();
         public HashSet<IndexKind> IndexKinds { get; init; } = new();
     }
 
@@ -360,10 +361,10 @@ public sealed class SearchIndexManager
         _logger = logger;
     }
 
-    public bool HasIndexedFields(Type type, out List<PropertyInfo> fields)
+    public bool HasIndexedFields(Type type, out List<IndexedFieldAccessor> fields)
     {
         var metadata = GetOrCreateTypeMetadata(type);
-        fields = new List<PropertyInfo>(metadata.IndexedProperties);
+        fields = new List<IndexedFieldAccessor>(metadata.IndexedFields);
         return fields.Count > 0;
     }
 
@@ -371,27 +372,47 @@ public sealed class SearchIndexManager
     {
         return _typeMetadata.GetOrAdd(type, t =>
         {
+            // Prefer DataScaffold metadata (already has compiled delegates) over raw reflection
+            var entityMeta = BareMetalWeb.Core.DataScaffold.GetEntityByType(t);
+            if (entityMeta != null)
+            {
+                var indexed = new List<IndexedFieldAccessor>();
+                var kinds = new HashSet<IndexKind>(4);
+                foreach (var f in entityMeta.Fields)
+                {
+                    if (f.DataIndex != null)
+                    {
+                        indexed.Add(new IndexedFieldAccessor(f.Name, f.ClrType, f.GetValueFn, f.DataIndex));
+                        kinds.Add(f.DataIndex.Kind);
+                    }
+                }
+                return new TypeMetadata
+                {
+                    IndexedFields = indexed.ToArray(),
+                    IndexKinds = kinds
+                };
+            }
+
+            // Fallback: scan properties directly (startup only, cached)
             var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-            var indexedProps = new List<PropertyInfo>(props.Length);
-            var attrs = new List<DataIndexAttribute>(props.Length);
-            var kinds = new HashSet<IndexKind>(4);
+            var indexedProps = new List<IndexedFieldAccessor>(props.Length);
+            var fallbackKinds = new HashSet<IndexKind>(4);
 
             foreach (var prop in props)
             {
                 var attr = prop.GetCustomAttribute<DataIndexAttribute>();
                 if (attr != null)
                 {
-                    indexedProps.Add(prop);
-                    attrs.Add(attr);
-                    kinds.Add(attr.Kind);
+                    var getter = PropertyAccessorFactory.BuildGetter(prop);
+                    indexedProps.Add(new IndexedFieldAccessor(prop.Name, prop.PropertyType, getter, attr));
+                    fallbackKinds.Add(attr.Kind);
                 }
             }
 
             return new TypeMetadata
             {
-                IndexedProperties = indexedProps.ToArray(),
-                Attributes = attrs.ToArray(),
-                IndexKinds = kinds
+                IndexedFields = indexedProps.ToArray(),
+                IndexKinds = fallbackKinds
             };
         });
     }
@@ -908,16 +929,15 @@ public sealed class SearchIndexManager
         var type = obj.GetType();
         var metadata = GetOrCreateTypeMetadata(type);
 
-        for (int i = 0; i < metadata.IndexedProperties.Length; i++)
+        for (int i = 0; i < metadata.IndexedFields.Length; i++)
         {
-            var prop = metadata.IndexedProperties[i];
-            var attr = metadata.Attributes[i];
+            var accessor = metadata.IndexedFields[i];
 
-            var value = prop.GetValue(obj);
+            var value = accessor.Getter(obj);
             if (value == null)
                 continue;
 
-            var valueType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+            var valueType = Nullable.GetUnderlyingType(accessor.ClrType) ?? accessor.ClrType;
             if (valueType == typeof(string))
             {
                 AddTokensFromString(tokens, value.ToString());

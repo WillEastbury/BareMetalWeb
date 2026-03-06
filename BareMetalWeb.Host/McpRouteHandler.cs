@@ -575,9 +575,9 @@ internal static class McpRouteHandler
                 ["description"] = f.Label
             };
 
-            if (f.FieldType == FormFieldType.Enum && f.Property.PropertyType.IsEnum)
+            if (f.FieldType == FormFieldType.Enum && f.ClrType.IsEnum)
             {
-                schema["enum"] = Enum.GetNames(f.Property.PropertyType);
+                schema["enum"] = Enum.GetNames(f.ClrType);
             }
 
             props[f.Name] = schema;
