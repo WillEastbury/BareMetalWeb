@@ -39,17 +39,18 @@ public class MultiSingletonTestItem : BaseDataObject
 public class SingletonFlagTests : IDisposable
 {
     private readonly string _testRoot;
-    private readonly LocalFolderBinaryDataProvider _provider;
+    private readonly WalDataProvider _provider;
 
     public SingletonFlagTests()
     {
         _testRoot = Path.Combine(Path.GetTempPath(), "BareMetalWeb_SingletonTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testRoot);
-        _provider = new LocalFolderBinaryDataProvider(_testRoot);
+        _provider = new WalDataProvider(_testRoot);
     }
 
     public void Dispose()
     {
+        _provider.Dispose();
         if (Directory.Exists(_testRoot))
         {
             try { Directory.Delete(_testRoot, recursive: true); }

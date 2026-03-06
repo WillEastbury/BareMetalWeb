@@ -21,7 +21,7 @@ public sealed class AuditServiceTests : IDisposable
         _testFolder = Path.Combine(Path.GetTempPath(), $"audit-test-{Guid.NewGuid():N}");
         Directory.CreateDirectory(_testFolder);
         
-        var provider = new LocalFolderBinaryDataProvider(_testFolder);
+        var provider = new WalDataProvider(_testFolder);
         _store = new DataObjectStore();
         _store.RegisterProvider(provider);
         DataStoreProvider.Current = _store;

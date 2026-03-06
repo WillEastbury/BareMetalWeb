@@ -30,9 +30,8 @@ namespace BareMetalWeb.Data;
 /// </para>
 ///
 /// <para>
-/// Schema versioning follows the same file layout as
-/// <see cref="LocalFolderBinaryDataProvider"/> so the two providers can coexist in
-/// the same data root with full binary-serializer schema-evolution support.
+/// Schema versioning uses a file-per-type layout in the data root with full
+/// binary-serializer schema-evolution support.
 /// </para>
 /// </summary>
 public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDisposable
@@ -79,7 +78,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     private readonly ConcurrentDictionary<string, uint> _tableIds
         = new(StringComparer.OrdinalIgnoreCase);
 
-    // Schema version cache (same pattern as LocalFolderBinaryDataProvider)
+    // Schema version cache
     private readonly ConcurrentDictionary<Type, SchemaCache>  _schemaCache  = new();
     private readonly ConcurrentDictionary<Type, object>       _schemaLocks  = new();
 
@@ -1695,7 +1694,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         }
     }
 
-    // ── Schema management (mirrors LocalFolderBinaryDataProvider) ─────────────
+    // ── Schema management ──────────────────────────────────────────────────────
 
     private sealed class SchemaCache
     {

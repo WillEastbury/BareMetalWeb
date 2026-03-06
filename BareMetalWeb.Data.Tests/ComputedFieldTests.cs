@@ -258,7 +258,7 @@ public class ComputedFieldTests : IDisposable
         try
         {
             Directory.CreateDirectory(tempDir);
-            var provider = new LocalFolderBinaryDataProvider(tempDir);
+            var provider = new WalDataProvider(tempDir);
             var store = new DataObjectStore();
             store.RegisterProvider(provider);
             DataStoreProvider.Current = store;
@@ -311,7 +311,7 @@ public class ComputedFieldTests : IDisposable
         try
         {
             Directory.CreateDirectory(tempDir);
-            var provider = new LocalFolderBinaryDataProvider(tempDir);
+            var provider = new WalDataProvider(tempDir);
             var store = new DataObjectStore();
             store.RegisterProvider(provider);
             DataStoreProvider.Current = store;
@@ -376,7 +376,7 @@ public class ComputedFieldTests : IDisposable
         try
         {
             Directory.CreateDirectory(tempDir);
-            var provider = new LocalFolderBinaryDataProvider(tempDir);
+            var provider = new WalDataProvider(tempDir);
             var store = new DataObjectStore();
             store.RegisterProvider(provider);
             DataStoreProvider.Current = store;
