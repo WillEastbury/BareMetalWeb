@@ -26,18 +26,29 @@ public static class BasketApiHandlers
         context.Response.ContentType = "application/json";
         decimal basketTotal = 0;
         foreach (var i in items) basketTotal += i.LineTotal;
-        var itemProjections = new List<object>(items.Count);
+
+        await using var writer = new Utf8JsonWriter(context.Response.Body);
+        writer.WriteStartObject();
+        writer.WriteNumber("basketKey", basket.Key);
+        writer.WriteString("userId", userId);
+        writer.WriteString("status", basket.Status.ToString());
+        writer.WriteNumber("itemCount", items.Count);
+        writer.WriteNumber("total", basketTotal);
+        writer.WriteStartArray("items");
         foreach (var i in items)
-            itemProjections.Add(new { key = i.Key, productId = i.ProductId, productName = i.ProductName, quantity = i.Quantity, unitPrice = i.UnitPrice, lineTotal = i.LineTotal });
-        await context.Response.WriteAsync(JsonSerializer.Serialize(new
         {
-            basketKey = basket.Key,
-            userId,
-            status = basket.Status.ToString(),
-            itemCount = items.Count,
-            total = basketTotal,
-            items = itemProjections
-        }));
+            writer.WriteStartObject();
+            writer.WriteNumber("key", i.Key);
+            writer.WriteString("productId", i.ProductId);
+            writer.WriteString("productName", i.ProductName);
+            writer.WriteNumber("quantity", i.Quantity);
+            writer.WriteNumber("unitPrice", i.UnitPrice);
+            writer.WriteNumber("lineTotal", i.LineTotal);
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+        await writer.FlushAsync(context.RequestAborted);
     }
 
     public static async ValueTask AddItemHandler(BmwContext context)
