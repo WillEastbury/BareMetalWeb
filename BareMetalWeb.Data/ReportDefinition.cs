@@ -50,38 +50,38 @@ public sealed class ReportDefinition : BaseDataObject
     [System.Text.Json.Serialization.JsonIgnore]
     public List<ReportJoin> Joins
     {
-        get => Deserialize<ReportJoin>(JoinsJson);
-        set => JoinsJson = JsonSerializer.Serialize(value ?? new List<ReportJoin>());
+        get => DeserializeList(JoinsJson, BmwDataJsonContext.Default.ListReportJoin);
+        set => JoinsJson = JsonSerializer.Serialize(value ?? new List<ReportJoin>(), BmwDataJsonContext.Default.ListReportJoin);
     }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public List<ReportColumn> Columns
     {
-        get => Deserialize<ReportColumn>(ColumnsJson);
-        set => ColumnsJson = JsonSerializer.Serialize(value ?? new List<ReportColumn>());
+        get => DeserializeList(ColumnsJson, BmwDataJsonContext.Default.ListReportColumn);
+        set => ColumnsJson = JsonSerializer.Serialize(value ?? new List<ReportColumn>(), BmwDataJsonContext.Default.ListReportColumn);
     }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public List<ReportFilter> Filters
     {
-        get => Deserialize<ReportFilter>(FiltersJson);
-        set => FiltersJson = JsonSerializer.Serialize(value ?? new List<ReportFilter>());
+        get => DeserializeList(FiltersJson, BmwDataJsonContext.Default.ListReportFilter);
+        set => FiltersJson = JsonSerializer.Serialize(value ?? new List<ReportFilter>(), BmwDataJsonContext.Default.ListReportFilter);
     }
 
     [System.Text.Json.Serialization.JsonIgnore]
     public List<ReportParameter> Parameters
     {
-        get => Deserialize<ReportParameter>(ParametersJson);
-        set => ParametersJson = JsonSerializer.Serialize(value ?? new List<ReportParameter>());
+        get => DeserializeList(ParametersJson, BmwDataJsonContext.Default.ListReportParameter);
+        set => ParametersJson = JsonSerializer.Serialize(value ?? new List<ReportParameter>(), BmwDataJsonContext.Default.ListReportParameter);
     }
 
-    private static List<T> Deserialize<T>(string json)
+    private static List<T> DeserializeList<T>(string json, System.Text.Json.Serialization.Metadata.JsonTypeInfo<List<T>> typeInfo)
     {
         try
         {
             return string.IsNullOrWhiteSpace(json)
                 ? new List<T>()
-                : JsonSerializer.Deserialize<List<T>>(json) ?? new List<T>();
+                : JsonSerializer.Deserialize(json, typeInfo) ?? new List<T>();
         }
         catch
         {

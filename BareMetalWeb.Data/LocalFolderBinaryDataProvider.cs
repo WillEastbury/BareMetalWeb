@@ -1142,7 +1142,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         try
         {
             var bytes = File.ReadAllBytes(path);
-            return JsonSerializer.Deserialize<SchemaDefinitionFile>(bytes);
+            return JsonSerializer.Deserialize(bytes, BmwDataJsonContext.Default.SchemaDefinitionFile);
         }
         catch (Exception ex)
         {
@@ -1154,7 +1154,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private void SaveSchemaFile(Type type, SchemaDefinitionFile schema)
     {
         var path = GetSchemaFilePath(type, schema.Version);
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(schema);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(schema, BmwDataJsonContext.Default.SchemaDefinitionFile);
         File.WriteAllBytes(path, bytes);
     }
 

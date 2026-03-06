@@ -33,7 +33,7 @@ public sealed class DashboardDefinition : BaseDataObject
     public List<DashboardTile> Tiles
     {
         get => DeserializeTiles(TilesJson);
-        set => TilesJson = JsonSerializer.Serialize(value ?? new List<DashboardTile>());
+        set => TilesJson = JsonSerializer.Serialize(value ?? new List<DashboardTile>(), BmwDataJsonContext.Default.ListDashboardTile);
     }
 
     private static List<DashboardTile> DeserializeTiles(string json)
@@ -42,7 +42,7 @@ public sealed class DashboardDefinition : BaseDataObject
         {
             return string.IsNullOrWhiteSpace(json)
                 ? new List<DashboardTile>()
-                : JsonSerializer.Deserialize<List<DashboardTile>>(json) ?? new List<DashboardTile>();
+                : JsonSerializer.Deserialize(json, BmwDataJsonContext.Default.ListDashboardTile) ?? new List<DashboardTile>();
         }
         catch
         {
