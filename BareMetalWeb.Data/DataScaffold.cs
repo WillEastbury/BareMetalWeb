@@ -942,7 +942,7 @@ public static class DataScaffold
         var result = new List<Dictionary<string, object?>>();
 
         var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        Array.Sort(properties, (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
+        Array.Sort(properties, (a, b) => string.CompareOrdinal(a.Name, b.Name));
 
         foreach (var prop in properties)
         {
@@ -2540,7 +2540,7 @@ public static class DataScaffold
     {
         var fields = new List<ChildFieldMeta>();
         var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        Array.Sort(properties, (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
+        Array.Sort(properties, (a, b) => string.CompareOrdinal(a.Name, b.Name));
 
         foreach (var prop in properties)
         {
@@ -2581,7 +2581,7 @@ public static class DataScaffold
     {
         var fields = new List<ChildFieldMeta>();
         var properties = childType.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        Array.Sort(properties, (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
+        Array.Sort(properties, (a, b) => string.CompareOrdinal(a.Name, b.Name));
 
         foreach (var prop in properties)
         {
@@ -3698,7 +3698,7 @@ public static class DataScaffold
 
         var fields = new List<DataFieldMetadata>();
         var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        Array.Sort(properties, (a, b) => a.MetadataToken.CompareTo(b.MetadataToken));
+        Array.Sort(properties, (a, b) => string.CompareOrdinal(a.Name, b.Name));
         for (int i = 0; i < properties.Length; i++)
         {
             var prop = properties[i];
