@@ -211,38 +211,56 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
         tableColumns = ["Metric", "Value"];
         tableRows =
         [
-            new[] { "Total Requests", snapshot.TotalRequests.ToString() },
-            new[] { "Errored Requests (5xx)", snapshot.ErrorRequests.ToString() },
-            new[] { "Average Response Time (All Time)", $"{snapshot.AverageResponseTime.TotalMilliseconds:F2} ms" },
-            new[] { "Minimum Response Time (Last 5m)", $"{snapshot.RecentMinimumResponseTime.TotalMilliseconds:F2} ms" },
-            new[] { "Maximum Response Time (Last 5m)", $"{snapshot.RecentMaximumResponseTime.TotalMilliseconds:F2} ms" },
-            new[] { "Average Response Time (Last 5m)", $"{snapshot.RecentAverageResponseTime.TotalMilliseconds:F2} ms" },
-            new[] { "95th Percentile Response Time (Last 5m)", $"{snapshot.RecentP95ResponseTime.TotalMilliseconds:F2} ms" },
-            new[] { "99th Percentile Response Time (Last 5m)", $"{snapshot.RecentP99ResponseTime.TotalMilliseconds:F2} ms" },
-            new[] { "Average Response Time (Last 10s)", $"{snapshot.Recent10sAverageResponseTime.TotalMilliseconds:F2} ms" },
-            new[] { "Pages Served 2xx", snapshot.Requests2xx.ToString() },
-            new[] { "Pages Served 4xx", snapshot.Requests4xx.ToString() },
-            new[] { "Pages Served 5xx", snapshot.Requests5xx.ToString() },
-            new[] { "Pages Served Other", snapshot.RequestsOther.ToString() },
-            new[] { "Pages Throttled (429)", snapshot.ThrottledRequests.ToString() },
-            new[] { "---- MEMORY STATS ----", "" },
+            new[] { "📊 REQUEST STATISTICS", "" },
+            new[] { "Total Requests", snapshot.TotalRequests.ToString("N0") },
+            new[] { "Errored Requests (5xx)", snapshot.ErrorRequests.ToString("N0") },
+
+            new[] { "⏱️ RESPONSE TIMES", "" },
+            new[] { "Average (All Time)", $"{snapshot.AverageResponseTime.TotalMilliseconds:F2} ms" },
+            new[] { "Minimum (Last 5m)", $"{snapshot.RecentMinimumResponseTime.TotalMilliseconds:F2} ms" },
+            new[] { "Maximum (Last 5m)", $"{snapshot.RecentMaximumResponseTime.TotalMilliseconds:F2} ms" },
+            new[] { "Average (Last 5m)", $"{snapshot.RecentAverageResponseTime.TotalMilliseconds:F2} ms" },
+            new[] { "P95 (Last 5m)", $"{snapshot.RecentP95ResponseTime.TotalMilliseconds:F2} ms" },
+            new[] { "P99 (Last 5m)", $"{snapshot.RecentP99ResponseTime.TotalMilliseconds:F2} ms" },
+            new[] { "Average (Last 10s)", $"{snapshot.Recent10sAverageResponseTime.TotalMilliseconds:F2} ms" },
+
+            new[] { "📈 STATUS CODES", "" },
+            new[] { "2xx Success", snapshot.Requests2xx.ToString("N0") },
+            new[] { "4xx Client Error", snapshot.Requests4xx.ToString("N0") },
+            new[] { "5xx Server Error", snapshot.Requests5xx.ToString("N0") },
+            new[] { "Other", snapshot.RequestsOther.ToString("N0") },
+            new[] { "429 Throttled", snapshot.ThrottledRequests.ToString("N0") },
+
+            new[] { "💻 MEMORY & PROCESS", "" },
             new[] { "Process ID (PID)", snapshot.ProcessId.ToString() },
-            new[] { "Process Uptime", FormatUptime(snapshot.ProcessUptime) },
-            new[] { "Working Set (bytes)", FormatSizeBytes(snapshot.WorkingSet64) },
-            new[] { "Virtual Memory Size (bytes)", FormatSizeBytes(snapshot.VirtualMemorySize64) },
-            new[] { "---- CPU / SIMD ----", "" },
-            new[] { "Architecture", RuntimeInformation.ProcessArchitecture.ToString() },
+            new[] { "Uptime", FormatUptime(snapshot.ProcessUptime) },
+            new[] { "Working Set", FormatSizeBytes(snapshot.WorkingSet64) },
+            new[] { "Virtual Memory", FormatSizeBytes(snapshot.VirtualMemorySize64) },
+
+            new[] { "🖥️ ENVIRONMENT", "" },
+            new[] { "Operating System", RuntimeInformation.OSDescription },
             new[] { "OS Architecture", RuntimeInformation.OSArchitecture.ToString() },
-            new[] { "Runtime", RuntimeInformation.FrameworkDescription },
+            new[] { "Process Architecture", RuntimeInformation.ProcessArchitecture.ToString() },
+            new[] { "Processor Count", Environment.ProcessorCount.ToString() },
+            new[] { "CPU", GetCpuModel() },
+            new[] { ".NET Runtime", RuntimeInformation.FrameworkDescription },
+            new[] { "Data Location", DataRoot ?? "(default)" },
+
+            new[] { "⚡ SIMD & VECTOR", "" },
             new[] { "SIMD Vector Width", $"{System.Numerics.Vector<float>.Count * 4 * 8}-bit ({System.Numerics.Vector<float>.Count} floats)" },
-            new[] { "---- Active Acceleration Paths ----", "" },
+
+            new[] { "🚀 ACTIVE ACCELERATION PATHS", "" },
             new[] { "Vector Distance (ANN)", DataLayerCapabilities.VectorDistancePath },
             new[] { "CRC-32C Checksum", DataLayerCapabilities.Crc32CPath },
             new[] { "Key Comparison", DataLayerCapabilities.KeyComparisonPath },
-            new[] { "---- Available CPU Features ----", "" },
+
+            new[] { "🔧 AVAILABLE CPU FEATURES", "" },
             .. GetSimdFeatureRows()
         ];
     }
+
+    /// <summary>Data root directory — set once at startup from configuration.</summary>
+    public static string? DataRoot { get; set; }
 
     private static string FormatUptime(TimeSpan uptime)
     {
@@ -266,6 +284,37 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
         return unitIndex == 0
             ? $"{size:N0} {units[unitIndex]}"
             : $"{size:N2} {units[unitIndex]}";
+    }
+
+    private static string GetCpuModel()
+    {
+        try
+        {
+            if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) && File.Exists("/proc/cpuinfo"))
+            {
+                foreach (var line in File.ReadLines("/proc/cpuinfo"))
+                {
+                    if (line.StartsWith("model name", StringComparison.OrdinalIgnoreCase) ||
+                        line.StartsWith("Model", StringComparison.OrdinalIgnoreCase) ||
+                        line.StartsWith("Hardware", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var colonIdx = line.IndexOf(':');
+                        if (colonIdx >= 0)
+                            return line[(colonIdx + 1)..].Trim();
+                    }
+                }
+            }
+        }
+        catch { /* /proc/cpuinfo not readable */ }
+
+        return RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.Arm64 => "ARM (AArch64)",
+            Architecture.Arm => "ARM (32-bit)",
+            Architecture.X64 => "x86-64",
+            Architecture.X86 => "x86",
+            _ => RuntimeInformation.ProcessArchitecture.ToString()
+        };
     }
 
     private static string[][] GetSimdFeatureRows()
