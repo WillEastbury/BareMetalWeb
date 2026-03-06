@@ -23,6 +23,8 @@ public static class BinaryApiHandlers
     private static IBufferedLogger? _logger;
     private static readonly ConcurrentDictionary<string, MetadataWireSerializer.FieldPlan[]> _plans = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, MetadataWireSerializer.WireSchemaDescriptor> _schemas = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, BmwJsonWriter.JsonFieldFragment[]> _jsonFragments = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, BmwJsonReader.JsonPropertyLookup[]> _jsonLookups = new(StringComparer.OrdinalIgnoreCase);
 
     private const string BinaryContentType = "application/x-bmw-binary";
 
@@ -47,6 +49,33 @@ public static class BinaryApiHandlers
     /// <summary>Public accessor for GetOrBuildPlan, used by DeltaApiHandlers.</summary>
     internal static MetadataWireSerializer.FieldPlan[] GetOrBuildPlanPublic(DataEntityMetadata meta)
         => GetOrBuildPlan(meta);
+
+    private static BmwJsonWriter.JsonFieldFragment[] GetOrBuildFragments(DataEntityMetadata meta)
+    {
+        return _jsonFragments.GetOrAdd(meta.Slug, _ => BmwJsonWriter.BuildFragments(GetOrBuildPlan(meta)));
+    }
+
+    private static BmwJsonReader.JsonPropertyLookup[] GetOrBuildLookup(DataEntityMetadata meta)
+    {
+        return _jsonLookups.GetOrAdd(meta.Slug, _ => BmwJsonReader.BuildLookup(GetOrBuildPlan(meta)));
+    }
+
+    /// <summary>
+    /// Reverse-lookup: find the DataEntityMetadata whose cached plan matches.
+    /// Falls back to null for uncached/ad-hoc plans (callers build fragments inline).
+    /// </summary>
+    private static DataEntityMetadata? FindMetaForPlan(MetadataWireSerializer.FieldPlan[] plan)
+    {
+        foreach (var kvp in _plans)
+        {
+            if (ReferenceEquals(kvp.Value, plan))
+            {
+                DataScaffold.TryGetEntity(kvp.Key, out var meta);
+                return meta;
+            }
+        }
+        return null;
+    }
 
     private static MetadataWireSerializer.FieldPlan[] BuildPlanFromMetadata(DataEntityMetadata meta)
     {
@@ -547,10 +576,14 @@ public static class BinaryApiHandlers
         context.Response.StatusCode = statusCode;
         if (WantsJson(context))
         {
+            // Serialize entity to BSO1 binary, then transcode to JSON —
+            // eliminates System.Text.Json.Utf8JsonWriter from the hot path.
+            var binary = _serializer!.Serialize(entity, plan, 1);
+            var meta = FindMetaForPlan(plan);
+            var frags = meta != null ? GetOrBuildFragments(meta) : BmwJsonWriter.BuildFragments(plan);
             context.Response.ContentType = "application/json";
-            await using var writer = new System.Text.Json.Utf8JsonWriter(context.Response.Body);
-            MetadataWireSerializer.WriteEntityJson(writer, entity, plan);
-            await writer.FlushAsync(context.RequestAborted);
+            BmwJsonWriter.WriteEntity(context.Response.Body, binary, frags);
+            await context.Response.Body.FlushAsync(context.RequestAborted);
         }
         else
         {
@@ -565,10 +598,12 @@ public static class BinaryApiHandlers
     {
         if (WantsJson(context))
         {
+            var meta = FindMetaForPlan(plan);
+            var frags = meta != null ? GetOrBuildFragments(meta) : BmwJsonWriter.BuildFragments(plan);
             context.Response.ContentType = "application/json";
-            await using var writer = new System.Text.Json.Utf8JsonWriter(context.Response.Body);
-            MetadataWireSerializer.WriteEntityListJson(writer, list, plan, list.Count);
-            await writer.FlushAsync(context.RequestAborted);
+            BmwJsonWriter.WriteEntityListFromObjects(
+                context.Response.Body, list, plan, frags, _serializer!, list.Count);
+            await context.Response.Body.FlushAsync(context.RequestAborted);
         }
         else
         {
@@ -583,8 +618,13 @@ public static class BinaryApiHandlers
     {
         if (RequestIsJson(context))
         {
-            using var doc = await System.Text.Json.JsonDocument.ParseAsync(context.HttpRequest.Body, cancellationToken: context.RequestAborted);
-            return MetadataWireSerializer.DeserializeFromJson(doc.RootElement, plan, entityType);
+            // Read JSON body, transcode to BSO1 binary, then deserialize —
+            // eliminates System.Text.Json.JsonDocument from the hot path.
+            var body = await ReadBodyAsync(context);
+            var meta = FindMetaForPlan(plan);
+            var lookup = meta != null ? GetOrBuildLookup(meta) : BmwJsonReader.BuildLookup(plan);
+            var binary = BmwJsonReader.ReadEntity(body.Span, plan, lookup);
+            return _serializer!.Deserialize(binary, plan, entityType);
         }
         else
         {
