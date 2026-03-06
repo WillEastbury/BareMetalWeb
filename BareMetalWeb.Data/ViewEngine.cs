@@ -131,6 +131,8 @@ public sealed class ViewEngine
         // Compile filters
         var filters      = def.Filters;
         var filterEntries = new ViewFilterEntry[filters.Count];
+        // Also build pushed filter QueryDefinitions per entity for data-provider predicate pushdown
+        var pushedFilters = new Dictionary<string, QueryDefinition>(StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i < filters.Count; i++)
         {
             var f = filters[i];
@@ -141,6 +143,17 @@ public sealed class ViewEngine
                 EntitySlug = entitySlug,
                 Predicate  = CompileFilterPredicate(entitySlug, f.Field, f.Operator, f.Value, filterMeta),
             };
+
+            // Accumulate into pushed filter QueryDefinition for this entity
+            if (!pushedFilters.TryGetValue(entitySlug, out var qd))
+                pushedFilters[entitySlug] = qd = new QueryDefinition();
+
+            qd.Clauses.Add(new QueryClause
+            {
+                Field    = f.Field,
+                Operator = MapOperator(f.Operator),
+                Value    = f.Value,
+            });
         }
 
         // Compile sort keys — map "entity.field" aliases to column indices after projection
@@ -173,6 +186,7 @@ public sealed class ViewEngine
             ProjectionMap        = projectionMap,
             JoinLookupFunctions  = joinEntries,
             FilterFunctions      = filterEntries,
+            PushedFilters        = pushedFilters,
             SortKeys             = sortKeys,
             Limit                = def.Limit > 0 ? def.Limit : DefaultRowLimit,
             Offset               = def.Offset >= 0 ? def.Offset : 0,
@@ -461,18 +475,15 @@ public sealed class ViewEngine
     }
 
     /// <summary>
-    /// Builds a <see cref="QueryDefinition"/> from filters that target <paramref name="entitySlug"/>
-    /// so the data provider can apply predicate-pushdown before returning rows.
+    /// Returns the pre-compiled <see cref="QueryDefinition"/> for <paramref name="entitySlug"/>
+    /// from the plan's <see cref="ViewExecutionPlan.PushedFilters"/> map.
+    /// This allows the data provider to apply index-assisted predicate pushdown before
+    /// returning rows, avoiding full table scans when indexes are available.
+    /// Returns null when no filter was defined for the entity.
     /// </summary>
     private static QueryDefinition? BuildPushedFilter(ViewExecutionPlan plan, string entitySlug)
     {
-        // Reuse the same operator mapping as QueryPlanner
-        QueryDefinition? qd = null;
-        // We don't have the raw filter text here; pushed filters come from the ViewDefinition
-        // which we can only access at compile-time. The plan already has compiled predicates
-        // so at this stage we just return null (let WalDataProvider do a full scan then we
-        // apply the compiled predicates via selection vectors above).
-        // For future optimisation: store raw QueryClauses in the plan for WalDataProvider push-down.
+        plan.PushedFilters.TryGetValue(entitySlug, out var qd);
         return qd;
     }
 

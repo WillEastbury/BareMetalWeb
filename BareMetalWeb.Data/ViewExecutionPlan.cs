@@ -29,6 +29,15 @@ public sealed class ViewExecutionPlan
     public DataEntityMetadata? RootEntityMeta { get; init; }
 
     /// <summary>
+    /// Pre-built <see cref="QueryDefinition"/> per entity slug for predicate pushdown.
+    /// Pushed to the data provider's <c>QueryAsync</c> so the store can use index-assisted
+    /// lookups rather than full table scans wherever possible.
+    /// Key = entity slug (case-insensitive).
+    /// </summary>
+    public IReadOnlyDictionary<string, QueryDefinition> PushedFilters { get; init; }
+        = new Dictionary<string, QueryDefinition>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Output column descriptors, in projection order.
     /// Each entry contains the entity slug, field name, display alias and a compiled getter delegate
     /// that extracts the field value from a <see cref="BaseDataObject"/> without reflection.
