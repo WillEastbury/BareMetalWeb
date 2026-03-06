@@ -374,4 +374,72 @@ dashboard).
 
 ---
 
-_Status: Updated @ commit HEAD (2026-03-05) — extended hardware acceleration section with SimdDistance FMA paths, WalLatin1Key32 word comparison, CRC slicing-by-4 software fallback; added striped WalHeadMap description_
+### Columnstore Ordinal Indirection — `ColumnarStore` / `OrdinalMap` / `FreeOrdinalStack`
+
+`ColumnarStore` is a per-entity in-memory cache of dense typed arrays (one per
+numeric field) that enables SIMD column scans without reloading all objects.  It is
+lazily built on the first vectorised query and maintained incrementally thereafter.
+
+#### Stable id → ordinal mapping (`OrdinalMap`)
+
+Each live row is addressed by a **stable ordinal** (`uint`) — its position in the
+dense column arrays.  Ordinals are allocated and tracked by `OrdinalMap`:
+
+```
+OrdinalMap:
+  Dictionary<uint,uint>  _idToOrdinal   id   → ordinal  (live rows only)
+  uint[]                 _ordinalToId   ordinal → id     (0 = freed slot)
+  uint                   HighWater      one past the highest ever-allocated ordinal
+  FreeOrdinalStack       FreeStack      freed ordinals available for reuse
+```
+
+- **Upsert(id)**: returns `(ordinal, isNew)`.  New ids pop from the free stack first;
+  if the stack is empty the `HighWater` mark is incremented.
+- **Remove(id)**: writes `0` into `_ordinalToId[ordinal]` (tombstone) and pushes the
+  ordinal onto the `FreeOrdinalStack`.
+
+Indexes always reference **IDs**; ordinals are a private layout detail of
+`ColumnarStore`.
+
+#### Freed-ordinal pooling (`FreeOrdinalStack`)
+
+`FreeOrdinalStack` is a simple LIFO stack of `uint` values.  When a row is deleted
+its ordinal is pushed onto the stack; the next insert pops that ordinal rather than
+allocating a new slot, keeping column arrays dense and avoiding unbounded growth
+under steady-state insert/delete churn.
+
+#### Validity bitmap
+
+Because freed ordinals are reused lazily there can be a brief window where a slot
+is freed but not yet reused.  A `ulong[]` validity bitmap (one bit per ordinal)
+tracks which slots are live.  `ScanClause` ANDs every scan result against this
+bitmap before returning, so stale column values in freed slots are never visible
+to callers.
+
+#### Incremental update protocol
+
+| Event | `ColumnarStore` call | Effect |
+|---|---|---|
+| `Save<T>` (insert or update) | `UpsertRow<T>(obj, meta)` | Upserts ordinal; grows arrays if needed; writes column values; sets validity bit |
+| `Delete<T>` | `RemoveRow(key)` | Clears validity bit; pushes ordinal onto free stack |
+| `SaveRecord` (DataRecord path) | `Invalidate()` | Marks stale; next query triggers full rebuild |
+| First query after startup | `Build<T>(objects, meta)` | Full rebuild; ordinals 0, 1, 2, … assigned in input order |
+
+`UpsertRow` and `RemoveRow` do **not** change `Version` — that stamp is reserved for
+`Build()` and `Invalidate()`.  `GetOrBuildColumnarStore` therefore only rebuilds
+when `Invalidate()` is called (e.g. from the `SaveRecord` path), not on every write.
+
+#### Scan range vs live count
+
+| Property | Meaning |
+|---|---|
+| `RowCount` | Number of live rows (`OrdinalMap.Count`) |
+| `Capacity` | `OrdinalMap.HighWater` — size of column arrays; scan loops run `[0, Capacity)` |
+| `ScanWordCount` | `(Capacity + 63) >> 6` — number of `ulong` bitmask words required |
+
+Callers should use `store.ScanWordCount` (not `(RowCount + 63) >> 6`) when there
+are freed slots between live rows.
+
+---
+
+_Status: Updated @ commit HEAD (2026-03-06) — added Columnstore Ordinal Indirection section describing OrdinalMap, FreeOrdinalStack, validity bitmap, and incremental UpsertRow/RemoveRow protocol_
