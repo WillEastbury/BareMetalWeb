@@ -12,6 +12,9 @@ public static class HttpContextCookieExtensions
 
     public static void SetCookie(this HttpContext context, string name, string value, CookieOptions? options = null)
     {
+        if (context.Response.HasStarted)
+            return;
+
         options ??= new CookieOptions
         {
             HttpOnly = true,
@@ -24,6 +27,9 @@ public static class HttpContextCookieExtensions
 
     public static void DeleteCookie(this HttpContext context, string name)
     {
+        if (context.Response.HasStarted)
+            return;
+
         context.Response.Cookies.Delete(name);
     }
 

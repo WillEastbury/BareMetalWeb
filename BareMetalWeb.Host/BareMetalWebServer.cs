@@ -475,8 +475,8 @@ public class BareMetalWebServer : IBareWebHost
                 }
                 if (!await IsAuthorizedAsync(page.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
                 {
-                    await RenderForbidden(bmwCtx);
                     await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, page.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                    await RenderForbidden(bmwCtx);
                     return;
                 }
                 await page.Handler(bmwCtx);
@@ -492,8 +492,8 @@ public class BareMetalWebServer : IBareWebHost
                 }
                 if (!await IsAuthorizedAsync(allPage.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
                 {
-                    await RenderForbidden(bmwCtx);
                     await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, allPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                    await RenderForbidden(bmwCtx);
                     return;
                 }
                 await allPage.Handler(bmwCtx);
@@ -521,8 +521,8 @@ public class BareMetalWebServer : IBareWebHost
                     }
                     if (!await IsAuthorizedAsync(injectedPage.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
                     {
-                        await RenderForbidden(bmwCtx);
                         await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                        await RenderForbidden(bmwCtx);
                         return;
                     }
                     await injectedPage.Handler(bmwCtx);
@@ -553,8 +553,8 @@ public class BareMetalWebServer : IBareWebHost
                     }
                     if (!await IsAuthorizedAsync(injectedPage.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
                     {
-                        await RenderForbidden(bmwCtx);
                         await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                        await RenderForbidden(bmwCtx);
                         return;
                     }
                     await injectedPage.Handler(bmwCtx);
