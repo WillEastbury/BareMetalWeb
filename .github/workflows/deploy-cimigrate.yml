@@ -56,10 +56,9 @@ jobs:
           creds: ${{ secrets.AZURE_CREDENTIALS_CIMIGRATE }}
 
       - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: baremetalweb-cimigrate
-          package: ./publish
+        run: |
+          cd ./publish
+          az webapp up --name baremetalweb-cimigrate --os-type Linux --runtime "DOTNETCORE:10.0"
 
   integration-tests:
     runs-on: ubuntu-latest
