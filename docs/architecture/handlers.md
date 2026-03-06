@@ -34,6 +34,7 @@ Each group of related routes has a dedicated `Register*` extension method on
 | `RegisterMcpRoutes` | `POST /mcp` |
 | `RegisterOpenApiRoute` | `GET /openapi.json` |
 | `RegisterReportRoutes` | `GET/GET /reports/*`, `GET /api/reports/*` |
+| `RegisterDashboardRoutes` | `GET /dashboards`, `GET /dashboards/{id}`, `GET /api/dashboards`, `GET /api/dashboards/{id}` |
 
 ---
 
@@ -738,6 +739,39 @@ Registered by `RegisterReportRoutes`.  All routes require Admin permission.
 | `GET /reports/{id}` | Execute a report and render the result as a styled HTML page using `ReportHtmlRenderer` (streamed via `PipeWriter`).  Accepts query parameters matching the report's `Parameters` list. |
 | `GET /api/reports/{id}` | Execute a report and return JSON or CSV (`?format=csv`). |
 | `GET /api/reports/_distinct/{entity}/{field}` | Returns distinct field values for a given entity field; used to populate parameter dropdowns in report forms. |
+
+---
+
+## Dashboard Routes
+
+Registered by `RegisterDashboardRoutes`.  All routes require Admin permission.
+
+A **dashboard** is a grid of KPI tiles, each of which computes a live aggregate
+(`count`, `sum`, `avg`, `min`, `max`) over an entity store.  Dashboards are
+persisted as `DashboardDefinition` records; each definition stores its tile
+configuration as a JSON array (`DashboardTile`).
+
+| Route | Description |
+|---|---|
+| `GET /dashboards` | List all `DashboardDefinition` records with view links (HTML). |
+| `GET /dashboards/{id}` | Render a dashboard as a Bootstrap KPI grid (HTML, streamed via `PipeWriter`).  Tiles display live aggregate values; page includes a client-side auto-refresh script every 60 s. |
+| `GET /api/dashboards` | JSON list of all dashboards (`id`, `name`, `description`, `tileCount`). |
+| `GET /api/dashboards/{id}` | JSON dashboard with resolved KPI values: each tile includes `displayValue`, `rawValue`, and optional `sparkline` bars. |
+
+### DashboardTile fields
+
+| Field | Description |
+|---|---|
+| `Title` | Card header label |
+| `Icon` | Bootstrap icon class, e.g. `bi-currency-dollar` |
+| `Color` | Bootstrap variant: `primary` / `success` / `danger` / `warning` / `info` / `secondary` |
+| `EntitySlug` | Slug of the entity to aggregate |
+| `AggregateFunction` | `count` / `sum` / `avg` / `min` / `max` |
+| `AggregateField` | Field to aggregate (required for non-count functions) |
+| `FilterField` / `FilterValue` | Optional equality filter on the entity query |
+| `ValuePrefix` / `ValueSuffix` | Optional formatting around the result, e.g. `$` / `%` |
+| `DecimalPlaces` | `-1` = auto; `0`+ = fixed decimal places |
+| `SparklineEntitySlug` / `SparklineGroupField` | Optional sparkline mini chart — groups records by field and renders an SVG bar chart beneath the KPI value |
 
 ---
 

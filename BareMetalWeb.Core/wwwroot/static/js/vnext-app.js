@@ -4606,7 +4606,7 @@
     // Tools dropdown (sample data, wipe data)
     const toolsLi = el('li', { className: 'nav-item dropdown' });
     const toolsToggle = el('a', {
-      className: 'nav-link dropdown-toggle' + (['_sample-data', '_wipe-data', '_query-plans'].includes(activeSlug) ? ' active' : ''),
+      className: 'nav-link dropdown-toggle' + (['_sample-data', '_wipe-data', '_query-plans', '_dashboards'].includes(activeSlug) ? ' active' : ''),
       href: '#', role: 'button', title: 'Admin Tools'
     });
     toolsToggle.setAttribute('data-bs-toggle', 'dropdown');
@@ -4617,7 +4617,8 @@
     [
       { slug: '_sample-data', label: '\uD83E\uDDEA Generate Sample Data' },
       { slug: '_wipe-data',   label: '\uD83D\uDDD1\uFE0F Wipe All Data' },
-      { slug: '_query-plans', label: '\uD83D\uDCCA Query Plan History' }
+      { slug: '_query-plans', label: '\uD83D\uDCCA Query Plan History' },
+      { slug: '_dashboards',  label: '\uD83D\uDCCA Dashboards' }
     ].forEach(function (t) {
       const mli = el('li');
       const ma  = el('a', { className: 'dropdown-item' + (activeSlug === t.slug ? ' active' : ''), href: BASE + '/' + t.slug, textContent: t.label });
@@ -4956,6 +4957,136 @@
     loadPlans();
   }
 
+  // ── Dashboard / KPI view ──────────────────────────────────────────────────
+
+  function renderDashboardsListPage(container) {
+    container.appendChild(el('h2', { className: 'mb-3', textContent: '\uD83D\uDCCA Dashboards' }));
+    container.appendChild(el('p', { className: 'text-muted', textContent: 'Executive KPI dashboards with live aggregate tiles. Create and manage dashboards via Dashboard Definitions.' }));
+
+    var addLink = el('a', { href: BASE + '/dashboard-definitions/create', className: 'btn btn-sm btn-primary mb-3', textContent: '+ New Dashboard' });
+    addLink.setAttribute('data-go', '');
+    container.appendChild(addLink);
+
+    var listWrap = el('div');
+    container.appendChild(listWrap);
+
+    apiFetch('/api/dashboards')
+      .then(function (dashboards) {
+        listWrap.innerHTML = '';
+        if (!Array.isArray(dashboards) || dashboards.length === 0) {
+          listWrap.innerHTML = '<div class="bm-empty-state"><i class="bi bi-speedometer2"></i><p>No dashboards defined yet</p><small>Create one via <a href="' + BASE + '/dashboard-definitions/create" data-go>Dashboard Definitions</a></small></div>';
+          wire();
+          return;
+        }
+        var row = el('div', { className: 'row g-3' });
+        dashboards.forEach(function (d) {
+          var card = el('div', { className: 'col-sm-6 col-md-4 col-lg-3' });
+          var inner = el('div', { className: 'card h-100' });
+          var body = el('div', { className: 'card-body' });
+          body.appendChild(el('h5', { className: 'card-title', innerHTML: '<i class="bi bi-speedometer2 me-2"></i>' + escHtml(d.name) }));
+          if (d.description) body.appendChild(el('p', { className: 'card-text text-muted small', textContent: d.description }));
+          body.appendChild(el('p', { className: 'card-text', innerHTML: '<small class="text-muted">' + escHtml(String(d.tileCount)) + ' KPI tile' + (d.tileCount !== 1 ? 's' : '') + '</small>' }));
+          var footer = el('div', { className: 'card-footer d-flex gap-2' });
+          var viewBtn = el('a', { href: BASE + '/_dashboards/' + encodeURIComponent(String(d.id)), className: 'btn btn-sm btn-primary', innerHTML: '<i class="bi bi-eye"></i> View' });
+          viewBtn.setAttribute('data-go', '');
+          footer.appendChild(viewBtn);
+          var editBtn = el('a', { href: BASE + '/dashboard-definitions/' + encodeURIComponent(String(d.id)) + '/edit', className: 'btn btn-sm btn-outline-secondary', innerHTML: '<i class="bi bi-pencil"></i> Edit' });
+          editBtn.setAttribute('data-go', '');
+          footer.appendChild(editBtn);
+          inner.appendChild(body);
+          inner.appendChild(footer);
+          card.appendChild(inner);
+          row.appendChild(card);
+        });
+        listWrap.appendChild(row);
+        wire();
+      })
+      .catch(function (err) {
+        listWrap.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';
+      });
+  }
+
+  function renderDashboardViewPage(container, dashId) {
+    var hdr = el('div', { className: 'd-flex align-items-center gap-3 mb-3 flex-wrap' });
+    hdr.appendChild(el('h2', { className: 'mb-0', textContent: '\uD83D\uDCCA Dashboard' }));
+    var backLink = el('a', { href: BASE + '/_dashboards', className: 'btn btn-outline-secondary btn-sm', innerHTML: '<i class="bi bi-arrow-left"></i> All Dashboards' });
+    backLink.setAttribute('data-go', '');
+    hdr.appendChild(backLink);
+    var refreshBtn = el('button', { className: 'btn btn-outline-secondary btn-sm', innerHTML: '<i class="bi bi-arrow-clockwise"></i> Refresh' });
+    hdr.appendChild(refreshBtn);
+    container.appendChild(hdr);
+
+    var descEl = el('p', { className: 'text-muted' });
+    container.appendChild(descEl);
+
+    var tilesWrap = el('div', { className: 'row g-3', id: 'bm-dashboard-tiles' });
+    container.appendChild(tilesWrap);
+
+    function colorToBs(color) {
+      var allowed = ['primary','success','danger','warning','info','secondary','dark','light'];
+      return allowed.includes(color) ? color : 'primary';
+    }
+
+    function buildSparklineSvg(bars, color) {
+      if (!bars || bars.length === 0) return '';
+      var max = Math.max.apply(null, bars.map(function(b){return b.value;}));
+      if (max <= 0) max = 1;
+      var w = 160, h = 40, pad = 2;
+      var barW = Math.max(1, Math.floor((w - pad * (bars.length + 1)) / bars.length));
+      var cssColors = { success: '#198754', danger: '#dc3545', warning: '#ffc107', info: '#0dcaf0', secondary: '#6c757d' };
+      var fill = cssColors[color] || '#0d6efd';
+      var svg = '<svg viewBox="0 0 ' + w + ' ' + h + '" width="' + w + '" height="' + h + '" aria-hidden="true">';
+      bars.forEach(function (b, i) {
+        var barH = Math.max(1, Math.round((b.value / max) * (h - 2)));
+        var x = pad + i * (barW + pad);
+        var y = h - barH;
+        svg += '<rect x="' + x + '" y="' + y + '" width="' + barW + '" height="' + barH + '" fill="' + fill + '" opacity="0.7" rx="1"><title>' + escHtml(b.label) + ': ' + b.value + '</title></rect>';
+      });
+      svg += '</svg>';
+      return svg;
+    }
+
+    function renderTiles(data) {
+      tilesWrap.innerHTML = '';
+      if (data.name) hdr.querySelector('h2').textContent = '\uD83D\uDCCA ' + data.name;
+      if (data.description) descEl.textContent = data.description;
+      if (!data.tiles || data.tiles.length === 0) {
+        tilesWrap.innerHTML = '<div class="col-12"><div class="bm-empty-state"><i class="bi bi-speedometer2"></i><p>No KPI tiles configured</p></div></div>';
+        return;
+      }
+      data.tiles.forEach(function (t, idx) {
+        var color = colorToBs(t.color);
+        var col = el('div', { className: 'col-6 col-md-4 col-lg-3' });
+        col.innerHTML =
+          '<div class="card border-' + color + ' h-100">' +
+          '<div class="card-header bg-' + color + ' text-white d-flex align-items-center gap-2">' +
+          '<i class="bi ' + escHtml(t.icon || 'bi-bar-chart-fill') + '"></i> ' + escHtml(t.title || '') +
+          '</div>' +
+          '<div class="card-body text-center py-4">' +
+          '<div class="display-5 fw-bold" id="bm-kpi-value-' + idx + '">' + escHtml(t.displayValue || '—') + '</div>' +
+          (t.sparkline && t.sparkline.length > 0 ? '<div class="mt-2">' + buildSparklineSvg(t.sparkline, color) + '</div>' : '') +
+          '</div></div>';
+        tilesWrap.appendChild(col);
+      });
+    }
+
+    function loadDashboard() {
+      apiFetch('/api/dashboards/' + encodeURIComponent(dashId))
+        .then(function (data) { renderTiles(data); wire(); })
+        .catch(function (err) {
+          tilesWrap.innerHTML = '<div class="col-12"><div class="alert alert-danger">' + escHtml(err.message) + '</div></div>';
+        });
+    }
+
+    refreshBtn.addEventListener('click', loadDashboard);
+    loadDashboard();
+
+    // Auto-refresh every 60 seconds
+    var autoRefreshHandle = setInterval(loadDashboard, 60000);
+    // Clean up interval on navigation
+    window.addEventListener('popstate', function () { clearInterval(autoRefreshHandle); }, { once: true });
+  }
+
   async function route() {
     const p      = location.pathname.replace(/^\//, '').split('/').filter(Boolean);
     const slug   = p[0], rawId = p[1], action = p[2];
@@ -5022,6 +5153,24 @@
         const main = el('div', { className: 'container mt-3' });
         R.appendChild(main);
         renderQueryPlansPage(main);
+        wire(); return;
+      }
+
+      // ── Dashboards list page ──────────────────────────────────────────────
+      if (slug === '_dashboards' && !rawId) {
+        R.replaceChildren(navbar('_dashboards'));
+        const main = el('div', { className: 'container mt-3' });
+        R.appendChild(main);
+        renderDashboardsListPage(main);
+        wire(); return;
+      }
+
+      // ── Individual dashboard view ─────────────────────────────────────────
+      if (slug === '_dashboards' && rawId) {
+        R.replaceChildren(navbar('_dashboards'));
+        const main = el('div', { className: 'container mt-3' });
+        R.appendChild(main);
+        renderDashboardViewPage(main, rawId);
         wire(); return;
       }
 

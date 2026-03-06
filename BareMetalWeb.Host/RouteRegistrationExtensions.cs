@@ -2318,4 +2318,179 @@ public static class RouteRegistrationExtensions
         w.WriteEndObject();
         await w.FlushAsync(context.RequestAborted);
     }
+
+    // ── Dashboard routes ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Register dashboard listing and rendering routes.
+    /// GET  /dashboards           → list all dashboard definitions
+    /// GET  /dashboards/{id}      → render a dashboard with live KPI tiles (HTML)
+    /// GET  /api/dashboards       → JSON list of all dashboard definitions
+    /// GET  /api/dashboards/{id}  → JSON with resolved KPI values for one dashboard
+    /// </summary>
+    public static void RegisterDashboardRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        // ── GET /dashboards — HTML listing ───────────────────────────────────
+        host.RegisterRoute("GET /dashboards", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right,
+                navLabel: "Dashboards", navSubGroup: "🔧 Tools"),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.Redirect("/login"); return; }
+                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
+
+                var dashboards = new List<DashboardDefinition>(DataStoreProvider.Current.Query<DashboardDefinition>(null));
+                dashboards.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
+                var nonce = context.GetCspNonce();
+                var safeNonce = WebUtility.HtmlEncode(nonce);
+                var safeToken = WebUtility.HtmlEncode(CsrfProtection.EnsureToken(context));
+
+                var sb = new StringBuilder(4096);
+                ReportHtmlRenderer.AppendChromeHead(sb, "Dashboards", safeNonce, safeToken);
+                ReportHtmlRenderer.AppendChromeNavbar(sb, host, safeNonce);
+                sb.Append("<div class=\"container-fluid py-4 px-4 bm-content\">");
+                sb.Append("<div class=\"card shadow-sm bm-page-card\">");
+                sb.Append("<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
+                sb.Append("<h1 class=\"h5 mb-0\"><i class=\"bi bi-speedometer2\"></i> Dashboards</h1>");
+                sb.Append("<a href=\"/dashboard-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New Dashboard</a>");
+                sb.Append("</div><div class=\"card-body\">");
+
+                if (dashboards.Count == 0)
+                {
+                    sb.Append("<div class=\"text-center py-5 text-muted\">No dashboards defined yet. Create one via <a href=\"/dashboard-definitions/create\">Dashboard Definitions</a>.</div>");
+                }
+                else
+                {
+                    sb.Append("<div class=\"row g-3\">");
+                    foreach (var d in dashboards)
+                    {
+                        var tiles = d.Tiles;
+                        sb.Append("<div class=\"col-sm-6 col-md-4 col-lg-3\">");
+                        sb.Append("<div class=\"card h-100\">");
+                        sb.Append("<div class=\"card-body\">");
+                        sb.Append("<h5 class=\"card-title\"><i class=\"bi bi-speedometer2 me-2\"></i>");
+                        sb.Append(WebUtility.HtmlEncode(d.Name));
+                        sb.Append("</h5>");
+                        if (!string.IsNullOrWhiteSpace(d.Description))
+                        {
+                            sb.Append("<p class=\"card-text text-muted small\">");
+                            sb.Append(WebUtility.HtmlEncode(d.Description));
+                            sb.Append("</p>");
+                        }
+                        sb.Append("<p class=\"card-text\"><small class=\"text-muted\">");
+                        sb.Append(tiles.Count);
+                        sb.Append(" KPI tile");
+                        if (tiles.Count != 1) sb.Append('s');
+                        sb.Append("</small></p>");
+                        sb.Append("</div><div class=\"card-footer\">");
+                        sb.Append("<a href=\"/dashboards/");
+                        sb.Append(WebUtility.UrlEncode(d.Key.ToString()));
+                        sb.Append("\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-eye\"></i> View</a>");
+                        sb.Append("</div></div></div>");
+                    }
+                    sb.Append("</div>");
+                }
+
+                sb.Append("</div></div></div>");
+                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context.HttpContext);
+                context.Response.ContentType = "text/html; charset=utf-8";
+                await context.Response.WriteAsync(sb.ToString());
+            }));
+
+        // ── GET /dashboards/{id} — HTML dashboard render ─────────────────────
+        host.RegisterRoute("GET /dashboards/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.Redirect("/login"); return; }
+                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
+
+                var id = GetRouteParam(context, "id");
+                if (string.IsNullOrWhiteSpace(id) || !uint.TryParse(id, out var dashId))
+                { context.Response.StatusCode = 400; await context.Response.WriteAsync("Invalid dashboard id."); return; }
+
+                var def = await DataStoreProvider.Current.LoadAsync<DashboardDefinition>(dashId, context.RequestAborted).ConfigureAwait(false);
+                if (def == null)
+                { context.Response.StatusCode = 404; await context.Response.WriteAsync("Dashboard not found."); return; }
+
+                var nonce = context.GetCspNonce();
+                var safeNonce = WebUtility.HtmlEncode(nonce);
+                var safeToken = WebUtility.HtmlEncode(CsrfProtection.EnsureToken(context));
+
+                var pipeWriter = System.IO.Pipelines.PipeWriter.Create(context.Response.Body);
+                context.Response.ContentType = "text/html; charset=utf-8";
+                await DashboardHtmlRenderer.RenderAsync(pipeWriter, def, host, safeNonce, safeToken, context.HttpContext, context.RequestAborted);
+                await pipeWriter.CompleteAsync();
+            }));
+
+        // ── GET /api/dashboards — JSON list ──────────────────────────────────
+        host.RegisterRoute("GET /api/dashboards", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
+
+                var dashboards = new List<DashboardDefinition>(DataStoreProvider.Current.Query<DashboardDefinition>(null));
+                dashboards.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
+                var list = dashboards.Select(d => new
+                {
+                    id = d.Key,
+                    name = d.Name,
+                    description = d.Description,
+                    tileCount = d.Tiles.Count
+                });
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(list, JsonCompact));
+            }));
+
+        // ── GET /api/dashboards/{id} — JSON with resolved KPI values ─────────
+        host.RegisterRoute("GET /api/dashboards/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
+
+                var id = GetRouteParam(context, "id");
+                if (string.IsNullOrWhiteSpace(id) || !uint.TryParse(id, out var dashId))
+                { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Invalid dashboard id\"}"); return; }
+
+                var def = await DataStoreProvider.Current.LoadAsync<DashboardDefinition>(dashId, context.RequestAborted).ConfigureAwait(false);
+                if (def == null)
+                { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Dashboard not found\"}"); return; }
+
+                var resolvedTiles = await DashboardHtmlRenderer.ResolveTilesAsync(def.Tiles, context.RequestAborted);
+                var tileProjections = resolvedTiles.Select(r => new
+                {
+                    title = r.Tile.Title,
+                    icon = r.Tile.Icon,
+                    color = r.Tile.Color,
+                    entitySlug = r.Tile.EntitySlug,
+                    aggregateFunction = r.Tile.AggregateFunction,
+                    displayValue = r.DisplayValue,
+                    rawValue = r.RawValue?.ToString(),
+                    sparkline = r.Sparkline?.Select(b => new { label = b.Label, value = b.Value }).ToArray()
+                }).ToArray();
+                var json = new
+                {
+                    id = def.Key,
+                    name = def.Name,
+                    description = def.Description,
+                    tiles = tileProjections
+                };
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(json, JsonIndented));
+            }));
+    }
 }
