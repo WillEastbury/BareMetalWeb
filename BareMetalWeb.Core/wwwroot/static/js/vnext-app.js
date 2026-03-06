@@ -4985,6 +4985,19 @@
       '<span id="vnext-jobs-badge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none">0</span>';
     jobsLi.appendChild(jobsA);
     rightUl.appendChild(jobsLi);
+
+    // Search icon button (opens global search modal, Ctrl+K)
+    const searchLi = el('li', { className: 'nav-item' });
+    const searchBtn = el('button', {
+      className: 'btn btn-link nav-link',
+      title: 'Global Search (Ctrl+K)'
+    });
+    searchBtn.setAttribute('type', 'button');
+    searchBtn.innerHTML = '<i class="bi bi-search"></i>';
+    searchBtn.addEventListener('click', openGlobalSearchModal);
+    searchLi.appendChild(searchBtn);
+    rightUl.appendChild(searchLi);
+
     nav.appendChild(rightUl);
 
     // Sync badge after DOM insertion
@@ -4992,6 +5005,138 @@
 
     return nav;
   }
+
+  // ── Global Search Modal ──────────────────────────────────────────────────────
+  function openGlobalSearchModal() {
+    const modalId = 'vnext-global-search-modal';
+    const existing = document.getElementById(modalId);
+    if (existing) {
+      const bsEx = bootstrap.Modal.getInstance(existing) || new bootstrap.Modal(existing);
+      bsEx.show();
+      setTimeout(function () {
+        const inp = document.getElementById(modalId + '-input');
+        if (inp) inp.focus();
+      }, 300);
+      return;
+    }
+
+    let container = document.getElementById('vnext-modal-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'vnext-modal-container';
+      document.body.appendChild(container);
+    }
+
+    const html =
+      '<div class="modal fade" id="' + modalId + '" tabindex="-1" aria-modal="true" role="dialog">' +
+        '<div class="modal-dialog modal-lg modal-dialog-scrollable">' +
+          '<div class="modal-content">' +
+            '<div class="modal-header py-2">' +
+              '<div class="input-group">' +
+                '<span class="input-group-text bg-transparent border-0"><i class="bi bi-search"></i></span>' +
+                '<input type="text" class="form-control border-0 shadow-none fs-5" id="' + modalId + '-input"' +
+                  ' placeholder="Search across all modules\u2026" autocomplete="off" />' +
+                '<span class="input-group-text bg-transparent border-0 text-muted small">Ctrl+K</span>' +
+              '</div>' +
+              '<button type="button" class="btn-close ms-2" data-bs-dismiss="modal" aria-label="Close"></button>' +
+            '</div>' +
+            '<div class="modal-body" id="' + modalId + '-results">' +
+              '<p class="text-muted text-center py-4">Type to search across all modules you have access to.</p>' +
+            '</div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+
+    container.insertAdjacentHTML('beforeend', html);
+    const modalEl  = document.getElementById(modalId);
+    const bsModal  = new bootstrap.Modal(modalEl);
+    const input    = document.getElementById(modalId + '-input');
+    const resultsDiv = document.getElementById(modalId + '-results');
+    let debounceTimer = null;
+
+    input.addEventListener('input', function () {
+      clearTimeout(debounceTimer);
+      const searchTerm = input.value.trim();
+      if (searchTerm.length < 2) {
+        resultsDiv.innerHTML = '<p class="text-muted text-center py-4">Type at least 2 characters to search.</p>';
+        return;
+      }
+      resultsDiv.innerHTML = '<p class="text-muted text-center py-3"><span class="spinner-border spinner-border-sm me-2"></span>Searching\u2026</p>';
+      debounceTimer = setTimeout(function () {
+        apiGet('/api/_global-search?q=' + encodeURIComponent(searchTerm))
+          .then(function (data) {
+            renderGlobalSearchResults(resultsDiv, data, searchTerm, bsModal);
+          })
+          .catch(function (err) {
+            resultsDiv.innerHTML = '<div class="alert alert-danger m-3">' + esc(err.message) + '</div>';
+          });
+      }, 300);
+    });
+
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { bsModal.hide(); }
+    });
+
+    modalEl.addEventListener('hidden.bs.modal', function () {
+      modalEl.remove();
+    });
+
+    bsModal.show();
+    setTimeout(function () { input.focus(); }, 300);
+  }
+
+  function renderGlobalSearchResults(container, data, searchTerm, modal) {
+    container.innerHTML = '';
+    const groups = (data && data.groups) ? data.groups : [];
+    if (groups.length === 0) {
+      container.innerHTML = '<p class="text-muted text-center py-4">No results found for <strong>' + esc(searchTerm) + '</strong>.</p>';
+      return;
+    }
+    groups.forEach(function (group) {
+      const section = document.createElement('div');
+      section.className = 'mb-3';
+
+      const heading = document.createElement('div');
+      heading.className = 'fw-semibold text-muted small text-uppercase px-3 pb-1 pt-2 border-bottom';
+      heading.textContent = group.name;
+      section.appendChild(heading);
+
+      const list = document.createElement('div');
+      list.className = 'list-group list-group-flush';
+      (group.items || []).forEach(function (item) {
+        const a = document.createElement('a');
+        a.className = 'list-group-item list-group-item-action px-3 py-2';
+        a.href = BASE + '/' + encodeURIComponent(group.slug) + '/' + encodeURIComponent(item.id);
+        a.setAttribute('data-go', '');
+        a.innerHTML = highlightMatch(esc(item.label), esc(searchTerm));
+        a.addEventListener('click', function (e) {
+          e.preventDefault();
+          if (modal) modal.hide();
+          go(a.getAttribute('href'));
+        });
+        list.appendChild(a);
+      });
+      section.appendChild(list);
+      container.appendChild(section);
+    });
+  }
+
+  function highlightMatch(escapedText, escapedQuery) {
+    if (!escapedQuery) return escapedText;
+    const idx = escapedText.toLowerCase().indexOf(escapedQuery.toLowerCase());
+    if (idx < 0) return escapedText;
+    return escapedText.substring(0, idx) +
+      '<mark class="p-0">' + escapedText.substring(idx, idx + escapedQuery.length) + '</mark>' +
+      escapedText.substring(idx + escapedQuery.length);
+  }
+
+  // Ctrl+K shortcut to open global search
+  document.addEventListener('keydown', function (e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      openGlobalSearchModal();
+    }
+  });
 
   function renderSampleDataPage(container) {
     container.appendChild(el('h2', { className: 'mb-3', textContent: '\u{1F9EA} Generate Sample Data' }));

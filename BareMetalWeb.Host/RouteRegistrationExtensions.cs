@@ -549,6 +549,11 @@ public static class RouteRegistrationExtensions
         // Lookup API routes are registered separately via RegisterLookupApiRoutes()
         // which must be called before this method (see BareMetalWebExtensions.cs).
 
+        // Global search — must precede /api/{type} routes to avoid '_global-search' matching {type}
+        host.RegisterRoute("GET /api/_global-search", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.GlobalSearchHandler));
+
         // Background job status — must precede /api/{type}/{id} to avoid 'jobs' matching {type}
         host.RegisterRoute("GET /api/jobs", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),

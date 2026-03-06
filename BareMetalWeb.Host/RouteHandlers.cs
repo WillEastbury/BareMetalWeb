@@ -4461,6 +4461,96 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.StatusCode = StatusCodes.Status204NoContent;
     }
 
+    public async ValueTask GlobalSearchHandler(BmwContext context)
+    {
+        var q = context.HttpRequest.Query["q"].ToString().Trim();
+        if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
+        {
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"groups\":[]}").ConfigureAwait(false);
+            return;
+        }
+
+        const int maxPerGroup = 5;
+
+        var user            = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        var userPermissions = user?.Permissions ?? Array.Empty<string>();
+
+        var groups = new List<Dictionary<string, object?>>();
+
+        foreach (var entityMeta in DataScaffold.Entities)
+        {
+            if (!IsEntityAccessible(entityMeta, user, userPermissions))
+                continue;
+
+            // Build OR-group of Contains clauses for each searchable string list field
+            var stringListFields = entityMeta.ListFields
+                .Where(f => f.FieldType is FormFieldType.String
+                                        or FormFieldType.TextArea
+                                        or FormFieldType.Email
+                                        or FormFieldType.Link
+                                        or FormFieldType.Tags
+                                        or FormFieldType.Markdown)
+                .ToList();
+
+            if (stringListFields.Count == 0)
+                continue;
+
+            var orGroup = new QueryGroup { Logic = QueryGroupLogic.Or };
+            foreach (var f in stringListFields)
+                orGroup.Clauses.Add(new QueryClause { Field = f.Name, Operator = QueryOperator.Contains, Value = q });
+
+            var query = new QueryDefinition
+            {
+                Top    = maxPerGroup,
+                Groups = new List<QueryGroup> { orGroup }
+            };
+
+            IEnumerable<BaseDataObject> results;
+            try
+            {
+                results = await entityMeta.Handlers.QueryAsync(query, context.RequestAborted).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError($"GlobalSearch|query-error|entity={entityMeta.Slug}|q={q}|msg={ex.Message}");
+                continue;
+            }
+
+            var items = new List<Dictionary<string, object?>>();
+            foreach (var record in results)
+            {
+                // Build a display label from the first non-empty string list field value
+                string label = string.Empty;
+                foreach (var f in stringListFields)
+                {
+                    var v = f.GetValueFn(record)?.ToString();
+                    if (!string.IsNullOrWhiteSpace(v)) { label = v; break; }
+                }
+                if (string.IsNullOrWhiteSpace(label))
+                    label = record.Key.ToString();
+
+                items.Add(new Dictionary<string, object?>
+                {
+                    ["id"]    = record.Key,
+                    ["label"] = label
+                });
+            }
+
+            if (items.Count == 0)
+                continue;
+
+            groups.Add(new Dictionary<string, object?>
+            {
+                ["slug"]  = entityMeta.Slug,
+                ["name"]  = entityMeta.Name,
+                ["items"] = items
+            });
+        }
+
+        await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["groups"] = groups }).ConfigureAwait(false);
+    }
+
     public async ValueTask MetricsJsonHandler(BmwContext context)
     {
         var app = context.GetApp();
