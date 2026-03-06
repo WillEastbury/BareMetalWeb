@@ -3884,6 +3884,361 @@ public sealed class RouteHandlers : IRouteHandlers
         await source.CopyToAsync(context.Response.Body, context.RequestAborted).ConfigureAwait(false);
     }
 
+    // ── Generic attachment endpoints ─────────────────────────────────────────────
+
+    private static bool TryGetAttachmentMeta(out DataEntityMetadata attachMeta)
+        => DataScaffold.TryGetEntity("fileattachment", out attachMeta);
+
+    private static Dictionary<string, object?> BuildAttachmentApiModel(FileAttachment a) =>
+        new()
+        {
+            ["id"]               = a.Key,
+            ["fileName"]         = a.FileName,
+            ["contentType"]      = a.ContentType,
+            ["sizeBytes"]        = a.SizeBytes,
+            ["description"]      = a.Description,
+            ["versionNumber"]    = a.VersionNumber,
+            ["attachmentGroupId"] = a.AttachmentGroupId,
+            ["isCurrentVersion"] = a.IsCurrentVersion,
+            ["uploadedAt"]       = a.CreatedOnUtc,
+            ["uploadedBy"]       = a.CreatedBy,
+            ["downloadUrl"]      = $"/api/_attachments/{a.Key}/download"
+        };
+
+    /// <summary>GET /api/{type}/{id}/_attachments — list current-version attachments for a record.</summary>
+    public async ValueTask AttachmentsListHandler(BmwContext context)
+    {
+        var meta = ResolveEntity(context, out _, out var errorMessage);
+        var idStr = GetRouteValue(context, "id");
+        if (meta == null || string.IsNullOrWhiteSpace(idStr) || !uint.TryParse(idStr, out var recordKey))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync(errorMessage ?? "Not found.").ConfigureAwait(false);
+            return;
+        }
+
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.").ConfigureAwait(false);
+            return;
+        }
+
+        if (!TryGetAttachmentMeta(out var attachMeta))
+        {
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("[]").ConfigureAwait(false);
+            return;
+        }
+
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new QueryClause { Field = nameof(FileAttachment.RecordType),        Operator = QueryOperator.Equals, Value = meta.Slug },
+                new QueryClause { Field = nameof(FileAttachment.RecordKey),         Operator = QueryOperator.Equals, Value = recordKey.ToString() },
+                new QueryClause { Field = nameof(FileAttachment.IsCurrentVersion),  Operator = QueryOperator.Equals, Value = "true" }
+            }
+        };
+
+        var rawItems = await DataScaffold.QueryAsync(attachMeta, query, context.RequestAborted).ConfigureAwait(false);
+        var result = new List<Dictionary<string, object?>>();
+        foreach (var item in rawItems)
+        {
+            if (item is FileAttachment a)
+                result.Add(BuildAttachmentApiModel(a));
+        }
+
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonIndented)).ConfigureAwait(false);
+    }
+
+    /// <summary>POST /api/{type}/{id}/_attachments — upload a new attachment (or new version) for a record.</summary>
+    public async ValueTask AttachmentsUploadHandler(BmwContext context)
+    {
+        var meta = ResolveEntity(context, out _, out var errorMessage);
+        var idStr = GetRouteValue(context, "id");
+        if (meta == null || string.IsNullOrWhiteSpace(idStr) || !uint.TryParse(idStr, out var recordKey))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync(errorMessage ?? "Not found.").ConfigureAwait(false);
+            return;
+        }
+
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.").ConfigureAwait(false);
+            return;
+        }
+
+        if (!TryGetAttachmentMeta(out var attachMeta))
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsync("{\"error\":\"Attachment entity not registered.\"}").ConfigureAwait(false);
+            return;
+        }
+
+        var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        var userName = user?.UserName ?? "anonymous";
+
+        if (!context.HttpRequest.HasFormContentType)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("{\"error\":\"Multipart form required.\"}").ConfigureAwait(false);
+            return;
+        }
+
+        var form = await context.HttpRequest.ReadFormAsync(context.RequestAborted).ConfigureAwait(false);
+        var uploadedFile = form.Files.GetFile("file");
+        if (uploadedFile == null || uploadedFile.Length <= 0)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("{\"error\":\"No file uploaded.\"}").ConfigureAwait(false);
+            return;
+        }
+
+        // Optional: description and replacesId (for versioning)
+        form.TryGetValue("description", out var descValues);
+        var description = descValues.Count > 0 ? (string?)descValues[0] : null;
+
+        form.TryGetValue("replacesId", out var replacesValues);
+        uint replacesKey = 0;
+        if (replacesValues.Count > 0) uint.TryParse(replacesValues[0], out replacesKey);
+
+        var safeName   = SanitizeFileName(uploadedFile.FileName);
+        var extension  = Path.GetExtension(safeName);
+        var storageKey = $"_attachments/{meta.Slug}/{recordKey}/{Guid.NewGuid():N}{extension}";
+        var fullPath   = ResolveUploadPath(context, storageKey);
+        var folder     = Path.GetDirectoryName(fullPath);
+        if (!string.IsNullOrWhiteSpace(folder))
+            Directory.CreateDirectory(folder);
+
+        await using (var src = uploadedFile.OpenReadStream())
+        await using (var dst = File.Create(fullPath))
+        {
+            await src.CopyToAsync(dst, context.RequestAborted).ConfigureAwait(false);
+        }
+
+        int nextVersion = 1;
+        uint groupId    = 0;
+
+        if (replacesKey > 0)
+        {
+            var previousRaw = await DataScaffold.LoadAsync(attachMeta, replacesKey, context.RequestAborted).ConfigureAwait(false);
+            if (previousRaw is FileAttachment previous)
+            {
+                groupId = previous.AttachmentGroupId == 0 ? previous.Key : previous.AttachmentGroupId;
+
+                var groupQuery = new QueryDefinition
+                {
+                    Clauses = new List<QueryClause>
+                    {
+                        new QueryClause { Field = nameof(FileAttachment.AttachmentGroupId), Operator = QueryOperator.Equals, Value = groupId.ToString() }
+                    }
+                };
+                var groupRaw = await DataScaffold.QueryAsync(attachMeta, groupQuery, context.RequestAborted).ConfigureAwait(false);
+                foreach (var raw in groupRaw)
+                {
+                    if (raw is not FileAttachment gi) continue;
+                    if (gi.VersionNumber >= nextVersion) nextVersion = gi.VersionNumber + 1;
+                    if (gi.IsCurrentVersion)
+                    {
+                        gi.IsCurrentVersion = false;
+                        gi.Touch(userName);
+                        await DataScaffold.SaveAsync(attachMeta, gi, context.RequestAborted).ConfigureAwait(false);
+                    }
+                }
+
+                if (nextVersion == 1) nextVersion = 2;
+            }
+        }
+
+        var attachment = new FileAttachment(userName)
+        {
+            RecordType        = meta.Slug,
+            RecordKey         = recordKey,
+            FileName          = safeName,
+            ContentType       = string.IsNullOrWhiteSpace(uploadedFile.ContentType) ? "application/octet-stream" : uploadedFile.ContentType,
+            SizeBytes         = uploadedFile.Length,
+            StorageKey        = storageKey,
+            Description       = description,
+            AttachmentGroupId = groupId,
+            VersionNumber     = nextVersion,
+            IsCurrentVersion  = true
+        };
+
+        await DataScaffold.ApplyAutoIdAsync(attachMeta, attachment, context.RequestAborted).ConfigureAwait(false);
+        await DataScaffold.SaveAsync(attachMeta, attachment, context.RequestAborted).ConfigureAwait(false);
+
+        // If this is the root version (no group yet), set groupId = its own Key
+        if (groupId == 0)
+        {
+            attachment.AttachmentGroupId = attachment.Key;
+            await DataScaffold.SaveAsync(attachMeta, attachment, context.RequestAborted).ConfigureAwait(false);
+        }
+
+        context.Response.StatusCode = StatusCodes.Status201Created;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(BuildAttachmentApiModel(attachment), JsonIndented)).ConfigureAwait(false);
+    }
+
+    /// <summary>GET /api/_attachments/{id}/download — stream an attachment file to the client.</summary>
+    public async ValueTask AttachmentsDownloadHandler(BmwContext context)
+    {
+        var idStr = GetRouteValue(context, "id");
+        if (string.IsNullOrWhiteSpace(idStr) || !uint.TryParse(idStr, out var attachmentKey)
+            || !TryGetAttachmentMeta(out var attachMeta))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Not found.").ConfigureAwait(false);
+            return;
+        }
+
+        var raw = await DataScaffold.LoadAsync(attachMeta, attachmentKey, context.RequestAborted).ConfigureAwait(false);
+        if (raw is not FileAttachment attachment || string.IsNullOrWhiteSpace(attachment.StorageKey))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Attachment not found.").ConfigureAwait(false);
+            return;
+        }
+
+        // Check permission against the owning entity
+        if (!string.IsNullOrWhiteSpace(attachment.RecordType)
+            && DataScaffold.TryGetEntity(attachment.RecordType, out var ownerMeta)
+            && !await HasEntityPermissionAsync(context, ownerMeta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.").ConfigureAwait(false);
+            return;
+        }
+
+        var fullPath = ResolveUploadPath(context, attachment.StorageKey);
+        if (!File.Exists(fullPath))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("File not found on disk.").ConfigureAwait(false);
+            return;
+        }
+
+        // Serve inline for previewable types; force download otherwise
+        var ct = string.IsNullOrWhiteSpace(attachment.ContentType) ? "application/octet-stream" : attachment.ContentType;
+        var disposition = "attachment";
+        if (ct.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
+            || ct.StartsWith("text/plain", StringComparison.OrdinalIgnoreCase)
+            || ct.Equals("application/pdf", StringComparison.OrdinalIgnoreCase))
+        {
+            disposition = "inline";
+        }
+
+        context.Response.ContentType = ct;
+        context.Response.Headers.ContentDisposition = $"{disposition}; filename=\"{SanitizeFileName(attachment.FileName)}\"";
+        await using var src = File.OpenRead(fullPath);
+        await src.CopyToAsync(context.Response.Body, context.RequestAborted).ConfigureAwait(false);
+    }
+
+    /// <summary>DELETE /api/_attachments/{id} — delete an attachment and its physical file.</summary>
+    public async ValueTask AttachmentsDeleteHandler(BmwContext context)
+    {
+        var idStr = GetRouteValue(context, "id");
+        if (string.IsNullOrWhiteSpace(idStr) || !uint.TryParse(idStr, out var attachmentKey)
+            || !TryGetAttachmentMeta(out var attachMeta))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Not found.").ConfigureAwait(false);
+            return;
+        }
+
+        var raw = await DataScaffold.LoadAsync(attachMeta, attachmentKey, context.RequestAborted).ConfigureAwait(false);
+        if (raw is not FileAttachment attachment)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Attachment not found.").ConfigureAwait(false);
+            return;
+        }
+
+        // Check permission against the owning entity
+        if (!string.IsNullOrWhiteSpace(attachment.RecordType)
+            && DataScaffold.TryGetEntity(attachment.RecordType, out var ownerMeta)
+            && !await HasEntityPermissionAsync(context, ownerMeta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.").ConfigureAwait(false);
+            return;
+        }
+
+        // Delete physical file
+        if (!string.IsNullOrWhiteSpace(attachment.StorageKey))
+        {
+            var fullPath = ResolveUploadPath(context, attachment.StorageKey);
+            if (File.Exists(fullPath))
+                File.Delete(fullPath);
+        }
+
+        await DataScaffold.DeleteAsync(attachMeta, attachmentKey, context.RequestAborted).ConfigureAwait(false);
+
+        context.Response.StatusCode = StatusCodes.Status200OK;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"deleted\":true}").ConfigureAwait(false);
+    }
+
+    /// <summary>GET /api/_attachments/{id}/versions — list all versions of an attachment group.</summary>
+    public async ValueTask AttachmentsVersionsHandler(BmwContext context)
+    {
+        var idStr = GetRouteValue(context, "id");
+        if (string.IsNullOrWhiteSpace(idStr) || !uint.TryParse(idStr, out var attachmentKey)
+            || !TryGetAttachmentMeta(out var attachMeta))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Not found.").ConfigureAwait(false);
+            return;
+        }
+
+        var rootRaw = await DataScaffold.LoadAsync(attachMeta, attachmentKey, context.RequestAborted).ConfigureAwait(false);
+        if (rootRaw is not FileAttachment root)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Attachment not found.").ConfigureAwait(false);
+            return;
+        }
+
+        // Check permission against the owning entity
+        if (!string.IsNullOrWhiteSpace(root.RecordType)
+            && DataScaffold.TryGetEntity(root.RecordType, out var ownerMeta)
+            && !await HasEntityPermissionAsync(context, ownerMeta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.").ConfigureAwait(false);
+            return;
+        }
+
+        var groupId = root.AttachmentGroupId == 0 ? root.Key : root.AttachmentGroupId;
+        var groupQuery = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new QueryClause { Field = nameof(FileAttachment.AttachmentGroupId), Operator = QueryOperator.Equals, Value = groupId.ToString() }
+            }
+        };
+
+        var rawVersions = await DataScaffold.QueryAsync(attachMeta, groupQuery, context.RequestAborted).ConfigureAwait(false);
+
+        // Collect and sort by VersionNumber ascending
+        var versionList = new List<FileAttachment>();
+        foreach (var rv in rawVersions)
+        {
+            if (rv is FileAttachment fa) versionList.Add(fa);
+        }
+        versionList.Sort(static (a, b) => a.VersionNumber.CompareTo(b.VersionNumber));
+
+        var result = new List<Dictionary<string, object?>>(versionList.Count);
+        foreach (var v in versionList)
+            result.Add(BuildAttachmentApiModel(v));
+
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonIndented)).ConfigureAwait(false);
+    }
+
     public async ValueTask MetricsJsonHandler(BmwContext context)
     {
         var app = context.GetApp();
