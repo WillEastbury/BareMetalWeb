@@ -314,39 +314,21 @@ public sealed class ReportExecutor
 
     // ── Field access helpers ─────────────────────────────────────────────────
 
-    // Cached base-class properties to avoid per-call reflection on typeof(BaseDataObject).
-    private static readonly System.Reflection.PropertyInfo[] BaseDataObjectProperties =
-        typeof(BaseDataObject).GetProperties(BindingFlags.Public | BindingFlags.Instance);
-
-    private static PropertyInfo? FindAccessor(DataEntityMetadata meta, string fieldName)
+    private static Func<object, object?>? FindAccessor(DataEntityMetadata meta, string fieldName)
     {
-        // Check DataField metadata first
-        DataFieldMetadata? field = null;
+        // Check DataField metadata first (compiled delegates, no reflection)
         foreach (var f in meta.Fields)
         {
             if (string.Equals(f.Name, fieldName, StringComparison.OrdinalIgnoreCase))
-            {
-                field = f;
-                break;
-            }
+                return f.GetValueFn;
         }
-        if (field != null)
-            return field.Property;
 
-        // Fall back to BaseDataObject base properties (Id, CreatedOnUtc, etc.)
-        foreach (var p in BaseDataObjectProperties)
-        {
-            if (string.Equals(p.Name, fieldName, StringComparison.OrdinalIgnoreCase))
-                return p;
-        }
-        return null;
+        // Fall back to base properties via cached compiled delegate
+        return FindAccessorOnObject(meta.Type, fieldName);
     }
 
-    private static string GetStringValue(PropertyInfo prop, object obj)
-        => prop.GetValue(obj)?.ToString() ?? string.Empty;
-
-    private static string? GetNullableStringValue(PropertyInfo? prop, BaseDataObject obj)
-        => prop?.GetValue(obj)?.ToString();
+    private static string GetStringValue(Func<object, object?> getter, object obj)
+        => getter(obj)?.ToString() ?? string.Empty;
 
     // ── Row projection ───────────────────────────────────────────────────────
 

@@ -5,6 +5,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Core.Interfaces;
 
@@ -18,7 +19,24 @@ public sealed class AuditService
     private readonly IDataObjectStore _store;
     private readonly IBufferedLogger? _logger;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
-    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> PropertyCache = new();
+
+    // Cache of compiled property accessors per type — avoids per-call GetProperties/GetValue reflection
+    private static readonly ConcurrentDictionary<Type, (string Name, Func<object, object?> Getter)[]> _accessorCache = new();
+
+    private static (string Name, Func<object, object?> Getter)[] GetCachedAccessors(Type type)
+    {
+        return _accessorCache.GetOrAdd(type, static t =>
+        {
+            var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            var list = new List<(string, Func<object, object?>)>(props.Length);
+            foreach (var p in props)
+            {
+                if (!p.CanRead || !p.CanWrite) continue;
+                list.Add((p.Name, PropertyAccessorFactory.BuildGetter(p)));
+            }
+            return list.ToArray();
+        });
+    }
 
     /// <summary>
     /// When true, audit saves are awaited directly instead of fire-and-forget.
@@ -221,16 +239,12 @@ public sealed class AuditService
     }
 
     /// <summary>
-    /// Detects changes between old and new entity instances
+    /// Detects changes between old and new entity instances using pre-compiled delegates.
     /// </summary>
     private List<FieldChange> DetectChanges<T>(T oldEntity, T newEntity) where T : BaseDataObject
     {
         var changes = new List<FieldChange>();
         var type = typeof(T);
-
-        // Get all public properties (cached per type)
-        var allProperties = PropertyCache.GetOrAdd(type, static t =>
-            t.GetProperties(BindingFlags.Public | BindingFlags.Instance));
 
         // Fields to skip (metadata fields that always change + sensitive credential fields)
         var skipFields = new HashSet<string>
@@ -244,24 +258,52 @@ public sealed class AuditService
             "ApiKeyHashes"
         };
 
-        foreach (var prop in allProperties)
+        // Use DataScaffold metadata (compiled delegates) instead of raw reflection
+        var meta = DataScaffold.GetEntityByType(type);
+        if (meta != null)
         {
-            if (!prop.CanRead || !prop.CanWrite)
-                continue;
+            foreach (var field in meta.Fields)
+            {
+                if (skipFields.Contains(field.Name))
+                    continue;
 
-            if (skipFields.Contains(prop.Name))
+                try
+                {
+                    var oldValue = field.GetValueFn(oldEntity);
+                    var newValue = field.GetValueFn(newEntity);
+
+                    if (!AreEqual(oldValue, newValue))
+                    {
+                        changes.Add(new FieldChange(
+                            field.Name,
+                            SerializeValue(oldValue),
+                            SerializeValue(newValue)
+                        ));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError($"Failed to detect change for property {field.Name}: {ex.Message}", ex);
+                }
+            }
+            return changes;
+        }
+
+        // Fallback for unregistered types — uses cached compiled delegates
+        foreach (var (name, getter) in GetCachedAccessors(type))
+        {
+            if (skipFields.Contains(name))
                 continue;
 
             try
             {
-                var oldValue = prop.GetValue(oldEntity);
-                var newValue = prop.GetValue(newEntity);
+                var oldValue = getter(oldEntity);
+                var newValue = getter(newEntity);
 
-                // Compare values
                 if (!AreEqual(oldValue, newValue))
                 {
                     changes.Add(new FieldChange(
-                        prop.Name,
+                        name,
                         SerializeValue(oldValue),
                         SerializeValue(newValue)
                     ));
@@ -269,7 +311,7 @@ public sealed class AuditService
             }
             catch (Exception ex)
             {
-                _logger?.LogError($"Failed to detect change for property {prop.Name}: {ex.Message}", ex);
+                _logger?.LogError($"Failed to detect change for property {name}: {ex.Message}", ex);
             }
         }
 

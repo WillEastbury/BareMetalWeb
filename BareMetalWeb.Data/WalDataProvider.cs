@@ -252,7 +252,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             var idMap    = GetOrLoadIdMap(type.Name);
             bool isInsert = !idMap.ContainsKey(obj.Key);
             T? oldObj    = null;
-            List<PropertyInfo> indexedFields = new();
+            List<SearchIndexManager.IndexedFieldAccessor> indexedFields = new();
             if (_searchIndexManager.HasIndexedFields(type, out indexedFields) && !isInsert)
                 oldObj = Load<T>(obj.Key);
 
@@ -288,10 +288,10 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
                 var keyStr = obj.Key.ToString();
                 foreach (var prop in indexedFields)
                 {
-                    var newValue = prop.GetValue(obj)?.ToString() ?? string.Empty;
+                    var newValue = prop.Getter(obj)?.ToString() ?? string.Empty;
                     if (oldObj != null)
                     {
-                        var oldValue = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
+                        var oldValue = prop.Getter(oldObj)?.ToString() ?? string.Empty;
                         if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
                             continue; // value unchanged — existing index entry is still valid
                         _indexStore.AppendEntry(type.Name, prop.Name, oldValue, keyStr, 'D');
@@ -487,8 +487,9 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             foreach (var clause in query.Clauses)
             {
                 if (clause.Value == null) continue;
-                var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
-                if (prop == null) continue;
+                var propIdx = indexedFields.FindIndex(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
+                if (propIdx < 0) continue;
+                var prop = indexedFields[propIdx];
 
                 HashSet<uint>? clauseCandidates = null;
 
@@ -648,9 +649,10 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             // Sort by an indexed field — use forward index to sort keys by value
             if (_searchIndexManager.HasIndexedFields(typeof(T), out var sortIndexedFields))
             {
-                var sortProp = sortIndexedFields.Find(p => string.Equals(p.Name, sort.Field, StringComparison.OrdinalIgnoreCase));
-                if (sortProp != null)
+                var sortPropIdx = sortIndexedFields.FindIndex(p => string.Equals(p.Name, sort.Field, StringComparison.OrdinalIgnoreCase));
+                if (sortPropIdx >= 0)
                 {
+                    var sortProp = sortIndexedFields[sortPropIdx];
                     var forwardIndex = _indexStore.ReadLatestValueIndex(typeName, sortProp.Name);
                     if (forwardIndex.Count > 0)
                     {
@@ -920,8 +922,9 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             foreach (var clause in query.Clauses)
             {
                 if (clause.Value == null) continue;
-                var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
-                if (prop == null) continue;
+                var propIdx = indexedFields.FindIndex(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
+                if (propIdx < 0) continue;
+                var prop = indexedFields[propIdx];
 
                 HashSet<uint>? clauseCandidates = null;
 
@@ -1016,7 +1019,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
         // Load the old object before deleting so we can remove its index entries
         T? oldObj = null;
-        List<PropertyInfo> indexedFields = new();
+        List<SearchIndexManager.IndexedFieldAccessor> indexedFields = new();
         if (_searchIndexManager.HasIndexedFields(type, out indexedFields))
             oldObj = Load<T>(key);
 
@@ -1044,7 +1047,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             var keyStr = key.ToString();
             foreach (var prop in indexedFields)
             {
-                var value = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
+                var value = prop.Getter(oldObj)?.ToString() ?? string.Empty;
                 _indexStore.AppendEntry(typeName, prop.Name, value, keyStr, 'D');
             }
             _searchIndexManager.RemoveObject(type, key);
@@ -1940,6 +1943,37 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     private void ClearSingletonFlagsOnOtherRecords<T>(T obj) where T : BaseDataObject
     {
         var type           = typeof(T);
+        // Use DataScaffold metadata (compiled delegates) instead of raw reflection
+        var meta = DataScaffold.GetEntityByType(type);
+        var singletonFields = new List<DataFieldMetadata>();
+        if (meta != null)
+        {
+            foreach (var f in meta.Fields)
+            {
+                if (f.HasSingletonFlag && f.ClrType == typeof(bool) && true.Equals(f.GetValueFn(obj)))
+                    singletonFields.Add(f);
+            }
+
+            if (singletonFields.Count == 0) return;
+
+            foreach (var record in Query<T>())
+            {
+                if (record.Key == obj.Key) continue;
+                bool changed = false;
+                foreach (var f in singletonFields)
+                {
+                    if (true.Equals(f.GetValueFn(record)))
+                    {
+                        f.SetValueFn(record, false);
+                        changed = true;
+                    }
+                }
+                if (changed) Save(record);
+            }
+            return;
+        }
+
+        // Fallback for unregistered types
         var allProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
         var singletonProps = new List<PropertyInfo>();
         foreach (var p in allProps)

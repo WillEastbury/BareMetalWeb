@@ -154,7 +154,7 @@ public static class ValidationService
         {
             try
             {
-                context[field.Name] = field.Property.GetValue(instance);
+                context[field.Name] = field.GetValueFn(instance);
             }
             catch
             {

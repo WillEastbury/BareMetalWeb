@@ -238,7 +238,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
                 object? enumValues = null;
                 if (f.FieldType == FormFieldType.Enum)
                 {
-                    var enumOpts = DataScaffold.BuildEnumOptions(f.Property.PropertyType);
+                    var enumOpts = DataScaffold.BuildEnumOptions(f.ClrType);
                     var enumOptionsList = new object[enumOpts.Count];
                     for (int ei = 0; ei < enumOpts.Count; ei++)
                         enumOptionsList[ei] = new { value = enumOpts[ei].Key, label = enumOpts[ei].Value };

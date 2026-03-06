@@ -75,7 +75,7 @@ public sealed class QueryService : IQueryService
         {
             try
             {
-                dict[field.Name] = field.Property.GetValue(obj);
+                dict[field.Name] = field.GetValueFn(obj);
             }
             catch
             {
