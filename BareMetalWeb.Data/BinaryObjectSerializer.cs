@@ -1894,7 +1894,33 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (!IsBlittable(type))
             throw new NotSupportedException($"Type '{type.FullName}' is not blittable.");
 
-        return Marshal.SizeOf(type);
+        // AOT-safe: compute size from fields instead of using Marshal.SizeOf
+        // which requires runtime marshalling data generation.
+        return ComputeBlittableSize(type);
+    }
+
+    private static int ComputeBlittableSize(Type type)
+    {
+        if (type.IsPrimitive) return GetPrimitiveSize(type);
+
+        var fields = type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        int total = 0;
+        for (int i = 0; i < fields.Length; i++)
+        {
+            var ft = fields[i].FieldType;
+            total += ft.IsPrimitive ? GetPrimitiveSize(ft) : ComputeBlittableSize(ft);
+        }
+        return total;
+    }
+
+    private static int GetPrimitiveSize(Type type)
+    {
+        if (type == typeof(byte) || type == typeof(sbyte) || type == typeof(bool)) return 1;
+        if (type == typeof(short) || type == typeof(ushort) || type == typeof(char)) return 2;
+        if (type == typeof(int) || type == typeof(uint) || type == typeof(float)) return 4;
+        if (type == typeof(long) || type == typeof(ulong) || type == typeof(double)) return 8;
+        if (type == typeof(decimal)) return 16;
+        return Marshal.SizeOf(type); // fallback for exotic primitives
     }
 
     private static Action<object?, byte[]> CreateBlittableWrite(Type type)
@@ -1902,7 +1928,8 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (!IsBlittable(type))
             throw new NotSupportedException($"Type '{type.FullName}' is not blittable.");
 
-        var size = Marshal.SizeOf(type);
+        var size = ComputeBlittableSize(type);
+        var fields = type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         return (value, buffer) =>
         {
             if (buffer is null) throw new ArgumentNullException(nameof(buffer));
@@ -1915,10 +1942,43 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
                 return;
             }
 
-            var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
-            try { Marshal.StructureToPtr(value, handle.AddrOfPinnedObject(), false); }
-            finally { handle.Free(); }
+            // AOT-safe: write fields directly instead of Marshal.StructureToPtr
+            int offset = 0;
+            for (int i = 0; i < fields.Length; i++)
+            {
+                var fv = fields[i].GetValue(value);
+                var ft = fields[i].FieldType;
+                WritePrimitiveOrStruct(buffer, ref offset, ft, fv);
+            }
         };
+    }
+
+    private static void WritePrimitiveOrStruct(byte[] buffer, ref int offset, Type fieldType, object? value)
+    {
+        if (fieldType == typeof(byte))   { buffer[offset++] = (byte)(value ?? (byte)0); return; }
+        if (fieldType == typeof(sbyte))  { buffer[offset++] = unchecked((byte)(sbyte)(value ?? (sbyte)0)); return; }
+        if (fieldType == typeof(bool))   { buffer[offset++] = (bool)(value ?? false) ? (byte)1 : (byte)0; return; }
+        if (fieldType == typeof(short))  { BinaryPrimitives.WriteInt16LittleEndian(buffer.AsSpan(offset), (short)(value ?? (short)0)); offset += 2; return; }
+        if (fieldType == typeof(ushort)) { BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(offset), (ushort)(value ?? (ushort)0)); offset += 2; return; }
+        if (fieldType == typeof(char))   { BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(offset), (ushort)(char)(value ?? '\0')); offset += 2; return; }
+        if (fieldType == typeof(int))    { BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(offset), (int)(value ?? 0)); offset += 4; return; }
+        if (fieldType == typeof(uint))   { BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset), (uint)(value ?? 0u)); offset += 4; return; }
+        if (fieldType == typeof(float))  { BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(offset), BitConverter.SingleToInt32Bits((float)(value ?? 0f))); offset += 4; return; }
+        if (fieldType == typeof(long))   { BinaryPrimitives.WriteInt64LittleEndian(buffer.AsSpan(offset), (long)(value ?? 0L)); offset += 8; return; }
+        if (fieldType == typeof(ulong))  { BinaryPrimitives.WriteUInt64LittleEndian(buffer.AsSpan(offset), (ulong)(value ?? 0UL)); offset += 8; return; }
+        if (fieldType == typeof(double)) { BinaryPrimitives.WriteInt64LittleEndian(buffer.AsSpan(offset), BitConverter.DoubleToInt64Bits((double)(value ?? 0.0))); offset += 8; return; }
+
+        // Nested blittable struct
+        if (value is null)
+        {
+            var sz = ComputeBlittableSize(fieldType);
+            buffer.AsSpan(offset, sz).Clear();
+            offset += sz;
+            return;
+        }
+        var nestedFields = fieldType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        for (int i = 0; i < nestedFields.Length; i++)
+            WritePrimitiveOrStruct(buffer, ref offset, nestedFields[i].FieldType, nestedFields[i].GetValue(value));
     }
 
     private static Func<byte[], object> CreateBlittableRead(Type type)
@@ -1926,17 +1986,52 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (!IsBlittable(type))
             throw new NotSupportedException($"Type '{type.FullName}' is not blittable.");
 
+        var fields = type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
         return buffer =>
         {
             if (buffer is null) throw new ArgumentNullException(nameof(buffer));
-            var size = Marshal.SizeOf(type);
+            var size = ComputeBlittableSize(type);
             if (buffer.Length < size)
                 throw new ArgumentException("Blittable buffer is too small.", nameof(buffer));
 
-            var handle = GCHandle.Alloc(buffer, GCHandleType.Pinned);
-            try { return Marshal.PtrToStructure(handle.AddrOfPinnedObject(), type)!; }
-            finally { handle.Free(); }
+            // AOT-safe: read fields directly instead of Marshal.PtrToStructure
+            var instance = Activator.CreateInstance(type)!;
+            int offset = 0;
+            ReadPrimitiveOrStruct(buffer, ref offset, type, ref instance, fields);
+            return instance;
         };
+    }
+
+    private static void ReadPrimitiveOrStruct(byte[] buffer, ref int offset, Type type, ref object instance, FieldInfo[] fields)
+    {
+        for (int i = 0; i < fields.Length; i++)
+        {
+            var ft = fields[i].FieldType;
+            object fieldValue;
+
+            if (ft == typeof(byte))        { fieldValue = buffer[offset++]; }
+            else if (ft == typeof(sbyte))  { fieldValue = unchecked((sbyte)buffer[offset++]); }
+            else if (ft == typeof(bool))   { fieldValue = buffer[offset++] != 0; }
+            else if (ft == typeof(short))  { fieldValue = BinaryPrimitives.ReadInt16LittleEndian(buffer.AsSpan(offset)); offset += 2; }
+            else if (ft == typeof(ushort)) { fieldValue = BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(offset)); offset += 2; }
+            else if (ft == typeof(char))   { fieldValue = (char)BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(offset)); offset += 2; }
+            else if (ft == typeof(int))    { fieldValue = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset)); offset += 4; }
+            else if (ft == typeof(uint))   { fieldValue = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(offset)); offset += 4; }
+            else if (ft == typeof(float))  { fieldValue = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset))); offset += 4; }
+            else if (ft == typeof(long))   { fieldValue = BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(offset)); offset += 8; }
+            else if (ft == typeof(ulong))  { fieldValue = BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(offset)); offset += 8; }
+            else if (ft == typeof(double)) { fieldValue = BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(offset))); offset += 8; }
+            else
+            {
+                // Nested blittable struct
+                var nested = Activator.CreateInstance(ft)!;
+                var nestedFields = ft.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                ReadPrimitiveOrStruct(buffer, ref offset, ft, ref nested, nestedFields);
+                fieldValue = nested;
+            }
+
+            fields[i].SetValue(instance, fieldValue);
+        }
     }
 
     private static byte[] LoadOrCreateSigningKey(string keyFilePath)
