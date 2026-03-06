@@ -4884,6 +4884,14 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static string? GetRouteValue(BmwContext context, string key)
     {
+        // Fast path: prefix router sets these directly (zero allocation)
+        if (string.Equals(key, "type", StringComparison.OrdinalIgnoreCase) && context.EntitySlug != null)
+            return context.EntitySlug;
+        if (string.Equals(key, "id", StringComparison.OrdinalIgnoreCase) && context.EntityId != null)
+            return context.EntityId;
+        if (context.RouteExtraKey != null && string.Equals(key, context.RouteExtraKey, StringComparison.OrdinalIgnoreCase))
+            return context.RouteExtra;
+
         var pageContext = context.GetPageContext();
         if (pageContext == null)
             return null;

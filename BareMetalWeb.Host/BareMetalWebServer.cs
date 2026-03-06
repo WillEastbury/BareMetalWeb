@@ -90,6 +90,8 @@ public class BareMetalWebServer : IBareWebHost
     private int _sortedRoutesVersion = -1;
     private readonly RouteJumpTable _jumpTable = new();
     private int _jumpTableVersion = -1;
+    private readonly PrefixRouter _prefixRouter = new();
+    private int _prefixRouterVersion = -1;
     public BareMetalWebServer(
         string appName,
         string companyDescription,
@@ -337,6 +339,16 @@ public class BareMetalWebServer : IBareWebHost
             _jumpTableVersion = _routesVersion;
         }
     }
+
+    /// <summary>Ensures the prefix router is rebuilt when routes change.</summary>
+    private void EnsurePrefixRouter()
+    {
+        if (_prefixRouterVersion != _routesVersion)
+        {
+            _prefixRouter.Build(routes, BufferedLogger);
+            _prefixRouterVersion = _routesVersion;
+        }
+    }
     public Task WireUpRequestHandlingAndLoggerAsyncLifetime()
     {
         EnsureJumpTable();
@@ -467,6 +479,7 @@ public class BareMetalWebServer : IBareWebHost
 
             // ── Jump table: O(1) exact-match dispatch ───────────────────────
             EnsureJumpTable();
+            EnsurePrefixRouter();
             if (_jumpTable.TryLookup(routeKey, out RouteHandlerData page))
             {
                 if (page.PageInfo != null)
@@ -498,6 +511,19 @@ public class BareMetalWebServer : IBareWebHost
                 }
                 await allPage.Handler(bmwCtx);
                 BufferedLogger.LogInfo($"{routeKey}|ALL {requestPath}|200|{sourceIp}");
+                return;
+            }
+            // ── Prefix router: O(1) entity dispatch for /api/{type} routes ──
+            if (_prefixRouter.TryMatch(bmwCtx, out RouteHandlerData prefixPage))
+            {
+                if (!await IsAuthorizedAsync(prefixPage.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
+                {
+                    await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, prefixPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                    await RenderForbidden(bmwCtx);
+                    return;
+                }
+                await prefixPage.Handler(bmwCtx);
+                BufferedLogger.LogInfo($"{routeKey}|200|{sourceIp}|prefix");
                 return;
             }
             // Pattern match fallback — iterate most-specific routes first so that literal
