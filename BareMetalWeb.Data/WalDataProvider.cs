@@ -4,11 +4,13 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Numerics;
 using System.Reflection;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data.Interfaces;
 
@@ -94,6 +96,13 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     private readonly ConcurrentDictionary<string, SeqIdRange> _seqIdRanges
         = new(StringComparer.OrdinalIgnoreCase);
     private const int SeqIdBatchSize = 64;
+
+    // Columnar store cache — per-entity in-memory columnar layout for SIMD queries.
+    // Lazily built on first vectorised query, invalidated on Save/Delete.
+    private readonly ConcurrentDictionary<string, ColumnarStore> _columnarStores
+        = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _columnarVersions
+        = new(StringComparer.OrdinalIgnoreCase);
 
     // Optional cluster state for write fencing
     private ClusterState? _clusterState;
@@ -288,6 +297,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                 }
                 _searchIndexManager.IndexObject(obj);
             }
+
+            // Invalidate columnar store so next query rebuilds from fresh data
+            if (_columnarStores.TryGetValue(type.Name, out var colStore))
+                colStore.Invalidate();
         }
         catch (Exception ex)
         {
@@ -606,9 +619,112 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
         // ── Fallback: filter/sort on non-indexed fields ─────────────────────
         var canShortCircuit = query == null || query.Sorts.Count == 0;
 
+        // ── Columnar store path: SIMD scan over pre-built typed arrays ──────
+        // Avoids loading all objects just to extract columns — scans arrays
+        // directly, then loads only matching rows.
+        if (query != null
+            && idMap.Count >= ColumnQueryExecutor.VectorizationThreshold
+            && query.Groups.Count == 0
+            && query.Clauses.Count > 0)
+        {
+            var meta = DataScaffold.GetEntityByType(typeof(T));
+            if (meta != null)
+            {
+                var store = GetOrBuildColumnarStore<T>(typeName, idMap, meta);
+                if (store != null && store.RowCount >= ColumnQueryExecutor.VectorizationThreshold)
+                {
+                    // Check if all clauses can be served by columnar store
+                    bool allColumnar = true;
+                    foreach (var clause in query.Clauses)
+                    {
+                        if (string.IsNullOrEmpty(clause.Field) || !store.HasColumn(clause.Field))
+                        {
+                            allColumnar = false;
+                            break;
+                        }
+                    }
+
+                    if (allColumnar)
+                    {
+                        int n = store.RowCount;
+                        int wordCount = (n + 63) >> 6;
+                        ulong[]? combined = null;
+
+                        foreach (var clause in query.Clauses)
+                        {
+                            var clauseMask = store.ScanClause(clause.Field, clause.Operator, clause.Value, wordCount);
+                            if (clauseMask == null) { combined = new ulong[wordCount]; break; }
+
+                            if (combined == null)
+                                combined = clauseMask;
+                            else
+                                AndBitmaskInPlace(combined, clauseMask);
+                        }
+
+                        // Materialise matching rows — only load objects that passed the filter
+                        var results = new List<T>(Math.Min(top, n));
+                        int matched = 0;
+
+                        if (combined != null)
+                        {
+                            for (int wordIdx = 0; wordIdx < combined.Length && results.Count < top; wordIdx++)
+                            {
+                                ulong word = combined[wordIdx];
+                                while (word != 0)
+                                {
+                                    int bit = BitOperations.TrailingZeroCount(word);
+                                    int rowIdx = (wordIdx << 6) | bit;
+                                    word &= word - 1;
+
+                                    if (rowIdx >= n) break;
+                                    if (matched++ < skip) continue;
+
+                                    uint objKey = store.GetKeyAtRow(rowIdx);
+                                    try
+                                    {
+                                        T? obj = Load<T>(objKey);
+                                        if (obj != null)
+                                        {
+                                            if (canShortCircuit)
+                                            {
+                                                results.Add(obj);
+                                            }
+                                            else
+                                            {
+                                                results.Add(obj); // will sort below
+                                            }
+                                        }
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        _logger?.LogError($"Deserialization failed for {typeName} Key {objKey}.", ex);
+                                    }
+
+                                    if (canShortCircuit && results.Count >= top) break;
+                                }
+                            }
+                        }
+
+                        if (canShortCircuit)
+                            return results;
+
+                        // With sorts: sort filtered results, then slice
+                        var sortedList = new List<T>(_queryEvaluator.ApplySorts(results, query));
+                        if (skip > 0 || top != int.MaxValue)
+                        {
+                            int end = Math.Min(skip + top, sortedList.Count);
+                            var paged = new List<T>(Math.Max(0, end - skip));
+                            for (int i = skip; i < end; i++) paged.Add(sortedList[i]);
+                            return paged;
+                        }
+                        return sortedList;
+                    }
+                }
+            }
+        }
+
         // ── Vectorised path: pre-load all objects, then apply SIMD column scan ──
-        // Activated when the entity set is large enough to amortise column-extraction
-        // overhead and the query has no nested OR groups.
+        // Fallback when columnar store doesn't cover all clauses.
         if (query != null
             && idMap.Count >= ColumnQueryExecutor.VectorizationThreshold
             && query.Groups.Count == 0
@@ -861,6 +977,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             }
             _searchIndexManager.RemoveObject(type, key);
         }
+
+        // Invalidate columnar store
+        if (_columnarStores.TryGetValue(typeName, out var colStore))
+            colStore.Invalidate();
     }
 
     public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default)
@@ -982,6 +1102,10 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                 }
                 _indexStore.AppendEntry(entityName, schema.Names[i], newValue, keyStr, 'A');
             }
+
+            // Invalidate columnar store
+            if (_columnarStores.TryGetValue(entityName, out var colStore))
+                colStore.Invalidate();
         }
         catch (Exception ex)
         {
@@ -1632,6 +1756,59 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
     // Cache: (type, schemaVersion) → MemberSignature[]
     private readonly ConcurrentDictionary<(Type, int), MemberSignature[]> _schemaMemberCache = new();
+
+    /// <summary>
+    /// Gets or lazily builds a columnar store for the given entity type.
+    /// Returns null if building fails (e.g. no numeric fields).
+    /// </summary>
+    private ColumnarStore? GetOrBuildColumnarStore<T>(
+        string typeName,
+        ConcurrentDictionary<uint, ulong> idMap,
+        DataEntityMetadata meta) where T : BaseDataObject
+    {
+        var store = _columnarStores.GetOrAdd(typeName, _ => new ColumnarStore(idMap.Count));
+        var lastVersion = _columnarVersions.GetOrAdd(typeName, -1L);
+
+        // Rebuild if stale (version changed due to Save/Delete)
+        if (lastVersion != store.Version || store.RowCount == 0)
+        {
+            var allObjects = new List<T>(idMap.Count);
+            foreach (var (objKey, _) in idMap)
+            {
+                try
+                {
+                    T? obj = Load<T>(objKey);
+                    if (obj != null) allObjects.Add(obj);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogError($"Columnar build: deserialization failed for {typeName} Key {objKey}.", ex);
+                }
+            }
+
+            if (allObjects.Count < ColumnQueryExecutor.VectorizationThreshold)
+                return null;
+
+            store.Build(allObjects, meta);
+            _columnarVersions[typeName] = store.Version;
+        }
+
+        return store;
+    }
+
+    /// <summary>SIMD-accelerated bitmask AND (same as ColumnQueryExecutor.AndInPlace).</summary>
+    private static void AndBitmaskInPlace(ulong[] dest, ulong[] src)
+    {
+        int vLen = Vector<ulong>.Count;
+        int i = 0;
+        for (; i <= dest.Length - vLen; i += vLen)
+        {
+            var d = new Vector<ulong>(dest, i);
+            var s = new Vector<ulong>(src, i);
+            (d & s).CopyTo(dest, i);
+        }
+        for (; i < dest.Length; i++) dest[i] &= src[i];
+    }
 
     private T? DeserializePayload<T>(ReadOnlyMemory<byte> memory, uint key) where T : BaseDataObject
     {
