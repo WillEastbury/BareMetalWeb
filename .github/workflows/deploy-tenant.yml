@@ -60,8 +60,7 @@ jobs:
 
       - name: Deploy to ${{ inputs.app-name }}
         run: |
-          cd ./publish
-          az webapp up --name ${{ inputs.app-name }} --os-type Linux --runtime "DOTNETCORE:10.0"
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name ${{ inputs.app-name }} --src-path ../deploy.zip --type zip --async true
 
       - name: Wait for deployment to stabilise
         run: |

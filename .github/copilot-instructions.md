@@ -142,7 +142,7 @@ Downstream we generate UI that is rendered on the client and pre-load data an in
 Custom JS libraries are generated and bundled. the whole platform should use solely trimmed aot native binaries and only bootstrap and bootswatch as imported libs.
 Deployment pipeline is multi-stage CI then CD with 4 release rings (Testing, Canary, Early, Main)
 Deployment target here is simply a single Azure Webapp hosting plan with a set of Azure Web Apps with multiple instances
-Az cli should be used with service principals to deploy az webapp create / az webapp up based on tenant lists using a pipeline action
+Az cli should be used with service principals to deploy via `az webapp deploy --src-path deploy.zip --type zip` based on tenant lists using a pipeline action. Do NOT use `az webapp up` (it fails on multi-csproj publish dirs).
 
 METADATA-DRIVEN ARCHITECTURE (CRITICAL — read before every change)
 ------------------------------------------------------------------
