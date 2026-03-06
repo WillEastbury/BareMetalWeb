@@ -1,8 +1,4 @@
-//////////////////////////////
-// Welcome to BareMetalWeb !// 
-//////////////////////////////
-
-Hey agent! 
+Hey agent!  Welcome to BareMetalWeb !
 
 We are using a custom, intentionally minimalistic and bare-metal approach to building a web server in ASP.NET Core. This means we are not using any of the common patterns or frameworks that you might be used to, such as MVC, middleware pipelines, dependency injection, or complex view engines. Instead, we have a single request handler that does everything, with explicit routing and lifecycle management, and a focus on control, understanding, minimalism, and performance over convenience and features.
 
