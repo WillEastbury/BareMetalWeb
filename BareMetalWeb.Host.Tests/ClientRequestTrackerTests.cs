@@ -8,6 +8,13 @@ namespace BareMetalWeb.Host.Tests;
 
 public class ClientRequestTrackerTests
 {
+    private static void WaitUntil(Func<bool> condition, int timeoutMs = 5000, int intervalMs = 25)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
+            Thread.Sleep(intervalMs);
+    }
+
     private class MockLogger : IBufferedLogger
     {
         public void LogInfo(string message) { }
@@ -125,10 +132,13 @@ public class ClientRequestTrackerTests
         Assert.True(tracker.ShouldThrottle(clientIp, out var reason1, out _));
         Assert.Equal("blocked", reason1);
         
-        // Wait for block to expire
-        Thread.Sleep(100);
+        // Wait for block to expire by checking snapshot (not ShouldThrottle, which increments counters)
+        WaitUntil(() => {
+            var s = tracker.Snapshot();
+            return s.ContainsKey(clientIp) && s[clientIp].BlockedUntilUtc <= DateTime.UtcNow;
+        });
 
-        // After block expires, client should be marked suspicious
+        // After block expires, first call clears the block and marks suspicious
         tracker.ShouldThrottle(clientIp, out _, out _);
         var snapshot = tracker.Snapshot();
         
@@ -324,8 +334,9 @@ public class ClientRequestTrackerTests
             tracker.ShouldThrottle(clientIp, out _, out _);
         }
 
-        // Wait for window to reset
-        Thread.Sleep(1100);
+        // Wait for window to reset (1-second window; generous timeout for CI)
+        var windowStart = System.Diagnostics.Stopwatch.StartNew();
+        WaitUntil(() => windowStart.ElapsedMilliseconds >= 1200);
 
         // Make more requests in new window
         for (int i = 0; i < 5; i++)
@@ -403,8 +414,11 @@ public class ClientRequestTrackerTests
         // Should still be blocked
         Assert.True(tracker.ShouldThrottle(clientIp, out _, out _));
         
-        // Wait for block to expire
-        Thread.Sleep(250);
+        // Wait for block to expire by checking snapshot (not ShouldThrottle, which increments counters)
+        WaitUntil(() => {
+            var s = tracker.Snapshot();
+            return s.ContainsKey(clientIp) && s[clientIp].BlockedUntilUtc <= DateTime.UtcNow;
+        });
         
         // Should no longer be blocked
         var result = tracker.ShouldThrottle(clientIp, out _, out _);
