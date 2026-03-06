@@ -688,7 +688,7 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                                     if (rowIdx >= n) break;
 
                                     uint objKey = store.GetKeyAtRow(rowIdx);
-                                    if (objKey == 0) continue; // freed ordinal; validity mask cleared it but belt-and-suspenders
+                                    if (objKey == 0) continue; // defensive: freed ordinals are already masked by the validity bitmap
 
                                     if (matched++ < skip) continue;
                                     try

@@ -104,7 +104,7 @@ internal sealed class ColumnarStore
 
     /// <summary>
     /// Populates the store from a pre-loaded set of objects and their field metadata.
-    /// Ordinates are assigned densely 0, 1, 2, … in input order, matching the
+    /// Ordinals are assigned densely 0, 1, 2, … in input order, matching the
     /// previous row-index semantics so callers need no changes.
     /// </summary>
     public void Build<T>(IReadOnlyList<T> objects, DataEntityMetadata meta) where T : BaseDataObject
