@@ -2654,6 +2654,27 @@
             html += '</div></div>';
         }
 
+        // Attachments panel — always shown on every record view
+        html += '<div class="card bm-page-card mt-3" id="bm-attachments-card">';
+        html += '<div class="card-header d-flex align-items-center justify-content-between">';
+        html += '<h6 class="mb-0"><i class="bi bi-paperclip me-2"></i>Attachments</h6>';
+        html += '<button class="btn btn-sm btn-outline-primary" id="bm-attach-toggle-upload"><i class="bi bi-upload me-1"></i>Upload</button>';
+        html += '</div>';
+        html += '<div class="card-body">';
+        html += '<div id="bm-attach-upload-form" style="display:none" class="mb-3 border rounded p-3 bg-light">';
+        html += '<form id="bm-attach-form" enctype="multipart/form-data">';
+        html += '<div class="mb-2"><label class="form-label small fw-semibold">File</label>';
+        html += '<input type="file" name="file" class="form-control form-control-sm" required id="bm-attach-file-input"></div>';
+        html += '<div class="mb-2"><label class="form-label small fw-semibold">Description (optional)</label>';
+        html += '<input type="text" name="description" class="form-control form-control-sm" placeholder="Description\u2026" id="bm-attach-desc-input"></div>';
+        html += '<input type="hidden" name="replacesId" id="bm-attach-replaces-id" value="">';
+        html += '<div class="d-flex gap-2">';
+        html += '<button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-upload me-1"></i>Upload</button>';
+        html += '<button type="button" class="btn btn-sm btn-secondary" id="bm-attach-cancel">Cancel</button>';
+        html += '</div></form></div>';
+        html += '<div id="bm-attachments-body"><div class="text-muted small"><i class="bi bi-hourglass-split me-1"></i>Loading attachments\u2026</div></div>';
+        html += '</div></div>';
+
         html += '</div>';
         setContent(html);
 
@@ -2669,6 +2690,9 @@
                     if (panel) panel.innerHTML = '<span class="text-warning small">Could not load chain: ' + escHtml(err.message) + '</span>';
                 });
         }
+
+        // Load and wire attachments panel
+        loadAttachmentsPanel(slug, id);
 
         // Wire command buttons
         document.querySelectorAll('.vnext-cmd-btn').forEach(function (btn) {
@@ -2803,6 +2827,193 @@
 
     function isSubListField(val) {
         return Array.isArray(val) && val.length > 0 && typeof val[0] === 'object';
+    }
+
+    /**
+     * Load the attachments panel for a record and wire up upload/delete/version-history actions.
+     */
+    function loadAttachmentsPanel(slug, id) {
+        var attachmentsBody  = document.getElementById('bm-attachments-body');
+        var toggleBtn        = document.getElementById('bm-attach-toggle-upload');
+        var uploadFormWrap   = document.getElementById('bm-attach-upload-form');
+        var attachForm       = document.getElementById('bm-attach-form');
+        var cancelBtn        = document.getElementById('bm-attach-cancel');
+        var replacesIdInput  = document.getElementById('bm-attach-replaces-id');
+
+        function refreshList() {
+            if (!attachmentsBody) return;
+            attachmentsBody.innerHTML = '<div class="text-muted small"><i class="bi bi-hourglass-split me-1"></i>Loading\u2026</div>';
+            apiFetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id) + '/_attachments')
+                .then(function (items) { renderAttachmentsList(items, attachmentsBody, slug, id, replacesIdInput, uploadFormWrap); })
+                .catch(function (err) {
+                    if (attachmentsBody) attachmentsBody.innerHTML = '<span class="text-warning small">Could not load attachments: ' + escHtml(err.message) + '</span>';
+                });
+        }
+
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', function () {
+                if (!uploadFormWrap) return;
+                var hidden = uploadFormWrap.style.display === 'none';
+                uploadFormWrap.style.display = hidden ? '' : 'none';
+                if (hidden && replacesIdInput) replacesIdInput.value = '';
+            });
+        }
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', function () {
+                if (uploadFormWrap) uploadFormWrap.style.display = 'none';
+                if (replacesIdInput) replacesIdInput.value = '';
+            });
+        }
+
+        if (attachForm) {
+            attachForm.addEventListener('submit', function (e) {
+                e.preventDefault();
+                var fileInput = document.getElementById('bm-attach-file-input');
+                var descInput = document.getElementById('bm-attach-desc-input');
+                if (!fileInput || fileInput.files.length === 0) {
+                    showToast('Please select a file to upload.', 'error');
+                    return;
+                }
+                var fd = new FormData();
+                fd.append('file', fileInput.files[0]);
+                if (descInput && descInput.value) fd.append('description', descInput.value);
+                if (replacesIdInput && replacesIdInput.value) fd.append('replacesId', replacesIdInput.value);
+
+                var submitBtn = attachForm.querySelector('[type=submit]');
+                if (submitBtn) submitBtn.disabled = true;
+
+                fetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id) + '/_attachments', {
+                    method: 'POST',
+                    body: fd,
+                    credentials: 'same-origin'
+                })
+                .then(function (resp) {
+                    if (!resp.ok) return resp.text().then(function (t) { throw new Error(t || resp.statusText); });
+                    return resp.json();
+                })
+                .then(function () {
+                    showToast('File uploaded successfully.', 'success');
+                    attachForm.reset();
+                    if (replacesIdInput) replacesIdInput.value = '';
+                    if (uploadFormWrap) uploadFormWrap.style.display = 'none';
+                    refreshList();
+                })
+                .catch(function (err) { showToast('Upload failed: ' + err.message, 'error'); })
+                .finally(function () { if (submitBtn) submitBtn.disabled = false; });
+            });
+        }
+
+        refreshList();
+    }
+
+    function renderAttachmentsList(items, container, slug, id, replacesIdInput, uploadFormWrap) {
+        if (!container) return;
+        if (!items || items.length === 0) {
+            container.innerHTML = '<span class="text-muted small">No attachments yet.</span>';
+            return;
+        }
+
+        function fmtSize(bytes) {
+            if (!bytes) return '0 B';
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return Math.round(bytes / 1024) + ' KB';
+            return (bytes / 1048576).toFixed(1) + ' MB';
+        }
+
+        function iconForMime(ct) {
+            ct = (ct || '').toLowerCase();
+            if (ct.startsWith('image/')) return 'bi-file-image';
+            if (ct === 'application/pdf') return 'bi-file-earmark-pdf';
+            if (ct.includes('word') || ct.includes('document')) return 'bi-file-earmark-word';
+            if (ct.includes('excel') || ct.includes('spreadsheet')) return 'bi-file-earmark-excel';
+            if (ct.startsWith('text/')) return 'bi-file-earmark-text';
+            if (ct.includes('zip') || ct.includes('archive')) return 'bi-file-earmark-zip';
+            return 'bi-file-earmark';
+        }
+
+        var html = '<div class="table-responsive"><table class="table table-sm table-hover mb-0">';
+        html += '<thead><tr><th>File</th><th>Size</th><th>Uploaded by</th><th>Uploaded at</th><th>Ver</th><th></th></tr></thead><tbody>';
+
+        items.forEach(function (a) {
+            var icon = iconForMime(a.contentType);
+            var downloadUrl = a.downloadUrl || (API + '/_attachments/' + a.id + '/download');
+            html += '<tr>';
+            html += '<td><i class="bi ' + escHtml(icon) + ' me-1 text-muted"></i><a href="' + escHtml(downloadUrl) + '" target="_blank">' + escHtml(a.fileName) + '</a>';
+            if (a.description) html += '<br><small class="text-muted">' + escHtml(a.description) + '</small>';
+            html += '</td>';
+            html += '<td class="text-nowrap text-muted small">' + fmtSize(a.sizeBytes) + '</td>';
+            html += '<td class="text-muted small">' + escHtml(a.uploadedBy || '') + '</td>';
+            html += '<td class="text-muted small text-nowrap">' + (a.uploadedAt ? new Date(a.uploadedAt).toLocaleString() : '') + '</td>';
+            html += '<td class="text-center"><span class="badge bg-secondary">v' + (a.versionNumber || 1) + '</span></td>';
+            html += '<td class="text-nowrap">';
+            html += '<button class="btn btn-xs btn-outline-secondary bm-attach-versions-btn me-1" data-id="' + a.id + '" data-group="' + a.attachmentGroupId + '" title="Version history"><i class="bi bi-clock-history"></i></button>';
+            html += '<button class="btn btn-xs btn-outline-primary bm-attach-newver-btn me-1" data-id="' + a.id + '" data-filename="' + escHtml(a.fileName) + '" title="Upload new version"><i class="bi bi-arrow-up-circle"></i></button>';
+            html += '<button class="btn btn-xs btn-outline-danger bm-attach-del-btn" data-id="' + a.id + '" title="Delete"><i class="bi bi-trash"></i></button>';
+            html += '</td></tr>';
+        });
+
+        html += '</tbody></table></div>';
+        container.innerHTML = html;
+
+        // Wire action buttons
+        container.querySelectorAll('.bm-attach-del-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                showConfirm('Delete attachment?', 'Are you sure you want to delete this attachment? This cannot be undone.', function () {
+                    apiFetch(API + '/_attachments/' + encodeURIComponent(btn.dataset.id), { method: 'DELETE' })
+                        .then(function () {
+                            showToast('Attachment deleted.', 'success');
+                            apiFetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id) + '/_attachments')
+                                .then(function (newItems) { renderAttachmentsList(newItems, container, slug, id, replacesIdInput, uploadFormWrap); })
+                                .catch(function () {});
+                        })
+                        .catch(function (err) { showToast('Delete failed: ' + err.message, 'error'); });
+                });
+            });
+        });
+
+        container.querySelectorAll('.bm-attach-newver-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                if (replacesIdInput) replacesIdInput.value = btn.dataset.id;
+                var descInput = document.getElementById('bm-attach-desc-input');
+                if (descInput) descInput.placeholder = 'Description for new version of ' + btn.dataset.filename + '\u2026';
+                if (uploadFormWrap) uploadFormWrap.style.display = '';
+            });
+        });
+
+        container.querySelectorAll('.bm-attach-versions-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var versionsRow = document.getElementById('bm-attach-versions-' + btn.dataset.id);
+                if (versionsRow) { versionsRow.remove(); return; }
+                apiFetch(API + '/_attachments/' + encodeURIComponent(btn.dataset.id) + '/versions')
+                    .then(function (versions) {
+                        var tr = document.createElement('tr');
+                        tr.id = 'bm-attach-versions-' + btn.dataset.id;
+                        tr.className = 'bm-attach-versions-row';
+                        var td = document.createElement('td');
+                        td.colSpan = 6;
+                        td.className = 'p-0';
+                        if (!versions || versions.length === 0) {
+                            td.innerHTML = '<div class="px-3 py-2 text-muted small">No version history.</div>';
+                        } else {
+                            var vh = '<div class="px-3 py-2"><strong class="small">Version history</strong><ul class="list-unstyled mb-0 mt-1">';
+                            versions.forEach(function (v) {
+                                var badge = v.isCurrentVersion ? ' <span class="badge bg-success ms-1">current</span>' : '';
+                                vh += '<li class="small d-flex align-items-center gap-2 py-1 border-bottom">';
+                                vh += '<span class="badge bg-secondary">v' + (v.versionNumber || 1) + '</span>';
+                                vh += '<a href="' + escHtml(v.downloadUrl) + '" target="_blank">' + escHtml(v.fileName) + '</a>' + badge;
+                                vh += '<span class="text-muted">' + (v.uploadedAt ? new Date(v.uploadedAt).toLocaleString() : '') + '</span>';
+                                vh += '<span class="text-muted">by ' + escHtml(v.uploadedBy || '') + '</span>';
+                                vh += '</li>';
+                            });
+                            vh += '</ul></div>';
+                            td.innerHTML = vh;
+                        }
+                        tr.appendChild(td);
+                        btn.closest('tr').insertAdjacentElement('afterend', tr);
+                    })
+                    .catch(function (err) { showToast('Could not load version history: ' + err.message, 'error'); });
+            });
+        });
     }
 
     function renderSubListReadonly(items, field) {

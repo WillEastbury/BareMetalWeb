@@ -787,7 +787,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
 
         // Assert
-        Assert.Equal(17, _server.routes.Count);
+        Assert.Equal(22, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -975,7 +975,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterData > afterAdmin);
         Assert.True(afterLookup > afterData);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 20 + 4 + 13 + 21 + 5 + 16, total); // 3+20+4+13+21+5+16=82
+        Assert.Equal(staticCount + 20 + 4 + 13 + 21 + 5 + 21, total); // 3+20+4+13+21+5+21=87
     }
 
     [Fact]
@@ -1169,6 +1169,11 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask AdminSampleDataJsonHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask AdminWipeDataJsonHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask QueryPlanHistoryHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask AttachmentsListHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask AttachmentsUploadHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask AttachmentsDownloadHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask AttachmentsDeleteHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask AttachmentsVersionsHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask DataListExportHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask DataViewExportHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask DataBulkDeleteHandler(BmwContext context) => ValueTask.CompletedTask;

@@ -82,4 +82,9 @@ public interface IRouteHandlers
     ValueTask AdminSampleDataJsonHandler(BmwContext context);
     ValueTask AdminWipeDataJsonHandler(BmwContext context);
     ValueTask QueryPlanHistoryHandler(BmwContext context);
+    ValueTask AttachmentsListHandler(BmwContext context);
+    ValueTask AttachmentsUploadHandler(BmwContext context);
+    ValueTask AttachmentsDownloadHandler(BmwContext context);
+    ValueTask AttachmentsDeleteHandler(BmwContext context);
+    ValueTask AttachmentsVersionsHandler(BmwContext context);
 }

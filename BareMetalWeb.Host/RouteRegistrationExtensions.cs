@@ -575,6 +575,23 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("admin", false),
             routeHandlers.QueryPlanHistoryHandler));
 
+        // Attachment API routes — must be registered before the generic /api/{type}/{id} route
+        host.RegisterRoute("GET /api/{type}/{id}/_attachments", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.AttachmentsListHandler));
+        host.RegisterRoute("POST /api/{type}/{id}/_attachments", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.AttachmentsUploadHandler));
+        host.RegisterRoute("GET /api/_attachments/{id}/download", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.AttachmentsDownloadHandler));
+        host.RegisterRoute("DELETE /api/_attachments/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.AttachmentsDeleteHandler));
+        host.RegisterRoute("GET /api/_attachments/{id}/versions", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.AttachmentsVersionsHandler));
+
         // Document chain — must be before the generic GET /api/{type}/{id} route
         host.RegisterRoute("GET /api/{type}/{id}/_related-chain", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
