@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Numerics;
 using System.Reflection;
@@ -36,6 +37,8 @@ namespace BareMetalWeb.Data;
 /// </summary>
 public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDisposable
 {
+    internal static Action<TimeSpan>? OnWalReadComplete;
+
     // ── Constants ────────────────────────────────────────────────────────────
 
     private const string WalSubFolder          = "wal";
@@ -323,25 +326,28 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
     public T? Load<T>(uint key) where T : BaseDataObject
     {
+        var sw = Stopwatch.StartNew();
         if (key == 0)
             throw new ArgumentException("Key cannot be zero.", nameof(key));
 
         var typeName = typeof(T).Name;
         var idMap    = GetOrLoadIdMap(typeName);
 
-        if (!idMap.TryGetValue(key, out var walKey)) return default;
-        if (!_walStore.TryGetHead(walKey, out var ptr)) return default;
+        if (!idMap.TryGetValue(key, out var walKey)) { sw.Stop(); OnWalReadComplete?.Invoke(sw.Elapsed); return default; }
+        if (!_walStore.TryGetHead(walKey, out var ptr)) { sw.Stop(); OnWalReadComplete?.Invoke(sw.Elapsed); return default; }
 
         // Check deserialization cache — hit if WAL pointer unchanged
         var cacheKey = (typeName, key, ptr);
         if (_deserCache.TryGetValue(cacheKey, out var cachedObj))
         {
             _deserCacheAccess[cacheKey] = Environment.TickCount64;
+            sw.Stop();
+            OnWalReadComplete?.Invoke(sw.Elapsed);
             return cachedObj as T;
         }
 
-        if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) return default;
-        if (payload.IsEmpty) return default;
+        if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) { sw.Stop(); OnWalReadComplete?.Invoke(sw.Elapsed); return default; }
+        if (payload.IsEmpty) { sw.Stop(); OnWalReadComplete?.Invoke(sw.Elapsed); return default; }
 
         T? result;
         try
@@ -351,6 +357,8 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         catch (Exception ex)
         {
             _logger?.LogError($"Corrupt payload for {typeName} Key={key} WalPtr={ptr}: {ex.Message}", ex);
+            sw.Stop();
+            OnWalReadComplete?.Invoke(sw.Elapsed);
             return default;
         }
         if (result != null)
@@ -360,6 +368,8 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             _deserCache[cacheKey] = result;
             _deserCacheAccess[cacheKey] = Environment.TickCount64;
         }
+        sw.Stop();
+        OnWalReadComplete?.Invoke(sw.Elapsed);
         return result;
     }
 
@@ -420,8 +430,9 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     /// <inheritdoc/>
     public IReadOnlyList<ReadOnlyMemory<byte>> QueryBinary(string typeName, QueryDefinition? query = null)
     {
+        var sw = Stopwatch.StartNew();
         var idMap = GetOrLoadIdMap(typeName);
-        if (idMap.Count == 0) return Array.Empty<ReadOnlyMemory<byte>>();
+        if (idMap.Count == 0) { sw.Stop(); OnWalReadComplete?.Invoke(sw.Elapsed); return Array.Empty<ReadOnlyMemory<byte>>(); }
 
         var results = new List<ReadOnlyMemory<byte>>();
 
@@ -445,6 +456,8 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             taken++;
         }
 
+        sw.Stop();
+        OnWalReadComplete?.Invoke(sw.Elapsed);
         return results;
     }
 

@@ -603,6 +603,11 @@ internal sealed class StubMetricsTracker : IMetricsTracker
 {
     public void RecordRequest(int statusCode, TimeSpan elapsed) { }
     public void RecordThrottled(TimeSpan elapsed) { }
+    public void RecordRouteDispatch(TimeSpan elapsed) { }
+    public void RecordWalRead(TimeSpan elapsed) { }
+    public void RecordUiRender(TimeSpan elapsed) { }
+    public void RecordSerialization(TimeSpan elapsed) { }
+    public void RecordGcPause(TimeSpan elapsed) { }
     public void GetMetricTable(out string[] tableColumns, out string[][] tableRows)
     {
         tableColumns = Array.Empty<string>();
@@ -610,5 +615,6 @@ internal sealed class StubMetricsTracker : IMetricsTracker
     }
     public MetricsSnapshot GetSnapshot() => new MetricsSnapshot(
         0, 0, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.FromMilliseconds(1.5),
-        TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, 0, 0, 0, 0, 0, 0, 0, 0, TimeSpan.Zero);
+        TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, 0, 0, 0, 0, 0, 0, 0, 0, TimeSpan.Zero,
+        0, TimeSpan.Zero, 0, TimeSpan.Zero, 0, TimeSpan.Zero, 0, TimeSpan.Zero, 0, 0, 0, 0);
 }

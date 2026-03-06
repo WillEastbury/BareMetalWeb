@@ -1113,6 +1113,11 @@ public class BareMetalWebServerTests : IDisposable
     {
         public void RecordRequest(int statusCode, TimeSpan duration) { }
         public void RecordThrottled(TimeSpan duration) { }
+        public void RecordRouteDispatch(TimeSpan elapsed) { }
+        public void RecordWalRead(TimeSpan elapsed) { }
+        public void RecordUiRender(TimeSpan elapsed) { }
+        public void RecordSerialization(TimeSpan elapsed) { }
+        public void RecordGcPause(TimeSpan elapsed) { }
         public void GetMetricTable(out string[] tableColumns, out string[][] tableRows)
         {
             tableColumns = Array.Empty<string>();
@@ -1120,7 +1125,8 @@ public class BareMetalWebServerTests : IDisposable
         }
         public MetricsSnapshot GetSnapshot() => new MetricsSnapshot(
             0, 0, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero,
-            TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, 0, 0, 0, 0, 0, 0, 0, 0, TimeSpan.Zero);
+            TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, 0, 0, 0, 0, 0, 0, 0, 0, TimeSpan.Zero,
+            0, TimeSpan.Zero, 0, TimeSpan.Zero, 0, TimeSpan.Zero, 0, TimeSpan.Zero, 0, 0, 0, 0);
     }
 
     private class MockClientRequestTracker : IClientRequestTracker

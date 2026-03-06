@@ -28,6 +28,17 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
     private long _requestsOther;
     private long _throttledRequests;
 
+    private long _routeDispatchTicks;
+    private long _routeDispatchCount;
+    private long _walReadTicks;
+    private long _walReadCount;
+    private long _uiRenderTicks;
+    private long _uiRenderCount;
+    private long _serializationTicks;
+    private long _serializationCount;
+    private long _gcPauseTicks;
+    private long _gcPauseCount;
+
     private readonly object _recentLock = new();
     private readonly Queue<ResponseSample> _recentSamples = new();
     private readonly Process _currentProcess = Process.GetCurrentProcess();
@@ -64,6 +75,36 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
         RecordRequest(429, elapsed);
     }
 
+    public void RecordRouteDispatch(TimeSpan elapsed)
+    {
+        Interlocked.Increment(ref _routeDispatchCount);
+        Interlocked.Add(ref _routeDispatchTicks, elapsed.Ticks);
+    }
+
+    public void RecordWalRead(TimeSpan elapsed)
+    {
+        Interlocked.Increment(ref _walReadCount);
+        Interlocked.Add(ref _walReadTicks, elapsed.Ticks);
+    }
+
+    public void RecordUiRender(TimeSpan elapsed)
+    {
+        Interlocked.Increment(ref _uiRenderCount);
+        Interlocked.Add(ref _uiRenderTicks, elapsed.Ticks);
+    }
+
+    public void RecordSerialization(TimeSpan elapsed)
+    {
+        Interlocked.Increment(ref _serializationCount);
+        Interlocked.Add(ref _serializationTicks, elapsed.Ticks);
+    }
+
+    public void RecordGcPause(TimeSpan elapsed)
+    {
+        Interlocked.Increment(ref _gcPauseCount);
+        Interlocked.Add(ref _gcPauseTicks, elapsed.Ticks);
+    }
+
     public MetricsSnapshot GetSnapshot()
     {
         var total = Interlocked.Read(ref _totalRequests);
@@ -88,6 +129,19 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
         var recentMetrics = ComputeRecentMetrics(recentSamples);
         var recent10s = ComputeRecentMetrics(FilterRecentSamples(recentSamples, nowUtc - RecentShortWindow));
 
+        var routeDispatchCount = Interlocked.Read(ref _routeDispatchCount);
+        var routeDispatchAvg = routeDispatchCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(Interlocked.Read(ref _routeDispatchTicks) / routeDispatchCount);
+        var walReadCount = Interlocked.Read(ref _walReadCount);
+        var walReadAvg = walReadCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(Interlocked.Read(ref _walReadTicks) / walReadCount);
+        var uiRenderCount = Interlocked.Read(ref _uiRenderCount);
+        var uiRenderAvg = uiRenderCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(Interlocked.Read(ref _uiRenderTicks) / uiRenderCount);
+        var serializationCount = Interlocked.Read(ref _serializationCount);
+        var serializationAvg = serializationCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(Interlocked.Read(ref _serializationTicks) / serializationCount);
+        var gcGen0 = GC.CollectionCount(0);
+        var gcGen1 = GC.CollectionCount(1);
+        var gcGen2 = GC.CollectionCount(2);
+        var gcAllocated = GC.GetTotalAllocatedBytes(precise: false);
+
         _currentProcess.Refresh();
 
         return new MetricsSnapshot(
@@ -108,7 +162,12 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             _currentProcess.Id,
             _currentProcess.WorkingSet64,
             _currentProcess.VirtualMemorySize64,
-            DateTime.UtcNow - _currentProcess.StartTime.ToUniversalTime()
+            DateTime.UtcNow - _currentProcess.StartTime.ToUniversalTime(),
+            routeDispatchCount, routeDispatchAvg,
+            walReadCount, walReadAvg,
+            uiRenderCount, uiRenderAvg,
+            serializationCount, serializationAvg,
+            gcGen0, gcGen1, gcGen2, gcAllocated
         );
     }
 
@@ -230,6 +289,18 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             new[] { "5xx Server Error", snapshot.Requests5xx.ToString("N0") },
             new[] { "Other", snapshot.RequestsOther.ToString("N0") },
             new[] { "429 Throttled", snapshot.ThrottledRequests.ToString("N0") },
+
+            new[] { "⏰ SUBSYSTEM TIMERS", "" },
+            new[] { "Route Dispatch (avg)", $"{snapshot.RouteDispatchAverage.TotalMicroseconds:F1} µs ({snapshot.RouteDispatchCount:N0} calls)" },
+            new[] { "WAL Read (avg)", $"{snapshot.WalReadAverage.TotalMicroseconds:F1} µs ({snapshot.WalReadCount:N0} calls)" },
+            new[] { "UI Render (avg)", $"{snapshot.UiRenderAverage.TotalMilliseconds:F2} ms ({snapshot.UiRenderCount:N0} calls)" },
+            new[] { "Serialization (avg)", $"{snapshot.SerializationAverage.TotalMicroseconds:F1} µs ({snapshot.SerializationCount:N0} calls)" },
+
+            new[] { "🗑️ GC STATISTICS", "" },
+            new[] { "Gen0 Collections", snapshot.GcGen0Collections.ToString("N0") },
+            new[] { "Gen1 Collections", snapshot.GcGen1Collections.ToString("N0") },
+            new[] { "Gen2 Collections", snapshot.GcGen2Collections.ToString("N0") },
+            new[] { "Total Allocated", FormatSizeBytes(snapshot.GcTotalAllocatedBytes) },
 
             new[] { "💻 MEMORY & PROCESS", "" },
             new[] { "Process ID (PID)", snapshot.ProcessId.ToString() },
