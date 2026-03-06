@@ -1776,10 +1776,22 @@ public sealed class RouteHandlers : IRouteHandlers
                 return;
             }
 
-            using var payloadList = new BmwValueList<Dictionary<string, object?>>(32);
-            foreach (var item in results)
-                payloadList.Add(BuildApiModel(meta, (object)item));
-            var payload = payloadList.ToArray();
+            int resultCount = results is ICollection resultCol ? resultCol.Count : 0;
+            Dictionary<string, object?>[] payload;
+            if (resultCount > 0)
+            {
+                payload = new Dictionary<string, object?>[resultCount];
+                int pi = 0;
+                foreach (var item in results)
+                    payload[pi++] = BuildApiModel(meta, (object)item);
+            }
+            else
+            {
+                using var payloadList = new BmwValueList<Dictionary<string, object?>>(32);
+                foreach (var item in results)
+                    payloadList.Add(BuildApiModel(meta, (object)item));
+                payload = payloadList.ToArray();
+            }
             // Clamp total: if fewer items than requested were returned, the real total cannot exceed skip + returned count.
             // This prevents inflated page counts when the location map has stale entries for unreadable records.
             // Applies whether or not Top was specified: without a top limit we also know the total is at most skip + payload.Length.
@@ -1802,10 +1814,22 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        using var allPayloadList = new BmwValueList<Dictionary<string, object?>>(32);
-        foreach (var item in allResults)
-            allPayloadList.Add(BuildApiModel(meta, (object)item));
-        var allPayload = allPayloadList.ToArray();
+        int allCount = allResults is ICollection allCol ? allCol.Count : 0;
+        Dictionary<string, object?>[] allPayload;
+        if (allCount > 0)
+        {
+            allPayload = new Dictionary<string, object?>[allCount];
+            int ai = 0;
+            foreach (var item in allResults)
+                allPayload[ai++] = BuildApiModel(meta, (object)item);
+        }
+        else
+        {
+            using var allPayloadList = new BmwValueList<Dictionary<string, object?>>(32);
+            foreach (var item in allResults)
+                allPayloadList.Add(BuildApiModel(meta, (object)item));
+            allPayload = allPayloadList.ToArray();
+        }
         await WriteJsonResponseAsync(context, allPayload);
     }
 
@@ -2929,14 +2953,18 @@ public sealed class RouteHandlers : IRouteHandlers
                 continue;
 
             // Build OR-group of Contains clauses for each searchable string list field
-            var stringListFields = entityMeta.ListFields
-                .Where(f => f.FieldType is FormFieldType.String
-                                        or FormFieldType.TextArea
-                                        or FormFieldType.Email
-                                        or FormFieldType.Link
-                                        or FormFieldType.Tags
-                                        or FormFieldType.Markdown)
-                .ToList();
+            var listFieldsArr = entityMeta.ListFields;
+            var stringListFields = new List<DataFieldMetadata>(listFieldsArr.Length);
+            foreach (var f in listFieldsArr)
+            {
+                if (f.FieldType is FormFieldType.String
+                                or FormFieldType.TextArea
+                                or FormFieldType.Email
+                                or FormFieldType.Link
+                                or FormFieldType.Tags
+                                or FormFieldType.Markdown)
+                    stringListFields.Add(f);
+            }
 
             if (stringListFields.Count == 0)
                 continue;
