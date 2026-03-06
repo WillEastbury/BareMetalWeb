@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using BareMetalWeb.Data;
 
 namespace BareMetalWeb.Host;
 
@@ -24,6 +25,8 @@ public sealed class EntityRouteTable
     {
         /// <summary>Pre-interned entity slug (null = empty slot).</summary>
         public string? Slug;
+        /// <summary>Compiled entity ordinal from RuntimeSnapshot (-1 = unresolved).</summary>
+        public int EntityOrdinal;
     }
 
     private Slot[] _slots = Array.Empty<Slot>();
@@ -61,6 +64,10 @@ public sealed class EntityRouteTable
                 idx = (idx + 1) & mask;
 
             slots[idx].Slug = slug;
+
+            // Resolve compiled ordinal from RuntimeSnapshot (if available)
+            var snapshot = RuntimeSnapshot.Current;
+            slots[idx].EntityOrdinal = snapshot?.Entities.TryResolveSlug(slug, out int eid) == true ? eid : -1;
         }
 
         _slots = slots;
@@ -69,15 +76,16 @@ public sealed class EntityRouteTable
     }
 
     /// <summary>
-    /// Resolve an entity slug span to its pre-interned string.
+    /// Resolve an entity slug span to its pre-interned string and compiled ordinal.
     /// Returns true if the entity is known; <paramref name="resolvedSlug"/>
-    /// is the canonical slug string (no allocation).
+    /// is the canonical slug string (no allocation), <paramref name="entityOrdinal"/>
+    /// is the RuntimeSnapshot EntityId (-1 if snapshot was not available at build time).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool TryResolve(ReadOnlySpan<char> slug, out string resolvedSlug)
+    public bool TryResolve(ReadOnlySpan<char> slug, out string resolvedSlug, out int entityOrdinal)
     {
         var slots = _slots;
-        if (slots.Length == 0) { resolvedSlug = null!; return false; }
+        if (slots.Length == 0) { resolvedSlug = null!; entityOrdinal = -1; return false; }
 
         uint idx = HashSlug(slug) & _mask;
 
@@ -85,16 +93,18 @@ public sealed class EntityRouteTable
         for (int probe = 0; probe <= _count; probe++)
         {
             ref var slot = ref slots[idx];
-            if (slot.Slug == null) { resolvedSlug = null!; return false; }
+            if (slot.Slug == null) { resolvedSlug = null!; entityOrdinal = -1; return false; }
             if (slug.Equals(slot.Slug.AsSpan(), StringComparison.OrdinalIgnoreCase))
             {
                 resolvedSlug = slot.Slug;
+                entityOrdinal = slot.EntityOrdinal;
                 return true;
             }
             idx = (idx + 1) & _mask;
         }
 
         resolvedSlug = null!;
+        entityOrdinal = -1;
         return false;
     }
 

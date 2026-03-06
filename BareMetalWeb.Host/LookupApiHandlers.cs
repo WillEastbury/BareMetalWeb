@@ -336,7 +336,18 @@ public static class LookupApiHandlers
             return (null, typeSlug, new ErrorResponse(StatusCodes.Status400BadRequest, "Entity type not specified."));
         }
 
-        if (!DataScaffold.TryGetEntity(typeSlug, out var metadata))
+        // Fast path: use compiled ordinal from PrefixRouter → O(1) array index
+        DataEntityMetadata? metadata = null;
+        var snapshot = RuntimeSnapshot.Current;
+        if (context.EntityOrdinal >= 0 && snapshot != null)
+        {
+            var entities = snapshot.Entities;
+            if ((uint)context.EntityOrdinal < (uint)entities.Count)
+                metadata = entities.Metadata[context.EntityOrdinal];
+        }
+
+        // Fallback: dictionary lookup
+        if (metadata == null && !DataScaffold.TryGetEntity(typeSlug, out metadata))
         {
             return (null, typeSlug, new ErrorResponse(StatusCodes.Status404NotFound, "Not found."));
         }

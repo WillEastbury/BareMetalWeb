@@ -93,7 +93,7 @@ public static class MetadataCompiler
         var entityTable = new EntityTable(
             eNames, eSlugs, eFieldStart, eFieldCount,
             eShowOnNav, eNavOrder, eIdStrategies, eHandlers,
-            sortedSlugs, sortedEntityIds);
+            sortedSlugs, sortedEntityIds, sorted);
 
         var fieldTable = new FieldTable(
             fNames, fWireTypes, fFormTypes, fFlags,

@@ -45,6 +45,8 @@ public sealed class BmwContext
     public string? RouteExtra;
     /// <summary>Key name for <see cref="RouteExtra"/> (e.g. "field", "command").</summary>
     public string? RouteExtraKey;
+    /// <summary>Compiled entity ordinal from RuntimeSnapshot (-1 = unresolved). Enables O(1) array-indexed metadata access.</summary>
+    public int EntityOrdinal = -1;
 
     // ── Migration bridge ────────────────────────────────────────────────
     /// <summary>

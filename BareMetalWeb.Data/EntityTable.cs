@@ -19,6 +19,8 @@ public sealed class EntityTable
     public readonly int[] NavOrder;
     public readonly AutoIdStrategy[] IdStrategies;
     public readonly DataEntityHandlers[] Handlers;
+    /// <summary>Original DataEntityMetadata references indexed by EntityId, for handlers that need full metadata.</summary>
+    public readonly DataEntityMetadata[] Metadata;
 
     // slug → EntityId resolver (sorted slugs + binary search)
     private readonly string[] _sortedSlugs;
@@ -34,7 +36,8 @@ public sealed class EntityTable
         AutoIdStrategy[] idStrategies,
         DataEntityHandlers[] handlers,
         string[] sortedSlugs,
-        int[] sortedEntityIds)
+        int[] sortedEntityIds,
+        DataEntityMetadata[] metadata)
     {
         Count = names.Length;
         Names = names;
@@ -47,6 +50,7 @@ public sealed class EntityTable
         Handlers = handlers;
         _sortedSlugs = sortedSlugs;
         _sortedEntityIds = sortedEntityIds;
+        Metadata = metadata;
     }
 
     /// <summary>
