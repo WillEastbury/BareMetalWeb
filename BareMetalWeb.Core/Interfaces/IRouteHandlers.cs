@@ -87,4 +87,8 @@ public interface IRouteHandlers
     ValueTask AttachmentsDownloadHandler(BmwContext context);
     ValueTask AttachmentsDeleteHandler(BmwContext context);
     ValueTask AttachmentsVersionsHandler(BmwContext context);
+    ValueTask CommentsListHandler(BmwContext context);
+    ValueTask CommentsAddHandler(BmwContext context);
+    ValueTask CommentsEditHandler(BmwContext context);
+    ValueTask CommentsDeleteHandler(BmwContext context);
 }

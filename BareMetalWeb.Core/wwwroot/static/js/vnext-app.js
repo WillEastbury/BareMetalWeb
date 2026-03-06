@@ -2675,6 +2675,21 @@
         html += '<div id="bm-attachments-body"><div class="text-muted small"><i class="bi bi-hourglass-split me-1"></i>Loading attachments\u2026</div></div>';
         html += '</div></div>';
 
+        // Comments panel — Slack-style chat thread on every record
+        html += '<div class="card bm-page-card mt-3" id="bm-comments-card">';
+        html += '<div class="card-header d-flex align-items-center justify-content-between">';
+        html += '<h6 class="mb-0"><i class="bi bi-chat-dots me-2"></i>Comments</h6>';
+        html += '<span class="badge bg-secondary" id="bm-comments-count">0</span>';
+        html += '</div>';
+        html += '<div class="card-body">';
+        html += '<div id="bm-comments-body"><div class="text-muted small"><i class="bi bi-hourglass-split me-1"></i>Loading comments\u2026</div></div>';
+        html += '<div class="mt-3 border-top pt-3">';
+        html += '<div class="d-flex gap-2">';
+        html += '<input type="text" class="form-control form-control-sm" id="bm-comment-input" placeholder="Write a comment\u2026" maxlength="4000">';
+        html += '<button class="btn btn-sm btn-primary" id="bm-comment-send" disabled><i class="bi bi-send"></i></button>';
+        html += '</div></div>';
+        html += '</div></div>';
+
         html += '</div>';
         setContent(html);
 
@@ -2693,6 +2708,9 @@
 
         // Load and wire attachments panel
         loadAttachmentsPanel(slug, id);
+
+        // Load and wire comments panel
+        loadCommentsPanel(slug, id);
 
         // Wire command buttons
         document.querySelectorAll('.vnext-cmd-btn').forEach(function (btn) {
@@ -3014,6 +3032,118 @@
                     .catch(function (err) { showToast('Could not load version history: ' + err.message, 'error'); });
             });
         });
+    }
+
+    /**
+     * Load comments panel for a record and wire up post/edit/delete.
+     */
+    function loadCommentsPanel(slug, id) {
+        var commentsBody = document.getElementById('bm-comments-body');
+        var commentInput = document.getElementById('bm-comment-input');
+        var sendBtn = document.getElementById('bm-comment-send');
+        var countBadge = document.getElementById('bm-comments-count');
+        if (!commentsBody || !commentInput || !sendBtn) return;
+
+        commentInput.addEventListener('input', function () {
+            sendBtn.disabled = !commentInput.value.trim();
+        });
+        commentInput.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' && !sendBtn.disabled) postComment();
+        });
+        sendBtn.addEventListener('click', postComment);
+
+        function postComment() {
+            var text = commentInput.value.trim();
+            if (!text) return;
+            sendBtn.disabled = true;
+            commentInput.disabled = true;
+            apiFetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id) + '/_comments', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text })
+            }).then(function () {
+                commentInput.value = '';
+                commentInput.disabled = false;
+                loadComments();
+            }).catch(function (err) {
+                showToast('Could not post comment: ' + err.message, 'error');
+                commentInput.disabled = false;
+                sendBtn.disabled = false;
+            });
+        }
+
+        function loadComments() {
+            apiFetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id) + '/_comments')
+                .then(function (comments) {
+                    if (countBadge) countBadge.textContent = comments.length;
+                    if (!comments || comments.length === 0) {
+                        commentsBody.innerHTML = '<div class="text-muted small">No comments yet. Be the first to comment!</div>';
+                        return;
+                    }
+                    var h = '';
+                    comments.forEach(function (c) {
+                        var date = new Date(c.createdAt);
+                        var edited = c.updatedAt && c.updatedAt !== c.createdAt;
+                        var timeStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'});
+                        h += '<div class="d-flex mb-2 bm-comment" data-id="' + c.id + '">';
+                        h += '<div class="flex-shrink-0 me-2">';
+                        h += '<div class="rounded-circle bg-primary text-white d-flex align-items-center justify-content-center" style="width:32px;height:32px;font-size:14px">';
+                        h += escHtml((c.author || '?').charAt(0).toUpperCase());
+                        h += '</div></div>';
+                        h += '<div class="flex-grow-1">';
+                        h += '<div class="d-flex align-items-baseline gap-2">';
+                        h += '<strong class="small">' + escHtml(c.author || 'Unknown') + '</strong>';
+                        h += '<span class="text-muted" style="font-size:0.75rem">' + timeStr + '</span>';
+                        if (edited) h += '<span class="text-muted" style="font-size:0.7rem">(edited)</span>';
+                        h += '</div>';
+                        h += '<div class="small bm-comment-text">' + escHtml(c.text) + '</div>';
+                        h += '<div class="bm-comment-actions mt-1" style="display:none">';
+                        h += '<button class="btn btn-xs btn-link text-muted p-0 me-2 bm-comment-edit-btn" data-id="' + c.id + '" data-text="' + escHtml(c.text).replace(/"/g, '&quot;') + '"><i class="bi bi-pencil"></i> Edit</button>';
+                        h += '<button class="btn btn-xs btn-link text-danger p-0 bm-comment-delete-btn" data-id="' + c.id + '"><i class="bi bi-trash"></i> Delete</button>';
+                        h += '</div>';
+                        h += '</div></div>';
+                    });
+                    commentsBody.innerHTML = h;
+
+                    // Show actions on hover
+                    commentsBody.querySelectorAll('.bm-comment').forEach(function (el) {
+                        var actions = el.querySelector('.bm-comment-actions');
+                        el.addEventListener('mouseenter', function () { if (actions) actions.style.display = ''; });
+                        el.addEventListener('mouseleave', function () { if (actions) actions.style.display = 'none'; });
+                    });
+
+                    // Wire edit buttons
+                    commentsBody.querySelectorAll('.bm-comment-edit-btn').forEach(function (btn) {
+                        btn.addEventListener('click', function () {
+                            var newText = prompt('Edit comment:', btn.dataset.text);
+                            if (newText !== null && newText.trim()) {
+                                apiFetch(API + '/_comments/' + btn.dataset.id, {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ text: newText.trim() })
+                                }).then(loadComments)
+                                  .catch(function (err) { showToast(err.message, 'error'); });
+                            }
+                        });
+                    });
+
+                    // Wire delete buttons
+                    commentsBody.querySelectorAll('.bm-comment-delete-btn').forEach(function (btn) {
+                        btn.addEventListener('click', function () {
+                            if (confirm('Delete this comment?')) {
+                                apiFetch(API + '/_comments/' + btn.dataset.id, { method: 'DELETE' })
+                                    .then(loadComments)
+                                    .catch(function (err) { showToast(err.message, 'error'); });
+                            }
+                        });
+                    });
+                })
+                .catch(function (err) {
+                    commentsBody.innerHTML = '<span class="text-warning small">Could not load comments: ' + escHtml(err.message) + '</span>';
+                });
+        }
+
+        loadComments();
     }
 
     function renderSubListReadonly(items, field) {

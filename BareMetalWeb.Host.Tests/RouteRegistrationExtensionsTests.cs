@@ -1174,6 +1174,10 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask AttachmentsDownloadHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask AttachmentsDeleteHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask AttachmentsVersionsHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask CommentsListHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask CommentsAddHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask CommentsEditHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask CommentsDeleteHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask DataListExportHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask DataViewExportHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask DataBulkDeleteHandler(BmwContext context) => ValueTask.CompletedTask;

@@ -592,6 +592,20 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.RawPage("Authenticated", false),
             routeHandlers.AttachmentsVersionsHandler));
 
+        // Comments API routes
+        host.RegisterRoute("GET /api/{type}/{id}/_comments", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.CommentsListHandler));
+        host.RegisterRoute("POST /api/{type}/{id}/_comments", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.CommentsAddHandler));
+        host.RegisterRoute("PATCH /api/_comments/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.CommentsEditHandler));
+        host.RegisterRoute("DELETE /api/_comments/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("Authenticated", false),
+            routeHandlers.CommentsDeleteHandler));
+
         // Document chain — must be before the generic GET /api/{type}/{id} route
         host.RegisterRoute("GET /api/{type}/{id}/_related-chain", new RouteHandlerData(
             pageInfoFactory.RawPage("Authenticated", false),
