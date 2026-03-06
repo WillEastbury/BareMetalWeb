@@ -293,6 +293,20 @@
         badge.classList.toggle('d-none', active === 0);
     }
 
+    function _updateInboxBadge() {
+        fetch(BASE + '/api/inbox/unread-count', { credentials: 'same-origin' })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (data) {
+                if (!data) return;
+                var badge = document.getElementById('vnext-inbox-badge');
+                if (!badge) return;
+                var count = data.count || 0;
+                badge.textContent = count > 99 ? '99+' : String(count);
+                badge.classList.toggle('d-none', count === 0);
+            })
+            .catch(function () {});
+    }
+
     function escHtml(str) {
         if (str == null) return '';
         return String(str)
@@ -4973,16 +4987,16 @@
     toolsLi.appendChild(toolsMenu);
     rightUl.appendChild(toolsLi);
 
-    // Bell icon linking to background jobs page
+    // Bell icon linking to inbox page
     const jobsLi  = el('li', { className: 'nav-item' });
     const jobsA   = el('a', {
-      className: 'nav-link position-relative' + (activeSlug === '_jobs' ? ' active' : ''),
-      href: BASE + '/_jobs',
-      title: 'Background Jobs'
+      className: 'nav-link position-relative' + (activeSlug === '_inbox' ? ' active' : ''),
+      href: BASE + '/_inbox',
+      title: 'Inbox'
     });
     jobsA.setAttribute('data-go', '');
     jobsA.innerHTML = '<i class="bi bi-bell"></i>' +
-      '<span id="vnext-jobs-badge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none">0</span>';
+      '<span id="vnext-inbox-badge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger d-none">0</span>';
     jobsLi.appendChild(jobsA);
     rightUl.appendChild(jobsLi);
 
@@ -5000,11 +5014,12 @@
 
     nav.appendChild(rightUl);
 
-    // Sync badge after DOM insertion
-    setTimeout(_updateJobBadge, 0);
+    // Sync inbox badge after DOM insertion
+    setTimeout(_updateInboxBadge, 0);
 
     return nav;
   }
+
 
   // ── Global Search Modal ──────────────────────────────────────────────────────
   function openGlobalSearchModal() {
@@ -5137,6 +5152,94 @@
       openGlobalSearchModal();
     }
   });
+  function renderInboxPage(container) {
+    var hdr = el('div', { className: 'd-flex align-items-center justify-content-between gap-3 mb-3 flex-wrap' });
+    hdr.appendChild(el('h2', { className: 'mb-0', textContent: '\uD83D\uDCEC Inbox' }));
+    var readAllBtn = el('button', { className: 'btn btn-outline-secondary btn-sm', textContent: '\u2713 Mark All Read' });
+    hdr.appendChild(readAllBtn);
+    container.appendChild(hdr);
+
+    var listDiv = el('div');
+    container.appendChild(listDiv);
+
+    function categoryBadge(cat) {
+      if (!cat) return '';
+      var cls = 'secondary';
+      if (cat === 'Lead') cls = 'success';
+      else if (cat === 'Payment') cls = 'danger';
+      else if (cat === 'Ticket') cls = 'primary';
+      return '<span class="badge bg-' + cls + ' me-2">' + escHtml(cat) + '</span>';
+    }
+
+    function loadMessages() {
+      listDiv.innerHTML = '<div class="text-muted text-center py-4">Loading\u2026</div>';
+      fetch(BASE + '/api/inbox', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+        .then(function (messages) {
+          if (!messages || messages.length === 0) {
+            listDiv.innerHTML = '<div class="text-center py-5 text-muted"><i class="bi bi-inbox display-4 d-block mb-2"></i>No messages</div>';
+            return;
+          }
+          var html = '<div class="list-group">';
+          messages.forEach(function (msg) {
+            var ts = msg.createdAtUtc ? new Date(msg.createdAtUtc).toLocaleString() : '';
+            var unreadCls = msg.isRead ? '' : ' list-group-item-light fw-semibold';
+            var link = (msg.entitySlug && msg.entityId) ? BASE + '/' + encodeURIComponent(msg.entitySlug) + '/' + encodeURIComponent(msg.entityId) : null;
+            html += '<div class="list-group-item' + unreadCls + ' d-flex gap-3 align-items-start" data-inbox-id="' + escHtml(String(msg.id)) + '">';
+            if (!msg.isRead) {
+              html += '<span class="mt-1 text-primary flex-shrink-0" title="Unread"><i class="bi bi-circle-fill" style="font-size:.5rem"></i></span>';
+            } else {
+              html += '<span class="mt-1 text-muted flex-shrink-0"><i class="bi bi-circle" style="font-size:.5rem"></i></span>';
+            }
+            html += '<div class="flex-grow-1">';
+            html += '<div class="d-flex justify-content-between flex-wrap gap-1">';
+            html += '<span>' + categoryBadge(msg.category) + '<strong>' + escHtml(msg.subject) + '</strong></span>';
+            html += '<small class="text-muted">' + escHtml(ts) + '</small>';
+            html += '</div>';
+            if (msg.body) {
+              html += '<div class="mt-1 text-muted small">' + escHtml(msg.body) + '</div>';
+            }
+            if (link) {
+              html += '<div class="mt-1"><a href="' + escHtml(link) + '" class="btn btn-sm btn-link p-0" data-go="">View record \u2192</a></div>';
+            }
+            html += '</div>';
+            html += '</div>';
+          });
+          html += '</div>';
+          listDiv.innerHTML = html;
+
+          // Mark as read on click
+          listDiv.querySelectorAll('[data-inbox-id]').forEach(function (item) {
+            item.addEventListener('click', function () {
+              var id = item.getAttribute('data-inbox-id');
+              if (item.classList.contains('fw-semibold')) {
+                fetch(BASE + '/api/inbox/' + id + '/read', { method: 'POST', credentials: 'same-origin' })
+                  .then(function () {
+                    item.classList.remove('list-group-item-light', 'fw-semibold');
+                    var dot = item.querySelector('.bi-circle-fill');
+                    if (dot) dot.className = 'bi bi-circle';
+                    _updateInboxBadge();
+                  })
+                  .catch(function () {});
+              }
+            });
+          });
+          _updateInboxBadge();
+        })
+        .catch(function () {
+          listDiv.innerHTML = '<div class="alert alert-danger">Failed to load inbox.</div>';
+        });
+    }
+
+    readAllBtn.addEventListener('click', function () {
+      readAllBtn.disabled = true;
+      fetch(BASE + '/api/inbox/read-all', { method: 'POST', credentials: 'same-origin' })
+        .then(function () { loadMessages(); })
+        .catch(function () { readAllBtn.disabled = false; });
+    });
+
+    loadMessages();
+  }
 
   function renderSampleDataPage(container) {
     container.appendChild(el('h2', { className: 'mb-3', textContent: '\u{1F9EA} Generate Sample Data' }));
@@ -5610,6 +5713,15 @@
         });
         container.appendChild(row);
         R.appendChild(container);
+        wire(); return;
+      }
+
+      // ── Inbox page ─────────────────────────────────────────────────────────
+      if (slug === '_inbox') {
+        R.replaceChildren(navbar('_inbox'));
+        const main = el('div', { className: 'container mt-3' });
+        R.appendChild(main);
+        renderInboxPage(main);
         wire(); return;
       }
 

@@ -64,5 +64,7 @@ public class NotificationDefinition : BaseDataObject
 public enum NotificationChannelType
 {
     Email = 0,
-    Sms = 1
+    Sms = 1,
+    Webhook = 2,
+    InApp = 3
 }

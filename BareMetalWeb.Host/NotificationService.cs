@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Mail;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
@@ -81,6 +82,66 @@ public sealed class WebhookSmsChannel : INotificationChannel
 }
 
 /// <summary>
+/// Outbound webhook notification channel. Posts a JSON payload to a configured HTTP endpoint.
+/// Compatible with any HTTP webhook receiver (Slack, Teams, custom integrations, etc.).
+/// </summary>
+public sealed class WebhookNotificationChannel : INotificationChannel
+{
+    private readonly string _endpoint;
+    private readonly string _secret;
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
+
+    public WebhookNotificationChannel(string endpoint, string secret)
+    {
+        _endpoint = endpoint;
+        _secret   = secret;
+    }
+
+    public async ValueTask SendAsync(string recipient, string subject, string body, CancellationToken ct)
+    {
+        var payload = JsonSerializer.Serialize(new
+        {
+            recipient,
+            subject,
+            body,
+            timestamp = DateTime.UtcNow
+        });
+        using var request = new HttpRequestMessage(HttpMethod.Post, _endpoint)
+        {
+            Content = new StringContent(payload, Encoding.UTF8, "application/json")
+        };
+        if (!string.IsNullOrEmpty(_secret))
+            request.Headers.TryAddWithoutValidation("X-Webhook-Secret", _secret);
+        await _http.SendAsync(request, ct);
+    }
+}
+
+/// <summary>
+/// In-app notification channel. Persists an <see cref="InboxMessage"/> record
+/// for the recipient user so it appears in their inbox.
+/// </summary>
+public sealed class InAppNotificationChannel : INotificationChannel
+{
+    private readonly string _category;
+
+    public InAppNotificationChannel(string category = "") => _category = category;
+
+    public async ValueTask SendAsync(string recipient, string subject, string body, CancellationToken ct)
+    {
+        var msg = new InboxMessage
+        {
+            RecipientUserName = recipient,
+            Subject           = subject,
+            Body              = body,
+            Category          = _category,
+            IsRead            = false,
+            CreatedAtUtc      = DateTime.UtcNow
+        };
+        await DataStoreProvider.Current.SaveAsync(msg, ct).ConfigureAwait(false);
+    }
+}
+
+/// <summary>
 /// Notification service that resolves channels from NotificationDefinition records
 /// and sends templated messages. Integrates with scheduled actions.
 /// </summary>
@@ -112,6 +173,9 @@ public static class NotificationService
                 channel.Username, channel.Password, channel.FromAddress),
             NotificationChannelType.Sms => new WebhookSmsChannel(
                 channel.Host, channel.Username, channel.FromAddress),
+            NotificationChannelType.Webhook => new WebhookNotificationChannel(
+                channel.Host, channel.Password),
+            NotificationChannelType.InApp => new InAppNotificationChannel(channel.Name),
             _ => throw new InvalidOperationException($"Unknown channel type: {channel.ChannelType}")
         };
 
