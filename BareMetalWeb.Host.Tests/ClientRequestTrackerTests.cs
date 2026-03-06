@@ -8,12 +8,8 @@ namespace BareMetalWeb.Host.Tests;
 
 public class ClientRequestTrackerTests
 {
-    private static void WaitUntil(Func<bool> condition, int timeoutMs = 5000, int intervalMs = 25)
-    {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
-            Thread.Sleep(intervalMs);
-    }
+    private static void WaitUntil(Func<bool> condition, int timeoutMs = 5000)
+        => SpinWait.SpinUntil(condition, timeoutMs);
 
     private class MockLogger : IBufferedLogger
     {
@@ -335,8 +331,7 @@ public class ClientRequestTrackerTests
         }
 
         // Wait for window to reset (1-second window; generous timeout for CI)
-        var windowStart = System.Diagnostics.Stopwatch.StartNew();
-        WaitUntil(() => windowStart.ElapsedMilliseconds >= 1200);
+        Thread.Sleep(1200);
 
         // Make more requests in new window
         for (int i = 0; i < 5; i++)

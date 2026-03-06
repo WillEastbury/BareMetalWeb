@@ -137,6 +137,27 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Cache npm packages (Jest)
+        uses: actions/cache@v4
+        with:
+          path: tests/js-unit/node_modules
+          key: npm-jest-${{ hashFiles('tests/js-unit/package-lock.json') }}
+          restore-keys: npm-jest-
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('tests/playwright/package-lock.json') }}
+          restore-keys: playwright-
+
       - name: Restore solution
         run: dotnet restore BareMetalWeb.sln
 
@@ -147,16 +168,33 @@ jobs:
             -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
             -p:InformationalVersion=${{ needs.version.outputs.info_version }}
 
-      - name: Unit tests (.NET)
+      - name: Unit tests (.NET) – parallel shards
         run: |
-          dotnet test BareMetalWeb.sln --no-build --configuration Release --verbosity minimal \
-            --blame-hang-timeout 60s \
-            --filter "FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~PerformanceTests&Category!=Integration" \
-            --results-directory TestResults --logger "trx"
-          if find TestResults -name '*.trx' -exec grep -l 'outcome="Failed"' {} + 2>/dev/null | head -1 | grep -q .; then
-            echo "::error::One or more unit tests failed"
-            exit 1
-          fi
+          FILTER="FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~PerformanceTests&Category!=Integration"
+          projects=(
+            BareMetalWeb.Data.Tests
+            BareMetalWeb.Host.Tests
+            BareMetalWeb.Rendering.Tests
+            BareMetalWeb.Runtime.Tests
+          )
+          declare -A pids
+          for proj in "${projects[@]}"; do
+            mkdir -p "TestResults/$proj"
+            dotnet test "$proj/$proj.csproj" --no-build --configuration Release --verbosity minimal \
+              --blame-hang-timeout 60s \
+              --filter "$FILTER" --results-directory "TestResults/$proj" --logger "trx" \
+              > "TestResults/$proj/stdout.log" 2>&1 &
+            pids[$proj]=$!
+          done
+          FAILED=0
+          for proj in "${projects[@]}"; do
+            if ! wait "${pids[$proj]}"; then
+              echo "::error::Tests failed in $proj"
+              cat "TestResults/$proj/stdout.log" || true
+              FAILED=1
+            fi
+          done
+          exit $FAILED
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -205,6 +243,20 @@ jobs:
           az webapp start --name baremetalweb --resource-group baremetalweb-rg
           echo "Waiting 30 s for app to start..."
           sleep 30
+
+      - name: Cache npm packages (Playwright)
+        uses: actions/cache@v4
+        with:
+          path: tests/playwright/node_modules
+          key: npm-playwright-${{ hashFiles('tests/playwright/package-lock.json') }}
+          restore-keys: npm-playwright-
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('tests/playwright/package-lock.json') }}
+          restore-keys: playwright-
 
       - name: Install Playwright
         working-directory: tests/playwright
@@ -256,6 +308,12 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
 
       - name: Restore
         run: dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
@@ -307,6 +365,12 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
 
       - name: Restore
         run: dotnet restore BareMetalWeb.IntegrationTests/BareMetalWeb.IntegrationTests.csproj
@@ -353,6 +417,12 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
 
       - name: Restore
         run: dotnet restore BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj
@@ -392,6 +462,12 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
 
       - name: Restore
         run: dotnet restore BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj
@@ -432,6 +508,20 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '20'
+
+      - name: Cache npm packages (Playwright)
+        uses: actions/cache@v4
+        with:
+          path: tests/playwright/node_modules
+          key: npm-playwright-${{ hashFiles('tests/playwright/package-lock.json') }}
+          restore-keys: npm-playwright-
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('tests/playwright/package-lock.json') }}
+          restore-keys: playwright-
 
       - name: Install Playwright
         working-directory: tests/playwright
@@ -490,6 +580,13 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
 
       - name: Restore
         run: dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
@@ -700,6 +797,20 @@ jobs:
         uses: actions/setup-node@v6
         with:
           node-version: '20'
+
+      - name: Cache npm packages (Playwright)
+        uses: actions/cache@v4
+        with:
+          path: tests/playwright/node_modules
+          key: npm-playwright-${{ hashFiles('tests/playwright/package-lock.json') }}
+          restore-keys: npm-playwright-
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ hashFiles('tests/playwright/package-lock.json') }}
+          restore-keys: playwright-
 
       - name: Install Playwright
         working-directory: tests/playwright
