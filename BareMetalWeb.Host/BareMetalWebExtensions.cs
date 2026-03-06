@@ -117,6 +117,11 @@ public static class BareMetalWebExtensions
             dataRoot,
             msg => logger.LogInfo($"[RuntimeEntityRegistry] {msg}")).ConfigureAwait(false);
 
+        // Compile metadata into dense runtime tables (struct-of-arrays)
+        MetadataCompiler.CompileAndSwap(DataScaffold.Entities);
+        logger.LogInfo($"[MetadataCompiler] Compiled {RuntimeSnapshot.Current!.Entities.Count} entities, " +
+                       $"{RuntimeSnapshot.Current.Fields.Count} fields");
+
         // Permissions
         var permSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var e in DataScaffold.Entities)
