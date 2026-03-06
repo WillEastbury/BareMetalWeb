@@ -374,7 +374,7 @@ public static class BmwJsonWriter
             }
 
             case WireFieldType.Enum:
-                WriteEnumAsJson(output, ref reader, enumUnderlying, fmtBuf);
+                WriteEnumAsJson(output, ref reader, enumUnderlying);
                 break;
 
             default:
@@ -437,8 +437,9 @@ public static class BmwJsonWriter
 
     // ────────────── Enum ──────────────
 
-    private static void WriteEnumAsJson(Stream output, ref SpanReader reader, WireFieldType underlying, Span<byte> fmtBuf)
+    private static void WriteEnumAsJson(Stream output, ref SpanReader reader, WireFieldType underlying)
     {
+        Span<byte> buf = stackalloc byte[24];
         long raw = underlying switch
         {
             WireFieldType.Byte => reader.ReadByte(),
@@ -451,7 +452,7 @@ public static class BmwJsonWriter
             WireFieldType.UInt64 => (long)reader.ReadUInt64(),
             _ => reader.ReadInt32(),
         };
-        FormatAndWriteInt64(output, raw, fmtBuf);
+        FormatAndWriteInt64(output, raw, buf);
     }
 
     // ────────────── String field ──────────────

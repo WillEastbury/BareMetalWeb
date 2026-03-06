@@ -36,6 +36,16 @@ public sealed class BmwContext
     /// <summary>Route parameters extracted by the jump-table or pattern router.</summary>
     public Dictionary<string, string>? RouteParameters { get; set; }
 
+    // ── Prefix-router fast-path fields (zero-allocation param passing) ──
+    /// <summary>Entity type slug set by the prefix router for /api/{type} routes.</summary>
+    public string? EntitySlug;
+    /// <summary>Entity ID string set by the prefix router for /api/{type}/{id} routes.</summary>
+    public string? EntityId;
+    /// <summary>Extra route segment value (field name, command name, etc.).</summary>
+    public string? RouteExtra;
+    /// <summary>Key name for <see cref="RouteExtra"/> (e.g. "field", "command").</summary>
+    public string? RouteExtraKey;
+
     // ── Migration bridge ────────────────────────────────────────────────
     /// <summary>
     /// The underlying ASP.NET HttpContext. Available during migration so
