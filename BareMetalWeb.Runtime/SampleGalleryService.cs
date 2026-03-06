@@ -300,6 +300,25 @@ public static class SampleGalleryService
                 await store.SaveAsync(newSched, cancellationToken).ConfigureAwait(false);
             }
 
+            // Import workflow rules that watch this entity
+            foreach (var srcRule in package.WorkflowRules)
+            {
+                if (!string.Equals(srcRule.SourceEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) continue;
+                var newRule = new DomainEventSubscription
+                {
+                    Name = srcRule.Name,
+                    SourceEntity = newEntity.Slug,
+                    WatchField = srcRule.WatchField,
+                    FromValue = srcRule.FromValue,
+                    TriggerValue = srcRule.TriggerValue,
+                    TargetAction = srcRule.TargetAction,
+                    TargetResolution = srcRule.TargetResolution,
+                    Priority = srcRule.Priority,
+                    Enabled = srcRule.Enabled
+                };
+                await store.SaveAsync(newRule, cancellationToken).ConfigureAwait(false);
+            }
+
             int fieldCount = 0;
             foreach (var f in package.Fields) if (f.EntityId == oldEntityId) fieldCount++;
             int indexCount = 0;
@@ -310,7 +329,9 @@ public static class SampleGalleryService
             foreach (var r in package.Reports) if (string.Equals(r.RootEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) reportCount++;
             int aggCount = 0;
             foreach (var a in package.Aggregations) if (a.EntityId == oldEntityId) aggCount++;
-            logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es), {actionCount} action(s), {reportCount} report(s), {aggCount} aggregation(s).");
+            int ruleCount = 0;
+            foreach (var rule in package.WorkflowRules) if (string.Equals(rule.SourceEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) ruleCount++;
+            logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es), {actionCount} action(s), {reportCount} report(s), {aggCount} aggregation(s), {ruleCount} workflow rule(s).");
             deployed.Add(srcEntity.Name);
         }
 
@@ -422,5 +443,14 @@ public static class SampleGalleryService
         var scheds = new List<ScheduledActionDefinition>(await store.QueryAsync<ScheduledActionDefinition>(entityIdQuery, ct).ConfigureAwait(false));
         foreach (var sched in scheds)
             await store.DeleteAsync<ScheduledActionDefinition>(sched.Key, ct).ConfigureAwait(false);
+
+        // Delete workflow rules watching this entity
+        var rulesQuery = new QueryDefinition
+        {
+            Clauses = { new QueryClause { Field = "SourceEntity", Operator = QueryOperator.Equals, Value = entitySlug } }
+        };
+        var rules = new List<DomainEventSubscription>(await store.QueryAsync<DomainEventSubscription>(rulesQuery, ct).ConfigureAwait(false));
+        foreach (var rule in rules)
+            await store.DeleteAsync<DomainEventSubscription>(rule.Key, ct).ConfigureAwait(false);
     }
 }
