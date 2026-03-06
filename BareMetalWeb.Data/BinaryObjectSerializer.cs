@@ -27,6 +27,8 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     // Maps (Type, schema-hash) → pre-built ordinal array so schema-based deserialization
     // uses array indexing instead of a per-field dictionary lookup.
     private static readonly ConcurrentDictionary<(Type Type, uint SchemaHash), MemberAccessor?[]> SchemaOrdinalCache = new();
+    // Cached compiled factory delegates — avoids per-call Activator.CreateInstance overhead.
+    private static readonly ConcurrentDictionary<Type, Func<object>> InstanceFactory = new();
     private static readonly Encoding Utf8 = Encoding.UTF8;
     private const int Magic = 0x314F5342; // "BSO1" in little-endian
     private const int CurrentVersion = 3;
@@ -1326,8 +1328,14 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             return RuntimeHelpers.GetUninitializedObject(type);
         }
 
-        return Activator.CreateInstance(type)
-            ?? throw new InvalidOperationException($"Unable to create instance for '{type.FullName}'.");
+        var factory = InstanceFactory.GetOrAdd(type, static t =>
+        {
+            var ctor = System.Linq.Expressions.Expression.New(t);
+            return System.Linq.Expressions.Expression.Lambda<Func<object>>(
+                System.Linq.Expressions.Expression.Convert(ctor, typeof(object))
+            ).Compile();
+        });
+        return factory();
     }
 
     private static void TryAssignValue(object instance, MemberAccessor member, object? value)
@@ -1534,9 +1542,15 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         {
             shape.Kind = TypeKind.List;
             shape.ElementType = AssumePublicMembers(listElementType);
-            // AOT-safe: use parameterless constructor (capacity is just a hint).
             var listType = type;
-            shape.ListFactory = _ => (System.Collections.IList)Activator.CreateInstance(listType)!;
+            var listFactory = InstanceFactory.GetOrAdd(listType, static t =>
+            {
+                var ctor = System.Linq.Expressions.Expression.New(t);
+                return System.Linq.Expressions.Expression.Lambda<Func<object>>(
+                    System.Linq.Expressions.Expression.Convert(ctor, typeof(object))
+                ).Compile();
+            });
+            shape.ListFactory = _ => (System.Collections.IList)listFactory();
             return shape;
         }
 
@@ -1545,9 +1559,15 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             shape.Kind = TypeKind.Dictionary;
             shape.KeyType = AssumePublicMembers(keyType);
             shape.ValueType = AssumePublicMembers(valueType);
-            // AOT-safe: use parameterless constructor (capacity is just a hint).
             var dictType = type;
-            shape.DictionaryFactory = _ => (System.Collections.IDictionary)Activator.CreateInstance(dictType)!;
+            var dictFactory = InstanceFactory.GetOrAdd(dictType, static t =>
+            {
+                var ctor = System.Linq.Expressions.Expression.New(t);
+                return System.Linq.Expressions.Expression.Lambda<Func<object>>(
+                    System.Linq.Expressions.Expression.Convert(ctor, typeof(object))
+                ).Compile();
+            });
+            shape.DictionaryFactory = _ => (System.Collections.IDictionary)dictFactory();
             return shape;
         }
 
@@ -1995,7 +2015,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
                 throw new ArgumentException("Blittable buffer is too small.", nameof(buffer));
 
             // AOT-safe: read fields directly instead of Marshal.PtrToStructure
-            var instance = Activator.CreateInstance(type)!;
+            var instance = CreateInstance(type);
             int offset = 0;
             ReadPrimitiveOrStruct(buffer, ref offset, type, ref instance, fields);
             return instance;
@@ -2024,7 +2044,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             else
             {
                 // Nested blittable struct
-                var nested = Activator.CreateInstance(ft)!;
+                var nested = CreateInstance(ft);
                 var nestedFields = ft.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 ReadPrimitiveOrStruct(buffer, ref offset, ft, ref nested, nestedFields);
                 fieldValue = nested;

@@ -352,7 +352,7 @@ public sealed class SearchIndexManager
     private readonly string _indexRoot;
     private readonly IBufferedLogger? _logger;
     private readonly ConcurrentDictionary<Type, IndexData> _indexes = new();
-    private readonly ConcurrentDictionary<Type, TypeMetadata> _typeMetadata = new();
+    private static readonly ConcurrentDictionary<Type, TypeMetadata> _typeMetadata = new();
 
     public SearchIndexManager(string rootPath, IBufferedLogger? logger)
     {

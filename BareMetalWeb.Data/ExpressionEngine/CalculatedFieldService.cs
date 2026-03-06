@@ -306,6 +306,9 @@ public static class CalculatedFieldService
         return dependencies;
     }
 
+    // Cached PropertyInfo[] per type for BuildContext fallback (unregistered types).
+    private static readonly ConcurrentDictionary<Type, System.Reflection.PropertyInfo[]> _propertyCache = new();
+
     private static Dictionary<string, object?> BuildContext(BaseDataObject instance, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
     {
         // Use compiled layout for efficient field access when available
@@ -323,9 +326,10 @@ public static class CalculatedFieldService
             return context;
         }
 
-        // Fallback for unregistered types
+        // Fallback for unregistered types — cache PropertyInfo[] per type
         var ctx = new Dictionary<string, object?>();
-        foreach (var prop in type.GetProperties())
+        var props = _propertyCache.GetOrAdd(type, static t => t.GetProperties());
+        foreach (var prop in props)
         {
             ctx[prop.Name] = prop.GetValue(instance);
         }
