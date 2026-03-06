@@ -759,7 +759,6 @@ jobs:
 
   l2-2-early-access:
     name: "L2.2 · Early Access: ${{ matrix.name }}"
-    runs-on: ubuntu-latest
     needs: l2-2-prepare-matrix
     strategy:
       fail-fast: false
@@ -817,7 +816,6 @@ jobs:
 
   l2-3-full-rollout:
     name: "L2.3 · Full Rollout: ${{ matrix.name }}"
-    runs-on: ubuntu-latest
     needs: l2-3-prepare-matrix
     strategy:
       fail-fast: false
