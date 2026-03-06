@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
@@ -247,7 +248,7 @@ public static class BinaryApiHandlers
 
             // Standard path: load CLR objects
             var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
-            var list = new List<object>();
+            var list = new List<object>(entities is ICollection entColl ? entColl.Count : 32);
             foreach (var e in entities)
                 list.Add((object)e);
             await WriteListResponse(context, list, plan);
@@ -274,7 +275,7 @@ public static class BinaryApiHandlers
         {
             var queryDef = LookupApiHandlers.BuildQueryFromRequest(context, meta);
             var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
-            var list = new List<object>();
+            var list = new List<object>(entities is ICollection rawColl ? rawColl.Count : 32);
             foreach (var e in entities)
                 list.Add((object)e);
             var plan = GetOrBuildPlan(meta);
@@ -366,9 +367,10 @@ public static class BinaryApiHandlers
             {
                 Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityDef.EntityId } }
             };
-            var aggs = new List<BareMetalWeb.Runtime.AggregationDefinition>();
-            foreach (var a in await DataStoreProvider.Current
-                .QueryAsync<BareMetalWeb.Runtime.AggregationDefinition>(aggQuery, context.RequestAborted))
+            var aggResults = await DataStoreProvider.Current
+                .QueryAsync<BareMetalWeb.Runtime.AggregationDefinition>(aggQuery, context.RequestAborted);
+            var aggs = new List<BareMetalWeb.Runtime.AggregationDefinition>(aggResults is ICollection aggColl ? aggColl.Count : 8);
+            foreach (var a in aggResults)
                 aggs.Add(a);
 
             context.Response.StatusCode = 200;
