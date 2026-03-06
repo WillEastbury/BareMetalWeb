@@ -366,6 +366,9 @@ public sealed class ReportExecutor
         return cells;
     }
 
+    // TODO [violation-006]: type.GetProperty() called per cell per report row is reflection in hot path.
+    // Replace with DataEntityMetadata.FindField(fieldName).GetValueFn delegate lookup.
+    // See docs/violations/006-report-executor-reflection-per-row.md
     private static PropertyInfo? FindAccessorOnObject([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type, string fieldName)
         => type.GetProperty(fieldName,
             BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);

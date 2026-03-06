@@ -141,6 +141,9 @@ internal static class McpRouteHandler
 
     private static object BuildInitializeResult()
     {
+        // TODO [violation-009]: GetCustomAttributes uses reflection for version string.
+        // Replace with a compile-time constant or Assembly.GetName().Version.
+        // See docs/violations/009-mcp-handler-assembly-version-reflection.md
         string? rawVersion = null;
         foreach (var attr in typeof(McpRouteHandler).Assembly
             .GetCustomAttributes(typeof(System.Reflection.AssemblyInformationalVersionAttribute), false))

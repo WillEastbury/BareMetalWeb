@@ -5,6 +5,9 @@ using System.Text.Json.Serialization.Metadata;
 
 namespace BareMetalWeb.Data;
 
+// TODO [violation-003]: DefaultJsonTypeInfoResolver is reflection-based and not AOT-safe.
+// Replace with a [JsonSerializable]-attributed source-generated JsonSerializerContext.
+// See docs/violations/003-reflection-based-json-typeinfo.md
 internal static class JsonTypeInfoRegistry
 {
 	private static readonly ConcurrentDictionary<Type, JsonTypeInfo> TypeInfoByType = new();
