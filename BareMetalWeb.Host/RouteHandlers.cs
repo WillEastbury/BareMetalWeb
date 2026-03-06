@@ -1767,7 +1767,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
             if (format == "csv" || acceptCsv)
             {
-                var resultsList = new List<object?>();
+                var resultsList = new List<object?>(results is ICollection csvCol ? csvCol.Count : 32);
                 foreach (var item in results)
                     resultsList.Add((object?)item);
                 var rows = BuildListPlainRowsWithId(meta, resultsList, out var headers);
@@ -1805,7 +1805,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         if (format == "csv" || acceptCsv)
         {
-            var resultsList = new List<object?>();
+            var resultsList = new List<object?>(allResults is ICollection csvCol2 ? csvCol2.Count : 32);
             foreach (var item in allResults)
                 resultsList.Add((object?)item);
             var rows = BuildListPlainRowsWithId(meta, resultsList, out var headers);
