@@ -1,6 +1,6 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -137,7 +137,7 @@ public sealed class ServerLookupResolver : ILookupResolver
         if (currentEntity == null)
             return null;
 
-        // Steps 2..n-1: traverse intermediate FK fields using DataLookupAttribute reflection
+        // Steps 2..n-1: traverse intermediate FK fields using entity metadata
         for (int i = 1; i < chain.Count - 1; i++)
         {
             var nextFkField = chain[i];
@@ -150,19 +150,10 @@ public sealed class ServerLookupResolver : ILookupResolver
                 return null;
 
             DataEntityMetadata? nextMeta = null;
-            PropertyInfo? lookupProp = null;
-            foreach (var p in currentEntity.GetType()
-                .GetProperties(BindingFlags.Public | BindingFlags.Instance))
-            {
-                if (string.Equals(p.Name, nextFkField, StringComparison.OrdinalIgnoreCase))
-                {
-                    lookupProp = p;
-                    break;
-                }
-            }
-            var lookupAttr = lookupProp?.GetCustomAttribute<DataLookupAttribute>();
-            if (lookupAttr != null)
-                nextMeta = DataScaffold.GetEntityByType(lookupAttr.TargetType);
+            var entityMeta = DataScaffold.GetEntityByType(currentEntity.GetType());
+            var fieldMeta = entityMeta?.FindField(nextFkField);
+            if (fieldMeta?.Lookup != null)
+                nextMeta = DataScaffold.GetEntityByType(fieldMeta.Lookup.TargetType);
 
             if (nextMeta == null)
                 return null;
@@ -175,15 +166,30 @@ public sealed class ServerLookupResolver : ILookupResolver
         return ExtractFieldValue(currentEntity, chain[chain.Count - 1]);
     }
 
+    private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> _accessorCache = new();
+
     private static object? ExtractFieldValue(object entity, string fieldName)
     {
         if (entity is DataRecord rec && rec.Schema != null)
             return rec.GetField(rec.Schema, fieldName);
 
-        // Reflection for compiled entities
-        var prop = entity.GetType().GetProperty(fieldName,
-            BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-        return prop?.GetValue(entity);
+        // Use entity metadata for compiled accessor delegates
+        var meta = DataScaffold.GetEntityByType(entity.GetType());
+        if (meta != null)
+        {
+            var field = meta.FindField(fieldName);
+            if (field != null)
+                return field.GetValueFn(entity);
+        }
+
+        // Fallback with cached compiled accessor for base/unregistered properties
+        var getter = _accessorCache.GetOrAdd((entity.GetType(), fieldName), static key =>
+        {
+            var prop = key.Item1.GetProperty(key.Item2,
+                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.IgnoreCase);
+            return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;
+        });
+        return getter?.Invoke(entity);
     }
 
     private static bool ValuesEqual(object? a, object? b)

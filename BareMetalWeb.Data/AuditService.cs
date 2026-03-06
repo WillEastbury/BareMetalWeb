@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Text.Json;
@@ -17,6 +18,7 @@ public sealed class AuditService
     private readonly IDataObjectStore _store;
     private readonly IBufferedLogger? _logger;
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = false };
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> PropertyCache = new();
 
     /// <summary>
     /// When true, audit saves are awaited directly instead of fire-and-forget.
@@ -226,8 +228,9 @@ public sealed class AuditService
         var changes = new List<FieldChange>();
         var type = typeof(T);
 
-        // Get all public properties
-        var allProperties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        // Get all public properties (cached per type)
+        var allProperties = PropertyCache.GetOrAdd(type, static t =>
+            t.GetProperties(BindingFlags.Public | BindingFlags.Instance));
 
         // Fields to skip (metadata fields that always change + sensitive credential fields)
         var skipFields = new HashSet<string>

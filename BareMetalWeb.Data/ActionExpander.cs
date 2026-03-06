@@ -243,8 +243,7 @@ public sealed class ActionExpander
 
     private static uint GetEntityKey(object entity)
     {
-        if (entity is BaseDataObject bdo) return bdo.Key;
-        var prop = entity.GetType().GetProperty("Key");
-        return prop != null ? Convert.ToUInt32(prop.GetValue(entity)) : 0;
+        if (entity is IBaseDataObject obj) return obj.Key;
+        return 0;
     }
 }

@@ -141,6 +141,12 @@ public static class ComputedFieldService
     {
         return _getterCache.GetOrAdd((type, name), static key =>
         {
+            // Prefer entity metadata compiled getter over raw reflection
+            var meta = DataScaffold.GetEntityByType(key.Item1);
+            var field = meta?.FindField(key.Item2);
+            if (field != null)
+                return field.GetValueFn;
+
             var prop = key.Item1.GetProperty(key.Item2);
             return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;
         });

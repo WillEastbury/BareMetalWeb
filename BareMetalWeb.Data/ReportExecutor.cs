@@ -314,6 +314,10 @@ public sealed class ReportExecutor
 
     // ── Field access helpers ─────────────────────────────────────────────────
 
+    // Cached base-class properties to avoid per-call reflection on typeof(BaseDataObject).
+    private static readonly System.Reflection.PropertyInfo[] BaseDataObjectProperties =
+        typeof(BaseDataObject).GetProperties(BindingFlags.Public | BindingFlags.Instance);
+
     private static PropertyInfo? FindAccessor(DataEntityMetadata meta, string fieldName)
     {
         // Check DataField metadata first
@@ -330,8 +334,12 @@ public sealed class ReportExecutor
             return field.Property;
 
         // Fall back to BaseDataObject base properties (Id, CreatedOnUtc, etc.)
-        return typeof(BaseDataObject).GetProperty(fieldName,
-            BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
+        foreach (var p in BaseDataObjectProperties)
+        {
+            if (string.Equals(p.Name, fieldName, StringComparison.OrdinalIgnoreCase))
+                return p;
+        }
+        return null;
     }
 
     private static string GetStringValue(PropertyInfo prop, object obj)
