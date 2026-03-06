@@ -4810,6 +4810,9 @@
 
         // Register routes
         BMRouter
+            // /d is the data-browser home entry point from the admin nav; must be registered
+            // before /:entity so the router does not treat 'd' as an entity slug.
+            .on('/d',                         function () { renderHome(); })
             .on(BASE + '/:entity/create', function (p, q) { renderCreate(p.entity, q); })
             .on(BASE + '/:entity/:id/edit',   function (p) { renderEdit(p.entity, p.id); })
             .on(BASE + '/:entity/:id/delete', function (p) { renderDelete(p.entity, p.id); })
