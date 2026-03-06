@@ -190,8 +190,7 @@ jobs:
 
       - name: Deploy to baremetalweb (Canary / CI base)
         run: |
-          cd ./publish
-          az webapp up --name baremetalweb --os-type Linux --runtime "DOTNETCORE:10.0"
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --src-path ../deploy.zip --type zip --async true
 
       - name: Wait for deployment to stabilise
         run: |
@@ -268,8 +267,7 @@ jobs:
 
       - name: Deploy to baremetalweb-upgrade (no data reset)
         run: |
-          cd ./publish
-          az webapp up --name baremetalweb-upgrade --os-type Linux --runtime "DOTNETCORE:10.0"
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-upgrade --src-path ../deploy.zip --type zip --async true
 
       - name: Wait for deployment to stabilise
         run: |
@@ -665,8 +663,7 @@ jobs:
 
       - name: Deploy to baremetalweb-canary (Ring 0)
         run: |
-          cd ./publish
-          az webapp up --name baremetalweb-canary --os-type Linux --runtime "DOTNETCORE:10.0"
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-canary --src-path ../deploy.zip --type zip --async true
 
       - name: Wait for deployment to stabilise
         run: |

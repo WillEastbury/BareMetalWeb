@@ -186,8 +186,7 @@ jobs:
 
       - name: Deploy to Azure Web App
         run: |
-          cd ./publish
-          az webapp up --name baremetalweb --os-type Linux --runtime "DOTNETCORE:10.0"
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --src-path ../deploy.zip --type zip --async true
 
       - name: Wait for deployment to stabilize
         run: |
