@@ -54,6 +54,14 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: Ensure app runs from deployed files
+        run: |
+          az webapp config appsettings set --name baremetalweb --resource-group baremetalweb-rg \
+            --settings WEBSITE_RUN_FROM_PACKAGE=0 --output none
+
       - name: Deploy to Azure Web App
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --clean true
+
+      - name: Restart app
+        run: az webapp restart --name baremetalweb --resource-group baremetalweb-rg
