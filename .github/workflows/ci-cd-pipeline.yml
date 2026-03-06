@@ -150,6 +150,7 @@ jobs:
       - name: Unit tests (.NET)
         run: |
           dotnet test BareMetalWeb.sln --no-build --configuration Release --verbosity minimal \
+            --blame-hang-timeout 60s \
             --filter "FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~PerformanceTests&Category!=Integration" \
             --results-directory TestResults --logger "trx"
           if find TestResults -name '*.trx' -exec grep -l 'outcome="Failed"' {} + 2>/dev/null | head -1 | grep -q .; then
@@ -324,6 +325,7 @@ jobs:
         run: |
           dotnet test BareMetalWeb.IntegrationTests/BareMetalWeb.IntegrationTests.csproj \
             --no-build --configuration Release --verbosity normal \
+            --blame-hang-timeout 120s \
             --filter "Category=Integration|FullyQualifiedName~IntegrationTests" \
             --results-directory TestResults --logger "trx"
 
@@ -377,12 +379,12 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # L1.4 – Performance CI (large dataset)
   # Heavier stress test with an auto-generated large volume data set.
-  # Runs after L1.3 so that large runs don't mask small-dataset regressions.
+  # Runs in parallel with L1.3 — both only need the upgrade instance deployed.
   # ─────────────────────────────────────────────────────────────────────────────
   l1-4-performance-big-ci:
     name: "L1.4 · Performance CI (Large Dataset)"
     runs-on: ubuntu-latest
-    needs: l1-3-performance-ci
+    needs: l1-1-upgrade-ci
     steps:
       - uses: actions/checkout@v4
 
@@ -422,7 +424,7 @@ jobs:
   l1-5-playwright-ci:
     name: "L1.5 · Playwright CI (UI Tests on Upgrade)"
     runs-on: ubuntu-latest
-    needs: [l1-2-integration-ci, l1-4-performance-big-ci]
+    needs: [l1-2-integration-ci, l1-3-performance-ci, l1-4-performance-big-ci]
     steps:
       - uses: actions/checkout@v4
 

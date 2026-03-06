@@ -113,7 +113,7 @@ jobs:
           name: build-debug
           path: .
       - name: Run Data tests
-        run: dotnet test BareMetalWeb.Data.Tests/BareMetalWeb.Data.Tests.csproj --configuration Debug --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+        run: dotnet test BareMetalWeb.Data.Tests/BareMetalWeb.Data.Tests.csproj --configuration Debug --no-build --verbosity minimal --blame-hang-timeout 60s --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
 
   test-host:
     needs: build-debug
@@ -134,7 +134,7 @@ jobs:
           name: build-debug
           path: .
       - name: Run Host tests
-        run: dotnet test BareMetalWeb.Host.Tests/BareMetalWeb.Host.Tests.csproj --configuration Debug --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+        run: dotnet test BareMetalWeb.Host.Tests/BareMetalWeb.Host.Tests.csproj --configuration Debug --no-build --verbosity minimal --blame-hang-timeout 60s --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
 
   test-rendering:
     needs: build-debug
@@ -156,10 +156,10 @@ jobs:
           path: .
       - name: Run Rendering + Runtime + API + Core tests
         run: |
-          dotnet test BareMetalWeb.Rendering.Tests/BareMetalWeb.Rendering.Tests.csproj --configuration Debug --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
-          dotnet test BareMetalWeb.Runtime.Tests/BareMetalWeb.Runtime.Tests.csproj --configuration Debug --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
-          dotnet test BareMetalWeb.Core.Tests/BareMetalWeb.Core.Tests.csproj --configuration Debug --no-build --verbosity minimal 2>/dev/null || true
-          dotnet test BareMetalWeb.API.Tests/BareMetalWeb.API.Tests.csproj --configuration Debug --no-build --verbosity minimal 2>/dev/null || true
+          dotnet test BareMetalWeb.Rendering.Tests/BareMetalWeb.Rendering.Tests.csproj --configuration Debug --no-build --verbosity minimal --blame-hang-timeout 60s --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+          dotnet test BareMetalWeb.Runtime.Tests/BareMetalWeb.Runtime.Tests.csproj --configuration Debug --no-build --verbosity minimal --blame-hang-timeout 60s --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+          dotnet test BareMetalWeb.Core.Tests/BareMetalWeb.Core.Tests.csproj --configuration Debug --no-build --verbosity minimal --blame-hang-timeout 60s 2>/dev/null || true
+          dotnet test BareMetalWeb.API.Tests/BareMetalWeb.API.Tests.csproj --configuration Debug --no-build --verbosity minimal --blame-hang-timeout 60s 2>/dev/null || true
 
   # ── Stage 2b: Jest tests (no .NET build dependency) ────────────────────
   test-jest:
