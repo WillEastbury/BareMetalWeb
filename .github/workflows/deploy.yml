@@ -16,12 +16,42 @@ permissions:
   id-token: write
 
 jobs:
-  # ── Stage 1: Build ─────────────────────────────────────────────────────
-  build:
+  # ── Stage 1a: Build Debug (for tests) ──────────────────────────────────
+  build-debug:
     runs-on: ubuntu-latest
-    outputs:
-      info_version: ${{ steps.version.outputs.info_version }}
-      assembly_version: ${{ steps.version.outputs.assembly_version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore BareMetalWeb.sln
+
+      - name: Build solution (Debug)
+        run: dotnet build BareMetalWeb.sln --configuration Debug --no-restore
+
+      - name: Upload Debug build
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-debug
+          path: |
+            **/bin/Debug/
+            **/obj/Debug/
+          retention-days: 1
+
+  # ── Stage 1b: Publish Release AOT+trimmed (for deploy) ─────────────────
+  build-release:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -46,24 +76,25 @@ jobs:
           key: nuget-${{ hashFiles('**/*.csproj') }}
           restore-keys: nuget-
 
-      - name: Restore dependencies
-        run: dotnet restore
+      - name: Publish Host (Release, AOT+trimmed)
+        run: |
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release \
+            --output ./publish \
+            -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ steps.version.outputs.assembly_version }} \
+            -p:InformationalVersion=${{ steps.version.outputs.info_version }}
 
-      - name: Build
-        run: dotnet build --no-restore --configuration Release -p:AssemblyVersion=${{ steps.version.outputs.assembly_version }} -p:FileVersion=${{ steps.version.outputs.assembly_version }} -p:InformationalVersion=${{ steps.version.outputs.info_version }}
-
-      - name: Upload build artefact
+      - name: Upload Release publish output
         uses: actions/upload-artifact@v4
         with:
-          name: build-output
-          path: |
-            **/bin/Release/
-            **/obj/Release/
+          name: publish-release
+          path: ./publish
           retention-days: 1
 
-  # ── Stage 2: Tests (parallel shards, fail-fast) ────────────────────────
+  # ── Stage 2: Test shards (parallel, test Debug build) ──────────────────
   test-data:
-    needs: build
+    needs: build-debug
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -78,13 +109,13 @@ jobs:
           restore-keys: nuget-
       - uses: actions/download-artifact@v4
         with:
-          name: build-output
+          name: build-debug
           path: .
       - name: Run Data tests
-        run: dotnet test BareMetalWeb.Data.Tests/BareMetalWeb.Data.Tests.csproj --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+        run: dotnet test BareMetalWeb.Data.Tests/BareMetalWeb.Data.Tests.csproj --configuration Debug --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
 
   test-host:
-    needs: build
+    needs: build-debug
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -99,13 +130,13 @@ jobs:
           restore-keys: nuget-
       - uses: actions/download-artifact@v4
         with:
-          name: build-output
+          name: build-debug
           path: .
       - name: Run Host tests
-        run: dotnet test BareMetalWeb.Host.Tests/BareMetalWeb.Host.Tests.csproj --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+        run: dotnet test BareMetalWeb.Host.Tests/BareMetalWeb.Host.Tests.csproj --configuration Debug --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
 
   test-rendering:
-    needs: build
+    needs: build-debug
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,17 +151,17 @@ jobs:
           restore-keys: nuget-
       - uses: actions/download-artifact@v4
         with:
-          name: build-output
+          name: build-debug
           path: .
       - name: Run Rendering + Runtime + API + Core tests
         run: |
-          dotnet test BareMetalWeb.Rendering.Tests/BareMetalWeb.Rendering.Tests.csproj --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
-          dotnet test BareMetalWeb.Runtime.Tests/BareMetalWeb.Runtime.Tests.csproj --configuration Release --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
-          dotnet test BareMetalWeb.Core.Tests/BareMetalWeb.Core.Tests.csproj --configuration Release --no-build --verbosity minimal 2>/dev/null || true
-          dotnet test BareMetalWeb.API.Tests/BareMetalWeb.API.Tests.csproj --configuration Release --no-build --verbosity minimal 2>/dev/null || true
+          dotnet test BareMetalWeb.Rendering.Tests/BareMetalWeb.Rendering.Tests.csproj --configuration Debug --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+          dotnet test BareMetalWeb.Runtime.Tests/BareMetalWeb.Runtime.Tests.csproj --configuration Debug --no-build --verbosity minimal --filter "FullyQualifiedName!~PerformanceTests&Category!=Integration"
+          dotnet test BareMetalWeb.Core.Tests/BareMetalWeb.Core.Tests.csproj --configuration Debug --no-build --verbosity minimal 2>/dev/null || true
+          dotnet test BareMetalWeb.API.Tests/BareMetalWeb.API.Tests.csproj --configuration Debug --no-build --verbosity minimal 2>/dev/null || true
 
+  # ── Stage 2b: Jest tests (no .NET build dependency) ────────────────────
   test-jest:
-    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -155,29 +186,15 @@ jobs:
         working-directory: tests/js-unit
         run: npm test
 
-  # ── Stage 3: Deploy (only after ALL tests pass) ────────────────────────
+  # ── Stage 3: Deploy pre-built Release artifact ─────────────────────────
   deploy:
-    needs: [test-data, test-host, test-rendering, test-jest]
+    needs: [test-data, test-host, test-rendering, test-jest, build-release]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/download-artifact@v4
         with:
-          dotnet-version: '10.0.x'
-
-      - name: Cache NuGet packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.nuget/packages
-          key: nuget-${{ hashFiles('**/*.csproj') }}
-          restore-keys: nuget-
-
-      - name: Restore and publish
-        run: |
-          dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
-          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj --configuration Release --output ./publish -p:AssemblyVersion=${{ needs.build.outputs.assembly_version }} -p:FileVersion=${{ needs.build.outputs.assembly_version }} -p:InformationalVersion=${{ needs.build.outputs.info_version }}
+          name: publish-release
+          path: ./publish
 
       - name: Login to Azure
         uses: azure/login@v2
