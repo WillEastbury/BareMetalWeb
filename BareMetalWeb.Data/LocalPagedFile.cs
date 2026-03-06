@@ -9,9 +9,8 @@ using BareMetalWeb.Core.Interfaces;
 namespace BareMetalWeb.Data;
 
 /// <summary>
-/// File-backed implementation of <see cref="IPagedFile"/> used by both
-/// <see cref="LocalFolderBinaryDataProvider"/> and <see cref="WalDataProvider"/>
-/// for secondary index paged storage.
+/// File-backed implementation of <see cref="IPagedFile"/> used by
+/// <see cref="WalDataProvider"/> for secondary index paged storage.
 /// </summary>
 internal sealed class LocalPagedFile : IPagedFile
 {

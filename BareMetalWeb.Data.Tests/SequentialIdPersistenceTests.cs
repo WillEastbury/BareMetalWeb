@@ -30,7 +30,7 @@ public class SequentialIdPersistenceTests : IDisposable
     public void NextSequentialKey_IncrementsFromOne()
     {
         // Arrange
-        var provider = new LocalFolderBinaryDataProvider(_tempRoot);
+        var provider = new WalDataProvider(_tempRoot);
 
         // Act
         var id1 = provider.NextSequentialKey("Widget");
@@ -47,14 +47,14 @@ public class SequentialIdPersistenceTests : IDisposable
     public void NextSequentialKey_SurvivesProviderReplacement_NoDuplicates()
     {
         // Arrange – first "run" generates some IDs
-        var provider1 = new LocalFolderBinaryDataProvider(_tempRoot);
+        var provider1 = new WalDataProvider(_tempRoot);
         var id1 = provider1.NextSequentialKey("Invoice");
         var id2 = provider1.NextSequentialKey("Invoice");
         Assert.True(id2 > id1);
 
         // Act – create a brand-new provider instance pointing at the same root
         // (simulates an application restart — batch-allocated IDs may leave gaps).
-        var provider2 = new LocalFolderBinaryDataProvider(_tempRoot);
+        var provider2 = new WalDataProvider(_tempRoot);
         var id3 = provider2.NextSequentialKey("Invoice");
         var id4 = provider2.NextSequentialKey("Invoice");
 
@@ -71,7 +71,7 @@ public class SequentialIdPersistenceTests : IDisposable
     public void SeedSequentialKey_SetsFloorWhenCurrentIsLower()
     {
         // Arrange
-        var provider = new LocalFolderBinaryDataProvider(_tempRoot);
+        var provider = new WalDataProvider(_tempRoot);
 
         // Act – seed to 100 (simulates migration from existing data with max ID = 100)
         provider.SeedSequentialKey("Order", 100);
@@ -85,7 +85,7 @@ public class SequentialIdPersistenceTests : IDisposable
     public void SeedSequentialKey_DoesNotLowerExistingCounter()
     {
         // Arrange – advance counter to 50
-        var provider = new LocalFolderBinaryDataProvider(_tempRoot);
+        var provider = new WalDataProvider(_tempRoot);
         uint lastId = 0;
         for (int i = 0; i < 50; i++)
             lastId = provider.NextSequentialKey("Product");
@@ -102,7 +102,7 @@ public class SequentialIdPersistenceTests : IDisposable
     public void NextSequentialKey_IsolatedPerEntityName()
     {
         // Arrange
-        var provider = new LocalFolderBinaryDataProvider(_tempRoot);
+        var provider = new WalDataProvider(_tempRoot);
 
         // Act
         var inv1 = provider.NextSequentialKey("Invoice");
@@ -122,7 +122,7 @@ public class SequentialIdPersistenceTests : IDisposable
         var originalProvider = DataStoreProvider.PrimaryProvider;
         try
         {
-            var provider = new LocalFolderBinaryDataProvider(_tempRoot);
+            var provider = new WalDataProvider(_tempRoot);
             DataStoreProvider.PrimaryProvider = provider;
 
             var generator = new DefaultIdGenerator();
@@ -132,7 +132,7 @@ public class SequentialIdPersistenceTests : IDisposable
             var id2 = generator.GenerateKey(typeof(FakeEntity));
 
             // Swap in a fresh provider instance (simulates restart with same data root)
-            DataStoreProvider.PrimaryProvider = new LocalFolderBinaryDataProvider(_tempRoot);
+            DataStoreProvider.PrimaryProvider = new WalDataProvider(_tempRoot);
             var generator2 = new DefaultIdGenerator();
 
             // Act – "second run"

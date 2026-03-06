@@ -664,24 +664,6 @@ public class DataObjectStoreTests
     }
 
     [Fact]
-    public void RegisterProvider_LocalFolderBinaryProvider_AutoSetsFallback()
-    {
-        // Arrange
-        var store = new DataObjectStore();
-        var localProvider = new LocalFolderBinaryDataProvider("/tmp/test-data");
-
-        // Act
-        store.RegisterProvider(localProvider);
-        var product = new TestProduct { Key = 1, Name = "Local Provider Test", Price = 75m };
-        store.Save(product);
-
-        // Assert - Should use the local provider as fallback
-        var loaded = store.Load<TestProduct>(product.Key);
-        Assert.NotNull(loaded);
-        Assert.Equal("Local Provider Test", loaded.Name);
-    }
-
-    [Fact]
     public void MultiProvider_QueryAcrossProviders_OnlyQueriesMatchingProvider()
     {
         // Arrange

@@ -10,14 +10,14 @@ namespace BareMetalWeb.Data.Tests;
 public class IndexStoreTests : IDisposable
 {
     private readonly string _testRoot;
-    private readonly LocalFolderBinaryDataProvider _provider;
+    private readonly WalDataProvider _provider;
     private readonly IndexStore _indexStore;
 
     public IndexStoreTests()
     {
         _testRoot = Path.Combine(Path.GetTempPath(), "BareMetalWeb_IndexStore_Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testRoot);
-        _provider = new LocalFolderBinaryDataProvider(_testRoot);
+        _provider = new WalDataProvider(_testRoot);
         _indexStore = new IndexStore(_provider);
     }
 

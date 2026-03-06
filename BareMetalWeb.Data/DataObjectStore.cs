@@ -23,9 +23,6 @@ public sealed class DataObjectStore : IDataObjectStore
         else
             _providersList.Add(provider);
 
-        if (provider is LocalFolderBinaryDataProvider && _fallbackProvider is null)
-            _fallbackProvider = provider;
-
         _providerCache.Clear();
     }
 

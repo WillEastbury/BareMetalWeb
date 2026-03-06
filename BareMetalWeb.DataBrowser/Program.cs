@@ -16,7 +16,7 @@ internal static class Program
 {
     private static string _dataRoot = "";
     private static bool _writeMode = false;
-    private static LocalFolderBinaryDataProvider _provider = null!;
+    private static WalDataProvider _provider = null!;
     private static IndexStore _indexStore = null!;
 
     static async Task<int> Main(string[] args)
@@ -58,7 +58,7 @@ internal static class Program
             return 1;
         }
 
-        _provider = new LocalFolderBinaryDataProvider(_dataRoot);
+        _provider = new WalDataProvider(_dataRoot);
         _indexStore = new IndexStore(_provider);
 
         DataStoreProvider.PrimaryProvider = _provider;
@@ -771,19 +771,11 @@ internal static class Program
 
     static int Compact(string[] args)
     {
-        if (args.Length < 1)
-            return ArgError("Usage: compact <entity>");
-        RequireWriteMode();
-
-        var entity = args[0];
-        var meta = FindEntityMetadata(entity);
-
-        if (meta == null)
-            return ArgError($"Entity '{entity}' is not registered. Cannot compact unknown entities.");
-
-        _provider.CompactClusteredEntity(meta.Type);
-        Console.WriteLine($"  Compacted clustered store for '{entity}'.");
-        return 0;
+        // TODO: compact is not supported with WalDataProvider — WAL compaction
+        // is handled automatically. This command needs rewriting if manual
+        // compaction support is desired.
+        Console.Error.WriteLine("  'compact' is not supported with the WAL data provider.");
+        return 1;
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
