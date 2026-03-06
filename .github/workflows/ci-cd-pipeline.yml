@@ -81,7 +81,7 @@ jobs:
           MAJOR="${{ vars.MAJOR_VERSION || '1' }}"
           DATE="$(date +%Y%m%d)"
           BUILD="${{ github.run_number }}"
-          echo "info_version=V${MAJOR}.${DATE}.${BUILD}"   >> $GITHUB_OUTPUT
+          echo "info_version=${MAJOR}.${DATE}.${BUILD}+${GITHUB_SHA:0:7}"   >> $GITHUB_OUTPUT
           echo "assembly_version=${MAJOR}.0.0.${BUILD}"    >> $GITHUB_OUTPUT
           echo "tag=v${MAJOR}.${DATE}.${BUILD}"            >> $GITHUB_OUTPUT
 
@@ -190,7 +190,7 @@ jobs:
 
       - name: Deploy to baremetalweb (Canary / CI base)
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --async true
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip
 
       - name: Wait for deployment to stabilise
         run: |
@@ -267,7 +267,7 @@ jobs:
 
       - name: Deploy to baremetalweb-upgrade (no data reset)
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-upgrade --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --async true
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-upgrade --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip
 
       - name: Wait for deployment to stabilise
         run: |
@@ -663,7 +663,7 @@ jobs:
 
       - name: Deploy to baremetalweb-canary (Ring 0)
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-canary --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --async true
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-canary --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip
 
       - name: Wait for deployment to stabilise
         run: |

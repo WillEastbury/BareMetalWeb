@@ -29,7 +29,7 @@ jobs:
           MAJOR="${{ vars.MAJOR_VERSION || '1' }}"
           DATE="$(date +%Y%m%d)"
           BUILD="${{ github.run_number }}"
-          echo "info_version=V${MAJOR}.${DATE}.${BUILD}" >> $GITHUB_OUTPUT
+          echo "info_version=${MAJOR}.${DATE}.${BUILD}+${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
           echo "assembly_version=${MAJOR}.0.0.${BUILD}" >> $GITHUB_OUTPUT
 
       - name: Setup .NET
@@ -59,7 +59,7 @@ jobs:
 
       - name: Deploy to Azure Web App (CI Reset)
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-cireset --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --async true
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb-cireset --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip
 
       - name: Wait for deployment to stabilize
         run: |

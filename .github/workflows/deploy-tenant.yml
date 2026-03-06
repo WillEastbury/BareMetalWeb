@@ -69,7 +69,7 @@ jobs:
 
       - name: Deploy to ${{ inputs.app-name }}
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }} --src-path ../deploy.zip --type zip --async true
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }} --src-path ../deploy.zip --type zip
 
       - name: Wait for deployment to stabilise
         run: |

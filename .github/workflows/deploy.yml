@@ -52,6 +52,8 @@ jobs:
   # ── Stage 1b: Publish Release AOT+trimmed (for deploy) ─────────────────
   build-release:
     runs-on: ubuntu-latest
+    outputs:
+      info_version: ${{ steps.version.outputs.info_version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -61,7 +63,7 @@ jobs:
           MAJOR="${{ vars.MAJOR_VERSION || '1' }}"
           DATE="$(date +%Y%m%d)"
           BUILD="${{ github.run_number }}"
-          echo "info_version=V${MAJOR}.${DATE}.${BUILD}" >> $GITHUB_OUTPUT
+          echo "info_version=${MAJOR}.${DATE}.${BUILD}+${GITHUB_SHA:0:7}" >> $GITHUB_OUTPUT
           echo "assembly_version=${MAJOR}.0.0.${BUILD}" >> $GITHUB_OUTPUT
 
       - name: Setup .NET
@@ -203,12 +205,28 @@ jobs:
 
       - name: Deploy to Azure Web App
         run: |
-          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip --async true
+          cd ./publish && zip -qr ../deploy.zip . && az webapp deploy --name baremetalweb --resource-group baremetalweb-rg --src-path ../deploy.zip --type zip
 
       - name: Wait for deployment to stabilize
         run: |
-          echo "Waiting 30 seconds for deployment to complete and app to start..."
+          echo "Waiting 30 seconds for app to restart..."
           sleep 30
+
+      - name: Verify deployed version
+        run: |
+          EXPECTED="${{ needs.build-release.outputs.info_version }}"
+          echo "Expected version: ${EXPECTED}"
+          BODY=$(curl -sf https://baremetalweb.azurewebsites.net/ || true)
+          FOUND=$(echo "$BODY" | grep -oP 'v\K[0-9]+\.[0-9]+\.[0-9]+\+[a-f0-9]+' | head -1)
+          echo "Found version: ${FOUND}"
+          if [ -z "$FOUND" ]; then
+            echo "⚠️ Could not extract version from footer — skipping check"
+          elif [ "$FOUND" = "$EXPECTED" ]; then
+            echo "✅ Version verified: v${FOUND}"
+          else
+            echo "❌ Version mismatch: expected ${EXPECTED}, got ${FOUND}"
+            exit 1
+          fi
 
   # ── Stage 4: Playwright E2E (after deploy) ─────────────────────────────
   e2e:
