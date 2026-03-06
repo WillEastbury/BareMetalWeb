@@ -34,7 +34,7 @@ namespace BareMetalWeb.Data;
 /// the same data root with full binary-serializer schema-evolution support.
 /// </para>
 /// </summary>
-public sealed class WalDataProvider : IDataProvider, IDisposable
+public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDisposable
 {
     // ── Constants ────────────────────────────────────────────────────────────
 
@@ -401,6 +401,54 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
     public ValueTask<T?> LoadAsync<T>(uint key, CancellationToken cancellationToken = default)
         where T : BaseDataObject
         => ValueTask.FromResult(Load<T>(key));
+
+    // ── IRawBinaryProvider ────────────────────────────────────────────────────
+
+    /// <inheritdoc/>
+    public ReadOnlyMemory<byte> LoadBinary(string typeName, uint key)
+    {
+        if (key == 0) return ReadOnlyMemory<byte>.Empty;
+
+        var idMap = GetOrLoadIdMap(typeName);
+        if (!idMap.TryGetValue(key, out var walKey)) return ReadOnlyMemory<byte>.Empty;
+        if (!_walStore.TryGetHead(walKey, out var ptr)) return ReadOnlyMemory<byte>.Empty;
+        if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) return ReadOnlyMemory<byte>.Empty;
+
+        return payload;
+    }
+
+    /// <inheritdoc/>
+    public IReadOnlyList<ReadOnlyMemory<byte>> QueryBinary(string typeName, QueryDefinition? query = null)
+    {
+        var idMap = GetOrLoadIdMap(typeName);
+        if (idMap.Count == 0) return Array.Empty<ReadOnlyMemory<byte>>();
+
+        var results = new List<ReadOnlyMemory<byte>>();
+
+        int skip = query?.Skip ?? 0;
+        int top  = query?.Top  ?? DefaultQueryLimit;
+        int skipped = 0;
+        int taken = 0;
+
+        foreach (var kvp in idMap)
+        {
+            if (taken >= top) break;
+
+            var walKey = kvp.Value;
+            if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
+            if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
+            if (payload.IsEmpty) continue;
+
+            if (skipped < skip) { skipped++; continue; }
+
+            results.Add(payload);
+            taken++;
+        }
+
+        return results;
+    }
+
+    // ── Query ────────────────────────────────────────────────────────────────
 
     public IEnumerable<T> Query<T>(QueryDefinition? query = null) where T : BaseDataObject
     {
