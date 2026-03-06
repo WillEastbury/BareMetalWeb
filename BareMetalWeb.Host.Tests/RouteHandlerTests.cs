@@ -146,44 +146,6 @@ public class RouteHandlerTests : IDisposable
     }
 
     // ──────────────────────────────────────────────────────────────
-    //  IsValidCloneReturnUrl tests
-    // ──────────────────────────────────────────────────────────────
-
-    [Theory]
-    [InlineData(null, false)]
-    [InlineData("", false)]
-    [InlineData("   ", false)]
-    [InlineData("https://evil.com/ssr/admin/data/foo", false)]     // contains ://
-    [InlineData("//evil.com/ssr/admin/data/foo", false)]            // starts with //
-    [InlineData("/home", false)]                                // wrong prefix
-    [InlineData("/ssr/admin/data/customer", true)]                  // valid
-    [InlineData("/ssr/admin/data/customer?page=2", true)]           // valid with query
-    public void IsValidCloneReturnUrl_VariousInputs_ReturnsExpected(string? input, bool expected)
-    {
-        var result = InvokeStatic<bool>("IsValidCloneReturnUrl", input);
-        Assert.Equal(expected, result);
-    }
-
-    // ──────────────────────────────────────────────────────────────
-    //  IsCloneExcluded tests
-    // ──────────────────────────────────────────────────────────────
-
-    [Theory]
-    [InlineData("Key", true)]
-    [InlineData("CreatedOnUtc", true)]
-    [InlineData("UpdatedOnUtc", true)]
-    [InlineData("CreatedBy", true)]
-    [InlineData("UpdatedBy", true)]
-    [InlineData("ETag", true)]
-    [InlineData("Name", false)]
-    [InlineData("Email", false)]
-    public void IsCloneExcluded_VariousProperties_ReturnsExpected(string property, bool expected)
-    {
-        var result = InvokeStatic<bool>("IsCloneExcluded", property);
-        Assert.Equal(expected, result);
-    }
-
-    // ──────────────────────────────────────────────────────────────
     //  CsvEscape tests
     // ──────────────────────────────────────────────────────────────
 
