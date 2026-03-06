@@ -453,6 +453,7 @@ static class ProgramSetup
     public static IDataObjectStore CreateDataStore(BmwConfig config, string contentRoot, ISchemaAwareObjectSerializer serializer, IDataQueryEvaluator queryEvaluator, IBufferedLogger logger)
     {
         var dataRoot = config.GetValue("Data.Root", Path.Combine(contentRoot, "Data"));
+        MetricsTracker.DataRoot = dataRoot;
 
         // Detect and wipe legacy GUID-based data before opening the store
         LegacyDataWipeGuard.WipeIfLegacyDetected(dataRoot, logger);

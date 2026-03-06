@@ -9,6 +9,7 @@ using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Primitives;
@@ -4265,7 +4266,16 @@ public sealed class RouteHandlers : IRouteHandlers
             ["requests5xx"] = snapshot.Requests5xx,
             ["requestsOther"] = snapshot.RequestsOther,
             ["throttledRequests"] = snapshot.ThrottledRequests,
-            ["processUptimeSeconds"] = (long)snapshot.ProcessUptime.TotalSeconds
+            ["processUptimeSeconds"] = (long)snapshot.ProcessUptime.TotalSeconds,
+            ["operatingSystem"] = RuntimeInformation.OSDescription,
+            ["osArchitecture"] = RuntimeInformation.OSArchitecture.ToString(),
+            ["processArchitecture"] = RuntimeInformation.ProcessArchitecture.ToString(),
+            ["processorCount"] = Environment.ProcessorCount,
+            ["dotnetRuntime"] = RuntimeInformation.FrameworkDescription,
+            ["dataLocation"] = MetricsTracker.DataRoot,
+            ["processId"] = snapshot.ProcessId,
+            ["workingSet64"] = snapshot.WorkingSet64,
+            ["virtualMemorySize64"] = snapshot.VirtualMemorySize64
         };
 
         await WriteJsonResponseAsync(context, payload);
