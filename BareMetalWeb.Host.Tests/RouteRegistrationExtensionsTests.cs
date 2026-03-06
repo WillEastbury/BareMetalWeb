@@ -511,153 +511,6 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     // ──────────────────────────────────────────────────────────────
-    //  Data Routes (CRUD scaffold)
-    // ──────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void RegisterDataRoutes_RegistersEntityBrowsingRoute()
-    {
-        // Arrange & Act
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data"));
-    }
-
-    [Fact]
-    public void RegisterDataRoutes_RegistersTypedListRoute()
-    {
-        // Arrange & Act
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}"));
-    }
-
-    [Fact]
-    public void RegisterDataRoutes_RegistersExportRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/csv"));
-        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/html"));
-    }
-
-    [Fact]
-    public void RegisterDataRoutes_RegistersImportRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/import"));
-        Assert.True(_server.routes.ContainsKey("POST /ssr/admin/data/{type}/import"));
-    }
-
-    [Fact]
-    public void RegisterDataRoutes_RegistersCreateRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/create"));
-        Assert.True(_server.routes.ContainsKey("POST /ssr/admin/data/{type}/create"));
-    }
-
-    [Fact]
-    public void RegisterDataRoutes_RegistersViewRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/{id}"));
-        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/{id}/rtf"));
-        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/{id}/html"));
-    }
-
-    [Fact]
-    public void RegisterDataRoutes_RegistersEditRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/{id}/edit"));
-        Assert.True(_server.routes.ContainsKey("POST /ssr/admin/data/{type}/{id}/edit"));
-    }
-
-    [Fact]
-    public void RegisterDataRoutes_RegistersCloneRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("POST /ssr/admin/data/{type}/{id}/clone"));
-        Assert.True(_server.routes.ContainsKey("POST /ssr/admin/data/{type}/{id}/clone-edit"));
-    }
-
-    [Fact]
-    public void RegisterDataRoutes_RegistersDeleteRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("GET /ssr/admin/data/{type}/{id}/delete"));
-        Assert.True(_server.routes.ContainsKey("POST /ssr/admin/data/{type}/{id}/delete"));
-    }
-
-    [Fact]
-    public void RegisterDataRoutes_AllRoutes_HaveAuthenticatedPermission()
-    {
-        // Arrange & Act
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        foreach (var kvp in _server.routes)
-        {
-            Assert.Equal("Authenticated", kvp.Value.PageInfo!.PageMetaData.PermissionsNeeded);
-        }
-    }
-
-    [Fact]
-    public void RegisterDataRoutes_EntityBrowsingRoute_HiddenFromNavBar()
-    {
-        // Arrange & Act — SSR data route hidden from nav (VNext /UI is primary)
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        var route = _server.routes["GET /ssr/admin/data"];
-        Assert.False(route.PageInfo!.PageMetaData.ShowOnNavBar);
-    }
-
-    [Fact]
-    public void RegisterDataRoutes_EntityBrowsingRoute_HasAdminNavGroup()
-    {
-        // Arrange & Act
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        var route = _server.routes["GET /ssr/admin/data"];
-        Assert.Equal("Admin", route.PageInfo!.PageContext.NavGroup);
-    }
-
-    [Fact]
-    public void RegisterDataRoutes_RegistersCorrectRouteCount()
-    {
-        // Arrange & Act
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert — 19 data routes total (including export routes)
-        Assert.Equal(21, _server.routes.Count);
-    }
-
-    // ──────────────────────────────────────────────────────────────
     //  API Routes (RESTful verbs)
     // ──────────────────────────────────────────────────────────────
 
@@ -787,7 +640,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
 
         // Assert
-        Assert.Equal(22, _server.routes.Count);
+        Assert.Equal(26, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -959,9 +812,6 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
         var afterAdmin = _server.routes.Count;
 
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-        var afterData = _server.routes.Count;
-
         _server.RegisterLookupApiRoutes(_pageInfoFactory);
         var afterLookup = _server.routes.Count;
 
@@ -972,10 +822,9 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterAuth > staticCount);
         Assert.True(afterMonitoring > afterAuth);
         Assert.True(afterAdmin > afterMonitoring);
-        Assert.True(afterData > afterAdmin);
-        Assert.True(afterLookup > afterData);
+        Assert.True(afterLookup > afterAdmin);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 20 + 4 + 13 + 21 + 5 + 21, total); // 3+20+4+13+21+5+21=87
+        Assert.Equal(staticCount + 20 + 4 + 13 + 5 + 25, total);
     }
 
     [Fact]
@@ -986,22 +835,6 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAuthRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, allowAccountCreation: true);
         _server.RegisterMonitoringRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
         _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-        _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
-
-        // Assert
-        Assert.All(_server.routes, kvp => Assert.NotNull(kvp.Value.Handler));
-    }
-
-    [Fact]
-    public void AllRoutes_HaveNonNullPageInfo()
-    {
-        // Arrange & Act
-        _server.RegisterStaticRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-        _server.RegisterAuthRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, allowAccountCreation: true);
-        _server.RegisterMonitoringRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-        _server.RegisterDataRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
         _server.RegisterApiRoutes(_routeHandlers, _pageInfoFactory);
 
         // Assert
@@ -1125,23 +958,6 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask SetupHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask SetupPostHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask ReloadTemplatesHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataEntitiesHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataListHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataListCsvHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataListHtmlHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataViewHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataViewRtfHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataViewHtmlHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataImportHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataImportPostHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataCreateHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataCreatePostHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataEditHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataEditPostHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataClonePostHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataCloneEditPostHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataDeleteHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataDeletePostHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask MetricsJsonHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask LogsViewerHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask LogsPruneHandler(BmwContext context) => ValueTask.CompletedTask;
@@ -1178,10 +994,6 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask CommentsAddHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask CommentsEditHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask CommentsDeleteHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataListExportHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataViewExportHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataBulkDeleteHandler(BmwContext context) => ValueTask.CompletedTask;
-        public ValueTask DataBulkExportHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiFileGetHandler(BmwContext context) => ValueTask.CompletedTask;
     }
 
