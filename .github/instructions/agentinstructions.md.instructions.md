@@ -28,6 +28,27 @@ Deployment pipeline is multi-stage CI then CD with 4 release rings (Testing, Can
 Deployment target here is simply a single Azure Webapp hosting plan with a set of Azure Web Apps with multiple instances
 Az cli should be used with service principals to deploy az webapp create / az webapp up based on tenant lists using a pipeline action
 
+METADATA-DRIVEN ARCHITECTURE (CRITICAL — read before every change)
+------------------------------------------------------------------
+**Do NOT rely on compiled C# types for adaptive runtime behaviour.** This platform is metadata-driven: entity shapes, field definitions, validation rules, UI rendering, navigation, permissions, and workflows are all defined by metadata (DataEntityMetadata, DataFieldMetadata, gallery JSON) — NOT by C# classes, generics, or compile-time type systems.
+
+**Every change should move further towards metadata and gallery-driven implementation:**
+- Entity structure comes from metadata registries, not from C# class definitions
+- Field rendering, validation, and behaviour are driven by field metadata attributes, not by property types or reflection
+- UI layout, menus, routes, and navigation are data-driven from gallery configuration
+- New features should be configurable via metadata/gallery without requiring code changes or recompilation
+- Ordinal-based lookups in memory (not reflection, not Dictionary<string,...>) for field access at runtime
+- The gallery app model means tenants configure behaviour through data, not code
+
+**Anti-patterns to avoid:**
+- Creating new C# entity classes for each data type (use DataRecord + metadata instead)
+- Using reflection, typeof(), or generic type parameters for runtime field access
+- Hard-coding entity-specific rendering or validation logic in C#
+- Adding compiled types that must be registered/discovered at startup for runtime behaviour
+- Using LINQ, dictionaries, or string-keyed lookups where ordinal arrays suffice
+
+**The goal:** A single compiled binary serves any gallery app configuration. The binary never changes when tenants add entities, fields, views, or workflows — only the metadata changes.
+
 (If you are seeing this, it means you have successfully loaded the agent instructions file. Please confirm that you understand the design philosophy and key features of the web server as described in the README.md file, and let me know if you have any questions or need further clarification on any aspect of the server's architecture or functionality.)
 
 
