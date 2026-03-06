@@ -298,9 +298,14 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                 _searchIndexManager.IndexObject(obj);
             }
 
-            // Invalidate columnar store so next query rebuilds from fresh data
+            // Update columnar store incrementally: upsert the row so SIMD queries stay hot.
+            // Falls back to a full rebuild on the next query if the store hasn't been built yet.
             if (_columnarStores.TryGetValue(type.Name, out var colStore))
-                colStore.Invalidate();
+            {
+                var meta = DataScaffold.GetEntityByType(type);
+                if (meta == null || !colStore.UpsertRow(obj, meta))
+                    colStore.Invalidate();
+            }
         }
         catch (Exception ex)
         {
@@ -646,8 +651,12 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
 
                     if (allColumnar)
                     {
-                        int n = store.RowCount;
-                        int wordCount = (n + 63) >> 6;
+                        // Use Capacity (= HighWater) as the scan range — covers all allocated
+                        // ordinals including reused slots.  ScanWordCount accounts for freed
+                        // slots between live rows; the validity mask in ScanClause ensures
+                        // freed ordinals never appear in results.
+                        int n         = store.Capacity;
+                        int wordCount = store.ScanWordCount;
                         ulong[]? combined = null;
 
                         foreach (var clause in query.Clauses)
@@ -677,9 +686,11 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
                                     word &= word - 1;
 
                                     if (rowIdx >= n) break;
-                                    if (matched++ < skip) continue;
 
                                     uint objKey = store.GetKeyAtRow(rowIdx);
+                                    if (objKey == 0) continue; // defensive: freed ordinals are already masked by the validity bitmap
+
+                                    if (matched++ < skip) continue;
                                     try
                                     {
                                         T? obj = Load<T>(objKey);
@@ -978,9 +989,9 @@ public sealed class WalDataProvider : IDataProvider, IDisposable
             _searchIndexManager.RemoveObject(type, key);
         }
 
-        // Invalidate columnar store
+        // Update columnar store incrementally: remove the row so SIMD queries stay hot.
         if (_columnarStores.TryGetValue(typeName, out var colStore))
-            colStore.Invalidate();
+            colStore.RemoveRow(key);
     }
 
     public ValueTask DeleteAsync<T>(uint key, CancellationToken cancellationToken = default)
