@@ -116,6 +116,57 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
+    // ────── ThreadStatic pools for hot-path collection types ──────
+
+    [ThreadStatic] private static List<string>? t_stringList;
+    [ThreadStatic] private static Dictionary<string, object?>? t_objectDict;
+    [ThreadStatic] private static List<Dictionary<string, object?>>? t_dictList;
+    [ThreadStatic] private static List<QueryClause>? t_queryClauseList;
+
+    private static List<string> RentStringList(int capacity = 16)
+    {
+        var list = t_stringList;
+        if (list != null) { t_stringList = null; list.Clear(); return list; }
+        return new List<string>(capacity);
+    }
+    private static void ReturnStringList(List<string> list)
+    {
+        if (list.Count < 1024) { list.Clear(); t_stringList = list; }
+    }
+
+    private static Dictionary<string, object?> RentObjectDictionary(int capacity = 16)
+    {
+        var dict = t_objectDict;
+        if (dict != null) { t_objectDict = null; dict.Clear(); return dict; }
+        return new Dictionary<string, object?>(capacity, StringComparer.OrdinalIgnoreCase);
+    }
+    private static void ReturnObjectDictionary(Dictionary<string, object?> dict)
+    {
+        if (dict.Count < 1024) { dict.Clear(); t_objectDict = dict; }
+    }
+
+    private static List<Dictionary<string, object?>> RentDictList(int capacity = 16)
+    {
+        var list = t_dictList;
+        if (list != null) { t_dictList = null; list.Clear(); return list; }
+        return new List<Dictionary<string, object?>>(capacity);
+    }
+    private static void ReturnDictList(List<Dictionary<string, object?>> list)
+    {
+        if (list.Count < 1024) { list.Clear(); t_dictList = list; }
+    }
+
+    private static List<QueryClause> RentQueryClauseList(int capacity = 8)
+    {
+        var list = t_queryClauseList;
+        if (list != null) { t_queryClauseList = null; list.Clear(); return list; }
+        return new List<QueryClause>(capacity);
+    }
+    private static void ReturnQueryClauseList(List<QueryClause> list)
+    {
+        if (list.Count < 256) { list.Clear(); t_queryClauseList = list; }
+    }
+
     public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, AuditService auditService,
         IReadOnlyList<(string SettingId, string Value, string Description)>? settingDefaults = null, IBufferedLogger? logger = null, BmwConfig? config = null)
     {
@@ -1980,14 +2031,16 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var apiCreateErrors = new List<string>();
+        var apiCreateErrors = RentStringList();
         await ValidateUserUniquenessAsync(meta, instance, excludeId: null, apiCreateErrors, context.RequestAborted).ConfigureAwait(false);
         if (apiCreateErrors.Count > 0)
         {
             context.Response.StatusCode = StatusCodes.Status409Conflict;
             await context.Response.WriteAsync(string.Join(" | ", apiCreateErrors));
+            ReturnStringList(apiCreateErrors);
             return;
         }
+        ReturnStringList(apiCreateErrors);
 
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
         await DataScaffold.ApplyAutoIdAsync(meta, instance, context.RequestAborted).ConfigureAwait(false);
@@ -2072,14 +2125,16 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var apiPutErrors = new List<string>();
+        var apiPutErrors = RentStringList();
         await ValidateUserUniquenessAsync(meta, instance, excludeId: id, apiPutErrors, context.RequestAborted).ConfigureAwait(false);
         if (apiPutErrors.Count > 0)
         {
             context.Response.StatusCode = StatusCodes.Status409Conflict;
             await context.Response.WriteAsync(string.Join(" | ", apiPutErrors));
+            ReturnStringList(apiPutErrors);
             return;
         }
+        ReturnStringList(apiPutErrors);
 
         ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
@@ -2312,7 +2367,7 @@ public sealed class RouteHandlers : IRouteHandlers
         };
 
         var rawItems = await DataScaffold.QueryAsync(attachMeta, query, context.RequestAborted).ConfigureAwait(false);
-        var result = new List<Dictionary<string, object?>>();
+        var result = RentDictList();
         foreach (var item in rawItems)
         {
             if (item is FileAttachment a)
@@ -2321,6 +2376,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonIndented)).ConfigureAwait(false);
+        ReturnDictList(result);
     }
 
     /// <summary>POST /api/{type}/{id}/_attachments — upload a new attachment (or new version) for a record.</summary>
@@ -2659,7 +2715,7 @@ public sealed class RouteHandlers : IRouteHandlers
         };
 
         var rawItems = await DataScaffold.QueryAsync(commentMeta, query, context.RequestAborted).ConfigureAwait(false);
-        var result = new List<Dictionary<string, object?>>();
+        var result = RentDictList();
         foreach (var item in rawItems)
         {
             if (item is RecordComment c)
@@ -2670,6 +2726,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         context.Response.ContentType = "application/json";
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonIndented)).ConfigureAwait(false);
+        ReturnDictList(result);
     }
 
     /// <summary>POST /api/{type}/{id}/_comments — add a comment to a record.</summary>
@@ -3886,7 +3943,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         var entries = QueryPlanHistory.GetSnapshot();
 
-        var payload = new List<Dictionary<string, object?>>();
+        var payload = RentDictList();
         foreach (var e in entries)
         {
             var stepsList = new List<Dictionary<string, object?>>();
@@ -3933,6 +3990,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         await WriteJsonResponseAsync(context, payload);
+        ReturnDictList(payload);
     }
 
     public async ValueTask EntityDesignerHandler(BmwContext context)
@@ -4052,7 +4110,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var messages = new List<string>();
+        var messages = RentStringList();
         var deployed = await SampleGalleryService.DeployPackageAsync(
             pkg,
             DataStoreProvider.Current,
@@ -4060,6 +4118,7 @@ public sealed class RouteHandlers : IRouteHandlers
             msg => messages.Add(msg),
             context.RequestAborted)
             .ConfigureAwait(false);
+        ReturnStringList(messages);
 
         // Hot-reload the entity registry so deployed entities are immediately usable
         if (deployed.Count > 0)

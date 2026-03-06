@@ -23,18 +23,19 @@ public static class BmwJsonWriter
     private const int HeaderSize = 45; // magic(4) + version(4) + schema(4) + arch(1) + sig(32)
     private const int MaxStringBytes = 4 * 1024 * 1024;
 
-    // Precomputed JSON literal fragments (UTF-8)
-    private static readonly byte[] JsonObjectStart = [(byte)'{'];
-    private static readonly byte[] JsonObjectEnd = [(byte)'}'];
-    private static readonly byte[] JsonArrayStart = [(byte)'['];
-    private static readonly byte[] JsonArrayEnd = [(byte)']'];
-    private static readonly byte[] JsonNull = "null"u8.ToArray();
-    private static readonly byte[] JsonTrue = "true"u8.ToArray();
-    private static readonly byte[] JsonFalse = "false"u8.ToArray();
-    private static readonly byte[] JsonQuote = [(byte)'"'];
-    private static readonly byte[] JsonComma = [(byte)','];
-    private static readonly byte[] DataPrefix = "\"data\":"u8.ToArray();
-    private static readonly byte[] CountPrefix = ",\"count\":"u8.ToArray();
+    // Precomputed JSON literal fragments (UTF-8) — ReadOnlySpan properties
+    // JIT inlines these; they point directly at the assembly's static data section (zero allocation).
+    private static ReadOnlySpan<byte> JsonObjectStart => "{"u8;
+    private static ReadOnlySpan<byte> JsonObjectEnd => "}"u8;
+    private static ReadOnlySpan<byte> JsonArrayStart => "["u8;
+    private static ReadOnlySpan<byte> JsonArrayEnd => "]"u8;
+    private static ReadOnlySpan<byte> JsonNull => "null"u8;
+    private static ReadOnlySpan<byte> JsonTrue => "true"u8;
+    private static ReadOnlySpan<byte> JsonFalse => "false"u8;
+    private static ReadOnlySpan<byte> JsonQuote => "\""u8;
+    private static ReadOnlySpan<byte> JsonComma => ","u8;
+    private static ReadOnlySpan<byte> DataPrefix => "\"data\":"u8;
+    private static ReadOnlySpan<byte> CountPrefix => ",\"count\":"u8;
 
     // ────────────── Fragment plan ──────────────
 
@@ -204,7 +205,7 @@ public static class BmwJsonWriter
         switch (wireType)
         {
             case WireFieldType.Bool:
-                output.Write(reader.ReadBoolean() ? JsonTrue : JsonFalse);
+                if (reader.ReadBoolean()) output.Write(JsonTrue); else output.Write(JsonFalse);
                 break;
 
             case WireFieldType.Byte:
