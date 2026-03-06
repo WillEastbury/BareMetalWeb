@@ -2510,4 +2510,346 @@ public static class RouteRegistrationExtensions
                 await context.Response.WriteAsync(JsonSerializer.Serialize(json, JsonIndented));
             }));
     }
+
+    // ── View Engine Routes ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Registers HTML and JSON routes for the BMW View Engine.
+    ///
+    /// <list type="bullet">
+    ///   <item><c>GET /views</c>  — lists all view definitions</item>
+    ///   <item><c>GET /views/{id}</c>  — executes a view and renders it as HTML</item>
+    ///   <item><c>GET /api/views</c>  — lists view definitions as JSON</item>
+    ///   <item><c>GET /api/views/{id}</c>  — executes a view and returns JSON</item>
+    ///   <item><c>POST /api/views/execute</c>  — executes an ad-hoc view definition (JSON body)</item>
+    /// </list>
+    /// </summary>
+    public static void RegisterViewRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        var _engine = new ViewEngine();
+
+        // ── GET /views ── list all view definitions ───────────────────────────
+        host.RegisterRoute("GET /views", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right,
+                navLabel: "Views", navSubGroup: "🔧 Tools"),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.Redirect("/login"); return; }
+                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
+
+                var views = new List<ViewDefinition>(DataStoreProvider.Current.Query<ViewDefinition>(null));
+                views.Sort((a, b) => string.Compare(a.ViewName, b.ViewName, StringComparison.Ordinal));
+                var csrfToken = CsrfProtection.EnsureToken(context);
+                var safeToken = WebUtility.HtmlEncode(csrfToken);
+                var nonce = context.GetCspNonce();
+                var safeNonce = WebUtility.HtmlEncode(nonce);
+
+                var sb = new StringBuilder(4096);
+                ReportHtmlRenderer.AppendChromeHead(sb, "Views", safeNonce, safeToken);
+                ReportHtmlRenderer.AppendChromeNavbar(sb, host, safeNonce);
+                sb.Append("<div class=\"container-fluid py-4 px-4 bm-content\">");
+                sb.Append("<div class=\"card shadow-sm bm-page-card\">");
+                sb.Append("<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
+                sb.Append("<h1 class=\"h5 mb-0\"><i class=\"bi bi-table\"></i> Views</h1>");
+                sb.Append("<a href=\"/view-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New View</a>");
+                sb.Append("</div><div class=\"card-body\">");
+
+                if (views.Count == 0)
+                {
+                    sb.Append("<div class=\"text-center py-5 text-muted\">No views defined yet. Create one via <a href=\"/view-definitions/create\">View Definitions</a>.</div>");
+                }
+                else
+                {
+                    sb.Append("<div class=\"table-responsive\"><table class=\"table table-hover table-bordered align-middle mb-0\">");
+                    sb.Append("<thead class=\"table-light\"><tr><th>Name</th><th>Root Entity</th><th>Materialised</th><th></th></tr></thead><tbody>");
+                    foreach (var v in views)
+                    {
+                        sb.Append("<tr><td><strong>");
+                        sb.Append(WebUtility.HtmlEncode(v.ViewName));
+                        sb.Append("</strong></td><td><code>");
+                        sb.Append(WebUtility.HtmlEncode(v.RootEntity));
+                        sb.Append("</code></td><td>");
+                        sb.Append(v.Materialised ? "<span class=\"badge bg-success\">Yes</span>" : "<span class=\"badge bg-secondary\">No</span>");
+                        sb.Append("</td><td><a class=\"btn btn-sm btn-primary\" href=\"/views/");
+                        sb.Append(WebUtility.UrlEncode(v.Key.ToString()));
+                        sb.Append("\"><i class=\"bi bi-play-fill\"></i> Run</a></td></tr>");
+                    }
+                    sb.Append("</tbody></table></div>");
+                }
+
+                sb.Append("</div></div></div>");
+                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context.HttpContext);
+                context.Response.ContentType = "text/html; charset=utf-8";
+                await context.Response.WriteAsync(sb.ToString());
+            }));
+
+        // ── GET /views/{id} ── execute view → HTML ────────────────────────────
+        host.RegisterRoute("GET /views/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.Redirect("/login"); return; }
+                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
+
+                var id = GetRouteParam(context, "id");
+                if (string.IsNullOrWhiteSpace(id) || !uint.TryParse(id, out var viewKey))
+                {
+                    context.Response.StatusCode = 400;
+                    await context.Response.WriteAsync("Missing or invalid view id.");
+                    return;
+                }
+
+                var def = await DataStoreProvider.Current.LoadAsync<ViewDefinition>(viewKey, context.RequestAborted).ConfigureAwait(false);
+                if (def == null)
+                {
+                    context.Response.StatusCode = 404;
+                    await context.Response.WriteAsync("View not found.");
+                    return;
+                }
+
+                ReportResult result;
+                try
+                {
+                    result = await _engine.ExecuteAsync(def, context.RequestAborted).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    context.Response.StatusCode = 500;
+                    context.Response.ContentType = "text/plain";
+                    await context.Response.WriteAsync($"Error executing view: {WebUtility.HtmlEncode(ex.Message)}");
+                    return;
+                }
+
+                context.Response.ContentType = "text/html; charset=utf-8";
+                var pipeWriter = System.IO.Pipelines.PipeWriter.Create(context.Response.Body);
+                await ReportHtmlRenderer.RenderAsync(
+                    pipeWriter,
+                    result,
+                    def.ViewName,
+                    $"Root: {def.RootEntity}",
+                    null,
+                    null,
+                    id,
+                    host,
+                    context.GetCspNonce(),
+                    CsrfProtection.EnsureToken(context),
+                    context.HttpContext);
+                await pipeWriter.CompleteAsync();
+            }));
+
+        // ── GET /api/views ── list view definitions as JSON ───────────────────
+        host.RegisterRoute("GET /api/views", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
+
+                var views = new List<ViewDefinition>(DataStoreProvider.Current.Query<ViewDefinition>(null));
+                views.Sort((a, b) => string.Compare(a.ViewName, b.ViewName, StringComparison.Ordinal));
+
+                var items = new object[views.Count];
+                for (int i = 0; i < views.Count; i++)
+                {
+                    var v = views[i];
+                    items[i] = new
+                    {
+                        id          = v.Key,
+                        viewName    = v.ViewName,
+                        rootEntity  = v.RootEntity,
+                        limit       = v.Limit,
+                        offset      = v.Offset,
+                        materialised = v.Materialised,
+                    };
+                }
+
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(items, JsonIndented));
+            }));
+
+        // ── GET /api/views/{id} ── execute view → JSON ────────────────────────
+        host.RegisterRoute("GET /api/views/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
+
+                var id = GetRouteParam(context, "id");
+                if (string.IsNullOrWhiteSpace(id) || !uint.TryParse(id, out var viewKey))
+                {
+                    context.Response.StatusCode = 400;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Missing or invalid view id\"}");
+                    return;
+                }
+
+                var def = await DataStoreProvider.Current.LoadAsync<ViewDefinition>(viewKey, context.RequestAborted).ConfigureAwait(false);
+                if (def == null)
+                {
+                    context.Response.StatusCode = 404;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"View not found\"}");
+                    return;
+                }
+
+                ReportResult result;
+                try
+                {
+                    // Materialised views served from cache when available
+                    if (def.Materialised)
+                    {
+                        var cached = await MaterializedViewCache.Instance.GetOrRefreshAsync(def.ViewName, context.RequestAborted).ConfigureAwait(false);
+                        result = cached ?? await _engine.ExecuteAsync(def, context.RequestAborted).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        result = await _engine.ExecuteAsync(def, context.RequestAborted).ConfigureAwait(false);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    context.Response.StatusCode = 500;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }));
+                    return;
+                }
+
+                var format = context.HttpRequest.Query.TryGetValue("format", out var fmt) ? fmt.ToString() : "json";
+                if (string.Equals(format, "csv", StringComparison.OrdinalIgnoreCase))
+                {
+                    context.Response.ContentType = "text/csv";
+                    context.Response.Headers.ContentDisposition = $"attachment; filename=\"{Uri.EscapeDataString(def.ViewName)}.csv\"";
+                    var csvSb = new StringBuilder(1024);
+                    var headerCells = new string[result.ColumnLabels.Length];
+                    for (int ci = 0; ci < result.ColumnLabels.Length; ci++)
+                        headerCells[ci] = CsvCell(result.ColumnLabels[ci]);
+                    csvSb.AppendLine(string.Join(",", headerCells));
+                    foreach (var row in result.Rows)
+                    {
+                        var rowCells = new string[row.Length];
+                        for (int ci = 0; ci < row.Length; ci++)
+                            rowCells[ci] = CsvCell(row[ci] ?? string.Empty);
+                        csvSb.AppendLine(string.Join(",", rowCells));
+                    }
+                    await context.Response.WriteAsync(csvSb.ToString());
+                    return;
+                }
+
+                var rowsList = new List<Dictionary<string, string?>>();
+                foreach (var r in result.Rows)
+                {
+                    var dict = new Dictionary<string, string?>();
+                    for (int i = 0; i < r.Length; i++)
+                    {
+                        var key = i < result.ColumnLabels.Length ? result.ColumnLabels[i] : $"col{i}";
+                        dict[key] = r[i];
+                    }
+                    rowsList.Add(dict);
+                }
+
+                var json = new
+                {
+                    viewName     = def.ViewName,
+                    rootEntity   = def.RootEntity,
+                    generatedAt  = result.GeneratedAt,
+                    totalRows    = result.TotalRows,
+                    isTruncated  = result.IsTruncated,
+                    columns      = result.ColumnLabels,
+                    rows         = rowsList.ToArray(),
+                };
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(json, JsonIndented));
+            }));
+
+        // ── POST /api/views/execute ── ad-hoc view execution ──────────────────
+        host.RegisterRoute("POST /api/views/execute", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
+
+                if (!CsrfProtection.ValidateApiToken(context))
+                {
+                    context.Response.StatusCode = 403;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Invalid CSRF token\"}");
+                    return;
+                }
+
+                ViewDefinition? def;
+                try
+                {
+                    using var bodyDoc = await System.Text.Json.JsonDocument.ParseAsync(
+                        context.HttpRequest.Body, cancellationToken: context.RequestAborted).ConfigureAwait(false);
+                    def = System.Text.Json.JsonSerializer.Deserialize<ViewDefinition>(bodyDoc.RootElement.GetRawText());
+                }
+                catch
+                {
+                    context.Response.StatusCode = 400;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Invalid JSON body — expected a ViewDefinition\"}");
+                    return;
+                }
+
+                if (def == null || string.IsNullOrWhiteSpace(def.RootEntity))
+                {
+                    context.Response.StatusCode = 400;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"RootEntity is required\"}");
+                    return;
+                }
+
+                ReportResult result;
+                try
+                {
+                    result = await _engine.ExecuteAsync(def, context.RequestAborted).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    context.Response.StatusCode = 500;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }));
+                    return;
+                }
+
+                var rowsList = new List<Dictionary<string, string?>>();
+                foreach (var r in result.Rows)
+                {
+                    var dict = new Dictionary<string, string?>();
+                    for (int i = 0; i < r.Length; i++)
+                    {
+                        var key = i < result.ColumnLabels.Length ? result.ColumnLabels[i] : $"col{i}";
+                        dict[key] = r[i];
+                    }
+                    rowsList.Add(dict);
+                }
+
+                var json = new
+                {
+                    viewName     = def.ViewName,
+                    rootEntity   = def.RootEntity,
+                    generatedAt  = result.GeneratedAt,
+                    totalRows    = result.TotalRows,
+                    isTruncated  = result.IsTruncated,
+                    columns      = result.ColumnLabels,
+                    rows         = rowsList.ToArray(),
+                };
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(json, JsonIndented));
+            }));
+    }
 }
