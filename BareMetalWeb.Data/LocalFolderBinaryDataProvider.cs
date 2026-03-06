@@ -438,7 +438,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             // Load existing object only on updates (existing location found) to track previous indexed field values.
             // New inserts skip this load since there are no prior index entries to clean up.
             T? oldObj = null;
-            List<PropertyInfo> indexedFields = new();
+            List<SearchIndexManager.IndexedFieldAccessor> indexedFields = new();
             if (_searchIndexManager.HasIndexedFields(type, out indexedFields) && TryGetClusteredLocation(type.Name, keyStr, out _))
                 oldObj = Load<T>(obj.Key);
 
@@ -472,10 +472,10 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             {
                 foreach (var prop in indexedFields)
                 {
-                    var newValue = prop.GetValue(obj)?.ToString() ?? string.Empty;
+                    var newValue = prop.Getter(obj)?.ToString() ?? string.Empty;
                     if (oldObj != null)
                     {
-                        var oldValue = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
+                        var oldValue = prop.Getter(oldObj)?.ToString() ?? string.Empty;
                         if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
                             continue; // value unchanged — existing index entry is still valid
                         _indexStore.AppendEntry(type.Name, prop.Name, oldValue, keyStr, 'D');
@@ -507,6 +507,38 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private void ClearSingletonFlagsOnOtherRecords<T>(T obj) where T : BaseDataObject
     {
         var type = typeof(T);
+        // Use DataScaffold metadata (compiled delegates) instead of raw reflection
+        var meta = BareMetalWeb.Core.DataScaffold.GetEntityByType(type);
+        if (meta != null)
+        {
+            var singletonFields = new List<BareMetalWeb.Core.DataFieldMetadata>();
+            foreach (var f in meta.Fields)
+            {
+                if (f.HasSingletonFlag && f.ClrType == typeof(bool) && true.Equals(f.GetValueFn(obj)))
+                    singletonFields.Add(f);
+            }
+
+            if (singletonFields.Count == 0) return;
+
+            var allRecords = Query<T>();
+            foreach (var record in allRecords)
+            {
+                if (record.Key == obj.Key) continue;
+                bool changed = false;
+                foreach (var f in singletonFields)
+                {
+                    if (true.Equals(f.GetValueFn(record)))
+                    {
+                        f.SetValueFn(record, false);
+                        changed = true;
+                    }
+                }
+                if (changed) Save(record);
+            }
+            return;
+        }
+
+        // Fallback for unregistered types
         var allProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
         var singletonProps = new List<PropertyInfo>();
         foreach (var p in allProps)
@@ -524,8 +556,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             return;
 
         // Only load all records if there is at least one active singleton flag.
-        var allRecords = Query<T>();
-        foreach (var record in allRecords)
+        var fallbackRecords = Query<T>();
+        foreach (var record in fallbackRecords)
         {
             if (record.Key == obj.Key)
                 continue;
@@ -628,9 +660,10 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             {
                 if (clause.Operator == QueryOperator.Equals && clause.Value != null)
                 {
-                    var prop = indexedFields.Find(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
-                    if (prop != null)
+                    var propIdx = indexedFields.FindIndex(p => string.Equals(p.Name, clause.Field, StringComparison.OrdinalIgnoreCase));
+                    if (propIdx >= 0)
                     {
+                        var prop = indexedFields[propIdx];
                         var fieldValue = clause.Value.ToString() ?? string.Empty;
                         var fieldIndex = _indexStore.ReadIndex(type.Name, prop.Name);
                         if (fieldIndex.Count == 0)
@@ -848,7 +881,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         {
             // Load old object for field index cleanup before deleting
             T? oldObj = null;
-            List<PropertyInfo> indexedFields = new();
+            List<SearchIndexManager.IndexedFieldAccessor> indexedFields = new();
             if (_searchIndexManager.HasIndexedFields(type, out indexedFields))
                 oldObj = Load<T>(key);
 
@@ -863,7 +896,7 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
             {
                 foreach (var prop in indexedFields)
                 {
-                    var value = prop.GetValue(oldObj)?.ToString() ?? string.Empty;
+                    var value = prop.Getter(oldObj)?.ToString() ?? string.Empty;
                     _indexStore.AppendEntry(type.Name, prop.Name, value, keyStr, 'D');
                 }
                 _searchIndexManager.RemoveObject(type, key);

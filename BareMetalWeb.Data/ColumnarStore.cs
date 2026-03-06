@@ -130,8 +130,8 @@ internal sealed class ColumnarStore
             // Identify numeric fields and allocate dense column arrays
             foreach (var field in meta.Fields)
             {
-                var propType = Nullable.GetUnderlyingType(field.Property.PropertyType)
-                               ?? field.Property.PropertyType;
+                var propType = Nullable.GetUnderlyingType(field.ClrType)
+                               ?? field.ClrType;
 
                 if      (IsIntType(propType))    _intColumns[field.Name]    = new int[n];
                 else if (IsLongType(propType))   _longColumns[field.Name]   = new long[n];

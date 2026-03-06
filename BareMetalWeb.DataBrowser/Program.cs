@@ -695,7 +695,7 @@ internal static class Program
 
             try
             {
-                var converted = ConvertValue(value, field.Property.PropertyType);
+                var converted = ConvertValue(value, field.ClrType);
                 field.SetValueFn(obj, converted);
                 Console.WriteLine($"  Set {field.Name} = {FormatValue(converted)}");
             }

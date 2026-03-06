@@ -1029,7 +1029,7 @@ public static class RouteRegistrationExtensions
                 var filteredTypes = new List<DataEntityMetadata>();
                 foreach (var m in DataScaffold.Entities)
                 {
-                    if (m.Type != typeof(DataRecord) && m.Type.GetCustomAttribute<DataEntityAttribute>() != null)
+                    if (m.Type != typeof(DataRecord))
                         filteredTypes.Add(m);
                 }
                 filteredTypes.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
@@ -1307,7 +1307,7 @@ public static class RouteRegistrationExtensions
             fd["subFields"] = DataScaffold.BuildSubFieldSchemas(f);
             if (f.FieldType == FormFieldType.Enum)
             {
-                var enumOptions = DataScaffold.BuildEnumOptions(f.Property.PropertyType);
+                var enumOptions = DataScaffold.BuildEnumOptions(f.ClrType);
                 var enumArr = new object[enumOptions.Count];
                 for (int ei = 0; ei < enumOptions.Count; ei++)
                     enumArr[ei] = new { value = enumOptions[ei].Key, label = enumOptions[ei].Value };
