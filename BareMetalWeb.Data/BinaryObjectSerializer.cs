@@ -1199,19 +1199,16 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return new MemberAccessor(field.Name, AssumePublicMembers(field.FieldType), getter, setter);
     }
 
-    // TODO [violation-008]: PropertyInfo.GetValue / SetValue are reflection calls (~50-200ns each).
-    // Replace with Expression.Lambda.Compile() delegates or EntityLayout.FieldRuntime.Getter/Setter
-    // for registered entity types. See docs/violations/008-binary-serializer-reflection-accessors.md
+    // Violation #008 fixed: Use compiled Expression.Lambda delegates via PropertyAccessorFactory
+    // instead of PropertyInfo.GetValue/SetValue (~50-200ns → ~1ns per access).
     private static Func<object, object?> CreatePropertyGetter(PropertyInfo property)
     {
-        // AOT-safe: use PropertyInfo.GetValue instead of Expression.Lambda.Compile.
-        return instance => property.GetValue(instance);
+        return PropertyAccessorFactory.BuildGetter(property);
     }
 
     private static Action<object, object?> CreatePropertySetter(PropertyInfo property)
     {
-        // AOT-safe: use PropertyInfo.SetValue instead of Expression.Lambda.Compile.
-        return (instance, value) => property.SetValue(instance, value);
+        return PropertyAccessorFactory.BuildSetter(property);
     }
 
     private static Func<object, object?> CreateFieldGetter(FieldInfo field)
@@ -1276,28 +1273,57 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     private static string GetTypeIdentifier(Type type)
         => type.AssemblyQualifiedName ?? type.FullName ?? type.Name;
 
-    // TODO [violation-002]: AppDomain.GetAssemblies() assembly scanning is AOT-unsafe and O(N·M).
-    // Replace with a pre-registered explicit type map (BinaryObjectSerializer.RegisterKnownType<T>()).
-    // See docs/violations/002-assembly-scanning-type-resolution.md
+    // Pre-registered known types for AOT-safe type resolution (no assembly scanning).
+    private static readonly ConcurrentDictionary<string, Type> KnownTypes = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Registers a type so it can be resolved by name during deserialization without assembly scanning.
+    /// Call at startup for every type that may appear in serialized binary data.
+    /// </summary>
+    public static void RegisterKnownType<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>()
+    {
+        var t = typeof(T);
+        KnownTypes[t.AssemblyQualifiedName ?? t.FullName ?? t.Name] = t;
+        if (t.FullName != null) KnownTypes[t.FullName] = t;
+        KnownTypes[t.Name] = t;
+    }
+
+    /// <summary>
+    /// Registers a type by runtime <see cref="Type"/> reference.
+    /// </summary>
+    public static void RegisterKnownType([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type t)
+    {
+        KnownTypes[t.AssemblyQualifiedName ?? t.FullName ?? t.Name] = t;
+        if (t.FullName != null) KnownTypes[t.FullName] = t;
+        KnownTypes[t.Name] = t;
+    }
+
+    // Type resolution uses pre-registered KnownTypes map (O(1)) with Type.GetType fallback.
+    // AppDomain.GetAssemblies() assembly scanning has been removed.
     [RequiresUnreferencedCode("Assembly scanning for type resolution is not AOT-safe.")]
     private static Type ResolveType(string typeName)
     {
+        // Fast path: check pre-registered known types first (O(1), AOT-safe)
+        if (KnownTypes.TryGetValue(typeName, out var known))
+            return known;
+
+        // Fallback: Type.GetType handles simple names and forwarded types
         var resolved = Type.GetType(typeName, throwOnError: false, ignoreCase: false);
         if (resolved != null)
-            return resolved;
-
-        resolved = typeof(BinaryObjectSerializer).Assembly.GetType(typeName, throwOnError: false, ignoreCase: false);
-        if (resolved != null)
-            return resolved;
-
-        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
         {
-            resolved = assembly.GetType(typeName, throwOnError: false, ignoreCase: false);
-            if (resolved != null)
-                return resolved;
+            KnownTypes.TryAdd(typeName, resolved);
+            return resolved;
         }
 
-        throw new InvalidOperationException($"Unable to resolve type '{typeName}'.");
+        // Last resort: check the declaring assembly
+        resolved = typeof(BinaryObjectSerializer).Assembly.GetType(typeName, throwOnError: false, ignoreCase: false);
+        if (resolved != null)
+        {
+            KnownTypes.TryAdd(typeName, resolved);
+            return resolved;
+        }
+
+        throw new InvalidOperationException($"Unable to resolve type '{typeName}'. Register it with BinaryObjectSerializer.RegisterKnownType<T>() at startup.");
     }
 
     private static Type AssumePublicMembers(Type type)
