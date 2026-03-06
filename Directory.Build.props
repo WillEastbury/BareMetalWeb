@@ -4,4 +4,13 @@
     <!-- Tests show minimal output by default: only failures and summary -->
     <VSTestVerbosity>minimal</VSTestVerbosity>
   </PropertyGroup>
+
+  <!-- Test-project optimizations: applied only to *.Tests projects -->
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.Tests'))">
+    <!-- Deterministic builds improve caching; avoid unnecessary rebuilds -->
+    <Deterministic>true</Deterministic>
+    <!-- Disable analyzers during test builds for faster compilation -->
+    <RunAnalyzers>false</RunAnalyzers>
+    <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
+  </PropertyGroup>
 </Project>
