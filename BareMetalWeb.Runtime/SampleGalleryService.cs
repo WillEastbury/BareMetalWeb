@@ -330,7 +330,7 @@ public static class SampleGalleryService
             int aggCount = 0;
             foreach (var a in package.Aggregations) if (a.EntityId == oldEntityId) aggCount++;
             int ruleCount = 0;
-            foreach (var r in package.WorkflowRules) if (string.Equals(r.SourceEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) ruleCount++;
+            foreach (var rule in package.WorkflowRules) if (string.Equals(rule.SourceEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) ruleCount++;
             logger?.Invoke($"Deployed '{srcEntity.Name}': {fieldCount} field(s), {indexCount} index(es), {actionCount} action(s), {reportCount} report(s), {aggCount} aggregation(s), {ruleCount} workflow rule(s).");
             deployed.Add(srcEntity.Name);
         }
