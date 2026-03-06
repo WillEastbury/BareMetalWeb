@@ -278,30 +278,22 @@ public class CssBundleServiceTests : IDisposable
         Assert.Contains("immutable", context.Response.Headers.CacheControl.ToString());
     }
 
-    // ── EnsureAssetsAsync (pre-existing files — no network required) ──────────
+    // ── LoadAssets (pre-existing files — no network required) ───────────
 
     [Fact]
-    public async Task EnsureAssetsAsync_AllFilesExist_SkipsDownloadAndLoadsIntoMemory()
+    public void LoadAssets_AllFilesExist_LoadsIntoMemory()
     {
-        // Pre-create all required files so no HTTP calls are made.
-        File.WriteAllText(Path.Combine(_tempRoot, "js", "bootstrap.bundle.min.js"), "/* bootstrap js */");
-        File.WriteAllBytes(Path.Combine(_tempRoot, "fonts", "bootstrap-icons.woff2"), new byte[] { 0x77, 0x4f, 0x46, 0x32 });
-
+        // Pre-create all required theme files on disk.
         foreach (var theme in CssBundleService.DefaultThemes)
             WriteThemeCss(theme, $"/* {theme} pre-existing */");
 
-        // Also pre-create custom theme files so no network calls are needed.
+        // Also pre-create custom theme files.
         foreach (var theme in CssBundleService.CustomThemeDefinitions.Keys)
             WriteThemeCss(theme, $"/* {theme} pre-existing */");
 
-        var logged = new System.Collections.Generic.List<string>();
-        await CssBundleService.EnsureAssetsAsync(_tempRoot, msg => logged.Add(msg));
+        CssBundleService.LoadAssets(_tempRoot);
 
-        // No "Downloading" or "Building" messages expected since all files already existed.
-        Assert.DoesNotContain(logged, m => m.StartsWith("Downloading"));
-        Assert.DoesNotContain(logged, m => m.StartsWith("Building"));
-
-        // BuildBundles is called at end — all 25 themes should be in memory.
+        // BuildBundles is called — all 25 themes should be in memory.
         Assert.True(CssBundleService.HasBundles);
         foreach (var theme in CssBundleService.DefaultThemes)
             Assert.Contains(theme, CssBundleService.LoadedThemes());
@@ -312,62 +304,39 @@ public class CssBundleServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task EnsureAssetsAsync_CreatesRequiredDirectories()
+    public void LoadAssets_EmptyThemesDir_DoesNotThrow()
     {
-        // Use a root that has css/ and js/ but NOT themes/ or fonts/.
-        var freshRoot = Path.Combine(Path.GetTempPath(), "bmw-fresh-" + Guid.NewGuid().ToString("N")[..8]);
-        Directory.CreateDirectory(Path.Combine(freshRoot, "css"));
-        Directory.CreateDirectory(Path.Combine(freshRoot, "js"));
-
+        // Use a fresh root with no theme files — LoadAssets should not throw.
+        var freshRoot = Path.Combine(Path.GetTempPath(), "bmw-empty-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(Path.Combine(freshRoot, "css", "themes"));
         try
         {
-            var fontsDir  = Path.Combine(freshRoot, "fonts");
-            var themesDir = Path.Combine(freshRoot, "css", "themes");
-
-            Assert.False(Directory.Exists(fontsDir));
-            Assert.False(Directory.Exists(themesDir));
-
-            // Pre-create files to avoid real network calls inside EnsureAssetsAsync.
-            File.WriteAllText(Path.Combine(freshRoot, "js", "bootstrap.bundle.min.js"), "/* js */");
-            Directory.CreateDirectory(fontsDir);
-            Directory.CreateDirectory(themesDir);
-            File.WriteAllBytes(Path.Combine(fontsDir, "bootstrap-icons.woff2"), Array.Empty<byte>());
-            foreach (var theme in CssBundleService.DefaultThemes)
-                File.WriteAllText(Path.Combine(themesDir, $"{theme}.min.css"), $"/* {theme} */");
-            foreach (var theme in CssBundleService.CustomThemeDefinitions.Keys)
-                File.WriteAllText(Path.Combine(themesDir, $"{theme}.min.css"), $"/* {theme} */");
-
-            await CssBundleService.EnsureAssetsAsync(freshRoot);
-
-            Assert.True(Directory.Exists(fontsDir));
-            Assert.True(Directory.Exists(themesDir));
+            // Should complete without throwing even when no theme files exist.
+            CssBundleService.LoadAssets(freshRoot);
         }
         finally
         {
-            if (Directory.Exists(freshRoot))
-                Directory.Delete(freshRoot, true);
+            if (Directory.Exists(freshRoot)) Directory.Delete(freshRoot, true);
         }
     }
 
     [Fact]
-    public async Task EnsureAssetsAsync_SetsStaticRootForLazyLoading()
+    public async Task LoadAssets_LoadsThemesAndServesFromCache()
     {
-        // Pre-create all files so no network is needed.
-        File.WriteAllText(Path.Combine(_tempRoot, "js", "bootstrap.bundle.min.js"), "/* js */");
-        File.WriteAllBytes(Path.Combine(_tempRoot, "fonts", "bootstrap-icons.woff2"), Array.Empty<byte>());
+        // Pre-create all files so they can be served.
         foreach (var theme in CssBundleService.DefaultThemes)
             WriteThemeCss(theme, $"/* {theme} */");
         foreach (var theme in CssBundleService.CustomThemeDefinitions.Keys)
             WriteThemeCss(theme, $"/* {theme} */");
 
-        await CssBundleService.EnsureAssetsAsync(_tempRoot);
+        CssBundleService.LoadAssets(_tempRoot);
 
-        // After EnsureAssetsAsync, all DefaultThemes must be served from cache.
+        // After LoadAssets, all DefaultThemes must be served from cache.
         foreach (var theme in CssBundleService.DefaultThemes)
         {
             var context = CreateContext("GET", $"/static/css/themes/{theme}.min.css");
             var result = await CssBundleService.TryServeAsync(context.ToBmw());
-            Assert.True(result, $"Theme '{theme}' should be served after EnsureAssetsAsync");
+            Assert.True(result, $"Theme '{theme}' should be served after LoadAssets");
             Assert.Equal(200, context.Response.StatusCode);
         }
 
@@ -376,7 +345,7 @@ public class CssBundleServiceTests : IDisposable
         {
             var context = CreateContext("GET", $"/static/css/themes/{theme}.min.css");
             var result = await CssBundleService.TryServeAsync(context.ToBmw());
-            Assert.True(result, $"Custom theme '{theme}' should be served after EnsureAssetsAsync");
+            Assert.True(result, $"Custom theme '{theme}' should be served after LoadAssets");
             Assert.Equal(200, context.Response.StatusCode);
         }
     }

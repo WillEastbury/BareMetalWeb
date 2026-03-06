@@ -1,0 +1,810 @@
+name: CI/CD Pipeline
+
+run-name: "CI/CD Pipeline - V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Full canary-style CI/CD pipeline:
+#
+#  CI Levels (run on every push to main and on pull requests)
+#  ──────────────────────────────────────────────────────────
+#  L1.0  AOT/Trim build check          – compiles with native AOT + full trim
+#  L1.1  Base CI                       – unit tests + deploy to canary (reset data) + Playwright smoke
+#  L1.1  Upgrade CI                    – deploy to upgrade instance (preserves existing data)
+#  L1.2  Integration CI                – integration tests on the upgrade instance
+#  L1.3  Performance CI (small)        – regression check with a small data set
+#  L1.4  Performance CI (large)        – stress test with an auto-generated large data set
+#  L1.5  Playwright CI                 – full UI tests on the upgrade instance
+#
+#  CD Levels (run on push to main after all CI levels pass; skipped on pull requests)
+#  ──────────────────────────────────────────────────────────────────────────────────
+#  L2.0  Release candidate             – build linux-x64/linux-arm64/win-x64 binaries + release notes + GitHub Release
+#  L2.1  Canary Ring 0                 – deploy to baremetalweb-canary + Playwright smoke + 20-min monitoring window
+#  L2.2  Early-access tenant rollout   – parallel deploy to early_access tenants from deploy-list.json
+#  L2.3  Full tenant rollout           – gated by "production-rollout" environment (manual approval) then parallel deploy
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# Required secrets
+# ─────────────────────────────────────────────────────────────────────────────
+#  AZURE_CREDENTIALS              – service principal for baremetalweb (canary/CI base instance)
+#  AZURE_CREDENTIALS_UPGRADE      – service principal for baremetalweb-upgrade
+#  AZURE_CREDENTIALS_CANARY       – service principal for baremetalweb-canary (ring 0)
+#  AZURE_CREDENTIALS_TENANTS      – service principal with Contributor access to all tenant Web Apps
+#  CIMIGRATE_TEST_USERNAME        – test user login name
+#  CIMIGRATE_TEST_DISPLAYNAME     – test user display name
+#  CIMIGRATE_TEST_PASSWORD        – test user password
+# ─────────────────────────────────────────────────────────────────────────────
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      skip_cd:
+        description: 'Skip CD stages (CI only – L1.x)'
+        type: boolean
+        default: false
+      force_cd:
+        description: 'Force CD stages even on a non-main ref'
+        type: boolean
+        default: false
+
+concurrency:
+  group: ci-cd-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  id-token: write
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shared condition: run CD stages only when on main branch and CD is not skipped
+# ─────────────────────────────────────────────────────────────────────────────
+
+jobs:
+
+  # ─── VERSION ────────────────────────────────────────────────────────────────
+  # Compute once, propagate to every job that needs it via outputs.
+  # ─────────────────────────────────────────────────────────────────────────────
+  version:
+    name: "Compute Version"
+    runs-on: ubuntu-latest
+    outputs:
+      info_version:     ${{ steps.v.outputs.info_version }}
+      assembly_version: ${{ steps.v.outputs.assembly_version }}
+      tag:              ${{ steps.v.outputs.tag }}
+    steps:
+      - name: Compute version
+        id: v
+        run: |
+          MAJOR="${{ vars.MAJOR_VERSION || '1' }}"
+          DATE="$(date +%Y%m%d)"
+          BUILD="${{ github.run_number }}"
+          echo "info_version=V${MAJOR}.${DATE}.${BUILD}"   >> $GITHUB_OUTPUT
+          echo "assembly_version=${MAJOR}.0.0.${BUILD}"    >> $GITHUB_OUTPUT
+          echo "tag=v${MAJOR}.${DATE}.${BUILD}"            >> $GITHUB_OUTPUT
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # L1.0 – AOT/Trim Build Check
+  # Verifies the host compiles and links successfully with native AOT + full
+  # trim (Debug config, linux-x64).  This is the pre-merge gate – if it fails
+  # we abort everything else immediately.
+  # ─────────────────────────────────────────────────────────────────────────────
+  l1-0-build-check:
+    name: "L1.0 · AOT/Trim Build Check"
+    runs-on: ubuntu-latest
+    needs: version
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
+
+      - name: AOT/Trim publish (Debug, linux-x64)
+        run: |
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Debug \
+            --runtime linux-x64 \
+            --self-contained true \
+            --no-restore \
+            -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:InformationalVersion=${{ needs.version.outputs.info_version }} \
+            -o /tmp/aot-check
+          echo "L1.0 AOT/Trim build check passed ✓"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # L1.1 – Base CI
+  # • .NET unit tests (excludes integration + performance)
+  # • JS unit tests (Jest)
+  # • Deploy to baremetalweb (canary) with reset-data.flag (nukes /home/data)
+  # • Playwright smoke tests against the fresh canary instance
+  # ─────────────────────────────────────────────────────────────────────────────
+  l1-1-base-ci:
+    name: "L1.1 · Base CI (Unit Tests + Canary Deploy)"
+    runs-on: ubuntu-latest
+    needs: [version, l1-0-build-check]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore solution
+        run: dotnet restore BareMetalWeb.sln
+
+      - name: Build solution
+        run: |
+          dotnet build BareMetalWeb.sln --no-restore --configuration Release \
+            -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:InformationalVersion=${{ needs.version.outputs.info_version }}
+
+      - name: Unit tests (.NET)
+        run: |
+          dotnet test BareMetalWeb.sln --no-build --configuration Release --verbosity minimal \
+            --filter "FullyQualifiedName!~IntegrationTests&FullyQualifiedName!~PerformanceTests&Category!=Integration" \
+            --results-directory TestResults --logger "trx"
+          if find TestResults -name '*.trx' -exec grep -l 'outcome="Failed"' {} + 2>/dev/null | head -1 | grep -q .; then
+            echo "::error::One or more unit tests failed"
+            exit 1
+          fi
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Jest dependencies
+        working-directory: tests/js-unit
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Run Jest unit tests
+        working-directory: tests/js-unit
+        run: npm test
+
+      - name: Publish (framework-dependent, for Azure deploy)
+        run: |
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release \
+            --output ./publish \
+            -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:InformationalVersion=${{ needs.version.outputs.info_version }}
+
+      - name: Add reset-data flag (wipes /home/data on startup)
+        run: touch ./publish/reset-data.flag
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to baremetalweb (Canary / CI base)
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: baremetalweb
+          package: ./publish
+
+      - name: Wait for deployment to stabilise
+        run: |
+          echo "Waiting 30 s for app to start..."
+          sleep 30
+
+      - name: Install Playwright
+        working-directory: tests/playwright
+        run: |
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Playwright smoke tests (canary)
+        working-directory: tests/playwright
+        env:
+          BASE_URL: https://baremetalweb.azurewebsites.net
+          CIMIGRATE_TEST_USERNAME:    ${{ secrets.CIMIGRATE_TEST_USERNAME }}
+          CIMIGRATE_TEST_DISPLAYNAME: ${{ secrets.CIMIGRATE_TEST_DISPLAYNAME }}
+          CIMIGRATE_TEST_PASSWORD:    ${{ secrets.CIMIGRATE_TEST_PASSWORD }}
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-l1-1-base-report
+          path: tests/playwright/playwright-report/
+          retention-days: 7
+
+      - name: Upload .NET test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-l1-1-base
+          path: TestResults/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # L1.1 – Upgrade CI
+  # Deploys the new build to baremetalweb-upgrade WITHOUT clearing data so that
+  # migration paths are exercised against a realistic existing data set.
+  # (The upgrade instance is expected to be running a prior version with the
+  # standard test data set in /home/static; the app copies it to /home/data on
+  # first startup if /home/data is absent.)
+  # ─────────────────────────────────────────────────────────────────────────────
+  l1-1-upgrade-ci:
+    name: "L1.1 · Upgrade CI (Deploy to Upgrade Instance)"
+    runs-on: ubuntu-latest
+    needs: [version, l1-0-build-check]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
+
+      - name: Publish (framework-dependent, for Azure deploy)
+        run: |
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release \
+            --output ./publish \
+            -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:InformationalVersion=${{ needs.version.outputs.info_version }}
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_UPGRADE }}
+
+      - name: Deploy to baremetalweb-upgrade (no data reset)
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: baremetalweb-upgrade
+          package: ./publish
+
+      - name: Wait for deployment to stabilise
+        run: |
+          echo "Waiting 30 s for app to start..."
+          sleep 30
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # L1.2 – Integration CI
+  # Runs the integration test suite against the upgrade instance to validate
+  # that the upgraded system behaves correctly with existing data.
+  # ─────────────────────────────────────────────────────────────────────────────
+  l1-2-integration-ci:
+    name: "L1.2 · Integration CI"
+    runs-on: ubuntu-latest
+    needs: l1-1-upgrade-ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore BareMetalWeb.IntegrationTests/BareMetalWeb.IntegrationTests.csproj
+
+      - name: Build
+        run: |
+          dotnet build BareMetalWeb.IntegrationTests/BareMetalWeb.IntegrationTests.csproj \
+            --configuration Release --no-restore
+
+      - name: Run integration tests
+        env:
+          CIMIGRATE_BASE_URL:         https://baremetalweb-upgrade.azurewebsites.net
+          CIMIGRATE_TEST_USERNAME:    ${{ secrets.CIMIGRATE_TEST_USERNAME }}
+          CIMIGRATE_TEST_DISPLAYNAME: ${{ secrets.CIMIGRATE_TEST_DISPLAYNAME }}
+          CIMIGRATE_TEST_PASSWORD:    ${{ secrets.CIMIGRATE_TEST_PASSWORD }}
+        run: |
+          dotnet test BareMetalWeb.IntegrationTests/BareMetalWeb.IntegrationTests.csproj \
+            --no-build --configuration Release --verbosity normal \
+            --filter "Category=Integration|FullyQualifiedName~IntegrationTests" \
+            --results-directory TestResults --logger "trx"
+
+      - name: Upload integration test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-l1-2-integration
+          path: TestResults/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # L1.3 – Performance CI (small dataset)
+  # Quick regression gate: runs the performance tests with a small data set and
+  # fails the pipeline if results are below acceptable thresholds.
+  # ─────────────────────────────────────────────────────────────────────────────
+  l1-3-performance-ci:
+    name: "L1.3 · Performance CI (Small Dataset)"
+    runs-on: ubuntu-latest
+    needs: l1-1-upgrade-ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj
+
+      - name: Build
+        run: |
+          dotnet build BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj \
+            --configuration Release --no-restore
+
+      - name: Run performance tests (small dataset)
+        run: |
+          dotnet run --project BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj \
+            --configuration Release --no-build \
+            -- --addresses 100 --customers 50 --products 25 --units 10
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-results-l1-3-small
+          path: report/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # L1.4 – Performance CI (large dataset)
+  # Heavier stress test with an auto-generated large volume data set.
+  # Runs after L1.3 so that large runs don't mask small-dataset regressions.
+  # ─────────────────────────────────────────────────────────────────────────────
+  l1-4-performance-big-ci:
+    name: "L1.4 · Performance CI (Large Dataset)"
+    runs-on: ubuntu-latest
+    needs: l1-3-performance-ci
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj
+
+      - name: Build
+        run: |
+          dotnet build BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj \
+            --configuration Release --no-restore
+
+      - name: Run performance tests (large dataset)
+        run: |
+          dotnet run --project BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj \
+            --configuration Release --no-build \
+            -- --addresses 10000 --customers 5000 --products 2500 --units 1000
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-results-l1-4-large
+          path: report/
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # L1.5 – Playwright CI (full UI test suite on upgrade instance)
+  # Runs the full Playwright suite against the upgrade instance (which has
+  # existing data) to verify UI behaviour across all gallery apps and skins.
+  # Waits for both integration tests and large performance tests to pass first.
+  # ─────────────────────────────────────────────────────────────────────────────
+  l1-5-playwright-ci:
+    name: "L1.5 · Playwright CI (UI Tests on Upgrade)"
+    runs-on: ubuntu-latest
+    needs: [l1-2-integration-ci, l1-4-performance-big-ci]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        working-directory: tests/playwright
+        run: |
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Run Playwright tests (upgrade instance)
+        working-directory: tests/playwright
+        env:
+          BASE_URL: https://baremetalweb-upgrade.azurewebsites.net
+          CIMIGRATE_TEST_USERNAME:    ${{ secrets.CIMIGRATE_TEST_USERNAME }}
+          CIMIGRATE_TEST_DISPLAYNAME: ${{ secrets.CIMIGRATE_TEST_DISPLAYNAME }}
+          CIMIGRATE_TEST_PASSWORD:    ${{ secrets.CIMIGRATE_TEST_PASSWORD }}
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-l1-5-upgrade-report
+          path: tests/playwright/playwright-report/
+          retention-days: 7
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  #  CD PIPELINE – only runs on push to main (or forced via workflow_dispatch)
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # L2.0 – Release Candidate
+  # All CI levels have passed.  Now:
+  #   1. Build self-contained release binaries for linux-x64, linux-arm64, win-x64
+  #   2. Upload a framework-dependent deploy package as an artifact for later jobs
+  #   3. Generate release notes from merged PRs since the last tag
+  #   4. Create a GitHub Release with binaries attached and the release notes
+  # ─────────────────────────────────────────────────────────────────────────────
+  l2-0-release-candidate:
+    name: "L2.0 · Release Candidate (Build Binaries + Release Notes)"
+    runs-on: ubuntu-latest
+    needs: [version, l1-1-base-ci, l1-5-playwright-ci]
+    # Run CD only on push to main (or when forced), and only when not skipped
+    if: |
+      github.event.inputs.skip_cd != 'true' && (
+        (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+        (github.event_name == 'workflow_dispatch' && github.event.inputs.force_cd == 'true')
+      )
+    outputs:
+      info_version: ${{ needs.version.outputs.info_version }}
+      tag:          ${{ needs.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
+
+      # ── Deploy artifact (framework-dependent, used by all Azure deploy jobs) ──
+      - name: Publish deploy artifact (framework-dependent)
+        run: |
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release \
+            --output ./publish \
+            -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:InformationalVersion=${{ needs.version.outputs.info_version }}
+
+      - name: Upload deploy artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-package
+          path: ./publish/
+          retention-days: 7
+
+      # ── Self-contained release binaries (no NativeAOT to enable cross-compile) ──
+      - name: Build release binary – linux-x64
+        run: |
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained true \
+            -p:PublishAot=false \
+            -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:InformationalVersion=${{ needs.version.outputs.info_version }} \
+            --output ./release/linux-x64
+
+      - name: Build release binary – linux-arm64
+        run: |
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release \
+            --runtime linux-arm64 \
+            --self-contained true \
+            -p:PublishAot=false \
+            -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:InformationalVersion=${{ needs.version.outputs.info_version }} \
+            --output ./release/linux-arm64
+
+      - name: Build release binary – win-x64
+        run: |
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release \
+            --runtime win-x64 \
+            --self-contained true \
+            -p:PublishAot=false \
+            -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:InformationalVersion=${{ needs.version.outputs.info_version }} \
+            --output ./release/win-x64
+
+      - name: Archive release binaries
+        run: |
+          cd release
+          zip -r  ../linux-x64.zip  linux-x64/
+          tar czf ../linux-arm64.tar.gz linux-arm64/
+          zip -r  ../win-x64.zip    win-x64/
+          cd ..
+
+      # ── Release notes ──────────────────────────────────────────────────────
+      - name: Collect merged PR titles since last release
+        id: prs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PREV_TAG=$(git tag --list 'v*' --sort=-version:refname | head -n 1)
+          if [ -z "$PREV_TAG" ]; then
+            PREV_TAG=$(git rev-list --max-parents=0 HEAD)
+            echo "No previous tag found; using initial commit."
+          fi
+          echo "Previous release ref: $PREV_TAG"
+
+          NOTES_FILE=$(mktemp)
+          FEATURE_FILE=$(mktemp)
+          FIX_FILE=$(mktemp)
+          OTHER_FILE=$(mktemp)
+
+          COMMITS=$(git log "${PREV_TAG}..HEAD" --merges --pretty=format:"%H" 2>/dev/null || true)
+          for SHA in $COMMITS; do
+            PR_NUM=$(git log -1 --format="%s" "$SHA" | grep -oP '#\K[0-9]+' | head -1)
+            [ -z "$PR_NUM" ] && continue
+            TITLE=$(gh pr view "$PR_NUM" --json title --jq '.title' 2>/dev/null || echo "")
+            [ -z "$TITLE" ] && continue
+            case "$TITLE" in
+              fix:*|Fix:*|fix\(*|Fix\(*)
+                echo "- $TITLE (#$PR_NUM)" >> "$FIX_FILE" ;;
+              feat:*|Feat:*|feat\(*|Feat\(*|Add*|add*)
+                echo "- $TITLE (#$PR_NUM)" >> "$FEATURE_FILE" ;;
+              *)
+                echo "- $TITLE (#$PR_NUM)" >> "$OTHER_FILE" ;;
+            esac
+          done
+
+          {
+            if [ -s "$FEATURE_FILE" ]; then echo "### 🚀 Features"; echo ""; cat "$FEATURE_FILE"; echo ""; fi
+            if [ -s "$FIX_FILE"    ]; then echo "### 🐛 Bug Fixes"; echo ""; cat "$FIX_FILE";    echo ""; fi
+            if [ -s "$OTHER_FILE"  ]; then echo "### 📦 Other Changes"; echo ""; cat "$OTHER_FILE"; echo ""; fi
+          } > "$NOTES_FILE"
+
+          [ ! -s "$NOTES_FILE" ] && echo "No merged PRs found since last release." > "$NOTES_FILE"
+
+          { echo "notes<<NOTES_EOF"; cat "$NOTES_FILE"; echo "NOTES_EOF"; } >> $GITHUB_OUTPUT
+          rm -f "$FEATURE_FILE" "$FIX_FILE" "$OTHER_FILE" "$NOTES_FILE"
+
+      - name: Write release notes markdown
+        run: |
+          mkdir -p docs/releases
+          VERSION="${{ needs.version.outputs.info_version }}"
+          FILENAME="docs/releases/${VERSION}.md"
+          cat > "$FILENAME" <<EOF
+          # Release ${VERSION}
+
+          **Date:** $(date +%Y-%m-%d)
+          **Build:** ${{ github.run_number }}
+          **Commit:** \`${GITHUB_SHA::8}\`
+
+          ---
+
+          ${{ steps.prs.outputs.notes }}
+
+          ---
+
+          *Generated automatically by the CI/CD pipeline.*
+          EOF
+          sed -i 's/^          //' "$FILENAME"
+          echo "Release notes written to $FILENAME"
+          cat "$FILENAME"
+
+      - name: Commit release notes and create tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.version.outputs.info_version }}"
+          TAG="${{ needs.version.outputs.tag }}"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/releases/
+          git commit -m "docs: release notes for ${VERSION}" || echo "Nothing to commit"
+          git push
+          git tag "$TAG"
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.version.outputs.info_version }}"
+          TAG="${{ needs.version.outputs.tag }}"
+          NOTES_FILE="docs/releases/${VERSION}.md"
+          gh release create "$TAG" \
+            --title "$VERSION" \
+            --notes-file "$NOTES_FILE" \
+            --latest \
+            linux-x64.zip \
+            linux-arm64.tar.gz \
+            win-x64.zip
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # L2.1 – Canary Ring 0
+  # Deploy the release package to baremetalweb-canary, run Playwright smoke
+  # tests, then wait 20 minutes to allow real user interaction before the
+  # pipeline proceeds.  Any failures here prevent the tenant rollout.
+  # ─────────────────────────────────────────────────────────────────────────────
+  l2-1-canary-ring0:
+    name: "L2.1 · Canary Ring 0 (baremetalweb-canary)"
+    runs-on: ubuntu-latest
+    needs: l2-0-release-candidate
+    environment: canary-ring-0
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download deploy package
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-package
+          path: ./publish
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_CANARY }}
+
+      - name: Deploy to baremetalweb-canary (Ring 0)
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: baremetalweb-canary
+          package: ./publish
+
+      - name: Wait for deployment to stabilise
+        run: |
+          echo "Waiting 60 s for app to start..."
+          sleep 60
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        working-directory: tests/playwright
+        run: |
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Playwright smoke tests (canary ring 0)
+        working-directory: tests/playwright
+        env:
+          BASE_URL: https://baremetalweb-canary.azurewebsites.net
+          CIMIGRATE_TEST_USERNAME:    ${{ secrets.CIMIGRATE_TEST_USERNAME }}
+          CIMIGRATE_TEST_DISPLAYNAME: ${{ secrets.CIMIGRATE_TEST_DISPLAYNAME }}
+          CIMIGRATE_TEST_PASSWORD:    ${{ secrets.CIMIGRATE_TEST_PASSWORD }}
+        run: npx playwright test
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-l2-1-canary-report
+          path: tests/playwright/playwright-report/
+          retention-days: 14
+
+      - name: Monitor canary ring 0 (20-minute window)
+        run: |
+          echo "Canary ring 0 deployed and smoke tests passed."
+          echo "Waiting 20 minutes for user interaction before proceeding to early-access rollout."
+          echo ""
+          echo "During this window, manually review application logs to confirm zero errors:"
+          echo "  Azure Portal: https://portal.azure.com/#resource/subscriptions/.../resourceGroups/.../providers/Microsoft.Web/sites/baremetalweb-canary/logStream"
+          echo "  az webapp log tail --name baremetalweb-canary --resource-group <rg>"
+          echo ""
+          sleep 1200
+          echo "Canary monitoring window complete.  Proceeding to early-access rollout."
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # L2.2 – Early-access tenant rollout
+  # Read early_access entries from deploy-list.json, build a matrix, and deploy
+  # to each early-access tenant in parallel.  After all deploys succeed, a
+  # 20-minute monitoring window is observed before proceeding to L2.3.
+  # ─────────────────────────────────────────────────────────────────────────────
+  l2-2-prepare-matrix:
+    name: "L2.2 · Prepare Early-Access Matrix"
+    runs-on: ubuntu-latest
+    needs: l2-1-canary-ring0
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build early-access deploy matrix from deploy-list.json
+        id: matrix
+        run: |
+          COUNT=$(jq '.early_access | length' deploy-list.json)
+          echo "Early-access tenants to deploy: $COUNT"
+          MATRIX=$(jq -c '{ include: .early_access }' deploy-list.json)
+          echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
+
+  l2-2-early-access:
+    name: "L2.2 · Early Access: ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    needs: l2-2-prepare-matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.l2-2-prepare-matrix.outputs.matrix) }}
+    uses: ./.github/workflows/deploy-tenant.yml
+    with:
+      app-name:        ${{ matrix.app_name }}
+      artifact-name:   deploy-package
+    secrets:
+      azure-credentials: ${{ secrets.AZURE_CREDENTIALS_TENANTS }}
+
+  l2-2-monitor-early-access:
+    name: "L2.2 · Monitor Early-Access Tenants (20 min)"
+    runs-on: ubuntu-latest
+    needs: l2-2-early-access
+    steps:
+      - name: Monitor early-access tenants
+        run: |
+          echo "All early-access tenant deployments complete."
+          echo ""
+          echo "Please review error logs for each early-access tenant before approving L2.3."
+          echo "Use the Azure Portal or Azure CLI to inspect logs for each app:"
+          TENANTS=$(jq -r '.early_access[] | "  \(.name): az webapp log tail --name \(.app_name) --resource-group <rg>"' deploy-list.json)
+          echo "$TENANTS"
+          echo ""
+          echo "Waiting 20 minutes before making the full rollout available for approval..."
+          sleep 1200
+          echo "Early-access monitoring window complete."
+          echo "Approve the 'production-rollout' environment in GitHub to trigger L2.3 full rollout."
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # L2.3 – Full tenant rollout  (MANUAL GATE)
+  # Requires manual approval via the "production-rollout" GitHub Environment
+  # before deploying to remaining tenants from deploy-list.json main_rollout.
+  # ─────────────────────────────────────────────────────────────────────────────
+  l2-3-prepare-matrix:
+    name: "L2.3 · Prepare Full-Rollout Matrix"
+    runs-on: ubuntu-latest
+    needs: l2-2-monitor-early-access
+    environment: production-rollout
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build full-rollout deploy matrix from deploy-list.json
+        id: matrix
+        run: |
+          COUNT=$(jq '.main_rollout | length' deploy-list.json)
+          echo "Main-rollout tenants to deploy: $COUNT"
+          MATRIX=$(jq -c '{ include: .main_rollout }' deploy-list.json)
+          echo "matrix=${MATRIX}" >> $GITHUB_OUTPUT
+
+  l2-3-full-rollout:
+    name: "L2.3 · Full Rollout: ${{ matrix.name }}"
+    runs-on: ubuntu-latest
+    needs: l2-3-prepare-matrix
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.l2-3-prepare-matrix.outputs.matrix) }}
+    uses: ./.github/workflows/deploy-tenant.yml
+    with:
+      app-name:      ${{ matrix.app_name }}
+      artifact-name: deploy-package
+    secrets:
+      azure-credentials: ${{ secrets.AZURE_CREDENTIALS_TENANTS }}
