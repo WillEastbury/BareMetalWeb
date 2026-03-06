@@ -31,34 +31,88 @@ public static class GraphQLHandler
 
     // ── Schema introspection ──────────────────────────────────────────────
 
-    private static object BuildIntrospectionSchema()
+    private static void WriteIntrospectionSchema(Utf8JsonWriter writer)
     {
-        var types = new List<object>();
-        var queryFields = new List<object>();
+        var queryFieldData = new List<(string name, bool isList, string typeName)>();
+
+        writer.WriteStartObject();
+        writer.WritePropertyName("__schema");
+        writer.WriteStartObject();
+        writer.WriteStartArray("types");
 
         foreach (var meta in DataScaffold.Entities)
         {
-            var fields = new object[meta.Fields.Count + 1];
-            fields[0] = new { name = "id", type = new { kind = "SCALAR", name = "ID", ofType = (object?)null } };
+            var pascalName = ToPascal(meta.Slug);
+            writer.WriteStartObject();
+            writer.WriteString("kind", "OBJECT");
+            writer.WriteString("name", pascalName);
+            writer.WriteStartArray("fields");
+
+            writer.WriteStartObject();
+            writer.WriteString("name", "id");
+            writer.WriteStartObject("type");
+            writer.WriteString("kind", "SCALAR");
+            writer.WriteString("name", "ID");
+            writer.WriteNull("ofType");
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+
             for (int fi = 0; fi < meta.Fields.Count; fi++)
             {
                 var f = meta.Fields[fi];
-                fields[fi + 1] = new
-                {
-                    name = ToCamel(f.Name),
-                    type = new { kind = "SCALAR", name = ToGraphQLType(f.FieldType, f.Required), ofType = (object?)null }
-                };
+                writer.WriteStartObject();
+                writer.WriteString("name", ToCamel(f.Name));
+                writer.WriteStartObject("type");
+                writer.WriteString("kind", "SCALAR");
+                writer.WriteString("name", ToGraphQLType(f.FieldType, f.Required));
+                writer.WriteNull("ofType");
+                writer.WriteEndObject();
+                writer.WriteEndObject();
             }
-            types.Add(new { kind = "OBJECT", name = ToPascal(meta.Slug), fields });
 
-            // list query
-            queryFields.Add(new { name = ToCamel(meta.Slug) + "List", type = new { kind = "LIST", name = (string?)null, ofType = new { kind = "OBJECT", name = ToPascal(meta.Slug) } } });
-            // single query
-            queryFields.Add(new { name = ToCamel(meta.Slug), type = new { kind = "OBJECT", name = ToPascal(meta.Slug), ofType = (object?)null } });
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+
+            queryFieldData.Add((ToCamel(meta.Slug) + "List", true, pascalName));
+            queryFieldData.Add((ToCamel(meta.Slug), false, pascalName));
         }
 
-        types.Add(new { kind = "OBJECT", name = "Query", fields = queryFields });
-        return new { __schema = new { types, queryType = new { name = "Query" } } };
+        writer.WriteStartObject();
+        writer.WriteString("kind", "OBJECT");
+        writer.WriteString("name", "Query");
+        writer.WriteStartArray("fields");
+        foreach (var (name, isList, typeName) in queryFieldData)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("name", name);
+            writer.WriteStartObject("type");
+            if (isList)
+            {
+                writer.WriteString("kind", "LIST");
+                writer.WriteNull("name");
+                writer.WriteStartObject("ofType");
+                writer.WriteString("kind", "OBJECT");
+                writer.WriteString("name", typeName);
+                writer.WriteEndObject();
+            }
+            else
+            {
+                writer.WriteString("kind", "OBJECT");
+                writer.WriteString("name", typeName);
+                writer.WriteNull("ofType");
+            }
+            writer.WriteEndObject();
+            writer.WriteEndObject();
+        }
+        writer.WriteEndArray();
+        writer.WriteEndObject();
+
+        writer.WriteEndArray();
+        writer.WriteStartObject("queryType");
+        writer.WriteString("name", "Query");
+        writer.WriteEndObject();
+        writer.WriteEndObject();
+        writer.WriteEndObject();
     }
 
     // ── Query execution ───────────────────────────────────────────────────
@@ -93,8 +147,12 @@ public static class GraphQLHandler
         // Introspection shortcut
         if (queryText.Contains("__schema"))
         {
-            var intro = BuildIntrospectionSchema();
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new { data = intro }));
+            await using var writer = new Utf8JsonWriter(context.Response.Body);
+            writer.WriteStartObject();
+            writer.WritePropertyName("data");
+            WriteIntrospectionSchema(writer);
+            writer.WriteEndObject();
+            await writer.FlushAsync(context.RequestAborted);
             return;
         }
 
@@ -102,12 +160,25 @@ public static class GraphQLHandler
         try
         {
             var result = await ExecuteQuery(queryText, variables, context.RequestAborted);
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new { data = result }));
+            await using var writer = new Utf8JsonWriter(context.Response.Body);
+            writer.WriteStartObject();
+            writer.WritePropertyName("data");
+            WriteJsonValue(writer, result);
+            writer.WriteEndObject();
+            await writer.FlushAsync(context.RequestAborted);
         }
         catch (Exception ex)
         {
             context.Response.StatusCode = 400;
-            await context.Response.WriteAsync(JsonSerializer.Serialize(new { errors = new[] { new { message = ex.Message } } }));
+            await using var writer = new Utf8JsonWriter(context.Response.Body);
+            writer.WriteStartObject();
+            writer.WriteStartArray("errors");
+            writer.WriteStartObject();
+            writer.WriteString("message", ex.Message);
+            writer.WriteEndObject();
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+            await writer.FlushAsync(context.RequestAborted);
         }
     }
 
@@ -268,6 +339,57 @@ public static class GraphQLHandler
         }
 
         return row;
+    }
+
+    // ── JSON writing helpers ─────────────────────────────────────────────
+
+    private static void WriteJsonValue(Utf8JsonWriter writer, object? value)
+    {
+        switch (value)
+        {
+            case null:
+                writer.WriteNullValue();
+                break;
+            case Dictionary<string, object?> dict:
+                writer.WriteStartObject();
+                foreach (var kv in dict)
+                {
+                    writer.WritePropertyName(kv.Key);
+                    WriteJsonValue(writer, kv.Value);
+                }
+                writer.WriteEndObject();
+                break;
+            case IList list:
+                writer.WriteStartArray();
+                foreach (var item in list)
+                    WriteJsonValue(writer, item);
+                writer.WriteEndArray();
+                break;
+            case string s:
+                writer.WriteStringValue(s);
+                break;
+            case uint u:
+                writer.WriteNumberValue(u);
+                break;
+            case int i:
+                writer.WriteNumberValue(i);
+                break;
+            case long l:
+                writer.WriteNumberValue(l);
+                break;
+            case double d:
+                writer.WriteNumberValue(d);
+                break;
+            case decimal m:
+                writer.WriteNumberValue(m);
+                break;
+            case bool b:
+                writer.WriteBooleanValue(b);
+                break;
+            default:
+                writer.WriteStringValue(value.ToString());
+                break;
+        }
     }
 
     // ── Parsing helpers ───────────────────────────────────────────────────

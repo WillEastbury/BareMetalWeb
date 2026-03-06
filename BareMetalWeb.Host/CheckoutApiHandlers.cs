@@ -95,10 +95,23 @@ public static class CheckoutApiHandlers
         order.Tax = Math.Round(order.Subtotal * 0.20m, 2); // 20% tax (configurable in future)
         order.Total = order.Subtotal + order.Tax;
         order.ItemCount = items.Count;
-        var itemsSummary = new List<object>(items.Count);
-        foreach (var i in items)
-            itemsSummary.Add(new { i.ProductId, i.ProductName, i.Quantity, i.UnitPrice, i.LineTotal });
-        order.ItemsJson = JsonSerializer.Serialize(itemsSummary);
+        using var ms = new MemoryStream();
+        using (var itemWriter = new Utf8JsonWriter(ms))
+        {
+            itemWriter.WriteStartArray();
+            foreach (var i in items)
+            {
+                itemWriter.WriteStartObject();
+                itemWriter.WriteString("ProductId", i.ProductId);
+                itemWriter.WriteString("ProductName", i.ProductName);
+                itemWriter.WriteNumber("Quantity", i.Quantity);
+                itemWriter.WriteNumber("UnitPrice", i.UnitPrice);
+                itemWriter.WriteNumber("LineTotal", i.LineTotal);
+                itemWriter.WriteEndObject();
+            }
+            itemWriter.WriteEndArray();
+        }
+        order.ItemsJson = System.Text.Encoding.UTF8.GetString(ms.ToArray());
         order.PlacedAtUtc = DateTime.UtcNow;
         order.Status = OrderStatus.Pending;
         await orderMeta.Handlers.SaveAsync(order, context.RequestAborted);
@@ -108,14 +121,15 @@ public static class CheckoutApiHandlers
         await basketMeta.Handlers.SaveAsync(basket, context.RequestAborted);
 
         context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(new
-        {
-            ok = true,
-            orderNumber = order.OrderNumber,
-            orderKey = order.Key,
-            total = order.Total,
-            status = order.Status.ToString()
-        }));
+        await using var writer = new Utf8JsonWriter(context.Response.Body);
+        writer.WriteStartObject();
+        writer.WriteBoolean("ok", true);
+        writer.WriteString("orderNumber", order.OrderNumber);
+        writer.WriteNumber("orderKey", order.Key);
+        writer.WriteNumber("total", order.Total);
+        writer.WriteString("status", order.Status.ToString());
+        writer.WriteEndObject();
+        await writer.FlushAsync(context.RequestAborted);
     }
 
     /// <summary>
@@ -157,12 +171,13 @@ public static class CheckoutApiHandlers
         await orderMeta.Handlers.SaveAsync(order, context.RequestAborted);
 
         context.Response.ContentType = "application/json";
-        await context.Response.WriteAsync(JsonSerializer.Serialize(new
-        {
-            ok = true,
-            orderNumber = order.OrderNumber,
-            status = order.Status.ToString()
-        }));
+        await using var writer = new Utf8JsonWriter(context.Response.Body);
+        writer.WriteStartObject();
+        writer.WriteBoolean("ok", true);
+        writer.WriteString("orderNumber", order.OrderNumber);
+        writer.WriteString("status", order.Status.ToString());
+        writer.WriteEndObject();
+        await writer.FlushAsync(context.RequestAborted);
     }
 
     private static string GetAnonymousId(BmwContext context)
