@@ -23,18 +23,18 @@ public static class BmwJsonWriter
     private const int HeaderSize = 45; // magic(4) + version(4) + schema(4) + arch(1) + sig(32)
     private const int MaxStringBytes = 4 * 1024 * 1024;
 
-    // Precomputed JSON literal fragments (UTF-8)
-    private static readonly byte[] JsonObjectStart = [(byte)'{'];
-    private static readonly byte[] JsonObjectEnd = [(byte)'}'];
-    private static readonly byte[] JsonArrayStart = [(byte)'['];
-    private static readonly byte[] JsonArrayEnd = [(byte)']'];
-    private static readonly byte[] JsonNull = "null"u8.ToArray();
-    private static readonly byte[] JsonTrue = "true"u8.ToArray();
-    private static readonly byte[] JsonFalse = "false"u8.ToArray();
-    private static readonly byte[] JsonQuote = [(byte)'"'];
-    private static readonly byte[] JsonComma = [(byte)','];
-    private static readonly byte[] DataPrefix = "\"data\":"u8.ToArray();
-    private static readonly byte[] CountPrefix = ",\"count\":"u8.ToArray();
+    // Zero-alloc JSON literal fragments via u8 literal properties
+    private static ReadOnlySpan<byte> JsonObjectStart => "{"u8;
+    private static ReadOnlySpan<byte> JsonObjectEnd => "}"u8;
+    private static ReadOnlySpan<byte> JsonArrayStart => "["u8;
+    private static ReadOnlySpan<byte> JsonArrayEnd => "]"u8;
+    private static ReadOnlySpan<byte> JsonNull => "null"u8;
+    private static ReadOnlySpan<byte> JsonTrue => "true"u8;
+    private static ReadOnlySpan<byte> JsonFalse => "false"u8;
+    private static ReadOnlySpan<byte> JsonQuote => "\""u8;
+    private static ReadOnlySpan<byte> JsonComma => ","u8;
+    private static ReadOnlySpan<byte> DataPrefix => "\"data\":"u8;
+    private static ReadOnlySpan<byte> CountPrefix => ",\"count\":"u8;
 
     // ────────────── Fragment plan ──────────────
 
@@ -374,7 +374,7 @@ public static class BmwJsonWriter
             }
 
             case WireFieldType.Enum:
-                WriteEnumAsJson(output, ref reader, enumUnderlying);
+                WriteEnumAsJson(output, ref reader, enumUnderlying, fmtBuf);
                 break;
 
             default:
@@ -437,7 +437,7 @@ public static class BmwJsonWriter
 
     // ────────────── Enum ──────────────
 
-    private static void WriteEnumAsJson(Stream output, ref SpanReader reader, WireFieldType underlying)
+    private static void WriteEnumAsJson(Stream output, ref SpanReader reader, WireFieldType underlying, scoped Span<byte> fmtBuf)
     {
         long raw = underlying switch
         {
@@ -451,8 +451,7 @@ public static class BmwJsonWriter
             WireFieldType.UInt64 => (long)reader.ReadUInt64(),
             _ => reader.ReadInt32(),
         };
-        Span<byte> buf = stackalloc byte[64];
-        FormatAndWriteInt64(output, raw, buf);
+        FormatAndWriteInt64(output, raw, fmtBuf);
     }
 
     // ────────────── String field ──────────────
