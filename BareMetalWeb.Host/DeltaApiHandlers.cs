@@ -104,11 +104,20 @@ public static class DeltaApiHandlers
             // Return updated entity (binary or JSON)
             if (WantsJson(context))
             {
+                var plan = BinaryApiHandlers.GetOrBuildPlanPublic(meta);
+                var serializer = BinaryApiHandlers.GetSerializer();
+                if (serializer == null)
+                {
+                    await WriteResult(context, 500, MutationResult.ValidationFailed, "Serializer not initialized.");
+                    return;
+                }
+                // Serialize to BSO1 binary, then transcode to JSON — no Utf8JsonWriter
+                var binary = serializer.Serialize(entity!, plan, 1);
+                var frags = BmwJsonWriter.BuildFragments(plan);
                 context.Response.StatusCode = 200;
                 context.Response.ContentType = "application/json";
-                await using var writer = new Utf8JsonWriter(context.Response.Body);
-                WriteEntityJson(writer, entity!, layout);
-                await writer.FlushAsync(context.RequestAborted);
+                BmwJsonWriter.WriteEntity(context.Response.Body, binary, frags);
+                await context.Response.Body.FlushAsync(context.RequestAborted);
             }
             else
             {
