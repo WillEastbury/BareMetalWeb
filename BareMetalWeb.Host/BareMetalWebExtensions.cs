@@ -63,6 +63,7 @@ public static class BareMetalWebExtensions
         DataScaffold.RegisterEntity<DashboardDefinition>();
         DataScaffold.RegisterEntity<ViewDefinition>();
         DataScaffold.RegisterEntity<FileAttachment>();
+        DataScaffold.RegisterEntity<RecordComment>();
 
         IDataObjectStore dataStore = ProgramSetup.CreateDataStore(config, contentRoot, serializer, queryEvaluator, logger);
 

@@ -196,6 +196,12 @@ public static class SystemEntitySchemas
         .AddField("UserAgent", FieldType.StringUtf8, typeof(string))
         .Build();
 
+    public static EntitySchema RecordComment { get; } = new EntitySchema.Builder("RecordComment", "recordcomment")
+        .AddField("RecordType", FieldType.StringUtf8, typeof(string), required: true, indexed: true)
+        .AddField("RecordKey", FieldType.UInt32, typeof(uint), required: true, indexed: true)
+        .AddField("Text", FieldType.StringUtf8, typeof(string), required: true)
+        .Build();
+
     /// <summary>All system entity schemas, for bulk registration.</summary>
     public static IReadOnlyList<EntitySchema> All { get; } = new[]
     {
@@ -204,6 +210,7 @@ public static class SystemEntitySchemas
         MfaChallenge, DeviceCodeAuth,
         EntityDefinition, FieldDefinition, IndexDefinition,
         ActionDefinition, ActionCommandDefinition,
-        SessionLog
+        SessionLog,
+        RecordComment
     };
 }

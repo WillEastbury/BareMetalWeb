@@ -4240,6 +4240,227 @@ public sealed class RouteHandlers : IRouteHandlers
         await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonIndented)).ConfigureAwait(false);
     }
 
+    // ── Record comment endpoints ────────────────────────────────────────────────
+
+    private static bool TryGetCommentMeta(out DataEntityMetadata commentMeta)
+        => DataScaffold.TryGetEntity("recordcomment", out commentMeta);
+
+    private static Dictionary<string, object?> BuildCommentApiModel(RecordComment c) =>
+        new()
+        {
+            ["id"]        = c.Key,
+            ["text"]      = c.Text,
+            ["author"]    = c.CreatedBy,
+            ["createdAt"] = c.CreatedOnUtc,
+            ["updatedAt"] = c.UpdatedOnUtc,
+            ["updatedBy"] = c.UpdatedBy
+        };
+
+    /// <summary>GET /api/{type}/{id}/_comments — list comments for a record.</summary>
+    public async ValueTask CommentsListHandler(BmwContext context)
+    {
+        var meta = ResolveEntity(context, out _, out var errorMessage);
+        var idStr = GetRouteValue(context, "id");
+        if (meta == null || string.IsNullOrWhiteSpace(idStr) || !uint.TryParse(idStr, out var recordKey))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync(errorMessage ?? "Not found.").ConfigureAwait(false);
+            return;
+        }
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.").ConfigureAwait(false);
+            return;
+        }
+        if (!TryGetCommentMeta(out var commentMeta))
+        {
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("[]").ConfigureAwait(false);
+            return;
+        }
+
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new QueryClause { Field = nameof(RecordComment.RecordType), Operator = QueryOperator.Equals, Value = meta.Slug },
+                new QueryClause { Field = nameof(RecordComment.RecordKey),  Operator = QueryOperator.Equals, Value = recordKey.ToString() }
+            }
+        };
+
+        var rawItems = await DataScaffold.QueryAsync(commentMeta, query, context.RequestAborted).ConfigureAwait(false);
+        var result = new List<Dictionary<string, object?>>();
+        foreach (var item in rawItems)
+        {
+            if (item is RecordComment c)
+                result.Add(BuildCommentApiModel(c));
+        }
+        // Sort by creation time ascending (oldest first, chat-style)
+        result.Sort((a, b) => ((DateTime)a["createdAt"]!).CompareTo((DateTime)b["createdAt"]!));
+
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(result, JsonIndented)).ConfigureAwait(false);
+    }
+
+    /// <summary>POST /api/{type}/{id}/_comments — add a comment to a record.</summary>
+    public async ValueTask CommentsAddHandler(BmwContext context)
+    {
+        var meta = ResolveEntity(context, out _, out var errorMessage);
+        var idStr = GetRouteValue(context, "id");
+        if (meta == null || string.IsNullOrWhiteSpace(idStr) || !uint.TryParse(idStr, out var recordKey))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync(errorMessage ?? "Not found.").ConfigureAwait(false);
+            return;
+        }
+        if (!await HasEntityPermissionAsync(context, meta, context.RequestAborted).ConfigureAwait(false))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied.").ConfigureAwait(false);
+            return;
+        }
+        if (!TryGetCommentMeta(out var commentMeta))
+        {
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsync("Comment entity not registered.").ConfigureAwait(false);
+            return;
+        }
+
+        string? text = null;
+        if (context.HttpRequest.ContentType?.Contains("application/json") == true)
+        {
+            using var reader = new StreamReader(context.HttpRequest.Body);
+            var body = await reader.ReadToEndAsync().ConfigureAwait(false);
+            var doc = JsonSerializer.Deserialize<Dictionary<string, string>>(body);
+            text = doc?.GetValueOrDefault("text");
+        }
+        else if (context.HttpRequest.HasFormContentType)
+        {
+            var form = await context.HttpRequest.ReadFormAsync().ConfigureAwait(false);
+            text = form["text"].ToString();
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Comment text is required.").ConfigureAwait(false);
+            return;
+        }
+
+        var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        var userName = user?.UserName ?? "anonymous";
+        var comment = new RecordComment(userName)
+        {
+            RecordType = meta.Slug,
+            RecordKey  = recordKey,
+            Text       = text.Trim()
+        };
+
+        await DataScaffold.ApplyAutoIdAsync(commentMeta, comment, context.RequestAborted).ConfigureAwait(false);
+        await DataScaffold.SaveAsync(commentMeta, comment, context.RequestAborted).ConfigureAwait(false);
+
+        context.Response.StatusCode = StatusCodes.Status201Created;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(BuildCommentApiModel(comment), JsonIndented)).ConfigureAwait(false);
+    }
+
+    /// <summary>PATCH /api/_comments/{id} — edit a comment (own comments only).</summary>
+    public async ValueTask CommentsEditHandler(BmwContext context)
+    {
+        var idStr = GetRouteValue(context, "id");
+        if (string.IsNullOrWhiteSpace(idStr) || !uint.TryParse(idStr, out var commentId))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid comment ID.").ConfigureAwait(false);
+            return;
+        }
+        if (!TryGetCommentMeta(out var commentMeta))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Not found.").ConfigureAwait(false);
+            return;
+        }
+
+        var existing = await DataScaffold.LoadAsync(commentMeta, commentId, context.RequestAborted).ConfigureAwait(false);
+        if (existing is not RecordComment comment)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Comment not found.").ConfigureAwait(false);
+            return;
+        }
+
+        var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        var userName = user?.UserName ?? "anonymous";
+        if (!string.Equals(comment.CreatedBy, userName, StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("You can only edit your own comments.").ConfigureAwait(false);
+            return;
+        }
+
+        string? text = null;
+        if (context.HttpRequest.ContentType?.Contains("application/json") == true)
+        {
+            using var reader = new StreamReader(context.HttpRequest.Body);
+            var body = await reader.ReadToEndAsync().ConfigureAwait(false);
+            var doc = JsonSerializer.Deserialize<Dictionary<string, string>>(body);
+            text = doc?.GetValueOrDefault("text");
+        }
+
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Comment text is required.").ConfigureAwait(false);
+            return;
+        }
+
+        comment.Text = text.Trim();
+        comment.Touch(userName);
+        await DataScaffold.SaveAsync(commentMeta, comment, context.RequestAborted).ConfigureAwait(false);
+
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync(JsonSerializer.Serialize(BuildCommentApiModel(comment), JsonIndented)).ConfigureAwait(false);
+    }
+
+    /// <summary>DELETE /api/_comments/{id} — delete a comment (own comments only).</summary>
+    public async ValueTask CommentsDeleteHandler(BmwContext context)
+    {
+        var idStr = GetRouteValue(context, "id");
+        if (string.IsNullOrWhiteSpace(idStr) || !uint.TryParse(idStr, out var commentId))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid comment ID.").ConfigureAwait(false);
+            return;
+        }
+        if (!TryGetCommentMeta(out var commentMeta))
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Not found.").ConfigureAwait(false);
+            return;
+        }
+
+        var existing = await DataScaffold.LoadAsync(commentMeta, commentId, context.RequestAborted).ConfigureAwait(false);
+        if (existing is not RecordComment comment)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Comment not found.").ConfigureAwait(false);
+            return;
+        }
+
+        var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        var userName = user?.UserName ?? "anonymous";
+        if (!string.Equals(comment.CreatedBy, userName, StringComparison.OrdinalIgnoreCase))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("You can only delete your own comments.").ConfigureAwait(false);
+            return;
+        }
+
+        await DataScaffold.DeleteAsync(commentMeta, commentId, context.RequestAborted).ConfigureAwait(false);
+        context.Response.StatusCode = StatusCodes.Status204NoContent;
+    }
+
     public async ValueTask MetricsJsonHandler(BmwContext context)
     {
         var app = context.GetApp();
