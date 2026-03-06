@@ -454,8 +454,8 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
 
         try
         {
-            var dict = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json);
-            return dict ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var dict = BareMetalWeb.Data.DataJsonWriter.ParseStringDict(json);
+            return dict;
         }
         catch (Exception ex)
         {

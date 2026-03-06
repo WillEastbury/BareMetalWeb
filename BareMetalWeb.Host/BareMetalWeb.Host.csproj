@@ -16,7 +16,7 @@
     <TrimMode>full</TrimMode>
     <SuppressTrimAnalysisWarnings>false</SuppressTrimAnalysisWarnings>
     <!-- Required: app uses reflection-based JsonSerializer throughout -->
-    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
     <!-- AOT readiness: surface AOT compatibility warnings at build time.
          Full PublishAot requires eliminating remaining Expression.Compile
          and Assembly.GetTypes calls (tracked in #791). -->
