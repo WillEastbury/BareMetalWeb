@@ -15,11 +15,6 @@ namespace BareMetalWeb.Runtime;
 /// </summary>
 public static class SampleGalleryService
 {
-    private static readonly JsonSerializerOptions _jsonOpts = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
-
     // ── Package loading ──────────────────────────────────────────────────────
 
     /// <summary>
@@ -43,7 +38,7 @@ public static class SampleGalleryService
             using var stream = assembly.GetManifestResourceStream(resourceName);
             if (stream == null) continue;
 
-            var pkg = JsonSerializer.Deserialize<SamplePackage>(stream, _jsonOpts);
+            var pkg = JsonSerializer.Deserialize(stream, SamplePackageJsonContext.Default.SamplePackage);
             if (pkg != null)
                 packages.Add(pkg);
         }
@@ -75,7 +70,7 @@ public static class SampleGalleryService
         using var stream = assembly.GetManifestResourceStream(resourceName);
         if (stream == null) return null;
 
-        return JsonSerializer.Deserialize<SamplePackage>(stream, _jsonOpts);
+        return JsonSerializer.Deserialize(stream, SamplePackageJsonContext.Default.SamplePackage);
     }
 
     // ── Deployment ───────────────────────────────────────────────────────────
