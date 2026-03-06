@@ -22,6 +22,8 @@ We also stream and use PipeReaders / Writers where we can - and that's how we ca
 // - Avoid new external dependencies unless explicitly requested.
 // - Avoid reflection - this system is metadata based and we do ordinal based lookups in memory for high speed.
 // - Serialization - avoid it where we can, if you can't then use our custom binary window mapper over a binary array on both the server and client. 
+// Downstream we generate UI that is rendered on the client and pre-load data an inject it to avoid double trips. 
+// Custom JS libraries are generated and bundled. the whole platform should use solely trimmed aot native binaries and only bootstrap and bootswatch as imported libs.
 
 
 
