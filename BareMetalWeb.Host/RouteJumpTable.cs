@@ -13,8 +13,8 @@ namespace BareMetalWeb.Host;
 /// <para>
 /// At build time the table searches for an FNV-1a seed that maps every
 /// exact-match route key to a unique slot (a minimal-collision perfect hash).
-/// The table size is the next power-of-two ≥ 2× the route count; with ~150
-/// routes this typically converges in 1–5 seed attempts.
+/// The table starts at 4× the route count and adaptively doubles up to 16×
+/// if the seed search doesn't converge within 100k attempts per size.
 /// </para>
 /// <para>
 /// At runtime, lookup is a single seeded hash, a bitwise mask, and one
@@ -47,6 +47,8 @@ public sealed class RouteJumpTable
     /// <summary>
     /// Rebuild the table from the current route dictionary.
     /// Finds an FNV-1a seed that gives every exact-match route a unique slot.
+    /// Adaptively grows the table when the birthday-problem makes a collision-free
+    /// seed unlikely at the current size.
     /// </summary>
     public void Build(Dictionary<string, RouteHandlerData> routes, Dictionary<string, CompiledRoute> compiledRoutes, IBufferedLogger logger)
     {
@@ -73,39 +75,60 @@ public sealed class RouteJumpTable
             return;
         }
 
-        // Table size = next power-of-two ≥ 2× route count (keeps unknown-key
-        // false-positive rate low while giving the seed search room)
-        int tableSize = NextPowerOfTwo(exactRoutes.Count * 2);
-        uint mask = (uint)(tableSize - 1);
+        // Adaptively grow the table when the seed search doesn't converge.
+        // Start at 4× route count (birthday-problem sweet spot for <200 routes),
+        // doubling up to 16× if needed. Each size gets 100k seed attempts.
+        const int maxMultiplier = 16;
+        const uint maxSeedAttempts = 100_000;
 
-        // Search for a seed that produces zero collisions
+        int multiplier = 4;
         uint seed = 0;
-        var indices = new uint[exactRoutes.Count];
-        for (; seed <= 100_000; seed++)
+        int tableSize = 0;
+        uint mask = 0;
+        bool found = false;
+
+        while (multiplier <= maxMultiplier)
         {
-            bool collision = false;
+            tableSize = NextPowerOfTwo(exactRoutes.Count * multiplier);
+            mask = (uint)(tableSize - 1);
             var occupied = new bool[tableSize];
 
-            for (int i = 0; i < exactRoutes.Count; i++)
+            for (seed = 0; seed < maxSeedAttempts; seed++)
             {
-                uint idx = RouteHash.Hash(exactRoutes[i].Key, seed) & mask;
-                if (occupied[idx])
+                bool collision = false;
+                Array.Clear(occupied);
+
+                for (int i = 0; i < exactRoutes.Count; i++)
                 {
-                    collision = true;
+                    uint idx = RouteHash.Hash(exactRoutes[i].Key, seed) & mask;
+                    if (occupied[idx])
+                    {
+                        collision = true;
+                        break;
+                    }
+                    occupied[idx] = true;
+                }
+
+                if (!collision)
+                {
+                    found = true;
                     break;
                 }
-                occupied[idx] = true;
-                indices[i] = idx;
             }
 
-            if (!collision)
+            if (found)
                 break;
 
-            if (seed == 100_000)
-                throw new InvalidOperationException(
-                    $"Could not find a perfect hash seed for {exactRoutes.Count} routes " +
-                    $"in {tableSize}-slot table after 100,000 attempts.");
+            logger.LogInfo(
+                $"Perfect hash: no seed found for {exactRoutes.Count} routes in " +
+                $"{tableSize}-slot table ({multiplier}×), expanding to {multiplier * 2}×");
+            multiplier *= 2;
         }
+
+        if (!found)
+            throw new InvalidOperationException(
+                $"Could not find a perfect hash seed for {exactRoutes.Count} routes " +
+                $"in {tableSize}-slot table after {maxMultiplier}× expansion.");
 
         // Populate the table using the winning seed
         var slots = new Slot[tableSize];
