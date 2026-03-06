@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Linq.Expressions;
 using System.Net;
 using System.Reflection;
 using System.Text;
@@ -153,6 +154,14 @@ public static class DataScaffold
     private static readonly ConcurrentDictionary<Type, Func<object>> ListFactoryCache = new();
     private static readonly ConcurrentDictionary<Type, Func<object>> InstanceFactoryCache = new();
     private static readonly ConcurrentDictionary<(Type, Type), Func<object>> DictFactoryCache = new();
+
+    /// <summary>Compile Expression.New for a type and return a cached factory delegate (no Activator.CreateInstance).</summary>
+    private static Func<object> CompileFactory(Type type)
+    {
+        var newExpr = Expression.New(type);
+        var lambda = Expression.Lambda<Func<object>>(Expression.Convert(newExpr, typeof(object)));
+        return lambda.Compile();
+    }
 
     /// <summary>
     /// Fallback JSON AST (serialized) used when expression parsing fails.
@@ -3031,11 +3040,8 @@ public static class DataScaffold
     {
         list = null;
         var listFactory = ListFactoryCache.GetOrAdd(childType, static t =>
-        {
-            var lt = typeof(List<>).MakeGenericType(t);
-            return () => Activator.CreateInstance(lt)!;
-        });
-        var instanceFactory = InstanceFactoryCache.GetOrAdd(childType, static t => () => Activator.CreateInstance(t)!);
+            CompileFactory(typeof(List<>).MakeGenericType(t)));
+        var instanceFactory = InstanceFactoryCache.GetOrAdd(childType, CompileFactory);
 
         if (string.IsNullOrWhiteSpace(rawValue))
         {
@@ -3248,10 +3254,7 @@ public static class DataScaffold
     {
         dictionary = null;
         var dictFactory = DictFactoryCache.GetOrAdd((typeof(string), valueType), static key =>
-        {
-            var dt = typeof(Dictionary<,>).MakeGenericType(key.Item1, key.Item2);
-            return () => Activator.CreateInstance(dt)!;
-        });
+            CompileFactory(typeof(Dictionary<,>).MakeGenericType(key.Item1, key.Item2)));
 
         if (string.IsNullOrWhiteSpace(rawValue))
         {
@@ -3621,11 +3624,8 @@ public static class DataScaffold
     {
         list = null;
         var listFactory = ListFactoryCache.GetOrAdd(childType, static t =>
-        {
-            var lt = typeof(List<>).MakeGenericType(t);
-            return () => Activator.CreateInstance(lt)!;
-        });
-        var instanceFactory = InstanceFactoryCache.GetOrAdd(childType, static t => () => Activator.CreateInstance(t)!);
+            CompileFactory(typeof(List<>).MakeGenericType(t)));
+        var instanceFactory = InstanceFactoryCache.GetOrAdd(childType, CompileFactory);
 
         if (element.ValueKind == JsonValueKind.Null)
         {

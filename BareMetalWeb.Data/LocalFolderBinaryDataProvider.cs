@@ -498,6 +498,8 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
         return ValueTask.CompletedTask;
     }
 
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _singletonFlagPropsCache = new();
+
     /// <summary>
     /// For each boolean property on <paramref name="obj"/> decorated with <see cref="SingletonFlagAttribute"/>
     /// that is currently <c>true</c>, find all other persisted records of the same type and set that
@@ -507,17 +509,27 @@ public sealed class LocalFolderBinaryDataProvider : IDataProvider
     private void ClearSingletonFlagsOnOtherRecords<T>(T obj) where T : BaseDataObject
     {
         var type = typeof(T);
-        var allProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var singletonProps = new List<PropertyInfo>();
-        foreach (var p in allProps)
+        var candidateProps = _singletonFlagPropsCache.GetOrAdd(type, static t =>
         {
-            if (p.PropertyType == typeof(bool)
-                && p.GetCustomAttribute<SingletonFlagAttribute>() != null
-                && p.CanRead && p.CanWrite
-                && true.Equals(p.GetValue(obj)))
+            var allProps = t.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+            var result = new List<PropertyInfo>();
+            foreach (var p in allProps)
             {
-                singletonProps.Add(p);
+                if (p.PropertyType == typeof(bool)
+                    && p.GetCustomAttribute<SingletonFlagAttribute>() != null
+                    && p.CanRead && p.CanWrite)
+                {
+                    result.Add(p);
+                }
             }
+            return result.ToArray();
+        });
+
+        var singletonProps = new List<PropertyInfo>();
+        foreach (var p in candidateProps)
+        {
+            if (true.Equals(p.GetValue(obj)))
+                singletonProps.Add(p);
         }
 
         if (singletonProps.Count == 0)
