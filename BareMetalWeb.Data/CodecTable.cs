@@ -27,36 +27,71 @@ public interface IFieldCodec
     int FixedSize { get; }
 }
 
+// ── Boxed Singleton Cache ──
+// Pre-boxed values eliminate boxing allocations for the most common field values.
+internal static class BoxedValues
+{
+    public static readonly object True = true;
+    public static readonly object False = false;
+    public static readonly object[] Bytes = new object[256];
+    public static readonly object[] SBytes = new object[256]; // -128..127 stored at index + 128
+    public static readonly object ZeroInt16 = (short)0;
+    public static readonly object ZeroUInt16 = (ushort)0;
+    public static readonly object ZeroInt32 = 0;
+    public static readonly object ZeroUInt32 = 0U;
+    public static readonly object ZeroInt64 = 0L;
+    public static readonly object ZeroUInt64 = 0UL;
+    public static readonly object ZeroFloat32 = 0f;
+    public static readonly object ZeroFloat64 = 0d;
+    public static readonly object ZeroDecimal = 0m;
+    public static readonly object ZeroChar = '\0';
+
+    static BoxedValues()
+    {
+        for (int i = 0; i < 256; i++)
+        {
+            Bytes[i] = (byte)i;
+            SBytes[i] = (sbyte)(i - 128);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static object BoxByte(byte v) => Bytes[v];
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static object BoxSByte(sbyte v) => SBytes[v + 128];
+}
+
 // ── Concrete Codecs ──
 
 public sealed class BoolCodec : IFieldCodec
 {
     public int FixedSize => 1;
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public object? ReadFixed(ReadOnlySpan<byte> data) => data[0] != 0;
+    public object? ReadFixed(ReadOnlySpan<byte> data) => data[0] != 0 ? BoxedValues.True : BoxedValues.False;
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int WriteFixed(object? value, Span<byte> dest) { dest[0] = (byte)((bool)value! ? 1 : 0); return 1; }
     public object? ReadVar(ReadOnlySpan<byte> data) => ReadFixed(data);
     public int WriteVar(object? value, IBufferWriter<byte> writer) { var s = writer.GetSpan(1); return WriteFixed(value, s); }
-    public bool TryParse(ReadOnlySpan<char> input, out object? result) { if (bool.TryParse(input, out var v)) { result = v; return true; } result = null; return false; }
+    public bool TryParse(ReadOnlySpan<char> input, out object? result) { if (bool.TryParse(input, out var v)) { result = v ? BoxedValues.True : BoxedValues.False; return true; } result = null; return false; }
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
 public sealed class ByteCodec : IFieldCodec
 {
     public int FixedSize => 1;
-    public object? ReadFixed(ReadOnlySpan<byte> data) => data[0];
+    public object? ReadFixed(ReadOnlySpan<byte> data) => BoxedValues.BoxByte(data[0]);
     public int WriteFixed(object? value, Span<byte> dest) { dest[0] = (byte)value!; return 1; }
     public object? ReadVar(ReadOnlySpan<byte> data) => ReadFixed(data);
     public int WriteVar(object? value, IBufferWriter<byte> writer) { var s = writer.GetSpan(1); return WriteFixed(value, s); }
-    public bool TryParse(ReadOnlySpan<char> input, out object? result) { if (byte.TryParse(input, out var v)) { result = v; return true; } result = null; return false; }
+    public bool TryParse(ReadOnlySpan<char> input, out object? result) { if (byte.TryParse(input, out var v)) { result = BoxedValues.BoxByte(v); return true; } result = null; return false; }
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
 public sealed class SByteCodec : IFieldCodec
 {
     public int FixedSize => 1;
-    public object? ReadFixed(ReadOnlySpan<byte> data) => (sbyte)data[0];
+    public object? ReadFixed(ReadOnlySpan<byte> data) => BoxedValues.BoxSByte((sbyte)data[0]);
     public int WriteFixed(object? value, Span<byte> dest) { dest[0] = (byte)(sbyte)value!; return 1; }
     public object? ReadVar(ReadOnlySpan<byte> data) => ReadFixed(data);
     public int WriteVar(object? value, IBufferWriter<byte> writer) { var s = writer.GetSpan(1); return WriteFixed(value, s); }
@@ -67,7 +102,7 @@ public sealed class SByteCodec : IFieldCodec
 public sealed class Int16Codec : IFieldCodec
 {
     public int FixedSize => 2;
-    public object? ReadFixed(ReadOnlySpan<byte> data) => BinaryPrimitives.ReadInt16LittleEndian(data);
+    public object? ReadFixed(ReadOnlySpan<byte> data) { var v = BinaryPrimitives.ReadInt16LittleEndian(data); return v == 0 ? BoxedValues.ZeroInt16 : (object)v; }
     public int WriteFixed(object? value, Span<byte> dest) { BinaryPrimitives.WriteInt16LittleEndian(dest, (short)value!); return 2; }
     public object? ReadVar(ReadOnlySpan<byte> data) => ReadFixed(data);
     public int WriteVar(object? value, IBufferWriter<byte> writer) { var s = writer.GetSpan(2); return WriteFixed(value, s); }
@@ -78,7 +113,7 @@ public sealed class Int16Codec : IFieldCodec
 public sealed class UInt16Codec : IFieldCodec
 {
     public int FixedSize => 2;
-    public object? ReadFixed(ReadOnlySpan<byte> data) => BinaryPrimitives.ReadUInt16LittleEndian(data);
+    public object? ReadFixed(ReadOnlySpan<byte> data) { var v = BinaryPrimitives.ReadUInt16LittleEndian(data); return v == 0 ? BoxedValues.ZeroUInt16 : (object)v; }
     public int WriteFixed(object? value, Span<byte> dest) { BinaryPrimitives.WriteUInt16LittleEndian(dest, (ushort)value!); return 2; }
     public object? ReadVar(ReadOnlySpan<byte> data) => ReadFixed(data);
     public int WriteVar(object? value, IBufferWriter<byte> writer) { var s = writer.GetSpan(2); return WriteFixed(value, s); }
@@ -89,7 +124,7 @@ public sealed class UInt16Codec : IFieldCodec
 public sealed class Int32Codec : IFieldCodec
 {
     public int FixedSize => 4;
-    public object? ReadFixed(ReadOnlySpan<byte> data) => BinaryPrimitives.ReadInt32LittleEndian(data);
+    public object? ReadFixed(ReadOnlySpan<byte> data) { var v = BinaryPrimitives.ReadInt32LittleEndian(data); return v == 0 ? BoxedValues.ZeroInt32 : (object)v; }
     public int WriteFixed(object? value, Span<byte> dest) { BinaryPrimitives.WriteInt32LittleEndian(dest, (int)value!); return 4; }
     public object? ReadVar(ReadOnlySpan<byte> data) => ReadFixed(data);
     public int WriteVar(object? value, IBufferWriter<byte> writer) { var s = writer.GetSpan(4); return WriteFixed(value, s); }
@@ -100,7 +135,7 @@ public sealed class Int32Codec : IFieldCodec
 public sealed class UInt32Codec : IFieldCodec
 {
     public int FixedSize => 4;
-    public object? ReadFixed(ReadOnlySpan<byte> data) => BinaryPrimitives.ReadUInt32LittleEndian(data);
+    public object? ReadFixed(ReadOnlySpan<byte> data) { var v = BinaryPrimitives.ReadUInt32LittleEndian(data); return v == 0 ? BoxedValues.ZeroUInt32 : (object)v; }
     public int WriteFixed(object? value, Span<byte> dest) { BinaryPrimitives.WriteUInt32LittleEndian(dest, (uint)value!); return 4; }
     public object? ReadVar(ReadOnlySpan<byte> data) => ReadFixed(data);
     public int WriteVar(object? value, IBufferWriter<byte> writer) { var s = writer.GetSpan(4); return WriteFixed(value, s); }
@@ -111,7 +146,7 @@ public sealed class UInt32Codec : IFieldCodec
 public sealed class Int64Codec : IFieldCodec
 {
     public int FixedSize => 8;
-    public object? ReadFixed(ReadOnlySpan<byte> data) => BinaryPrimitives.ReadInt64LittleEndian(data);
+    public object? ReadFixed(ReadOnlySpan<byte> data) { var v = BinaryPrimitives.ReadInt64LittleEndian(data); return v == 0 ? BoxedValues.ZeroInt64 : (object)v; }
     public int WriteFixed(object? value, Span<byte> dest) { BinaryPrimitives.WriteInt64LittleEndian(dest, (long)value!); return 8; }
     public object? ReadVar(ReadOnlySpan<byte> data) => ReadFixed(data);
     public int WriteVar(object? value, IBufferWriter<byte> writer) { var s = writer.GetSpan(8); return WriteFixed(value, s); }
@@ -122,7 +157,7 @@ public sealed class Int64Codec : IFieldCodec
 public sealed class UInt64Codec : IFieldCodec
 {
     public int FixedSize => 8;
-    public object? ReadFixed(ReadOnlySpan<byte> data) => BinaryPrimitives.ReadUInt64LittleEndian(data);
+    public object? ReadFixed(ReadOnlySpan<byte> data) { var v = BinaryPrimitives.ReadUInt64LittleEndian(data); return v == 0 ? BoxedValues.ZeroUInt64 : (object)v; }
     public int WriteFixed(object? value, Span<byte> dest) { BinaryPrimitives.WriteUInt64LittleEndian(dest, (ulong)value!); return 8; }
     public object? ReadVar(ReadOnlySpan<byte> data) => ReadFixed(data);
     public int WriteVar(object? value, IBufferWriter<byte> writer) { var s = writer.GetSpan(8); return WriteFixed(value, s); }

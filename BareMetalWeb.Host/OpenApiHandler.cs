@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -20,6 +21,11 @@ namespace BareMetalWeb.Host;
 /// </summary>
 internal static class OpenApiHandler
 {
+    private static readonly ConcurrentDictionary<int, string> _cachedDocumentJson = new();
+
+    /// <summary>Invalidates all cached OpenAPI documents so the next request rebuilds them.</summary>
+    internal static void InvalidateCache() => _cachedDocumentJson.Clear();
+
     // ── Entry point ───────────────────────────────────────────────────────────
 
     internal static async ValueTask HandleAsync(BmwContext context)
@@ -36,13 +42,28 @@ internal static class OpenApiHandler
                 filteredEntities.Add(e);
         }
         filteredEntities.Sort((a, b) => string.Compare(a.Slug, b.Slug, StringComparison.Ordinal));
-        var document = BuildDocument(context, filteredEntities);
+
+        // Cache key: hash of the sorted entity slug list
+        var cacheKey = ComputeSlugListHash(filteredEntities);
+
+        if (!_cachedDocumentJson.TryGetValue(cacheKey, out var json))
+        {
+            var document = BuildDocument(context, filteredEntities);
+            json = JsonWriterHelper.ToJsonString(document, indented: true);
+            _cachedDocumentJson.TryAdd(cacheKey, json);
+        }
 
         context.Response.ContentType = "application/json; charset=utf-8";
         context.Response.Headers["Cache-Control"] = "no-store";
-        await context.Response.WriteAsync(
-            JsonWriterHelper.ToJsonString(document, indented: true),
-            context.RequestAborted).ConfigureAwait(false);
+        await context.Response.WriteAsync(json, context.RequestAborted).ConfigureAwait(false);
+    }
+
+    private static int ComputeSlugListHash(List<DataEntityMetadata> entities)
+    {
+        var hash = new HashCode();
+        foreach (var e in entities)
+            hash.Add(e.Slug, StringComparer.Ordinal);
+        return hash.ToHashCode();
     }
 
     // ── Document builder ──────────────────────────────────────────────────────
