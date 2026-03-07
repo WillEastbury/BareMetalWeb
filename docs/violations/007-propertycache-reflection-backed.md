@@ -1,5 +1,9 @@
 # [VIOLATION] PropertyCache uses ConcurrentDictionary<(Type,string), PropertyInfo?> (reflection-backed)
 
+## Resolution
+
+> **Status: RESOLVED** — `PropertyCache` was removed from the codebase. Property access now uses compiled expression delegates cached in `PropertyAccessorFactory`, or metadata-driven `DataFieldMetadata.GetValueFn`/`SetValueFn`.
+
 **Severity:** 🟡 Medium  
 **File:** `BareMetalWeb.Data/DataScaffold.cs`  
 **Line:** 151  

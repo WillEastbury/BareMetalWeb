@@ -64,16 +64,16 @@ graph TD
 sequenceDiagram
     participant RH as Route handler
     participant DS as DataStoreProvider
-    participant LFB as LocalFolderBinaryDataProvider
+    participant WAL as WalDataProvider
     participant SIM as SearchIndexManager
     participant IS as IndexStore
     participant FS as File system
 
     RH->>DS: Save(entity)
-    DS->>LFB: Save(entity)
-    LFB->>FS: Write {id}.bin
+    DS->>WAL: Save(entity)
+    WAL->>WAL: Commit to WAL segment
     loop For each property marked [DataIndex]
-        LFB->>SIM: IndexObject(entity)
+        WAL->>SIM: IndexObject(entity)
         SIM->>SIM: Update all applicable index types
         SIM->>IS: AppendEntry('I', id, fieldValue)  [Inverted only]
         IS->>FS: Append to {Field}.idx
@@ -88,16 +88,16 @@ sequenceDiagram
 sequenceDiagram
     participant RH as Route handler
     participant DS as DataStoreProvider
-    participant LFB as LocalFolderBinaryDataProvider
+    participant WAL as WalDataProvider
     participant SIM as SearchIndexManager
     participant IS as IndexStore
     participant FS as File system
 
     RH->>DS: Delete<T>(id)
-    DS->>LFB: Delete(type, id)
-    LFB->>FS: Remove {id}.bin
+    DS->>WAL: Delete(type, id)
+    WAL->>WAL: Write tombstone to WAL segment
     loop For each [DataIndex] field
-        LFB->>SIM: RemoveObject(type, id)
+        WAL->>SIM: RemoveObject(type, id)
         SIM->>SIM: Remove id from all index types
         SIM->>IS: AppendEntry('D', id)  [Inverted only]
         IS->>FS: Append tombstone to {Field}.idx

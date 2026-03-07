@@ -1,5 +1,9 @@
 # [VIOLATION] BinaryObjectSerializer uses PropertyInfo.GetValue at serialization time
 
+## Partial Resolution
+
+> **Status: PARTIALLY RESOLVED** — Property accessors (`CreatePropertyGetter`/`CreatePropertySetter`) now use compiled `Expression.Lambda` delegates via `PropertyAccessorFactory.BuildGetter`/`BuildSetter`. Field accessors (`CreateFieldGetter`/`CreateFieldSetter`) still use `FieldInfo.GetValue`/`SetValue`.
+
 **Severity:** 🟡 Medium  
 **File:** `BareMetalWeb.Data/BinaryObjectSerializer.cs`  
 **Lines:** ~1181–1230  

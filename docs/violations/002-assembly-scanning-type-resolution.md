@@ -1,5 +1,9 @@
 # [VIOLATION] Assembly scanning via AppDomain.GetAssemblies() in deserialization path
 
+## Resolution
+
+> **Status: RESOLVED** — Assembly scanning was replaced with a pre-registered `KnownTypes` dictionary in `BinaryObjectSerializer`. Type resolution is now O(1) and AOT-safe. See `BinaryObjectSerializer.cs` lines ~1252-1293.
+
 **Severity:** 🔴 Critical  
 **File:** `BareMetalWeb.Data/BinaryObjectSerializer.cs`  
 **Lines:** 1275–1295  

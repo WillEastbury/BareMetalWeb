@@ -80,13 +80,13 @@ Nested `InvokeIf` chains are rejected at expansion time.
 
 ## 7. Storage is blind to business semantics
 
-`WalStore`, `LocalFolderBinaryDataProvider`, and the binary serializer deal only in bytes,
+`WalStore` and the binary serializer deal only in bytes,
 keys, and schema signatures.
 They have no knowledge of field meaning, validation rules, permissions, or workflow state.
 Business rules are enforced by the layers above (route handlers, `ActionExpander`, validators).
 
 **Enforced by design:** `WalStore` accepts `WalOp` byte payloads with no interpretation.
-**Source:** `BareMetalWeb.Data/WalStore.cs`, `BareMetalWeb.Data/LocalFolderBinaryDataProvider.cs`
+**Source:** `BareMetalWeb.Data/WalStore.cs`, `BareMetalWeb.Data/WalDataProvider.cs`
 
 ---
 
@@ -112,5 +112,5 @@ The storage layer is the last step, not the correctness gate.
 | 4 | Server validates end state, not client path | `ActionExpander.Expand` |
 | 5 | Single writer; deterministic ordering | `_writeLock` + `AggregateLockManager` |
 | 6 | Actions are expanded, not executed remotely | `ActionExpander`; depth guard |
-| 7 | Storage is blind to business semantics | `WalStore` / `LocalFolderBinaryDataProvider` |
+| 7 | Storage is blind to business semantics | `WalStore` / `WalDataProvider` |
 | 8 | Business invariants live above storage | Validate before `CommitAsync` |

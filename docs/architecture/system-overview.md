@@ -36,8 +36,7 @@ graph TD
     end
 
     subgraph Data["BareMetalWeb.Data"]
-        DataStore["LocalFolderBinaryDataProvider<br/>(IDataProvider)"]
-        WalDP["WalDataProvider<br/>(IDataProvider — WAL-backed)"]
+        DataStore["WalDataProvider<br/>(IDataProvider — WAL-backed)"]
         WalS["WalStore / WalSegmentWriter"]
         DataStoreProvider["DataStoreProvider (singleton)"]
         BinSerializer["BinaryObjectSerializer"]
@@ -47,7 +46,7 @@ graph TD
         VectorIdx["VectorIndexManager<br/>(ANN — Vamana NSW graph)"]
         IndexStore["IndexStore"]
         VirtualLoader["VirtualEntityLoader"]
-        DynObject["DynamicDataObject"]
+        DynObject["DataRecord"]
         ExprEngine["ExpressionEngine<br/>(CalculatedFieldService)"]
         ReportExec["ReportExecutor"]
         PlanHistory["QueryPlanHistory<br/>(in-memory circular buffer)"]
@@ -107,12 +106,9 @@ graph TD
 
     Extensions --> DataStoreProvider
     DataStoreProvider --> DataStore
-    DataStoreProvider --> WalDP
+    DataStore --> WalS
     DataStore --> BinSerializer
     DataStore --> SearchIdx
-    WalDP --> WalS
-    WalDP --> BinSerializer
-    WalDP --> SearchIdx
     WalS --> WalCrc32
     SearchIdx --> IndexStore
     VectorHandlers --> VectorIdx
