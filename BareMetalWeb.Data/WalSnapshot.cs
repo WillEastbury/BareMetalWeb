@@ -71,11 +71,29 @@ internal static class WalSnapshot
         BinaryPrimitives.WriteUInt64LittleEndian(s[o..], snapshotPtr);  o += 8;
         BinaryPrimitives.WriteUInt32LittleEndian(s[o..], SnapEndMagic); o += 4;
 
-        // Write atomically: write to .tmp then rename
+        // Write atomically: write to .tmp, fsync, rename, then fsync directory
         string path    = Path.Combine(directory, FileName);
         string tmpPath = path + ".tmp";
         File.WriteAllBytes(tmpPath, buf);
+
+        // #1170: fsync the temp file so data is durable before the rename
+        using (var fs = new FileStream(tmpPath, FileMode.Open, FileAccess.Read, FileShare.None))
+            fs.Flush(flushToDisk: true);
+
         File.Move(tmpPath, path, overwrite: true);
+
+        // #1170: fsync the directory so the rename (directory entry) is durable
+        if (!OperatingSystem.IsWindows())
+        {
+            try
+            {
+                using var d = new FileStream(directory, FileMode.Open,
+                    FileAccess.Read, FileShare.ReadWrite);
+                d.Flush(flushToDisk: true);
+            }
+            catch (IOException)                { /* best-effort */ }
+            catch (UnauthorizedAccessException) { /* best-effort */ }
+        }
     }
 
     // ── Load ──────────────────────────────────────────────────────────────────

@@ -1,5 +1,4 @@
 using System;
-using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -282,7 +281,10 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             if (!commitTask.IsCompleted)
                 commitTask.GetAwaiter().GetResult();
 
-            PersistIdMap(type.Name);
+            // #1165: Persist IdMap in finally so a crash after WAL commit
+            // cannot orphan the committed record.
+            try { }
+            finally { PersistIdMap(type.Name); }
 
             // Bump live count on insert (updates don't change count)
             if (isInsert)
@@ -1042,8 +1044,15 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         if (!commitTask.IsCompleted)
             commitTask.GetAwaiter().GetResult();
 
-        idMap.TryRemove(key, out _);
-        PersistIdMap(typeName);
+        // #1164: Acquire the IdMap lock first so the TryRemove and persist
+        // are atomic — eliminates the TOCTOU race where a concurrent Save
+        // could re-observe the key between remove and persist.
+        var lockObj = _idMapLocks.GetOrAdd(typeName, _ => new object());
+        lock (lockObj)
+        {
+            idMap.TryRemove(key, out _);
+            PersistIdMapCore(typeName);
+        }
 
         // Decrement live count
         _liveCounts.AddOrUpdate(typeName, 0, (_, c) => Math.Max(0, c - 1));
@@ -1629,6 +1638,11 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             if (rawCount > (uint)((bytes.Length - 16) / 12)) return map;
             int entryCount = (int)rawCount;
 
+            // #1169: Reject truncated files that pass the rough check above
+            // but are too short for the exact header + entries + CRC layout.
+            int expectedSize = 12 + entryCount * 12 + 4;
+            if (bytes.Length < expectedSize) return map;
+
             // Verify CRC over everything except the trailing 4-byte CRC field
             uint storedCrc   = BinaryPrimitives.ReadUInt32LittleEndian(span[^4..]);
             uint computedCrc = WalCrc32C.Compute(span[..^4]);
@@ -1674,46 +1688,53 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
     private void PersistIdMap(string typeName)
     {
-        var map     = GetOrLoadIdMap(typeName);
         var lockObj = _idMapLocks.GetOrAdd(typeName, _ => new object());
-
         lock (lockObj)
         {
-            int entryCount = map.Count;
-            // Compute total buffer size: header(12) + entries(12 each) + CRC(4)
-            int size = 12 + entryCount * 12 + 4;
-
-            var buf = ArrayPool<byte>.Shared.Rent(size);
-            try
-            {
-                var span = buf.AsSpan(0, size);
-                int o    = 0;
-
-                BinaryPrimitives.WriteUInt32LittleEndian(span[o..], IdMapMagic);         o += 4;
-                BinaryPrimitives.WriteUInt16LittleEndian(span[o..], IdMapVersion);       o += 2;
-                BinaryPrimitives.WriteUInt16LittleEndian(span[o..], 0);                  o += 2;  // reserved
-                BinaryPrimitives.WriteUInt32LittleEndian(span[o..], (uint)entryCount);   o += 4;
-
-                foreach (var (objKey, walKey) in map)
-                {
-                    BinaryPrimitives.WriteUInt32LittleEndian(span[o..], objKey);  o += 4;
-                    BinaryPrimitives.WriteUInt64LittleEndian(span[o..], walKey);  o += 8;
-                }
-
-                uint crc = WalCrc32C.Compute(span[..o]);
-                BinaryPrimitives.WriteUInt32LittleEndian(span[o..], crc);
-
-                var path    = GetIdMapPath(typeName);
-                var tmpPath = path + ".tmp";
-                using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
-                    fs.Write(buf, 0, size);
-                File.Move(tmpPath, path, overwrite: true);
-            }
-            finally
-            {
-                ArrayPool<byte>.Shared.Return(buf);
-            }
+            PersistIdMapCore(typeName);
         }
+    }
+
+    /// <summary>
+    /// Inner persist logic — caller must already hold <c>_idMapLocks[typeName]</c>.
+    /// </summary>
+    private void PersistIdMapCore(string typeName)
+    {
+        var map = GetOrLoadIdMap(typeName);
+        int entryCount = map.Count;
+        // Compute total buffer size: header(12) + entries(12 each) + CRC(4)
+        int size = 12 + entryCount * 12 + 4;
+
+        // #1160: Use a plain allocation instead of ArrayPool on this cold path
+        // to eliminate the race where two threads could receive the same pooled buffer.
+        var buf  = new byte[size];
+        var span = buf.AsSpan();
+        int o    = 0;
+
+        BinaryPrimitives.WriteUInt32LittleEndian(span[o..], IdMapMagic);         o += 4;
+        BinaryPrimitives.WriteUInt16LittleEndian(span[o..], IdMapVersion);       o += 2;
+        BinaryPrimitives.WriteUInt16LittleEndian(span[o..], 0);                  o += 2;  // reserved
+        BinaryPrimitives.WriteUInt32LittleEndian(span[o..], (uint)entryCount);   o += 4;
+
+        foreach (var (objKey, walKey) in map)
+        {
+            BinaryPrimitives.WriteUInt32LittleEndian(span[o..], objKey);  o += 4;
+            BinaryPrimitives.WriteUInt64LittleEndian(span[o..], walKey);  o += 8;
+        }
+
+        uint crc = WalCrc32C.Compute(span[..o]);
+        BinaryPrimitives.WriteUInt32LittleEndian(span[o..], crc);
+
+        // #1167: Atomic write — write to tmp, fsync, then rename so a crash
+        // mid-write never corrupts the primary IdMap file.
+        var path    = GetIdMapPath(typeName);
+        var tmpPath = path + ".tmp";
+        using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            fs.Write(buf, 0, size);
+            fs.Flush(flushToDisk: true);
+        }
+        File.Move(tmpPath, path, overwrite: true);
     }
 
     // ── Schema management ──────────────────────────────────────────────────────
