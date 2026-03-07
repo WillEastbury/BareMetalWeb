@@ -40,6 +40,11 @@ public sealed class SynchronousEncryption : ISynchronousEncryption
 
     public static void EnsureKeyFile(string keyFilePath)
     {
+        // SECURITY: Encryption key files are stored as plaintext Base64 on disk. Any file-system
+        // access (container escape, backup exposure, misconfigured permissions) results in full key
+        // compromise. Ensure restrictive file permissions (chmod 600) on the .keys/ directory.
+        // For production, consider OS key storage (Linux keyring, DPAPI) or KMS integration.
+        // See issue #1200.
         if (string.IsNullOrWhiteSpace(keyFilePath))
             throw new ArgumentException("Key file path cannot be null or whitespace.", nameof(keyFilePath));
 

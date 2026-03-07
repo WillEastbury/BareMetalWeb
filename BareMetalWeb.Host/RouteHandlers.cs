@@ -267,6 +267,13 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        if (password.Length > 1024)
+        {
+            RenderLoginForm(context, "Password exceeds maximum allowed length.", identifier);
+            await _renderer.RenderPage(context.HttpContext);
+            return;
+        }
+
         var user = await Users.FindByEmailOrUserNameAsync(identifier, context.RequestAborted).ConfigureAwait(false);
         if (user == null || !user.IsActive)
         {
@@ -522,6 +529,13 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.IsNullOrWhiteSpace(userName) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
             RenderRegisterForm(context, "Please complete all required fields.", userName, displayName, email);
+            await _renderer.RenderPage(context.HttpContext);
+            return;
+        }
+
+        if (password.Length > 1024)
+        {
+            RenderRegisterForm(context, "Password exceeds maximum allowed length.", userName, displayName, email);
             await _renderer.RenderPage(context.HttpContext);
             return;
         }
@@ -1169,6 +1183,13 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.IsNullOrWhiteSpace(userName) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
             RenderSetupForm(context, "Please complete all required fields.", userName, email);
+            await _renderer.RenderPage(context.HttpContext);
+            return;
+        }
+
+        if (password.Length > 1024)
+        {
+            RenderSetupForm(context, "Password exceeds maximum allowed length.", userName, email);
             await _renderer.RenderPage(context.HttpContext);
             return;
         }
@@ -1977,7 +1998,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
             catch (Exception ex)
             {
-                importErrors.Add($"Row {rowNumber}: {ex.Message}");
+                importErrors.Add($"Row {rowNumber}: Import failed.");
                 skipped++;
             }
         }
@@ -7039,7 +7060,7 @@ public sealed class RouteHandlers : IRouteHandlers
         catch (Exception ex)
         {
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = false, ["message"] = $"Command failed: {ex.InnerException?.Message ?? ex.Message}" });
+            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = false, ["message"] = "Command failed due to an internal error." });
         }
     }
 

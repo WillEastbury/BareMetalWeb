@@ -406,9 +406,9 @@ public class BareMetalWebServer : IBareWebHost
         using var tenantScope = TenantRegistry?.ResolveForRequest(context);
 
         bool isHttps = IsHttpsRequest(context, TrustForwardedHeaders);
-        context.Response.Headers["X-BareMetal-IsHttps"] = isHttps ? "true" : "false";
-        context.Response.Headers["X-BareMetal-RedirectMode"] = HttpsRedirectMode.ToString();
-        context.Response.Headers["X-BareMetal-HttpsAvailable"] = HttpsEndpointAvailable ? "true" : "false";
+        // SECURITY: X-BareMetal-* diagnostic headers removed to avoid exposing internal
+        // TLS termination architecture, redirect configuration, and HTTPS availability
+        // to external clients. Re-enable gated behind a debug/development flag if needed.
         if (!isHttps && ShouldRedirectToHttps())
         {
             var httpsUrl = BuildHttpsRedirectUrl(context, TrustForwardedHeaders, HttpsRedirectHost, HttpsRedirectPort);

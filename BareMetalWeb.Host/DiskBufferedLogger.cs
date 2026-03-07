@@ -11,6 +11,10 @@ namespace BareMetalWeb.Host;
 
 public sealed class DiskBufferedLogger : IBufferedLogger
 {
+    // SECURITY: Audit log files are written as plaintext and may contain PII (user names, entity IDs,
+    // operation details, error messages). No log redaction or encryption-at-rest is applied. Consider
+    // implementing log field redaction middleware for sensitive patterns (passwords, tokens, PII) and
+    // encrypting log files on disk for compliance. See issue #1201.
     private readonly string _logFolder;
     private readonly object _lock = new();
     private DateTime? _lastInfoMinuteUtc;

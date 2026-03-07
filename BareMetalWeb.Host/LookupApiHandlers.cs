@@ -101,6 +101,10 @@ public static class LookupApiHandlers
 
         try
         {
+            // SECURITY: No row-level security (RLS) is applied here. Once a user passes entity-level
+            // permission checks, QueryAsync returns ALL matching records with no ownership or tenant
+            // filtering. Implement an IRowFilter interface on DataEntityMetadata to inject user/tenant
+            // context into queries for ownership-based access control (OBAC). See issue #1195.
             var queryDef = BuildQueryFromRequest(context, meta);
             var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
             var results = new List<Dictionary<string, object?>>(entities is ICollection entColl ? entColl.Count : 16);
