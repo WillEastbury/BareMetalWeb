@@ -19,6 +19,14 @@ public readonly struct IdentifierValue : IEquatable<IdentifierValue>, IComparabl
     public const int Base = 37;
     public const int ByteSize = 16;
 
+    // Layout: top 5 bits of Hi store the string length (0–25),
+    // remaining 123 bits store the base-37 encoded value.
+    private const int LengthBitShift = 59;
+    private const ulong LengthBitMask = 0x1F;
+    private const ulong ValueBitMask = 0x07FFFFFFFFFFFFFF;
+    private const int HalfWordShift = 32;
+    private const ulong LowerHalfMask = 0xFFFFFFFF;
+
     // A=0..Z=25, 0=26..9=35, -=36
     private const string Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-";
 
@@ -65,7 +73,7 @@ public readonly struct IdentifierValue : IEquatable<IdentifierValue>, IComparabl
         }
 
         // Store length in top 5 bits of hi (25 fits in 5 bits)
-        hi |= (ulong)normalized.Length << 59;
+        hi |= (ulong)normalized.Length << LengthBitShift;
 
         return new IdentifierValue(hi, lo);
     }
@@ -96,12 +104,12 @@ public readonly struct IdentifierValue : IEquatable<IdentifierValue>, IComparabl
             return string.Empty;
 
         // Extract length from top 5 bits of hi
-        int length = (int)(Hi >> 59) & 0x1F;
+        int length = (int)(Hi >> LengthBitShift) & (int)LengthBitMask;
         if (length == 0 || length > MaxLength)
             return string.Empty;
 
         // Mask out the length bits to get the numeric value
-        ulong hi = Hi & 0x07FFFFFFFFFFFFFF;
+        ulong hi = Hi & ValueBitMask;
         ulong lo = Lo;
 
         // Decode base-37 digits right to left
@@ -149,16 +157,16 @@ public readonly struct IdentifierValue : IEquatable<IdentifierValue>, IComparabl
         // We need to divide (rHi * 2^64 + lo) by 37
         // rHi is at most 36, so rHi * 2^64 fits conceptually
         // Use the identity: (rHi * 2^64 + lo) / 37
-        ulong combined = (rHi << 32) | (lo >> 32); // upper 64 bits of shifted value
+        ulong combined = (rHi << HalfWordShift) | (lo >> HalfWordShift);
         ulong qMid = combined / 37;
         ulong rMid = combined % 37;
 
-        ulong lowerCombined = (rMid << 32) | (lo & 0xFFFFFFFF);
+        ulong lowerCombined = (rMid << HalfWordShift) | (lo & LowerHalfMask);
         ulong qLo = lowerCombined / 37;
         remainder = lowerCombined % 37;
 
         hi = qHi;
-        lo = (qMid << 32) | qLo;
+        lo = (qMid << HalfWordShift) | qLo;
     }
 
     /// <summary>
