@@ -283,23 +283,30 @@ public static class BinaryApiHandlers
         {
             var queryDef = LookupApiHandlers.BuildQueryFromRequest(context, meta);
             var entities = await meta.Handlers.QueryAsync(queryDef, context.RequestAborted);
-            var list = new List<object>(entities is ICollection rawColl ? rawColl.Count : 32);
-            foreach (var e in entities)
-                list.Add((object)e);
+            // Prefer IList to avoid boxing each entity into List<object>
+            var entityList = entities as System.Collections.IList;
+            if (entityList == null)
+            {
+                var tempList = new List<object>(entities is ICollection rawColl ? rawColl.Count : 32);
+                foreach (var e in entities)
+                    tempList.Add(e);
+                entityList = tempList;
+            }
             var plan = GetOrBuildPlan(meta);
 
             // Build raw ordinal array: each row is field values in plan order
             using var ms = new System.IO.MemoryStream();
             using (var bw = new System.IO.BinaryWriter(ms, System.Text.Encoding.UTF8, leaveOpen: true))
             {
-                bw.Write((uint)list.Count);
+                bw.Write((uint)entityList.Count);
                 bw.Write((ushort)plan.Length);
 
-                foreach (var entity in list)
+                // TODO: consider buffer pooling for field encoding
+                foreach (var entity in entityList)
                 {
                     foreach (var field in plan)
                     {
-                        var val = field.Getter(entity)?.ToString() ?? string.Empty;
+                        var val = field.Getter(entity!)?.ToString() ?? string.Empty;
                         var bytes = System.Text.Encoding.UTF8.GetBytes(val);
                         bw.Write((ushort)bytes.Length);
                         bw.Write(bytes);
@@ -798,10 +805,10 @@ public static class BinaryApiHandlers
 
     private static async ValueTask<ReadOnlyMemory<byte>> ReadBodyAsync(BmwContext context)
     {
-        var ms = new MemoryStream();
+        using var ms = new MemoryStream();
         await context.HttpRequest.Body.CopyToAsync(ms, context.RequestAborted);
         // Return a view over the internal buffer — avoids a full copy.
-        // MemoryStream() has no unmanaged resources; the backing byte[] lives until GC collects it.
+        // The backing byte[] outlives Dispose; MemoryStream.Dispose only clears internal state.
         return ms.GetBuffer().AsMemory(0, (int)ms.Length);
     }
 
