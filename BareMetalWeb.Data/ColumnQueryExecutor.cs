@@ -489,7 +489,7 @@ internal static class ColumnQueryExecutor
             result = Convert.ToInt32(value);
             return true;
         }
-        catch { result = 0; return false; }
+        catch (Exception) { result = 0; return false; }
     }
 
     private static bool TryConvertToLong(object? value, Type targetType, out long result)
@@ -510,7 +510,7 @@ internal static class ColumnQueryExecutor
             result = Convert.ToInt64(value);
             return true;
         }
-        catch { result = 0; return false; }
+        catch (Exception) { result = 0; return false; }
     }
 
     private static bool TryConvertToDouble(object? value, out double result)
@@ -522,14 +522,14 @@ internal static class ColumnQueryExecutor
             result = Convert.ToDouble(value);
             return true;
         }
-        catch { result = 0; return false; }
+        catch (Exception) { result = 0; return false; }
     }
 
     private static bool TryConvertToFloat(object? value, out float result)
     {
         if (value == null) { result = 0; return false; }
         try { result = Convert.ToSingle(value); return true; }
-        catch { result = 0; return false; }
+        catch (Exception) { result = 0; return false; }
     }
 
     // ── Row-value unboxing ─────────────────────────────────────────────────
@@ -540,7 +540,7 @@ internal static class ColumnQueryExecutor
         if (v is int i)    return i;
         if (v is bool b)   return b ? 1 : 0;
         if (v == null)     return 0;
-        try { return Convert.ToInt32(v); } catch { return 0; }
+        try { return Convert.ToInt32(v); } catch (Exception) { return 0; }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -553,7 +553,7 @@ internal static class ColumnQueryExecutor
         if (v is TimeSpan ts)      return ts.Ticks;
         if (v is DateTimeOffset dto) return dto.UtcTicks;
         if (v == null)             return 0;
-        try { return Convert.ToInt64(v); } catch { return 0; }
+        try { return Convert.ToInt64(v); } catch (Exception) { return 0; }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -563,7 +563,7 @@ internal static class ColumnQueryExecutor
         if (v is decimal dec) return (double)dec;
         if (v is float f)    return f;
         if (v == null)       return 0;
-        try { return Convert.ToDouble(v); } catch { return 0; }
+        try { return Convert.ToDouble(v); } catch (Exception) { return 0; }
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -571,7 +571,7 @@ internal static class ColumnQueryExecutor
     {
         if (v is float f) return f;
         if (v == null)    return 0;
-        try { return Convert.ToSingle(v); } catch { return 0; }
+        try { return Convert.ToSingle(v); } catch (Exception) { return 0; }
     }
 
     // ── Utility ────────────────────────────────────────────────────────────

@@ -2723,7 +2723,7 @@ public static class DataScaffold
                 var parsed = DataJsonWriter.ParseListOfStringDicts(jsonValue);
                 if (parsed != null) rows = parsed;
             }
-            catch { /* ignore corrupt JSON */ }
+            catch (Exception) { /* ignore corrupt JSON */ }
         }
 
         return RenderChildListEditorHtml(field, childFields, rows, cspNonce);

@@ -335,7 +335,7 @@ public static class GraphQLHandler
             }
 
             try { row[camel] = f.GetValueFn(item)?.ToString(); }
-            catch { row[camel] = null; }
+            catch (Exception) { row[camel] = null; }
         }
 
         return row;

@@ -1659,7 +1659,11 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
             // Re-persist without tombstoned entries so future loads are clean
             if (needsCompaction)
-                Task.Run(() => PersistIdMap(typeName));
+                Task.Run(() =>
+                {
+                    try { PersistIdMap(typeName); }
+                    catch (Exception ex) { _logger?.LogError($"Background id-map compaction failed for {typeName}.", ex); }
+                });
         }
         catch (IOException) { /* treat file as missing */ }
 

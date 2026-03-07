@@ -201,7 +201,7 @@ public sealed class QueryPlanner
             if (count.IsCompleted)
                 return (int)Math.Min(count.Result, int.MaxValue);
         }
-        catch { /* fall through */ }
+        catch (Exception) { /* fall through */ }
 
         return 10_000; // default estimate
     }

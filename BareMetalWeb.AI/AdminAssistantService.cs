@@ -149,7 +149,7 @@ public static class CrudTools
                     var converted = Convert.ChangeType(value, field.ClrType);
                     field.Setter(instance, converted);
                 }
-                catch { /* skip invalid values */ }
+                catch (Exception) { /* skip invalid values */ }
             }
         }
 

@@ -239,7 +239,7 @@ public sealed class CompactorState : IDisposable
                 if (!await _lease.TryRenewAsync(ct)) { Demote(); return; }
             }
             catch (OperationCanceledException) { return; }
-            catch { Demote(); return; }
+            catch (Exception) { Demote(); return; }
         }
     }
 

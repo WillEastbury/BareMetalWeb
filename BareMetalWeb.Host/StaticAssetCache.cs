@@ -163,7 +163,7 @@ public static class StaticAssetCache
 
             FileInfo fi;
             try { fi = new FileInfo(filePath); }
-            catch { continue; }
+            catch (Exception) { continue; }
 
             if (!fi.Exists)
                 continue;
@@ -178,7 +178,7 @@ public static class StaticAssetCache
 
             byte[] raw;
             try { raw = File.ReadAllBytes(filePath); }
-            catch { continue; }
+            catch (Exception) { continue; }
 
             var lastModified = fi.LastWriteTimeUtc.ToString("R");
             var isVersioned  = IsVersionedPath(relativePath);
