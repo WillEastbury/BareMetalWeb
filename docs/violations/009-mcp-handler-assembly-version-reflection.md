@@ -1,5 +1,9 @@
 # [VIOLATION] Assembly.GetCustomAttributes used in MCP handler for version string
 
+## Resolution
+
+> **Status: RESOLVED** — `GetCustomAttributes` was replaced with `Assembly.GetName().Version`, which does not use reflection attribute scanning. The version is now read directly from the assembly metadata.
+
 **Severity:** 🟢 Low  
 **File:** `BareMetalWeb.Host/McpRouteHandler.cs`  
 **Line:** 146  

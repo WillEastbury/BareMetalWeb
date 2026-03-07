@@ -1,5 +1,9 @@
 # [VIOLATION] Reflection-based JSON type resolution via DefaultJsonTypeInfoResolver
 
+## Resolution
+
+> **Status: RESOLVED** — `JsonTypeInfoRegistry.cs` was deleted entirely. All `JsonSerializer.Serialize/Deserialize` calls have been replaced with direct `Utf8JsonWriter`/`JsonDocument` usage. `JsonSerializerIsReflectionEnabledByDefault` is set to `false` in Host.csproj.
+
 **Severity:** 🟠 High  
 **File:** `BareMetalWeb.Data/JsonTypeInfoRegistry.cs`  
 **Lines:** 1–27  
@@ -61,5 +65,5 @@ For dynamic/gallery-defined types (where the CLR type is not known at compile ti
 
 ## Affected Code Paths
 
-- `JsonTypeInfoRegistry.GetTypeInfo<T>()` — called from serialization paths in `LocalFolderBinaryDataProvider`, `WalDataProvider`, etc.
-- `JsonTypeInfoRegistry.GetTypeInfo(Type type)` — called from polymorphic serialization paths
+- `JsonTypeInfoRegistry.GetTypeInfo<T>()` — *(previously)* called from serialization paths in `WalDataProvider`, etc.
+- `JsonTypeInfoRegistry.GetTypeInfo(Type type)` — *(previously)* called from polymorphic serialization paths
