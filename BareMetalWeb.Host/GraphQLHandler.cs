@@ -144,6 +144,34 @@ public static class GraphQLHandler
             return;
         }
 
+        // SECURITY: Enforce query depth and field count limits to prevent abuse (see #1207)
+        const int MaxQueryDepth = 5;
+        const int MaxFieldCount = 50;
+        int depth = 0, maxDepth = 0, fieldCount = 0;
+        for (int i = 0; i < queryText.Length; i++)
+        {
+            var ch = queryText[i];
+            if (ch == '{') { depth++; if (depth > maxDepth) maxDepth = depth; }
+            else if (ch == '}') { depth--; }
+            else if (char.IsLetter(ch))
+            {
+                fieldCount++;
+                while (i + 1 < queryText.Length && char.IsLetterOrDigit(queryText[i + 1])) i++;
+            }
+        }
+        if (maxDepth > MaxQueryDepth)
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync($"{{\"errors\":[{{\"message\":\"Query depth {maxDepth} exceeds maximum of {MaxQueryDepth}.\"}}]}}");
+            return;
+        }
+        if (fieldCount > MaxFieldCount)
+        {
+            context.Response.StatusCode = 400;
+            await context.Response.WriteAsync($"{{\"errors\":[{{\"message\":\"Query field count {fieldCount} exceeds maximum of {MaxFieldCount}.\"}}]}}");
+            return;
+        }
+
         // Introspection shortcut — require authentication to prevent schema disclosure
         if (queryText.Contains("__schema"))
         {

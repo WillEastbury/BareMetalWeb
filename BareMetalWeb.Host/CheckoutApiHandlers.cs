@@ -22,6 +22,9 @@ public static class CheckoutApiHandlers
 
     private static long _orderSeq = DateTime.UtcNow.Ticks % 100_000;
 
+    // SECURITY: Per-basket locks to prevent double-checkout race condition (see #1217)
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<uint, SemaphoreSlim> _checkoutLocks = new();
+
     /// <summary>
     /// POST /api/checkout
     /// Body: { email, shippingAddress, paymentMethod }
@@ -56,6 +59,26 @@ public static class CheckoutApiHandlers
         {
             context.Response.StatusCode = 400;
             await context.Response.WriteAsync("{\"error\":\"No open basket.\"}");
+            return;
+        }
+
+        // SECURITY: Acquire per-basket lock to prevent double-checkout race condition (see #1217)
+        var basketLock = _checkoutLocks.GetOrAdd(basket.Key, _ => new SemaphoreSlim(1, 1));
+        if (!await basketLock.WaitAsync(TimeSpan.FromSeconds(5), context.RequestAborted))
+        {
+            context.Response.StatusCode = 409;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Checkout already in progress for this basket.\"}");
+            return;
+        }
+        try
+        {
+        // Re-check basket status under lock
+        if (basket.Status != BasketStatus.Open)
+        {
+            context.Response.StatusCode = 409;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"Basket was already checked out.\"}");
             return;
         }
 
@@ -130,6 +153,12 @@ public static class CheckoutApiHandlers
         writer.WriteString("status", order.Status.ToString());
         writer.WriteEndObject();
         await writer.FlushAsync(context.RequestAborted);
+        } // end try
+        finally
+        {
+            basketLock.Release();
+            _checkoutLocks.TryRemove(basket.Key, out _);
+        }
     }
 
     /// <summary>

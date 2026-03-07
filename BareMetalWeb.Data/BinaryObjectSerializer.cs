@@ -1267,22 +1267,32 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     /// <summary>
     /// Registers a type so it can be resolved by name during deserialization without assembly scanning.
     /// Call at startup for every type that may appear in serialized binary data.
+    /// Throws if a short name is already registered with a different type to prevent type confusion (see #1222).
     /// </summary>
     public static void RegisterKnownType<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>()
     {
         var t = typeof(T);
-        KnownTypes[t.AssemblyQualifiedName ?? t.FullName ?? t.Name] = t;
-        if (t.FullName != null) KnownTypes[t.FullName] = t;
-        KnownTypes[t.Name] = t;
+        RegisterKnownTypeCore(t);
     }
 
     /// <summary>
     /// Registers a type by runtime <see cref="Type"/> reference.
+    /// Throws if a short name is already registered with a different type to prevent type confusion (see #1222).
     /// </summary>
     public static void RegisterKnownType([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type t)
     {
+        RegisterKnownTypeCore(t);
+    }
+
+    private static void RegisterKnownTypeCore(Type t)
+    {
         KnownTypes[t.AssemblyQualifiedName ?? t.FullName ?? t.Name] = t;
         if (t.FullName != null) KnownTypes[t.FullName] = t;
+
+        // SECURITY: Detect short-name collisions to prevent type confusion attacks (see #1222)
+        if (KnownTypes.TryGetValue(t.Name, out var existing) && existing != t)
+            throw new InvalidOperationException(
+                $"KnownType short-name collision: '{t.Name}' is already registered as '{existing.FullName}', cannot register '{t.FullName}'.");
         KnownTypes[t.Name] = t;
     }
 

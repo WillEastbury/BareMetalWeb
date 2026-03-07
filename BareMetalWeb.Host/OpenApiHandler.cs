@@ -73,9 +73,9 @@ internal static class OpenApiHandler
         List<DataEntityMetadata> entities)
     {
         var request = context.HttpRequest;
-        var scheme = request.IsHttps ? "https" : "http";
-        var host = request.Host.Value ?? "localhost";
-        var serverUrl = $"{scheme}://{host}";
+        // SECURITY: Use a fixed relative base URL instead of the Host header to prevent
+        // cache poisoning where an attacker's Host value gets cached for all users (see #1220)
+        var serverUrl = "";
 
         // Collect schema components (may be referenced by multiple entities).
         var components = new Dictionary<string, object?>(StringComparer.Ordinal);

@@ -277,6 +277,8 @@ public sealed class RouteHandlers : IRouteHandlers
         var user = await Users.FindByEmailOrUserNameAsync(identifier, context.RequestAborted).ConfigureAwait(false);
         if (user == null || !user.IsActive)
         {
+            // SECURITY: Perform dummy hash to equalize timing regardless of user existence (see #1219)
+            PasswordHasher.Verify(password, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "AAAAAAAAAAAAAAAAAAAAAA==", 100_000);
             RegisterFailure(ipKey, LoginIpMaxAttempts);
             RenderLoginForm(context, "Invalid credentials.", identifier);
             await _renderer.RenderPage(context.HttpContext);
@@ -549,14 +551,16 @@ public sealed class RouteHandlers : IRouteHandlers
 
         if (await Users.FindByEmailAsync(email, context.RequestAborted).ConfigureAwait(false) != null)
         {
-            RenderRegisterForm(context, "Email is already registered.", userName, displayName, email);
+            // SECURITY: Generic message to prevent account enumeration (see #1219)
+            RenderRegisterForm(context, "Registration could not be completed. Please try again or use a different email.", userName, displayName, email);
             await _renderer.RenderPage(context.HttpContext);
             return;
         }
 
         if (await Users.FindByUserNameAsync(userName, context.RequestAborted).ConfigureAwait(false) != null)
         {
-            RenderRegisterForm(context, "Username is already taken.", userName, displayName, email);
+            // SECURITY: Generic message to prevent account enumeration (see #1219)
+            RenderRegisterForm(context, "Registration could not be completed. Please try again or use a different username.", userName, displayName, email);
             await _renderer.RenderPage(context.HttpContext);
             return;
         }
@@ -1905,12 +1909,27 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        // SECURITY: Enforce max file size (50 MB) to prevent memory exhaustion (see #1206)
+        const long MaxCsvFileSize = 50L * 1024 * 1024;
+        if (file.Length > MaxCsvFileSize)
+        {
+            context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"error\":\"CSV file exceeds 50 MB size limit.\"}");
+            return;
+        }
+
         var upsert = DataScaffold.IsTruthy(form["upsert"].ToString());
         string csvText;
-        await using (var stream = file.OpenReadStream())
-        using (var reader = new StreamReader(stream))
+        // SECURITY: Apply read timeout to prevent slow-loris DoS (see #1208)
+        using (var cts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted))
         {
-            csvText = await reader.ReadToEndAsync();
+            cts.CancelAfter(TimeSpan.FromSeconds(60));
+            await using (var stream = file.OpenReadStream())
+            using (var reader = new StreamReader(stream))
+            {
+                csvText = await reader.ReadToEndAsync(cts.Token);
+            }
         }
 
         var rows = ParseCsvRows(csvText);
@@ -1919,6 +1938,16 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync("{\"error\":\"CSV file is empty or missing headers.\"}");
+            return;
+        }
+
+        // SECURITY: Enforce max row count (100K data rows) to prevent resource exhaustion (see #1206)
+        const int MaxCsvRows = 100_000;
+        if (rows.Count - 1 > MaxCsvRows)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync($"{{\"error\":\"CSV exceeds {MaxCsvRows:N0} row limit.\"}}");
             return;
         }
 
