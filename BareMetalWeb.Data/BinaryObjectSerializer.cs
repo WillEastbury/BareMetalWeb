@@ -1964,25 +1964,26 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 
     private static void WritePrimitiveOrStruct(byte[] buffer, ref int offset, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields)] Type fieldType, object? value)
     {
-        if (fieldType == typeof(byte))   { buffer[offset++] = (byte)(value ?? (byte)0); return; }
-        if (fieldType == typeof(sbyte))  { buffer[offset++] = unchecked((byte)(sbyte)(value ?? (sbyte)0)); return; }
-        if (fieldType == typeof(bool))   { buffer[offset++] = (bool)(value ?? false) ? (byte)1 : (byte)0; return; }
-        if (fieldType == typeof(short))  { BinaryPrimitives.WriteInt16LittleEndian(buffer.AsSpan(offset), (short)(value ?? (short)0)); offset += 2; return; }
-        if (fieldType == typeof(ushort)) { BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(offset), (ushort)(value ?? (ushort)0)); offset += 2; return; }
-        if (fieldType == typeof(char))   { BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(offset), (ushort)(char)(value ?? '\0')); offset += 2; return; }
-        if (fieldType == typeof(int))    { BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(offset), (int)(value ?? 0)); offset += 4; return; }
-        if (fieldType == typeof(uint))   { BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset), (uint)(value ?? 0u)); offset += 4; return; }
-        if (fieldType == typeof(float))  { BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(offset), BitConverter.SingleToInt32Bits((float)(value ?? 0f))); offset += 4; return; }
-        if (fieldType == typeof(long))   { BinaryPrimitives.WriteInt64LittleEndian(buffer.AsSpan(offset), (long)(value ?? 0L)); offset += 8; return; }
-        if (fieldType == typeof(ulong))  { BinaryPrimitives.WriteUInt64LittleEndian(buffer.AsSpan(offset), (ulong)(value ?? 0UL)); offset += 8; return; }
-        if (fieldType == typeof(double)) { BinaryPrimitives.WriteInt64LittleEndian(buffer.AsSpan(offset), BitConverter.DoubleToInt64Bits((double)(value ?? 0.0))); offset += 8; return; }
+        if (fieldType == typeof(byte))   { if (offset + 1 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); buffer[offset++] = (byte)(value ?? (byte)0); return; }
+        if (fieldType == typeof(sbyte))  { if (offset + 1 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); buffer[offset++] = unchecked((byte)(sbyte)(value ?? (sbyte)0)); return; }
+        if (fieldType == typeof(bool))   { if (offset + 1 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); buffer[offset++] = (bool)(value ?? false) ? (byte)1 : (byte)0; return; }
+        if (fieldType == typeof(short))  { if (offset + 2 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteInt16LittleEndian(buffer.AsSpan(offset), (short)(value ?? (short)0)); offset += 2; return; }
+        if (fieldType == typeof(ushort)) { if (offset + 2 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(offset), (ushort)(value ?? (ushort)0)); offset += 2; return; }
+        if (fieldType == typeof(char))   { if (offset + 2 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(offset), (ushort)(char)(value ?? '\0')); offset += 2; return; }
+        if (fieldType == typeof(int))    { if (offset + 4 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(offset), (int)(value ?? 0)); offset += 4; return; }
+        if (fieldType == typeof(uint))   { if (offset + 4 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset), (uint)(value ?? 0u)); offset += 4; return; }
+        if (fieldType == typeof(float))  { if (offset + 4 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(offset), BitConverter.SingleToInt32Bits((float)(value ?? 0f))); offset += 4; return; }
+        if (fieldType == typeof(long))   { if (offset + 8 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteInt64LittleEndian(buffer.AsSpan(offset), (long)(value ?? 0L)); offset += 8; return; }
+        if (fieldType == typeof(ulong))  { if (offset + 8 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteUInt64LittleEndian(buffer.AsSpan(offset), (ulong)(value ?? 0UL)); offset += 8; return; }
+        if (fieldType == typeof(double)) { if (offset + 8 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteInt64LittleEndian(buffer.AsSpan(offset), BitConverter.DoubleToInt64Bits((double)(value ?? 0.0))); offset += 8; return; }
 
         // Nested blittable struct
         if (value is null)
         {
             var sz = ComputeBlittableSize(fieldType);
+            if (offset + sz > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write");
             buffer.AsSpan(offset, sz).Clear();
-            offset += sz;
+            offset = checked(offset + sz);
             return;
         }
         var nestedFields = fieldType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -2018,18 +2019,18 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             var ft = fields[i].FieldType;
             object fieldValue;
 
-            if (ft == typeof(byte))        { fieldValue = buffer[offset++]; }
-            else if (ft == typeof(sbyte))  { fieldValue = unchecked((sbyte)buffer[offset++]); }
-            else if (ft == typeof(bool))   { fieldValue = buffer[offset++] != 0; }
-            else if (ft == typeof(short))  { fieldValue = BinaryPrimitives.ReadInt16LittleEndian(buffer.AsSpan(offset)); offset += 2; }
-            else if (ft == typeof(ushort)) { fieldValue = BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(offset)); offset += 2; }
-            else if (ft == typeof(char))   { fieldValue = (char)BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(offset)); offset += 2; }
-            else if (ft == typeof(int))    { fieldValue = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset)); offset += 4; }
-            else if (ft == typeof(uint))   { fieldValue = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(offset)); offset += 4; }
-            else if (ft == typeof(float))  { fieldValue = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset))); offset += 4; }
-            else if (ft == typeof(long))   { fieldValue = BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(offset)); offset += 8; }
-            else if (ft == typeof(ulong))  { fieldValue = BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(offset)); offset += 8; }
-            else if (ft == typeof(double)) { fieldValue = BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(offset))); offset += 8; }
+            if (ft == typeof(byte))        { if (offset + 1 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = buffer[offset++]; }
+            else if (ft == typeof(sbyte))  { if (offset + 1 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = unchecked((sbyte)buffer[offset++]); }
+            else if (ft == typeof(bool))   { if (offset + 1 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = buffer[offset++] != 0; }
+            else if (ft == typeof(short))  { if (offset + 2 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BinaryPrimitives.ReadInt16LittleEndian(buffer.AsSpan(offset)); offset += 2; }
+            else if (ft == typeof(ushort)) { if (offset + 2 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(offset)); offset += 2; }
+            else if (ft == typeof(char))   { if (offset + 2 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = (char)BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(offset)); offset += 2; }
+            else if (ft == typeof(int))    { if (offset + 4 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset)); offset += 4; }
+            else if (ft == typeof(uint))   { if (offset + 4 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(offset)); offset += 4; }
+            else if (ft == typeof(float))  { if (offset + 4 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset))); offset += 4; }
+            else if (ft == typeof(long))   { if (offset + 8 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(offset)); offset += 8; }
+            else if (ft == typeof(ulong))  { if (offset + 8 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(offset)); offset += 8; }
+            else if (ft == typeof(double)) { if (offset + 8 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(offset))); offset += 8; }
             else
             {
                 // Nested blittable struct

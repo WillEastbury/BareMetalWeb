@@ -69,7 +69,8 @@ public sealed class SynchronousEncryption : ISynchronousEncryption
         using var aes = new AesGcm(_key, TagSize);
         aes.Encrypt(nonce, plaintext, ciphertext, tag, associatedData);
 
-        var payload = new byte[1 + NonceSize + TagSize + ciphertext.Length];
+        int payloadSize = checked(1 + NonceSize + TagSize + ciphertext.Length);
+        var payload = new byte[payloadSize];
         payload[0] = FormatVersion;
         nonce.CopyTo(payload.AsSpan(1));
         tag.CopyTo(payload.AsSpan(1 + NonceSize));

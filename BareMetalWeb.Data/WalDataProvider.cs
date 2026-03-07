@@ -1625,7 +1625,9 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             if (BinaryPrimitives.ReadUInt32LittleEndian(span)        != IdMapMagic)   return map;
             if (BinaryPrimitives.ReadUInt16LittleEndian(span[4..])   != IdMapVersion) return map;
 
-            int entryCount = (int)BinaryPrimitives.ReadUInt32LittleEndian(span[8..]);
+            uint rawCount = BinaryPrimitives.ReadUInt32LittleEndian(span[8..]);
+            if (rawCount > (uint)((bytes.Length - 16) / 12)) return map;
+            int entryCount = (int)rawCount;
 
             // Verify CRC over everything except the trailing 4-byte CRC field
             uint storedCrc   = BinaryPrimitives.ReadUInt32LittleEndian(span[^4..]);

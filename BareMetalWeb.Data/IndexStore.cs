@@ -638,6 +638,7 @@ public sealed class IndexStore
         if (hasFifth)
         {
             p3 += p2 + 1;
+            if (p3 + 1 > span.Length) return false;
             if (span[(p3 + 1)..].IndexOf('|') >= 0) return false; // too many parts
         }
 
@@ -651,8 +652,12 @@ public sealed class IndexStore
             return false;
         key = Decode(span[(p1 + 1)..p2].ToString());
         id = Decode(span[(p2 + 1)..(hasFifth ? p3 : span.Length)].ToString());
-        if (hasFifth && long.TryParse(span[(p3 + 1)..], out var exp))
-            expiresAtUtcTicks = exp;
+        if (hasFifth)
+        {
+            if (p3 + 1 > span.Length) return false;
+            if (long.TryParse(span[(p3 + 1)..], out var exp))
+                expiresAtUtcTicks = exp;
+        }
         return true;
     }
 
@@ -874,6 +879,7 @@ public sealed class IndexStore
         var span = line.AsSpan();
         int sep = span.IndexOf('|');
         if (sep < 0) return false;
+        if (sep + 1 > span.Length) return false;
         if (span[(sep + 1)..].IndexOf('|') >= 0) return false;
 
         entityName = Decode(span[..sep].ToString());
@@ -1013,13 +1019,17 @@ public sealed class IndexStore
         if (hasThird)
         {
             sep2 += sep1 + 1;
+            if (sep2 + 1 > span.Length) return false;
             if (span[(sep2 + 1)..].IndexOf('|') >= 0) return false;
         }
 
         key = Decode(span[..sep1].ToString());
         id = Decode(span[(sep1 + 1)..(hasThird ? sep2 : span.Length)].ToString());
         if (hasThird)
+        {
+            if (sep2 + 1 > span.Length) return false;
             long.TryParse(span[(sep2 + 1)..], out expiresAtUtcTicks);
+        }
         return true;
     }
     private static string Encode(string value)
