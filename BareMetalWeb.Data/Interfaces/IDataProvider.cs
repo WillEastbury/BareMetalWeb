@@ -41,6 +41,7 @@ public interface IDataProvider
     bool PagedFileExists(string entityName, string fileName);
     IPagedFile OpenPagedFile(string entityName, string fileName, int pageSize, FileAccess access);
     ValueTask DeletePagedFileAsync(string entityName, string fileName, CancellationToken cancellationToken = default);
+    void RenamePagedFile(string entityName, string oldFileName, string newFileName);
 
     /// <summary>
     /// Atomically increments and returns the next sequential uint32 key for the given entity.

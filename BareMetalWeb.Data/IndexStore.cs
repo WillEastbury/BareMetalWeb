@@ -39,6 +39,9 @@ public sealed class IndexStore
     private readonly ConcurrentDictionary<(string Entity, string Field), Dictionary<string, HashSet<uint>>> _invertedCache = new();
     private readonly ConcurrentDictionary<(string Entity, string Field), Dictionary<string, string>> _forwardCache = new();
 
+    // Per-field lock for AppendPagedLine to prevent concurrent read-modify-write corruption (#1173)
+    private readonly ConcurrentDictionary<(string, string), object> _appendLocks = new();
+
     public IndexStore(IDataProvider provider, IBufferedLogger logger = null!)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
@@ -97,12 +100,8 @@ public sealed class IndexStore
     public Dictionary<string, HashSet<uint>> ReadIndex(string entityName, string fieldName, bool normalizeKey = true)
     {
         var cacheKey = (entityName, fieldName);
-        if (_invertedCache.TryGetValue(cacheKey, out var cached))
-            return cached;
-
-        var result = ReadIndexCore(entityName, fieldName, normalizeKey);
-        _invertedCache[cacheKey] = result;
-        return result;
+        // Use GetOrAdd so only one thread rebuilds the cache entry (#1172)
+        return _invertedCache.GetOrAdd(cacheKey, _ => ReadIndexCore(entityName, fieldName, normalizeKey));
     }
 
     private Dictionary<string, HashSet<uint>> ReadIndexCore(string entityName, string fieldName, bool normalizeKey = true)
@@ -285,54 +284,66 @@ public sealed class IndexStore
     private void WriteSnapshotPaged(string entityName, string fieldName, Dictionary<string, Dictionary<string, long>> map, long nowTicks)
     {
         var pagedFileName = GetPagedFileName(fieldName);
+        var tempFileName = pagedFileName + ".tmp";
+
+        // Write to a temp file first so a crash can never lose the old snapshot (#1171)
+        using (var pagedFile = _provider.OpenPagedFile(entityName, tempFileName, DefaultPageSize, FileAccess.ReadWrite))
+        {
+            var buffer = ArrayPool<byte>.Shared.Rent(pagedFile.PageSize);
+            try
+            {
+                long pageIndex = HeaderPageCount;
+                WritePagedLine(pagedFile, buffer, pageIndex++, PageKindSnapshot, SnapshotHeader);
+                foreach (var pair in map)
+                {
+                    foreach (var id in pair.Value)
+                    {
+                        if (IsExpired(id.Value, nowTicks))
+                            continue;
+
+                        WritePagedLine(pagedFile, buffer, pageIndex++, PageKindSnapshot, FormatSnapshotLine(pair.Key, id.Key, id.Value));
+                    }
+                }
+
+                pagedFile.Flush();
+
+                var snapshotPageCount = pageIndex - HeaderPageCount;
+                WriteIndexHeader(pagedFile, buffer, snapshotPageCount, 0, previousSequence: -1);
+                pagedFile.Flush();
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
+        }
+
+        // Temp file is fully flushed — safe to replace the old snapshot
         if (_provider.PagedFileExists(entityName, pagedFileName))
             _provider.DeletePagedFileAsync(entityName, pagedFileName).AsTask().GetAwaiter().GetResult();
 
-        using var pagedFile = _provider.OpenPagedFile(entityName, pagedFileName, DefaultPageSize, FileAccess.ReadWrite);
-        var buffer = ArrayPool<byte>.Shared.Rent(pagedFile.PageSize);
-        try
-        {
-            long pageIndex = HeaderPageCount;
-            WritePagedLine(pagedFile, buffer, pageIndex++, PageKindSnapshot, SnapshotHeader);
-            foreach (var pair in map)
-            {
-                foreach (var id in pair.Value)
-                {
-                    if (IsExpired(id.Value, nowTicks))
-                        continue;
-
-                    WritePagedLine(pagedFile, buffer, pageIndex++, PageKindSnapshot, FormatSnapshotLine(pair.Key, id.Key, id.Value));
-                }
-            }
-
-            pagedFile.Flush();
-
-            var snapshotPageCount = pageIndex - HeaderPageCount;
-            WriteIndexHeader(pagedFile, buffer, snapshotPageCount, 0, previousSequence: -1);
-            pagedFile.Flush();
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
-        }
+        _provider.RenamePagedFile(entityName, tempFileName, pagedFileName);
     }
     private void AppendPagedLine(string entityName, string fieldName, string line)
     {
-        var pagedFileName = GetPagedFileName(fieldName);
-        using var pagedFile = _provider.OpenPagedFile(entityName, pagedFileName, DefaultPageSize, FileAccess.ReadWrite);
-        var buffer = ArrayPool<byte>.Shared.Rent(pagedFile.PageSize);
-        try
+        var lockObj = _appendLocks.GetOrAdd((entityName, fieldName), _ => new object());
+        lock (lockObj)
         {
-            var header = ReadIndexHeader(pagedFile, buffer);
-            var pageIndex = HeaderPageCount + header.SnapshotPageCount + header.LogPageCount;
-            WritePagedLine(pagedFile, buffer, pageIndex, PageKindLog, line);
-            pagedFile.Flush();
-            WriteIndexHeader(pagedFile, buffer, header.SnapshotPageCount, header.LogPageCount + 1, header.Sequence);
-            pagedFile.Flush();
-        }
-        finally
-        {
-            ArrayPool<byte>.Shared.Return(buffer);
+            var pagedFileName = GetPagedFileName(fieldName);
+            using var pagedFile = _provider.OpenPagedFile(entityName, pagedFileName, DefaultPageSize, FileAccess.ReadWrite);
+            var buffer = ArrayPool<byte>.Shared.Rent(pagedFile.PageSize);
+            try
+            {
+                var header = ReadIndexHeader(pagedFile, buffer);
+                var pageIndex = HeaderPageCount + header.SnapshotPageCount + header.LogPageCount;
+                WritePagedLine(pagedFile, buffer, pageIndex, PageKindLog, line);
+                pagedFile.Flush();
+                WriteIndexHeader(pagedFile, buffer, header.SnapshotPageCount, header.LogPageCount + 1, header.Sequence);
+                pagedFile.Flush();
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+            }
         }
     }
     private static void WritePagedLine(IPagedFile pagedFile, byte[] buffer, long pageIndex, byte kind, string line)

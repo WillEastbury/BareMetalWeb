@@ -228,6 +228,7 @@ public class DataStoreProviderTests
         public bool PagedFileExists(string entityName, string fileName) => false;
         public BareMetalWeb.Core.Interfaces.IPagedFile OpenPagedFile(string entityName, string fileName, int pageSize, System.IO.FileAccess access) => throw new NotImplementedException();
         public System.Threading.Tasks.ValueTask DeletePagedFileAsync(string entityName, string fileName, System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public void RenamePagedFile(string entityName, string oldFileName, string newFileName) => throw new NotImplementedException();
         public uint NextSequentialKey(string entityName) => 0;
         public void SeedSequentialKey(string entityName, uint floor) { }
 
