@@ -653,6 +653,9 @@ public sealed class SearchIndexManager
         }
         
         var results = new HashSet<uint>(8);
+        // Read lock held for the entire iteration — safe against concurrent
+        // RemoveObject which acquires a write lock. ReaderWriterLockSlim
+        // prevents concurrent read+write access. (#1175)
         index.Sync.EnterReadLock();
         try
         {
@@ -827,6 +830,33 @@ public sealed class SearchIndexManager
             foreach (var token in index.Tokens.Keys)
             {
                 AddToPrefixTree(index, token);
+            }
+
+            // Rebuild secondary index structures from loaded tokens (#1174)
+            var metadata = GetOrCreateTypeMetadata(type);
+
+            if (metadata.IndexKinds.Contains(IndexKind.BTree))
+            {
+                InitializeBTreeIndex(index);
+                foreach (var entry in index.Tokens)
+                    foreach (var id in entry.Value)
+                        AddToBTree(index, entry.Key, id);
+            }
+
+            if (metadata.IndexKinds.Contains(IndexKind.Treap))
+            {
+                InitializeTreapIndex(index);
+                foreach (var entry in index.Tokens)
+                    foreach (var id in entry.Value)
+                        AddToTreap(index, entry.Key, id);
+            }
+
+            if (metadata.IndexKinds.Contains(IndexKind.Bloom))
+            {
+                InitializeBloomFilter(index);
+                foreach (var entry in index.Tokens)
+                    foreach (var id in entry.Value)
+                        AddToBloomFilter(index, entry.Key, id);
             }
 
             index.IsBuilt = true;

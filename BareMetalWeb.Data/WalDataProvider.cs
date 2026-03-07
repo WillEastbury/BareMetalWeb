@@ -301,20 +301,28 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             // ── Update secondary field indexes ────────────────────────────
             if (indexedFields.Count > 0)
             {
-                var keyStr = obj.Key.ToString();
-                foreach (var prop in indexedFields)
+                try
                 {
-                    var newValue = prop.Getter(obj)?.ToString() ?? string.Empty;
-                    if (oldObj != null)
+                    var keyStr = obj.Key.ToString();
+                    foreach (var prop in indexedFields)
                     {
-                        var oldValue = prop.Getter(oldObj)?.ToString() ?? string.Empty;
-                        if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
-                            continue; // value unchanged — existing index entry is still valid
-                        _indexStore.AppendEntry(type.Name, prop.Name, oldValue, keyStr, 'D');
+                        var newValue = prop.Getter(obj)?.ToString() ?? string.Empty;
+                        if (oldObj != null)
+                        {
+                            var oldValue = prop.Getter(oldObj)?.ToString() ?? string.Empty;
+                            if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
+                                continue; // value unchanged — existing index entry is still valid
+                            _indexStore.AppendEntry(type.Name, prop.Name, oldValue, keyStr, 'D');
+                        }
+                        _indexStore.AppendEntry(type.Name, prop.Name, newValue, keyStr, 'A');
                     }
-                    _indexStore.AppendEntry(type.Name, prop.Name, newValue, keyStr, 'A');
+                    _searchIndexManager.IndexObject(obj);
                 }
-                _searchIndexManager.IndexObject(obj);
+                catch (Exception ex)
+                {
+                    // Log but don't crash — indexes will be rebuilt on next access (#1176)
+                    _logger?.LogError($"Index update failed for {type.Name}: {ex.Message}", ex);
+                }
             }
 
             // Update columnar store incrementally: upsert the row so SIMD queries stay hot.
@@ -1068,13 +1076,21 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         // ── Remove from secondary field indexes ────────────────────────────
         if (indexedFields.Count > 0 && oldObj != null)
         {
-            var keyStr = key.ToString();
-            foreach (var prop in indexedFields)
+            try
             {
-                var value = prop.Getter(oldObj)?.ToString() ?? string.Empty;
-                _indexStore.AppendEntry(typeName, prop.Name, value, keyStr, 'D');
+                var keyStr = key.ToString();
+                foreach (var prop in indexedFields)
+                {
+                    var value = prop.Getter(oldObj)?.ToString() ?? string.Empty;
+                    _indexStore.AppendEntry(typeName, prop.Name, value, keyStr, 'D');
+                }
+                _searchIndexManager.RemoveObject(type, key);
             }
-            _searchIndexManager.RemoveObject(type, key);
+            catch (Exception ex)
+            {
+                // Log but don't crash — indexes will be rebuilt on next access (#1176)
+                _logger?.LogError($"Index removal failed for {typeName}: {ex.Message}", ex);
+            }
         }
 
         // Update columnar store incrementally: remove the row so SIMD queries stay hot.
@@ -1580,6 +1596,13 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         if (File.Exists(path))
             File.Delete(path);
         return ValueTask.CompletedTask;
+    }
+
+    public void RenamePagedFile(string entityName, string oldFileName, string newFileName)
+    {
+        var oldPath = GetPagedFilePath(entityName, oldFileName);
+        var newPath = GetPagedFilePath(entityName, newFileName);
+        File.Move(oldPath, newPath, overwrite: true);
     }
 
     private string GetPagedFilePath(string entityName, string fileName)

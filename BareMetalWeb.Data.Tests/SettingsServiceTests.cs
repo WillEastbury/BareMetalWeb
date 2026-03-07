@@ -100,6 +100,7 @@ public class SettingsServiceTests : IDisposable
         public bool PagedFileExists(string entityName, string fileName) => false;
         public IPagedFile OpenPagedFile(string entityName, string fileName, int pageSize, FileAccess access) => throw new NotImplementedException();
         public ValueTask DeletePagedFileAsync(string entityName, string fileName, CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public void RenamePagedFile(string entityName, string oldFileName, string newFileName) => throw new NotImplementedException();
 
         private readonly Dictionary<string, uint> _seqIds = new();
         public uint NextSequentialKey(string entityName)

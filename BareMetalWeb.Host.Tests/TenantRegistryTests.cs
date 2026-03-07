@@ -303,6 +303,7 @@ public sealed class TenantRegistryTests : IDisposable
         public bool PagedFileExists(string e, string f) => false;
         public BareMetalWeb.Core.Interfaces.IPagedFile OpenPagedFile(string e, string f, int ps, System.IO.FileAccess a) => throw new NotImplementedException();
         public ValueTask DeletePagedFileAsync(string e, string f, CancellationToken ct = default) => throw new NotImplementedException();
+        public void RenamePagedFile(string e, string o, string n) => throw new NotImplementedException();
         public uint NextSequentialKey(string e) => 0;
         public void SeedSequentialKey(string e, uint floor) { }
         private sealed class D : IDisposable { public void Dispose() { } }
