@@ -77,7 +77,7 @@ public static class QueryTools
             foreach (var field in layout.Fields)
             {
                 try { dict[field.Name] = field.Getter(entity); }
-                catch { dict[field.Name] = null; }
+                catch (Exception) { dict[field.Name] = null; }
             }
             rowsList.Add(dict);
         }
@@ -129,7 +129,7 @@ public static class QueryTools
         foreach (var field in layout.Fields)
         {
             try { dict[field.Name] = field.Getter(entity); }
-            catch { dict[field.Name] = null; }
+            catch (Exception) { dict[field.Name] = null; }
         }
         return dict;
     }
