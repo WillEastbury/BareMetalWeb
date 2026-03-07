@@ -142,6 +142,7 @@ public sealed class ComposableQueryPipeline
     private static IEnumerable<BaseDataObject> LoadAll(DataEntityMetadata meta, CancellationToken ct)
     {
         var task = meta.Handlers.QueryAsync(null, ct);
+        // TODO: convert to async
         var result = task.IsCompleted ? task.Result : task.AsTask().GetAwaiter().GetResult();
         return result.Cast<BaseDataObject>();
     }

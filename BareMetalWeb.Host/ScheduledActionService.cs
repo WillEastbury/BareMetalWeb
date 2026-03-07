@@ -163,7 +163,7 @@ public sealed class ScheduledActionService
             new QueryDefinition
             {
                 Clauses = { new QueryClause { Field = "EntityId", Operator = QueryOperator.Equals, Value = entityId } }
-            }, CancellationToken.None).GetAwaiter().GetResult();
+            }, CancellationToken.None).GetAwaiter().GetResult(); // TODO: convert to async
 
         BareMetalWeb.Runtime.EntityDefinition? def = null;
         foreach (var d in defs)

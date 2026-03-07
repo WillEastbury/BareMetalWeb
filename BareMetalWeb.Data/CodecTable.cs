@@ -64,6 +64,7 @@ internal static class BoxedValues
 
 // ── Concrete Codecs ──
 
+/// <summary>Codec for <see cref="bool"/> values.</summary>
 public sealed class BoolCodec : IFieldCodec
 {
     public int FixedSize => 1;
@@ -77,6 +78,7 @@ public sealed class BoolCodec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="byte"/> values.</summary>
 public sealed class ByteCodec : IFieldCodec
 {
     public int FixedSize => 1;
@@ -88,6 +90,7 @@ public sealed class ByteCodec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="sbyte"/> values.</summary>
 public sealed class SByteCodec : IFieldCodec
 {
     public int FixedSize => 1;
@@ -99,6 +102,7 @@ public sealed class SByteCodec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="short"/> values.</summary>
 public sealed class Int16Codec : IFieldCodec
 {
     public int FixedSize => 2;
@@ -110,6 +114,7 @@ public sealed class Int16Codec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="ushort"/> values.</summary>
 public sealed class UInt16Codec : IFieldCodec
 {
     public int FixedSize => 2;
@@ -121,6 +126,7 @@ public sealed class UInt16Codec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="int"/> values.</summary>
 public sealed class Int32Codec : IFieldCodec
 {
     public int FixedSize => 4;
@@ -132,6 +138,7 @@ public sealed class Int32Codec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="uint"/> values.</summary>
 public sealed class UInt32Codec : IFieldCodec
 {
     public int FixedSize => 4;
@@ -143,6 +150,7 @@ public sealed class UInt32Codec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="long"/> values.</summary>
 public sealed class Int64Codec : IFieldCodec
 {
     public int FixedSize => 8;
@@ -154,6 +162,7 @@ public sealed class Int64Codec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="ulong"/> values.</summary>
 public sealed class UInt64Codec : IFieldCodec
 {
     public int FixedSize => 8;
@@ -165,6 +174,7 @@ public sealed class UInt64Codec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="float"/> values.</summary>
 public sealed class Float32Codec : IFieldCodec
 {
     public int FixedSize => 4;
@@ -176,6 +186,7 @@ public sealed class Float32Codec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="double"/> values.</summary>
 public sealed class Float64Codec : IFieldCodec
 {
     public int FixedSize => 8;
@@ -187,6 +198,7 @@ public sealed class Float64Codec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="decimal"/> values.</summary>
 public sealed class DecimalCodec : IFieldCodec
 {
     public int FixedSize => 16;
@@ -213,6 +225,7 @@ public sealed class DecimalCodec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="char"/> values.</summary>
 public sealed class CharCodec : IFieldCodec
 {
     public int FixedSize => 2;
@@ -224,6 +237,7 @@ public sealed class CharCodec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="DateOnly"/> values.</summary>
 public sealed class DateOnlyCodec : IFieldCodec
 {
     public int FixedSize => 4;
@@ -235,6 +249,7 @@ public sealed class DateOnlyCodec : IFieldCodec
     public string Format(object? value) => value is DateOnly d ? d.ToString("O") : "";
 }
 
+/// <summary>Codec for <see cref="DateTime"/> values.</summary>
 public sealed class DateTimeCodec : IFieldCodec
 {
     public int FixedSize => 8;
@@ -246,6 +261,7 @@ public sealed class DateTimeCodec : IFieldCodec
     public string Format(object? value) => value is DateTime dt ? dt.ToString("O") : "";
 }
 
+/// <summary>Codec for <see cref="DateTimeOffset"/> values.</summary>
 public sealed class DateTimeOffsetCodec : IFieldCodec
 {
     public int FixedSize => 10; // 8 ticks + 2 offset minutes
@@ -268,6 +284,7 @@ public sealed class DateTimeOffsetCodec : IFieldCodec
     public string Format(object? value) => value is DateTimeOffset dto ? dto.ToString("O") : "";
 }
 
+/// <summary>Codec for <see cref="TimeOnly"/> values.</summary>
 public sealed class TimeOnlyCodec : IFieldCodec
 {
     public int FixedSize => 8;
@@ -279,6 +296,7 @@ public sealed class TimeOnlyCodec : IFieldCodec
     public string Format(object? value) => value is TimeOnly t ? t.ToString("O") : "";
 }
 
+/// <summary>Codec for <see cref="TimeSpan"/> values.</summary>
 public sealed class TimeSpanCodec : IFieldCodec
 {
     public int FixedSize => 8;
@@ -290,6 +308,7 @@ public sealed class TimeSpanCodec : IFieldCodec
     public string Format(object? value) => value is TimeSpan ts ? ts.ToString() : "";
 }
 
+/// <summary>Codec for <see cref="Guid"/> values.</summary>
 public sealed class GuidCodec : IFieldCodec
 {
     public int FixedSize => 16;
@@ -301,6 +320,7 @@ public sealed class GuidCodec : IFieldCodec
     public string Format(object? value) => value is Guid g ? g.ToString("D") : "";
 }
 
+/// <summary>Codec for <see cref="IdentifierValue"/> values.</summary>
 public sealed class IdentifierCodec : IFieldCodec
 {
     public int FixedSize => 16;
@@ -323,6 +343,7 @@ public sealed class IdentifierCodec : IFieldCodec
     public string Format(object? value) => value is IdentifierValue id ? id.ToString() : "";
 }
 
+/// <summary>Codec for <see cref="string"/> values (UTF-8 encoded).</summary>
 public sealed class StringCodec : IFieldCodec
 {
     public int FixedSize => 0; // variable-length
@@ -343,6 +364,7 @@ public sealed class StringCodec : IFieldCodec
     public string Format(object? value) => value?.ToString() ?? "";
 }
 
+/// <summary>Codec for <see cref="T:byte[]"/> values.</summary>
 public sealed class BytesCodec : IFieldCodec
 {
     public int FixedSize => 0; // variable-length
@@ -362,6 +384,7 @@ public sealed class BytesCodec : IFieldCodec
     public string Format(object? value) => value is byte[] b ? Convert.ToBase64String(b) : "";
 }
 
+/// <summary>Codec for enum values stored as <see cref="int"/>.</summary>
 public sealed class EnumInt32Codec : IFieldCodec
 {
     public int FixedSize => 4;

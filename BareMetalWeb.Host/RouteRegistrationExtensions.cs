@@ -782,7 +782,7 @@ public static class RouteRegistrationExtensions
                 var entitiesList = new List<object>();
                 foreach (var e in DataScaffold.Entities)
                 {
-                    if (!IsEntityAccessible(e, user, userPermissions)) continue;
+                    if (!await IsEntityAccessibleAsync(e, user, userPermissions).ConfigureAwait(false)) continue;
                     entitiesList.Add(new Dictionary<string, object?>
                     {
                         ["slug"]         = e.Slug,
@@ -1170,7 +1170,7 @@ public static class RouteRegistrationExtensions
 
     // ─── Private helpers ────────────────────────────────────────────────────────
 
-    private static bool IsEntityAccessible(DataEntityMetadata entity, User? user, string[] userPermissions)
+    private static async ValueTask<bool> IsEntityAccessibleAsync(DataEntityMetadata entity, User? user, string[] userPermissions)
     {
         var perms = entity.Permissions ?? string.Empty;
         if (string.IsNullOrWhiteSpace(perms) || string.Equals(perms, "Public", StringComparison.OrdinalIgnoreCase))
@@ -1205,8 +1205,8 @@ public static class RouteRegistrationExtensions
         // RBAC check via resolved permission set
         if (user != null)
         {
-            var resolved = PermissionResolver.ResolveAsync(user, CancellationToken.None)
-                .AsTask().GetAwaiter().GetResult();
+            var resolved = await PermissionResolver.ResolveAsync(user, CancellationToken.None)
+                .ConfigureAwait(false);
             if (resolved.CanAccess(entity.Slug))
                 return true;
         }
@@ -1812,7 +1812,7 @@ public static class RouteRegistrationExtensions
         var userPermissions = user?.Permissions ?? Array.Empty<string>();
 
         // Inline /meta/objects (and optionally /meta/{slug}) to eliminate client-side round-trips
-        var metaObjectsScript = TryBuildMetaObjectsScript(user, userPermissions, safeNonce);
+        var metaObjectsScript = await TryBuildMetaObjectsScriptAsync(user, userPermissions, safeNonce).ConfigureAwait(false);
         // For any /{slug}[/...] path, inline /meta/{slug} to eliminate the schema round-trip
         string? metaSlugScript = null;
         string? initialDataScript = null;
@@ -1889,14 +1889,14 @@ public static class RouteRegistrationExtensions
     /// list of entities accessible to the current user.
     /// Returns <c>null</c> on any error so the client falls back to normal API calls.
     /// </summary>
-    private static string? TryBuildMetaObjectsScript(User? user, string[] userPermissions, string safeNonce)
+    private static async Task<string?> TryBuildMetaObjectsScriptAsync(User? user, string[] userPermissions, string safeNonce)
     {
         try
         {
             var entitiesMetaList = new List<object>();
             foreach (var e in DataScaffold.Entities)
             {
-                if (!IsEntityAccessible(e, user, userPermissions)) continue;
+                if (!await IsEntityAccessibleAsync(e, user, userPermissions).ConfigureAwait(false)) continue;
                 entitiesMetaList.Add(new Dictionary<string, object?>
                 {
                     ["slug"]         = e.Slug,
@@ -1914,8 +1914,8 @@ public static class RouteRegistrationExtensions
             bool hasElevated = false;
             if (user != null)
             {
-                var resolved = PermissionResolver.ResolveAsync(user, CancellationToken.None)
-                    .AsTask().GetAwaiter().GetResult();
+                var resolved = await PermissionResolver.ResolveAsync(user, CancellationToken.None)
+                    .ConfigureAwait(false);
                 hasElevated = resolved.HasElevatedPermissions;
             }
 
