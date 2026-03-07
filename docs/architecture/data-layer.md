@@ -6,23 +6,9 @@ This document covers BareMetalWeb's data storage, entity registration, CRUD life
 
 ## Storage Stack
 
-Two `IDataProvider` implementations ship out of the box.  `Program.cs` (`CreateDataStore`) selects one at startup.
+`WalDataProvider` is the sole `IDataProvider` implementation.
 
-### LocalFolderBinaryDataProvider (classic)
-
-```mermaid
-graph TD
-    Consumer["Route handler / service"] -->|IDataObjectStore| DSP["DataStoreProvider<br/>(static singleton)"]
-    DSP -->|PrimaryProvider| LFB["LocalFolderBinaryDataProvider<br/>(IDataProvider)"]
-    LFB -->|serialize| BOS["BinaryObjectSerializer<br/>(ISchemaAwareObjectSerializer)"]
-    LFB -->|extent files| FS["File system<br/>{dataRoot}/{EntityType}/{id}.bin"]
-    LFB -->|secondary indexes| SIM["SearchIndexManager"]
-    SIM -->|binary .idx files| FS2["File system<br/>{dataRoot}/{EntityType}/_idx/{field}.idx"]
-    LFB -->|sequential IDs| SeqID["_seqid.dat<br/>(int64 binary)"]
-    BOS -->|schema versioning| SHA["Field hash registry<br/>(schema evolution)"]
-```
-
-### WalDataProvider (WAL-backed)
+### WalDataProvider
 
 ```mermaid
 graph TD
@@ -31,20 +17,18 @@ graph TD
     WAL -->|write/read| WS["WalStore<br/>({dataRoot}/wal/)"]
     WS -->|segment files| SEG["WalSegmentWriter / WalSegmentReader<br/>(append-only segments)"]
     WAL -->|id mapping| IDMap["Per-entity _idmap.bin<br/>(string ID → packed ulong WAL key)"]
-    WAL -->|schema files| BOS["BinaryObjectSerializer<br/>(shared with LocalFolderBinaryDataProvider)"]
+    WAL -->|schema files| BOS["BinaryObjectSerializer"]
     WAL -->|secondary field indexes| IS["IndexStore<br/>({dataRoot}/Paged/{Entity}/{field}_index.page)"]
     WAL -->|full-text search| SIM["SearchIndexManager<br/>({dataRoot}/indexes/)"]
 ```
 
 **Key points:**
 - `DataStoreProvider.Current` is the one-stop shop for all data access.
-- `LocalFolderBinaryDataProvider` stores each entity instance as a single binary file, grouped by entity type.  Used when WAL is not configured.
 - `WalDataProvider` stores all records as commit-log payloads inside a `WalStore` at `{dataRoot}/wal/`.  Each entity type gets a stable `uint32` table-ID derived from the type name; each string record-ID is mapped to a monotonic `uint32` record-ID via a per-entity `_idmap.bin` file, giving a packed `ulong` key consumed by the WAL store.
 - **Striped head map** — `WalStore` holds a `WalHeadMap` that tracks the latest committed WAL pointer for every live key.  The map is partitioned into `N` independent shards (default 16, configurable power-of-two) keyed by `tableId & shardMask` (upper 32 bits of the packed key).  Each shard carries its own `ReaderWriterLockSlim` and a pair of sorted `ulong[]` arrays.  Reads (`TryGetHead`) and writes (`BatchSetHeads`) touch only the shard(s) relevant to the keys involved, so concurrent reads against different entity types never contend on the same lock stripe.  The `CopyArrays` snapshot helper merges all shards into a single globally-sorted array for checkpoint writes.
 - `WalDataProvider` maintains secondary field indexes via `IndexStore` (paged files under `{dataRoot}/Paged/`) and `SearchIndexManager` for full-text search. `Query<T>` consults `IndexStore` for `Equals` clauses on `[DataIndex]`-decorated fields before falling back to a full WAL scan, reducing deserializations from O(n) to O(matches).
-- Schema evolution is handled via `SchemaReadMode.BestEffort` in both providers: old records with extra/missing fields still load; new fields receive default values.
-- Schema files are shared between the two providers so they can coexist in the same data root.
-- `LocalPagedFile` is a shared `internal` class (extracted from `LocalFolderBinaryDataProvider`) used by both providers to implement `IPagedFile` paged file storage for `IndexStore`.
+- Schema evolution is handled via `SchemaReadMode.BestEffort`: old records with extra/missing fields still load; new fields receive default values.
+- `LocalPagedFile` is an `internal` class used by `WalDataProvider` via `IndexStore` to implement `IPagedFile` paged file storage.
 
 ---
 
@@ -59,9 +43,7 @@ flowchart TD
     D --> F["DataScaffold.BuildEntityListHtml()<br/>(list HTML fragments)"]
 
     VE["virtualEntities.json"] --> VL["VirtualEntityLoader.LoadFromFile()"]
-    VL --> VJStore["VirtualEntityJsonStore<br/>(IDataProvider for virtual types)"]
     VL --> DSP2["DataScaffold.RegisterVirtualEntity()"]
-    VJStore --> FS3["File system<br/>{dataRoot}/virtual/{entity}/{id}.json"]
 ```
 
 ### Runtime Entity Definitions
@@ -159,23 +141,23 @@ sequenceDiagram
     participant SC as DataScaffold
     participant CF as CalculatedFieldService
     participant DS as DataStoreProvider
-    participant LFB as LocalFolderBinaryDataProvider
+    participant WAL as WalDataProvider
     participant SIM as SearchIndexManager
     participant BOS as BinaryObjectSerializer
 
     H->>SC: Validate form fields (DataField rules)
     H->>CF: EvaluateCalculatedFieldsAsync(entity)
     H->>DS: Save(entity)
-    DS->>LFB: Save(entity)
-    LFB->>BOS: Serialize(entity) → byte[]
-    LFB->>FS: Write {id}.bin
+    DS->>WAL: Save(entity)
+    WAL->>BOS: Serialize(entity) → byte[]
+    WAL->>WAL: Commit to WAL segment
     loop For each [DataIndex] field
-        LFB->>SIM: IndexObject(entity)
+        WAL->>SIM: IndexObject(entity)
         SIM->>IndexStore: AppendEntry(field, value, id)
         IndexStore->>FS: Append to {field}.idx
     end
-    LFB->>AuditLog: Record change (if AuditEntry enabled)
-    LFB-->>DS: success
+    WAL->>AuditLog: Record change (if AuditEntry enabled)
+    WAL-->>DS: success
     DS-->>H: saved entity
 ```
 
@@ -185,14 +167,14 @@ sequenceDiagram
 sequenceDiagram
     participant H as Route handler
     participant DS as DataStoreProvider
-    participant LFB as LocalFolderBinaryDataProvider
+    participant WAL as WalDataProvider
     participant SIM as SearchIndexManager
 
     H->>DS: Delete<T>(id)
-    DS->>LFB: Delete(type, id)
-    LFB->>FS: Remove {id}.bin
+    DS->>WAL: Delete(type, id)
+    WAL->>WAL: Write tombstone to WAL segment
     loop For each [DataIndex] field
-        LFB->>SIM: RemoveObject(type, id)
+        WAL->>SIM: RemoveObject(type, id)
         SIM->>IndexStore: AppendEntry('D', id)
     end
 ```
@@ -251,22 +233,6 @@ Sequential IDs are persisted so they survive restarts:
 
 ## Storage Layout Summary
 
-### LocalFolderBinaryDataProvider layout
-
-```
-{dataRoot}/
-├── {EntityType}/
-│   ├── {id}.bin          ← binary-serialized entity instance
-│   ├── _seqid.dat        ← sequential ID counter
-│   └── _idx/
-│       └── {FieldName}.idx  ← append-only binary index file
-├── virtual/
-│   └── {entityName}/
-│       └── {id}.json     ← JSON-stored virtual entity instance
-└── sessions/
-    └── {sessionId}.bin   ← binary-serialized UserSession
-```
-
 ### WalDataProvider layout
 
 ```
@@ -275,7 +241,7 @@ Sequential IDs are persisted so they survive restarts:
 │   ├── {EntityType}_idmap.bin    ← string ID → packed ulong WAL key
 │   └── wal_seg_*.log             ← append-only WAL segment files (CRC32C verified)
 ├── {EntityType}/
-│   ├── schema-{EntityType}-*.json ← schema version files (shared with LocalFolderBinaryDataProvider)
+│   ├── schema-{EntityType}-*.json ← schema version files
 │   └── _seqid.dat                ← sequential ID counter
 ├── Index/
 │   ├── index.registry            ← IndexStore tracked-index registry
