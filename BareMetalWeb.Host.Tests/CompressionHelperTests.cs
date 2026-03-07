@@ -216,7 +216,7 @@ public class CssBundleServiceCompressionTests : IDisposable
         File.WriteAllText(
             Path.Combine(_tempRoot, "css", "themes", "vapor.min.css"),
             new string('a', 500), Encoding.UTF8);
-        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+        CssBundleService.DiscoverThemes(Path.Combine(_tempRoot, "css"));
     }
 
     public void Dispose()

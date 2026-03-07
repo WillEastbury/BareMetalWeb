@@ -124,14 +124,14 @@ public class CssBundleServiceTests : IDisposable
             $"Custom CSS for '{theme}' should not be empty");
     }
 
-    // ── BuildBundles ──────────────────────────────────────────────────────────
+    // ── DiscoverThemes ──────────────────────────────────────────────────────────
 
     [Fact]
     public void BuildBundles_LoadsThemesFromDisk()
     {
         WriteThemeCss("vapor", "/* vapor theme */");
 
-        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+        CssBundleService.DiscoverThemes(Path.Combine(_tempRoot, "css"));
 
         Assert.True(CssBundleService.HasBundles);
         Assert.Contains("vapor", CssBundleService.LoadedThemes());
@@ -144,7 +144,7 @@ public class CssBundleServiceTests : IDisposable
         Directory.CreateDirectory(emptyRoot);
 
         // Should not throw when themes directory does not exist
-        CssBundleService.BuildBundles(emptyRoot);
+        CssBundleService.DiscoverThemes(emptyRoot);
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public class CssBundleServiceTests : IDisposable
         foreach (var theme in new[] { "darkly", "flatly", "slate" })
             WriteThemeCss(theme, $"/* {theme} */");
 
-        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+        CssBundleService.DiscoverThemes(Path.Combine(_tempRoot, "css"));
 
         var loaded = CssBundleService.LoadedThemes();
         Assert.Contains("darkly",  loaded);
@@ -167,7 +167,7 @@ public class CssBundleServiceTests : IDisposable
     public async Task TryServeAsync_KnownTheme_ReturnsTrue()
     {
         WriteThemeCss("flatly", "/* flatly */");
-        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+        CssBundleService.DiscoverThemes(Path.Combine(_tempRoot, "css"));
 
         var context = CreateContext("GET", "/static/css/themes/flatly.min.css");
         var result = await CssBundleService.TryServeAsync(context.ToBmw());
@@ -200,7 +200,7 @@ public class CssBundleServiceTests : IDisposable
     public async Task TryServeAsync_SetsCorrectContentType()
     {
         WriteThemeCss("darkly", "/* darkly */");
-        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+        CssBundleService.DiscoverThemes(Path.Combine(_tempRoot, "css"));
 
         var context = CreateContext("GET", "/static/css/themes/darkly.min.css");
         await CssBundleService.TryServeAsync(context.ToBmw());
@@ -212,7 +212,7 @@ public class CssBundleServiceTests : IDisposable
     public async Task TryServeAsync_SetsETagHeader()
     {
         WriteThemeCss("slate", "/* slate */");
-        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+        CssBundleService.DiscoverThemes(Path.Combine(_tempRoot, "css"));
 
         var context = CreateContext("GET", "/static/css/themes/slate.min.css");
         await CssBundleService.TryServeAsync(context.ToBmw());
@@ -224,7 +224,7 @@ public class CssBundleServiceTests : IDisposable
     public async Task TryServeAsync_Returns304_WhenETagMatches()
     {
         WriteThemeCss("lux", "/* lux */");
-        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+        CssBundleService.DiscoverThemes(Path.Combine(_tempRoot, "css"));
 
         var first = CreateContext("GET", "/static/css/themes/lux.min.css");
         await CssBundleService.TryServeAsync(first.ToBmw());
@@ -242,7 +242,7 @@ public class CssBundleServiceTests : IDisposable
     public async Task TryServeAsync_PostMethod_Returns405()
     {
         WriteThemeCss("superhero", "/* superhero */");
-        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+        CssBundleService.DiscoverThemes(Path.Combine(_tempRoot, "css"));
 
         var context = CreateContext("POST", "/static/css/themes/superhero.min.css");
         var result = await CssBundleService.TryServeAsync(context.ToBmw());
@@ -255,7 +255,7 @@ public class CssBundleServiceTests : IDisposable
     public async Task TryServeAsync_HeadMethod_ReturnsNoBody()
     {
         WriteThemeCss("cyborg", "/* cyborg */");
-        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+        CssBundleService.DiscoverThemes(Path.Combine(_tempRoot, "css"));
 
         var context = CreateContext("HEAD", "/static/css/themes/cyborg.min.css");
         await CssBundleService.TryServeAsync(context.ToBmw());
@@ -268,7 +268,7 @@ public class CssBundleServiceTests : IDisposable
     public async Task TryServeAsync_SetsCacheControlHeader()
     {
         WriteThemeCss("minty", "/* minty */");
-        CssBundleService.BuildBundles(Path.Combine(_tempRoot, "css"));
+        CssBundleService.DiscoverThemes(Path.Combine(_tempRoot, "css"));
 
         var context = CreateContext("GET", "/static/css/themes/minty.min.css");
         await CssBundleService.TryServeAsync(context.ToBmw());

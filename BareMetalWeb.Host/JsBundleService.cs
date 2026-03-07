@@ -83,8 +83,9 @@ public static class JsBundleService
     /// </summary>
     public static void BuildBundle(string jsDirectory)
     {
-        BuildNamedBundle(BundlePath, BundleFileOrder, jsDirectory);
-        BuildNamedBundle(VNextBundlePath, VNextBundleFileOrder, jsDirectory);
+        var legacyTask = Task.Run(() => BuildNamedBundle(BundlePath, BundleFileOrder, jsDirectory));
+        var vnextTask = Task.Run(() => BuildNamedBundle(VNextBundlePath, VNextBundleFileOrder, jsDirectory));
+        Task.WaitAll(legacyTask, vnextTask);
     }
 
     private static void BuildNamedBundle(string path, string[] fileOrder, string jsDirectory)

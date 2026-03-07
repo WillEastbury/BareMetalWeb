@@ -314,6 +314,17 @@ public static class BareMetalWebExtensions
         await appInfo.BuildAppInfoMenuOptionsAsync();
         await appInfo.WireUpRequestHandlingAndLoggerAsyncLifetime();
 
+        // Fire-and-forget: warm up search index metadata in the background so the
+        // first real query does not pay the reflection/compilation cost.
+        if (DataStoreProvider.PrimaryProvider is WalDataProvider warmupProvider)
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(2000);
+                warmupProvider.WarmSearchIndexMetadata();
+            });
+        }
+
         return appInfo;
     }
 }

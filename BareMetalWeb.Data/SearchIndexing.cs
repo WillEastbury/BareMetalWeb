@@ -372,6 +372,15 @@ public sealed class SearchIndexManager
         return fields.Count > 0;
     }
 
+    /// <summary>
+    /// Pre-warms the type metadata cache for the given type so that the first
+    /// real query does not pay the reflection/compilation cost.
+    /// </summary>
+    public void WarmTypeMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
+    {
+        GetOrCreateTypeMetadata(type);
+    }
+
     private TypeMetadata GetOrCreateTypeMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
     {
         return _typeMetadata.GetOrAdd(type, t =>
