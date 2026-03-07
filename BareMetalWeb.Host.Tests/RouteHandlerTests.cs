@@ -1475,12 +1475,12 @@ public class RouteHandlerTests : IDisposable
 
         public ValueTask RenderPage(HttpContext context, PageInfo page, IBareWebHost app) => ValueTask.CompletedTask;
 
-        public ValueTask<byte[]> RenderToBytesAsync(
+        public ValueTask<ReadOnlyMemory<byte>> RenderToBytesAsync(
             IHtmlTemplate template, string[] keys, string[] values,
             string[] appkeys, string[] appvalues, IBareWebHost app,
             string[]? tableColumnTitles = null, string[][]? tableRows = null,
             FormDefinition? formDefinition = null, TemplateLoop[]? templateLoops = null)
-            => ValueTask.FromResult(Encoding.UTF8.GetBytes("<html></html>"));
+            => ValueTask.FromResult<ReadOnlyMemory<byte>>(Encoding.UTF8.GetBytes("<html></html>"));
 
         public ValueTask RenderToStreamAsync(
             PipeWriter writer, IHtmlTemplate template, string[] keys, string[] values,

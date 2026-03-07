@@ -143,7 +143,7 @@ public class HtmlRendererTests
             tableRows,
             formDefinition,
             templateLoops);
-        return Encoding.UTF8.GetString(result);
+        return Encoding.UTF8.GetString(result.Span);
     }
 
     [Fact]
@@ -326,7 +326,7 @@ public class HtmlRendererTests
             Array.Empty<string>(), Array.Empty<string>(),
             Array.Empty<string>(), Array.Empty<string>(),
             _app);
-        var decoded = Encoding.UTF8.GetString(bytes);
+        var decoded = Encoding.UTF8.GetString(bytes.Span);
         Assert.Contains("Héllo Wörld — ñ", decoded);
     }
 
