@@ -221,7 +221,7 @@ public static class DataScaffold
 
     private sealed record LookupCacheEntry(IReadOnlyList<KeyValuePair<string, string>> Options, bool IsLarge, DateTime ExpiresUtc);
 
-    internal static class DataEntityMetadataCache<T> where T : BaseDataObject, new()
+    internal static class DataEntityMetadataCache<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T> where T : BaseDataObject, new()
     {
         public static readonly DataEntityMetadata? Metadata = Build();
 
@@ -256,7 +256,7 @@ public static class DataScaffold
     /// <summary>Invalidates the cached entity list. Called when entities are registered.</summary>
     private static void InvalidateEntityListCache() => _cachedEntityList = null;
 
-    public static bool RegisterEntity<T>() where T : BaseDataObject, new()
+    public static bool RegisterEntity<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>() where T : BaseDataObject, new()
     {
         var type = typeof(T);
         var metadata = DataEntityMetadataCache<T>.Metadata;
@@ -2574,7 +2574,7 @@ public static class DataScaffold
         Action<object, object?> Setter
     );
 
-    private static bool IsChildListType(Type type, out Type childType)
+    private static bool IsChildListType(Type type, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] out Type childType)
     {
         childType = typeof(object);
         if (!type.IsGenericType || type.GetGenericTypeDefinition() != typeof(List<>))
@@ -3745,7 +3745,7 @@ public static class DataScaffold
         return FormFieldType.String;
     }
 
-    private static DataEntityMetadata? BuildEntityMetadata<T>() where T : BaseDataObject, new()
+    private static DataEntityMetadata? BuildEntityMetadata<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>() where T : BaseDataObject, new()
     {
         var type = typeof(T);
         if (type.IsAbstract)

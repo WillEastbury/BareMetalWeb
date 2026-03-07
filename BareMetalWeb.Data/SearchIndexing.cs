@@ -4,6 +4,7 @@ using System.Buffers.Binary;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Numerics;
 using System.Reflection;
@@ -368,7 +369,7 @@ public sealed class SearchIndexManager
         return fields.Count > 0;
     }
 
-    private TypeMetadata GetOrCreateTypeMetadata(Type type)
+    private TypeMetadata GetOrCreateTypeMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
     {
         return _typeMetadata.GetOrAdd(type, t =>
         {
