@@ -52,6 +52,21 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     // Monotonic ETag counter — cheaper than Guid.NewGuid() per save
     private static long _etagCounter = DateTime.UtcNow.Ticks;
 
+    /// <summary>Format a long as lowercase hex using string.Create to avoid intermediate ToString allocation.</summary>
+    private static string FormatETagHex(long value)
+    {
+        int bits = 64 - BitOperations.LeadingZeroCount((ulong)value);
+        int len = Math.Max(1, (bits + 3) >> 2);
+        return string.Create(len, value, static (span, val) =>
+        {
+            for (int i = span.Length - 1; i >= 0; i--)
+            {
+                span[i] = "0123456789abcdef"[(int)(val & 0xF)];
+                val >>>= 4;
+            }
+        });
+    }
+
     // ── Fields ────────────────────────────────────────────────────────────────
 
     private readonly string                    _rootPath;
@@ -204,7 +219,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         var now = DateTime.UtcNow;
         if (obj.CreatedOnUtc == default) obj.CreatedOnUtc = now;
         obj.UpdatedOnUtc = now;
-        obj.ETag = Interlocked.Increment(ref _etagCounter).ToString("x");
+        obj.ETag = FormatETagHex(Interlocked.Increment(ref _etagCounter));
 
         var type       = typeof(T);
         var typeFolder = GetTypeFolder(type);
@@ -379,20 +394,21 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         int toRemove = _deserCache.Count / 4;
         if (toRemove == 0) toRemove = 1;
 
-        var evictKeys = new List<((string TypeName, uint Key, ulong WalPtr) key, long access)>(toRemove);
+        var evictKeys = new ((string TypeName, uint Key, ulong WalPtr) key, long access)[toRemove];
+        int evictCount = 0;
 
         foreach (var kvp in _deserCacheAccess)
         {
-            if (evictKeys.Count < toRemove)
+            if (evictCount < toRemove)
             {
-                evictKeys.Add((kvp.Key, kvp.Value));
+                evictKeys[evictCount++] = (kvp.Key, kvp.Value);
                 continue;
             }
 
             // Find the max (youngest) entry in our evict set and replace it
             // if this entry is older (smaller tick count)
             int maxIdx = 0;
-            for (int i = 1; i < evictKeys.Count; i++)
+            for (int i = 1; i < evictCount; i++)
                 if (evictKeys[i].access > evictKeys[maxIdx].access)
                     maxIdx = i;
 
@@ -400,10 +416,10 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
                 evictKeys[maxIdx] = (kvp.Key, kvp.Value);
         }
 
-        foreach (var (key, _) in evictKeys)
+        for (int i = 0; i < evictCount; i++)
         {
-            _deserCache.TryRemove(key, out _);
-            _deserCacheAccess.TryRemove(key, out _);
+            _deserCache.TryRemove(evictKeys[i].key, out _);
+            _deserCacheAccess.TryRemove(evictKeys[i].key, out _);
         }
     }
 
@@ -1126,7 +1142,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         var now = DateTime.UtcNow;
         if (record.CreatedOnUtc == default) record.CreatedOnUtc = now;
         record.UpdatedOnUtc = now;
-        record.ETag = Interlocked.Increment(ref _etagCounter).ToString("x");
+        record.ETag = FormatETagHex(Interlocked.Increment(ref _etagCounter));
 
         var entityName = schema.EntityName;
         record.EntityTypeName = entityName;
