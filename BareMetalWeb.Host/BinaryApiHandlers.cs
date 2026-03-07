@@ -126,12 +126,8 @@ public static class BinaryApiHandlers
         foreach (var f in meta.Fields)
             metaFieldsByName[f.Name] = f;
 
-        // Collect ALL public properties on the CLR type — same set the BinaryObjectSerializer uses.
-        // Sort by name (Ordinal compare) to match binary serializer member ordering.
-        var unsortedProps = meta.Type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-        var propsList = new List<System.Reflection.PropertyInfo>(unsortedProps);
-        propsList.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
-        var props = propsList.ToArray();
+        // Use pre-cached sorted properties from metadata (avoids per-call GetProperties reflection)
+        var props = meta.AllProperties;
 
         var descriptors = new List<MetadataWireSerializer.FieldPlanDescriptor>(props.Length);
         foreach (var prop in props)

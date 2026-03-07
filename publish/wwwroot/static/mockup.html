@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entity List UI Mockup - BareMetalWeb</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        body { padding: 20px; }
+        .feature-badge { 
+            display: inline-block;
+            background: #28a745;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 0.8em;
+            margin-left: 5px;
+        }
+        .mockup-container {
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 30px;
+            background: #f8f9fa;
+        }
+        h2 { margin-top: 30px; }
+        .code-example {
+            background: #272822;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <h1>Entity List UI Enhancements <span class="feature-badge">NEW</span></h1>
+        <p class="lead">Search, filtering, sorting, and pagination features for BareMetalWeb entity list views</p>
+
+        <div class="mockup-container">
+            <h2>Complete UI Example <span class="feature-badge">LIVE PREVIEW</span></h2>
+            
+            <!-- Search Box -->
+            <div class="mb-3">
+                <form method="get" class="row g-2">
+                    <div class="col-auto flex-grow-1">
+                        <input type="search" class="form-control" name="q" placeholder="Search..." value="" aria-label="Search" />
+                    </div>
+                    <div class="col-auto">
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-search" aria-hidden="true"></i> Search</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- View Switcher -->
+            <div class="btn-group btn-group-sm mb-2" role="group" aria-label="View Type">
+                <a class="btn btn-outline-secondary active" href="#" title="Table View"><i class="bi bi-table" aria-hidden="true"></i> Table</a>
+            </div>
+
+            <!-- Pagination Controls (Top) -->
+            <div class="d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2">
+                <div class="small text-muted">Records 26 to 50 of 237 total</div>
+                <nav aria-label="Page navigation">
+                    <ul class="pagination pagination-sm mb-0">
+                        <li class="page-item"><a class="page-link" href="#" aria-label="Previous"><i class="bi bi-arrow-left" aria-hidden="true"></i></a></li>
+                        <li class="page-item"><a class="page-link" href="#">1</a></li>
+                        <li class="page-item active" aria-current="page"><span class="page-link">2</span></li>
+                        <li class="page-item"><a class="page-link" href="#">3</a></li>
+                        <li class="page-item"><a class="page-link" href="#">4</a></li>
+                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                        <li class="page-item"><a class="page-link" href="#">10</a></li>
+                        <li class="page-item"><a class="page-link" href="#" aria-label="Next"><i class="bi bi-arrow-right" aria-hidden="true"></i></a></li>
+                    </ul>
+                </nav>
+                <div class="d-flex align-items-center gap-2">
+                    <label class="form-label mb-0 small text-nowrap">Page size:</label>
+                    <select class="form-select form-select-sm" style="width: auto;" aria-label="Page size">
+                        <option>10</option>
+                        <option selected>25</option>
+                        <option>50</option>
+                        <option>100</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <p>
+                <a class="btn btn-sm btn-success" href="#" title="Create User"><i class="bi bi-plus-lg" aria-hidden="true"></i></a>
+                <a class="btn btn-sm btn-outline-success ms-2" href="#" title="Download CSV"><i class="bi bi-download" aria-hidden="true"></i><i class="bi bi-file-earmark-spreadsheet ms-1" aria-hidden="true"></i> CSV</a>
+                <a class="btn btn-sm btn-outline-primary ms-2" href="#" title="Download HTML"><i class="bi bi-download" aria-hidden="true"></i><i class="bi bi-filetype-html ms-1" aria-hidden="true"></i> HTML</a>
+            </p>
+
+            <!-- Sortable Table -->
+            <table class="table table-striped table-sm align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Actions</th>
+                        <th scope="col">
+                            <a href="#" class="text-decoration-none text-reset" title="Sort by Name">
+                                Name <i class="bi bi-arrow-up" aria-hidden="true"></i>
+                            </a>
+                        </th>
+                        <th scope="col">
+                            <a href="#" class="text-decoration-none text-reset" title="Sort by Email">
+                                Email <i class="bi bi-arrow-down-up text-muted" aria-hidden="true" style="opacity: 0.3;"></i>
+                            </a>
+                        </th>
+                        <th scope="col">
+                            <a href="#" class="text-decoration-none text-reset" title="Sort by Created Date">
+                                Created <i class="bi bi-arrow-down-up text-muted" aria-hidden="true" style="opacity: 0.3;"></i>
+                            </a>
+                        </th>
+                        <th scope="col">
+                            <a href="#" class="text-decoration-none text-reset" title="Sort by Active">
+                                Active <i class="bi bi-arrow-down-up text-muted" aria-hidden="true" style="opacity: 0.3;"></i>
+                            </a>
+                        </th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>
+                            <a class="btn btn-sm btn-outline-info me-1" href="#" title="Open"><i class="bi bi-search"></i></a>
+                            <a class="btn btn-sm btn-outline-warning me-1" href="#" title="Edit"><i class="bi bi-pencil"></i></a>
+                            <a class="btn btn-sm btn-outline-danger" href="#" title="Delete"><i class="bi bi-x-lg"></i></a>
+                        </td>
+                        <td>Alice Johnson</td>
+                        <td>alice@example.com</td>
+                        <td>2024-01-15</td>
+                        <td><input type="checkbox" checked disabled class="form-check-input"></td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <a class="btn btn-sm btn-outline-info me-1" href="#" title="Open"><i class="bi bi-search"></i></a>
+                            <a class="btn btn-sm btn-outline-warning me-1" href="#" title="Edit"><i class="bi bi-pencil"></i></a>
+                            <a class="btn btn-sm btn-outline-danger" href="#" title="Delete"><i class="bi bi-x-lg"></i></a>
+                        </td>
+                        <td>Bob Smith</td>
+                        <td>bob@example.com</td>
+                        <td>2024-02-20</td>
+                        <td><input type="checkbox" checked disabled class="form-check-input"></td>
+                    </tr>
+                    <tr>
+                        <td>
+                            <a class="btn btn-sm btn-outline-info me-1" href="#" title="Open"><i class="bi bi-search"></i></a>
+                            <a class="btn btn-sm btn-outline-warning me-1" href="#" title="Edit"><i class="bi bi-pencil"></i></a>
+                            <a class="btn btn-sm btn-outline-danger" href="#" title="Delete"><i class="bi bi-x-lg"></i></a>
+                        </td>
+                        <td>Charlie Brown</td>
+                        <td>charlie@example.com</td>
+                        <td>2024-03-10</td>
+                        <td><input type="checkbox" disabled class="form-check-input"></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <h2>Key Features</h2>
+        <div class="row">
+            <div class="col-md-6">
+                <h3>1. Search Box</h3>
+                <ul>
+                    <li>Searches across all visible fields</li>
+                    <li>Server-side filtering for performance</li>
+                    <li>URL parameter: <code>?q=searchterm</code></li>
+                </ul>
+            </div>
+            <div class="col-md-6">
+                <h3>2. Sortable Headers</h3>
+                <ul>
+                    <li>Click to sort ascending/descending</li>
+                    <li>Visual indicators (↑↓⇅)</li>
+                    <li>URL: <code>?sort=Name&dir=asc</code></li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="row mt-3">
+            <div class="col-md-6">
+                <h3>3. Pagination</h3>
+                <ul>
+                    <li>Numbered pages with smart range</li>
+                    <li>Shows current +/- 2 pages</li>
+                    <li>First/Last links, ellipsis for gaps</li>
+                    <li>Record count display</li>
+                </ul>
+            </div>
+            <div class="col-md-6">
+                <h3>4. Page Size Selector</h3>
+                <ul>
+                    <li>10 / 25 / 50 / 100 items per page</li>
+                    <li>Default: 25 items</li>
+                    <li>URL: <code>?size=50</code></li>
+                </ul>
+            </div>
+        </div>
+
+        <h2>URL Examples</h2>
+        
+        <div class="code-example">
+<strong># Simple search</strong>
+/admin/data/user?q=john
+
+<strong># Sort by email descending</strong>
+/admin/data/user?sort=Email&dir=desc
+
+<strong># Page 3 with 50 items per page</strong>
+/admin/data/user?page=3&size=50
+
+<strong># Combined: search + sort + page size</strong>
+/admin/data/user?q=john&sort=CreatedDate&dir=desc&size=100
+
+<strong># Field-specific filter (backend supported)</strong>
+/admin/data/user?f_Email=@example.com&f_IsActive=true
+        </div>
+
+        <h2>Backend Field Filtering</h2>
+        <p>While the UI doesn't yet include per-column filter inputs, the backend fully supports filtering via URL parameters:</p>
+        
+        <div class="code-example">
+<strong># Filter by exact email</strong>
+/admin/data/user?f_Email=alice@example.com&op_Email=eq
+
+<strong># Filter by age greater than 30</strong>
+/admin/data/user?f_Age=30&op_Age=gt
+
+<strong># Multiple filters (AND logic)</strong>
+/admin/data/user?f_Department=Engineering&f_IsActive=true
+
+<strong># Text contains filter</strong>
+/admin/data/user?f_Name=John&op_Name=contains
+        </div>
+
+        <h3>Supported Operators</h3>
+        <ul>
+            <li><code>contains</code> - Text contains (default for strings)</li>
+            <li><code>startswith</code> - Text starts with</li>
+            <li><code>endswith</code> - Text ends with</li>
+            <li><code>eq</code> - Equals (default for numbers/dates)</li>
+            <li><code>ne</code> - Not equals</li>
+            <li><code>gt</code> - Greater than</li>
+            <li><code>lt</code> - Less than</li>
+            <li><code>gte</code> - Greater than or equal</li>
+            <li><code>lte</code> - Less than or equal</li>
+            <li><code>in</code> - Value in list</li>
+            <li><code>notin</code> - Value not in list</li>
+        </ul>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

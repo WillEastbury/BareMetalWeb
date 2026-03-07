@@ -92,6 +92,23 @@ public sealed record DataEntityMetadata(
     private DataFieldMetadata[]? _createFields;
     private DataFieldMetadata[]? _editFields;
     private Dictionary<string, DataFieldMetadata>? _fieldsByName;
+    private PropertyInfo[]? _allProperties;
+
+    /// <summary>
+    /// All public instance properties on the CLR type, sorted by name (ordinal).
+    /// Cached to avoid repeated reflection in serialization paths.
+    /// </summary>
+    public PropertyInfo[] AllProperties
+    {
+        get
+        {
+            if (_allProperties != null) return _allProperties;
+            var props = Type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+            Array.Sort(props, (a, b) => string.CompareOrdinal(a.Name, b.Name));
+            _allProperties = props;
+            return _allProperties;
+        }
+    }
 
     /// <summary>Fields visible in list views, pre-sorted by Order.</summary>
     public DataFieldMetadata[] ListFields => _listFields ??= BuildFilteredFields(f => f.List);
