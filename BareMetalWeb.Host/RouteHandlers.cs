@@ -1651,9 +1651,8 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static string HashBackupCode(User user, string code)
     {
-        using var sha = SHA256.Create();
         var payload = Encoding.UTF8.GetBytes($"{user.Key}:{code}");
-        return Convert.ToHexString(sha.ComputeHash(payload));
+        return Convert.ToHexString(SHA256.HashData(payload));
     }
 
     private sealed class AttemptTracker
