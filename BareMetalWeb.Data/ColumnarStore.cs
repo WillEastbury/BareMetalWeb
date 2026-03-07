@@ -48,6 +48,10 @@ internal sealed class ColumnarStore
     // so GetOrBuildColumnarStore detects "needs rebuild" only when Invalidate() is called.
     private long _version;
 
+    // Per-column statistics registry — shared across all ColumnarStore instances.
+    // Stats are collected during Build() and used by QueryCostEstimator.
+    internal static readonly ColumnStatsRegistry StatsRegistry = new();
+
     // ── Public properties ─────────────────────────────────────────────────────
 
     /// <summary>Number of live rows currently stored.</summary>
@@ -159,6 +163,10 @@ internal sealed class ColumnarStore
             }
 
             Interlocked.Increment(ref _version);
+
+            // Collect per-column statistics for query cost estimation
+            StatsRegistry.CollectStats(
+                meta.Name, _intColumns, _longColumns, _doubleColumns, _floatColumns, _validMask, n);
         }
         finally
         {
