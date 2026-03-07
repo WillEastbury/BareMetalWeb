@@ -343,6 +343,7 @@ public static class ReportHtmlRenderer
         // Use capped query to avoid loading entire table; async-safe via Task.Run
         var distinct = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
         var queryDef = new BareMetalWeb.Data.QueryDefinition { Top = 10000 };
+        // TODO: convert to async
         var allItems = Task.Run(async () => await meta.Handlers.QueryAsync(queryDef, CancellationToken.None)).GetAwaiter().GetResult();
         foreach (var item in allItems)
         {

@@ -226,7 +226,7 @@ public static class BmwJsonReader
     /// </summary>
     private static (byte[] value, int endPos) ParseFieldValue(ReadOnlySpan<byte> json, int pos, FieldPlan fp)
     {
-        // Handle null
+        // Match JSON "null" literal byte-by-byte (avoids allocation)
         if (pos + 4 <= json.Length && json[pos] == (byte)'n' &&
             json[pos + 1] == (byte)'u' && json[pos + 2] == (byte)'l' && json[pos + 3] == (byte)'l')
         {
@@ -295,12 +295,14 @@ public static class BmwJsonReader
         bool val;
         int endPos;
 
+        // Match JSON "true" literal byte-by-byte
         if (pos + 4 <= json.Length && json[pos] == (byte)'t' &&
             json[pos + 1] == (byte)'r' && json[pos + 2] == (byte)'u' && json[pos + 3] == (byte)'e')
         {
             val = true;
             endPos = pos + 4;
         }
+        // Match JSON "false" literal byte-by-byte
         else if (pos + 5 <= json.Length && json[pos] == (byte)'f' &&
                  json[pos + 1] == (byte)'a' && json[pos + 2] == (byte)'l' &&
                  json[pos + 3] == (byte)'s' && json[pos + 4] == (byte)'e')
@@ -900,6 +902,7 @@ public static class BmwJsonReader
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int SkipWhitespace(ReadOnlySpan<byte> json, int pos)
     {
+        // Skip JSON whitespace: space, tab, CR, LF
         while (pos < json.Length && (json[pos] == (byte)' ' || json[pos] == (byte)'\t' ||
                json[pos] == (byte)'\r' || json[pos] == (byte)'\n'))
             pos++;

@@ -60,6 +60,7 @@ public sealed class FileLeaseAuthority : ILeaseAuthority, IDisposable
     private readonly string _leaseFilePath;
     private readonly string _epochFilePath;
     private readonly TimeSpan _leaseDuration;
+    private readonly Lock _epochLock = new();
     private FileStream? _leaseFile;
     private long _epoch;
     private DateTime _leaseExpiryUtc;
@@ -75,7 +76,7 @@ public sealed class FileLeaseAuthority : ILeaseAuthority, IDisposable
     }
 
     public bool IsLeader => _leaseFile != null && DateTime.UtcNow < _leaseExpiryUtc;
-    public long CurrentEpoch => _epoch;
+    public long CurrentEpoch => Interlocked.Read(ref _epoch);
     public string InstanceId { get; }
 
     public ValueTask<bool> TryAcquireAsync(CancellationToken ct)
@@ -93,8 +94,8 @@ public sealed class FileLeaseAuthority : ILeaseAuthority, IDisposable
             writer.Write(InstanceId);
             writer.Flush();
 
-            // Increment epoch atomically (write to temp, then rename)
-            _epoch = IncrementEpoch();
+            // Increment epoch under lock to ensure atomic read-modify-write
+            Interlocked.Exchange(ref _epoch, IncrementEpoch());
             _leaseExpiryUtc = DateTime.UtcNow + _leaseDuration;
 
             return ValueTask.FromResult(true);
@@ -119,7 +120,7 @@ public sealed class FileLeaseAuthority : ILeaseAuthority, IDisposable
                         using var w = new StreamWriter(_leaseFile, leaveOpen: true);
                         w.Write(InstanceId);
                         w.Flush();
-                        _epoch = IncrementEpoch();
+                        Interlocked.Exchange(ref _epoch, IncrementEpoch());
                         _leaseExpiryUtc = DateTime.UtcNow + _leaseDuration;
                         return ValueTask.FromResult(true);
                     }
@@ -179,19 +180,22 @@ public sealed class FileLeaseAuthority : ILeaseAuthority, IDisposable
 
     private long IncrementEpoch()
     {
-        long epoch = 1;
-        try
+        lock (_epochLock)
         {
-            if (File.Exists(_epochFilePath))
-                epoch = long.Parse(File.ReadAllText(_epochFilePath).Trim()) + 1;
-        }
-        catch { /* start at 1 */ }
+            long epoch = 1;
+            try
+            {
+                if (File.Exists(_epochFilePath))
+                    epoch = long.Parse(File.ReadAllText(_epochFilePath).Trim()) + 1;
+            }
+            catch { /* start at 1 */ }
 
-        // Atomic write: temp file then rename (atomic on POSIX, near-atomic on Windows)
-        var tempPath = _epochFilePath + ".tmp";
-        File.WriteAllText(tempPath, epoch.ToString());
-        File.Move(tempPath, _epochFilePath, overwrite: true);
-        return epoch;
+            // Atomic write: temp file then rename (atomic on POSIX, near-atomic on Windows)
+            var tempPath = _epochFilePath + ".tmp";
+            File.WriteAllText(tempPath, epoch.ToString());
+            File.Move(tempPath, _epochFilePath, overwrite: true);
+            return epoch;
+        }
     }
 
     public void Dispose() => Demote();

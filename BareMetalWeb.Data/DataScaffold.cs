@@ -2271,6 +2271,7 @@ public static class DataScaffold
         if (meta != null)
         {
             var vt = meta.Handlers.QueryAsync(query, CancellationToken.None);
+            // TODO: convert to async
             return vt.IsCompleted ? (IEnumerable)vt.Result : (IEnumerable)vt.AsTask().GetAwaiter().GetResult();
         }
 
@@ -2285,6 +2286,7 @@ public static class DataScaffold
         if (meta != null)
         {
             var vt = meta.Handlers.CountAsync(query, CancellationToken.None);
+            // TODO: convert to async
             return vt.IsCompleted ? vt.Result : vt.AsTask().GetAwaiter().GetResult();
         }
 
@@ -2299,6 +2301,7 @@ public static class DataScaffold
         {
             var key = uint.Parse(id);
             var vt = meta.Handlers.LoadAsync(key, CancellationToken.None);
+            // TODO: convert to async
             return vt.IsCompleted ? vt.Result : vt.AsTask().GetAwaiter().GetResult();
         }
 
