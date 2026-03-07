@@ -672,46 +672,32 @@ public class HtmlRenderer : IHtmlRenderer
     public static byte[] InjectBeforeBodyEnd(byte[] source, byte[] insertBytes)
     {
         // </body> in UTF-8 is the 7-byte ASCII sequence 3C 2F 62 6F 64 79 3E
-        const int bodyEndTagLen = 7; // </body>
-        if (source.Length < bodyEndTagLen)
+        ReadOnlySpan<byte> bodyEndTag = [(byte)'<', (byte)'/', (byte)'b', (byte)'o', (byte)'d', (byte)'y', (byte)'>'];
+        var src = source.AsSpan();
+
+        if (src.Length < bodyEndTag.Length)
         {
-            // Source too short to contain </body> — append at end
-            var tiny = new byte[source.Length + insertBytes.Length];
-            Array.Copy(source, 0, tiny, 0, source.Length);
-            Array.Copy(insertBytes, 0, tiny, source.Length, insertBytes.Length);
+            var tiny = new byte[src.Length + insertBytes.Length];
+            src.CopyTo(tiny);
+            insertBytes.AsSpan().CopyTo(tiny.AsSpan(src.Length));
             return tiny;
         }
 
-        // Search backwards from the last possible position for </body>
-        int insertPos = source.Length - bodyEndTagLen;
-        while (insertPos >= 0)
-        {
-            if (source[insertPos]     == 0x3C && // '<'
-                source[insertPos + 1] == 0x2F && // '/'
-                source[insertPos + 2] == 0x62 && // 'b'
-                source[insertPos + 3] == 0x6F && // 'o'
-                source[insertPos + 4] == 0x64 && // 'd'
-                source[insertPos + 5] == 0x79 && // 'y'
-                source[insertPos + 6] == 0x3E)   // '>'
-            {
-                break;
-            }
-            insertPos--;
-        }
+        // Search backwards for </body>
+        int insertPos = src.LastIndexOf(bodyEndTag);
 
         if (insertPos < 0)
         {
-            // </body> not found — append the banner at the end as a fallback
-            var fallback = new byte[source.Length + insertBytes.Length];
-            Array.Copy(source, 0, fallback, 0, source.Length);
-            Array.Copy(insertBytes, 0, fallback, source.Length, insertBytes.Length);
+            var fallback = new byte[src.Length + insertBytes.Length];
+            src.CopyTo(fallback);
+            insertBytes.AsSpan().CopyTo(fallback.AsSpan(src.Length));
             return fallback;
         }
 
-        var result = new byte[source.Length + insertBytes.Length];
-        Array.Copy(source, 0, result, 0, insertPos);
-        Array.Copy(insertBytes, 0, result, insertPos, insertBytes.Length);
-        Array.Copy(source, insertPos, result, insertPos + insertBytes.Length, source.Length - insertPos);
+        var result = new byte[src.Length + insertBytes.Length];
+        src[..insertPos].CopyTo(result);
+        insertBytes.AsSpan().CopyTo(result.AsSpan(insertPos));
+        src[insertPos..].CopyTo(result.AsSpan(insertPos + insertBytes.Length));
         return result;
     }
 
