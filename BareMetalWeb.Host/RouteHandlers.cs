@@ -5610,8 +5610,8 @@ public sealed class RouteHandlers : IRouteHandlers
     private static string BuildExportDropdown(string typeSlug, string queryString, bool includeNested, string? id = null)
     {
         var baseUrl = id != null 
-            ? $"/ssr/admin/data/{typeSlug}/{WebUtility.UrlEncode(id)}/export"
-            : $"/ssr/admin/data/{typeSlug}/export";
+            ? $"/{typeSlug}/{WebUtility.UrlEncode(id)}/export"
+            : $"/{typeSlug}/export";
         
         var separator = string.IsNullOrEmpty(queryString) || queryString == "?" ? "?" : "&";
         var baseQueryString = queryString == "?" ? "" : queryString;
@@ -6301,28 +6301,28 @@ public sealed class RouteHandlers : IRouteHandlers
         html.Append("<div class=\"btn-group btn-group-sm\" role=\"group\" aria-label=\"View Type\">");
         
         var tableActive = currentView == ViewType.Table ? " active" : string.Empty;
-        html.Append($"<a class=\"btn btn-outline-secondary{tableActive}\" href=\"/ssr/admin/data/{typeSlug}?view=table\" title=\"Table View\"><i class=\"bi bi-table\" aria-hidden=\"true\"></i> Table</a>");
+        html.Append($"<a class=\"btn btn-outline-secondary{tableActive}\" href=\"/{typeSlug}?view=table\" title=\"Table View\"><i class=\"bi bi-table\" aria-hidden=\"true\"></i> Table</a>");
         
         if (meta.ParentField != null)
         {
             var treeActive = currentView == ViewType.TreeView ? " active" : string.Empty;
-            html.Append($"<a class=\"btn btn-outline-secondary{treeActive}\" href=\"/ssr/admin/data/{typeSlug}?view=tree\" title=\"Tree View\"><i class=\"bi bi-diagram-3\" aria-hidden=\"true\"></i> Tree</a>");
+            html.Append($"<a class=\"btn btn-outline-secondary{treeActive}\" href=\"/{typeSlug}?view=tree\" title=\"Tree View\"><i class=\"bi bi-diagram-3\" aria-hidden=\"true\"></i> Tree</a>");
             
             var orgActive = currentView == ViewType.OrgChart ? " active" : string.Empty;
-            html.Append($"<a class=\"btn btn-outline-secondary{orgActive}\" href=\"/ssr/admin/data/{typeSlug}?view=orgchart\" title=\"Org Chart\"><i class=\"bi bi-diagram-2\" aria-hidden=\"true\"></i> Org Chart</a>");
+            html.Append($"<a class=\"btn btn-outline-secondary{orgActive}\" href=\"/{typeSlug}?view=orgchart\" title=\"Org Chart\"><i class=\"bi bi-diagram-2\" aria-hidden=\"true\"></i> Org Chart</a>");
         }
 
         if (DataScaffold.CanShowTimetableView(meta))
         {
             var timetableActive = currentView == ViewType.Timetable ? " active" : string.Empty;
-            html.Append($"<a class=\"btn btn-outline-secondary{timetableActive}\" href=\"/ssr/admin/data/{typeSlug}?view=timetable\" title=\"Timetable View\"><i class=\"bi bi-calendar-week\" aria-hidden=\"true\"></i> Timetable</a>");
+            html.Append($"<a class=\"btn btn-outline-secondary{timetableActive}\" href=\"/{typeSlug}?view=timetable\" title=\"Timetable View\"><i class=\"bi bi-calendar-week\" aria-hidden=\"true\"></i> Timetable</a>");
         }
         
         // Check if entity has any DateOnly or DateTime fields for timeline view
         if (DataScaffold.CanShowTimelineView(meta))
         {
             var timelineActive = currentView == ViewType.Timeline ? " active" : string.Empty;
-            html.Append($"<a class=\"btn btn-outline-secondary{timelineActive}\" href=\"/ssr/admin/data/{typeSlug}?view=timeline\" title=\"Timeline View\"><i class=\"bi bi-clock-history\" aria-hidden=\"true\"></i> Timeline</a>");
+            html.Append($"<a class=\"btn btn-outline-secondary{timelineActive}\" href=\"/{typeSlug}?view=timeline\" title=\"Timeline View\"><i class=\"bi bi-clock-history\" aria-hidden=\"true\"></i> Timeline</a>");
         }
         
         html.Append("</div>");
@@ -7100,7 +7100,7 @@ public sealed class RouteHandlers : IRouteHandlers
             {
                 long tableTotal = schemaBytes + idMapBytes + indexBytes;
                 html.Append("<tr>");
-                html.Append($"<td><a href=\"/ssr/admin/data/{WebUtility.HtmlEncode(slug)}\">{WebUtility.HtmlEncode(name)}</a></td>");
+                html.Append($"<td><a href=\"/{WebUtility.HtmlEncode(slug)}\">{WebUtility.HtmlEncode(name)}</a></td>");
                 html.Append($"<td class=\"text-end\">{FormatSizeBytes(schemaBytes)}</td>");
                 html.Append($"<td class=\"text-end\">{FormatSizeBytes(idMapBytes)}</td>");
                 html.Append($"<td class=\"text-end\">{FormatSizeBytes(indexBytes)}</td>");

@@ -152,7 +152,7 @@
             formData.append('ids', id);
         });
 
-        fetch('/ssr/admin/data/' + currentEntitySlug + '/bulk-delete', {
+        fetch('/' + currentEntitySlug + '/bulk-delete', {
             method: 'POST',
             body: formData
         })
@@ -185,7 +185,7 @@
     }
 
     function executeBulkExport(ids, format) {
-        var url = '/ssr/admin/data/' + encodeURIComponent(currentEntitySlug) +
+        var url = '/' + encodeURIComponent(currentEntitySlug) +
             '/bulk-export?format=' + encodeURIComponent(format) +
             '&ids=' + ids.map(function (id) { return encodeURIComponent(id); }).join(',');
         window.location.href = url;

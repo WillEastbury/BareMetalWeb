@@ -987,7 +987,7 @@
             items.forEach(function (item) { roots.push(nodeMap[item.id || item.Id || '']); });
         }
 
-        // Split-panel layout (mirrors log viewer / SSR tree view)
+        // Split-panel layout (mirrors log viewer / VNext tree view)
         var html = '<div class="bm-data-tree-layout">';
 
         // Left: tree sidebar
@@ -1057,7 +1057,7 @@
         var parentField = meta.parentField ? meta.parentField.name : null;
         var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
         var subtitleField = meta.fields.filter(function (f) { return f.list && f !== labelField; }).sort(function (a, b) { return a.order - b.order; })[0];
-        // Look for a title/role field like the SSR version does
+        // Look for a title/role field like the list view does
         var titleField = meta.fields.find(function (f) {
             var n = f.name.toLowerCase();
             return n.indexOf('title') >= 0 || n.indexOf('role') >= 0 || n.indexOf('position') >= 0;
@@ -1272,7 +1272,7 @@
             html += '</div>';
         }
 
-        // Render Gantt chart HTML (matches SSR bm-gantt-* classes)
+        // Render Gantt chart HTML (matches bm-gantt-* classes)
         html += '<div class="bm-gantt-container"><div class="bm-gantt-inner">';
 
         // Year header row
@@ -1319,7 +1319,7 @@
 
         html += '</div></div>';
 
-        // Apply dynamic styles (same as gantt-view.js does for SSR)
+        // Apply dynamic styles (same as gantt-view.js)
         setTimeout(function () {
             var els = document.querySelectorAll('[data-gantt-left],[data-gantt-width],[data-gantt-bg]');
             for (var j = 0; j < els.length; j++) {

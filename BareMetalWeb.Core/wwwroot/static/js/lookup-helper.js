@@ -24,7 +24,7 @@
         if (!targetSlug) return;
         // Validate slug to prevent URL injection — slugs are alphanumeric with hyphens/underscores only
         if (!/^[a-zA-Z0-9_-]+$/.test(targetSlug)) return;
-        var createUrl = '/ssr/admin/data/' + targetSlug + '/create?popup=1';
+        var createUrl = '/' + targetSlug + '/create?popup=1';
         var newWindow = window.open(createUrl, '_blank', 'width=800,height=600');
         if (!newWindow) {
             alert('Please allow popups for this site, or the create form will open in the same window.');
