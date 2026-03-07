@@ -152,6 +152,20 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     /// </summary>
     public void SetClusterState(ClusterState clusterState) => _clusterState = clusterState;
 
+    /// <summary>
+    /// Pre-warms the search index type metadata cache for all registered entity
+    /// types so that the first real query does not pay the reflection cost.
+    /// Safe to call from a background thread after startup.
+    /// </summary>
+    public void WarmSearchIndexMetadata()
+    {
+        foreach (var meta in BareMetalWeb.Core.DataScaffold.Entities)
+        {
+            try { _searchIndexManager.WarmTypeMetadata(meta.Type); }
+            catch { /* index metadata will be built on first query */ }
+        }
+    }
+
     public void Dispose()
     {
         _walStore.Dispose();
