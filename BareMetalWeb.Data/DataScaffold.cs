@@ -2471,7 +2471,7 @@ public static class DataScaffold
         if (effectiveType == typeof(long)) return (long)value == 0L;
         if (effectiveType == typeof(decimal)) return (decimal)value == 0m;
         if (effectiveType == typeof(double)) return (double)value == 0.0;
-        if (effectiveType == typeof(float)) return (float)value == 0f;
+        if (effectiveType == typeof(float)) return MathF.Abs((float)value) < 1e-7f;
         if (effectiveType == typeof(bool)) return (bool)value == false;
         if (effectiveType == typeof(DateTime)) return (DateTime)value == default;
         if (effectiveType == typeof(DateTimeOffset)) return (DateTimeOffset)value == default;

@@ -29,10 +29,10 @@ internal static class McpRouteHandler
     private const string ProtocolVersion = "2024-11-05";
     private const string ServerName = "BareMetalWeb";
 
-    private static volatile object? _cachedToolsList;
+    private static object? _cachedToolsList;
 
     /// <summary>Invalidates the cached tools list so the next request rebuilds it.</summary>
-    internal static void InvalidateToolsCache() => _cachedToolsList = null;
+    internal static void InvalidateToolsCache() => Volatile.Write(ref _cachedToolsList, null);
 
     // ── Entry point ───────────────────────────────────────────────────────────
 
@@ -158,11 +158,7 @@ internal static class McpRouteHandler
 
     private static object GetOrBuildToolsList()
     {
-        var cached = _cachedToolsList;
-        if (cached != null) return cached;
-        var tools = BuildToolsList();
-        _cachedToolsList = tools;
-        return tools;
+        return LazyInitializer.EnsureInitialized(ref _cachedToolsList, () => BuildToolsList())!;
     }
 
     private static object BuildToolsList()

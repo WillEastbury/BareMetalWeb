@@ -10,8 +10,8 @@ namespace BareMetalWeb.Data;
 public static class ModuleRegistry
 {
     private static volatile int _generation;
-    private static int _cachedGeneration = -1;
-    private static IReadOnlyList<ModuleInfo> _cachedModules = Array.Empty<ModuleInfo>();
+    private static volatile int _cachedGeneration = -1;
+    private static volatile IReadOnlyList<ModuleInfo> _cachedModules = Array.Empty<ModuleInfo>();
     private static readonly object _cacheLock = new();
 
     /// <summary>Invalidate the module cache (call after module entity save).</summary>
