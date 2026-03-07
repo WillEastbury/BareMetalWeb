@@ -26,13 +26,13 @@ public class HtmlRenderer : IHtmlRenderer
         _fragments = fragments;
     }
 
-    public async ValueTask<byte[]> RenderToBytesAsync(IHtmlTemplate template, string[] keys, string[] values, string[] appkeys, string[] appvalues, IBareWebHost app, string[]? tableColumnTitles = null, string[][]? tableRows = null, FormDefinition? formDefinition = null, TemplateLoop[]? templateLoops = null)
+    public async ValueTask<ReadOnlyMemory<byte>> RenderToBytesAsync(IHtmlTemplate template, string[] keys, string[] values, string[] appkeys, string[] appvalues, IBareWebHost app, string[]? tableColumnTitles = null, string[][]? tableRows = null, FormDefinition? formDefinition = null, TemplateLoop[]? templateLoops = null)
     {
-        using var ms = new MemoryStream();
+        var ms = new MemoryStream();
         var pipeWriter = PipeWriter.Create(ms);
         await RenderToStreamAsync(pipeWriter, template, keys, values, appkeys, appvalues, app, tableColumnTitles, tableRows, formDefinition, templateLoops);
         await pipeWriter.CompleteAsync();
-        return ms.ToArray();
+        return ms.TryGetBuffer(out var buffer) ? buffer : ms.ToArray();
     }
 
     public async ValueTask RenderToStreamAsync(PipeWriter writer, IHtmlTemplate template, string[] keys, string[] values, string[] appkeys, string[] appvalues, IBareWebHost app, string[]? tableColumnTitles = null, string[][]? tableRows = null, FormDefinition? formDefinition = null, TemplateLoop[]? templateLoops = null)
@@ -614,7 +614,7 @@ public class HtmlRenderer : IHtmlRenderer
             page = page with { PageContext = pageContext };
         }
 
-        byte[] output = await RenderToBytesAsync(
+        ReadOnlyMemory<byte> output = await RenderToBytesAsync(
             page.PageMetaData.Template,
             page.PageContext.PageMetaDataKeys,
             page.PageContext.PageMetaDataValues,
@@ -630,14 +630,19 @@ public class HtmlRenderer : IHtmlRenderer
         if (ShouldShowDiagnosticBanner(context, app))
         {
             var bannerHtml = BuildDiagnosticBannerHtml(context, app, output.Length);
-            output = InjectBeforeBodyEnd(output, Utf8.GetBytes(bannerHtml));
+            output = InjectBeforeBodyEnd(output.Span, Utf8.GetBytes(bannerHtml));
         }
 
         context.Response.StatusCode = page.PageMetaData.StatusCode;
         context.Response.ContentType = page.PageMetaData.Template.ContentTypeHeader;
 
         var encoding = CompressionHelper.SelectEncoding(context);
-        var responseBytes = CompressionHelper.Compress(output, encoding);
+        ReadOnlyMemory<byte> responseBytes = encoding switch
+        {
+            "br"   => CompressionHelper.CompressBrotli(output.Span),
+            "gzip" => CompressionHelper.CompressGzip(output.Span),
+            _      => output
+        };
         CompressionHelper.ApplyHeaders(context.Response, encoding);
         context.Response.ContentLength = responseBytes.Length;
         await context.Response.BodyWriter.WriteAsync(responseBytes);
@@ -669,35 +674,34 @@ public class HtmlRenderer : IHtmlRenderer
     }
 
     /// <summary>Inserts <paramref name="insertBytes"/> immediately before the final <c>&lt;/body&gt;</c> tag in <paramref name="source"/>.</summary>
-    public static byte[] InjectBeforeBodyEnd(byte[] source, byte[] insertBytes)
+    public static byte[] InjectBeforeBodyEnd(ReadOnlySpan<byte> source, ReadOnlySpan<byte> insertBytes)
     {
         // </body> in UTF-8 is the 7-byte ASCII sequence 3C 2F 62 6F 64 79 3E
         ReadOnlySpan<byte> bodyEndTag = [(byte)'<', (byte)'/', (byte)'b', (byte)'o', (byte)'d', (byte)'y', (byte)'>'];
-        var src = source.AsSpan();
 
-        if (src.Length < bodyEndTag.Length)
+        if (source.Length < bodyEndTag.Length)
         {
-            var tiny = new byte[src.Length + insertBytes.Length];
-            src.CopyTo(tiny);
-            insertBytes.AsSpan().CopyTo(tiny.AsSpan(src.Length));
+            var tiny = new byte[source.Length + insertBytes.Length];
+            source.CopyTo(tiny);
+            insertBytes.CopyTo(tiny.AsSpan(source.Length));
             return tiny;
         }
 
         // Search backwards for </body>
-        int insertPos = src.LastIndexOf(bodyEndTag);
+        int insertPos = source.LastIndexOf(bodyEndTag);
 
         if (insertPos < 0)
         {
-            var fallback = new byte[src.Length + insertBytes.Length];
-            src.CopyTo(fallback);
-            insertBytes.AsSpan().CopyTo(fallback.AsSpan(src.Length));
+            var fallback = new byte[source.Length + insertBytes.Length];
+            source.CopyTo(fallback);
+            insertBytes.CopyTo(fallback.AsSpan(source.Length));
             return fallback;
         }
 
-        var result = new byte[src.Length + insertBytes.Length];
-        src[..insertPos].CopyTo(result);
-        insertBytes.AsSpan().CopyTo(result.AsSpan(insertPos));
-        src[insertPos..].CopyTo(result.AsSpan(insertPos + insertBytes.Length));
+        var result = new byte[source.Length + insertBytes.Length];
+        source[..insertPos].CopyTo(result);
+        insertBytes.CopyTo(result.AsSpan(insertPos));
+        source[insertPos..].CopyTo(result.AsSpan(insertPos + insertBytes.Length));
         return result;
     }
 

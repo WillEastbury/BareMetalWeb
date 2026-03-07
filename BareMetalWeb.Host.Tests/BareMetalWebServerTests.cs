@@ -1077,7 +1077,7 @@ public class BareMetalWebServerTests : IDisposable
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask<byte[]> RenderToBytesAsync(
+        public ValueTask<ReadOnlyMemory<byte>> RenderToBytesAsync(
             IHtmlTemplate template,
             string[] keys,
             string[] values,
@@ -1089,7 +1089,7 @@ public class BareMetalWebServerTests : IDisposable
             FormDefinition? formDefinition = null,
             TemplateLoop[]? templateLoops = null)
         {
-            return ValueTask.FromResult(Encoding.UTF8.GetBytes("<html><body>Mock</body></html>"));
+            return ValueTask.FromResult<ReadOnlyMemory<byte>>(Encoding.UTF8.GetBytes("<html><body>Mock</body></html>"));
         }
 
         public ValueTask RenderToStreamAsync(
