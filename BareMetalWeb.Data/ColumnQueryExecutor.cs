@@ -65,8 +65,14 @@ internal static class ColumnQueryExecutor
         int wordCount = (n + 63) >> 6;
         ulong[]? combined = null;
 
-        foreach (var clause in query.Clauses)
+        // Reorder clauses by estimated selectivity (most selective first)
+        // so the AND-chain eliminates rows as early as possible.
+        var statsMap = ColumnarStore.StatsRegistry.GetStats(meta.Name);
+        var clauseOrder = QueryCostEstimator.OrderClausesBySelectivity(query.Clauses, statsMap);
+
+        for (int ci = 0; ci < clauseOrder.Length; ci++)
         {
+            var clause = query.Clauses[clauseOrder[ci]];
             if (string.IsNullOrEmpty(clause.Field)) continue;
             var field = meta.FindField(clause.Field);
             if (field == null) continue;
