@@ -113,7 +113,14 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
         }
         if (dc.Status == "approved" && !string.IsNullOrEmpty(dc.UserId))
         {
-            var user = await DataStoreProvider.Current.LoadAsync<User>(uint.Parse(dc.UserId));
+            if (!uint.TryParse(dc.UserId, out var parsedUserId))
+            {
+                context.Response.StatusCode = 400;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"status\":\"error\",\"message\":\"Invalid user id.\"}");
+                return;
+            }
+            var user = await DataStoreProvider.Current.LoadAsync<User>(parsedUserId);
             if (user != null)
             {
                 await UserAuth.SignInAsync(context, user, false);

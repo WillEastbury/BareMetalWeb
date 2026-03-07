@@ -394,7 +394,14 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var user = await Users.GetByIdAsync(uint.Parse(challenge.UserId), context.RequestAborted).ConfigureAwait(false);
+        if (!uint.TryParse(challenge.UserId, out var parsedUserId))
+        {
+            RenderMfaChallengeForm(context, "Invalid user account.");
+            await _renderer.RenderPage(context.HttpContext);
+            return;
+        }
+
+        var user = await Users.GetByIdAsync(parsedUserId, context.RequestAborted).ConfigureAwait(false);
         if (user == null || !user.IsActive || !user.MfaEnabled || !TryGetActiveSecret(user, out var activeSecret, out var upgraded))
         {
             RenderMfaChallengeForm(context, "MFA is not available for this account.");
@@ -1921,7 +1928,13 @@ public sealed class RouteHandlers : IRouteHandlers
             var upsertWithExplicitId = false;
             if (upsert && !string.IsNullOrWhiteSpace(idValue))
             {
-                var existing = await DataScaffold.LoadAsync(meta, uint.Parse(idValue!));
+                if (!uint.TryParse(idValue, out var parsedIdValue))
+                {
+                    importErrors.Add($"Row {rowNumber}: Invalid ID '{idValue}'.");
+                    skipped++;
+                    continue;
+                }
+                var existing = await DataScaffold.LoadAsync(meta, parsedIdValue);
                 if (existing is BaseDataObject existingObject)
                 {
                     instance = existingObject;
@@ -1930,7 +1943,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 else
                 {
                     instance = meta.Handlers.Create();
-                    instance.Key = uint.Parse(idValue);
+                    instance.Key = parsedIdValue;
                     upsertWithExplicitId = true;
                 }
             }
@@ -2003,7 +2016,14 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
+        if (!uint.TryParse(id, out var parsedId))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid entity id.");
+            return;
+        }
+
+        var instance = await DataScaffold.LoadAsync(meta, parsedId);
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -2129,7 +2149,14 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
+        if (!uint.TryParse(id, out var parsedId))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid entity id.");
+            return;
+        }
+
+        var instance = await DataScaffold.LoadAsync(meta, parsedId);
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -2221,7 +2248,14 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
+        if (!uint.TryParse(id, out var parsedId))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid entity id.");
+            return;
+        }
+
+        var instance = await DataScaffold.LoadAsync(meta, parsedId);
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -2301,7 +2335,14 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        await DataScaffold.DeleteAsync(meta, uint.Parse(id));
+        if (!uint.TryParse(id, out var parsedId))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid entity id.");
+            return;
+        }
+
+        await DataScaffold.DeleteAsync(meta, parsedId);
         context.Response.StatusCode = StatusCodes.Status204NoContent;
     }
 
@@ -2324,7 +2365,14 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
+        if (!uint.TryParse(id, out var parsedId))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid entity id.");
+            return;
+        }
+
+        var instance = await DataScaffold.LoadAsync(meta, parsedId);
         if (instance is not BaseDataObject)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -6232,7 +6280,10 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.IsNullOrWhiteSpace(challengeId))
             return null;
 
-        var challenge = await DataStoreProvider.Current.LoadAsync<MfaChallenge>(uint.Parse(challengeId), cancellationToken).ConfigureAwait(false);
+        if (!uint.TryParse(challengeId, out var parsedChallengeId))
+            return null;
+
+        var challenge = await DataStoreProvider.Current.LoadAsync<MfaChallenge>(parsedChallengeId, cancellationToken).ConfigureAwait(false);
         if (challenge == null || challenge.IsExpired())
         {
             if (challenge != null)
@@ -6936,7 +6987,14 @@ public sealed class RouteHandlers : IRouteHandlers
             }
         }
 
-        var instance = await DataScaffold.LoadAsync(meta, uint.Parse(id));
+        if (!uint.TryParse(id, out var parsedId))
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = false, ["message"] = "Invalid entity id." });
+            return;
+        }
+
+        var instance = await DataScaffold.LoadAsync(meta, parsedId);
         if (instance == null)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
