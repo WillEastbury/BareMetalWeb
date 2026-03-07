@@ -62,8 +62,13 @@ internal static class McpRouteHandler
         }
 
         string body;
-        using (var reader = new System.IO.StreamReader(context.HttpRequest.Body))
-            body = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
+        // SECURITY: Apply read timeout to prevent slow-loris DoS (see #1208)
+        using (var cts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted))
+        {
+            cts.CancelAfter(TimeSpan.FromSeconds(30));
+            using (var reader = new System.IO.StreamReader(context.HttpRequest.Body))
+                body = await reader.ReadToEndAsync(cts.Token).ConfigureAwait(false);
+        }
 
         if (string.IsNullOrWhiteSpace(body))
         {

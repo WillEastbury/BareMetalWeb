@@ -455,6 +455,7 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                 break;
             }
         }
+        // SECURITY: HTML-encode the action URL to prevent XSS (see #1233)
         _fragmentStore.ZeroAllocationReplaceCopyAndWrite(
             _fragmentStore.ReturnTemplateFragment("FormStart"),
             buffer,
@@ -462,7 +463,7 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
             new[]
             {
                 definition.Method,
-                definition.Action,
+                System.Net.WebUtility.HtmlEncode(definition.Action),
                 needsMultipart ? "multipart/form-data" : "application/x-www-form-urlencoded"
             });
 

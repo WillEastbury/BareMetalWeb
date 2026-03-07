@@ -363,7 +363,12 @@
                 camelSessionCode = code;
             }).catch(function (e) {
                 var status = document.getElementById('ed-camel-status');
-                if (status) status.innerHTML = '<div class="alert alert-danger py-1 px-2 small">Error: ' + e.message + '</div>';
+                if (status) {
+                    var div = document.createElement('div');
+                    div.className = 'alert alert-danger py-1 px-2 small';
+                    div.textContent = 'Error: ' + e.message;
+                    status.replaceChildren(div);
+                }
             });
         });
 
@@ -397,11 +402,22 @@
                     } catch (e) {}
                     render();
                     var status = document.getElementById('ed-camel-status');
-                    if (status) status.innerHTML = '<div class="alert alert-info py-1 px-2 small">Joined session: ' + (session.sessionName || session.SessionName) + '</div>';
+                    if (status) {
+                        var div = document.createElement('div');
+                        div.className = 'alert alert-info py-1 px-2 small';
+                        div.textContent = 'Joined session: ' + (session.sessionName || session.SessionName);
+                        status.replaceChildren(div);
+                    }
                     var log = document.getElementById('ed-camel-log');
                     if (log && (session.contributionsLog || session.ContributionsLog)) {
                         var entries = (session.contributionsLog || session.ContributionsLog).split('\n').filter(Boolean);
-                        log.innerHTML = entries.map(function (e) { return '<div class="text-muted">' + e + '</div>'; }).join('');
+                        log.replaceChildren();
+                        entries.forEach(function (e) {
+                            var entryDiv = document.createElement('div');
+                            entryDiv.className = 'text-muted';
+                            entryDiv.textContent = e;
+                            log.appendChild(entryDiv);
+                        });
                     }
                 });
         });

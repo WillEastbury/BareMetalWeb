@@ -215,6 +215,10 @@ public static class UserAuth
         }
 
         context.DeleteCookie(SessionCookieName);
+        // SECURITY: Clear all security-relevant cookies on logout to prevent reuse (see #1231)
+        context.DeleteCookie("csrf_token");
+        context.DeleteCookie("mfa_challenge_id");
+        context.DeleteCookie("bm-anon-id");
     }
 
     private static void ReissueCookie(BmwContext context, string protectedSessionId, DateTime expiresUtc)

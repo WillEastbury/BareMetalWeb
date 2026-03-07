@@ -121,6 +121,11 @@ public static class BinaryApiHandlers
 
     private static MetadataWireSerializer.FieldPlan[] BuildPlanFromMetadata(DataEntityMetadata meta)
     {
+        // SECURITY TODO: No field-level write protection — all CanRead && CanWrite properties are
+        // included in the serialization plan. A caller with entity-level write permission can set
+        // any writable field, including sensitive ones (e.g. User.Permissions). Field-level
+        // permission annotations ([WritePermission], [ReadOnly] enforcement) are needed. See #1205.
+
         // Build a lookup from metadata fields for getter/setter reuse
         var metaFieldsByName = new Dictionary<string, DataFieldMetadata>(StringComparer.Ordinal);
         foreach (var f in meta.Fields)

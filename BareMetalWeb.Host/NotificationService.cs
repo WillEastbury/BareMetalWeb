@@ -14,6 +14,35 @@ namespace BareMetalWeb.Host;
 internal static class SharedWebhookHttpClient
 {
     internal static readonly HttpClient Instance = new() { Timeout = TimeSpan.FromSeconds(30) };
+
+    /// <summary>
+    /// Validates that a webhook endpoint does not target private, loopback, or cloud metadata IPs.
+    /// Mirrors the SSRF protection in ProxyRouteHandler.IsPrivateOrMetadataHost (see #1209).
+    /// </summary>
+    internal static bool ValidateWebhookEndpoint(string endpoint)
+    {
+        if (!Uri.TryCreate(endpoint, UriKind.Absolute, out var uri))
+            return false;
+
+        var host = uri.Host;
+        if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (IPAddress.TryParse(host, out var ip))
+        {
+            if (IPAddress.IsLoopback(ip)) return false;
+            var bytes = ip.GetAddressBytes();
+            if (bytes.Length == 4)
+            {
+                if (bytes[0] == 10) return false;                                        // 10.0.0.0/8
+                if (bytes[0] == 172 && bytes[1] >= 16 && bytes[1] <= 31) return false;   // 172.16.0.0/12
+                if (bytes[0] == 192 && bytes[1] == 168) return false;                    // 192.168.0.0/16
+                if (bytes[0] == 169 && bytes[1] == 254) return false;                    // 169.254.0.0/16
+            }
+        }
+
+        return true;
+    }
 }
 
 /// <summary>
@@ -70,6 +99,10 @@ public sealed class WebhookSmsChannel : INotificationChannel
 
     public async ValueTask SendAsync(string recipient, string subject, string body, CancellationToken ct)
     {
+        // SECURITY: Block private/metadata IPs to prevent SSRF (see #1209)
+        if (!SharedWebhookHttpClient.ValidateWebhookEndpoint(_endpoint))
+            throw new InvalidOperationException("Webhook endpoint targets a private or metadata IP address.");
+
         var payload = JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
         {
             ["from"] = _from,
@@ -101,6 +134,9 @@ public sealed class WebhookNotificationChannel : INotificationChannel
 
     public async ValueTask SendAsync(string recipient, string subject, string body, CancellationToken ct)
     {
+        // SECURITY: Block private/metadata IPs to prevent SSRF (see #1209)
+        if (!SharedWebhookHttpClient.ValidateWebhookEndpoint(_endpoint))
+            throw new InvalidOperationException("Webhook endpoint targets a private or metadata IP address.");
         var payload = JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
         {
             ["recipient"] = recipient,
