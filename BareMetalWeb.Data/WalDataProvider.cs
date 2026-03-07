@@ -1972,35 +1972,38 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             return;
         }
 
-        // Fallback for unregistered types
-        var allProps = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var singletonProps = new List<PropertyInfo>();
-        foreach (var p in allProps)
+        // Fallback: use cached AllProperties from metadata (no live reflection)
+        if (meta != null)
         {
-            if (p.PropertyType == typeof(bool)
-                && p.GetCustomAttribute<SingletonFlagAttribute>() != null
-                && p.CanRead && p.CanWrite
-                && true.Equals(p.GetValue(obj)))
+            var allProps = meta.AllProperties;
+            var singletonProps = new List<PropertyInfo>();
+            foreach (var p in allProps)
             {
-                singletonProps.Add(p);
-            }
-        }
-
-        if (singletonProps.Count == 0) return;
-
-        foreach (var record in Query<T>())
-        {
-            if (record.Key == obj.Key) continue;
-            bool changed = false;
-            foreach (var prop in singletonProps)
-            {
-                if (true.Equals(prop.GetValue(record)))
+                if (p.PropertyType == typeof(bool)
+                    && p.GetCustomAttribute<SingletonFlagAttribute>() != null
+                    && p.CanRead && p.CanWrite
+                    && true.Equals(p.GetValue(obj)))
                 {
-                    prop.SetValue(record, false);
-                    changed = true;
+                    singletonProps.Add(p);
                 }
             }
-            if (changed) Save(record);
+
+            if (singletonProps.Count == 0) return;
+
+            foreach (var record in Query<T>())
+            {
+                if (record.Key == obj.Key) continue;
+                bool changed = false;
+                foreach (var prop in singletonProps)
+                {
+                    if (true.Equals(prop.GetValue(record)))
+                    {
+                        prop.SetValue(record, false);
+                        changed = true;
+                    }
+                }
+                if (changed) Save(record);
+            }
         }
     }
 
