@@ -64,7 +64,7 @@ internal static class SimdVectorMath
         float dot   = DotProduct(a, b);
         float normA = DotProduct(a, a);
         float normB = DotProduct(b, b);
-        if (normA == 0f || normB == 0f) return 1f;
+        if (MathF.Abs(normA) < 1e-7f || MathF.Abs(normB) < 1e-7f) return 1f;
         return 1f - dot / MathF.Sqrt(normA * normB);
     }
 
