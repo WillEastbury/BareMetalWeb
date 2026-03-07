@@ -45,9 +45,15 @@ public static class LookupApiHandlers
         var traverse = context.HttpRequest.Query.TryGetValue("traverseRelationships", out var tvVal)
             && string.Equals(tvVal.Count > 0 ? tvVal[0] : null, "true", StringComparison.OrdinalIgnoreCase);
 
+        if (!uint.TryParse(id, out var parsedId))
+        {
+            await WriteJsonErrorAsync(context, StatusCodes.Status400BadRequest, $"Invalid entity ID '{id}'.");
+            return;
+        }
+
         try
         {
-            var entity = await meta.Handlers.LoadAsync(uint.Parse(id), context.RequestAborted);
+            var entity = await meta.Handlers.LoadAsync(parsedId, context.RequestAborted);
             if (entity == null)
             {
                 await WriteJsonErrorAsync(context, StatusCodes.Status404NotFound, $"Entity with ID '{id}' not found.");
@@ -171,7 +177,8 @@ public static class LookupApiHandlers
             var results = new Dictionary<string, object?>(ids.Count);
             foreach (var id in ids)
             {
-                var entity = await meta.Handlers.LoadAsync(uint.Parse(id), context.RequestAborted);
+                if (!uint.TryParse(id, out var parsedId)) continue;
+                var entity = await meta.Handlers.LoadAsync(parsedId, context.RequestAborted);
                 if (entity != null)
                     results[id] = await EntityToJsonAsync(entity, meta, traverse, context.RequestAborted);
             }
@@ -213,9 +220,15 @@ public static class LookupApiHandlers
             return;
         }
 
+        if (!uint.TryParse(id, out var parsedId))
+        {
+            await WriteJsonErrorAsync(context, StatusCodes.Status400BadRequest, $"Invalid entity ID '{id}'.");
+            return;
+        }
+
         try
         {
-            var entity = await meta.Handlers.LoadAsync(uint.Parse(id), context.RequestAborted);
+            var entity = await meta.Handlers.LoadAsync(parsedId, context.RequestAborted);
             if (entity == null)
             {
                 await WriteJsonErrorAsync(context, StatusCodes.Status404NotFound, $"Entity with ID '{id}' not found.");

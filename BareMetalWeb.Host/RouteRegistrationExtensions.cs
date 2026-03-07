@@ -1555,7 +1555,14 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(uint.Parse(id), context.RequestAborted).ConfigureAwait(false);
+                if (!uint.TryParse(id, out var parsedId))
+                {
+                    context.Response.StatusCode = 400;
+                    await context.Response.WriteAsync("Invalid report id.");
+                    return;
+                }
+
+                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(parsedId, context.RequestAborted).ConfigureAwait(false);
                 if (def == null)
                 {
                     context.Response.StatusCode = 404;
@@ -1625,7 +1632,15 @@ public static class RouteRegistrationExtensions
                     return;
                 }
 
-                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(uint.Parse(id), context.RequestAborted).ConfigureAwait(false);
+                if (!uint.TryParse(id, out var parsedId))
+                {
+                    context.Response.StatusCode = 400;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Invalid report id\"}");
+                    return;
+                }
+
+                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(parsedId, context.RequestAborted).ConfigureAwait(false);
                 if (def == null)
                 {
                     context.Response.StatusCode = 404;
@@ -2099,7 +2114,8 @@ public static class RouteRegistrationExtensions
             foreach (var id in uniqueIds)
             {
                 if (slugResults.ContainsKey(id!)) continue; // already loaded by a previous field
-                var entity = await targetMeta.Handlers.LoadAsync(uint.Parse(id!), cancellationToken).ConfigureAwait(false);
+                if (!uint.TryParse(id, out var parsedEntityId)) continue;
+                var entity = await targetMeta.Handlers.LoadAsync(parsedEntityId, cancellationToken).ConfigureAwait(false);
                 if (entity != null)
                     slugResults[id!] = RouteHandlers.BuildApiModel(targetMeta, entity);
             }
