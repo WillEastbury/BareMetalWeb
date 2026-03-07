@@ -44,8 +44,7 @@ public sealed class MfaSecretProtector
         RandomNumberGenerator.Fill(salt);
         RandomNumberGenerator.Fill(nonce);
 
-        var saltBytes = salt.ToArray();
-        var key = DeriveKey(_masterKey, saltBytes, userId);
+        var key = DeriveKey(_masterKey, salt, userId);
         var ciphertext = new byte[secretBytes.Length];
         Span<byte> tag = stackalloc byte[TagSize];
 
@@ -56,17 +55,16 @@ public sealed class MfaSecretProtector
 
             var payload = new byte[1 + SaltSize + NonceSize + TagSize + ciphertext.Length];
             payload[0] = CurrentVersion;
-            Buffer.BlockCopy(saltBytes, 0, payload, 1, SaltSize);
-            Buffer.BlockCopy(nonce.ToArray(), 0, payload, 1 + SaltSize, NonceSize);
-            Buffer.BlockCopy(tag.ToArray(), 0, payload, 1 + SaltSize + NonceSize, TagSize);
-            Buffer.BlockCopy(ciphertext, 0, payload, 1 + SaltSize + NonceSize + TagSize, ciphertext.Length);
+            salt.CopyTo(payload.AsSpan(1));
+            nonce.CopyTo(payload.AsSpan(1 + SaltSize));
+            tag.CopyTo(payload.AsSpan(1 + SaltSize + NonceSize));
+            ciphertext.CopyTo(payload.AsSpan(1 + SaltSize + NonceSize + TagSize));
             return Convert.ToBase64String(payload);
         }
         finally
         {
             CryptographicOperations.ZeroMemory(secretBytes);
             CryptographicOperations.ZeroMemory(key);
-            CryptographicOperations.ZeroMemory(saltBytes);
         }
     }
 
@@ -92,11 +90,11 @@ public sealed class MfaSecretProtector
         if (payload[0] != CurrentVersion)
             return false;
 
-        var salt = payload.AsSpan(1, SaltSize).ToArray();
-        var nonce = payload.AsSpan(1 + SaltSize, NonceSize).ToArray();
-        var tag = payload.AsSpan(1 + SaltSize + NonceSize, TagSize).ToArray();
+        var salt = payload.AsSpan(1, SaltSize);
+        var nonce = payload.AsSpan(1 + SaltSize, NonceSize);
+        var tag = payload.AsSpan(1 + SaltSize + NonceSize, TagSize);
         var cipherLen = payload.Length - (1 + SaltSize + NonceSize + TagSize);
-        var ciphertext = payload.AsSpan(1 + SaltSize + NonceSize + TagSize, cipherLen).ToArray();
+        var ciphertext = payload.AsSpan(1 + SaltSize + NonceSize + TagSize, cipherLen);
 
         var key = DeriveKey(_masterKey, salt, userId);
         var plaintext = new byte[cipherLen];
@@ -116,26 +114,25 @@ public sealed class MfaSecretProtector
         finally
         {
             CryptographicOperations.ZeroMemory(key);
-            CryptographicOperations.ZeroMemory(salt);
-            CryptographicOperations.ZeroMemory(nonce);
-            CryptographicOperations.ZeroMemory(tag);
-            CryptographicOperations.ZeroMemory(ciphertext);
         }
     }
 
-    private static byte[] DeriveKey(byte[] masterKey, byte[] salt, string userId)
+    private static byte[] DeriveKey(byte[] masterKey, ReadOnlySpan<byte> salt, string userId)
     {
         var info = Encoding.UTF8.GetBytes(userId);
-        var prk = HkdfExtract(salt, masterKey);
+        Span<byte> saltCopy = stackalloc byte[salt.Length];
+        salt.CopyTo(saltCopy);
+        var prk = HkdfExtract(saltCopy, masterKey);
         var okm = HkdfExpand(prk, info, KeySize);
         CryptographicOperations.ZeroMemory(prk);
         return okm;
     }
 
-    private static byte[] HkdfExtract(byte[] salt, byte[] ikm)
+    private static byte[] HkdfExtract(ReadOnlySpan<byte> salt, byte[] ikm)
     {
-        using var hmac = new HMACSHA256(salt);
-        return hmac.ComputeHash(ikm);
+        Span<byte> hash = stackalloc byte[32]; // SHA256 output
+        HMACSHA256.HashData(salt, ikm, hash);
+        return hash.ToArray();
     }
 
     private static byte[] HkdfExpand(byte[] prk, byte[] info, int length)
