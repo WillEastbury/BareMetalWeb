@@ -60,20 +60,20 @@ public sealed class SynchronousEncryption : ISynchronousEncryption
     {
         if (plaintext is null) throw new ArgumentNullException(nameof(plaintext));
 
-        var nonce = new byte[NonceSize];
+        Span<byte> nonce = stackalloc byte[NonceSize];
         RandomNumberGenerator.Fill(nonce);
 
         var ciphertext = new byte[plaintext.Length];
-        var tag = new byte[TagSize];
+        Span<byte> tag = stackalloc byte[TagSize];
 
         using var aes = new AesGcm(_key, TagSize);
         aes.Encrypt(nonce, plaintext, ciphertext, tag, associatedData);
 
         var payload = new byte[1 + NonceSize + TagSize + ciphertext.Length];
         payload[0] = FormatVersion;
-        Buffer.BlockCopy(nonce, 0, payload, 1, NonceSize);
-        Buffer.BlockCopy(tag, 0, payload, 1 + NonceSize, TagSize);
-        Buffer.BlockCopy(ciphertext, 0, payload, 1 + NonceSize + TagSize, ciphertext.Length);
+        nonce.CopyTo(payload.AsSpan(1));
+        tag.CopyTo(payload.AsSpan(1 + NonceSize));
+        ciphertext.AsSpan().CopyTo(payload.AsSpan(1 + NonceSize + TagSize));
         return payload;
     }
 
@@ -87,13 +87,10 @@ public sealed class SynchronousEncryption : ISynchronousEncryption
         if (version != FormatVersion)
             throw new InvalidOperationException($"Unsupported payload version {version}.");
 
-        var nonce = new byte[NonceSize];
-        var tag = new byte[TagSize];
-        var ciphertext = new byte[payload.Length - 1 - NonceSize - TagSize];
-
-        Buffer.BlockCopy(payload, 1, nonce, 0, NonceSize);
-        Buffer.BlockCopy(payload, 1 + NonceSize, tag, 0, TagSize);
-        Buffer.BlockCopy(payload, 1 + NonceSize + TagSize, ciphertext, 0, ciphertext.Length);
+        var span = payload.AsSpan();
+        var nonce = span.Slice(1, NonceSize);
+        var tag = span.Slice(1 + NonceSize, TagSize);
+        var ciphertext = span.Slice(1 + NonceSize + TagSize);
 
         var plaintext = new byte[ciphertext.Length];
         using var aes = new AesGcm(_key, TagSize);
