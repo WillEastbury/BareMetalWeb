@@ -479,7 +479,8 @@ internal static class ColumnQueryExecutor
             if (targetType.IsEnum)
             {
                 object enumVal = value is string s
-                    ? Enum.Parse(targetType, s, ignoreCase: true)
+                    && DataScaffold.GetEnumLookup(targetType).TryGetValue(s, out var cached)
+                    ? cached
                     : value;
                 result = (int)Convert.ChangeType(enumVal, typeof(int));
                 return true;

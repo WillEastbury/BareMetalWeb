@@ -176,6 +176,24 @@ public static class DataScaffold
     private static readonly ConcurrentDictionary<Type, Func<object>> ListFactoryCache = new();
     private static readonly ConcurrentDictionary<Type, Func<object>> InstanceFactoryCache = new();
     private static readonly ConcurrentDictionary<(Type, Type), Func<object>> DictFactoryCache = new();
+    private static readonly ConcurrentDictionary<Type, Dictionary<string, object>> EnumLookupCache = new();
+
+    /// <summary>
+    /// Returns a cached case-insensitive name→value lookup for the given enum type.
+    /// Avoids Enum.Parse() reflection on every call.
+    /// </summary>
+    internal static Dictionary<string, object> GetEnumLookup(Type enumType)
+    {
+        return EnumLookupCache.GetOrAdd(enumType, static t =>
+        {
+            var names = Enum.GetNames(t);
+            var values = Enum.GetValues(t);
+            var dict = new Dictionary<string, object>(names.Length, StringComparer.OrdinalIgnoreCase);
+            for (int i = 0; i < names.Length; i++)
+                dict[names[i]] = values.GetValue(i)!;
+            return dict;
+        });
+    }
 
     /// <summary>Compile Expression.New for a type and return a cached factory delegate (no Activator.CreateInstance).</summary>
     private static Func<object> CompileFactory(Type type)
@@ -3476,15 +3494,13 @@ public static class DataScaffold
 
         if (effectiveType.IsEnum)
         {
-            try
+            var lookup = GetEnumLookup(effectiveType);
+            if (lookup.TryGetValue(rawValue, out var enumVal))
             {
-                converted = Enum.Parse(effectiveType, rawValue, ignoreCase: true);
+                converted = enumVal;
                 return true;
             }
-            catch
-            {
-                return false;
-            }
+            return false;
         }
 
         return false;
@@ -3615,8 +3631,13 @@ public static class DataScaffold
 
             if (effectiveType.IsEnum && element.ValueKind == JsonValueKind.String)
             {
-                converted = Enum.Parse(effectiveType, element.GetString() ?? string.Empty, ignoreCase: true);
-                return true;
+                var enumStr = element.GetString() ?? string.Empty;
+                var lookup = GetEnumLookup(effectiveType);
+                if (lookup.TryGetValue(enumStr, out var enumVal))
+                {
+                    converted = enumVal;
+                    return true;
+                }
             }
 
             // Child list: List<T> where T is a complex class (e.g. List<OrderRow>)
