@@ -32,9 +32,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     private static readonly Encoding Utf8 = Encoding.UTF8;
     private const int Magic = 0x314F5342; // "BSO1" in little-endian
     private const int CurrentVersion = 3;
-    private const int MaxDepth = 64;
+    private const int MaxDepth = 32;
     private const int MaxStringBytes = 4 * 1024 * 1024; // 4 MiB
-    private const int MaxCollectionLength = 1_000_000;
+    private const int MaxCollectionLength = 100_000;
     private const int MaxDictionaryEntries = 1_000_000;
     private const int MaxBlittableSize = 4 * 1024 * 1024; // 4 MiB
     private const int SignatureSize = 32;
@@ -960,6 +960,8 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
                         var signatureType = AssumePublicMembers(schema.Members[i].Type);
                         if (!TryReadValue(ref reader, signatureType, depth + 1, out var memberValue))
                             break;
+                        if (reader.Remaining < 0)
+                            throw new System.IO.InvalidDataException("Field read overran buffer boundary");
 
                         var member = ordinals[i];
                         if (member != null)
@@ -973,6 +975,8 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
                     {
                         if (!TryReadValue(ref reader, AssumePublicMembers(member.MemberType), depth + 1, out var memberValue))
                             break;
+                        if (reader.Remaining < 0)
+                            throw new System.IO.InvalidDataException("Field read overran buffer boundary");
 
                         member.Setter(instance, memberValue);
                     }
