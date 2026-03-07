@@ -159,11 +159,12 @@ internal static class WalSegmentReader
 
                         ulong key           = BinaryPrimitives.ReadUInt64LittleEndian(span[off..]);
                         uint  compressedLen = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 32)..]);
+                        if (compressedLen > int.MaxValue - 44) { corrupt = true; break; }
                         off += 44;
 
                         result[key] = (uint)recordStart;
 
-                        off += (int)compressedLen;
+                        off = checked(off + (int)compressedLen);
                         if (off > span.Length) { corrupt = true; break; }
                     }
                     if (corrupt) break;

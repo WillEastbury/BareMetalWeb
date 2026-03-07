@@ -28,6 +28,9 @@ public sealed class WalStore : IDisposable
     /// <summary>Default maximum segment size before rotating to a new segment (64 MiB).</summary>
     public const uint DefaultMaxSegmentBytes = 64u * 1024u * 1024u;
 
+    /// <summary>Maximum allowed compressed payload size (100 MB) to prevent OOM from corrupt data.</summary>
+    private const int MaxPayloadSize = 100_000_000;
+
     private readonly string _directory;
     private readonly uint   _maxSegmentBytes;
     private readonly object _writeLock = new();
@@ -759,6 +762,7 @@ public sealed class WalStore : IDisposable
                 }
                 else
                 {
+                    if (compressedLen > MaxPayloadSize) return false;
                     if (off + compressedLen > span.Length) return false;
                     // Keep raw compressed payload — avoids decompress/recompress round-trip
                     payload = span.Slice(off, (int)compressedLen).ToArray();
@@ -834,10 +838,12 @@ public sealed class WalStore : IDisposable
                 uint   uncompressedLen = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 28)..]);
                 uint   compressedLen  = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 32)..]);
                 uint   flags          = BinaryPrimitives.ReadUInt32LittleEndian(span[(off + 36)..]);
+                if (compressedLen > int.MaxValue - 44) return false;
                 off += 44;
 
                 if (key == targetKey)
                 {
+                    if (compressedLen > MaxPayloadSize) return false;
                     if (off + compressedLen > span.Length) return false;
 
                     byte[] rawPayload = compressedLen > 0
@@ -858,7 +864,7 @@ public sealed class WalStore : IDisposable
                     return true;
                 }
 
-                off += (int)compressedLen;
+                off = checked(off + (int)compressedLen);
                 if (off > span.Length) return false;
             }
 
@@ -950,6 +956,7 @@ public sealed class WalStore : IDisposable
                         $"Unknown WAL op codec 0x{codec:X4} for key 0x{key:X16}.");
 
                 if (compressedLen == 0) { payload = ReadOnlyMemory<byte>.Empty; return true; }
+                if (compressedLen > MaxPayloadSize) return false;
                 if (off + compressedLen > span.Length) return false;
 
                 var raw = span.Slice(off, (int)compressedLen).ToArray();
@@ -957,7 +964,8 @@ public sealed class WalStore : IDisposable
                 return true;
             }
 
-            off += 44 + (int)compressedLen;
+            if (compressedLen > int.MaxValue - 44) return false;
+            off = checked(off + 44 + (int)compressedLen);
             if (off > span.Length) return false;
         }
 

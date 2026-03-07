@@ -456,9 +456,11 @@ public static class BmwJsonReader
         {
             strEnd = ReadJsonString(json, pos, out var str);
             var byteCount = str.Length;
+            if (byteCount < 0 || byteCount > 100_000_000)
+                throw new InvalidOperationException("String length exceeds limit");
 
             // Encode: [nullable indicator?] + [int32 length] + [utf8 bytes]
-            var resultLen = (isNullable ? 1 : 0) + 4 + byteCount;
+            var resultLen = checked((isNullable ? 1 : 0) + 4 + byteCount);
             var result = new byte[resultLen];
             int off = 0;
             if (isNullable) result[off++] = 1;
@@ -472,7 +474,9 @@ public static class BmwJsonReader
         var valEnd = SkipJsonValue(json, pos);
         var raw = json[pos..valEnd];
         var rawLen = raw.Length;
-        var res = new byte[(isNullable ? 1 : 0) + 4 + rawLen];
+        if (rawLen < 0 || rawLen > 100_000_000)
+            throw new InvalidOperationException("String length exceeds limit");
+        var res = new byte[checked((isNullable ? 1 : 0) + 4 + rawLen)];
         int o = 0;
         if (isNullable) res[o++] = 1;
         BinaryPrimitives.WriteInt32LittleEndian(res.AsSpan(o), rawLen);
