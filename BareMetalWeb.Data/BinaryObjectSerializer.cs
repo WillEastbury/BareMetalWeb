@@ -1274,25 +1274,15 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         KnownTypes[t.Name] = t;
     }
 
-    // Type resolution uses pre-registered KnownTypes map (O(1)) with Type.GetType fallback.
-    // AppDomain.GetAssemblies() assembly scanning has been removed.
-    [RequiresUnreferencedCode("Assembly scanning for type resolution is not AOT-safe.")]
+    // Type resolution uses pre-registered KnownTypes map (O(1), AOT-safe).
     private static Type ResolveType(string typeName)
     {
-        // Fast path: check pre-registered known types first (O(1), AOT-safe)
+        // Fast path: check pre-registered known types (O(1), AOT-safe)
         if (KnownTypes.TryGetValue(typeName, out var known))
             return known;
 
-        // Fallback: Type.GetType handles simple names and forwarded types
-        var resolved = Type.GetType(typeName, throwOnError: false, ignoreCase: false);
-        if (resolved != null)
-        {
-            KnownTypes.TryAdd(typeName, resolved);
-            return resolved;
-        }
-
-        // Last resort: check the declaring assembly
-        resolved = typeof(BinaryObjectSerializer).Assembly.GetType(typeName, throwOnError: false, ignoreCase: false);
+        // Check the declaring assembly as a fallback (no dynamic assembly scanning)
+        var resolved = typeof(BinaryObjectSerializer).Assembly.GetType(typeName, throwOnError: false, ignoreCase: false);
         if (resolved != null)
         {
             KnownTypes.TryAdd(typeName, resolved);
@@ -1919,7 +1909,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return ComputeBlittableSize(type);
     }
 
-    private static int ComputeBlittableSize(Type type)
+    private static int ComputeBlittableSize([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields)] Type type)
     {
         if (type.IsPrimitive) return GetPrimitiveSize(type);
 
@@ -1943,7 +1933,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return Marshal.SizeOf(type); // fallback for exotic primitives
     }
 
-    private static Action<object?, byte[]> CreateBlittableWrite(Type type)
+    private static Action<object?, byte[]> CreateBlittableWrite([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields)] Type type)
     {
         if (!IsBlittable(type))
             throw new NotSupportedException($"Type '{type.FullName}' is not blittable.");
@@ -1973,7 +1963,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         };
     }
 
-    private static void WritePrimitiveOrStruct(byte[] buffer, ref int offset, Type fieldType, object? value)
+    private static void WritePrimitiveOrStruct(byte[] buffer, ref int offset, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields)] Type fieldType, object? value)
     {
         if (fieldType == typeof(byte))   { buffer[offset++] = (byte)(value ?? (byte)0); return; }
         if (fieldType == typeof(sbyte))  { buffer[offset++] = unchecked((byte)(sbyte)(value ?? (sbyte)0)); return; }
@@ -2001,7 +1991,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             WritePrimitiveOrStruct(buffer, ref offset, nestedFields[i].FieldType, nestedFields[i].GetValue(value));
     }
 
-    private static Func<byte[], object> CreateBlittableRead(Type type)
+    private static Func<byte[], object> CreateBlittableRead([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
     {
         if (!IsBlittable(type))
             throw new NotSupportedException($"Type '{type.FullName}' is not blittable.");
@@ -2022,7 +2012,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         };
     }
 
-    private static void ReadPrimitiveOrStruct(byte[] buffer, ref int offset, Type type, ref object instance, FieldInfo[] fields)
+    private static void ReadPrimitiveOrStruct(byte[] buffer, ref int offset, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type, ref object instance, FieldInfo[] fields)
     {
         for (int i = 0; i < fields.Length; i++)
         {
