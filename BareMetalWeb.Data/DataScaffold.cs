@@ -196,11 +196,10 @@ public static class DataScaffold
     }
 
     /// <summary>Compile Expression.New for a type and return a cached factory delegate (no Activator.CreateInstance).</summary>
-    private static Func<object> CompileFactory(Type type)
+    private static Func<object> CompileFactory([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
     {
-        var newExpr = Expression.New(type);
-        var lambda = Expression.Lambda<Func<object>>(Expression.Convert(newExpr, typeof(object)));
-        return lambda.Compile();
+        // AOT-safe: use Activator.CreateInstance instead of Expression.Lambda.Compile()
+        return () => Activator.CreateInstance(type)!;
     }
 
     /// <summary>
