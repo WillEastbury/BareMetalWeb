@@ -543,6 +543,12 @@ public sealed class WalStore : IDisposable
         string tmpPath = segPath + ".compact";
 
         // Step 1: Snapshot HeadMap — find all walKeys whose HEAD is in targetSegment.
+        // #1166: CopyArrays is intentionally called outside the write lock for
+        // throughput.  Safety is guaranteed by the segment-ID guard in Step 4:
+        // SetHead (BatchSetHeads) only updates entries whose current head still
+        // points to this segment.  If a concurrent write moved the head to a
+        // newer segment between the snapshot and the lock acquisition, the stale
+        // entry is simply skipped, so no data is lost.
         HeadMap.CopyArrays(out ulong[] allKeys, out ulong[] allHeads);
 
         int matchCount = 0;
@@ -580,6 +586,11 @@ public sealed class WalStore : IDisposable
 
             for (int i = 0; i < matchCount; i++)
             {
+                // #1168: Delete tombstones are excluded here so compacted segments
+                // contain only live upserts.  The HeadMap segment-ID guard in
+                // Step 4 ensures a tombstone from an older segment can never
+                // override a newer upsert whose head already moved to a different
+                // segment — the HeadMap is authoritative.
                 if (TryReadRawOpFromStream(srcFile, targetOffsets[i], targetWalKeys[i], out WalOp rawOp)
                     && rawOp.OpType != WalConstants.OpTypeDeleteTombstone)
                 {
