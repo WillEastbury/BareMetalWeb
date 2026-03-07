@@ -339,10 +339,27 @@
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sessionName: sessionName, designJson: JSON.stringify(buildJson()), isOpen: true })
-            }).then(function (r) { return r.json(); }).then(function (data) {
+            }).then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            }).then(function (data) {
                 var code = data.shareCode || data.ShareCode || '';
                 var status = document.getElementById('ed-camel-status');
-                if (status) status.innerHTML = '<div class="alert alert-success py-1 px-2 small">Session created! Share code: <strong>' + code + '</strong> <button class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="navigator.clipboard.writeText(\'' + code + '\')">Copy</button></div>';
+                if (status) {
+                    var div = document.createElement('div');
+                    div.className = 'alert alert-success py-1 px-2 small';
+                    div.textContent = 'Session created! Share code: ';
+                    var strong = document.createElement('strong');
+                    strong.textContent = code;
+                    div.appendChild(strong);
+                    div.appendChild(document.createTextNode(' '));
+                    var btn = document.createElement('button');
+                    btn.className = 'btn btn-sm btn-outline-secondary py-0 px-1';
+                    btn.textContent = 'Copy';
+                    btn.onclick = function() { navigator.clipboard.writeText(code); };
+                    div.appendChild(btn);
+                    status.replaceChildren(div);
+                }
                 camelSessionCode = code;
             }).catch(function (e) {
                 var status = document.getElementById('ed-camel-status');
@@ -355,7 +372,10 @@
             var code = (document.getElementById('ed-camel-code') || {}).value;
             if (!code) { alert('Enter a share code'); return; }
             fetch('/api/_binary/design-sessions?f_shareCode=' + encodeURIComponent(code))
-                .then(function (r) { return r.json(); })
+                .then(function (r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.json();
+                })
                 .then(function (data) {
                     var sessions = data.items || data;
                     if (!sessions || sessions.length === 0) {

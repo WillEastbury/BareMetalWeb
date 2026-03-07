@@ -134,15 +134,18 @@
         }
 
         fetch(url, { credentials: 'same-origin' })
-            .then(function(r) { return r.json(); })
+            .then(function(r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
             .then(function(data) {
-                var rows = (data && data.data) ? data.data : [];
+                var rows = (data && Array.isArray(data.data)) ? data.data : [];
                 if (rows.length === 0) {
                     resultsEl.innerHTML = '<p class="text-muted small">No results found.</p>';
                     return;
                 }
                 // Build a simple table from the results
-                var keys = Object.keys(rows[0]);
+                var keys = Object.keys(rows[0] || {});
                 var html = '<table class="table table-sm table-hover table-striped bm-table"><thead><tr><th></th>';
                 keys.forEach(function(k) {
                     html += '<th>' + escapeHtml(k) + '</th>';
