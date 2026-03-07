@@ -1,5 +1,4 @@
 using BareMetalWeb.Core;
-using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
 
@@ -60,11 +59,6 @@ public static class MetadataSeeder
             cancellationToken.ThrowIfCancellationRequested();
 
             // Skip DataRecord instances — they are runtime-defined, not code-first.
-            if (meta.Type == typeof(DataRecord)) continue;
-
-            // Only seed types that are explicitly annotated with [DataEntity].
-            // All entities in DataScaffold are registered because they have this attribute,
-            // but DataRecord instances are runtime-defined and also present.
             if (meta.Type == typeof(DataRecord)) continue;
 
             var slug = meta.Slug;

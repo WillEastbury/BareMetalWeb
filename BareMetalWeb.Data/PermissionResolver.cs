@@ -148,6 +148,15 @@ public static class PermissionResolver
         };
     }
 
+    /// <summary>
+    /// Recursively discovers all security groups that a principal belongs to,
+    /// including groups reached via nested group membership (transitive closure).
+    /// Uses iterative deepening up to 10 levels to detect and avoid cycles.
+    /// </summary>
+    /// <param name="principalKey">The key of the user/principal to resolve groups for.</param>
+    /// <param name="allGroups">All security group records loaded from the data store.</param>
+    /// <param name="result">Accumulates discovered group keys; also used for cycle detection.</param>
+    /// <param name="depth">Current recursion depth (capped at 10 to prevent infinite loops).</param>
     private static void FindMemberGroups(
         uint principalKey, IReadOnlyList<BaseDataObject> allGroups,
         HashSet<uint> result, int depth)

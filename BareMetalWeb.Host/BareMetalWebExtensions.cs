@@ -46,8 +46,10 @@ public static class BareMetalWebExtensions
 
         // Initialize binary wire API with the same signing key
         if (serializer is BinaryObjectSerializer bos)
+        {
             BinaryApiHandlers.Initialize(bos.GetSigningKeyCopy(), logger);
-            LookupApiHandlers.Init(logger);
+        }
+        LookupApiHandlers.Init(logger);
 
         // Register system entities explicitly (AOT-safe, no assembly scanning).
         DataScaffold.RegisterEntity<AppSetting>();

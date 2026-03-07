@@ -2,7 +2,6 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Core;
-using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
@@ -83,7 +82,15 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
         using (var reader = new System.IO.StreamReader(context.HttpRequest.Body))
             body = await reader.ReadToEndAsync();
         var deviceCode = "";
-        try { var doc = JsonDocument.Parse(body); deviceCode = doc.RootElement.GetProperty("device_code").GetString() ?? ""; } catch { }
+        try
+        {
+            var doc = JsonDocument.Parse(body);
+            deviceCode = doc.RootElement.GetProperty("device_code").GetString() ?? "";
+        }
+        catch (Exception)
+        {
+            // Malformed JSON or missing property — deviceCode stays empty, handled below
+        }
         if (string.IsNullOrEmpty(deviceCode))
         {
             context.Response.StatusCode = 400;
