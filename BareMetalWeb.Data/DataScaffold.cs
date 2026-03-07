@@ -166,6 +166,8 @@ public static class DataScaffold
 
     // Max number of entries in LookupCache before expired entries are pruned.
     private const int LookupCacheMaxSize = 500;
+    // Hard upper bound — if the cache exceeds this after pruning, clear it entirely.
+    private const int MaxLookupCacheEntries = 10_000;
     // Minimum ticks between successive LookupCache prune sweeps (60 seconds).
     private static readonly long LookupCachePruneCooldownTicks = TimeSpan.FromSeconds(60).Ticks;
     private static long _lastLookupCachePruneTicks;
@@ -2205,6 +2207,11 @@ public static class DataScaffold
             if (kv.Value.ExpiresUtc <= now)
                 LookupCache.TryRemove(kv.Key, out _);
         }
+
+        // Hard size limit — if still over capacity after expiry pruning, clear entirely.
+        // The cache will repopulate on demand.
+        if (LookupCache.Count > MaxLookupCacheEntries)
+            LookupCache.Clear();
     }
 
     /// <summary>
