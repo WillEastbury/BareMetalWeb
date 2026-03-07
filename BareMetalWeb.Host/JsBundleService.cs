@@ -18,7 +18,7 @@ namespace BareMetalWeb.Host;
 public static class JsBundleService
 {
     /// <summary>
-    /// JS files to include in the SSR bundle, in dependency order.
+    /// JS files to include in the legacy bundle, in dependency order.
     /// bootstrap.bundle.min.js must be first so Bootstrap is available to all subsequent scripts.
     /// </summary>
     public static readonly string[] BundleFileOrder = new[]
@@ -57,7 +57,7 @@ public static class JsBundleService
         "agent-panel.js"
     };
 
-    /// <summary>The route path at which the SSR bundle is served.</summary>
+    /// <summary>The route path at which the legacy bundle is served.</summary>
     public const string BundlePath = "/static/js/bundle.js";
 
     /// <summary>The route path at which the VNext bundle is served.</summary>
@@ -78,7 +78,7 @@ public static class JsBundleService
     private static readonly SearchValues<char> s_jsSpecialChars = SearchValues.Create("\r\n\"'`/");
 
     /// <summary>
-    /// Builds and caches the SSR and VNext JS bundles from files in <paramref name="jsDirectory"/>.
+    /// Builds and caches the legacy and VNext JS bundles from files in <paramref name="jsDirectory"/>.
     /// Should be called once at application startup.
     /// </summary>
     public static void BuildBundle(string jsDirectory)

@@ -181,7 +181,7 @@ METADATA-DRIVEN ARCHITECTURE (CRITICAL — read before every change)
 - `docs/QUERY_INDEX_ARCHITECTURE.md` — Query paths, index usage, caching, performance characteristics
 - `docs/PROXY.md` — Proxy configuration, load balancing, affinity cookies
 - `docs/architecture/data-layer.md` — Storage stack, WAL, serialization, idMap
-- `docs/architecture/rendering.md` — SSR, VNext, screen chrome, template syntax
+- `docs/architecture/rendering.md` — VNext SPA, screen chrome, template syntax
 - `docs/architecture/system-overview.md` — Component diagram, route divergence
 
 **A session is considered incomplete if code was changed but affected docs were not updated.**
@@ -240,7 +240,7 @@ When making code changes, you **MUST** update the corresponding architecture doc
 - `data-layer.md` — Storage stack, entity registration, CRUD lifecycle, binary serializer, storage layout
 - `indexing.md` — Search index types, file format, lookup mechanism
 - `auth.md` — Login flow, session validation, permission model, API keys
-- `rendering.md` — SSR pipeline, VNext SPA, JS libraries, view types
+- `rendering.md` — VNext SPA pipeline, JS libraries, view types
 
 **Rule:** If you add a new class, endpoint, or subsystem, ask yourself: "Does any architecture doc describe this area?" If yes, update it. If no doc exists for the area, create one in `docs/architecture/`.
 
