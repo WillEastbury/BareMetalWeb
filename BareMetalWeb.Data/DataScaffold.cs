@@ -3744,25 +3744,43 @@ public static class DataScaffold
             if (!prop.CanRead || !prop.CanWrite)
                 continue;
 
+            // Batch-read all custom attributes once per property (avoids 10+ individual reflection calls)
+            var allAttrs = prop.GetCustomAttributes(false);
+            DataFieldAttribute? fieldAttribute = null;
+            FileFieldAttribute? fileFieldAttribute = null;
+            ImageFieldAttribute? imageFieldAttribute = null;
+            DataLookupAttribute? lookupAttribute = null;
+            IdGenerationAttribute? idGenAttribute = null;
+            ComputedFieldAttribute? computedAttribute = null;
+            CalculatedFieldAttribute? calculatedAttribute = null;
+            DataIndexAttribute? dataIndexAttribute = null;
+            RelatedDocumentAttribute? relatedDocAttribute = null;
+            SingletonFlagAttribute? singletonFlagAttribute = null;
+            for (int j = 0; j < allAttrs.Length; j++)
+            {
+                switch (allAttrs[j])
+                {
+                    case DataFieldAttribute a: fieldAttribute = a; break;
+                    case FileFieldAttribute a: fileFieldAttribute = a; break;
+                    case ImageFieldAttribute a: imageFieldAttribute = a; break;
+                    case DataLookupAttribute a: lookupAttribute = a; break;
+                    case IdGenerationAttribute a: idGenAttribute = a; break;
+                    case ComputedFieldAttribute a: computedAttribute = a; break;
+                    case CalculatedFieldAttribute a: calculatedAttribute = a; break;
+                    case DataIndexAttribute a: dataIndexAttribute = a; break;
+                    case RelatedDocumentAttribute a: relatedDocAttribute = a; break;
+                    case SingletonFlagAttribute a: singletonFlagAttribute = a; break;
+                }
+            }
+
             if (IsCoreDataObjectProperty(prop))
             {
                 // Allow core properties if they have DataField or IdGeneration attributes
-                var hasDataFieldAttr = prop.GetCustomAttribute<DataFieldAttribute>() != null;
-                var hasIdGenAttr = prop.GetCustomAttribute<IdGenerationAttribute>() != null;
-                if (!hasDataFieldAttr && !hasIdGenAttr)
+                if (fieldAttribute == null && idGenAttribute == null)
                     continue;
             }
 
-            var fieldAttribute = prop.GetCustomAttribute<DataFieldAttribute>();
-            var fileFieldAttribute = prop.GetCustomAttribute<FileFieldAttribute>();
-            var imageFieldAttribute = prop.GetCustomAttribute<ImageFieldAttribute>();
-            var lookupAttribute = prop.GetCustomAttribute<DataLookupAttribute>();
-            var idGenAttribute = prop.GetCustomAttribute<IdGenerationAttribute>();
-            var computedAttribute = prop.GetCustomAttribute<ComputedFieldAttribute>();
-            var calculatedAttribute = prop.GetCustomAttribute<CalculatedFieldAttribute>();
-            var dataIndexAttribute = prop.GetCustomAttribute<DataIndexAttribute>();
-            var relatedDocAttribute = prop.GetCustomAttribute<RelatedDocumentAttribute>();
-            var hasSingletonFlag = prop.PropertyType == typeof(bool) && prop.GetCustomAttribute<SingletonFlagAttribute>() != null;
+            var hasSingletonFlag = prop.PropertyType == typeof(bool) && singletonFlagAttribute != null;
             if (fieldAttribute == null && imageFieldAttribute == null && fileFieldAttribute == null)
                 continue;
 
