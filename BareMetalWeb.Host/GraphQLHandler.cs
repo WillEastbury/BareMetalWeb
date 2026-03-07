@@ -144,9 +144,17 @@ public static class GraphQLHandler
             return;
         }
 
-        // Introspection shortcut
+        // Introspection shortcut — require authentication to prevent schema disclosure
         if (queryText.Contains("__schema"))
         {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted);
+            if (user == null)
+            {
+                context.Response.StatusCode = 401;
+                await context.Response.WriteAsync("{\"errors\":[{\"message\":\"Authentication required for introspection.\"}]}");
+                return;
+            }
+
             await using var writer = new Utf8JsonWriter(context.Response.Body);
             writer.WriteStartObject();
             writer.WritePropertyName("data");
@@ -174,7 +182,7 @@ public static class GraphQLHandler
             writer.WriteStartObject();
             writer.WriteStartArray("errors");
             writer.WriteStartObject();
-            writer.WriteString("message", ex.Message);
+            writer.WriteString("message", "An error occurred processing the query.");
             writer.WriteEndObject();
             writer.WriteEndArray();
             writer.WriteEndObject();

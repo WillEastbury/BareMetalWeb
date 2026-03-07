@@ -391,11 +391,13 @@ public static class RouteRegistrationExtensions
         IPageInfoFactory pageInfoFactory)
     {
         // More specific routes must be registered first to avoid {id} matching literal segments
-        host.RegisterRoute("GET /api/_lookup/{type}/_field/{id}/{fieldName}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityFieldHandler));
-        host.RegisterRoute("GET /api/_lookup/{type}/_aggregate", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.AggregateEntitiesHandler));
-        host.RegisterRoute("POST /api/_lookup/{type}/_batch", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.BatchGetEntitiesHandler));
-        host.RegisterRoute("GET /api/_lookup/{type}/{id}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.GetEntityByIdHandler));
-        host.RegisterRoute("GET /api/_lookup/{type}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), LookupApiHandlers.QueryEntitiesHandler));
+        // Require authentication at route level; entity-level permissions are enforced in each handler via HasEntityPermissionAsync.
+        var lookupAuth = pageInfoFactory.RawPage("Authenticated", false);
+        host.RegisterRoute("GET /api/_lookup/{type}/_field/{id}/{fieldName}", new RouteHandlerData(lookupAuth, LookupApiHandlers.GetEntityFieldHandler));
+        host.RegisterRoute("GET /api/_lookup/{type}/_aggregate", new RouteHandlerData(lookupAuth, LookupApiHandlers.AggregateEntitiesHandler));
+        host.RegisterRoute("POST /api/_lookup/{type}/_batch", new RouteHandlerData(lookupAuth, LookupApiHandlers.BatchGetEntitiesHandler));
+        host.RegisterRoute("GET /api/_lookup/{type}/{id}", new RouteHandlerData(lookupAuth, LookupApiHandlers.GetEntityByIdHandler));
+        host.RegisterRoute("GET /api/_lookup/{type}", new RouteHandlerData(lookupAuth, LookupApiHandlers.QueryEntitiesHandler));
     }
 
     /// <summary>
@@ -409,6 +411,7 @@ public static class RouteRegistrationExtensions
         IHtmlTemplate mainTemplate)
     {
         var raw = pageInfoFactory.RawPage("Public", false);
+        var adminOnly = pageInfoFactory.RawPage("admin", false);
         host.RegisterRoute("GET /api/_binary/_key", new RouteHandlerData(raw, BinaryApiHandlers.KeyHandler));
         host.RegisterRoute("GET /api/_binary/{type}/_schema", new RouteHandlerData(raw, BinaryApiHandlers.SchemaHandler));
         host.RegisterRoute("GET /api/_binary/{type}/_aggregate", new RouteHandlerData(raw, BinaryApiHandlers.AggregateHandler));
@@ -417,9 +420,8 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/_binary/{type}/_layout", new RouteHandlerData(raw, DeltaApiHandlers.LayoutHandler));
         host.RegisterRoute("GET /api/_binary/{type}/_actions", new RouteHandlerData(raw, ActionApiHandlers.ListActionsHandler));
         host.RegisterRoute("POST /api/_binary/{type}/_action/{actionId}", new RouteHandlerData(raw, ActionApiHandlers.ExecuteActionHandler));
-        host.RegisterRoute("GET /api/_metrics", new RouteHandlerData(raw, EngineMetricsHandler));
-        host.RegisterRoute("POST /api/graphql", new RouteHandlerData(raw, GraphQLHandler.HandleAsync));
-        var adminOnly = pageInfoFactory.RawPage("admin", false);
+        host.RegisterRoute("GET /api/_metrics", new RouteHandlerData(adminOnly, EngineMetricsHandler));
+        host.RegisterRoute("POST /api/graphql", new RouteHandlerData(pageInfoFactory.RawPage("Authenticated", false), GraphQLHandler.HandleAsync));
         host.RegisterRoute("GET /api/_cluster", new RouteHandlerData(adminOnly, ClusterApiHandlers.ClusterStatusHandler));
         host.RegisterRoute("GET /api/_cluster/replicate", new RouteHandlerData(adminOnly, ClusterApiHandlers.ReplicationHandler));
         host.RegisterRoute("POST /api/_cluster/stepdown", new RouteHandlerData(adminOnly, ClusterApiHandlers.StepDownHandler));
@@ -985,7 +987,7 @@ public static class RouteRegistrationExtensions
                     await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
                     {
                         w.WriteStartObject();
-                        w.WriteString("error", ex.Message);
+                        w.WriteString("error", "Invalid request.");
                         w.WriteEndObject();
                     }
                     return;
@@ -1042,7 +1044,7 @@ public static class RouteRegistrationExtensions
                     await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
                     {
                         w.WriteStartObject();
-                        w.WriteString("error", ex.Message);
+                        w.WriteString("error", "Invalid request.");
                         w.WriteEndObject();
                     }
                     return;
@@ -1674,7 +1676,7 @@ public static class RouteRegistrationExtensions
                     await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
                     {
                         w.WriteStartObject();
-                        w.WriteString("error", ex.Message);
+                        w.WriteString("error", "An internal error occurred.");
                         w.WriteEndObject();
                     }
                     return;
@@ -2758,7 +2760,7 @@ public static class RouteRegistrationExtensions
                     await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
                     {
                         w.WriteStartObject();
-                        w.WriteString("error", ex.Message);
+                        w.WriteString("error", "An internal error occurred.");
                         w.WriteEndObject();
                     }
                     return;
@@ -2854,7 +2856,7 @@ public static class RouteRegistrationExtensions
                     await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
                     {
                         w.WriteStartObject();
-                        w.WriteString("error", ex.Message);
+                        w.WriteString("error", "An internal error occurred.");
                         w.WriteEndObject();
                     }
                     return;

@@ -42,6 +42,13 @@ public static class VectorApiHandlers
 
         var entity = root.GetProperty("entity").GetString() ?? "";
         var field = root.GetProperty("field").GetString() ?? "";
+
+        if (!await HasEntityPermissionAsync(context, entity, context.RequestAborted))
+        {
+            context.Response.StatusCode = 403;
+            await context.Response.WriteAsync("{\"error\":\"Access denied.\"}");
+            return;
+        }
         var top = root.TryGetProperty("top", out var topEl) ? topEl.GetInt32() : 10;
 
         float[] vector;
@@ -85,6 +92,12 @@ public static class VectorApiHandlers
         var field = root.GetProperty("field").GetString() ?? "";
         var objectId = root.GetProperty("objectId").GetUInt32();
 
+        if (!await HasEntityPermissionAsync(context, entity, context.RequestAborted))
+        {
+            context.Response.StatusCode = 403;
+            return;
+        }
+
         float[] embedding;
         if (root.TryGetProperty("embedding", out var embEl) && embEl.ValueKind == JsonValueKind.Array)
         {
@@ -115,6 +128,12 @@ public static class VectorApiHandlers
         var field = root.GetProperty("field").GetString() ?? "";
         var objectId = root.GetProperty("objectId").GetUInt32();
 
+        if (!await HasEntityPermissionAsync(context, entity, context.RequestAborted))
+        {
+            context.Response.StatusCode = 403;
+            return;
+        }
+
         _manager.Delete(entity, field, objectId);
         context.Response.StatusCode = 204;
     }
@@ -123,6 +142,14 @@ public static class VectorApiHandlers
     public static async ValueTask ListIndexesHandler(BmwContext context)
     {
         if (_manager == null) { context.Response.StatusCode = 503; return; }
+
+        var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted);
+        if (user == null)
+        {
+            context.Response.StatusCode = 401;
+            await context.Response.WriteAsync("{\"error\":\"Authentication required.\"}");
+            return;
+        }
 
         var rawDefs = _manager.GetDefinitions();
         var defs = new List<Dictionary<string, object?>>();
@@ -140,6 +167,43 @@ public static class VectorApiHandlers
         }
 
         await JsonWriterHelper.WriteResponseAsync(context.Response, defs);
+    }
+
+    private static async ValueTask<bool> HasEntityPermissionAsync(BmwContext context, string entitySlug, CancellationToken ct)
+    {
+        if (!DataScaffold.TryGetEntity(entitySlug, out var meta))
+            return true;
+
+        var permissionsNeeded = meta.Permissions?.Trim();
+        if (string.IsNullOrWhiteSpace(permissionsNeeded) ||
+            string.Equals(permissionsNeeded, "Public", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        var user = await UserAuth.GetRequestUserAsync(context, ct);
+        if (user == null)
+            return string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase);
+
+        if (string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var userPerms = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        var altLookup = userPerms.GetAlternateLookup<ReadOnlySpan<char>>();
+        var remaining = permissionsNeeded.AsSpan();
+        while (remaining.Length > 0)
+        {
+            int idx = remaining.IndexOf(',');
+            ReadOnlySpan<char> segment;
+            if (idx < 0) { segment = remaining; remaining = default; }
+            else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
+            var trimmed = segment.Trim();
+            if (trimmed.IsEmpty) continue;
+            if (!altLookup.Contains(trimmed))
+                return false;
+        }
+        return true;
     }
 
     /// <summary>POST /api/vector/register — register a new vector index.</summary>

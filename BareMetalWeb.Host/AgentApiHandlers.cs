@@ -32,7 +32,7 @@ public static class AgentApiHandlers
         }
         catch (Exception ex)
         {
-            reply = $"Error: {ex.Message}";
+            reply = "Sorry, an error occurred processing your request.";
         }
 
         await JsonWriterHelper.WriteResponseAsync(context.Response, new Dictionary<string, object?> { ["reply"] = reply });
