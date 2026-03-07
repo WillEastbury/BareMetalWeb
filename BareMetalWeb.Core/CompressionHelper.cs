@@ -78,20 +78,20 @@ public static class CompressionHelper
         => SelectEncoding(context.HttpRequest.Headers.AcceptEncoding.ToString());
 
     /// <summary>Compresses <paramref name="data"/> using Brotli at Fastest level.</summary>
-    public static byte[] CompressBrotli(byte[] data)
+    public static byte[] CompressBrotli(ReadOnlySpan<byte> data)
     {
         using var ms = new MemoryStream(data.Length);
         using (var bs = new BrotliStream(ms, CompressionLevel.Fastest, leaveOpen: true))
-            bs.Write(data, 0, data.Length);
+            bs.Write(data);
         return ms.ToArray();
     }
 
     /// <summary>Compresses <paramref name="data"/> using GZip at Fastest level.</summary>
-    public static byte[] CompressGzip(byte[] data)
+    public static byte[] CompressGzip(ReadOnlySpan<byte> data)
     {
         using var ms = new MemoryStream(data.Length);
         using (var gz = new GZipStream(ms, CompressionLevel.Fastest, leaveOpen: true))
-            gz.Write(data, 0, data.Length);
+            gz.Write(data);
         return ms.ToArray();
     }
 
