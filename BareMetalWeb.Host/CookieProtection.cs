@@ -51,13 +51,13 @@ public static class CookieProtection
         {
             payload = new byte[1 + compressed.Length];
             payload[0] = VersionDeflate;
-            compressed.CopyTo(payload, 1);
+            compressed.AsSpan().CopyTo(payload.AsSpan(1));
         }
         else
         {
             payload = new byte[1 + plaintext.Length];
             payload[0] = VersionPlain;
-            plaintext.CopyTo(payload, 1);
+            plaintext.AsSpan().CopyTo(payload.AsSpan(1));
         }
 
         var encrypted = Encryption.Value.Encrypt(payload);
@@ -127,11 +127,11 @@ public static class CookieProtection
         return Encoding.UTF8.GetString(decrypted);
     }
 
-    private static byte[] DeflateCompress(byte[] data)
+    private static byte[] DeflateCompress(ReadOnlySpan<byte> data)
     {
         using var output = new MemoryStream();
         using (var deflate = new DeflateStream(output, CompressionLevel.Optimal, leaveOpen: true))
-            deflate.Write(data, 0, data.Length);
+            deflate.Write(data);
         return output.ToArray();
     }
 
@@ -145,10 +145,7 @@ public static class CookieProtection
     }
 
     private static byte[] ComputeHmac(byte[] payload)
-    {
-        using var hmac = new HMACSHA256(HmacKey.Value);
-        return hmac.ComputeHash(payload);
-    }
+        => HMACSHA256.HashData(HmacKey.Value, payload);
 
     private static bool FixedTimeEquals(byte[] left, byte[] right)
     {
@@ -191,16 +188,17 @@ public static class CookieProtection
 
     private static byte[] Base64UrlDecode(string input)
     {
-        var base64 = input.Replace('-', '+').Replace('_', '/');
-        switch (base64.Length % 4)
-        {
-            case 2:
-                base64 += "==";
-                break;
-            case 3:
-                base64 += "=";
-                break;
-        }
-        return Convert.FromBase64String(base64);
+        int padLen = (4 - input.Length % 4) % 4;
+        int totalLen = input.Length + padLen;
+        Span<char> base64 = totalLen <= 256 ? stackalloc char[totalLen] : new char[totalLen];
+        for (int i = 0; i < input.Length; i++)
+            base64[i] = input[i] switch { '-' => '+', '_' => '/', _ => input[i] };
+        for (int i = 0; i < padLen; i++)
+            base64[input.Length + i] = '=';
+
+        Span<byte> buffer = new byte[(totalLen * 3 + 3) / 4];
+        if (!Convert.TryFromBase64Chars(base64, buffer, out int written))
+            throw new FormatException("Invalid base64url input.");
+        return buffer[..written].ToArray();
     }
 }
