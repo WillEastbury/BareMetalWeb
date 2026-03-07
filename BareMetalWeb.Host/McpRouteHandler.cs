@@ -29,6 +29,11 @@ internal static class McpRouteHandler
     private const string ProtocolVersion = "2024-11-05";
     private const string ServerName = "BareMetalWeb";
 
+    private static volatile object? _cachedToolsList;
+
+    /// <summary>Invalidates the cached tools list so the next request rebuilds it.</summary>
+    internal static void InvalidateToolsCache() => _cachedToolsList = null;
+
     // ── Entry point ───────────────────────────────────────────────────────────
 
     internal static async ValueTask HandleAsync(BmwContext context)
@@ -108,7 +113,7 @@ internal static class McpRouteHandler
             {
                 "initialize" => BuildInitializeResult(),
                 "ping" => (object)new { },
-                "tools/list" => BuildToolsList(),
+                "tools/list" => GetOrBuildToolsList(),
                 "tools/call" => await ExecuteToolCallAsync(@params, context.RequestAborted).ConfigureAwait(false),
                 "resources/list" => new { resources = Array.Empty<object>() },
                 "prompts/list" => new { prompts = Array.Empty<object>() },
@@ -149,6 +154,15 @@ internal static class McpRouteHandler
             },
             serverInfo = new { name = ServerName, version = serverVersion }
         };
+    }
+
+    private static object GetOrBuildToolsList()
+    {
+        var cached = _cachedToolsList;
+        if (cached != null) return cached;
+        var tools = BuildToolsList();
+        _cachedToolsList = tools;
+        return tools;
     }
 
     private static object BuildToolsList()
