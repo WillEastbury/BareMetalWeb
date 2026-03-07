@@ -319,7 +319,8 @@ public static class SimdByteScanner
         int length = data.Length;
         if (length == 0) return -1;
 
-        var vecs = MemoryMarshal.Cast<byte, Vector128<byte>>(data);
+        int vectorizableLength = length & ~0xF; // Round down to 16-byte boundary
+        var vecs = MemoryMarshal.Cast<byte, Vector128<byte>>(data[..vectorizableLength]);
         Vector128<byte> needle = Vector128.Create(target);
 
         for (int k = 0; k < vecs.Length; k++)
@@ -338,7 +339,8 @@ public static class SimdByteScanner
             }
         }
 
-        for (int i = vecs.Length * 16; i < length; i++)
+        // Process remaining bytes beyond the 16-byte-aligned region
+        for (int i = vectorizableLength; i < length; i++)
         {
             if (data[i] == target) return i;
         }
@@ -351,7 +353,8 @@ public static class SimdByteScanner
         int length = data.Length;
         if (length == 0) return -1;
 
-        var vecs = MemoryMarshal.Cast<byte, Vector128<byte>>(data);
+        int vectorizableLength = length & ~0xF; // Round down to 16-byte boundary
+        var vecs = MemoryMarshal.Cast<byte, Vector128<byte>>(data[..vectorizableLength]);
         Vector128<byte> needleA = Vector128.Create(a);
         Vector128<byte> needleB = Vector128.Create(b);
 
@@ -373,7 +376,8 @@ public static class SimdByteScanner
             }
         }
 
-        for (int i = vecs.Length * 16; i < length; i++)
+        // Process remaining bytes beyond the 16-byte-aligned region
+        for (int i = vectorizableLength; i < length; i++)
         {
             byte v = data[i];
             if (v == a || v == b) return i;
@@ -388,7 +392,8 @@ public static class SimdByteScanner
         if (length == 0) return 0;
 
         int count = 0;
-        var vecs = MemoryMarshal.Cast<byte, Vector128<byte>>(data);
+        int vectorizableLength = length & ~0xF; // Round down to 16-byte boundary
+        var vecs = MemoryMarshal.Cast<byte, Vector128<byte>>(data[..vectorizableLength]);
         Vector128<byte> needle = Vector128.Create(target);
         // Each matching lane is 0xFF. We use subtraction from a zero accumulator:
         // 0 - 0xFF = wraps, so instead we just sum each chunk's scalar count.
@@ -405,7 +410,8 @@ public static class SimdByteScanner
             count += laneSum / 255;
         }
 
-        for (int i = vecs.Length * 16; i < length; i++)
+        // Process remaining bytes beyond the 16-byte-aligned region
+        for (int i = vectorizableLength; i < length; i++)
         {
             if (data[i] == target) count++;
         }
