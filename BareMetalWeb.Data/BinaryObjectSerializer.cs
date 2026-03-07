@@ -1175,7 +1175,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return new MemberAccessor(field.Name, AssumePublicMembers(field.FieldType), getter, setter);
     }
 
-    // Violation #008 fixed: Use compiled Expression.Lambda delegates via PropertyAccessorFactory
+    // Property accessors use PropertyInfo.GetValue/SetValue (AOT-safe).
     // instead of PropertyInfo.GetValue/SetValue (~50-200ns → ~1ns per access).
     private static Func<object, object?> CreatePropertyGetter(PropertyInfo property)
     {
@@ -1320,10 +1320,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 
         var factory = InstanceFactory.GetOrAdd(type, static t =>
         {
-            var ctor = System.Linq.Expressions.Expression.New(t);
-            return System.Linq.Expressions.Expression.Lambda<Func<object>>(
-                System.Linq.Expressions.Expression.Convert(ctor, typeof(object))
-            ).Compile();
+            return () => Activator.CreateInstance(t)!;
         });
         return factory();
     }
@@ -1535,10 +1532,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             var listType = type;
             var listFactory = InstanceFactory.GetOrAdd(listType, static t =>
             {
-                var ctor = System.Linq.Expressions.Expression.New(t);
-                return System.Linq.Expressions.Expression.Lambda<Func<object>>(
-                    System.Linq.Expressions.Expression.Convert(ctor, typeof(object))
-                ).Compile();
+                return () => Activator.CreateInstance(t)!;
             });
             shape.ListFactory = _ => (System.Collections.IList)listFactory();
             return shape;
@@ -1552,10 +1546,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             var dictType = type;
             var dictFactory = InstanceFactory.GetOrAdd(dictType, static t =>
             {
-                var ctor = System.Linq.Expressions.Expression.New(t);
-                return System.Linq.Expressions.Expression.Lambda<Func<object>>(
-                    System.Linq.Expressions.Expression.Convert(ctor, typeof(object))
-                ).Compile();
+                return () => Activator.CreateInstance(t)!;
             });
             shape.DictionaryFactory = _ => (System.Collections.IDictionary)dictFactory();
             return shape;
