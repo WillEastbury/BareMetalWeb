@@ -28,6 +28,8 @@ public static class MetadataExtractor
         "EntityTypeName"
     };
 
+    private static readonly NullabilityInfoContext _nullabilityCtx = new();
+
     /// <summary>
     /// Extracts an <see cref="EntityDefinition"/>, its <see cref="FieldDefinition"/>s,
     /// and any <see cref="IndexDefinition"/>s from the reflection attributes on
@@ -238,6 +240,92 @@ public static class MetadataExtractor
 
     private static bool IsCoreProperty(PropertyInfo prop) =>
         prop.DeclaringType == typeof(BaseDataObject) || CorePropertyNames.Contains(prop.Name);
+
+    /// <summary>
+    /// Builds persisted metadata records from an already-loaded <see cref="DataEntityMetadata"/>,
+    /// avoiding the full reflection scan that <see cref="ExtractFromType"/> performs.
+    /// </summary>
+    internal static (
+        EntityDefinition Entity,
+        IReadOnlyList<FieldDefinition> Fields,
+        IReadOnlyList<IndexDefinition> Indexes)
+        BuildFromMetadata(DataEntityMetadata meta)
+    {
+        var entityAttr = meta.Type.GetCustomAttribute<DataEntityAttribute>();
+
+        var entity = new EntityDefinition
+        {
+            EntityId = Guid.NewGuid().ToString("D"),
+            Name = meta.Name,
+            Slug = meta.Slug,
+            IdStrategy = MapIdStrategyString(entityAttr?.IdGeneration ?? AutoIdStrategy.Sequential),
+            ShowOnNav = entityAttr?.ShowOnNav ?? false,
+            NavGroup = entityAttr?.NavGroup ?? "Admin",
+            NavOrder = entityAttr?.NavOrder ?? 0,
+            Permissions = !string.IsNullOrWhiteSpace(entityAttr?.Permissions)
+                ? entityAttr!.Permissions
+                : meta.Name,
+            Version = 1
+        };
+
+        var fields = new List<FieldDefinition>();
+        var indexes = new List<IndexDefinition>();
+
+        foreach (var f in meta.Fields)
+        {
+            if (CorePropertyNames.Contains(f.Name)) continue;
+
+            bool hasLookup = f.Lookup != null;
+            string? lookupSlug = hasLookup ? ResolveEntitySlug(f.Lookup!.TargetType) : null;
+            string fieldTypeStr = MapFieldTypeString(f.ClrType, f.FieldType, hasLookup);
+
+            string? enumValues = null;
+            var effectivePropType = Nullable.GetUnderlyingType(f.ClrType) ?? f.ClrType;
+            if (effectivePropType.IsEnum && !hasLookup)
+            {
+                var enumNames = Enum.GetNames(effectivePropType);
+                if (enumNames.Length > 0)
+                    enumValues = string.Join("|", enumNames);
+            }
+
+            bool isNullable = Nullable.GetUnderlyingType(f.ClrType) != null
+                || (!f.ClrType.IsValueType && IsNullableProperty(f.Property, _nullabilityCtx));
+
+            fields.Add(new FieldDefinition
+            {
+                FieldId = Guid.NewGuid().ToString("D"),
+                EntityId = entity.EntityId,
+                Name = f.Name,
+                Label = f.Label,
+                Ordinal = f.Order,
+                Type = fieldTypeStr,
+                IsNullable = isNullable,
+                Required = f.Required,
+                List = f.List,
+                View = f.View,
+                Edit = f.Edit,
+                Create = f.Create,
+                ReadOnly = f.ReadOnly,
+                Placeholder = f.Placeholder,
+                EnumValues = enumValues,
+                LookupEntitySlug = lookupSlug,
+                LookupValueField = hasLookup ? f.Lookup!.ValueField : null,
+                LookupDisplayField = hasLookup ? f.Lookup!.DisplayField : null
+            });
+
+            if (f.DataIndex != null)
+            {
+                indexes.Add(new IndexDefinition
+                {
+                    EntityId = entity.EntityId,
+                    FieldNames = f.Name,
+                    Type = f.DataIndex.Kind == IndexKind.BTree ? "btree" : "secondary"
+                });
+            }
+        }
+
+        return (entity, fields, indexes);
+    }
 
     private static bool IsNullableProperty(PropertyInfo prop, NullabilityInfoContext ctx)
     {

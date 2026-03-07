@@ -75,7 +75,7 @@ public static class MetadataSeeder
                 continue;
             }
 
-            var (entityDef, fields, indexes) = MetadataExtractor.ExtractFromType(meta.Type);
+            var (entityDef, fields, indexes) = MetadataExtractor.BuildFromMetadata(meta);
 
             if (overwrite && existingBySlug.TryGetValue(slug, out var existing))
             {
