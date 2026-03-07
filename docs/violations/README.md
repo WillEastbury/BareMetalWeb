@@ -25,5 +25,5 @@ Each file corresponds to a GitHub Issue to be created. Violations are grouped by
 | 5 | 🟠 High | **Open** | `BareMetalWeb.Data/DataScaffold.cs` | [TryConvertJsonChildList / TryParseChildList use Activator.CreateInstance and PropertyInfo.SetValue](./005-child-list-json-reflection.md) |
 | 6 | 🟡 Medium | **Open** | `BareMetalWeb.Data/ReportExecutor.cs` | [FindAccessorOnObject uses reflection per row cell in report projection](./006-report-executor-reflection-per-row.md) |
 | 7 | 🟡 Medium | ✅ **RESOLVED** | ~~`BareMetalWeb.Data/DataScaffold.cs`~~ *(PropertyCache removed)* | [PropertyCache removed; uses compiled delegates](./007-propertycache-reflection-backed.md) |
-| 8 | 🟡 Medium | ⚠️ **PARTIAL** | `BareMetalWeb.Data/BinaryObjectSerializer.cs` | [Property accessors fixed; field accessors pending](./008-binary-serializer-reflection-accessors.md) |
+| 8 | 🟡 Medium | ✅ **RESOLVED** | `BareMetalWeb.Data/BinaryObjectSerializer.cs` | [All accessors use compiled Expression.Lambda delegates](./008-binary-serializer-reflection-accessors.md) |
 | 9 | 🟢 Low | ✅ **RESOLVED** | `BareMetalWeb.Host/McpRouteHandler.cs` | [Assembly.GetName().Version replaces GetCustomAttributes](./009-mcp-handler-assembly-version-reflection.md) |

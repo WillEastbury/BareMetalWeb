@@ -1175,7 +1175,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return new MemberAccessor(field.Name, AssumePublicMembers(field.FieldType), getter, setter);
     }
 
-    // Property accessors use PropertyInfo.GetValue/SetValue (AOT-safe).
+    // Property accessors use compiled Expression.Lambda delegates via PropertyAccessorFactory
     // instead of PropertyInfo.GetValue/SetValue (~50-200ns → ~1ns per access).
     private static Func<object, object?> CreatePropertyGetter(PropertyInfo property)
     {
@@ -1189,14 +1189,22 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 
     private static Func<object, object?> CreateFieldGetter(FieldInfo field)
     {
-        // AOT-safe: use FieldInfo.GetValue instead of Expression.Lambda.Compile.
-        return instance => field.GetValue(instance);
+        var instanceParam = System.Linq.Expressions.Expression.Parameter(typeof(object), "instance");
+        var cast = System.Linq.Expressions.Expression.Convert(instanceParam, field.DeclaringType!);
+        var fieldAccess = System.Linq.Expressions.Expression.Field(cast, field);
+        var boxed = System.Linq.Expressions.Expression.Convert(fieldAccess, typeof(object));
+        return System.Linq.Expressions.Expression.Lambda<Func<object, object?>>(boxed, instanceParam).Compile();
     }
 
     private static Action<object, object?> CreateFieldSetter(FieldInfo field)
     {
-        // AOT-safe: use FieldInfo.SetValue instead of Expression.Lambda.Compile.
-        return (instance, value) => field.SetValue(instance, value);
+        var instanceParam = System.Linq.Expressions.Expression.Parameter(typeof(object), "instance");
+        var valueParam = System.Linq.Expressions.Expression.Parameter(typeof(object), "value");
+        var cast = System.Linq.Expressions.Expression.Convert(instanceParam, field.DeclaringType!);
+        var fieldAccess = System.Linq.Expressions.Expression.Field(cast, field);
+        var convertedValue = System.Linq.Expressions.Expression.Convert(valueParam, field.FieldType);
+        var assign = System.Linq.Expressions.Expression.Assign(fieldAccess, convertedValue);
+        return System.Linq.Expressions.Expression.Lambda<Action<object, object?>>(assign, instanceParam, valueParam).Compile();
     }
 
     private static uint GetSignatureHash(MemberSignature[] members)
