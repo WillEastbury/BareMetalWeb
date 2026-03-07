@@ -6,6 +6,7 @@ internal static class DataJsonWriter
 {
     internal static string ToJsonString(object? value)
     {
+        // TODO: consider pooling MemoryStream via RecyclableMemoryStreamManager
         using var buffer = new MemoryStream();
         using (var w = new Utf8JsonWriter(buffer))
         {

@@ -4,25 +4,32 @@
     'use strict';
 
     function initFormValidation() {
-        var forms = document.querySelectorAll('form');
-        forms.forEach(function (form) {
+        // Use event delegation on document to avoid per-element listener accumulation
+        document.addEventListener('input', function (e) {
+            var input = e.target;
+            if (input.matches('form input, form select, form textarea')) {
+                validateField(input);
+            }
+        });
+        document.addEventListener('change', function (e) {
+            var input = e.target;
+            if (input.matches('form input, form select, form textarea')) {
+                validateField(input);
+            }
+        });
+        document.addEventListener('submit', function (e) {
+            var form = e.target;
+            if (!form.matches('form')) return;
+            var valid = true;
             var inputs = form.querySelectorAll('input, select, textarea');
             inputs.forEach(function (input) {
-                input.addEventListener('input', function () { validateField(input); });
-                input.addEventListener('change', function () { validateField(input); });
+                if (!validateField(input)) valid = false;
             });
-
-            form.addEventListener('submit', function (e) {
-                var valid = true;
-                inputs.forEach(function (input) {
-                    if (!validateField(input)) valid = false;
-                });
-                if (!valid) {
-                    e.preventDefault();
-                    e.stopPropagation();
-                }
-                form.classList.add('was-validated');
-            });
+            if (!valid) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            form.classList.add('was-validated');
         });
     }
 

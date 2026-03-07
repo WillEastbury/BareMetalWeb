@@ -386,7 +386,8 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
 
             var groupLabel = WebUtility.HtmlEncode(option.Group);
             var menuAlignmentClass = rightAligned ? "dropdown-menu dropdown-menu-end" : "dropdown-menu";
-            var dropdownHtml = $"<li class=\"nav-item dropdown\"><a class=\"nav-link dropdown-toggle\" href=\"#\" role=\"button\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\">{groupLabel}</a><ul class=\"{menuAlignmentClass}\">";
+            var sb = new StringBuilder();
+            sb.Append($"<li class=\"nav-item dropdown\"><a class=\"nav-link dropdown-toggle\" href=\"#\" role=\"button\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\">{groupLabel}</a><ul class=\"{menuAlignmentClass}\">");
 
             string? lastSubGroup = null;
             foreach (var item in groupItems)
@@ -396,16 +397,17 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
                     !string.Equals(item.SubGroup, lastSubGroup, StringComparison.OrdinalIgnoreCase))
                 {
                     if (lastSubGroup != null)
-                        dropdownHtml += "<li><hr class=\"dropdown-divider\"></li>";
-                    dropdownHtml += $"<li><h6 class=\"dropdown-header\">{WebUtility.HtmlEncode(item.SubGroup)}</h6></li>";
+                        sb.Append("<li><hr class=\"dropdown-divider\"></li>");
+                    sb.Append($"<li><h6 class=\"dropdown-header\">{WebUtility.HtmlEncode(item.SubGroup)}</h6></li>");
                     lastSubGroup = item.SubGroup;
                 }
                 var itemLabel = WebUtility.HtmlEncode(item.Label);
                 var itemHref = WebUtility.HtmlEncode(item.Href);
-                dropdownHtml += $"<li><a class=\"dropdown-item\" href=\"{itemHref}\">{itemLabel}</a></li>";
+                sb.Append($"<li><a class=\"dropdown-item\" href=\"{itemHref}\">{itemLabel}</a></li>");
             }
 
-            dropdownHtml += "</ul></li>";
+            sb.Append("</ul></li>");
+            var dropdownHtml = sb.ToString();
             buffer.Write(Encoding.UTF8.GetBytes(dropdownHtml));
         }
 

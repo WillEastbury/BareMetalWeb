@@ -1,4 +1,5 @@
 using BareMetalWeb.Core;
+using System.Buffers;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
@@ -498,21 +499,28 @@ public sealed class ProxyRouteHandler
             ? (int)Math.Min(context.HttpRequest.ContentLength.Value, maxBytes)
             : 0);
 
-        var temp = new byte[81920];
-        int read;
-        int total = 0;
-        while ((read = await context.HttpRequest.Body.ReadAsync(temp, 0, temp.Length, context.RequestAborted)) > 0)
+        var temp = ArrayPool<byte>.Shared.Rent(81920);
+        try
         {
-            total += read;
-            if (total > maxBytes)
+            int read;
+            int total = 0;
+            while ((read = await context.HttpRequest.Body.ReadAsync(temp, 0, temp.Length, context.RequestAborted)) > 0)
             {
-                return null;
+                total += read;
+                if (total > maxBytes)
+                {
+                    return null;
+                }
+
+                buffer.Write(temp, 0, read);
             }
 
-            buffer.Write(temp, 0, read);
+            return buffer.ToArray();
         }
-
-        return buffer.ToArray();
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(temp);
+        }
     }
 
     private static List<ProxyTargetState> BuildTargetStates(ProxyRouteConfig route)

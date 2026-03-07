@@ -30,10 +30,11 @@
             alert('Please allow popups for this site, or the create form will open in the same window.');
             window.location.href = createUrl;
         } else {
+            var attempts = 0;
             var checkWindow = setInterval(function() {
-                if (newWindow.closed) {
+                if (newWindow.closed || ++attempts > 120) {
                     clearInterval(checkWindow);
-                    refreshLookup(fieldName);
+                    if (newWindow.closed) refreshLookup(fieldName);
                 }
             }, 500);
         }

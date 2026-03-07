@@ -69,7 +69,6 @@ public static class BareMetalWebExtensions
         DataScaffold.RegisterEntity<ViewDefinition>();
         DataScaffold.RegisterEntity<FileAttachment>();
         DataScaffold.RegisterEntity<RecordComment>();
-        DataScaffold.RegisterEntity<NotificationDefinition>();
         DataScaffold.RegisterEntity<InboxMessage>();
 
         IDataObjectStore dataStore = ProgramSetup.CreateDataStore(config, contentRoot, serializer, queryEvaluator, logger);
@@ -257,10 +256,10 @@ public static class BareMetalWebExtensions
         // disk I/O and per-request compression entirely.
         if (appInfo.StaticFiles.EnableInMemoryCache)
         {
-            StaticAssetCache.Build(
+            _ = Task.Run(() => StaticAssetCache.Build(
                 appInfo.StaticFiles.RootPathFull,
                 appInfo.StaticFiles,
-                msg => logger.LogInfo(msg));
+                msg => logger.LogInfo(msg)));
         }
 
         ProgramSetup.ConfigureCors(config, appInfo);

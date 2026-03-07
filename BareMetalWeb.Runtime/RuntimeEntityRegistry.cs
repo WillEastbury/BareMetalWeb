@@ -164,7 +164,19 @@ public sealed class RuntimeEntityRegistry
         var registry = new RuntimeEntityRegistry();
 
         // Load all schema records in parallel
-        var entityDefs = new List<EntityDefinition>(await store.QueryAsync<EntityDefinition>().ConfigureAwait(false));
+        var entityDefsTask = store.QueryAsync<EntityDefinition>();
+        var fieldsTask = store.QueryAsync<FieldDefinition>();
+        var indexesTask = store.QueryAsync<IndexDefinition>();
+        var actionsTask = store.QueryAsync<ActionDefinition>();
+        var actionCommandsTask = store.QueryAsync<ActionCommandDefinition>();
+        await Task.WhenAll(
+            entityDefsTask.AsTask(),
+            fieldsTask.AsTask(),
+            indexesTask.AsTask(),
+            actionsTask.AsTask(),
+            actionCommandsTask.AsTask()).ConfigureAwait(false);
+
+        var entityDefs = new List<EntityDefinition>(entityDefsTask.Result);
         if (entityDefs.Count == 0)
         {
             registry.Freeze();
@@ -172,10 +184,10 @@ public sealed class RuntimeEntityRegistry
             return registry;
         }
 
-        var allFields = new List<FieldDefinition>(await store.QueryAsync<FieldDefinition>().ConfigureAwait(false));
-        var allIndexes = new List<IndexDefinition>(await store.QueryAsync<IndexDefinition>().ConfigureAwait(false));
-        var allActions = new List<ActionDefinition>(await store.QueryAsync<ActionDefinition>().ConfigureAwait(false));
-        var allActionCommands = new List<ActionCommandDefinition>(await store.QueryAsync<ActionCommandDefinition>().ConfigureAwait(false));
+        var allFields = new List<FieldDefinition>(fieldsTask.Result);
+        var allIndexes = new List<IndexDefinition>(indexesTask.Result);
+        var allActions = new List<ActionDefinition>(actionsTask.Result);
+        var allActionCommands = new List<ActionCommandDefinition>(actionCommandsTask.Result);
 
         foreach (var entityDef in entityDefs)
         {
