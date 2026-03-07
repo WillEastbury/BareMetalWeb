@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
@@ -29,6 +30,7 @@ public static class MetadataExtractor
     };
 
     private static readonly NullabilityInfoContext _nullabilityCtx = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo[]> _propertyCache = new();
 
     /// <summary>
     /// Extracts an <see cref="EntityDefinition"/>, its <see cref="FieldDefinition"/>s,
@@ -82,7 +84,7 @@ public static class MetadataExtractor
         var indexes = new List<IndexDefinition>();
         var nullabilityCtx = new NullabilityInfoContext();
 
-        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var properties = _propertyCache.GetOrAdd(type, t => t.GetProperties(BindingFlags.Public | BindingFlags.Instance));
         Array.Sort(properties, (a, b) => string.CompareOrdinal(a.Name, b.Name));
 
         int ordinal = 1;

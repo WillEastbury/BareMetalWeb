@@ -10,6 +10,12 @@ using BareMetalWeb.Runtime;
 
 namespace BareMetalWeb.Host;
 
+/// <summary>Shared HttpClient for webhook-based notification channels.</summary>
+internal static class SharedWebhookHttpClient
+{
+    internal static readonly HttpClient Instance = new() { Timeout = TimeSpan.FromSeconds(30) };
+}
+
 /// <summary>
 /// Pluggable notification channel interface. Implementations deliver
 /// messages via Email, SMS, or other transports.
@@ -55,8 +61,6 @@ public sealed class WebhookSmsChannel : INotificationChannel
     private readonly string _endpoint;
     private readonly string _apiKey;
     private readonly string _from;
-    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
-
     public WebhookSmsChannel(string endpoint, string apiKey, string from)
     {
         _endpoint = endpoint;
@@ -77,7 +81,7 @@ public sealed class WebhookSmsChannel : INotificationChannel
             Content = new StringContent(payload, Encoding.UTF8, "application/json")
         };
         request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {_apiKey}");
-        await _http.SendAsync(request, ct);
+        await SharedWebhookHttpClient.Instance.SendAsync(request, ct);
     }
 }
 
@@ -89,8 +93,6 @@ public sealed class WebhookNotificationChannel : INotificationChannel
 {
     private readonly string _endpoint;
     private readonly string _secret;
-    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(30) };
-
     public WebhookNotificationChannel(string endpoint, string secret)
     {
         _endpoint = endpoint;
@@ -112,7 +114,7 @@ public sealed class WebhookNotificationChannel : INotificationChannel
         };
         if (!string.IsNullOrEmpty(_secret))
             request.Headers.TryAddWithoutValidation("X-Webhook-Secret", _secret);
-        await _http.SendAsync(request, ct);
+        await SharedWebhookHttpClient.Instance.SendAsync(request, ct);
     }
 }
 
