@@ -9,6 +9,7 @@ using System.Numerics;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Threading;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data.Interfaces;
 
@@ -112,7 +113,7 @@ public sealed class SearchIndexManager
 
     private sealed class IndexData
     {
-        public object Sync { get; } = new();
+        public ReaderWriterLockSlim Sync { get; } = new(LockRecursionPolicy.NoRecursion);
         public bool IsBuilt { get; set; }
         // Token -> IDs mapping for inverted index
         public Dictionary<string, HashSet<uint>> Tokens { get; } = new(StringComparer.OrdinalIgnoreCase);
@@ -250,7 +251,7 @@ public sealed class SearchIndexManager
             var cell = GetCell(lat, lng);
             if (!_grid.TryGetValue(cell, out var list))
             {
-                list = new List<GeoPoint>();
+                list = new List<GeoPoint>(4);
                 _grid[cell] = list;
             }
             list.Add(pt);
@@ -323,14 +324,16 @@ public sealed class SearchIndexManager
                 radiusKm *= 2;
             } while (candidates.Count < count && radiusKm < 20_000);
 
-            var sorted = new List<(uint Id, double DistanceKm)>();
+            var sorted = new List<(uint Id, double DistanceKm)>(candidates.Count);
             foreach (var id in candidates)
             {
                 if (_points.TryGetValue(id, out var pt))
                     sorted.Add((id, HaversineKm(centerLat, centerLng, pt.Lat, pt.Lng)));
             }
             sorted.Sort((a, b) => a.DistanceKm.CompareTo(b.DistanceKm));
-            return sorted.Count > count ? sorted.GetRange(0, count) : sorted;
+            if (sorted.Count > count)
+                sorted.RemoveRange(count, sorted.Count - count);
+            return sorted;
         }
 
         private static (int LatCell, int LngCell) GetCell(double lat, double lng) =>
@@ -423,7 +426,8 @@ public sealed class SearchIndexManager
         if (index.IsBuilt)
             return;
 
-        lock (index.Sync)
+        index.Sync.EnterWriteLock();
+        try
         {
             if (index.IsBuilt)
                 return;
@@ -431,6 +435,10 @@ public sealed class SearchIndexManager
             BuildFrom(index, loadAll);
             index.IsBuilt = true;
             SaveIndex(type, index);
+        }
+        finally
+        {
+            index.Sync.ExitWriteLock();
         }
     }
 
@@ -444,7 +452,8 @@ public sealed class SearchIndexManager
         var metadata = GetOrCreateTypeMetadata(type);
         var tokens = BuildTokens(obj, index);
 
-        lock (index.Sync)
+        index.Sync.EnterWriteLock();
+        try
         {
             RemoveObjectInternal(index, obj.Key, metadata);
             if (tokens.Count == 0)
@@ -485,6 +494,10 @@ public sealed class SearchIndexManager
 
             index.IsBuilt = true;
             SaveIndex(type, index);
+        }
+        finally
+        {
+            index.Sync.ExitWriteLock();
         }
     }
 
@@ -542,10 +555,15 @@ public sealed class SearchIndexManager
         var type = obj.GetType();
         var metadata = GetOrCreateTypeMetadata(type);
         var index = _indexes.GetOrAdd(type, LoadIndex);
-        lock (index.Sync)
+        index.Sync.EnterWriteLock();
+        try
         {
             RemoveObjectInternal(index, obj.Key, metadata);
             SaveIndex(type, index);
+        }
+        finally
+        {
+            index.Sync.ExitWriteLock();
         }
     }
 
@@ -556,10 +574,15 @@ public sealed class SearchIndexManager
 
         var metadata = GetOrCreateTypeMetadata(type);
         var index = _indexes.GetOrAdd(type, LoadIndex);
-        lock (index.Sync)
+        index.Sync.EnterWriteLock();
+        try
         {
             RemoveObjectInternal(index, id, metadata);
             SaveIndex(type, index);
+        }
+        finally
+        {
+            index.Sync.ExitWriteLock();
         }
     }
 
@@ -580,7 +603,8 @@ public sealed class SearchIndexManager
         EnsureBuilt(type, loadAll);
         var index = _indexes.GetOrAdd(type, LoadIndex);
         var results = new HashSet<uint>(8);
-        lock (index.Sync)
+        index.Sync.EnterReadLock();
+        try
         {
             var reversed = ReverseString(suffixText.ToLowerInvariant());
             if (index.SuffixTree.TryGetValue(reversed, out var matchedTokens))
@@ -594,6 +618,10 @@ public sealed class SearchIndexManager
                     }
                 }
             }
+        }
+        finally
+        {
+            index.Sync.ExitReadLock();
         }
         return results;
     }
@@ -624,7 +652,8 @@ public sealed class SearchIndexManager
         }
         
         var results = new HashSet<uint>(8);
-        lock (index.Sync)
+        index.Sync.EnterReadLock();
+        try
         {
             // Use Span-based tokenization for zero allocations during query parsing
             TokenizeToHashSet(queryText, out var queryTokens);
@@ -671,6 +700,10 @@ public sealed class SearchIndexManager
                 foreach (var id in tokenResults)
                     results.Add(id);
             }
+        }
+        finally
+        {
+            index.Sync.ExitReadLock();
         }
 
         return results;
@@ -1535,10 +1568,15 @@ public sealed class SearchIndexManager
     {
         EnsureBuilt(type, loadAll);
         var index = _indexes.GetOrAdd(type, LoadIndex);
-        lock (index.Sync)
+        index.Sync.EnterReadLock();
+        try
         {
             if (index.GraphIndex == null) return Array.Empty<uint>();
             return index.GraphIndex.Traverse(startId, maxHops, edgeType);
+        }
+        finally
+        {
+            index.Sync.ExitReadLock();
         }
     }
 
@@ -1549,7 +1587,8 @@ public sealed class SearchIndexManager
     {
         EnsureBuilt(type, loadAll);
         var index = _indexes.GetOrAdd(type, LoadIndex);
-        lock (index.Sync)
+        index.Sync.EnterReadLock();
+        try
         {
             if (index.GraphIndex == null) return Array.Empty<uint>();
             if (!index.GraphIndex.Forward.TryGetValue(nodeId, out var edges)) return Array.Empty<uint>();
@@ -1558,6 +1597,10 @@ public sealed class SearchIndexManager
             foreach (var e in edges)
                 result[idx++] = e.TargetId;
             return result;
+        }
+        finally
+        {
+            index.Sync.ExitReadLock();
         }
     }
 
@@ -1568,7 +1611,8 @@ public sealed class SearchIndexManager
     {
         EnsureBuilt(type, loadAll);
         var index = _indexes.GetOrAdd(type, LoadIndex);
-        lock (index.Sync)
+        index.Sync.EnterReadLock();
+        try
         {
             if (index.GraphIndex == null) return Array.Empty<uint>();
             if (!index.GraphIndex.Reverse.TryGetValue(nodeId, out var edges)) return Array.Empty<uint>();
@@ -1577,6 +1621,10 @@ public sealed class SearchIndexManager
             foreach (var e in edges)
                 result[idx++] = e.TargetId;
             return result;
+        }
+        finally
+        {
+            index.Sync.ExitReadLock();
         }
     }
 
@@ -1657,10 +1705,15 @@ public sealed class SearchIndexManager
     {
         EnsureBuilt(type, loadAll);
         var index = _indexes.GetOrAdd(type, LoadIndex);
-        lock (index.Sync)
+        index.Sync.EnterReadLock();
+        try
         {
             if (index.SpatialIndex == null) return Array.Empty<uint>();
             return index.SpatialIndex.SearchRadius(centerLat, centerLng, radiusKm);
+        }
+        finally
+        {
+            index.Sync.ExitReadLock();
         }
     }
 
@@ -1671,10 +1724,15 @@ public sealed class SearchIndexManager
     {
         EnsureBuilt(type, loadAll);
         var index = _indexes.GetOrAdd(type, LoadIndex);
-        lock (index.Sync)
+        index.Sync.EnterReadLock();
+        try
         {
             if (index.SpatialIndex == null) return Array.Empty<uint>();
             return index.SpatialIndex.SearchBoundingBox(minLat, maxLat, minLng, maxLng);
+        }
+        finally
+        {
+            index.Sync.ExitReadLock();
         }
     }
 
@@ -1685,10 +1743,15 @@ public sealed class SearchIndexManager
     {
         EnsureBuilt(type, loadAll);
         var index = _indexes.GetOrAdd(type, LoadIndex);
-        lock (index.Sync)
+        index.Sync.EnterReadLock();
+        try
         {
             if (index.SpatialIndex == null) return Array.Empty<(uint, double)>();
             return index.SpatialIndex.SearchNearest(centerLat, centerLng, count);
+        }
+        finally
+        {
+            index.Sync.ExitReadLock();
         }
     }
 }

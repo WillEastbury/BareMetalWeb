@@ -2489,17 +2489,29 @@ public static class RouteRegistrationExtensions
                 { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Dashboard not found\"}"); return; }
 
                 var resolvedTiles = await DashboardHtmlRenderer.ResolveTilesAsync(def.Tiles, context.RequestAborted);
-                var tileProjections = resolvedTiles.Select(r => new Dictionary<string, object?>
+                var tileProjections = new Dictionary<string, object?>[resolvedTiles.Count];
+                for (int i = 0; i < resolvedTiles.Count; i++)
                 {
-                    ["title"] = r.Tile.Title,
-                    ["icon"] = r.Tile.Icon,
-                    ["color"] = r.Tile.Color,
-                    ["entitySlug"] = r.Tile.EntitySlug,
-                    ["aggregateFunction"] = r.Tile.AggregateFunction,
-                    ["displayValue"] = r.DisplayValue,
-                    ["rawValue"] = r.RawValue?.ToString(),
-                    ["sparkline"] = r.Sparkline?.Select(b => new Dictionary<string, object?> { ["label"] = b.Label, ["value"] = b.Value }).ToArray()
-                }).ToArray();
+                    var r = resolvedTiles[i];
+                    Dictionary<string, object?>[]? sparklineArr = null;
+                    if (r.Sparkline != null)
+                    {
+                        sparklineArr = new Dictionary<string, object?>[r.Sparkline.Count];
+                        for (int j = 0; j < r.Sparkline.Count; j++)
+                            sparklineArr[j] = new Dictionary<string, object?> { ["label"] = r.Sparkline[j].Label, ["value"] = r.Sparkline[j].Value };
+                    }
+                    tileProjections[i] = new Dictionary<string, object?>
+                    {
+                        ["title"] = r.Tile.Title,
+                        ["icon"] = r.Tile.Icon,
+                        ["color"] = r.Tile.Color,
+                        ["entitySlug"] = r.Tile.EntitySlug,
+                        ["aggregateFunction"] = r.Tile.AggregateFunction,
+                        ["displayValue"] = r.DisplayValue,
+                        ["rawValue"] = r.RawValue?.ToString(),
+                        ["sparkline"] = sparklineArr
+                    };
+                }
                 context.Response.ContentType = "application/json";
                 await using (var w = new Utf8JsonWriter(context.Response.Body, s_indentedWriterOptions))
                 {
@@ -2885,17 +2897,22 @@ public static class RouteRegistrationExtensions
             var messages = DataStoreProvider.Current.Query<InboxMessage>(query).ToList();
 
             context.Response.ContentType = "application/json";
-            var payload = messages.Select(m => new Dictionary<string, object?>
+            var payload = new Dictionary<string, object?>[messages.Count];
+            for (int i = 0; i < messages.Count; i++)
             {
-                ["id"]           = m.Key,
-                ["subject"]      = m.Subject,
-                ["body"]         = m.Body,
-                ["category"]     = m.Category,
-                ["isRead"]       = m.IsRead,
-                ["createdAtUtc"] = m.CreatedAtUtc,
-                ["entitySlug"]   = m.EntitySlug,
-                ["entityId"]     = m.EntityId
-            }).ToArray();
+                var m = messages[i];
+                payload[i] = new Dictionary<string, object?>
+                {
+                    ["id"]           = m.Key,
+                    ["subject"]      = m.Subject,
+                    ["body"]         = m.Body,
+                    ["category"]     = m.Category,
+                    ["isRead"]       = m.IsRead,
+                    ["createdAtUtc"] = m.CreatedAtUtc,
+                    ["entitySlug"]   = m.EntitySlug,
+                    ["entityId"]     = m.EntityId
+                };
+            }
             await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
             {
                 JsonWriterHelper.WriteValue(w, payload);
