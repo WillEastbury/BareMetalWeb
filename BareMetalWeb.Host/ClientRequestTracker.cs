@@ -58,10 +58,15 @@ public sealed class ClientRequestTracker : IClientRequestTracker
         retryAfterSeconds = null;
 
         // Always bypass throttling for loopback addresses
-        if (IPAddress.TryParse(clientIp, out var addr) && IPAddress.IsLoopback(addr))
+        // MapToIPv4() handles IPv4-mapped IPv6 (e.g. ::ffff:127.0.0.1) from dual-stack sockets
+        if (IPAddress.TryParse(clientIp, out var addr))
         {
-            reason = string.Empty;
-            return false;
+            var effective = addr.IsIPv4MappedToIPv6 ? addr.MapToIPv4() : addr;
+            if (IPAddress.IsLoopback(effective))
+            {
+                reason = string.Empty;
+                return false;
+            }
         }
 
         if (_allowList.Contains(clientIp))
