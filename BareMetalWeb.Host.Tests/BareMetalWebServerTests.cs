@@ -260,11 +260,11 @@ public class BareMetalWebServerTests : IDisposable
         // Assert
         Assert.Equal(500, context.Response.StatusCode);
         Assert.Contains("X-Error-Id", context.Response.Headers.Keys);
-        Assert.StartsWith("application/json", context.Response.ContentType);
+        Assert.StartsWith("application/problem+json", context.Response.ContentType);
         context.Response.Body.Seek(0, System.IO.SeekOrigin.Begin);
         var body = await new System.IO.StreamReader(context.Response.Body).ReadToEndAsync();
         Assert.Contains("errorId", body);
-        Assert.Contains("error", body);
+        Assert.Contains("Internal Server Error", body);
         Assert.DoesNotContain("<html", body, StringComparison.OrdinalIgnoreCase);
     }
 

@@ -442,16 +442,24 @@ public class BareMetalWebServer : IBareWebHost
 
         if (ClientRequests.ShouldThrottle(sourceIp, out var throttleReason, out var retryAfterSeconds))
         {
-            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             if (retryAfterSeconds.HasValue)
             {
                 context.Response.Headers.RetryAfter = retryAfterSeconds.Value.ToString();
             }
-            context.Response.ContentType = "text/plain";
-            var retryText = retryAfterSeconds.HasValue
-                ? $"Too many Requests. Retry after {retryAfterSeconds.Value}s."
-                : "Too many Requests.";
-            await context.Response.WriteAsync(retryText);
+            if (IsAjaxRequest(context))
+            {
+                await ApiErrorWriter.WriteAsync(context.Response,
+                    ApiErrorWriter.RateLimited(retryAfterSeconds: retryAfterSeconds),
+                    context.RequestAborted);
+            }
+            else
+            {
+                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                context.Response.ContentType = "text/plain";
+                await context.Response.WriteAsync(retryAfterSeconds.HasValue
+                    ? $"Too many Requests. Retry after {retryAfterSeconds.Value}s."
+                    : "Too many Requests.");
+            }
             BufferedLogger.LogInfo($"{routeKey}|429|{sourceIp}|{throttleReason}");
             stopwatch.Stop();
             Metrics.RecordThrottled(stopwatch.Elapsed);
@@ -655,18 +663,19 @@ public class BareMetalWebServer : IBareWebHost
                 return;
             }
             context.Response.Clear();
-            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            context.Response.Headers["X-Error-Id"] = errorId;
             if (IsAjaxRequest(context))
             {
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync($"{{\"error\":\"An unexpected error occurred.\",\"errorId\":\"{errorId}\"}}");
+                await ApiErrorWriter.WriteAsync(context.Response,
+                    ApiErrorWriter.InternalError(errorId),
+                    context.RequestAborted);
             }
             else
             {
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                context.Response.Headers["X-Error-Id"] = errorId;
                 bmwCtx.SetPageInfo(ErrorPageInfo);
                 bmwCtx.SetStringValue("html_message", $"<p>An unexpected error occurred.</p><p>Error ID: <code>{errorId}</code></p>");
-                await HtmlRenderer.RenderPage(bmwCtx.HttpContext); // Render error page
+                await HtmlRenderer.RenderPage(bmwCtx.HttpContext);
             }
             BufferedLogger.LogInfo($"{routeKey}|500|{sourceIp}");
         }
@@ -829,9 +838,15 @@ public class BareMetalWebServer : IBareWebHost
 
     public async Task RenderForbidden(BmwContext context)
     {
-        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        if (IsAjaxRequest(context.HttpContext))
+        {
+            await ApiErrorWriter.WriteAsync(context.Response,
+                ApiErrorWriter.Forbidden(),
+                context.RequestAborted);
+            return;
+        }
 
-        // Refactor this to use the helpers on the context
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
 
         PageInfo forbiddenPage = ErrorPageInfo with
         {

@@ -49,9 +49,8 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
     {
         if (!DeviceRateCheck(context))
         {
-            context.Response.StatusCode = 429;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync("{\"error\":\"rate_limited\"}");
+            await ApiErrorWriter.WriteAsync(context.Response,
+                ApiErrorWriter.RateLimited(), context.RequestAborted);
             return;
         }
         var dc = new DeviceCodeAuth
@@ -77,16 +76,15 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
     {
         if (!DeviceRateCheck(context, 30))
         {
-            context.Response.StatusCode = 429;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync("{\"error\":\"rate_limited\"}");
+            await ApiErrorWriter.WriteAsync(context.Response,
+                ApiErrorWriter.RateLimited(), context.RequestAborted);
             return;
         }
         // Validate Content-Type (CSRF mitigation)
         if (!(context.HttpRequest.ContentType ?? "").Contains("application/json", StringComparison.OrdinalIgnoreCase))
         {
-            context.Response.StatusCode = 415;
-            await context.Response.WriteAsync("{\"error\":\"Unsupported Content-Type\"}");
+            await ApiErrorWriter.WriteAsync(context.Response,
+                ApiErrorWriter.UnsupportedMediaType(), context.RequestAborted);
             return;
         }
         string body;
@@ -104,9 +102,10 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
         }
         if (string.IsNullOrEmpty(deviceCode))
         {
-            context.Response.StatusCode = 400;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync("{\"error\":\"missing device_code\"}");
+            await ApiErrorWriter.WriteAsync(context.Response,
+                ApiErrorWriter.BadRequest("Field 'device_code' is required.",
+                    new[] { new FieldError { Field = "device_code", Message = "Required" } }),
+                context.RequestAborted);
             return;
         }
         var queryDef = new BareMetalWeb.Data.QueryDefinition { Clauses = new() { new BareMetalWeb.Data.QueryClause { Field = "DeviceCode", Operator = BareMetalWeb.Data.QueryOperator.Equals, Value = deviceCode } }, Top = 1 };
@@ -126,9 +125,9 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
         {
             if (!uint.TryParse(dc.UserId, out var parsedUserId))
             {
-                context.Response.StatusCode = 400;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync("{\"status\":\"error\",\"message\":\"Invalid user id.\"}");
+                await ApiErrorWriter.WriteAsync(context.Response,
+                    ApiErrorWriter.BadRequest("Invalid user id."),
+                    context.RequestAborted);
                 return;
             }
             var user = await DataStoreProvider.Current.LoadAsync<User>(parsedUserId);
