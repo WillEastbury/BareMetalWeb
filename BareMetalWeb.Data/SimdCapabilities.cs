@@ -38,6 +38,8 @@ public sealed class SimdCapabilities
     public bool ArmAes      { get; }
     public bool ArmSha256   { get; }
     public bool ArmDp       { get; }
+    public bool Sve         { get; }
+    public bool Sve2        { get; }
 
     /// <summary>
     /// Highest-performance SIMD tier available on this CPU/OS combination.
@@ -70,6 +72,12 @@ public sealed class SimdCapabilities
         ArmAes       = System.Runtime.Intrinsics.Arm.Aes.IsSupported;
         ArmSha256    = System.Runtime.Intrinsics.Arm.Sha256.IsSupported;
         ArmDp        = System.Runtime.Intrinsics.Arm.Dp.IsSupported;
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
+        Sve          = System.Runtime.Intrinsics.Arm.Sve.IsSupported;
+        Sve2         = Sve && IsSve2Supported();
+#pragma warning restore SYSLIB5003
+#endif
 
         BestTier = DetermineBestTier();
 #else
@@ -103,6 +111,8 @@ public sealed class SimdCapabilities
         if (Bmi2) x86Parts.Append("BMI2 ");
 
         var armParts = new System.Text.StringBuilder();
+        if (Sve2) armParts.Append("SVE2 ");
+        else if (Sve) armParts.Append("SVE ");
         if (AdvSimdArm64) armParts.Append("AdvSimd/ARM64 ");
         else if (AdvSimd) armParts.Append("AdvSimd ");
         if (ArmCrc32) armParts.Append("CRC32 ");
@@ -123,6 +133,8 @@ public sealed class SimdCapabilities
         if (Fma && Avx2)      return "AVX2+FMA";
         if (Avx2)             return "AVX2";
         if (Avx)              return "AVX";
+        if (Sve2)             return "SVE2";
+        if (Sve)              return "SVE";
         if (AdvSimdArm64)     return "AdvSimd-ARM64";
         if (AdvSimd)          return "AdvSimd";
         if (Sse42)            return "SSE4.2";
@@ -131,4 +143,14 @@ public sealed class SimdCapabilities
 #endif
         return "Scalar";
     }
+
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
+    private static bool IsSve2Supported()
+    {
+        try { return System.Runtime.Intrinsics.Arm.Sve2.IsSupported; }
+        catch { return false; }
+    }
+#pragma warning restore SYSLIB5003
+#endif
 }

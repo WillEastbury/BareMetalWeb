@@ -2,6 +2,11 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003 // Sve is experimental
+using System.Runtime.Intrinsics.Arm;
+#pragma warning restore SYSLIB5003
+#endif
 
 namespace BareMetalWeb.Data;
 
@@ -11,10 +16,11 @@ namespace BareMetalWeb.Data;
 /// <para>Filters compare encoded dictionary indexes (small ints) instead of full values,
 /// enabling tens of millions of rows per second throughput.</para>
 ///
-/// <para>Pipeline tiers:
-///   1. <b>AVX2</b> — 8 × int32 per cycle via <c>Avx2.CompareEqual</c> + <c>Avx2.MoveMask</c>
-///   2. <b>Portable SIMD</b> — <c>Vector&lt;int&gt;</c> fallback (width auto-detected)
-///   3. <b>Scalar</b> — branchless loop for platforms without hardware SIMD
+/// <para>Pipeline tiers (dispatched at runtime based on CPU capabilities):
+///   1. <b>AVX2</b> (x86)  — 8 × int32 per cycle via <c>Avx2.CompareEqual</c> + <c>Avx2.MoveMask</c>
+///   2. <b>SVE</b>  (ARM)  — scalable-width vectors (128–2048 bit) with predicated tail handling
+///   3. <b>Portable SIMD</b> — <c>Vector&lt;int&gt;</c> fallback (width auto-detected)
+///   4. <b>Scalar</b> — branchless loop for platforms without hardware SIMD
 /// </para>
 /// </summary>
 public static class DictionaryColumnFilter
@@ -23,9 +29,6 @@ public static class DictionaryColumnFilter
     /// Scans <paramref name="encodedColumn"/> for entries equal to <paramref name="dictionaryIndex"/>
     /// and writes matching row positions into <paramref name="outputIndexes"/>.
     /// Returns the number of matches written.
-    ///
-    /// <para>Uses AVX2 when available (8 ints per cycle), then falls back to portable
-    /// <c>Vector&lt;int&gt;</c>, then scalar loop.</para>
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static int FilterEquals(
@@ -35,6 +38,13 @@ public static class DictionaryColumnFilter
     {
         if (Avx2.IsSupported)
             return FilterEqualsAvx2(encodedColumn, dictionaryIndex, outputIndexes);
+
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
+        if (Sve.IsSupported)
+            return FilterEqualsSve(encodedColumn, dictionaryIndex, outputIndexes);
+#pragma warning restore SYSLIB5003
+#endif
 
         if (Vector.IsHardwareAccelerated && Vector<int>.Count >= 4)
             return FilterEqualsVector(encodedColumn, dictionaryIndex, outputIndexes);
@@ -53,6 +63,13 @@ public static class DictionaryColumnFilter
     {
         if (Avx2.IsSupported)
             return FilterNotEqualsAvx2(encodedColumn, dictionaryIndex, outputIndexes);
+
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
+        if (Sve.IsSupported)
+            return FilterNotEqualsSve(encodedColumn, dictionaryIndex, outputIndexes);
+#pragma warning restore SYSLIB5003
+#endif
 
         if (Vector.IsHardwareAccelerated && Vector<int>.Count >= 4)
             return FilterNotEqualsVector(encodedColumn, dictionaryIndex, outputIndexes);
@@ -179,6 +196,92 @@ public static class DictionaryColumnFilter
 
         return count;
     }
+
+    // ── SVE path: scalable-width vectors with predicated tail handling ────
+
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
+
+    /// <summary>
+    /// ARM SVE filter path. Processes a hardware-dependent number of int32 elements per
+    /// iteration (128–2048 bit vectors). Uses <c>CreateWhileLessThanMask32Bit</c> for
+    /// predicated tail handling, eliminating the scalar remainder loop entirely.
+    /// </summary>
+    private static unsafe int FilterEqualsSve(
+        ReadOnlySpan<int> encodedColumn,
+        int dictionaryIndex,
+        Span<int> outputIndexes)
+    {
+        int n = encodedColumn.Length;
+        int count = 0;
+        int vLen = (int)Sve.Count32BitElements();
+        var target = new Vector<int>(dictionaryIndex);
+
+        fixed (int* pCol = encodedColumn)
+        {
+            for (int i = 0; i < n; i += vLen)
+            {
+                // Predicate mask: active lanes where (i + lane) < n.
+                // Naturally handles the tail — no separate scalar loop needed.
+                var loopMask = Sve.CreateWhileLessThanMask32Bit(i, n);
+
+                // Reinterpret uint mask → int mask for signed LoadVector.
+                var intMask = Unsafe.As<Vector<uint>, Vector<int>>(ref loopMask);
+
+                // Predicated load: only active lanes read from memory.
+                var chunk = Sve.LoadVector(intMask, pCol + i);
+
+                // Compare each lane against the target dictionary index.
+                // Sve.CompareEqual returns a mask vector; AND with intMask
+                // to exclude inactive tail lanes.
+                var cmp = Sve.CompareEqual(chunk, target);
+                var matchMask = Vector.BitwiseAnd(intMask, cmp);
+
+                // Extract matching row positions by walking active lanes.
+                int end = Math.Min(vLen, n - i);
+                for (int j = 0; j < end; j++)
+                    if (Unsafe.Add(ref Unsafe.As<Vector<int>, int>(ref matchMask), j) != 0)
+                        outputIndexes[count++] = i + j;
+            }
+        }
+
+        return count;
+    }
+
+    private static unsafe int FilterNotEqualsSve(
+        ReadOnlySpan<int> encodedColumn,
+        int dictionaryIndex,
+        Span<int> outputIndexes)
+    {
+        int n = encodedColumn.Length;
+        int count = 0;
+        int vLen = (int)Sve.Count32BitElements();
+        var target = new Vector<int>(dictionaryIndex);
+
+        fixed (int* pCol = encodedColumn)
+        {
+            for (int i = 0; i < n; i += vLen)
+            {
+                var loopMask = Sve.CreateWhileLessThanMask32Bit(i, n);
+                var intMask = Unsafe.As<Vector<uint>, Vector<int>>(ref loopMask);
+                var chunk = Sve.LoadVector(intMask, pCol + i);
+
+                // CompareNotEqualTo returns mask of lanes where chunk != target.
+                var cmp = Sve.CompareNotEqualTo(chunk, target);
+                var matchMask = Vector.BitwiseAnd(intMask, cmp);
+
+                int end = Math.Min(vLen, n - i);
+                for (int j = 0; j < end; j++)
+                    if (Unsafe.Add(ref Unsafe.As<Vector<int>, int>(ref matchMask), j) != 0)
+                        outputIndexes[count++] = i + j;
+            }
+        }
+
+        return count;
+    }
+
+#pragma warning restore SYSLIB5003
+#endif
 
     // ── Portable Vector<int> path ──────────────────────────────────────────
 
