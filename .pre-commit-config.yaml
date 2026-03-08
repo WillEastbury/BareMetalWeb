@@ -1,0 +1,35 @@
+repos:
+  # ── .NET format gate ──────────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: dotnet-format
+        name: dotnet format (verify no changes)
+        language: system
+        entry: dotnet format BareMetalWeb.sln --verify-no-changes --include
+        types: [c#]
+        pass_filenames: true
+
+  # ── General file hygiene ──────────────────────────────────────────────────
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: \.md$
+      - id: end-of-file-fixer
+      - id: check-json
+      - id: check-yaml
+      - id: check-merge-conflict
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # ── JavaScript linting ───────────────────────────────────────────────────
+  - repo: local
+    hooks:
+      - id: eslint
+        name: eslint (JS files)
+        language: node
+        entry: npx eslint --max-warnings=0
+        types: [javascript]
+        pass_filenames: true
+        additional_dependencies:
+          - eslint@8
