@@ -530,19 +530,41 @@ static class ProgramSetup
             if (streamWindowSize > 0)
                 serverOptions.Limits.Http2.InitialStreamWindowSize = streamWindowSize;
 
-            // #1238: Connection limits — prevent resource exhaustion on constrained hardware
-            var maxConnections = config.GetValue("Kestrel.MaxConcurrentConnections", 256);
+            // ── Connection limits ────────────────────────────────────────────
+            // MaxConcurrentConnections: 2048 supports high-concurrency benchmarks
+            // (wrk -c400) and production traffic without artificial throttling.
+            // Set lower on memory-constrained deployments.
+            var maxConnections = config.GetValue("Kestrel.MaxConcurrentConnections", 2048);
             if (maxConnections > 0)
                 serverOptions.Limits.MaxConcurrentConnections = maxConnections;
 
-            var keepAliveSeconds = config.GetValue("Kestrel.KeepAliveTimeoutSeconds", 15);
+            // Upgraded connections (WebSocket): cap below total to reserve
+            // capacity for normal HTTP requests under pressure.
+            var maxUpgraded = config.GetValue("Kestrel.MaxConcurrentUpgradedConnections", 512);
+            if (maxUpgraded > 0)
+                serverOptions.Limits.MaxConcurrentUpgradedConnections = maxUpgraded;
+
+            // ── Timeouts ────────────────────────────────────────────────────
+            // Keep-alive: 2 minutes aligns with the HTTP/2 RFC default and lets
+            // multiplexed connections amortize the TLS handshake cost.
+            var keepAliveSeconds = config.GetValue("Kestrel.KeepAliveTimeoutSeconds", 120);
             serverOptions.Limits.KeepAliveTimeout = TimeSpan.FromSeconds(keepAliveSeconds);
 
-            var headerTimeoutSeconds = config.GetValue("Kestrel.RequestHeadersTimeoutSeconds", 10);
+            // Request headers: 5s is tight enough to drop slowloris-style
+            // attacks while still accepting legitimate slow mobile clients.
+            var headerTimeoutSeconds = config.GetValue("Kestrel.RequestHeadersTimeoutSeconds", 5);
             serverOptions.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(headerTimeoutSeconds);
 
             var maxBodyBytes = config.GetValue("Kestrel.MaxRequestBodySizeMB", 10);
             serverOptions.Limits.MaxRequestBodySize = (long)maxBodyBytes * 1024 * 1024;
+
+            // Disable minimum data-rate enforcement for response bodies.
+            // Prevents Kestrel from killing slow consumers (SSE, long-poll,
+            // large CSV exports over mobile connections).
+            serverOptions.Limits.MinResponseDataRate = null;
+
+            // Strip the "Server: Kestrel" header — avoid leaking server identity.
+            serverOptions.AddServerHeader = false;
         };
     }
 
