@@ -459,7 +459,7 @@ public static class BareMetalWebExtensions
 
         // Admin endpoint: GET /api/admin/capabilities — capability graph summary
         appInfo.RegisterRoute("GET /api/admin/capabilities", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", true),
+            pageInfoFactory.RawPage("admin", false),
             async context =>
             {
                 var graph = BareMetalWeb.Runtime.CapabilityGraph.CapabilityGraphRegistry.Current;
