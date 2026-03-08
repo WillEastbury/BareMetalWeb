@@ -277,3 +277,26 @@ This lets you verify at a glance which SIMD tier is active in production.
 ---
 
 _Status: 3.1–3.3 implemented in commit **bc095a0**; 3.4 (AVX2 byte scanner) implemented; 3.5–3.6 no action required; 3.7 future scope_
+
+---
+
+## 6. Intelligence Engine — Ternary Dot Product  ✅ Implemented
+
+See [Intelligence Engine Architecture](intelligence.md) for full details.
+
+**Hot path:** `NativeTernaryMatrix.DotProduct` — the inner loop of every
+transformer layer forward pass (attention projections and FFN).
+
+**What was done:**
+
+| Priority | Platform | Path | Width |
+|----------|----------|------|-------|
+| 1 | x86 AVX2 | `DotProductAvx2` — decode 4 packed bytes → `Vector256<int>` | 256-bit / 16 weights per iteration |
+| 2 | ARM NEON | _(stub added, implementation pending)_ | 128-bit / 8 weights per iteration |
+| 3 | All | Scalar fallback with zero-byte skip | 4 weights per iteration |
+
+**Additional optimizations:**
+- **Zero-skip:** 4-byte groups (`uint32`) equal to zero are skipped entirely.
+- **Prefetch:** `Sse.Prefetch0(rowPtr + b + 128)` — 2 cache lines ahead.
+- **32-byte row alignment:** rows padded to 32-byte stride for cache-line and
+  SIMD-width alignment.

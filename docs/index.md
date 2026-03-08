@@ -16,6 +16,7 @@ Conceptual documentation explaining how the system works.
 - [Vector Index](architecture/vector-index.md) — VectorIndexManager ANN engine, Vamana NSW graph, distance metrics, REST API
 - [UI Rendering](architecture/rendering.md) — SSR template pipeline, VNext SPA path, form rendering, report rendering
 - [Auth & Session](architecture/auth.md) — Login flow, session validation, permission model, CSRF lifecycle, API keys
+- [Intelligence Engine](architecture/intelligence.md) — BitNet b1.58 ternary inference, semantic pruning, BMWM snapshots, SIMD dot product
 
 ---
 

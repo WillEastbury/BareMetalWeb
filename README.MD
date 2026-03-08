@@ -73,6 +73,8 @@ The first run triggers the **Out-of-Box Experience (OOBE)** setup wizard at `htt
 | `BareMetalWeb.Rendering` | SSR HTML fragment rendering |
 | `BareMetalWeb.Runtime` | Runtime/virtual entity definitions |
 | `BareMetalWeb.API` | REST API controller layer |
+| `BareMetalWeb.Intelligence` | BitNet b1.58 ternary inference engine (zero-dependency, AOT-safe) |
+| `BareMetalWeb.Intelligence.CLI` | Interactive REPL for testing the inference engine |
 | `BareMetalWeb.CLI` | Native AOT `metal` command-line tool |
 | `BareMetalWeb.UserClasses` | User-defined entity model classes |
 
