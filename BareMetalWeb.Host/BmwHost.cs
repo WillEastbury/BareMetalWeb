@@ -81,6 +81,8 @@ public sealed class BmwHost : IAsyncDisposable
 
         _logger.LogInfo($"BmwHost started — PID {Environment.ProcessId} — direct Kestrel hosting (no ASP.NET middleware)");
         Console.WriteLine($"BmwHost started — PID {Environment.ProcessId} — direct Kestrel hosting");
+        Console.WriteLine($"PORT={Environment.GetEnvironmentVariable("PORT")}");
+        Console.WriteLine($"WEBSITES_PORT={Environment.GetEnvironmentVariable("WEBSITES_PORT")}");
         foreach (var address in _server.Features.Get<Microsoft.AspNetCore.Hosting.Server.Features.IServerAddressesFeature>()?.Addresses ?? [])
             Console.WriteLine($"  Listening on: {address}");
 
