@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
+using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
 
 namespace BareMetalWeb.Intelligence;
@@ -358,6 +359,62 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
             _data = null;
             _disposed = true;
         }
+    }
+
+    // ── Snapshot serialisation helpers ───────────────────────────────────
+
+    /// <summary>
+    /// Copy the raw packed data (including alignment padding) to a destination span.
+    /// Returns the total number of bytes written.
+    /// </summary>
+    public long CopyPackedDataTo(Span<byte> destination)
+    {
+        if (destination.Length < _totalBytes)
+            throw new ArgumentException(
+                $"Destination {destination.Length} < required {_totalBytes}");
+        new ReadOnlySpan<byte>(_data, (int)_totalBytes).CopyTo(destination);
+        return _totalBytes;
+    }
+
+    /// <summary>Total bytes of raw packed data (including alignment padding per row).</summary>
+    public long TotalPackedDataBytes => _totalBytes;
+
+    /// <summary>
+    /// Reconstruct a NativeTernaryMatrix from previously packed binary data.
+    /// The data must include row alignment padding (rowStrideBytes per row).
+    /// This avoids re-encoding from sbyte[] weights — instant load.
+    /// </summary>
+    public static NativeTernaryMatrix FromPackedData(
+        ReadOnlySpan<byte> packedData, int rows, int cols)
+    {
+        var matrix = new NativeTernaryMatrix(rows, cols);
+
+        long expected = (long)rows * matrix._rowStrideBytes;
+        if (packedData.Length < expected)
+            throw new ArgumentException(
+                $"Packed data {packedData.Length} < expected {expected}");
+
+        packedData[..(int)expected].CopyTo(
+            new Span<byte>(matrix._data, (int)expected));
+
+        // Recompute stats from the data we just loaded
+        int totalLogicalBytes = rows * matrix._packedRowBytes;
+        int zeroByteCount = 0;
+        for (int r = 0; r < rows; r++)
+        {
+            byte* rowPtr = matrix._data + (long)r * matrix._rowStrideBytes;
+            for (int b = 0; b < matrix._packedRowBytes; b++)
+                if (rowPtr[b] == 0) zeroByteCount++;
+        }
+
+        matrix._stats = new MatrixStats(
+            LogicalWeights: rows * cols,
+            PackedBytes: totalLogicalBytes,
+            ZeroByteCount: zeroByteCount,
+            ZeroByteRatio: totalLogicalBytes > 0
+                ? (float)zeroByteCount / totalLogicalBytes : 0f);
+
+        return matrix;
     }
 
     private static void ThrowRowOutOfRange(int row) =>

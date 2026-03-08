@@ -105,6 +105,16 @@ while (true)
             continue;
 
         default:
+            if (input.StartsWith("save ", StringComparison.OrdinalIgnoreCase))
+            {
+                SaveSnapshot(engine, input[5..].Trim());
+                continue;
+            }
+            if (input.StartsWith("load ", StringComparison.OrdinalIgnoreCase))
+            {
+                LoadSnapshot(engine, input[5..].Trim(), config, ref orchestrator, classifier, executor);
+                continue;
+            }
             await RunQuery(orchestrator, input);
             continue;
     }
@@ -125,6 +135,8 @@ static void PrintHelp()
     Console.WriteLine("  │    semantic     — Run semantic pruning comparison│");
     Console.WriteLine("  │    bench        — Run inference benchmark       │");
     Console.WriteLine("  │    compare      — Compare pruning levels RAM    │");
+    Console.WriteLine("  │    save <path>  — Save model snapshot (.bmwm)   │");
+    Console.WriteLine("  │    load <path>  — Load model snapshot (.bmwm)   │");
     Console.WriteLine("  │    exit, quit   — Exit                          │");
     Console.WriteLine("  │                                                 │");
     Console.WriteLine("  │  Or just type a natural language query:         │");
@@ -447,5 +459,80 @@ static void RunSemanticComparison(BitNetModelConfig config)
     }
 
     GC.Collect(2, GCCollectionMode.Aggressive, true, true);
+    Console.WriteLine();
+}
+
+static void SaveSnapshot(BitNetEngine engine, string path)
+{
+    if (string.IsNullOrWhiteSpace(path))
+    {
+        path = "model.bmwm";
+        Console.WriteLine($"    Using default path: {path}");
+    }
+
+    try
+    {
+        var sw = Stopwatch.StartNew();
+        engine.SaveSnapshot(path);
+        sw.Stop();
+
+        var fi = new FileInfo(path);
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($"  ✓ Saved ");
+        Console.ResetColor();
+        Console.WriteLine($"{fi.Length / (1024 * 1024)} MB to {fi.FullName} ({sw.ElapsedMilliseconds}ms)");
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"  ✗ Save failed: {ex.Message}");
+        Console.ResetColor();
+    }
+    Console.WriteLine();
+}
+
+static void LoadSnapshot(
+    BitNetEngine engine, string path,
+    BitNetModelConfig config,
+    ref IntelligenceOrchestrator orchestrator,
+    KeywordIntentClassifier classifier,
+    IToolExecutor executor)
+{
+    if (string.IsNullOrWhiteSpace(path))
+    {
+        path = "model.bmwm";
+        Console.WriteLine($"    Using default path: {path}");
+    }
+
+    if (!File.Exists(path))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"  ✗ File not found: {path}");
+        Console.ResetColor();
+        Console.WriteLine();
+        return;
+    }
+
+    try
+    {
+        var sw = Stopwatch.StartNew();
+        engine.LoadSnapshot(path);
+        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
+        sw.Stop();
+
+        orchestrator = new IntelligenceOrchestrator(classifier, executor, engine);
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($"  ✓ Loaded ");
+        Console.ResetColor();
+        Console.WriteLine($"from {path} ({sw.ElapsedMilliseconds}ms)");
+        PrintStats(engine, config);
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"  ✗ Load failed: {ex.Message}");
+        Console.ResetColor();
+    }
     Console.WriteLine();
 }

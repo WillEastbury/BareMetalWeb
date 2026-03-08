@@ -187,7 +187,7 @@ public static class AdminToolCatalogue
 
             foreach (var item in list)
             {
-                sb.AppendLine($"  [{item.Id}] {item}");
+                sb.AppendLine($"  [{item.Key}] {item}");
             }
 
             return ToolResult.Ok(sb.ToString());

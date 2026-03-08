@@ -178,6 +178,85 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         LayerStats = layerStatsList;
     }
 
+    /// <summary>
+    /// Save the current pruned + packed model state to a binary snapshot.
+    /// The snapshot can be loaded later with <see cref="LoadSnapshot"/> to
+    /// skip all pruning and compression steps.
+    /// </summary>
+    public void SaveSnapshot(string path, IReadOnlyList<string>? tokenTable = null)
+    {
+        if (!_isLoaded || _compressedAttn is null || _compressedFfn is null
+            || _compressedEmbeddings is null || _compressedOutputHead is null)
+            throw new InvalidOperationException("No model loaded to snapshot");
+
+        int activeVocab = _pruner?.PrunedVocabSize ?? _config.VocabSize;
+
+        ModelSnapshot.Save(path, _config, activeVocab,
+            _compressedAttn, _compressedFfn,
+            _compressedEmbeddings, _compressedOutputHead,
+            tokenTable);
+    }
+
+    /// <summary>
+    /// Load a model from a binary snapshot file. Reconstructs
+    /// NativeTernaryMatrix instances directly from packed data —
+    /// no pruning or compression needed, loads in milliseconds.
+    /// </summary>
+    /// <param name="path">Path to the .bmwm snapshot file.</param>
+    /// <param name="memoryMapped">If true, use memory-mapped I/O (avoids large managed copies).</param>
+    public void LoadSnapshot(string path, bool memoryMapped = false)
+    {
+        var snapshot = memoryMapped
+            ? ModelSnapshot.LoadMapped(path)
+            : ModelSnapshot.Load(path);
+
+        // Transfer ownership from snapshot to engine
+        DisposeNative();
+
+        _layerCount = snapshot.Attn.Length;
+        _compressedAttn = snapshot.Attn;
+        _compressedFfn = snapshot.Ffn;
+        _compressedEmbeddings = snapshot.Embeddings;
+        _compressedOutputHead = snapshot.OutputHead;
+
+        NativeBytesAllocated = 0;
+        var layerStatsList = new (MatrixStats Attn, MatrixStats Ffn)[_layerCount];
+        for (int i = 0; i < _layerCount; i++)
+        {
+            NativeBytesAllocated += _compressedAttn[i].BytesAllocated;
+            NativeBytesAllocated += _compressedFfn[i].BytesAllocated;
+            layerStatsList[i] = (_compressedAttn[i].Stats, _compressedFfn[i].Stats);
+        }
+        NativeBytesAllocated += _compressedEmbeddings.BytesAllocated;
+        NativeBytesAllocated += _compressedOutputHead.BytesAllocated;
+        LayerStats = layerStatsList;
+
+        // Compute model stats from loaded data
+        long totalWeights = 0;
+        long zeroWeights = 0;
+        for (int i = 0; i < _layerCount; i++)
+        {
+            totalWeights += _compressedAttn[i].Stats.LogicalWeights;
+            totalWeights += _compressedFfn[i].Stats.LogicalWeights;
+            zeroWeights += _compressedAttn[i].Stats.ZeroByteCount * 4L;
+            zeroWeights += _compressedFfn[i].Stats.ZeroByteCount * 4L;
+        }
+        long embWeights = (long)_compressedEmbeddings.Stats.LogicalWeights
+                        + _compressedOutputHead.Stats.LogicalWeights;
+
+        _modelStats = new ModelSizeStats(
+            TotalWeights: totalWeights + embWeights,
+            LayerWeights: totalWeights,
+            EmbeddingWeights: embWeights,
+            ZeroWeights: zeroWeights,
+            StoredBytes: totalWeights + embWeights,
+            PackedBytes: NativeBytesAllocated,
+            Sparsity: totalWeights > 0 ? (float)zeroWeights / totalWeights : 0f,
+            LayerCount: _layerCount);
+
+        _isLoaded = true;
+    }
+
     public ValueTask<string> GenerateAsync(
         ReadOnlyMemory<char> prompt,
         int maxTokens = 256,
