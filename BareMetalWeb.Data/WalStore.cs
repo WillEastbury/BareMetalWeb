@@ -1,9 +1,11 @@
 using System.Buffers;
 using System.Buffers.Binary;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Win32.SafeHandles;
 
 namespace BareMetalWeb.Data;
 
@@ -49,6 +51,9 @@ public sealed class WalStore : IDisposable
     private ulong _nextTxId = 1;
     private ulong _visibleCommitPtr;
     private bool _disposed;
+
+    // #1240: Cached read handles per segment — RandomAccess.Read is thread-safe
+    private readonly ConcurrentDictionary<uint, SafeFileHandle> _readerHandles = new();
 
     // ── Public surface ────────────────────────────────────────────────────────
 
@@ -223,14 +228,12 @@ public sealed class WalStore : IDisposable
         if (ptr == WalConstants.NullPtr) return false;
 
         var (segId, offset32) = WalConstants.UnpackPtr(ptr);
-        string path = Path.Combine(_directory, WalConstants.SegmentFileName(segId));
-        if (!File.Exists(path)) return false;
 
         try
         {
-            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
-                FileShare.ReadWrite, 4096);
-            return TryReadOpPayloadFromStream(fs, offset32, key, out payload, Encryption);
+            var handle = GetOrOpenReaderHandle(segId);
+            if (handle == null) return false;
+            return TryReadOpPayloadFromHandle(handle, offset32, key, out payload, Encryption);
         }
         catch (FileNotFoundException) { return false; }
         catch (DirectoryNotFoundException) { return false; }
@@ -258,6 +261,14 @@ public sealed class WalStore : IDisposable
             _activeWriter?.WriteFooterAndClose();
             _activeWriter = null;
         }
+
+        // #1240: Close all cached reader handles
+        foreach (var kvp in _readerHandles)
+        {
+            try { kvp.Value.Dispose(); } catch { /* best-effort */ }
+        }
+        _readerHandles.Clear();
+
         ProjectionManager.Dispose();
         KeyAllocator.Dispose();
         HeadMap.Dispose();
@@ -393,6 +404,37 @@ public sealed class WalStore : IDisposable
     }
 
     /// <summary>
+    /// #1240: Returns a cached SafeFileHandle for the given segment, opening it on first access.
+    /// RandomAccess.Read with SafeFileHandle is thread-safe — no locking needed per read.
+    /// </summary>
+    private SafeFileHandle? GetOrOpenReaderHandle(uint segId)
+    {
+        if (_readerHandles.TryGetValue(segId, out var cached))
+            return cached;
+
+        string path = Path.Combine(_directory, WalConstants.SegmentFileName(segId));
+        if (!File.Exists(path)) return null;
+
+        var handle = File.OpenHandle(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        if (_readerHandles.TryAdd(segId, handle))
+            return handle;
+
+        // Another thread won the race — dispose our handle and use theirs
+        handle.Dispose();
+        return _readerHandles[segId];
+    }
+
+    /// <summary>
+    /// #1240: Evict and close a cached reader handle for a segment about to be deleted.
+    /// Called during compaction before File.Delete.
+    /// </summary>
+    internal void EvictReaderHandle(uint segId)
+    {
+        if (_readerHandles.TryRemove(segId, out var handle))
+            handle.Dispose();
+    }
+
+    /// <summary>
     /// Forces a segment rotation (closes the active writer, starts a new segment).
     /// Exposed as <c>internal</c> so unit tests can ensure a segment is no longer
     /// active before calling <see cref="CompactSegmentFromMaterialisedView"/>.
@@ -427,6 +469,7 @@ public sealed class WalStore : IDisposable
         if (matchKeys.Length == 0)
         {
             // No live keys reference this segment — it can be deleted
+            EvictReaderHandle(segmentId);
             try { File.Delete(originalPath); } catch { /* best effort */ }
             EngineMetrics.RecordCompaction(EngineMetrics.ElapsedUs(startTicks), originalSize);
             return;
@@ -471,6 +514,7 @@ public sealed class WalStore : IDisposable
         if (opCount == 0)
         {
             // All entries were tombstones — delete the segment
+            EvictReaderHandle(segmentId);
             try { File.Delete(originalPath); } catch { /* best effort */ }
             EngineMetrics.RecordCompaction(EngineMetrics.ElapsedUs(startTicks), originalSize);
             return;
@@ -500,6 +544,7 @@ public sealed class WalStore : IDisposable
             // ── 5. Fsync temp file, then atomic rename ──────────────────────
             // Fsync is handled by WriteFooterAndClose above.
             // Atomic rename over the original segment.
+            EvictReaderHandle(segmentId);
             File.Move(tmpPath, originalPath, overwrite: true);
         }
         catch
@@ -733,29 +778,27 @@ public sealed class WalStore : IDisposable
         if (ptr == WalConstants.NullPtr) return false;
 
         var (segId, offset32) = WalConstants.UnpackPtr(ptr);
-        string path = Path.Combine(_directory, WalConstants.SegmentFileName(segId));
-        if (!File.Exists(path)) return false;
 
         try
         {
-            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
-                FileShare.ReadWrite, 4096);
-            return TryReadFullOpFromStream(fs, offset32, key, out op, Encryption);
+            var handle = GetOrOpenReaderHandle(segId);
+            if (handle == null) return false;
+            return TryReadFullOpFromHandle(handle, offset32, key, out op, Encryption);
         }
         catch (FileNotFoundException) { return false; }
         catch (DirectoryNotFoundException) { return false; }
     }
 
-    private static bool TryReadFullOpFromStream(FileStream fs, uint offset32,
+    private static bool TryReadFullOpFromHandle(SafeFileHandle handle, uint offset32,
         ulong targetKey, out WalOp op, WalEnvelopeEncryption? encryption = null)
     {
         op = default;
 
-        if (offset32 + WalConstants.RecordHeaderBytes > fs.Length) return false;
-        fs.Seek(offset32, SeekOrigin.Begin);
+        long fileLength = RandomAccess.GetLength(handle);
+        if (offset32 + WalConstants.RecordHeaderBytes > fileLength) return false;
 
         Span<byte> recHdr = stackalloc byte[WalConstants.RecordHeaderBytes];
-        if (fs.Read(recHdr) != WalConstants.RecordHeaderBytes) return false;
+        if (RandomAccess.Read(handle, recHdr, offset32) != WalConstants.RecordHeaderBytes) return false;
 
         if (BinaryPrimitives.ReadUInt32LittleEndian(recHdr[0..]) != WalConstants.RecordMagic)
             return false;
@@ -764,11 +807,10 @@ public sealed class WalStore : IDisposable
 
         uint totalBytes = BinaryPrimitives.ReadUInt32LittleEndian(recHdr[8..]);
         long minSize = WalConstants.RecordHeaderBytes + WalConstants.RecordTrailerBytes;
-        if (totalBytes < minSize || offset32 + totalBytes > fs.Length) return false;
+        if (totalBytes < minSize || offset32 + totalBytes > fileLength) return false;
 
-        fs.Seek(offset32, SeekOrigin.Begin);
         var recordBuf = new byte[totalBytes];
-        if (fs.Read(recordBuf) != (int)totalBytes) return false;
+        if (RandomAccess.Read(handle, recordBuf, offset32) != (int)totalBytes) return false;
 
         if (!WalSegmentReader.VerifyRecordCrc(recordBuf)) return false;
 
@@ -942,16 +984,16 @@ public sealed class WalStore : IDisposable
 
     // ── Read-back internals ───────────────────────────────────────────────────
 
-    private static bool TryReadOpPayloadFromStream(FileStream fs, uint offset32,
+    private static bool TryReadOpPayloadFromHandle(SafeFileHandle handle, uint offset32,
         ulong targetKey, out ReadOnlyMemory<byte> payload, WalEnvelopeEncryption? encryption = null)
     {
         payload = default;
 
-        if (offset32 + WalConstants.RecordHeaderBytes > fs.Length) return false;
-        fs.Seek(offset32, SeekOrigin.Begin);
+        long fileLength = RandomAccess.GetLength(handle);
+        if (offset32 + WalConstants.RecordHeaderBytes > fileLength) return false;
 
         Span<byte> recHdr = stackalloc byte[WalConstants.RecordHeaderBytes];
-        if (fs.Read(recHdr) != WalConstants.RecordHeaderBytes) return false;
+        if (RandomAccess.Read(handle, recHdr, offset32) != WalConstants.RecordHeaderBytes) return false;
 
         if (BinaryPrimitives.ReadUInt32LittleEndian(recHdr[0..]) != WalConstants.RecordMagic)
             return false;
@@ -960,12 +1002,11 @@ public sealed class WalStore : IDisposable
 
         uint totalBytes = BinaryPrimitives.ReadUInt32LittleEndian(recHdr[8..]);
         long minSize = WalConstants.RecordHeaderBytes + WalConstants.RecordTrailerBytes;
-        if (totalBytes < minSize || offset32 + totalBytes > fs.Length) return false;
+        if (totalBytes < minSize || offset32 + totalBytes > fileLength) return false;
 
         // Read entire record for CRC verification
-        fs.Seek(offset32, SeekOrigin.Begin);
         var recordBuf = new byte[totalBytes];
-        if (fs.Read(recordBuf) != (int)totalBytes) return false;
+        if (RandomAccess.Read(handle, recordBuf, offset32) != (int)totalBytes) return false;
 
         if (!WalSegmentReader.VerifyRecordCrc(recordBuf)) return false;
 
