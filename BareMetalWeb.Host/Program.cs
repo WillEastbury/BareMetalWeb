@@ -460,6 +460,20 @@ static class ProgramSetup
             var streamWindowSize = config.GetValue("Kestrel.InitialStreamWindowSize", 98304);
             if (streamWindowSize > 0)
                 serverOptions.Limits.Http2.InitialStreamWindowSize = streamWindowSize;
+
+            // #1238: Connection limits — prevent resource exhaustion on constrained hardware
+            var maxConnections = config.GetValue("Kestrel.MaxConcurrentConnections", 256);
+            if (maxConnections > 0)
+                serverOptions.Limits.MaxConcurrentConnections = maxConnections;
+
+            var keepAliveSeconds = config.GetValue("Kestrel.KeepAliveTimeoutSeconds", 15);
+            serverOptions.Limits.KeepAliveTimeout = TimeSpan.FromSeconds(keepAliveSeconds);
+
+            var headerTimeoutSeconds = config.GetValue("Kestrel.RequestHeadersTimeoutSeconds", 10);
+            serverOptions.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(headerTimeoutSeconds);
+
+            var maxBodyBytes = config.GetValue("Kestrel.MaxRequestBodySizeMB", 10);
+            serverOptions.Limits.MaxRequestBodySize = (long)maxBodyBytes * 1024 * 1024;
         };
     }
 

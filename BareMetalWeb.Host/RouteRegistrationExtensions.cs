@@ -50,6 +50,18 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /statusRaw", new RouteHandlerData(
             pageInfoFactory.RawPage("Public", false),
             routeHandlers.TimeRawHandler));
+
+        // #1244: Health check endpoint for load balancers / monitoring
+        host.RegisterRoute("GET /health", new RouteHandlerData(
+            pageInfoFactory.RawPage("Public", false),
+            async context =>
+            {
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json";
+                var uptime = DateTime.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
+                var json = $"{{\"status\":\"healthy\",\"uptime_seconds\":{uptime.TotalSeconds:F0}}}";
+                await context.Response.WriteAsync(json);
+            }));
     }
 
     /// <summary>

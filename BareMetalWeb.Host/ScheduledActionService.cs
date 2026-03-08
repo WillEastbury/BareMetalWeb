@@ -17,6 +17,7 @@ public sealed class ScheduledActionService
 {
     private static readonly TimeSpan TickInterval = TimeSpan.FromMinutes(1);
     private readonly IBufferedLogger _logger;
+    private readonly SemaphoreSlim _executionGuard = new(1, 1);
 
     public ScheduledActionService(IBufferedLogger logger)
     {
@@ -29,13 +30,25 @@ public sealed class ScheduledActionService
 
         while (!token.IsCancellationRequested)
         {
-            try
+            // #1242: Overlap prevention — skip tick if previous is still running
+            if (_executionGuard.Wait(0))
             {
-                await ProcessSchedulesAsync(DateTime.UtcNow, token);
+                try
+                {
+                    await ProcessSchedulesAsync(DateTime.UtcNow, token);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError("ScheduledActionService tick error.", ex);
+                }
+                finally
+                {
+                    _executionGuard.Release();
+                }
             }
-            catch (Exception ex)
+            else
             {
-                _logger.LogError("ScheduledActionService tick error.", ex);
+                _logger.LogInfo("ScheduledActionService: skipping tick — previous execution still running.");
             }
 
             try

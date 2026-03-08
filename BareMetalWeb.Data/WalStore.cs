@@ -36,6 +36,14 @@ public sealed class WalStore : IDisposable
     private readonly object _writeLock = new();
     internal readonly WalEnvelopeEncryption Encryption;
 
+    /// <summary>
+    /// When true, each commit performs an fsync to guarantee on-disk durability.
+    /// When false (default), data is flushed to OS page cache only — safe against
+    /// process crash but not power loss. Set to true for full durability on
+    /// unreliable storage.
+    /// </summary>
+    public bool ForceDiskSync { get; set; }
+
     private WalSegmentWriter? _activeWriter;
     private uint _nextSegmentId;
     private ulong _nextTxId = 1;
@@ -134,6 +142,9 @@ public sealed class WalStore : IDisposable
 
         cancellationToken.ThrowIfCancellationRequested();
 
+        // #1248: Disk space check before writing
+        CheckDiskSpace();
+
         WalOp[] filledOps;
         ulong ptr;
 
@@ -165,9 +176,9 @@ public sealed class WalStore : IDisposable
                 }
             }
 
-            // Write record, fsync
+            // Write record; fsync only when ForceDiskSync is enabled (#1245)
             ptr = _activeWriter.AppendCommitBatch(txId, filledOps);
-            _activeWriter.Flush(flushToDisk: true);
+            _activeWriter.Flush(flushToDisk: ForceDiskSync);
 
             // Batch head map update — single write-lock instead of N
             Span<ulong> opKeys = stackalloc ulong[filledOps.Length];
@@ -360,6 +371,25 @@ public sealed class WalStore : IDisposable
         _activeWriter?.WriteFooterAndClose();
         _activeWriter = null;
         OpenNewSegment();
+    }
+
+    /// <summary>#1248: Ensure at least 50 MB of free disk space before writes.</summary>
+    private const long MinFreeDiskBytes = 50L * 1024 * 1024;
+    private void CheckDiskSpace()
+    {
+        try
+        {
+            var root = Path.GetPathRoot(Path.GetFullPath(_directory));
+            if (root == null) return;
+            var drive = new DriveInfo(root);
+            if (drive.IsReady && drive.AvailableFreeSpace < MinFreeDiskBytes)
+            {
+                throw new IOException(
+                    $"Insufficient disk space for WAL write. Available: {drive.AvailableFreeSpace / (1024 * 1024)} MB, required: {MinFreeDiskBytes / (1024 * 1024)} MB");
+            }
+        }
+        catch (IOException) { throw; }
+        catch { /* DriveInfo may fail on some platforms — allow write to proceed */ }
     }
 
     /// <summary>

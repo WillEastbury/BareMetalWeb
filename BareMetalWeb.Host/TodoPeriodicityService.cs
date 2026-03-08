@@ -129,7 +129,7 @@ public sealed class TodoPeriodicityService
         {
             next = periodicity.ToUpperInvariant() switch
             {
-                "HOURLY"    => next.AddDays(1),
+                "HOURLY"    => next.AddDays(1),  // DateOnly has no AddHours; hourly granularity needs DateTime
                 "DAILY"     => next.AddDays(1),
                 "WEEKLY"    => next.AddDays(7),
                 "MONTHLY"   => next.AddMonths(1),

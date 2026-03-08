@@ -1920,34 +1920,36 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var upsert = DataScaffold.IsTruthy(form["upsert"].ToString());
-        string csvText;
-        // SECURITY: Apply read timeout to prevent slow-loris DoS (see #1208)
+        // #1250: Stream CSV line by line instead of buffering entire file
+        const int MaxCsvRows = 100_000;
+        var rows = new List<string[]>();
         using (var cts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted))
         {
             cts.CancelAfter(TimeSpan.FromSeconds(60));
             await using (var stream = file.OpenReadStream())
             using (var reader = new StreamReader(stream))
             {
-                csvText = await reader.ReadToEndAsync(cts.Token);
+                string? line;
+                while ((line = await reader.ReadLineAsync(cts.Token)) != null)
+                {
+                    if (string.IsNullOrWhiteSpace(line)) continue;
+                    rows.Add(ParseCsvLine(line));
+                    if (rows.Count > MaxCsvRows + 1)
+                    {
+                        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                        context.Response.ContentType = "application/json";
+                        await context.Response.WriteAsync($"{{\"error\":\"CSV exceeds {MaxCsvRows:N0} row limit.\"}}");
+                        return;
+                    }
+                }
             }
         }
 
-        var rows = ParseCsvRows(csvText);
         if (rows.Count < 2)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync("{\"error\":\"CSV file is empty or missing headers.\"}");
-            return;
-        }
-
-        // SECURITY: Enforce max row count (100K data rows) to prevent resource exhaustion (see #1206)
-        const int MaxCsvRows = 100_000;
-        if (rows.Count - 1 > MaxCsvRows)
-        {
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            context.Response.ContentType = "application/json";
-            await context.Response.WriteAsync($"{{\"error\":\"CSV exceeds {MaxCsvRows:N0} row limit.\"}}");
             return;
         }
 
@@ -5881,6 +5883,53 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         return rows;
+    }
+
+    /// <summary>Parse a single CSV line into an array of field values, respecting quoted fields.</summary>
+    private static string[] ParseCsvLine(string line)
+    {
+        var fields = new List<string>();
+        var field = new StringBuilder(64);
+        bool inQuotes = false;
+
+        for (int i = 0; i < line.Length; i++)
+        {
+            var ch = line[i];
+            if (inQuotes)
+            {
+                if (ch == '"')
+                {
+                    if (i + 1 < line.Length && line[i + 1] == '"')
+                    {
+                        field.Append('"');
+                        i++;
+                    }
+                    else
+                    {
+                        inQuotes = false;
+                    }
+                }
+                else
+                {
+                    field.Append(ch);
+                }
+            }
+            else if (ch == '"')
+            {
+                inQuotes = true;
+            }
+            else if (ch == ',')
+            {
+                fields.Add(field.ToString());
+                field.Clear();
+            }
+            else if (ch != '\r')
+            {
+                field.Append(ch);
+            }
+        }
+        fields.Add(field.ToString());
+        return fields.ToArray();
     }
 
     private static Dictionary<string, int> BuildCsvMapping(DataEntityMetadata meta, string[] header, out int idIndex, out int passwordIndex)

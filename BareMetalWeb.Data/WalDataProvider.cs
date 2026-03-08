@@ -42,7 +42,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     private const string WalSubFolder          = "wal";
     private const uint   IdMapMagic            = 0x494D4150u; // "IMAP"
     private const ushort IdMapVersion          = 2;
-    private const int    DefaultQueryLimit     = int.MaxValue;
+    private const int    DefaultQueryLimit     = 1000;
     private const string PagedFolderName       = "Paged";
     private const string PagedFileExtension    = ".page";
 
@@ -838,8 +838,11 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
         // ── Vectorised path: pre-load all objects, then apply SIMD column scan ──
         // Fallback when columnar store doesn't cover all clauses.
+        // #1241: Cap pre-load to prevent OOM on very large entities
+        const int MaxVectorizedPreload = 10_000;
         if (query != null
             && idMap.Count >= ColumnQueryExecutor.VectorizationThreshold
+            && idMap.Count <= MaxVectorizedPreload
             && query.Groups.Count == 0
             && query.Clauses.Count > 0)
         {
@@ -925,9 +928,23 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         return scanResults;
     }
 
+    // #1252: Query timeout — prevent unbounded queries from exhausting thread pool
+    private const int DefaultQueryTimeoutMs = 30_000;
+
     public ValueTask<IEnumerable<T>> QueryAsync<T>(QueryDefinition? query = null,
         CancellationToken cancellationToken = default) where T : BaseDataObject
-        => ValueTask.FromResult(Query<T>(query));
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(DefaultQueryTimeoutMs);
+        try
+        {
+            return ValueTask.FromResult(Query<T>(query));
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Query for {typeof(T).Name} exceeded {DefaultQueryTimeoutMs / 1000}s timeout.");
+        }
+    }
 
     public int Count<T>(QueryDefinition? query = null) where T : BaseDataObject
     {
@@ -935,20 +952,10 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         var idMap    = GetOrLoadIdMap(typeName);
         if (idMap.Count == 0) return 0;
 
-        // Fast-path: no filter — use cached live count (O(1)), seed on first call
+        // Fast-path: no filter — use cached live count (O(1)), seed from IdMap size
         if (query == null || (query.Clauses.Count == 0 && query.Groups.Count == 0))
         {
-            return _liveCounts.GetOrAdd(typeName, _ =>
-            {
-                int live = 0;
-                foreach (var (__, walKey) in idMap)
-                {
-                    if (!_walStore.TryGetHead(walKey, out var ptr)) continue;
-                    if (!_walStore.TryReadOpPayload(ptr, walKey, out var payload)) continue;
-                    if (!payload.IsEmpty) live++;
-                }
-                return live;
-            });
+            return _liveCounts.GetOrAdd(typeName, _ => idMap.Count);
         }
 
         // ── Index-accelerated count: Equals/StartsWith with compound intersection ──

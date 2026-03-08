@@ -21,6 +21,8 @@ public sealed class DiskBufferedLogger : IBufferedLogger
 
     private readonly Queue<string> _buffer = new();
     private const int MaxBufferSize = 1000;
+    private const int LogRetentionDays = 30;
+    private DateTime _lastCleanupUtc = DateTime.MinValue;
 
     public DiskBufferedLogger(string logFolder)
     {
@@ -85,6 +87,40 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         await FlushOnceAsync(CancellationToken.None, isShutdown: true);
     }
 
+    /// <summary>
+    /// #1246: Delete log directories older than <see cref="LogRetentionDays"/> days.
+    /// Runs at most once per day to avoid repeated directory scans.
+    /// </summary>
+    private void CleanupOldLogs()
+    {
+        var now = DateTime.UtcNow;
+        if ((now - _lastCleanupUtc).TotalHours < 24) return;
+        _lastCleanupUtc = now;
+
+        var baseDirectory = string.IsNullOrWhiteSpace(_logFolder)
+            ? AppContext.BaseDirectory
+            : _logFolder;
+        if (!Path.IsPathRooted(baseDirectory))
+            baseDirectory = Path.Combine(AppContext.BaseDirectory, baseDirectory);
+
+        if (!Directory.Exists(baseDirectory)) return;
+
+        try
+        {
+            var cutoff = now.AddDays(-LogRetentionDays).ToString("yyyyMMdd");
+            foreach (var dayDir in Directory.EnumerateDirectories(baseDirectory))
+            {
+                var dirName = Path.GetFileName(dayDir);
+                if (dirName.Length == 8 && string.CompareOrdinal(dirName, cutoff) < 0)
+                {
+                    try { Directory.Delete(dayDir, recursive: true); }
+                    catch { /* best-effort cleanup */ }
+                }
+            }
+        }
+        catch { /* don't let cleanup failures affect logging */ }
+    }
+
     public void OnApplicationStopping(CancellationTokenSource cts, Task loggerTask)
     {
         Console.WriteLine("Application stopping: flushing logs...");
@@ -142,6 +178,8 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         }
 
         await AppendLinesSharedAsync(GetLogFilePath(nowUtc, "info"), lines, token).ConfigureAwait(false);
+
+        CleanupOldLogs();
     }
 
     private static DateTime TruncateToMinuteUtc(DateTime utcNow)
