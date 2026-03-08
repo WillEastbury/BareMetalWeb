@@ -67,7 +67,7 @@ jobs:
           cp ./cli-out/${{ matrix.rid }}/metal${{ matrix.ext }} ./artifacts/metal-${{ matrix.rid }}${{ matrix.ext }}
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: metal-${{ matrix.rid }}
           path: ./artifacts/metal-${{ matrix.rid }}${{ matrix.ext }}
@@ -86,7 +86,7 @@ jobs:
         run: ls -lh ./all-binaries/
 
       - name: Upload combined release
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: metal-all-platforms
           path: ./all-binaries/

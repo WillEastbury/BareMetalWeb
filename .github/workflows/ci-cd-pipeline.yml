@@ -222,7 +222,7 @@ jobs:
         run: npx playwright test
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: playwright-l1-1-base-report
@@ -230,7 +230,7 @@ jobs:
           retention-days: 7
 
       - name: Upload .NET test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-l1-1-base
@@ -330,7 +330,7 @@ jobs:
             --results-directory TestResults --logger "trx"
 
       - name: Upload integration test results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: test-results-l1-2-integration
@@ -369,7 +369,7 @@ jobs:
             -- --addresses 100 --customers 50 --products 25 --units 10
 
       - name: Upload performance results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: perf-results-l1-3-small
@@ -408,7 +408,7 @@ jobs:
             -- --addresses 10000 --customers 5000 --products 2500 --units 1000
 
       - name: Upload performance results
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: perf-results-l1-4-large
@@ -449,7 +449,7 @@ jobs:
         run: npx playwright test
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: playwright-l1-5-upgrade-report
@@ -505,7 +505,7 @@ jobs:
             -p:InformationalVersion=${{ needs.version.outputs.info_version }}
 
       - name: Upload deploy artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deploy-package
           path: ./publish/
@@ -717,7 +717,7 @@ jobs:
         run: npx playwright test
 
       - name: Upload Playwright report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         if: always()
         with:
           name: playwright-l2-1-canary-report

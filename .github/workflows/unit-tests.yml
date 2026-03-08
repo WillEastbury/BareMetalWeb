@@ -42,7 +42,7 @@ jobs:
         run: dotnet build BareMetalWeb.sln --configuration Debug --no-restore
 
       - name: Upload Debug build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: build-debug
           path: |
@@ -87,7 +87,7 @@ jobs:
             -p:InformationalVersion=${{ steps.version.outputs.info_version }}
 
       - name: Upload Release publish output
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: publish-release
           path: ./publish
