@@ -78,6 +78,32 @@ dotnet run --project BareMetalWeb.PerformanceTests
 - CSRF protection built-in
 - Be cautious with user input and data serialization
 
+## ⚠️ MANDATORY Code Quality Requirements
+
+All code contributed to this project — whether by humans or AI agents — **MUST** adhere to the following non-negotiable requirements:
+
+### Performance & AOT Safety
+- **No unnecessary allocations on the hot path.** Every allocation in request handling must be justified. Prefer stackalloc, `Span<T>`, `Memory<T>`, ArrayPool, and struct-based patterns.
+- **No reflection on the hot path.** Reflection is only acceptable at startup for one-time metadata caching. Never use `Type.GetMethod()`, `Activator.CreateInstance()`, or similar in request processing.
+- **AOT and trim safe.** All code must be compatible with Native AOT compilation and IL trimming. No `dynamic`, no unconstrained `MakeGenericType`, no runtime code generation. Use `[DynamicallyAccessedMembers]` or source generators where needed.
+- **Use hardware acceleration where possible.** Leverage `Vector<T>`, `Vector128<T>`/`Vector256<T>`, `System.Numerics`, SIMD intrinsics, and hardware-accelerated APIs (`Crc32`, `AesGcm`, `SHA256.HashData`) for any compute-intensive operations (hashing, searching, serialisation, crypto).
+
+### Security & Privacy
+- **No OWASP vulnerabilities.** Code must be free of injection (SQL, command, header, log), XSS, CSRF, path traversal, insecure deserialisation, broken access control, and all other OWASP Top 10 categories.
+- **No bounds-checking exploits or buffer overruns.** Always validate indices, lengths, and offsets before accessing buffers. Use `Span<T>` slicing (which throws on out-of-range) rather than raw pointer arithmetic. Never trust user-supplied lengths.
+- **Privacy safe.** Never log PII, tokens, passwords, or session data. Sanitise all user input before storage or display. Follow data minimisation principles.
+- **Production ready.** Code must be deployable as-is — no TODO stubs, no placeholder error handling, no `Console.WriteLine` debugging. Proper error handling, proper logging, proper resource disposal.
+
+### Summary Checklist (for every change)
+- [ ] Zero unnecessary allocations on hot path
+- [ ] No reflection at runtime (startup-only if needed)
+- [ ] AOT/trim compatible
+- [ ] No OWASP vulnerabilities
+- [ ] Bounds-checked, no buffer overruns
+- [ ] Privacy safe (no PII leakage)
+- [ ] Hardware-accelerated where applicable
+- [ ] Production ready and secure by design
+
 ## Static Files and Proxy
 
 - **Static files**: Custom handler (no middleware) with caching/ETag/Last-Modified support
