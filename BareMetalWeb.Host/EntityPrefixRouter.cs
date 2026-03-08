@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 
@@ -59,43 +58,11 @@ public sealed class EntityPrefixRouter
     private EntityRoute[] _routes = Array.Empty<EntityRoute>();
     private int _count;
 
-    // Metrics — shared totals (updated in batches from thread-local accumulators).
-    private long _dispatchTicks;
-    private long _dispatchCount;
-    private long _matchAttempts;
-
-    // Thread-local accumulators — flushed every 64 calls to avoid
-    // Interlocked memory barriers (LDAXR/STLXR) on the ARM hot path.
-    // NativeAOT has no JIT to speculatively elide barriers, so every
-    // Interlocked op compiles to a full LL/SC sequence (2-3× costlier
-    // than x86 LOCK prefix).
-    [ThreadStatic] private static long t_ticks;
-    [ThreadStatic] private static int t_count;
-    [ThreadStatic] private static int t_attempts;
-
     /// <summary>Number of registered entities.</summary>
     public int Count => _count;
 
     /// <summary>Registered entity routes.</summary>
     public IReadOnlyList<EntityRoute> Routes => _routes;
-
-    /// <summary>Total dispatch operations recorded.</summary>
-    public long DispatchCount => Volatile.Read(ref _dispatchCount);
-
-    /// <summary>Total entity_match_attempts across all dispatches.</summary>
-    public long MatchAttempts => Volatile.Read(ref _matchAttempts);
-
-    /// <summary>Average entity_dispatch_time in nanoseconds.</summary>
-    public double AverageDispatchNs
-    {
-        get
-        {
-            long count = Volatile.Read(ref _dispatchCount);
-            if (count == 0) return 0;
-            double ticks = Volatile.Read(ref _dispatchTicks);
-            return ticks / count / Stopwatch.Frequency * 1_000_000_000;
-        }
-    }
 
     /// <summary>
     /// Build the prefix dispatch tree from a set of entity routes.
@@ -106,7 +73,6 @@ public sealed class EntityPrefixRouter
     {
         _count = routes.Count;
         _routes = routes.ToArray();
-        ResetMetrics();
 
         if (routes.Count == 0)
         {
@@ -161,6 +127,7 @@ public sealed class EntityPrefixRouter
     /// <summary>
     /// Resolve an entity slug (UTF-8 bytes) to its canonical name and ordinal.
     /// O(1) bucket lookup + 1–2 comparisons per bucket. Case-insensitive.
+    /// Zero Stopwatch overhead — dispatch timing is handled by the caller.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryResolve(ReadOnlySpan<byte> entitySlug, out string resolvedName, out int ordinal)
@@ -171,10 +138,6 @@ public sealed class EntityPrefixRouter
             ordinal = -1;
             return false;
         }
-
-        // Read system timer AFTER the empty guard — CNTVCT_EL0 on ARM is
-        // a system-register read that serialises the pipeline.
-        long start = Stopwatch.GetTimestamp();
 
         // Pre-lowercase the slug once using branchless masking, then use
         // SequenceEqual for all bucket comparisons. Under NativeAOT the
@@ -193,30 +156,24 @@ public sealed class EntityPrefixRouter
         {
             resolvedName = null!;
             ordinal = -1;
-            RecordDispatch(start, 0);
             return false;
         }
 
         var entries = _buckets[bucket];
-        int attempts = 0;
-
         for (int i = 0; i < entries.Length; i++)
         {
-            attempts++;
             ref readonly var entry = ref entries[i];
 
             if (lowered.Length == entry.Bytes.Length && lowered.SequenceEqual(entry.Bytes))
             {
                 resolvedName = entry.Name;
                 ordinal = entry.Ordinal;
-                RecordDispatch(start, attempts);
                 return true;
             }
         }
 
         resolvedName = null!;
         ordinal = -1;
-        RecordDispatch(start, attempts);
         return false;
     }
 
@@ -329,14 +286,6 @@ public sealed class EntityPrefixRouter
         return true;
     }
 
-    /// <summary>Reset dispatch metrics to zero.</summary>
-    public void ResetMetrics()
-    {
-        Interlocked.Exchange(ref _dispatchTicks, 0);
-        Interlocked.Exchange(ref _dispatchCount, 0);
-        Interlocked.Exchange(ref _matchAttempts, 0);
-    }
-
     /// <summary>
     /// Branchless ASCII lowercase. Under NativeAOT the compiler emits a
     /// real conditional branch for ternaries on ARM64; this arithmetic
@@ -360,28 +309,5 @@ public sealed class EntityPrefixRouter
     {
         for (int i = 0; i < src.Length; i++)
             dst[i] = AsciiLower(src[i]);
-    }
-
-    /// <summary>
-    /// Batch-record dispatch metrics via thread-local accumulators.
-    /// Flushes to shared Interlocked counters every 64 calls, reducing
-    /// ARM64 LL/SC barrier overhead by ~64×.
-    /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void RecordDispatch(long startTimestamp, int attempts)
-    {
-        t_ticks += Stopwatch.GetTimestamp() - startTimestamp;
-        t_count++;
-        t_attempts += attempts;
-
-        if ((t_count & 63) == 0)
-        {
-            Interlocked.Add(ref _dispatchTicks, t_ticks);
-            Interlocked.Add(ref _dispatchCount, t_count);
-            Interlocked.Add(ref _matchAttempts, t_attempts);
-            t_ticks = 0;
-            t_count = 0;
-            t_attempts = 0;
-        }
     }
 }

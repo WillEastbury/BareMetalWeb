@@ -593,6 +593,7 @@ public class BareMetalWebServer : IBareWebHost
             EnsurePrefixRouter();
             if (_jumpTable.TryLookup(routeKey, out RouteHandlerData page))
             {
+                Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 if (page.PageInfo != null)
                 {
                     bmwCtx.SetPageInfo(page.PageInfo);
@@ -601,17 +602,16 @@ public class BareMetalWebServer : IBareWebHost
                 {
                     await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, page.PageInfo, context.RequestAborted).ConfigureAwait(false);
                     await RenderForbidden(bmwCtx);
-                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     return;
                 }
                 await page.Handler(bmwCtx);
                 BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|200", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp });
-                Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 return;
             }
             // Jump table also handles "ALL" verb routes
             if (_jumpTable.TryLookup(string.Concat("ALL ", requestPath), out RouteHandlerData allPage))
             {
+                Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 if (allPage.PageInfo != null)
                 {
                     bmwCtx.SetPageInfo(allPage.PageInfo);
@@ -620,27 +620,24 @@ public class BareMetalWebServer : IBareWebHost
                 {
                     await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, allPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                     await RenderForbidden(bmwCtx);
-                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     return;
                 }
                 await allPage.Handler(bmwCtx);
                 BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|ALL {requestPath}|200", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp });
-                Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 return;
             }
             // ── Prefix router: O(1) entity dispatch for /api/{type} routes ──
             if (_prefixRouter.TryMatch(bmwCtx, out RouteHandlerData prefixPage))
             {
+                Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 if (!await IsAuthorizedAsync(prefixPage.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
                 {
                     await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, prefixPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                     await RenderForbidden(bmwCtx);
-                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     return;
                 }
                 await prefixPage.Handler(bmwCtx);
                 BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|200|prefix", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp, Detail = "prefix" });
-                Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 return;
             }
             // Pattern match fallback— iterate most-specific routes first so that literal
@@ -656,6 +653,7 @@ public class BareMetalWebServer : IBareWebHost
                             methodNotAllowed = true;
                         continue;
                     }
+                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     // a routed parameter match ! --> grab it and inject it into the rendering parameters
                     var injectedPage = RouteInfoHelpers.InjectRouteParametersIntoPageInfo(routeData, parameters);
                     if (injectedPage.PageInfo != null)
@@ -666,7 +664,6 @@ public class BareMetalWebServer : IBareWebHost
                     {
                         await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                         await RenderForbidden(bmwCtx);
-                        Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                         return;
                     }
                     await injectedPage.Handler(bmwCtx);
@@ -675,7 +672,6 @@ public class BareMetalWebServer : IBareWebHost
                     foreach (var p in parameters)
                         paramParts[paramIdx++] = $"{p.Key}={p.Value}";
                     BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|{method}|{compiled.Verb}|{string.Join(", ", paramParts)}|200", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp });
-                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     return;
                 }
             }
@@ -691,6 +687,7 @@ public class BareMetalWebServer : IBareWebHost
                     // this TryGetValue is a defensive guard against future concurrent modifications.
                     if (!routes.TryGetValue(kvp.Key, out var routeData))
                         continue;
+                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     var injectedPage = RouteInfoHelpers.InjectRouteParametersIntoPageInfo(routeData, parameters);
                     if (injectedPage.PageInfo != null)
                     {
@@ -700,7 +697,6 @@ public class BareMetalWebServer : IBareWebHost
                     {
                         await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                         await RenderForbidden(bmwCtx);
-                        Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                         return;
                     }
                     await injectedPage.Handler(bmwCtx);
@@ -709,23 +705,22 @@ public class BareMetalWebServer : IBareWebHost
                     foreach (var p in parameters)
                         paramParts2[paramIdx2++] = $"{p.Key}={p.Value}";
                     BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|{method}|{compiled.Verb}|{string.Join(", ", paramParts2)}|200", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp });
-                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     return;
                 }
             }
             if (methodNotAllowed)
             {
+                Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
                 bmwCtx.SetPageInfo(ErrorPageInfo);
                 await HtmlRenderer.RenderPage(bmwCtx.HttpContext);
                 BufferedLogger.Log(BmwLogLevel.Warn, $"{routeKey}|405", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 405, SourceIp = sourceIp });
-                Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 return;
             }
+            Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
             bmwCtx.SetPageInfo(NotFoundPageInfo);
             await HtmlRenderer.RenderPage(bmwCtx.HttpContext); // Still nothing? 404
             BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|404", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 404, SourceIp = sourceIp });
-            Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
         }
         catch (OperationCanceledException oce)
         {
