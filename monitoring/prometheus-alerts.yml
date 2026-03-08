@@ -1,0 +1,117 @@
+# Prometheus alert rules for BareMetalWeb SLOs.
+# Load via: rule_files: ["prometheus-alerts.yml"] in prometheus.yml
+
+groups:
+  - name: bmw_availability
+    rules:
+      # ── Critical: health probe down ────────────────────────────
+      - alert: BmwHealthCheckDown
+        expr: up{job="baremetalweb"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "BareMetalWeb health check is failing"
+          description: "The /health probe has been unreachable for 2 minutes."
+
+  - name: bmw_error_rate
+    rules:
+      # ── Critical: error rate > 5% for 5 min ───────────────────
+      - alert: BmwHighErrorRate
+        expr: |
+          (bmw_http_requests_errors_total / bmw_http_requests_total) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "BareMetalWeb error rate above 5%"
+          description: "5xx error ratio is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      # ── Warning: error rate > 1% (SLO breach) ─────────────────
+      - alert: BmwErrorRateSloBreached
+        expr: |
+          (bmw_http_requests_errors_total / bmw_http_requests_total) > 0.01
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BareMetalWeb error rate exceeds 1% SLO"
+          description: "5xx error ratio is {{ $value | humanizePercentage }} — SLO target is < 1%."
+
+  - name: bmw_latency
+    rules:
+      # ── Warning: P95 latency > 1s for 10 min ──────────────────
+      - alert: BmwHighP95Latency
+        expr: bmw_http_request_duration_seconds{quantile="0.95"} > 1.0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BareMetalWeb P95 latency above 1 second"
+          description: "P95 request duration is {{ $value | humanizeDuration }} — SLO target is < 500ms."
+
+      # ── Critical: P99 latency > 5s for 5 min ──────────────────
+      - alert: BmwCriticalP99Latency
+        expr: bmw_http_request_duration_seconds{quantile="0.99"} > 5.0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "BareMetalWeb P99 latency above 5 seconds"
+          description: "P99 request duration is {{ $value | humanizeDuration }}."
+
+  - name: bmw_resources
+    rules:
+      # ── Warning: memory > 85% of limit for 5 min ──────────────
+      - alert: BmwHighMemoryUsage
+        expr: bmw_process_working_set_bytes > 435159040
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BareMetalWeb memory usage above 85% of 512Mi limit"
+          description: "Working set is {{ $value | humanize1024 }}B."
+
+      # ── Warning: throttled requests indicate overload ──────────
+      - alert: BmwRequestThrottling
+        expr: rate(bmw_http_requests_throttled_total[5m]) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BareMetalWeb is throttling requests"
+          description: "Rate limiter is rejecting {{ $value | humanize }} req/s."
+
+  - name: bmw_wal
+    rules:
+      # ── Critical: WAL commit failures ──────────────────────────
+      - alert: BmwWalCommitFailures
+        expr: bmw_commits_total{result="fail"} > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "BareMetalWeb WAL commit failures detected"
+          description: "{{ $value }} failed WAL commits — data durability SLO at risk."
+
+      # ── Warning: lock contention ratio high ────────────────────
+      - alert: BmwHighLockContention
+        expr: bmw_lock_contention_ratio > 0.1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "BareMetalWeb lock contention ratio above 10%"
+          description: "Lock contention is {{ $value | humanizePercentage }}."
+
+  - name: bmw_gc
+    rules:
+      # ── Info: frequent Gen2 GC ─────────────────────────────────
+      - alert: BmwFrequentGen2Gc
+        expr: rate(bmw_gc_collections_total{generation="2"}[5m]) > 0.1
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "BareMetalWeb Gen2 GC collecting frequently"
+          description: "Gen2 GC rate is {{ $value | humanize }}/s — check for memory pressure."

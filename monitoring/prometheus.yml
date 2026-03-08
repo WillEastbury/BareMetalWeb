@@ -1,0 +1,30 @@
+# Prometheus scrape configuration for BareMetalWeb.
+# Adjust targets to match your deployment.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - "prometheus-alerts.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: "baremetalweb"
+    metrics_path: "/metrics/prometheus"
+    scrape_interval: 10s
+    static_configs:
+      - targets: ["baremetalweb:5000"]
+        labels:
+          environment: "production"
+
+  # Health probe (used by BmwHealthCheckDown alert)
+  - job_name: "baremetalweb-health"
+    metrics_path: "/health"
+    scrape_interval: 10s
+    static_configs:
+      - targets: ["baremetalweb:5000"]

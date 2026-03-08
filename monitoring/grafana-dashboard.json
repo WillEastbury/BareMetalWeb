@@ -1,0 +1,183 @@
+{
+  "annotations": { "list": [] },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "title": "Request Rate",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "rate(bmw_http_requests_total[5m])", "legendFormat": "{{status_class}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "title": "Error Rate (%)",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 4, "x": 8, "y": 0 },
+      "targets": [
+        { "expr": "(bmw_http_requests_errors_total / bmw_http_requests_total) * 100", "legendFormat": "error %" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "In-Flight Requests",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 4, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "bmw_http_requests_in_flight", "legendFormat": "in-flight" }
+      ]
+    },
+    {
+      "title": "Throttled Requests",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 4, "x": 16, "y": 0 },
+      "targets": [
+        { "expr": "rate(bmw_http_requests_throttled_total[5m])", "legendFormat": "throttled/s" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "title": "Uptime",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 4, "x": 20, "y": 0 },
+      "targets": [
+        { "expr": "bmw_uptime_seconds", "legendFormat": "uptime" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "title": "Request Latency (P50 / P95 / P99)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "bmw_http_request_duration_seconds{quantile=\"0.5\"}", "legendFormat": "P50" },
+        { "expr": "bmw_http_request_duration_seconds{quantile=\"0.95\"}", "legendFormat": "P95" },
+        { "expr": "bmw_http_request_duration_seconds{quantile=\"0.99\"}", "legendFormat": "P99" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": { "thresholdsStyle": { "mode": "line" } },
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.5 },
+              { "color": "red", "value": 2 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Route Dispatch",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "bmw_route_dispatch_avg_seconds * 1e6", "legendFormat": "dispatch avg (µs)" },
+        { "expr": "rate(bmw_route_dispatch_total[5m])", "legendFormat": "dispatches/s" }
+      ]
+    },
+    {
+      "title": "WAL Operations",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [
+        { "expr": "rate(bmw_wal_appends_total[5m])", "legendFormat": "appends/s" },
+        { "expr": "rate(bmw_wal_reads_total[5m])", "legendFormat": "reads/s" },
+        { "expr": "bmw_wal_append_avg_seconds * 1000", "legendFormat": "append avg (ms)" }
+      ]
+    },
+    {
+      "title": "Commits",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 16 },
+      "targets": [
+        { "expr": "rate(bmw_commits_total{result=\"success\"}[5m])", "legendFormat": "commits/s (ok)" },
+        { "expr": "rate(bmw_commits_total{result=\"fail\"}[5m])", "legendFormat": "commits/s (fail)" },
+        { "expr": "bmw_commit_avg_seconds * 1000", "legendFormat": "commit avg (ms)" }
+      ]
+    },
+    {
+      "title": "Memory & GC",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [
+        { "expr": "bmw_process_working_set_bytes / 1048576", "legendFormat": "working set (MB)" },
+        { "expr": "rate(bmw_gc_allocated_bytes_total[5m]) / 1048576", "legendFormat": "alloc rate (MB/s)" }
+      ]
+    },
+    {
+      "title": "GC Collections",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        { "expr": "rate(bmw_gc_collections_total{generation=\"0\"}[5m])", "legendFormat": "Gen0/s" },
+        { "expr": "rate(bmw_gc_collections_total{generation=\"1\"}[5m])", "legendFormat": "Gen1/s" },
+        { "expr": "rate(bmw_gc_collections_total{generation=\"2\"}[5m])", "legendFormat": "Gen2/s" }
+      ]
+    },
+    {
+      "title": "Lock Contention",
+      "type": "gauge",
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 32 },
+      "targets": [
+        { "expr": "bmw_lock_contention_ratio * 100", "legendFormat": "contention %" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 5 },
+              { "color": "red", "value": 10 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "title": "Compaction",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 32 },
+      "targets": [
+        { "expr": "bmw_compactions_total", "legendFormat": "total compactions" },
+        { "expr": "bmw_compaction_bytes_reclaimed_total / 1048576", "legendFormat": "reclaimed (MB)" }
+      ]
+    },
+    {
+      "title": "UI Renders & Serializations",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 32 },
+      "targets": [
+        { "expr": "rate(bmw_ui_renders_total[5m])", "legendFormat": "renders/s" },
+        { "expr": "rate(bmw_serializations_total[5m])", "legendFormat": "serializations/s" }
+      ]
+    }
+  ],
+  "schemaVersion": 39,
+  "tags": ["baremetalweb", "slo"],
+  "templating": { "list": [] },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "BareMetalWeb — SLO Dashboard",
+  "uid": "bmw-slo-dashboard",
+  "version": 1
+}
