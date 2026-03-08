@@ -269,6 +269,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         return ValueTask.FromResult(result);
     }
 
+    private const float EarlyExitThreshold = 0.9995f;
+    private const int EarlyExitMinLayers = 2;
+
     private string RunInference(ReadOnlySpan<char> prompt, int maxTokens, CancellationToken ct)
     {
         int dim = _config.HiddenDim;
@@ -276,13 +279,20 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         int[] hidden = new int[dim];
         int[] scratch = new int[dim];
         int[] output = new int[dim];
+        int[] prevHidden = new int[dim];
 
         InitHiddenState(prompt, hidden);
+
+        int layersExecuted = _layerCount;
 
         // Forward pass through compressed layers (2-bit packed, native memory)
         for (int layerIdx = 0; layerIdx < _layerCount; layerIdx++)
         {
             ct.ThrowIfCancellationRequested();
+
+            // Save state for early exit stability check
+            if (layerIdx >= EarlyExitMinLayers)
+                Array.Copy(hidden, prevHidden, dim);
 
             // Pre-norm → attention → residual
             TernaryTensor.RmsNormalize(hidden, scratch);
@@ -293,17 +303,49 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             TernaryTensor.RmsNormalize(hidden, scratch);
             _compressedFfn![layerIdx].MatVecMultiply(scratch, output);
             TernaryTensor.Add(hidden, output, hidden);
+
+            // Early exit: if hidden state barely changed, skip remaining layers
+            if (layerIdx >= EarlyExitMinLayers && layerIdx < _layerCount - 1)
+            {
+                float similarity = CosineSimilarityInt(prevHidden, hidden);
+                if (similarity > EarlyExitThreshold)
+                {
+                    layersExecuted = layerIdx + 1;
+                    break;
+                }
+            }
         }
 
-        TernaryTensor.RmsNormalize(hidden, output);
+        // Final normalization
+        TernaryTensor.RmsNormalize(hidden, scratch);
 
+        // Project through output head to get vocabulary logits
+        int vocabSize = _compressedOutputHead!.Rows;
+        int[] logits = new int[vocabSize];
+        _compressedOutputHead.MatVecMultiply(scratch, logits);
+
+        // Top-k on actual vocabulary logits
         Span<int> topK = stackalloc int[3];
-        TernaryTensor.TopK(output, topK, 3);
+        TernaryTensor.TopK(logits, topK, 3);
 
         return $"[BitNet spike] Inference complete. Top logit indices: {topK[0]}, {topK[1]}, {topK[2]}. " +
-               $"Hidden dim: {dim}, layers: {_layerCount}. " +
+               $"Hidden dim: {dim}, layers: {layersExecuted}/{_layerCount}. " +
                $"Vocab: {(_pruner is not null ? $"{_pruner.PrunedVocabSize} (pruned from {_pruner.OriginalVocabSize})" : $"{_config.VocabSize}")}. " +
                $"Prompt length: {prompt.Length} chars.";
+    }
+
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float CosineSimilarityInt(int[] a, int[] b)
+    {
+        long dot = 0, normA = 0, normB = 0;
+        for (int i = 0; i < a.Length; i++)
+        {
+            dot += (long)a[i] * b[i];
+            normA += (long)a[i] * a[i];
+            normB += (long)b[i] * b[i];
+        }
+        double denom = Math.Sqrt((double)normA) * Math.Sqrt((double)normB);
+        return denom > 1e-10 ? (float)(dot / denom) : 0f;
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

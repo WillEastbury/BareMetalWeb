@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
+using System.Threading.Tasks;
 
 namespace BareMetalWeb.Intelligence;
 
@@ -21,6 +22,10 @@ namespace BareMetalWeb.Intelligence;
 public sealed unsafe class NativeTernaryMatrix : IDisposable
 {
     private const int RowAlignment = 32; // AVX2 register width in bytes
+    private const int ParallelRowThreshold = 128;
+
+    // 256-entry LUT: packed byte → 4 decoded ternary weights {-1, 0, +1}
+    private static readonly int[] s_decodeLut = BuildDecodeLut();
 
     private byte* _data;
     private readonly int _rows;
@@ -29,6 +34,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     private readonly int _rowStrideBytes;   // aligned width = AlignUp(packedRowBytes, 32)
     private readonly long _totalBytes;
     private MatrixStats _stats;
+    private ushort[][]? _skipIndex; // per-row non-zero byte offsets for sparse skip
     private bool _disposed;
 
     public int Rows => _rows;
@@ -46,6 +52,20 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     internal static int AlignUp(int value, int alignment)
     {
         return (value + alignment - 1) & ~(alignment - 1);
+    }
+
+    private static int[] BuildDecodeLut()
+    {
+        var lut = new int[1024]; // 256 packed bytes × 4 weights each
+        for (int b = 0; b < 256; b++)
+        {
+            int i = b << 2;
+            lut[i]     = Decode2Bit(b & 3);
+            lut[i + 1] = Decode2Bit((b >> 2) & 3);
+            lut[i + 2] = Decode2Bit((b >> 4) & 3);
+            lut[i + 3] = Decode2Bit(b >> 6);
+        }
+        return lut;
     }
 
     private NativeTernaryMatrix(int rows, int cols)
@@ -118,13 +138,20 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
                 ? (float)zeroByteCount / totalLogicalBytes
                 : 0f);
 
+        if (matrix._stats.ZeroByteRatio > 0.4f
+            && !Vector512.IsHardwareAccelerated
+            && !Vector256.IsHardwareAccelerated
+            && !AdvSimd.IsSupported)
+            matrix.BuildSkipIndex();
+
         return matrix;
     }
 
     /// <summary>
     /// Dot product of matrix row with an input vector.
-    /// Dispatches to AVX2 (16 weights/iter) or scalar (4 weights/iter).
-    /// Both paths use prefetching and zero-skip acceleration.
+    /// Dispatches to AVX-512 (32 weights/iter), AVX2 (16 weights/iter),
+    /// NEON (8 weights/iter), sparse skip, or scalar (4 weights/iter).
+    /// All paths use LUT decode, prefetching, and zero-skip acceleration.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int DotProductRow(int row, ReadOnlySpan<int> input)
@@ -141,24 +168,97 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         int sum;
         int col;
 
-        if (Vector256.IsHardwareAccelerated && fullBytes >= 4)
+        // Dispatch: AVX-512 > AVX2 > NEON > Sparse skip > Scalar
+        if (Vector512.IsHardwareAccelerated && fullBytes >= 8)
+        {
+            sum = DotProductAvx512(rowPtr, in inputRef, fullBytes, out col);
+        }
+        else if (Vector256.IsHardwareAccelerated && fullBytes >= 4)
         {
             sum = DotProductAvx2(rowPtr, in inputRef, fullBytes, out col);
+        }
+        else if (AdvSimd.IsSupported && fullBytes >= 2)
+        {
+            sum = DotProductNeon(rowPtr, in inputRef, fullBytes, out col);
+        }
+        else if (_skipIndex is not null)
+        {
+            return DotProductSparse(rowPtr, in inputRef, row, fullBytes, tailWeights);
         }
         else
         {
             sum = DotProductScalar(rowPtr, in inputRef, fullBytes, out col);
         }
 
-        // Tail weights (< 4 remaining)
+        // Tail weights (< 4 remaining) — LUT decode
         if (tailWeights > 0)
         {
-            byte packed = rowPtr[fullBytes];
+            int lutBase = rowPtr[fullBytes] << 2;
             for (int k = 0; k < tailWeights; k++, col++)
-            {
-                int e = (packed >> (k * 2)) & 3;
-                sum += Decode2Bit(e) * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col);
-            }
+                sum += s_decodeLut[lutBase + k] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col);
+        }
+
+        return sum;
+    }
+
+    /// <summary>
+    /// AVX-512 fast path: processes 32 weights (8 packed bytes) per iteration.
+    /// Uses Vector512 multiply-accumulate with LUT decode and 64-weight zero-skip.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int DotProductAvx512(
+        byte* rowPtr,
+        in int inputRef,
+        int fullBytes,
+        out int col)
+    {
+        Vector512<int> acc = Vector512<int>.Zero;
+        col = 0;
+        int b = 0;
+
+        ref int lutRef = ref MemoryMarshal.GetArrayDataReference(s_decodeLut);
+
+        for (; b + 7 < fullBytes; b += 8, col += 32)
+        {
+            if (Sse.IsSupported)
+                Sse.Prefetch0(rowPtr + b + 256);
+
+            ulong packed8 = *(ulong*)(rowPtr + b);
+            if (packed8 == 0) continue; // Skip 32 zero weights
+
+            Vector512<int> w0 = Vector512.Create(
+                Vector256.Create(
+                    Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b] << 2)),
+                    Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b + 1] << 2))),
+                Vector256.Create(
+                    Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b + 2] << 2)),
+                    Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b + 3] << 2))));
+            Vector512<int> x0 = Vector512.LoadUnsafe(in Unsafe.AsRef(in inputRef), (nuint)col);
+            acc = Vector512.Add(acc, Vector512.Multiply(w0, x0));
+
+            Vector512<int> w1 = Vector512.Create(
+                Vector256.Create(
+                    Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b + 4] << 2)),
+                    Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b + 5] << 2))),
+                Vector256.Create(
+                    Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b + 6] << 2)),
+                    Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b + 7] << 2))));
+            Vector512<int> x1 = Vector512.LoadUnsafe(in Unsafe.AsRef(in inputRef), (nuint)(col + 16));
+            acc = Vector512.Add(acc, Vector512.Multiply(w1, x1));
+        }
+
+        int sum = Vector512.Sum(acc);
+
+        // Scalar remainder (0-7 packed bytes)
+        for (; b < fullBytes; b++, col += 4)
+        {
+            byte packed = rowPtr[b];
+            if (packed == 0) continue;
+            int lutBase = packed << 2;
+            sum += s_decodeLut[lutBase] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col);
+            sum += s_decodeLut[lutBase + 1] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 1);
+            sum += s_decodeLut[lutBase + 2] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 2);
+            sum += s_decodeLut[lutBase + 3] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 3);
         }
 
         return sum;
@@ -166,7 +266,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
 
     /// <summary>
     /// AVX2 fast path: processes 16 weights (4 packed bytes) per iteration.
-    /// Uses Vector256 multiply-accumulate with prefetch and 16-weight zero-skip.
+    /// Uses Vector256 multiply-accumulate with LUT decode and 16-weight zero-skip.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int DotProductAvx2(
@@ -179,24 +279,26 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         col = 0;
         int b = 0;
 
-        // Process 16 weights (4 packed bytes) per iteration
+        ref int lutRef = ref MemoryMarshal.GetArrayDataReference(s_decodeLut);
+
         for (; b + 3 < fullBytes; b += 4, col += 16)
         {
-            // Prefetch 2 cache lines ahead — Sse.IsSupported is a JIT constant (no branch)
             if (Sse.IsSupported)
                 Sse.Prefetch0(rowPtr + b + 128);
 
-            // Quick zero check: 4 bytes as uint32
             uint packed4 = *(uint*)(rowPtr + b);
-            if (packed4 == 0) continue; // Skip 16 zero weights
+            if (packed4 == 0) continue;
 
-            // Decode bytes 0-1 → 8 weights → Vector256<int>
-            Vector256<int> w0 = Decode2PackedBytes(rowPtr[b], rowPtr[b + 1]);
+            // LUT decode: 2 bytes → 8 weights → Vector256<int>
+            Vector256<int> w0 = Vector256.Create(
+                Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b] << 2)),
+                Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b + 1] << 2)));
             Vector256<int> x0 = Vector256.LoadUnsafe(in Unsafe.AsRef(in inputRef), (nuint)col);
             acc = Vector256.Add(acc, Vector256.Multiply(w0, x0));
 
-            // Decode bytes 2-3 → 8 weights → Vector256<int>
-            Vector256<int> w1 = Decode2PackedBytes(rowPtr[b + 2], rowPtr[b + 3]);
+            Vector256<int> w1 = Vector256.Create(
+                Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b + 2] << 2)),
+                Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b + 3] << 2)));
             Vector256<int> x1 = Vector256.LoadUnsafe(in Unsafe.AsRef(in inputRef), (nuint)(col + 8));
             acc = Vector256.Add(acc, Vector256.Multiply(w1, x1));
         }
@@ -208,18 +310,66 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         {
             byte packed = rowPtr[b];
             if (packed == 0) continue;
-
-            sum += Decode2Bit(packed & 3) * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col);
-            sum += Decode2Bit((packed >> 2) & 3) * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 1);
-            sum += Decode2Bit((packed >> 4) & 3) * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 2);
-            sum += Decode2Bit(packed >> 6) * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 3);
+            int lutBase = packed << 2;
+            sum += s_decodeLut[lutBase] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col);
+            sum += s_decodeLut[lutBase + 1] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 1);
+            sum += s_decodeLut[lutBase + 2] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 2);
+            sum += s_decodeLut[lutBase + 3] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 3);
         }
 
         return sum;
     }
 
     /// <summary>
-    /// Scalar fallback: processes 4 weights (1 packed byte) per iteration with prefetch.
+    /// ARM NEON path: processes 8 weights (2 packed bytes) per iteration.
+    /// Uses Vector128 multiply-accumulate with LUT decode and 8-weight zero-skip.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int DotProductNeon(
+        byte* rowPtr,
+        in int inputRef,
+        int fullBytes,
+        out int col)
+    {
+        Vector128<int> acc = Vector128<int>.Zero;
+        col = 0;
+        int b = 0;
+
+        ref int lutRef = ref MemoryMarshal.GetArrayDataReference(s_decodeLut);
+
+        for (; b + 1 < fullBytes; b += 2, col += 8)
+        {
+            ushort packed2 = *(ushort*)(rowPtr + b);
+            if (packed2 == 0) continue;
+
+            Vector128<int> w0 = Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b] << 2));
+            Vector128<int> x0 = Vector128.LoadUnsafe(in Unsafe.AsRef(in inputRef), (nuint)col);
+            acc = Vector128.Add(acc, Vector128.Multiply(w0, x0));
+
+            Vector128<int> w1 = Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b + 1] << 2));
+            Vector128<int> x1 = Vector128.LoadUnsafe(in Unsafe.AsRef(in inputRef), (nuint)(col + 4));
+            acc = Vector128.Add(acc, Vector128.Multiply(w1, x1));
+        }
+
+        int sum = acc.GetElement(0) + acc.GetElement(1) + acc.GetElement(2) + acc.GetElement(3);
+
+        // Scalar remainder (0-1 packed bytes)
+        for (; b < fullBytes; b++, col += 4)
+        {
+            byte packed = rowPtr[b];
+            if (packed == 0) continue;
+            int lutBase = packed << 2;
+            sum += s_decodeLut[lutBase] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col);
+            sum += s_decodeLut[lutBase + 1] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 1);
+            sum += s_decodeLut[lutBase + 2] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 2);
+            sum += s_decodeLut[lutBase + 3] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 3);
+        }
+
+        return sum;
+    }
+
+    /// <summary>
+    /// Scalar fallback with LUT decode: processes 4 weights per iteration.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int DotProductScalar(
@@ -233,42 +383,66 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
 
         for (int b = 0; b < fullBytes; b++, col += 4)
         {
-            // Prefetch 1 cache line ahead — JIT constant guard, no runtime branch
             if (Sse.IsSupported)
                 Sse.Prefetch0(rowPtr + b + 64);
 
             byte packed = rowPtr[b];
             if (packed == 0) continue;
 
-            sum += Decode2Bit(packed & 3) * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col);
-            sum += Decode2Bit((packed >> 2) & 3) * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 1);
-            sum += Decode2Bit((packed >> 4) & 3) * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 2);
-            sum += Decode2Bit(packed >> 6) * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 3);
+            int lutBase = packed << 2;
+            sum += s_decodeLut[lutBase] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col);
+            sum += s_decodeLut[lutBase + 1] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 1);
+            sum += s_decodeLut[lutBase + 2] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 2);
+            sum += s_decodeLut[lutBase + 3] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 3);
         }
 
         return sum;
     }
 
     /// <summary>
-    /// Decode 2 packed bytes (8 ternary weights) into Vector256&lt;int&gt;.
+    /// Sparse skip-index path: iterates only over non-zero bytes using pre-built offset list.
+    /// Best for high-sparsity rows without SIMD support.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static Vector256<int> Decode2PackedBytes(byte p0, byte p1)
+    private int DotProductSparse(
+        byte* rowPtr,
+        in int inputRef,
+        int row,
+        int fullBytes,
+        int tailWeights)
     {
-        return Vector256.Create(
-            Decode2Bit(p0 & 3),
-            Decode2Bit((p0 >> 2) & 3),
-            Decode2Bit((p0 >> 4) & 3),
-            Decode2Bit(p0 >> 6),
-            Decode2Bit(p1 & 3),
-            Decode2Bit((p1 >> 2) & 3),
-            Decode2Bit((p1 >> 4) & 3),
-            Decode2Bit(p1 >> 6));
+        var offsets = _skipIndex![row];
+        int sum = 0;
+
+        for (int i = 0; i < offsets.Length; i++)
+        {
+            int b = offsets[i];
+            int col = b << 2;
+            int lutBase = rowPtr[b] << 2;
+            sum += s_decodeLut[lutBase] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col);
+            sum += s_decodeLut[lutBase + 1] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 1);
+            sum += s_decodeLut[lutBase + 2] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 2);
+            sum += s_decodeLut[lutBase + 3] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 3);
+        }
+
+        if (tailWeights > 0)
+        {
+            byte p = rowPtr[fullBytes];
+            if (p != 0)
+            {
+                int col = fullBytes << 2;
+                int lutBase = p << 2;
+                for (int k = 0; k < tailWeights; k++)
+                    sum += s_decodeLut[lutBase + k] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + k);
+            }
+        }
+
+        return sum;
     }
 
     /// <summary>
     /// Branchless decode: 0b00→0, 0b01→+1, 0b11→-1.
-    /// Formula: (e &amp; 1) * (1 - (e &amp; 2)). No branches, no LUT.
+    /// Used by LUT builder. Hot-path code uses the LUT directly.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int Decode2Bit(int e)
@@ -277,7 +451,28 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     }
 
     /// <summary>
+    /// Build per-row sparse skip index listing non-zero byte offsets.
+    /// Enables O(nnz) iteration instead of O(n) linear scan.
+    /// </summary>
+    private void BuildSkipIndex()
+    {
+        _skipIndex = new ushort[_rows][];
+        var temp = new ushort[_packedRowBytes];
+        for (int r = 0; r < _rows; r++)
+        {
+            byte* rowPtr = _data + (long)r * _rowStrideBytes;
+            int count = 0;
+            for (int b = 0; b < _packedRowBytes; b++)
+            {
+                if (rowPtr[b] != 0) temp[count++] = (ushort)b;
+            }
+            _skipIndex[r] = temp[..count].ToArray();
+        }
+    }
+
+    /// <summary>
     /// Matrix-vector multiply: output[r] = dot(row[r], input) for all rows.
+    /// Uses parallel execution for large matrices (&gt;128 rows).
     /// </summary>
     public void MatVecMultiply(ReadOnlySpan<int> input, Span<int> output)
     {
@@ -286,8 +481,29 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         if (output.Length < _rows)
             throw new ArgumentException($"Output length {output.Length} < rows {_rows}");
 
-        for (int r = 0; r < _rows; r++)
-            output[r] = DotProductRow(r, input);
+        if (_rows >= ParallelRowThreshold && Environment.ProcessorCount > 1)
+        {
+            // Parallel path — pin spans so pointers survive cross-thread access
+            fixed (int* pInput = input)
+            fixed (int* pOutput = output)
+            {
+                int inputLen = input.Length;
+                int rows = _rows;
+                int* pi = pInput;
+                int* po = pOutput;
+
+                Parallel.For(0, rows, r =>
+                {
+                    var inputSpan = new ReadOnlySpan<int>(pi, inputLen);
+                    po[r] = DotProductRow(r, inputSpan);
+                });
+            }
+        }
+        else
+        {
+            for (int r = 0; r < _rows; r++)
+                output[r] = DotProductRow(r, input);
+        }
     }
 
     /// <summary>
@@ -413,6 +629,12 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
             ZeroByteCount: zeroByteCount,
             ZeroByteRatio: totalLogicalBytes > 0
                 ? (float)zeroByteCount / totalLogicalBytes : 0f);
+
+        if (matrix._stats.ZeroByteRatio > 0.4f
+            && !Vector512.IsHardwareAccelerated
+            && !Vector256.IsHardwareAccelerated
+            && !AdvSimd.IsSupported)
+            matrix.BuildSkipIndex();
 
         return matrix;
     }
