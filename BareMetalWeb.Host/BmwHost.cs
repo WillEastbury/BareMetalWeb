@@ -45,7 +45,7 @@ public sealed class BmwHost : IAsyncDisposable
         var kestrelOptions = new KestrelServerOptions();
         configureKestrel?.Invoke(kestrelOptions);
 
-        var transportOptions = new SocketTransportOptions();
+        var transportOptions = new SocketTransportOptions { NoDelay = true };
         var transportFactory = new SocketTransportFactory(
             Options.Create(transportOptions),
             loggerFactory);
