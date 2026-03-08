@@ -60,7 +60,7 @@ public static class BareMetalWebExtensions
         // Logger & data root
         IBufferedLogger logger = ProgramSetup.CreateLogger(config);
         logger.LogInfo("Starting BareMetalWeb server...");
-        Console.WriteLine($"[BMW Startup] Logger created ({logger.GetType().Name})");
+        Console.WriteLine($"[BMW Startup] Logger created ({logger.GetType().Name}, minLevel={logger.MinimumLevel}, format=JSON structured)");
 
         var dataRoot = config.GetValue("Data.Root", Path.Combine(contentRoot, "Data"));
         ProgramSetup.ResetDataIfRequested(config, contentRoot, dataRoot, logger);

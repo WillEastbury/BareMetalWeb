@@ -465,7 +465,11 @@ public class BareMetalWebServer : IBareWebHost
         string requestPath = bmwCtx.Request.Path;
         string routeKey = bmwCtx.Request.RouteKey;
         string sourceIp = bmwCtx.SourceIp;
+        string rid = bmwCtx.CorrelationId;
         bmwCtx.SetApp(this);
+
+        // Return correlation ID on every response for distributed tracing
+        context.Response.Headers["X-Trace-ID"] = rid;
 
         // ── Multitenancy: resolve tenant from Host header ─────────────────────
         // When enabled, sets DataStoreProvider.CurrentTenant for the duration of
@@ -481,7 +485,7 @@ public class BareMetalWebServer : IBareWebHost
             var httpsUrl = BuildHttpsRedirectUrl(context, TrustForwardedHeaders, HttpsRedirectHost, HttpsRedirectPort);
             context.Response.StatusCode = StatusCodes.Status301MovedPermanently;
             context.Response.Headers.Location = httpsUrl;
-            BufferedLogger.LogInfo($"{routeKey}|301|{sourceIp}|redirect={httpsUrl}|mode={HttpsRedirectMode}|httpsAvailable={HttpsEndpointAvailable}|trustForwarded={TrustForwardedHeaders}|host={context.Request.Host}");
+            BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|301|redirect={httpsUrl}", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 301, SourceIp = sourceIp, Detail = $"mode={HttpsRedirectMode}" });
             return;
         }
         ApplySecurityHeaders(context, isHttps);
@@ -515,7 +519,7 @@ public class BareMetalWebServer : IBareWebHost
                     ? $"Too many Requests. Retry after {retryAfterSeconds.Value}s."
                     : "Too many Requests.");
             }
-            BufferedLogger.LogInfo($"{routeKey}|429|{sourceIp}|{throttleReason}");
+            BufferedLogger.Log(BmwLogLevel.Warn, $"{routeKey}|429|{throttleReason}", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 429, SourceIp = sourceIp, Detail = throttleReason });
             stopwatch.Stop();
             Metrics.RecordThrottled(stopwatch.Elapsed);
             return;
@@ -526,25 +530,25 @@ public class BareMetalWebServer : IBareWebHost
             {
                 context.Response.StatusCode = StatusCodes.Status302Found;
                 context.Response.Headers.Location = "/setup";
-                BufferedLogger.LogInfo($"{routeKey}|302|{sourceIp}|setup=required");
+                BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|302|setup=required", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 302, SourceIp = sourceIp });
                 return;
             }
 
             if (await JsBundleService.TryServeAsync(bmwCtx))
             {
-                BufferedLogger.LogInfo($"{routeKey}|{context.Response.StatusCode}|{sourceIp}|bundle");
+                BufferedLogger.Log(BmwLogLevel.Debug, $"{routeKey}|{context.Response.StatusCode}|bundle", rid, new LogFields { Method = method, Path = requestPath, StatusCode = context.Response.StatusCode, SourceIp = sourceIp, Detail = "bundle" });
                 return;
             }
 
             if (await CssBundleService.TryServeAsync(bmwCtx))
             {
-                BufferedLogger.LogInfo($"{routeKey}|{context.Response.StatusCode}|{sourceIp}|css-bundle");
+                BufferedLogger.Log(BmwLogLevel.Debug, $"{routeKey}|{context.Response.StatusCode}|css-bundle", rid, new LogFields { Method = method, Path = requestPath, StatusCode = context.Response.StatusCode, SourceIp = sourceIp, Detail = "css-bundle" });
                 return;
             }
 
             if (await StaticFileService.TryServeAsync(bmwCtx, StaticFiles))
             {
-                BufferedLogger.LogInfo($"{routeKey}|{context.Response.StatusCode}|{sourceIp}|static");
+                BufferedLogger.Log(BmwLogLevel.Debug, $"{routeKey}|{context.Response.StatusCode}|static", rid, new LogFields { Method = method, Path = requestPath, StatusCode = context.Response.StatusCode, SourceIp = sourceIp, Detail = "static" });
                 return;
             }
 
@@ -570,7 +574,7 @@ public class BareMetalWebServer : IBareWebHost
                     return;
                 }
                 await page.Handler(bmwCtx);
-                BufferedLogger.LogInfo($"{routeKey}|200|{sourceIp}");
+                BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|200", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp });
                 Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 return;
             }
@@ -589,7 +593,7 @@ public class BareMetalWebServer : IBareWebHost
                     return;
                 }
                 await allPage.Handler(bmwCtx);
-                BufferedLogger.LogInfo($"{routeKey}|ALL {requestPath}|200|{sourceIp}");
+                BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|ALL {requestPath}|200", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp });
                 Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 return;
             }
@@ -604,7 +608,7 @@ public class BareMetalWebServer : IBareWebHost
                     return;
                 }
                 await prefixPage.Handler(bmwCtx);
-                BufferedLogger.LogInfo($"{routeKey}|200|{sourceIp}|prefix");
+                BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|200|prefix", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp, Detail = "prefix" });
                 Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 return;
             }
@@ -639,7 +643,7 @@ public class BareMetalWebServer : IBareWebHost
                     int paramIdx = 0;
                     foreach (var p in parameters)
                         paramParts[paramIdx++] = $"{p.Key}={p.Value}";
-                    BufferedLogger.LogInfo($"{routeKey}|{method}|{compiled.Verb}|{string.Join(", ", paramParts)}|200|{sourceIp}");
+                    BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|{method}|{compiled.Verb}|{string.Join(", ", paramParts)}|200", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp });
                     Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     return;
                 }
@@ -673,7 +677,7 @@ public class BareMetalWebServer : IBareWebHost
                     int paramIdx2 = 0;
                     foreach (var p in parameters)
                         paramParts2[paramIdx2++] = $"{p.Key}={p.Value}";
-                    BufferedLogger.LogInfo($"{routeKey}|{method}|{compiled.Verb}|{string.Join(", ", paramParts2)}|200|{sourceIp}");
+                    BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|{method}|{compiled.Verb}|{string.Join(", ", paramParts2)}|200", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp });
                     Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     return;
                 }
@@ -683,23 +687,23 @@ public class BareMetalWebServer : IBareWebHost
                 context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
                 bmwCtx.SetPageInfo(ErrorPageInfo);
                 await HtmlRenderer.RenderPage(bmwCtx.HttpContext);
-                BufferedLogger.LogInfo($"{routeKey}|405|{sourceIp}");
+                BufferedLogger.Log(BmwLogLevel.Warn, $"{routeKey}|405", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 405, SourceIp = sourceIp });
                 Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 return;
             }
             bmwCtx.SetPageInfo(NotFoundPageInfo);
             await HtmlRenderer.RenderPage(bmwCtx.HttpContext); // Still nothing? 404
-            BufferedLogger.LogInfo($"{routeKey}|404|{sourceIp}");
+            BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|404", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 404, SourceIp = sourceIp });
             Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
         }
         catch (OperationCanceledException oce)
         {
-            BufferedLogger.LogInfo($"Client disconnected:{routeKey}|{oce.Message}|{sourceIp}");
+            BufferedLogger.Log(BmwLogLevel.Debug, $"Client disconnected:{routeKey}|{oce.Message}", rid);
         }
         catch (Exception ex)
         {
             var errorId = Guid.NewGuid().ToString("N");
-            BufferedLogger.LogError($"Exception: {routeKey} | {sourceIp} | ErrorId={errorId}", ex);
+            BufferedLogger.LogError($"Exception: {routeKey} | ErrorId={errorId}", ex, rid);
             if (context.Response.HasStarted)
             {
                 context.Abort();
@@ -720,7 +724,7 @@ public class BareMetalWebServer : IBareWebHost
                 bmwCtx.SetStringValue("html_message", $"<p>An unexpected error occurred.</p><p>Error ID: <code>{errorId}</code></p>");
                 await HtmlRenderer.RenderPage(bmwCtx.HttpContext);
             }
-            BufferedLogger.LogInfo($"{routeKey}|500|{sourceIp}");
+            BufferedLogger.Log(BmwLogLevel.Error, $"{routeKey}|500|ErrorId={errorId}", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 500, SourceIp = sourceIp, Detail = errorId });
         }
         finally
         {

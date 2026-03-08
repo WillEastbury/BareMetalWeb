@@ -154,6 +154,12 @@ public sealed class BmwConfig
                 errors.Add($"Https.RedirectMode: invalid value '{redirectMode}' (expected: Off, Always, IfAvailable)");
         }
 
+        if (_values.TryGetValue("Logging.MinLevel", out var logLevel))
+        {
+            if (!Enum.TryParse<BmwLogLevel>(logLevel, ignoreCase: true, out _))
+                errors.Add($"Logging.MinLevel: invalid value '{logLevel}' (expected: Trace, Debug, Info, Warn, Error, Fatal, Off)");
+        }
+
         // EntraID — if enabled, require TenantId and ClientId
         if (GetValue("EntraId.Enabled", false))
         {

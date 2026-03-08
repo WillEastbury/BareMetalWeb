@@ -589,7 +589,14 @@ static class ProgramSetup
     }
 
     public static IBufferedLogger CreateLogger(BmwConfig config)
-        => new DiskBufferedLogger(config.GetValue("Logging.LogFolder", "Logs"));
+    {
+        var folder = config.GetValue("Logging.LogFolder", "Logs");
+        var levelStr = config.GetValue("Logging.MinLevel", "Info");
+        var level = Enum.TryParse<BmwLogLevel>(levelStr, ignoreCase: true, out var parsed)
+            ? parsed
+            : BmwLogLevel.Info;
+        return new DiskBufferedLogger(folder, level);
+    }
 
     public static IDataObjectStore CreateDataStore(BmwConfig config, string contentRoot, ISchemaAwareObjectSerializer serializer, IDataQueryEvaluator queryEvaluator, IBufferedLogger logger)
     {

@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Interfaces;
 
@@ -24,50 +27,136 @@ public sealed class DiskBufferedLogger : IBufferedLogger
     private const int LogRetentionDays = 30;
     private DateTime _lastCleanupUtc = DateTime.MinValue;
 
-    public DiskBufferedLogger(string logFolder)
+    /// <summary>The minimum log level. Entries below this are suppressed with zero allocation.</summary>
+    public BmwLogLevel MinimumLevel { get; set; }
+
+    private static readonly string[] s_levelLabels = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "OFF" };
+
+    public DiskBufferedLogger(string logFolder, BmwLogLevel minimumLevel = BmwLogLevel.Info)
     {
         _logFolder = logFolder;
+        MinimumLevel = minimumLevel;
     }
+
+    /// <summary>Returns true if the given level would be logged. Use as a guard to avoid allocations.</summary>
+    public bool IsEnabled(BmwLogLevel level) => level >= MinimumLevel;
+
+    // ── Legacy interface (backward-compatible) ─────────────────────────────
 
     public void LogInfo(string message)
     {
-        lock (_lock)
-        {
-            if (_buffer.Count >= MaxBufferSize)
-                _buffer.Dequeue();
-
-            _buffer.Enqueue(
-                $"INFO | {DateTime.UtcNow:O} | {message}");
-        }
+        Log(BmwLogLevel.Info, message, correlationId: null);
     }
 
     public void LogError(string message, Exception ex)
     {
-        // Deliberately NOT sharing the lock
-        // Errors must not block info logging
-        // Fire-and-forget async to avoid blocking caller while still using async backoff
-        _ = LogErrorAsync(message, ex);
+        LogError(message, ex, correlationId: null);
     }
 
-    private async Task LogErrorAsync(string message, Exception ex)
+    // ── Structured logging (#1256) ─────────────────────────────────────────
+
+    public void Log(BmwLogLevel level, string message, string? correlationId = null)
+    {
+        if (level < MinimumLevel) return;
+
+        var entry = FormatJsonEntry(level, message, correlationId, fields: null, ex: null);
+
+        if (level >= BmwLogLevel.Error)
+        {
+            _ = LogErrorRawAsync(entry, level);
+            return;
+        }
+
+        lock (_lock)
+        {
+            if (_buffer.Count >= MaxBufferSize)
+                _buffer.Dequeue();
+            _buffer.Enqueue(entry);
+        }
+    }
+
+    public void LogError(string message, Exception ex, string? correlationId)
+    {
+        if (BmwLogLevel.Error < MinimumLevel) return;
+        var entry = FormatJsonEntry(BmwLogLevel.Error, message, correlationId, fields: null, ex);
+        _ = LogErrorRawAsync(entry, BmwLogLevel.Error);
+    }
+
+    public void Log(BmwLogLevel level, string message, string? correlationId, LogFields? fields)
+    {
+        if (level < MinimumLevel) return;
+
+        var entry = FormatJsonEntry(level, message, correlationId, fields, ex: null);
+
+        if (level >= BmwLogLevel.Error)
+        {
+            _ = LogErrorRawAsync(entry, level);
+            return;
+        }
+
+        lock (_lock)
+        {
+            if (_buffer.Count >= MaxBufferSize)
+                _buffer.Dequeue();
+            _buffer.Enqueue(entry);
+        }
+    }
+
+    // ── JSON formatting ────────────────────────────────────────────────────
+
+    private static string FormatJsonEntry(BmwLogLevel level, string message, string? correlationId, LogFields? fields, Exception? ex)
+    {
+        using var ms = new MemoryStream(256);
+        using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { SkipValidation = true }))
+        {
+            w.WriteStartObject();
+            w.WriteString("ts", DateTime.UtcNow.ToString("O"));
+            w.WriteString("level", s_levelLabels[(int)level]);
+            if (correlationId != null)
+                w.WriteString("rid", correlationId);
+            w.WriteString("msg", message);
+
+            if (fields != null)
+            {
+                if (fields.Method != null) w.WriteString("method", fields.Method);
+                if (fields.Path != null) w.WriteString("path", fields.Path);
+                if (fields.StatusCode.HasValue) w.WriteNumber("status", fields.StatusCode.Value);
+                if (fields.DurationMs.HasValue) w.WriteNumber("ms", Math.Round(fields.DurationMs.Value, 2));
+                if (fields.UserId != null) w.WriteString("uid", fields.UserId);
+                if (fields.SourceIp != null) w.WriteString("ip", fields.SourceIp);
+                if (fields.Detail != null) w.WriteString("detail", fields.Detail);
+            }
+
+            if (ex != null)
+            {
+                w.WriteString("error", ex.GetType().Name);
+                w.WriteString("stack", ex.ToString());
+            }
+
+            w.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(ms.ToArray());
+    }
+
+    // ── Error logging (async, non-blocking) ────────────────────────────────
+
+    private async Task LogErrorRawAsync(string jsonEntry, BmwLogLevel level)
     {
         try
         {
             var nowUtc = DateTime.UtcNow;
+            var category = level >= BmwLogLevel.Fatal ? "fatal" : "error";
             await AppendTextSharedAsync(
-                GetLogFilePath(nowUtc, "error"),
-                $"ERROR | {nowUtc:O} | {message}{Environment.NewLine}{ex}{Environment.NewLine}").ConfigureAwait(false);
+                GetLogFilePath(nowUtc, category),
+                jsonEntry + Environment.NewLine).ConfigureAwait(false);
         }
         catch (Exception secondEx)
         {
-            // Last line of defence: logging must never throw, BUT - we should at least know it failed
-            // While this is not ideal to log to the console for performance terms, logging failures are rare and likely indicate a serious issue
-            // So we should at least do SOMETHING
-            Console.Error.WriteLine($"Failed to log {ex.ToString()} || because of error: {secondEx}");  
+            Console.Error.WriteLine($"Failed to log error: {secondEx}");
         }
     }
-    [DebuggerNonUserCode] // Prevent stepping into this method during debugging as it will drive you insane 
-    // If diagnosing why your logging is not working, remove this attribute
+
+    [DebuggerNonUserCode]
     public async Task RunAsync(CancellationToken cancellationToken)
     {
         try
@@ -139,8 +228,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         }
     }
 
-    [DebuggerNonUserCode] // Prevent stepping into this method during debugging as it will drive you insane 
-    // If diagnosing why your logging is not working, remove this attribute
+    [DebuggerNonUserCode]
     private async Task FlushOnceAsync(CancellationToken token, bool isShutdown = false)
     {
         string[] batch;
@@ -161,7 +249,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
 
         if (!isShutdown && previousMinuteUtc.HasValue && previousMinuteUtc.Value != currentMinuteUtc)
         {
-            var segmentLine = $"INFO | {nowUtc:O} | Log segment complete; cycling to next segment.";
+            var segmentLine = FormatJsonEntry(BmwLogLevel.Info, "Log segment complete; cycling to next segment.", null, null, null);
             await AppendLinesSharedAsync(
                 GetLogFilePath(previousMinuteUtc.Value, "info"),
                 new[] { segmentLine },
@@ -174,7 +262,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
 
         if (isShutdown)
         {
-            lines.Add($"INFO | {nowUtc:O} | Clean shutdown completed.");
+            lines.Add(FormatJsonEntry(BmwLogLevel.Info, "Clean shutdown completed.", null, null, null));
         }
 
         await AppendLinesSharedAsync(GetLogFilePath(nowUtc, "info"), lines, token).ConfigureAwait(false);

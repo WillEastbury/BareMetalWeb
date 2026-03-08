@@ -33,6 +33,9 @@ public sealed class BmwContext
     public IBareWebHost App { get; }
     public PageInfo? PageInfo { get; set; }
 
+    /// <summary>Unique correlation ID for this request (extracted from X-Trace-ID or generated).</summary>
+    public string CorrelationId { get; }
+
     /// <summary>Route parameters extracted by the jump-table or pattern router.</summary>
     public Dictionary<string, string>? RouteParameters { get; set; }
 
@@ -82,7 +85,8 @@ public sealed class BmwContext
         IHttpResponseFeature responseFeature,
         IHttpConnectionFeature? connectionFeature,
         IBareWebHost app,
-        string sourceIp)
+        string sourceIp,
+        string correlationId)
     {
         HttpContext = httpContext;
         Request = request;
@@ -92,6 +96,7 @@ public sealed class BmwContext
         ConnectionFeature = connectionFeature;
         App = app;
         SourceIp = sourceIp;
+        CorrelationId = correlationId;
     }
 
     /// <summary>
@@ -112,6 +117,11 @@ public sealed class BmwContext
 
         var sourceIp = connectionFeature?.RemoteIpAddress?.ToString() ?? "unknown";
 
+        // Extract or generate correlation ID
+        var correlationId = httpContext.Request.Headers.TryGetValue("X-Trace-ID", out var traceHeader) && traceHeader.Count > 0
+            ? traceHeader[0]!
+            : httpContext.TraceIdentifier;
+
         return new BmwContext(
             httpContext,
             request,
@@ -120,7 +130,8 @@ public sealed class BmwContext
             responseFeature,
             connectionFeature,
             app,
-            sourceIp);
+            sourceIp,
+            correlationId);
     }
 
     /// <summary>
@@ -145,6 +156,10 @@ public sealed class BmwContext
 
         var sourceIp = connectionFeature?.RemoteIpAddress?.ToString() ?? "unknown";
 
+        var correlationId = httpContext.Request.Headers.TryGetValue("X-Trace-ID", out var traceHeader) && traceHeader.Count > 0
+            ? traceHeader[0]!
+            : httpContext.TraceIdentifier;
+
         return new BmwContext(
             httpContext,
             request,
@@ -153,6 +168,7 @@ public sealed class BmwContext
             responseFeature,
             connectionFeature,
             app,
-            sourceIp);
+            sourceIp,
+            correlationId);
     }
 }
