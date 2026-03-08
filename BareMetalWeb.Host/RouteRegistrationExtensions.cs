@@ -52,15 +52,47 @@ public static class RouteRegistrationExtensions
             routeHandlers.TimeRawHandler));
 
         // #1244: Health check endpoint for load balancers / monitoring
+        // #1263: Separate liveness and readiness probes
         host.RegisterRoute("GET /health", new RouteHandlerData(
+            pageInfoFactory.RawPage("Public", false),
+            async context =>
+            {
+                bool ready = BareMetalWebServer.IsReady;
+                context.Response.StatusCode = ready ? 200 : 503;
+                context.Response.ContentType = "application/json";
+                var uptime = DateTime.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
+                var status = ready ? "healthy" : "initializing";
+                var json = $"{{\"status\":\"{status}\",\"ready\":{(ready ? "true" : "false")},\"uptime_seconds\":{uptime.TotalSeconds:F0}}}";
+                await context.Response.WriteAsync(json);
+            }));
+
+        // GET /healthz — liveness probe: 200 if process is running (always succeeds)
+        host.RegisterRoute("GET /healthz", new RouteHandlerData(
             pageInfoFactory.RawPage("Public", false),
             async context =>
             {
                 context.Response.StatusCode = 200;
                 context.Response.ContentType = "application/json";
-                var uptime = DateTime.UtcNow - System.Diagnostics.Process.GetCurrentProcess().StartTime.ToUniversalTime();
-                var json = $"{{\"status\":\"healthy\",\"uptime_seconds\":{uptime.TotalSeconds:F0}}}";
-                await context.Response.WriteAsync(json);
+                await context.Response.WriteAsync("{\"status\":\"alive\"}");
+            }));
+
+        // GET /readyz — readiness probe: 200 only when fully initialized, 503 during startup
+        host.RegisterRoute("GET /readyz", new RouteHandlerData(
+            pageInfoFactory.RawPage("Public", false),
+            async context =>
+            {
+                bool ready = BareMetalWebServer.IsReady;
+                context.Response.StatusCode = ready ? 200 : 503;
+                context.Response.ContentType = "application/json";
+
+                if (ready)
+                {
+                    await context.Response.WriteAsync("{\"status\":\"ready\"}");
+                }
+                else
+                {
+                    await context.Response.WriteAsync("{\"status\":\"not_ready\",\"reason\":\"Server is still initializing\"}");
+                }
             }));
     }
 

@@ -386,6 +386,9 @@ public static class BareMetalWebExtensions
         Console.WriteLine($"[BMW Startup] ✓ Initialization complete in {startupSw.ElapsedMilliseconds}ms");
         Console.WriteLine();
 
+        // Signal readiness for /readyz and /health probes (#1263)
+        BareMetalWebServer.IsReady = true;
+
         return appInfo;
     }
 }

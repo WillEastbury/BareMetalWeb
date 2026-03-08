@@ -119,13 +119,13 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void RegisterStaticRoutes_RegistersExactlyThreeRoutes()
+    public void RegisterStaticRoutes_RegistersExpectedRouteCount()
     {
         // Arrange & Act
         _server.RegisterStaticRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
-        // Assert
-        Assert.Equal(3, _server.routes.Count);
+        // Assert — /, /status, /statusRaw, /health, /healthz, /readyz
+        Assert.Equal(6, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────

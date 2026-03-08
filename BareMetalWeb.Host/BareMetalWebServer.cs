@@ -78,6 +78,13 @@ public class BareMetalWebServer : IBareWebHost
     public bool ShowHostDiagnostics { get; set; } = false;
 
     /// <summary>
+    /// Set to <c>true</c> when startup is complete and the server is ready to serve traffic.
+    /// Used by <c>GET /readyz</c> to signal readiness to orchestrators.
+    /// Static because route handlers don't have access to the server instance.
+    /// </summary>
+    public static volatile bool IsReady;
+
+    /// <summary>
     /// When multitenancy is enabled, this registry resolves the correct per-tenant
     /// data store at the start of each request based on the HTTP Host header.
     /// Null (default) means multitenancy is disabled and the system store is used for all requests.
@@ -778,8 +785,10 @@ public class BareMetalWebServer : IBareWebHost
         if (requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        // Health endpoint must always be reachable for load balancers / monitoring
-        if (requestPath.Equals("/health", StringComparison.OrdinalIgnoreCase))
+        // Health/readiness probes must always be reachable for load balancers / monitoring
+        if (requestPath.Equals("/health", StringComparison.OrdinalIgnoreCase)
+            || requestPath.Equals("/healthz", StringComparison.OrdinalIgnoreCase)
+            || requestPath.Equals("/readyz", StringComparison.OrdinalIgnoreCase))
             return false;
 
         var staticPrefix = StaticFiles?.NormalizedRequestPathPrefix;
