@@ -110,9 +110,15 @@ while (true)
                 SaveSnapshot(engine, input[5..].Trim());
                 continue;
             }
-            if (input.StartsWith("load ", StringComparison.OrdinalIgnoreCase))
+            if (input.StartsWith("load ", StringComparison.OrdinalIgnoreCase)
+                && !input.StartsWith("loadlazy ", StringComparison.OrdinalIgnoreCase))
             {
                 LoadSnapshot(engine, input[5..].Trim(), config, ref orchestrator, classifier, executor);
+                continue;
+            }
+            if (input.StartsWith("loadlazy ", StringComparison.OrdinalIgnoreCase))
+            {
+                LoadSnapshotLazy(engine, input[9..].Trim(), config, ref orchestrator, classifier, executor);
                 continue;
             }
             await RunQuery(orchestrator, input);
@@ -137,6 +143,7 @@ static void PrintHelp()
     Console.WriteLine("  │    compare      — Compare pruning levels RAM    │");
     Console.WriteLine("  │    save <path>  — Save model snapshot (.bmwm)   │");
     Console.WriteLine("  │    load <path>  — Load model snapshot (.bmwm)   │");
+    Console.WriteLine("  │    loadlazy <p> — Lazy mmap load (zero-copy)    │");
     Console.WriteLine("  │    exit, quit   — Exit                          │");
     Console.WriteLine("  │                                                 │");
     Console.WriteLine("  │  Or just type a natural language query:         │");
@@ -532,6 +539,51 @@ static void LoadSnapshot(
     {
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"  ✗ Load failed: {ex.Message}");
+        Console.ResetColor();
+    }
+    Console.WriteLine();
+}
+
+static void LoadSnapshotLazy(
+    BitNetEngine engine, string path,
+    BitNetModelConfig config,
+    ref IntelligenceOrchestrator orchestrator,
+    KeywordIntentClassifier classifier,
+    IToolExecutor executor)
+{
+    if (string.IsNullOrWhiteSpace(path))
+    {
+        path = "model.bmwm";
+        Console.WriteLine($"    Using default path: {path}");
+    }
+
+    if (!File.Exists(path))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"  ✗ File not found: {path}");
+        Console.ResetColor();
+        Console.WriteLine();
+        return;
+    }
+
+    try
+    {
+        var sw = Stopwatch.StartNew();
+        engine.LoadSnapshotLazy(path);
+        sw.Stop();
+
+        orchestrator = new IntelligenceOrchestrator(classifier, executor, engine);
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($"  ✓ Lazy-loaded ");
+        Console.ResetColor();
+        Console.WriteLine($"from {path} ({sw.ElapsedMilliseconds}ms, zero-copy mmap)");
+        PrintStats(engine, config);
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"  ✗ Lazy load failed: {ex.Message}");
         Console.ResetColor();
     }
     Console.WriteLine();

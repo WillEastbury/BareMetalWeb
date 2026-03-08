@@ -25,6 +25,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private NativeTernaryMatrix[]? _compressedFfn;
     private NativeTernaryMatrix? _compressedEmbeddings;
     private NativeTernaryMatrix? _compressedOutputHead;
+    private LazySnapshot? _lazySnapshot; // holds mmap open when lazy-loaded
     private int _layerCount;
     private bool _isLoaded;
 
@@ -257,6 +258,55 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _isLoaded = true;
     }
 
+    /// <summary>
+    /// Load a model from a snapshot using persistent memory-mapping.
+    /// Matrices reference the mapped file directly — zero copy, instant load.
+    /// The OS demand-pages data on first access; layers skipped by early exit
+    /// never consume physical memory.
+    /// </summary>
+    public void LoadSnapshotLazy(string path)
+    {
+        DisposeNative();
+
+        _lazySnapshot = ModelSnapshot.LoadLazy(path);
+        var snap = _lazySnapshot.Data;
+
+        _layerCount = snap.Attn.Length;
+        _compressedAttn = snap.Attn;
+        _compressedFfn = snap.Ffn;
+        _compressedEmbeddings = snap.Embeddings;
+        _compressedOutputHead = snap.OutputHead;
+
+        NativeBytesAllocated = 0; // no native alloc — data lives in mmap
+        var layerStatsList = new (MatrixStats Attn, MatrixStats Ffn)[_layerCount];
+        for (int i = 0; i < _layerCount; i++)
+        {
+            layerStatsList[i] = (_compressedAttn[i].Stats, _compressedFfn[i].Stats);
+        }
+        LayerStats = layerStatsList;
+
+        long totalWeights = 0;
+        for (int i = 0; i < _layerCount; i++)
+        {
+            totalWeights += _compressedAttn[i].Stats.LogicalWeights;
+            totalWeights += _compressedFfn[i].Stats.LogicalWeights;
+        }
+        long embWeights = (long)_compressedEmbeddings.Stats.LogicalWeights
+                        + _compressedOutputHead.Stats.LogicalWeights;
+
+        _modelStats = new ModelSizeStats(
+            TotalWeights: totalWeights + embWeights,
+            LayerWeights: totalWeights,
+            EmbeddingWeights: embWeights,
+            ZeroWeights: 0, // stats deferred for mmap
+            StoredBytes: totalWeights + embWeights,
+            PackedBytes: 0,
+            Sparsity: 0f, // unknown until first access
+            LayerCount: _layerCount);
+
+        _isLoaded = true;
+    }
+
     public ValueTask<string> GenerateAsync(
         ReadOnlyMemory<char> prompt,
         int maxTokens = 256,
@@ -384,20 +434,33 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
     private void DisposeNative()
     {
-        if (_compressedAttn is not null)
+        if (_lazySnapshot is not null)
         {
-            foreach (var m in _compressedAttn) m?.Dispose();
+            // LazySnapshot owns the mmap — disposing it releases everything
+            _lazySnapshot.Dispose();
+            _lazySnapshot = null;
             _compressedAttn = null;
-        }
-        if (_compressedFfn is not null)
-        {
-            foreach (var m in _compressedFfn) m?.Dispose();
             _compressedFfn = null;
+            _compressedEmbeddings = null;
+            _compressedOutputHead = null;
         }
-        _compressedEmbeddings?.Dispose();
-        _compressedOutputHead?.Dispose();
-        _compressedEmbeddings = null;
-        _compressedOutputHead = null;
+        else
+        {
+            if (_compressedAttn is not null)
+            {
+                foreach (var m in _compressedAttn) m?.Dispose();
+                _compressedAttn = null;
+            }
+            if (_compressedFfn is not null)
+            {
+                foreach (var m in _compressedFfn) m?.Dispose();
+                _compressedFfn = null;
+            }
+            _compressedEmbeddings?.Dispose();
+            _compressedOutputHead?.Dispose();
+            _compressedEmbeddings = null;
+            _compressedOutputHead = null;
+        }
         NativeBytesAllocated = 0;
         LayerStats = null;
     }

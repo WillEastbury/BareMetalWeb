@@ -319,6 +319,96 @@ public static class ModelSnapshot
         }
     }
 
+    /// <summary>
+    /// Load a snapshot using persistent memory-mapping. Matrices reference the
+    /// mapped file directly — zero copy, OS demand-pages data on first access.
+    /// Layers never touched during inference (e.g. skipped by early exit) never
+    /// consume physical memory.
+    /// Returns a <see cref="LazySnapshot"/> that owns the mmap lifetime.
+    /// </summary>
+    public static unsafe LazySnapshot LoadLazy(string path)
+    {
+        var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var mmf = MemoryMappedFile.CreateFromFile(
+            fs, null, 0, MemoryMappedFileAccess.Read, HandleInheritability.None, true);
+        var accessor = mmf.CreateViewAccessor(0, fs.Length, MemoryMappedFileAccess.Read);
+
+        byte* basePtr = null;
+        accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref basePtr);
+
+        // ── Header ──────────────────────────────────────────────────
+        var headerSpan = new ReadOnlySpan<byte>(basePtr, HeaderSize);
+        if (!headerSpan[..4].SequenceEqual(Magic))
+            throw new InvalidDataException("Not a BMWM snapshot file");
+
+        int version = MemoryMarshal.Read<int>(headerSpan[4..]);
+        if (version != FormatVersion)
+            throw new InvalidDataException($"Unsupported version {version}");
+
+        int hiddenDim = MemoryMarshal.Read<int>(headerSpan[8..]);
+        int layerCount = MemoryMarshal.Read<int>(headerSpan[12..]);
+        int numHeads = MemoryMarshal.Read<int>(headerSpan[16..]);
+        int vocabSize = MemoryMarshal.Read<int>(headerSpan[20..]);
+        int activeVocab = MemoryMarshal.Read<int>(headerSpan[24..]);
+        int maxSeqLen = MemoryMarshal.Read<int>(headerSpan[28..]);
+        int matrixCount = MemoryMarshal.Read<int>(headerSpan[32..]);
+        int tokenCount = MemoryMarshal.Read<int>(headerSpan[36..]);
+        long tokenTableOffset = MemoryMarshal.Read<long>(headerSpan[40..]);
+
+        if (matrixCount != layerCount * 2 + 2)
+            throw new InvalidDataException("Matrix count mismatch");
+
+        // ── Descriptors ─────────────────────────────────────────────
+        var descSpan = new ReadOnlySpan<byte>(
+            basePtr + HeaderSize, matrixCount * DescriptorSize);
+
+        var descriptors = new (int Rows, int Cols, int Stride, long Offset, long Length)[matrixCount];
+        for (int i = 0; i < matrixCount; i++)
+        {
+            int off = i * DescriptorSize;
+            descriptors[i] = (
+                MemoryMarshal.Read<int>(descSpan[off..]),
+                MemoryMarshal.Read<int>(descSpan[(off + 4)..]),
+                MemoryMarshal.Read<int>(descSpan[(off + 8)..]),
+                MemoryMarshal.Read<long>(descSpan[(off + 12)..]),
+                MemoryMarshal.Read<long>(descSpan[(off + 20)..])
+            );
+        }
+
+        // ── Token table ─────────────────────────────────────────────
+        string[] tokens;
+        using (var tokenStream = new UnmanagedMemoryStream(
+            basePtr + tokenTableOffset,
+            descriptors[0].Offset - tokenTableOffset))
+        using (var tbr = new BinaryReader(tokenStream, Encoding.UTF8))
+        {
+            tokens = DecodeTokenTable(tbr, tokenCount);
+        }
+
+        // ── Zero-copy matrices from mapped memory ───────────────────
+        var attn = new NativeTernaryMatrix[layerCount];
+        var ffn = new NativeTernaryMatrix[layerCount];
+        for (int i = 0; i < layerCount; i++)
+        {
+            var (rows, cols, _, offset, _) = descriptors[i * 2];
+            attn[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+
+            (rows, cols, _, offset, _) = descriptors[i * 2 + 1];
+            ffn[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+        }
+
+        var (eRows, eCols, _, eOff, _) = descriptors[matrixCount - 2];
+        var embeddings = NativeTernaryMatrix.FromMappedMemory(basePtr + eOff, eRows, eCols);
+
+        var (oRows, oCols, _, oOff, _) = descriptors[matrixCount - 1];
+        var outputHead = NativeTernaryMatrix.FromMappedMemory(basePtr + oOff, oRows, oCols);
+
+        var config = new BitNetModelConfig(hiddenDim, layerCount, numHeads, vocabSize, maxSeqLen);
+        var data = new SnapshotData(config, activeVocab, attn, ffn, embeddings, outputHead, tokens);
+
+        return new LazySnapshot(fs, mmf, accessor, basePtr, data);
+    }
+
     // ── Token table encoding ────────────────────────────────────────────
 
     private static byte[] EncodeTokenTable(IReadOnlyList<string>? tokens)
@@ -362,5 +452,55 @@ public sealed record SnapshotData(
         foreach (var m in Ffn) m?.Dispose();
         Embeddings?.Dispose();
         OutputHead?.Dispose();
+    }
+}
+
+/// <summary>
+/// Holds a memory-mapped snapshot file open so matrices can reference
+/// mapped pages directly. Dispose releases the mapping (and invalidates
+/// all matrices created from it).
+/// </summary>
+public sealed unsafe class LazySnapshot : IDisposable
+{
+    private readonly FileStream _fs;
+    private readonly MemoryMappedFile _mmf;
+    private readonly MemoryMappedViewAccessor _accessor;
+    private byte* _basePtr;
+    private bool _disposed;
+
+    /// <summary>Snapshot data with zero-copy matrices pointing at mapped memory.</summary>
+    public SnapshotData Data { get; }
+
+    internal LazySnapshot(
+        FileStream fs,
+        MemoryMappedFile mmf,
+        MemoryMappedViewAccessor accessor,
+        byte* basePtr,
+        SnapshotData data)
+    {
+        _fs = fs;
+        _mmf = mmf;
+        _accessor = accessor;
+        _basePtr = basePtr;
+        Data = data;
+    }
+
+    public void Dispose()
+    {
+        if (!_disposed)
+        {
+            // Matrices have _ownsMemory=false — dispose just nulls pointers
+            Data.Dispose();
+
+            if (_basePtr != null)
+            {
+                _accessor.SafeMemoryMappedViewHandle.ReleasePointer();
+                _basePtr = null;
+            }
+            _accessor.Dispose();
+            _mmf.Dispose();
+            _fs.Dispose();
+            _disposed = true;
+        }
     }
 }

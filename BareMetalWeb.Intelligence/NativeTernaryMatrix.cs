@@ -33,6 +33,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     private readonly int _packedRowBytes;   // logical packed width = ceil(cols / 4)
     private readonly int _rowStrideBytes;   // aligned width = AlignUp(packedRowBytes, 32)
     private readonly long _totalBytes;
+    private readonly bool _ownsMemory;      // false for mmap-backed matrices
     private MatrixStats _stats;
     private ushort[][]? _skipIndex; // per-row non-zero byte offsets for sparse skip
     private bool _disposed;
@@ -75,7 +76,32 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         _packedRowBytes = (cols + 3) >> 2;
         _rowStrideBytes = AlignUp(_packedRowBytes, RowAlignment);
         _totalBytes = (long)rows * _rowStrideBytes;
+        _ownsMemory = true;
         _data = (byte*)NativeMemory.AllocZeroed((nuint)_totalBytes);
+    }
+
+    // Non-allocating constructor for memory-mapped matrices
+    private NativeTernaryMatrix(int rows, int cols, byte* externalData)
+    {
+        _rows = rows;
+        _cols = cols;
+        _packedRowBytes = (cols + 3) >> 2;
+        _rowStrideBytes = AlignUp(_packedRowBytes, RowAlignment);
+        _totalBytes = (long)rows * _rowStrideBytes;
+        _ownsMemory = false;
+        _data = externalData;
+    }
+
+    /// <summary>
+    /// Create a matrix referencing external (mmap) memory. The matrix does NOT
+    /// own the memory — the caller must ensure it stays valid for the matrix's lifetime.
+    /// Stats are deferred (zero-byte ratio shows 0 until data is touched).
+    /// </summary>
+    public static NativeTernaryMatrix FromMappedMemory(byte* data, int rows, int cols)
+    {
+        var matrix = new NativeTernaryMatrix(rows, cols, data);
+        matrix._stats = new MatrixStats(rows * cols, rows * matrix._packedRowBytes, 0, 0f);
+        return matrix;
     }
 
     /// <summary>
@@ -557,11 +583,11 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     {
         if (!_disposed)
         {
-            if (_data != null)
+            if (_ownsMemory && _data != null)
             {
                 NativeMemory.Free(_data);
-                _data = null;
             }
+            _data = null;
             _disposed = true;
             GC.SuppressFinalize(this);
         }
@@ -569,9 +595,10 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
 
     ~NativeTernaryMatrix()
     {
-        if (!_disposed && _data != null)
+        if (!_disposed)
         {
-            NativeMemory.Free(_data);
+            if (_ownsMemory && _data != null)
+                NativeMemory.Free(_data);
             _data = null;
             _disposed = true;
         }
