@@ -108,7 +108,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContext("GET", "/test");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.True(executed, "Route handler should have been executed");
@@ -141,7 +141,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContext("GET", "/users/123");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal("123", capturedId);
@@ -160,9 +160,9 @@ public class BareMetalWebServerTests : IDisposable
         ));
 
         // Act
-        await _server.RequestHandler(CreateHttpContext("GET", "/api/resource"));
-        await _server.RequestHandler(CreateHttpContext("POST", "/api/resource"));
-        await _server.RequestHandler(CreateHttpContext("PUT", "/api/resource"));
+        await _server.RequestHandler(CreateHttpContext("GET", "/api/resource").ToBmw());
+        await _server.RequestHandler(CreateHttpContext("POST", "/api/resource").ToBmw());
+        await _server.RequestHandler(CreateHttpContext("PUT", "/api/resource").ToBmw());
 
         // Assert
         Assert.Equal(3, executedCount);
@@ -182,7 +182,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContext("POST", "/api/resource/123");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         if (context.Response.StatusCode != 405)
@@ -202,7 +202,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContext("GET", "/nonexistent");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(404, context.Response.StatusCode);
@@ -229,7 +229,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContext("GET", "/error");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(500, context.Response.StatusCode);
@@ -255,7 +255,7 @@ public class BareMetalWebServerTests : IDisposable
         context.Request.Headers["X-Requested-With"] = "BareMetalWeb";
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(500, context.Response.StatusCode);
@@ -289,7 +289,7 @@ public class BareMetalWebServerTests : IDisposable
         context.RequestAborted = cts.Token;
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.True(_logger.InfoLogs.Any(e => e.Contains("Client disconnected") || e.Contains("disconnected")),
@@ -318,7 +318,7 @@ public class BareMetalWebServerTests : IDisposable
         ));
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal("https://example.com", context.Response.Headers.AccessControlAllowOrigin.ToString());
@@ -341,7 +341,7 @@ public class BareMetalWebServerTests : IDisposable
         ));
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal("*", context.Response.Headers.AccessControlAllowOrigin.ToString());
@@ -358,7 +358,7 @@ public class BareMetalWebServerTests : IDisposable
         context.Request.Headers.Origin = "https://example.com";
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(204, context.Response.StatusCode);
@@ -380,7 +380,7 @@ public class BareMetalWebServerTests : IDisposable
         ));
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.False(context.Response.Headers.ContainsKey("Access-Control-Allow-Origin"));
@@ -407,7 +407,7 @@ public class BareMetalWebServerTests : IDisposable
         ));
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.NotEqual(301, context.Response.StatusCode);
@@ -426,7 +426,7 @@ public class BareMetalWebServerTests : IDisposable
         context.Request.Host = new HostString("example.com");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(301, context.Response.StatusCode);
@@ -446,7 +446,7 @@ public class BareMetalWebServerTests : IDisposable
         context.Request.Host = new HostString("example.com");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(301, context.Response.StatusCode);
@@ -471,7 +471,7 @@ public class BareMetalWebServerTests : IDisposable
         ));
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.NotEqual(301, context.Response.StatusCode);
@@ -493,7 +493,7 @@ public class BareMetalWebServerTests : IDisposable
         ));
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.NotEqual(301, context.Response.StatusCode);
@@ -521,7 +521,7 @@ public class BareMetalWebServerTests : IDisposable
         ));
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal("true", context.Response.Headers["X-BareMetal-IsHttps"].ToString());
@@ -546,7 +546,7 @@ public class BareMetalWebServerTests : IDisposable
         ));
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal("true", context.Response.Headers["X-BareMetal-IsHttps"].ToString());
@@ -567,7 +567,7 @@ public class BareMetalWebServerTests : IDisposable
         context.Request.Headers["X-Forwarded-Proto"] = "https";
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal("false", context.Response.Headers["X-BareMetal-IsHttps"].ToString());
@@ -588,7 +588,7 @@ public class BareMetalWebServerTests : IDisposable
         context.Request.Host = new HostString("example.com");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(301, context.Response.StatusCode);
@@ -787,7 +787,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContext("GET", "/home");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(302, context.Response.StatusCode);
@@ -811,7 +811,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContext("GET", "/setup");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.True(setupExecuted, "Setup page should be accessible");
@@ -834,7 +834,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContext("GET", "/static/css/site.css");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert - Should not redirect to setup (static file handler will attempt to serve)
         Assert.NotEqual(302, context.Response.StatusCode);
@@ -857,7 +857,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/jobs/test-job");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert — API call must not be redirected to /setup
         Assert.True(handlerExecuted, "API endpoint should be reachable even when no root user exists");
@@ -880,7 +880,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContext("GET", "/home");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.NotEqual(302, context.Response.StatusCode);
@@ -903,7 +903,7 @@ public class BareMetalWebServerTests : IDisposable
         var context = CreateHttpContext("GET", "/test");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.True(context.Response.Headers.ContainsKey("Content-Security-Policy"));
@@ -935,7 +935,7 @@ public class BareMetalWebServerTests : IDisposable
         context.Request.Protocol = protocol;
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.True(context.Response.Headers.ContainsKey("Keep-Alive"),
@@ -957,7 +957,7 @@ public class BareMetalWebServerTests : IDisposable
         context.Request.Protocol = "HTTP/2";
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert — Keep-Alive is a hop-by-hop HTTP/1.x concept; not sent for HTTP/2
         Assert.False(context.Response.Headers.ContainsKey("Keep-Alive"),
@@ -1057,7 +1057,7 @@ public class BareMetalWebServerTests : IDisposable
 
     private class MockHtmlRenderer : IHtmlRenderer
     {
-        public ValueTask RenderPage(HttpContext context)
+        public ValueTask RenderPage(BmwContext context)
         {
             // Don't overwrite status code if already set
             if (context.Response.StatusCode == 200)
@@ -1067,7 +1067,7 @@ public class BareMetalWebServerTests : IDisposable
             return ValueTask.CompletedTask;
         }
 
-        public ValueTask RenderPage(HttpContext context, PageInfo page, IBareWebHost app)
+        public ValueTask RenderPage(BmwContext context, PageInfo page, IBareWebHost app)
         {
             // Don't overwrite status code if already set
             if (context.Response.StatusCode == 200)

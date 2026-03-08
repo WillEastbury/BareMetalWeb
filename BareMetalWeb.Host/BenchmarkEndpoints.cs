@@ -35,23 +35,19 @@ internal static class BenchmarkEndpoints
     /// Returns true (and writes the response) if the path matched a bench endpoint.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    internal static bool TryHandle(HttpContext context)
+    internal static bool TryHandle(BmwContext context)
     {
-        // PathString.Value is pre-computed by Kestrel — no allocation here.
-        var path = context.Request.Path.Value;
+        var path = context.Request.Path;
 
         // Length gate: /_null = 6, /_router = 8.  Anything shorter or null → skip.
-        if (path is null || path.Length < 6)
+        if (path.Length < 6)
             return false;
 
-        // Use ordinal char comparison on 2nd char to split the two paths
-        // before falling into full string equality. Avoids scanning both
-        // strings on every request.
         if (path.Length == 6 && path[1] == 'n')
         {
             if (string.Equals(path, "/_null", StringComparison.Ordinal))
             {
-                WriteOk(context.Response);
+                WriteOk(context);
                 return true;
             }
         }
@@ -59,7 +55,7 @@ internal static class BenchmarkEndpoints
         {
             if (string.Equals(path, "/_router", StringComparison.Ordinal))
             {
-                HandleRouter(context.Response);
+                HandleRouter(context);
                 return true;
             }
         }
@@ -71,28 +67,25 @@ internal static class BenchmarkEndpoints
     /// /_null — absolute minimum: write two pre-computed bytes, nothing else.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static void WriteOk(HttpResponse response)
+    private static void WriteOk(BmwContext context)
     {
-        response.StatusCode = 200;
-        response.ContentType = "text/plain";
-        response.ContentLength = 2;
-        var span = response.BodyWriter.GetSpan(2);
+        context.StatusCode = 200;
+        context.ContentType = "text/plain";
+        context.ContentLength = 2;
+        var span = context.ResponseBody.GetSpan(2);
         OkBody.CopyTo(span);
-        response.BodyWriter.Advance(2);
+        context.ResponseBody.Advance(2);
     }
 
     /// <summary>
     /// /_router — exercise EntityPrefixRouter.TryResolve on a real entity slug,
     /// then write the same two-byte response. No WAL, no rendering, no auth.
     /// </summary>
-    private static void HandleRouter(HttpResponse response)
+    private static void HandleRouter(BmwContext context)
     {
         var router = EnsureRouter();
-        // Resolve "customer" via the byte-span path (zero-allocation hot path).
-        // The slug doesn't need to exist — we're benchmarking the dispatch, not the result.
         router.TryResolve("customer"u8, out _, out _);
-
-        WriteOk(response);
+        WriteOk(context);
     }
 
     /// <summary>

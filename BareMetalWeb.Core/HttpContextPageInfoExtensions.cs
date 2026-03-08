@@ -252,67 +252,219 @@ public static class HttpContextPageInfoExtensions
         });
     }
 
-    // ── BmwContext overloads (delegate to HttpContext) ───────────────────
+    // ── BmwContext overloads (operate on BmwContext fields directly) ────
 
     public static void SetPageMetaData(this BmwContext context, PageMetaData metaData)
-        => context.HttpContext.SetPageMetaData(metaData);
+        => context.PageMetaData = metaData;
 
     public static void SetPageContext(this BmwContext context, PageContext pageContext)
-        => context.HttpContext.SetPageContext(pageContext);
+        => context.PageContext = pageContext;
 
     public static void SetPageInfo(this BmwContext context, PageInfo pageInfo)
-        => context.HttpContext.SetPageInfo(pageInfo);
+    {
+        context.PageMetaData = pageInfo.PageMetaData;
+        context.PageContext = pageInfo.PageContext;
+    }
 
     public static PageMetaData? GetPageMetaData(this BmwContext context)
-        => context.HttpContext.GetPageMetaData();
+        => context.PageMetaData;
 
     public static PageContext? GetPageContext(this BmwContext context)
-        => context.HttpContext.GetPageContext();
+        => context.PageContext;
 
     public static PageInfo? GetPageInfo(this BmwContext context)
-        => context.HttpContext.GetPageInfo();
+        => context.PageInfo;
 
     public static void SetApp(this BmwContext context, IBareWebHost app)
-        => context.HttpContext.SetApp(app);
+    {
+        // App is set during BmwContext construction — this is a no-op compatibility shim.
+    }
 
     public static IBareWebHost? GetApp(this BmwContext context)
-        => context.HttpContext.GetApp();
+        => context.App;
 
     public static void SetStringValue(this BmwContext context, string key, string value)
-        => context.HttpContext.SetStringValue(key, value);
+    {
+        var current = EnsureBmwPageContext(context);
+        var keys = new List<string>(current.PageMetaDataKeys);
+        var values = new List<string>(current.PageMetaDataValues);
+
+        int index = -1;
+        for (int i = 0; i < keys.Count; i++)
+        {
+            if (string.Equals(keys[i], key, StringComparison.Ordinal))
+            {
+                index = i;
+                break;
+            }
+        }
+        if (index >= 0)
+        {
+            values[index] = value;
+        }
+        else
+        {
+            keys.Add(key);
+            values.Add(value);
+        }
+
+        context.PageContext = current with
+        {
+            PageMetaDataKeys = keys.ToArray(),
+            PageMetaDataValues = values.ToArray()
+        };
+    }
 
     public static void AddStringValue(this BmwContext context, string key, string value)
-        => context.HttpContext.AddStringValue(key, value);
+    {
+        var current = EnsureBmwPageContext(context);
+        var keys = new List<string>(current.PageMetaDataKeys);
+        var values = new List<string>(current.PageMetaDataValues);
+
+        keys.Add(key);
+        values.Add(value);
+
+        context.PageContext = current with
+        {
+            PageMetaDataKeys = keys.ToArray(),
+            PageMetaDataValues = values.ToArray()
+        };
+    }
 
     public static void RemoveStringValue(this BmwContext context, string key)
-        => context.HttpContext.RemoveStringValue(key);
+    {
+        var current = EnsureBmwPageContext(context);
+        var keys = new List<string>();
+        var values = new List<string>();
+
+        for (int i = 0; i < current.PageMetaDataKeys.Length; i++)
+        {
+            if (string.Equals(current.PageMetaDataKeys[i], key, StringComparison.Ordinal))
+                continue;
+            keys.Add(current.PageMetaDataKeys[i]);
+            values.Add(current.PageMetaDataValues[i]);
+        }
+
+        context.PageContext = current with
+        {
+            PageMetaDataKeys = keys.ToArray(),
+            PageMetaDataValues = values.ToArray()
+        };
+    }
 
     public static void SetLoop(this BmwContext context, TemplateLoop loop)
-        => context.HttpContext.SetLoop(loop);
+    {
+        var current = EnsureBmwPageContext(context);
+        var loops = current.TemplateLoops != null ? new List<TemplateLoop>(current.TemplateLoops) : new List<TemplateLoop>();
+
+        int index = -1;
+        for (int i = 0; i < loops.Count; i++)
+        {
+            if (string.Equals(loops[i].Key, loop.Key, StringComparison.Ordinal))
+            {
+                index = i;
+                break;
+            }
+        }
+        if (index >= 0)
+            loops[index] = loop;
+        else
+            loops.Add(loop);
+
+        context.PageContext = current with { TemplateLoops = loops.ToArray() };
+    }
 
     public static void SetLoop(this BmwContext context, string loopKey, IReadOnlyList<IReadOnlyDictionary<string, string>> items)
-        => context.HttpContext.SetLoop(loopKey, items);
+        => context.SetLoop(new TemplateLoop(loopKey, items));
 
     public static void SetLoopValues(this BmwContext context, string loopKey, string valueKey, IReadOnlyList<string> values)
-        => context.HttpContext.SetLoopValues(loopKey, valueKey, values);
+    {
+        var items = new List<IReadOnlyDictionary<string, string>>(values.Count);
+        for (int i = 0; i < values.Count; i++)
+            items.Add(new Dictionary<string, string> { [valueKey] = values[i] });
+        context.SetLoop(loopKey, items);
+    }
 
     public static void AddLoopItem(this BmwContext context, string loopKey, IReadOnlyDictionary<string, string> item)
-        => context.HttpContext.AddLoopItem(loopKey, item);
+    {
+        var current = EnsureBmwPageContext(context);
+        var loops = current.TemplateLoops != null ? new List<TemplateLoop>(current.TemplateLoops) : new List<TemplateLoop>();
+
+        int index = -1;
+        for (int i = 0; i < loops.Count; i++)
+        {
+            if (string.Equals(loops[i].Key, loopKey, StringComparison.Ordinal))
+            {
+                index = i;
+                break;
+            }
+        }
+        if (index >= 0)
+        {
+            var items = new List<IReadOnlyDictionary<string, string>>(loops[index].Items);
+            items.Add(item);
+            loops[index] = loops[index] with { Items = items };
+        }
+        else
+        {
+            loops.Add(new TemplateLoop(loopKey, new[] { item }));
+        }
+
+        context.PageContext = current with { TemplateLoops = loops.ToArray() };
+    }
 
     public static void AddTable(this BmwContext context, string[] columnTitles, string[][] rows)
-        => context.HttpContext.AddTable(columnTitles, rows);
+    {
+        var current = EnsureBmwPageContext(context);
+        context.PageContext = current with
+        {
+            TableColumnTitles = columnTitles,
+            TableData = rows
+        };
+    }
 
     public static void AddTableColumnTitle(this BmwContext context, string title)
-        => context.HttpContext.AddTableColumnTitle(title);
+    {
+        var current = EnsureBmwPageContext(context);
+        var titles = current.TableColumnTitles != null ? new List<string>(current.TableColumnTitles) : new List<string>();
+        titles.Add(title);
+        context.PageContext = current with { TableColumnTitles = titles.ToArray() };
+    }
 
     public static void AddTableHeader(this BmwContext context, string[] titles)
-        => context.HttpContext.AddTableHeader(titles);
+    {
+        var current = EnsureBmwPageContext(context);
+        context.PageContext = current with { TableColumnTitles = titles };
+    }
 
     public static void AddTableRow(this BmwContext context, string[] row)
-        => context.HttpContext.AddTableRow(row);
+    {
+        var current = EnsureBmwPageContext(context);
+        var rows = current.TableData != null ? new List<string[]>(current.TableData) : new List<string[]>();
+        rows.Add(row);
+        context.PageContext = current with { TableData = rows.ToArray() };
+    }
 
     public static void AddFormDefinition(this BmwContext context, FormDefinition formDefinition)
-        => context.HttpContext.AddFormDefinition(formDefinition);
+    {
+        var current = EnsureBmwPageContext(context);
+        context.PageContext = current with { FormDefinition = formDefinition };
+    }
+
+    private static PageContext EnsureBmwPageContext(BmwContext context)
+    {
+        var pageContext = context.PageContext;
+        if (pageContext != null)
+            return pageContext;
+
+        var nonce = context.GetCspNonce();
+        var newContext = new PageContext(
+            new[] { "csp_nonce" },
+            new[] { nonce }
+        );
+        context.PageContext = newContext;
+        return newContext;
+    }
 
     private static PageContext EnsurePageContext(HttpContext context)
     {

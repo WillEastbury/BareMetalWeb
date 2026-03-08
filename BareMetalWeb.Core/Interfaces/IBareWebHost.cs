@@ -41,6 +41,6 @@ public interface IBareWebHost
     ValueTask BuildAppInfoMenuOptionsAsync(BmwContext? context = null, CancellationToken cancellationToken = default);
     void RegisterRoute(string path, RouteHandlerData routeHandler);
     Task RenderForbidden(BmwContext context);
-    Task RequestHandler(HttpContext context);
+    Task RequestHandler(BmwContext context);
     Task WireUpRequestHandlingAndLoggerAsyncLifetime();
 }

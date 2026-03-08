@@ -1583,7 +1583,7 @@ public static class RouteRegistrationExtensions
                 }
 
                 sb.Append("</div></div></div>");
-                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context.HttpContext);
+                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context);
                 context.Response.ContentType = "text/html; charset=utf-8";
                 await context.Response.WriteAsync(sb.ToString());
             }));
@@ -1660,7 +1660,7 @@ public static class RouteRegistrationExtensions
                     host,
                     context.GetCspNonce(),
                     CsrfProtection.EnsureToken(context),
-                    context.HttpContext);
+                    context);
                 await pipeWriter.CompleteAsync();
             }));
 
@@ -1924,8 +1924,8 @@ public static class RouteRegistrationExtensions
         if (initialDataScript != null)
             sb.Append(initialDataScript);
         sb.Append("<script src=\"/static/js/vnext-bundle.js\"></script>");
-        if (BareMetalWeb.Rendering.HtmlRenderer.ShouldShowDiagnosticBanner(context.HttpContext, host))
-            sb.Append(BareMetalWeb.Rendering.HtmlRenderer.BuildDiagnosticBannerHtml(context.HttpContext, host, sb.Length));
+        if (BareMetalWeb.Rendering.HtmlRenderer.ShouldShowDiagnosticBanner(context, host))
+            sb.Append(BareMetalWeb.Rendering.HtmlRenderer.BuildDiagnosticBannerHtml(context, host, sb.Length));
         sb.Append("</body></html>");
 
         context.Response.ContentType = "text/html; charset=utf-8";
@@ -2478,7 +2478,7 @@ public static class RouteRegistrationExtensions
                 }
 
                 sb.Append("</div></div></div>");
-                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context.HttpContext);
+                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context);
                 context.Response.ContentType = "text/html; charset=utf-8";
                 await context.Response.WriteAsync(sb.ToString());
             }));
@@ -2507,7 +2507,7 @@ public static class RouteRegistrationExtensions
 
                 var pipeWriter = System.IO.Pipelines.PipeWriter.Create(context.Response.Body);
                 context.Response.ContentType = "text/html; charset=utf-8";
-                await DashboardHtmlRenderer.RenderAsync(pipeWriter, def, host, safeNonce, safeToken, context.HttpContext, context.RequestAborted);
+                await DashboardHtmlRenderer.RenderAsync(pipeWriter, def, host, safeNonce, safeToken, context, context.RequestAborted);
                 await pipeWriter.CompleteAsync();
             }));
 
@@ -2664,7 +2664,7 @@ public static class RouteRegistrationExtensions
                 }
 
                 sb.Append("</div></div></div>");
-                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context.HttpContext);
+                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context);
                 context.Response.ContentType = "text/html; charset=utf-8";
                 await context.Response.WriteAsync(sb.ToString());
             }));
@@ -2721,7 +2721,7 @@ public static class RouteRegistrationExtensions
                     host,
                     context.GetCspNonce(),
                     CsrfProtection.EnsureToken(context),
-                    context.HttpContext);
+                    context);
                 await pipeWriter.CompleteAsync();
             }));
 

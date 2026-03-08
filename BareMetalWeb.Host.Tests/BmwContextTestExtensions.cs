@@ -66,6 +66,6 @@ internal sealed class NullBareWebHost : IBareWebHost
 
     public void RegisterRoute(string path, RouteHandlerData routeHandler) { }
     public Task RenderForbidden(BmwContext context) => Task.CompletedTask;
-    public Task RequestHandler(HttpContext context) => Task.CompletedTask;
+    public Task RequestHandler(BmwContext context) => Task.CompletedTask;
     public Task WireUpRequestHandlingAndLoggerAsyncLifetime() => Task.CompletedTask;
 }

@@ -28,7 +28,7 @@ public static class DashboardHtmlRenderer
         IBareWebHost? host = null,
         string? safeNonce = null,
         string? safeToken = null,
-        HttpContext? context = null,
+        BareMetalWeb.Core.BmwContext? context = null,
         CancellationToken cancellationToken = default)
     {
         safeNonce ??= string.Empty;

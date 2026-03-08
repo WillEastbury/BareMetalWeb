@@ -534,21 +534,21 @@ public class HtmlRenderer : IHtmlRenderer
             Write(writer, span.Slice(segStart));
     }
 
-    public async ValueTask RenderPage(HttpContext context)
+    public async ValueTask RenderPage(BmwContext context)
     {
-        var app = context.GetApp();
-        var page = context.GetPageInfo();
+        var app = context.App;
+        var page = context.PageInfo;
 
         if (app == null || page == null)
         {
-            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            context.StatusCode = StatusCodes.Status500InternalServerError;
             return;
         }
 
         await RenderPage(context, page, app);
     }
 
-    public async ValueTask RenderPage(HttpContext context, PageInfo page, IBareWebHost app)
+    public async ValueTask RenderPage(BmwContext context, PageInfo page, IBareWebHost app)
     {
         var renderSw = Stopwatch.StartNew();
         // Ensure CSP nonce is in page context — search without List allocation
@@ -633,8 +633,8 @@ public class HtmlRenderer : IHtmlRenderer
             output = InjectBeforeBodyEnd(output.Span, Utf8.GetBytes(bannerHtml));
         }
 
-        context.Response.StatusCode = page.PageMetaData.StatusCode;
-        context.Response.ContentType = page.PageMetaData.Template.ContentTypeHeader;
+        context.StatusCode = page.PageMetaData.StatusCode;
+        context.ContentType = page.PageMetaData.Template.ContentTypeHeader;
 
         var encoding = CompressionHelper.SelectEncoding(context);
         ReadOnlyMemory<byte> responseBytes = encoding switch
@@ -643,9 +643,9 @@ public class HtmlRenderer : IHtmlRenderer
             "gzip" => CompressionHelper.CompressGzip(output.Span),
             _      => output
         };
-        CompressionHelper.ApplyHeaders(context.Response, encoding);
-        context.Response.ContentLength = responseBytes.Length;
-        await context.Response.BodyWriter.WriteAsync(responseBytes);
+        CompressionHelper.ApplyHeaders(context, encoding);
+        context.ContentLength = responseBytes.Length;
+        await context.ResponseBody.WriteAsync(responseBytes);
         renderSw.Stop();
         OnRenderComplete?.Invoke(renderSw.Elapsed);
 
@@ -653,19 +653,21 @@ public class HtmlRenderer : IHtmlRenderer
 
     // ── Diagnostic banner helpers ──────────────────────────────────────────────
 
-    public static bool ShouldShowDiagnosticBanner(HttpContext context, IBareWebHost app)
+    public static bool ShouldShowDiagnosticBanner(BmwContext context, IBareWebHost app)
     {
         if (!app.ShowHostDiagnostics)
             return false;
-        string? qsVal = string.Empty; var showhstValues = context.Request.Query["showhst"]; if (showhstValues.Count > 0) qsVal = showhstValues[0] ?? string.Empty; else qsVal = string.Empty;
-        return string.Equals(qsVal, "true", StringComparison.OrdinalIgnoreCase);
+        // Read query string from request headers (avoids HttpContext allocation)
+        var qs = context.Request.QueryString;
+        bool showHst = qs.Contains("showhst=true", StringComparison.OrdinalIgnoreCase);
+        return showHst;
     }
 
-    public static string BuildDiagnosticBannerHtml(HttpContext context, IBareWebHost app, int payloadBytes)
+    public static string BuildDiagnosticBannerHtml(BmwContext context, IBareWebHost app, int payloadBytes)
     {
-        var initialHost = context.Request.Headers.TryGetValue("X-Forwarded-Host", out var fwdHost) && !string.IsNullOrEmpty(fwdHost)
+        var initialHost = context.RequestHeaders.TryGetValue("X-Forwarded-Host", out var fwdHost) && !string.IsNullOrEmpty(fwdHost)
             ? fwdHost.ToString()
-            : context.Request.Host.Value;
+            : context.RequestHeaders.Host.ToString();
         var serverHost = System.Net.Dns.GetHostName();
         var rttMs = app.Metrics.GetSnapshot().RecentAverageResponseTime.TotalMilliseconds;
         return $"<div id=\"bm-diag-banner\" style=\"position:fixed;bottom:40px;right:0;background:rgba(0,0,0,0.85);color:#0f0;font-family:monospace;font-size:11px;padding:4px 8px;z-index:99999;border-radius:4px 0 0 4px\">" +
@@ -719,8 +721,9 @@ public class HtmlRenderer : IHtmlRenderer
     private const string DefaultTheme   = "vapor";
     private const string ThemeCookieKey = "bm-selected-theme";
 
-    private static string GetThemeCssUrl(HttpContext context)
+    private static string GetThemeCssUrl(BmwContext context)
     {
+        // Cookie access requires lazy HttpContext bridge — acceptable for HTML renders
         var cookie = context.GetCookie(ThemeCookieKey);
         var theme  = (!string.IsNullOrEmpty(cookie) && _validThemes.Contains(cookie))
                      ? cookie

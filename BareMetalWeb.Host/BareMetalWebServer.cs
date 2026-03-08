@@ -459,52 +459,50 @@ public class BareMetalWebServer : IBareWebHost
             }
         }
     }
-    public async Task RequestHandler(HttpContext context)
+    public async Task RequestHandler(BmwContext bmwCtx)
     {
         // ── Bench fast-paths: bypass entire pipeline for perf diagnostics ──
         // Static readonly bool lets JIT eliminate this branch in production.
-        if (BenchmarkEndpoints.Enabled && BenchmarkEndpoints.TryHandle(context))
+        if (BenchmarkEndpoints.Enabled && BenchmarkEndpoints.TryHandle(bmwCtx))
             return;
 
         var stopwatch = Stopwatch.StartNew();
         Metrics.EnterRequest();
 
-        // ── Create BmwContext: resolve features once per request ─────────
-        var bmwCtx = BmwContext.CreateFrom(context, this);
+        // BmwContext already created by BmwApplication.CreateContext — zero double-creation
         string method = bmwCtx.Request.Method;
         string requestPath = bmwCtx.Request.Path;
         string routeKey = bmwCtx.Request.RouteKey;
         string sourceIp = bmwCtx.SourceIp;
         string rid = bmwCtx.CorrelationId;
-        bmwCtx.SetApp(this);
 
         // Return correlation ID on every response for distributed tracing
-        context.Response.Headers["X-Trace-ID"] = rid;
+        bmwCtx.ResponseHeaders["X-Trace-ID"] = rid;
 
         // ── Multitenancy: resolve tenant from Host header ─────────────────────
         // When enabled, sets DataStoreProvider.CurrentTenant for the duration of
         // this async call chain. Disposed at the end of the request.
-        using var tenantScope = TenantRegistry?.ResolveForRequest(context);
+        using var tenantScope = TenantRegistry?.ResolveForRequest(bmwCtx);
 
-        bool isHttps = IsHttpsRequest(context, TrustForwardedHeaders);
+        bool isHttps = IsHttpsRequest(bmwCtx, TrustForwardedHeaders);
         // SECURITY: X-BareMetal-* diagnostic headers removed to avoid exposing internal
         // TLS termination architecture, redirect configuration, and HTTPS availability
         // to external clients. Re-enable gated behind a debug/development flag if needed.
         if (!isHttps && ShouldRedirectToHttps())
         {
-            var httpsUrl = BuildHttpsRedirectUrl(context, TrustForwardedHeaders, HttpsRedirectHost, HttpsRedirectPort);
-            context.Response.StatusCode = StatusCodes.Status301MovedPermanently;
-            context.Response.Headers.Location = httpsUrl;
+            var httpsUrl = BuildHttpsRedirectUrl(bmwCtx, TrustForwardedHeaders, HttpsRedirectHost, HttpsRedirectPort);
+            bmwCtx.StatusCode = StatusCodes.Status301MovedPermanently;
+            bmwCtx.ResponseHeaders.Location = httpsUrl;
             BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|301|redirect={httpsUrl}", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 301, SourceIp = sourceIp, Detail = $"mode={HttpsRedirectMode}" });
             return;
         }
-        ApplySecurityHeaders(context, isHttps);
+        ApplySecurityHeaders(bmwCtx, isHttps);
 
-        if (ApplyCors(context))
+        if (ApplyCors(bmwCtx))
         {
             if (string.Equals(method, "OPTIONS", StringComparison.OrdinalIgnoreCase))
             {
-                context.Response.StatusCode = StatusCodes.Status204NoContent;
+                bmwCtx.StatusCode = StatusCodes.Status204NoContent;
                 return;
             }
         }
@@ -513,19 +511,19 @@ public class BareMetalWebServer : IBareWebHost
         {
             if (retryAfterSeconds.HasValue)
             {
-                context.Response.Headers.RetryAfter = retryAfterSeconds.Value.ToString();
+                bmwCtx.ResponseHeaders.RetryAfter = retryAfterSeconds.Value.ToString();
             }
-            if (IsAjaxRequest(context))
+            if (IsAjaxRequest(bmwCtx))
             {
-                await ApiErrorWriter.WriteAsync(context.Response,
+                await ApiErrorWriter.WriteAsync(bmwCtx,
                     ApiErrorWriter.RateLimited(retryAfterSeconds: retryAfterSeconds),
-                    context.RequestAborted);
+                    bmwCtx.RequestAborted);
             }
             else
             {
-                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                context.Response.ContentType = "text/plain";
-                await context.Response.WriteAsync(retryAfterSeconds.HasValue
+                bmwCtx.StatusCode = StatusCodes.Status429TooManyRequests;
+                bmwCtx.ContentType = "text/plain";
+                await bmwCtx.WriteResponseAsync(retryAfterSeconds.HasValue
                     ? $"Too many Requests. Retry after {retryAfterSeconds.Value}s."
                     : "Too many Requests.");
             }
@@ -536,35 +534,35 @@ public class BareMetalWebServer : IBareWebHost
         }
         try
         {
-            if (await ShouldForceSetupAsync(requestPath, context.RequestAborted).ConfigureAwait(false))
+            if (await ShouldForceSetupAsync(requestPath, bmwCtx.RequestAborted).ConfigureAwait(false))
             {
-                context.Response.StatusCode = StatusCodes.Status302Found;
-                context.Response.Headers.Location = "/setup";
+                bmwCtx.StatusCode = StatusCodes.Status302Found;
+                bmwCtx.ResponseHeaders.Location = "/setup";
                 BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|302|setup=required", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 302, SourceIp = sourceIp });
                 return;
             }
 
             if (await JsBundleService.TryServeAsync(bmwCtx))
             {
-                BufferedLogger.Log(BmwLogLevel.Debug, $"{routeKey}|{context.Response.StatusCode}|bundle", rid, new LogFields { Method = method, Path = requestPath, StatusCode = context.Response.StatusCode, SourceIp = sourceIp, Detail = "bundle" });
+                BufferedLogger.Log(BmwLogLevel.Debug, $"{routeKey}|{bmwCtx.StatusCode}|bundle", rid, new LogFields { Method = method, Path = requestPath, StatusCode = bmwCtx.StatusCode, SourceIp = sourceIp, Detail = "bundle" });
                 return;
             }
 
             if (await CssBundleService.TryServeAsync(bmwCtx))
             {
-                BufferedLogger.Log(BmwLogLevel.Debug, $"{routeKey}|{context.Response.StatusCode}|css-bundle", rid, new LogFields { Method = method, Path = requestPath, StatusCode = context.Response.StatusCode, SourceIp = sourceIp, Detail = "css-bundle" });
+                BufferedLogger.Log(BmwLogLevel.Debug, $"{routeKey}|{bmwCtx.StatusCode}|css-bundle", rid, new LogFields { Method = method, Path = requestPath, StatusCode = bmwCtx.StatusCode, SourceIp = sourceIp, Detail = "css-bundle" });
                 return;
             }
 
             if (await StaticFileService.TryServeAsync(bmwCtx, StaticFiles))
             {
-                BufferedLogger.Log(BmwLogLevel.Debug, $"{routeKey}|{context.Response.StatusCode}|static", rid, new LogFields { Method = method, Path = requestPath, StatusCode = context.Response.StatusCode, SourceIp = sourceIp, Detail = "static" });
+                BufferedLogger.Log(BmwLogLevel.Debug, $"{routeKey}|{bmwCtx.StatusCode}|static", rid, new LogFields { Method = method, Path = requestPath, StatusCode = bmwCtx.StatusCode, SourceIp = sourceIp, Detail = "static" });
                 return;
             }
 
             // Build the menu/session context now — only for actual page/API requests,
             // not for static assets (bundles, files) served above.
-            await BuildAppInfoMenuOptionsAsync(bmwCtx, context.RequestAborted).ConfigureAwait(false);
+            await BuildAppInfoMenuOptionsAsync(bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false);
 
             // ── Per-identity API rate limiting (#1264) ──────────────────────
             if (requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
@@ -572,18 +570,18 @@ public class BareMetalWebServer : IBareWebHost
                 bool isWrite = !string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase);
                 if (!ApiLimiter.TryAcquire(sourceIp, isWrite, out int apiRetryAfter))
                 {
-                    context.Response.Headers.RetryAfter = apiRetryAfter.ToString();
-                    if (IsAjaxRequest(context))
+                    bmwCtx.ResponseHeaders.RetryAfter = apiRetryAfter.ToString();
+                    if (IsAjaxRequest(bmwCtx))
                     {
-                        await ApiErrorWriter.WriteAsync(context.Response,
+                        await ApiErrorWriter.WriteAsync(bmwCtx,
                             ApiErrorWriter.RateLimited(retryAfterSeconds: apiRetryAfter),
-                            context.RequestAborted);
+                            bmwCtx.RequestAborted);
                     }
                     else
                     {
-                        context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                        context.Response.ContentType = "text/plain";
-                        await context.Response.WriteAsync(
+                        bmwCtx.StatusCode = StatusCodes.Status429TooManyRequests;
+                        bmwCtx.ContentType = "text/plain";
+                        await bmwCtx.WriteResponseAsync(
                             $"API rate limit exceeded. Retry after {apiRetryAfter}s.");
                     }
                     BufferedLogger.Log(BmwLogLevel.Warn,
@@ -607,9 +605,9 @@ public class BareMetalWebServer : IBareWebHost
                 {
                     bmwCtx.SetPageInfo(page.PageInfo);
                 }
-                if (!await IsAuthorizedAsync(page.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
+                if (!await IsAuthorizedAsync(page.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
                 {
-                    await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, page.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                    await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, page.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);
                     await RenderForbidden(bmwCtx);
                     return;
                 }
@@ -625,9 +623,9 @@ public class BareMetalWebServer : IBareWebHost
                 {
                     bmwCtx.SetPageInfo(allPage.PageInfo);
                 }
-                if (!await IsAuthorizedAsync(allPage.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
+                if (!await IsAuthorizedAsync(allPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
                 {
-                    await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, allPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                    await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, allPage.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);
                     await RenderForbidden(bmwCtx);
                     return;
                 }
@@ -639,9 +637,9 @@ public class BareMetalWebServer : IBareWebHost
             if (_prefixRouter.TryMatch(bmwCtx, out RouteHandlerData prefixPage))
             {
                 Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
-                if (!await IsAuthorizedAsync(prefixPage.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
+                if (!await IsAuthorizedAsync(prefixPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
                 {
-                    await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, prefixPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                    await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, prefixPage.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);
                     await RenderForbidden(bmwCtx);
                     return;
                 }
@@ -675,9 +673,9 @@ public class BareMetalWebServer : IBareWebHost
                     {
                         bmwCtx.SetPageInfo(injectedPage.PageInfo);
                     }
-                    if (!await IsAuthorizedAsync(injectedPage.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
+                    if (!await IsAuthorizedAsync(injectedPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
                     {
-                        await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
+                        await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, injectedPage.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);
                         await RenderForbidden(bmwCtx);
                         return;
                     }
@@ -693,15 +691,15 @@ public class BareMetalWebServer : IBareWebHost
             if (methodNotAllowed)
             {
                 Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
-                context.Response.StatusCode = StatusCodes.Status405MethodNotAllowed;
+                bmwCtx.StatusCode = StatusCodes.Status405MethodNotAllowed;
                 bmwCtx.SetPageInfo(ErrorPageInfo);
-                await HtmlRenderer.RenderPage(bmwCtx.HttpContext);
+                await HtmlRenderer.RenderPage(bmwCtx);
                 BufferedLogger.Log(BmwLogLevel.Warn, $"{routeKey}|405", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 405, SourceIp = sourceIp });
                 return;
             }
             Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
             bmwCtx.SetPageInfo(NotFoundPageInfo);
-            await HtmlRenderer.RenderPage(bmwCtx.HttpContext); // Still nothing? 404
+            await HtmlRenderer.RenderPage(bmwCtx);
             BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|404", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 404, SourceIp = sourceIp });
         }
         catch (OperationCanceledException oce)
@@ -712,25 +710,25 @@ public class BareMetalWebServer : IBareWebHost
         {
             var errorId = Guid.NewGuid().ToString("N");
             BufferedLogger.LogError($"Exception: {routeKey} | ErrorId={errorId}", ex, rid);
-            if (context.Response.HasStarted)
+            if (bmwCtx.HasResponseStarted)
             {
-                context.Abort();
+                bmwCtx.Abort();
                 return;
             }
-            context.Response.Clear();
-            if (IsAjaxRequest(context))
+            bmwCtx.ClearResponse();
+            if (IsAjaxRequest(bmwCtx))
             {
-                await ApiErrorWriter.WriteAsync(context.Response,
+                await ApiErrorWriter.WriteAsync(bmwCtx,
                     ApiErrorWriter.InternalError(errorId),
-                    context.RequestAborted);
+                    bmwCtx.RequestAborted);
             }
             else
             {
-                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                context.Response.Headers["X-Error-Id"] = errorId;
+                bmwCtx.StatusCode = StatusCodes.Status500InternalServerError;
+                bmwCtx.ResponseHeaders["X-Error-Id"] = errorId;
                 bmwCtx.SetPageInfo(ErrorPageInfo);
                 bmwCtx.SetStringValue("html_message", $"<p>An unexpected error occurred.</p><p>Error ID: <code>{errorId}</code></p>");
-                await HtmlRenderer.RenderPage(bmwCtx.HttpContext);
+                await HtmlRenderer.RenderPage(bmwCtx);
             }
             BufferedLogger.Log(BmwLogLevel.Error, $"{routeKey}|500|ErrorId={errorId}", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 500, SourceIp = sourceIp, Detail = errorId });
         }
@@ -738,14 +736,14 @@ public class BareMetalWebServer : IBareWebHost
         {
             Metrics.LeaveRequest();
             stopwatch.Stop();
-            var statusCode = context.Response?.StatusCode ?? 0;
+            var statusCode = bmwCtx.StatusCode;
             Metrics.RecordRequest(statusCode, stopwatch.Elapsed);
         }
     }
 
-    private static bool IsAjaxRequest(HttpContext context) =>
-        context.Request.Headers.ContainsKey("X-Requested-With") ||
-        context.Request.Path.StartsWithSegments("/api");
+    private static bool IsAjaxRequest(BmwContext context) =>
+        context.RequestHeaders.ContainsKey("X-Requested-With") ||
+        context.Request.Path.StartsWith("/api", StringComparison.OrdinalIgnoreCase);
 
     private static bool TryParseRoute(string route, out string verb, out string path)
     {
@@ -878,32 +876,33 @@ public class BareMetalWebServer : IBareWebHost
         BufferedLogger.LogInfo($"{path}|403|{sourceIp}|user={userName}|required={required}");
     }
 
-    private static void ApplySecurityHeaders(HttpContext context, bool isHttps)
+    private static void ApplySecurityHeaders(BmwContext context, bool isHttps)
     {
-        var nonce = context.GenerateCspNonce();
-        context.Response.Headers["Content-Security-Policy"] = string.Format(ContentSecurityPolicyTemplate, nonce);
-        context.Response.Headers["X-Content-Type-Options"] = "nosniff";
-        context.Response.Headers["X-Frame-Options"] = "DENY";
-        context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
-        context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+        var nonce = context.GetCspNonce();
+        context.ResponseHeaders["Content-Security-Policy"] = string.Format(ContentSecurityPolicyTemplate, nonce);
+        context.ResponseHeaders["X-Content-Type-Options"] = "nosniff";
+        context.ResponseHeaders["X-Frame-Options"] = "DENY";
+        context.ResponseHeaders["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        context.ResponseHeaders["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
         if (isHttps)
-            context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload";
-        // HTTP/1.x keep-alive hint so clients reuse TCP connections across requests
-        if (context.Request.Protocol is "HTTP/1.0" or "HTTP/1.1")
-            context.Response.Headers["Keep-Alive"] = "timeout=60, max=1000";
+            context.ResponseHeaders["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload";
+        // HTTP/1.x keep-alive hint — check protocol from request feature
+        var protocol = context.RequestHeaders[":protocol"];
+        if (protocol.Count == 0)
+            context.ResponseHeaders["Keep-Alive"] = "timeout=60, max=1000";
     }
 
     public async Task RenderForbidden(BmwContext context)
     {
-        if (IsAjaxRequest(context.HttpContext))
+        if (IsAjaxRequest(context))
         {
-            await ApiErrorWriter.WriteAsync(context.Response,
+            await ApiErrorWriter.WriteAsync(context,
                 ApiErrorWriter.Forbidden(),
                 context.RequestAborted);
             return;
         }
 
-        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        context.StatusCode = StatusCodes.Status403Forbidden;
 
         PageInfo forbiddenPage = ErrorPageInfo with
         {
@@ -917,12 +916,12 @@ public class BareMetalWebServer : IBareWebHost
             }
         };
         context.SetPageInfo(forbiddenPage);
-        await HtmlRenderer.RenderPage(context.HttpContext);
+        await HtmlRenderer.RenderPage(context);
     }
 
-    private bool ApplyCors(HttpContext context)
+    private bool ApplyCors(BmwContext context)
     {
-        var origin = context.Request.Headers.Origin.ToString();
+        var origin = context.RequestHeaders.Origin.ToString();
         if (string.IsNullOrWhiteSpace(origin))
             return false;
 
@@ -953,11 +952,11 @@ public class BareMetalWebServer : IBareWebHost
         if (!allowOrigin)
             return false;
 
-        context.Response.Headers.AccessControlAllowOrigin = allowAny ? "*" : origin;
-        context.Response.Headers.Append("Vary", "Origin");
-        context.Response.Headers.AccessControlAllowMethods = string.Join(", ", CorsAllowedMethods);
-        context.Response.Headers.AccessControlAllowHeaders = string.Join(", ", CorsAllowedHeaders);
-        context.Response.Headers.AccessControlMaxAge = "600";
+        context.ResponseHeaders.AccessControlAllowOrigin = allowAny ? "*" : origin;
+        context.ResponseHeaders.Append("Vary", "Origin");
+        context.ResponseHeaders.AccessControlAllowMethods = string.Join(", ", CorsAllowedMethods);
+        context.ResponseHeaders.AccessControlAllowHeaders = string.Join(", ", CorsAllowedHeaders);
+        context.ResponseHeaders.AccessControlMaxAge = "600";
         return true;
     }
 
@@ -972,9 +971,9 @@ public class BareMetalWebServer : IBareWebHost
         };
     }
 
-    private static bool IsHttpsRequest(HttpContext context, bool trustForwardedHeaders)
+    private static bool IsHttpsRequest(BmwContext context, bool trustForwardedHeaders)
     {
-        if (context.Request.IsHttps)
+        if (context.IsHttps)
             return true;
 
         if (!trustForwardedHeaders)
@@ -994,10 +993,10 @@ public class BareMetalWebServer : IBareWebHost
         return false;
     }
 
-    private static string BuildHttpsRedirectUrl(HttpContext context, bool trustForwardedHeaders, string? redirectHost, int? redirectPort)
+    private static string BuildHttpsRedirectUrl(BmwContext context, bool trustForwardedHeaders, string? redirectHost, int? redirectPort)
     {
-        var request = context.Request;
-        var host = request.Host;
+        var hostHeader = context.RequestHeaders.Host.ToString();
+        var host = string.IsNullOrEmpty(hostHeader) ? new HostString("localhost") : HostString.FromUriComponent(hostHeader);
 
         if (trustForwardedHeaders)
         {
@@ -1022,8 +1021,8 @@ public class BareMetalWebServer : IBareWebHost
         {
             Scheme = "https",
             Host = host.Host,
-            Path = request.PathBase.Add(request.Path).ToString(),
-            Query = request.QueryString.HasValue ? request.QueryString.Value : string.Empty
+            Path = context.Request.Path,
+            Query = context.Request.QueryString
         };
 
         int? port = host.Port;
@@ -1082,7 +1081,7 @@ public class BareMetalWebServer : IBareWebHost
         }
     }
 
-    private static bool TryGetForwardedHost(HttpContext context, out HostString host)
+    private static bool TryGetForwardedHost(BmwContext context, out HostString host)
     {
         host = default;
         if (!TryGetForwardedHeaderValue(context, "X-Forwarded-Host", out var value))
@@ -1096,7 +1095,7 @@ public class BareMetalWebServer : IBareWebHost
         return true;
     }
 
-    private static bool TryGetForwardedPort(HttpContext context, out int port)
+    private static bool TryGetForwardedPort(BmwContext context, out int port)
     {
         port = 0;
         if (!TryGetForwardedHeaderValue(context, "X-Forwarded-Port", out var value))
@@ -1106,10 +1105,10 @@ public class BareMetalWebServer : IBareWebHost
         return int.TryParse(first, out port);
     }
 
-    private static bool TryGetForwardedHeaderValue(HttpContext context, string headerName, out string value)
+    private static bool TryGetForwardedHeaderValue(BmwContext context, string headerName, out string value)
     {
         value = string.Empty;
-        if (!context.Request.Headers.TryGetValue(headerName, out var values))
+        if (!context.RequestHeaders.TryGetValue(headerName, out var values))
             return false;
 
         value = values.ToString();
@@ -1122,7 +1121,7 @@ public class BareMetalWebServer : IBareWebHost
         return commaIndex >= 0 ? headerValue.Substring(0, commaIndex).Trim() : headerValue.Trim();
     }
 
-    private static bool TryGetForwardedProtoFromForwardedHeader(HttpContext context, out string proto)
+    private static bool TryGetForwardedProtoFromForwardedHeader(BmwContext context, out string proto)
     {
         proto = string.Empty;
         if (!TryGetForwardedHeaderValue(context, "Forwarded", out var forwarded))

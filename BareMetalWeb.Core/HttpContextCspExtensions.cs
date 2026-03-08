@@ -30,11 +30,19 @@ public static class HttpContextCspExtensions
         return GenerateCspNonce(context);
     }
 
-    // ── BmwContext overloads ────────────────────────────────────────────
+    // ── BmwContext overloads (use BmwContext.CspNonce directly) ────────
 
     public static string GenerateCspNonce(this BmwContext context)
-        => context.HttpContext.GenerateCspNonce();
+    {
+        var nonce = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
+        context.CspNonce = nonce;
+        return nonce;
+    }
 
     public static string GetCspNonce(this BmwContext context)
-        => context.HttpContext.GetCspNonce();
+    {
+        if (context.CspNonce is string existing)
+            return existing;
+        return GenerateCspNonce(context);
+    }
 }

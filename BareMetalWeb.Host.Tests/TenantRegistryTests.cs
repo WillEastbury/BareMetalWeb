@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
@@ -158,7 +159,7 @@ public sealed class TenantRegistryTests : IDisposable
         registry.RegisterSystemTenant(_systemTenant);
 
         var ctx = MakeContext("any.host.com");
-        var scope = registry.ResolveForRequest(ctx);
+        var scope = registry.ResolveForRequest(ctx.ToBmw());
 
         Assert.Null(scope);
         // Current should still be system store (no scope was set)
@@ -191,7 +192,7 @@ public sealed class TenantRegistryTests : IDisposable
             systemLogger: new NullLogger());
 
         var httpCtx = MakeContext("t1.example.com");
-        using var scope = registry.ResolveForRequest(httpCtx);
+        using var scope = registry.ResolveForRequest(httpCtx.ToBmw());
 
         Assert.NotNull(scope);
         Assert.Equal("t1", DataStoreProvider.CurrentTenant?.TenantId);
@@ -207,7 +208,7 @@ public sealed class TenantRegistryTests : IDisposable
         registry.RegisterSystemTenant(_systemTenant);
 
         var httpCtx = MakeContext("unknown.host.com");
-        using var scope = registry.ResolveForRequest(httpCtx);
+        using var scope = registry.ResolveForRequest(httpCtx.ToBmw());
 
         Assert.NotNull(scope);
         Assert.Equal("_system", DataStoreProvider.CurrentTenant?.TenantId);
@@ -221,7 +222,7 @@ public sealed class TenantRegistryTests : IDisposable
         registry.RegisterSystemTenant(_systemTenant);
 
         var httpCtx = MakeContext("unknown.host.com");
-        var scope = registry.ResolveForRequest(httpCtx);
+        var scope = registry.ResolveForRequest(httpCtx.ToBmw());
 
         Assert.NotNull(DataStoreProvider.CurrentTenant);
         scope!.Dispose();
@@ -248,7 +249,7 @@ public sealed class TenantRegistryTests : IDisposable
             systemLogger: new NullLogger());
 
         // Request with lower-case host
-        using var scope = registry.ResolveForRequest(MakeContext("tenant.example.com"));
+        using var scope = registry.ResolveForRequest(MakeContext("tenant.example.com").ToBmw());
         Assert.Equal("ci", DataStoreProvider.CurrentTenant?.TenantId);
     }
 

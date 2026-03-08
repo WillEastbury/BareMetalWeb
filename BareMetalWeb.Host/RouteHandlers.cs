@@ -183,7 +183,7 @@ public sealed class RouteHandlers : IRouteHandlers
     }
 
     public ValueTask DefaultPageHandler(BmwContext context)
-        => _renderer.RenderPage(context.HttpContext);
+        => _renderer.RenderPage(context);
 
     public RouteHandlerDelegate BuildPageHandler(Action<BmwContext> configure)
     {
@@ -191,7 +191,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return async context =>
         {
             configure(context);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
         };
     }
 
@@ -201,7 +201,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return async context =>
         {
             await configureAsync(context);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
         };
     }
 
@@ -212,7 +212,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             var shouldRender = await configureAsync(context);
             if (shouldRender == renderWhenTrue)
-                await _renderer.RenderPage(context.HttpContext);
+                await _renderer.RenderPage(context);
         };
     }
 
@@ -239,7 +239,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 context.Response.Headers.RetryAfter = ((int)Math.Ceiling(ipRetry.Value.TotalSeconds)).ToString();
             _logger?.LogInfo($"login|rate-limit|ip={remoteIp}|retry={FormatThrottleMessage(ipRetry)}");
             RenderLoginForm(context, FormatThrottleMessage(ipRetry), string.Empty);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -251,7 +251,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderLoginForm(context, "Invalid security token. Please try again.", string.Empty);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -265,14 +265,14 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.IsNullOrWhiteSpace(identifier) || string.IsNullOrWhiteSpace(password))
         {
             RenderLoginForm(context, "Please enter your email/username and password.", identifier);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
         if (password.Length > 1024)
         {
             RenderLoginForm(context, "Password exceeds maximum allowed length.", identifier);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -283,7 +283,7 @@ public sealed class RouteHandlers : IRouteHandlers
             PasswordHasher.Verify(password, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "AAAAAAAAAAAAAAAAAAAAAA==", 100_000);
             RegisterFailure(ipKey, LoginIpMaxAttempts);
             RenderLoginForm(context, "Invalid credentials.", identifier);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -296,14 +296,14 @@ public sealed class RouteHandlers : IRouteHandlers
                 context.Response.Headers.RetryAfter = ((int)Math.Ceiling(userRetry.Value.TotalSeconds)).ToString();
             _logger?.LogInfo($"login|rate-limit|user={identifier}|ip={remoteIp}|retry={FormatThrottleMessage(userRetry)}");
             RenderLoginForm(context, FormatThrottleMessage(userRetry), identifier);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
         if (user.IsLockedOut)
         {
             RenderLoginForm(context, "Account is temporarily locked. Try again later.", identifier);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -314,7 +314,7 @@ public sealed class RouteHandlers : IRouteHandlers
             user.RegisterFailedLogin();
             await Users.SaveAsync(user);
             RenderLoginForm(context, "Invalid credentials.", identifier);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -323,7 +323,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (!TryGetActiveSecret(user, out _, out var upgraded))
             {
                 RenderLoginForm(context, "MFA is misconfigured. Contact support.", identifier);
-                await _renderer.RenderPage(context.HttpContext);
+                await _renderer.RenderPage(context);
                 return;
             }
 
@@ -393,7 +393,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderMfaChallengeForm(context, "Invalid security token. Please try again.");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -402,14 +402,14 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             RenderMfaChallengeForm(context, "Please enter your authentication code.");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
         if (!uint.TryParse(challenge.UserId, out var parsedUserId))
         {
             RenderMfaChallengeForm(context, "Invalid user account.");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -417,7 +417,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (user == null || !user.IsActive || !user.MfaEnabled || !TryGetActiveSecret(user, out var activeSecret, out var upgraded))
         {
             RenderMfaChallengeForm(context, "MFA is not available for this account.");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -429,7 +429,7 @@ public sealed class RouteHandlers : IRouteHandlers
             || IsThrottled(BuildMfaAttemptKey("challenge:ip", remoteIp), MfaChallengeMaxFailures, out retryAfter))
         {
             RenderMfaChallengeForm(context, FormatThrottleMessage(retryAfter));
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -442,14 +442,14 @@ public sealed class RouteHandlers : IRouteHandlers
                 RegisterFailure(BuildMfaAttemptKey("challenge:user", user.Key.ToString()), MfaChallengeMaxFailures);
                 RegisterFailure(BuildMfaAttemptKey("challenge:ip", remoteIp), MfaChallengeMaxFailures);
                 RenderMfaChallengeForm(context, "Invalid authentication code.");
-                await _renderer.RenderPage(context.HttpContext);
+                await _renderer.RenderPage(context);
                 return;
             }
 
             if (matchedStep <= user.MfaLastVerifiedStep)
             {
                 RenderMfaChallengeForm(context, "Authentication code already used. Please wait for a new code.");
-                await _renderer.RenderPage(context.HttpContext);
+                await _renderer.RenderPage(context);
                 return;
             }
 
@@ -496,7 +496,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.SetStringValue("title", "Create Account");
             context.SetStringValue("html_message", "<p>Account creation is disabled in this environment.</p>");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -510,14 +510,14 @@ public sealed class RouteHandlers : IRouteHandlers
                 context.Response.Headers.RetryAfter = ((int)Math.Ceiling(regRetry.Value.TotalSeconds)).ToString();
             _logger?.LogInfo($"register|rate-limit|ip={remoteIp}|retry={FormatThrottleMessage(regRetry)}");
             RenderRegisterForm(context, FormatThrottleMessage(regRetry), null, null, null);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
         if (!context.HttpRequest.HasFormContentType)
         {
             RenderRegisterForm(context, "Invalid registration request.", null, null, null);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -531,28 +531,28 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderRegisterForm(context, "Invalid security token. Please try again.", userName, displayName, email);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(userName) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
             RenderRegisterForm(context, "Please complete all required fields.", userName, displayName, email);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
         if (password.Length > 1024)
         {
             RenderRegisterForm(context, "Password exceeds maximum allowed length.", userName, displayName, email);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
         if (!string.Equals(password, confirm, StringComparison.Ordinal))
         {
             RenderRegisterForm(context, "Passwords do not match.", userName, displayName, email);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -560,7 +560,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             // SECURITY: Generic message to prevent account enumeration (see #1219)
             RenderRegisterForm(context, "Registration could not be completed. Please try again or use a different email.", userName, displayName, email);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -568,7 +568,7 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             // SECURITY: Generic message to prevent account enumeration (see #1219)
             RenderRegisterForm(context, "Registration could not be completed. Please try again or use a different username.", userName, displayName, email);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -598,7 +598,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!context.HttpRequest.HasFormContentType)
         {
             RenderLogoutForm(context, "Invalid logout request.");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -606,7 +606,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderLogoutForm(context, "Invalid security token. Please try again.");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -881,7 +881,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 await Users.SaveAsync(user);
             var otpauth = string.IsNullOrWhiteSpace(pendingSecret) ? string.Empty : MfaTotp.GetOtpAuthUri(issuer, user.Email, pendingSecret);
             RenderMfaSetupForm(context, pendingSecret ?? string.Empty, otpauth, "Invalid setup request.");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -896,7 +896,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 await Users.SaveAsync(user);
             var otpauth = string.IsNullOrWhiteSpace(pendingSecret) ? string.Empty : MfaTotp.GetOtpAuthUri(issuer, user.Email, pendingSecret);
             RenderMfaSetupForm(context, pendingSecret ?? string.Empty, otpauth, "Invalid security token. Please try again.");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -909,7 +909,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 await Users.SaveAsync(user);
             var otpauth = string.IsNullOrWhiteSpace(pendingSecret) ? string.Empty : MfaTotp.GetOtpAuthUri(issuer, user.Email, pendingSecret);
             RenderMfaSetupForm(context, pendingSecret ?? string.Empty, otpauth, "Please enter a valid 6-digit code.");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -926,7 +926,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 await Users.SaveAsync(user);
             var otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, refreshedSecret ?? string.Empty);
             RenderMfaSetupForm(context, refreshedSecret ?? string.Empty, otpauth, "Setup token expired. A new secret was generated.");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -938,7 +938,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var issuer = context.GetApp()?.AppName ?? "BareMetalWeb";
             var otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, currentPendingSecret);
             RenderMfaSetupForm(context, currentPendingSecret, otpauth, FormatThrottleMessage(setupRetry));
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -960,7 +960,7 @@ public sealed class RouteHandlers : IRouteHandlers
                         await Users.SaveAsync(user);
                     otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, refreshedSecret);
                     RenderMfaSetupForm(context, refreshedSecret, otpauth, "Too many failed attempts. A new secret was generated.");
-                    await _renderer.RenderPage(context.HttpContext);
+                    await _renderer.RenderPage(context);
                     return;
                 }
 
@@ -969,7 +969,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 RegisterFailure(BuildMfaAttemptKey("setup:secret", currentPendingSecret), MfaPendingMaxFailures);
 
                 RenderMfaSetupForm(context, currentPendingSecret, otpauth, "Invalid authentication code.");
-                await _renderer.RenderPage(context.HttpContext);
+                await _renderer.RenderPage(context);
                 return;
             }
 
@@ -978,7 +978,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 var issuer = context.GetApp()?.AppName ?? "BareMetalWeb";
                 var otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, currentPendingSecret);
                 RenderMfaSetupForm(context, currentPendingSecret, otpauth, "Authentication code already used. Please wait for a new code.");
-                await _renderer.RenderPage(context.HttpContext);
+                await _renderer.RenderPage(context);
                 return;
             }
 
@@ -1009,7 +1009,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 ? string.Empty
                 : $"<div class=\"mt-3\"><p><strong>Backup codes (save these now):</strong></p><ul>{backupList}</ul><p class=\"text-warning\">These codes are shown once.</p></div>";
             context.SetStringValue("html_message", "<p>MFA enabled successfully.</p>" + backupHtml + "<p><a href=\"/account\">Back to account</a></p>");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
         finally
@@ -1054,7 +1054,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!context.HttpRequest.HasFormContentType)
         {
             RenderMfaResetForm(context, "Invalid request.");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -1062,7 +1062,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderMfaResetForm(context, "Invalid security token. Please try again.");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -1080,7 +1080,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         context.SetStringValue("title", "Reset MFA");
         context.SetStringValue("html_message", "<p>MFA has been reset.</p><p><a href=\"/account\">Back to account</a></p>");
-        await _renderer.RenderPage(context.HttpContext);
+        await _renderer.RenderPage(context);
     }
 
     public async ValueTask UsersListHandler(BmwContext context)
@@ -1143,7 +1143,7 @@ public sealed class RouteHandlers : IRouteHandlers
             {
                 context.SetStringValue("title", "Setup");
                 context.SetStringValue("html_message", "<p>Root user already exists.</p>");
-                await _renderer.RenderPage(context.HttpContext);
+                await _renderer.RenderPage(context);
                 return;
             }
 
@@ -1155,7 +1155,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (!CsrfProtection.ValidateFormToken(context, unlockForm))
             {
                 RenderUnlockForm(context, "Invalid security token. Please try again.");
-                await _renderer.RenderPage(context.HttpContext);
+                await _renderer.RenderPage(context);
                 return;
             }
 
@@ -1163,7 +1163,7 @@ public sealed class RouteHandlers : IRouteHandlers
             if (string.IsNullOrWhiteSpace(unlockPassword) || !lockedUser.VerifyPassword(unlockPassword))
             {
                 RenderUnlockForm(context, "Invalid password. Account remains locked.");
-                await _renderer.RenderPage(context.HttpContext);
+                await _renderer.RenderPage(context);
                 return;
             }
 
@@ -1171,7 +1171,7 @@ public sealed class RouteHandlers : IRouteHandlers
             await Users.SaveAsync(lockedUser);
             context.SetStringValue("title", "Setup");
             context.SetStringValue("html_message", "<p>Account unlocked successfully. You may now sign in.</p>");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -1187,21 +1187,21 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderSetupForm(context, "Invalid security token. Please try again.", userName, email);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(userName) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
             RenderSetupForm(context, "Please complete all required fields.", userName, email);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
         if (password.Length > 1024)
         {
             RenderSetupForm(context, "Password exceeds maximum allowed length.", userName, email);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -1320,7 +1320,7 @@ public sealed class RouteHandlers : IRouteHandlers
         _templateStore.ReloadAll();
         context.SetStringValue("title", "Reload Templates");
         context.SetStringValue("html_message", "Templates reloaded successfully.");
-        await _renderer.RenderPage(context.HttpContext);
+        await _renderer.RenderPage(context);
     }
 
     private void RenderLoginForm(BmwContext context, string? message, string? emailValue)
@@ -3600,7 +3600,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Generate Sample Data");
             context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -3611,7 +3611,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.SetStringValue("title", "Generate Sample Data");
             context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
             RenderSampleDataForm(context, "<p>Invalid security token. Please try again.</p>", entities, 10, clearExisting: false);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -3631,7 +3631,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.SetStringValue("title", "Generate Sample Data");
             context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{JoinEncoded("<br/>", errors)}</div>");
             RenderSampleDataForm(context, $"<div class=\"alert alert-danger\">{JoinEncoded("<br/>", errors)}</div>", registry.All, 10, clearExisting);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -3762,7 +3762,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 "<div class=\"alert alert-warning\">" +
                 "<h4 class=\"alert-heading\">Endpoint Disabled</h4>" +
                 $"<p>The <code>{WebUtility.HtmlEncode(WellKnownSettings.AllowWipeData)}</code> setting is empty or missing.</p></div>");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -3771,7 +3771,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
             context.SetStringValue("title", "Wipe All Data");
             context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -3779,7 +3779,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             RenderWipeDataForm(context, "<div class=\"alert alert-danger\">Invalid security token. Please try again.</div>", wipeToken);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -3787,7 +3787,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!string.Equals(confirmText, wipeToken, StringComparison.Ordinal))
         {
             RenderWipeDataForm(context, "<div class=\"alert alert-danger\">Confirmation text did not match. Enter the configured wipe token exactly to proceed.</div>", wipeToken);
-            await _renderer.RenderPage(context.HttpContext);
+            await _renderer.RenderPage(context);
             return;
         }
 
@@ -3865,7 +3865,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         context.SetStringValue("title", operationName);
         context.SetStringValue("html_message", html.ToString());
-        await _renderer.RenderPage(context.HttpContext);
+        await _renderer.RenderPage(context);
     }
 
     private void RenderWipeDataForm(BmwContext context, string? message, string wipeToken)

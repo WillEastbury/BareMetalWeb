@@ -42,9 +42,10 @@ public sealed class BmwApplication : IHttpApplication<BmwContext>
 
     /// <summary>
     /// Dispatches the request through the existing <see cref="BareMetalWebServer.RequestHandler"/>.
+    /// BmwContext flows directly — no HttpContext unwrap/rewrap.
     /// </summary>
     public Task ProcessRequestAsync(BmwContext context)
-        => _server.RequestHandler(context.HttpContext);
+        => _server.RequestHandler(context);
 
     /// <summary>
     /// Minimal cleanup. The <see cref="BmwContext"/> has no unmanaged resources;

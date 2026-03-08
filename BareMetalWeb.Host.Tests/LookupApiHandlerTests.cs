@@ -148,7 +148,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products/1");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -163,7 +163,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products/999");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(404, context.Response.StatusCode);
@@ -176,7 +176,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/nonexistent-type/1");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(404, context.Response.StatusCode);
@@ -192,7 +192,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -210,7 +210,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products/_field/1/Name");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -226,7 +226,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products/_field/999/Name");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(404, context.Response.StatusCode);
@@ -240,7 +240,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products/_field/1/NonExistentField");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(404, context.Response.StatusCode);
@@ -256,7 +256,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products/_aggregate?fn=count");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -272,7 +272,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products/_aggregate");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(400, context.Response.StatusCode);
@@ -285,7 +285,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products/_aggregate?fn=median");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(400, context.Response.StatusCode);
@@ -301,7 +301,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "1", "2" } });
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -320,7 +320,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "1", "999" } });
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -337,7 +337,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = Array.Empty<string>() });
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -352,7 +352,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { something = "else" });
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(400, context.Response.StatusCode);
@@ -365,7 +365,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreatePostHttpContext("/api/_lookup/nonexistent-type/_batch", new { ids = new[] { "1" } });
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(404, context.Response.StatusCode);
@@ -380,7 +380,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreatePostHttpContext("/api/_lookup/products/_batch", new { ids = new[] { "1", "1", "1" } });
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -400,7 +400,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products?filter=NonExistentField:Widget");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -419,7 +419,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products?sort=HiddenField&dir=asc");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert — request succeeds; no error from invalid sort field
         Assert.Equal(200, context.Response.StatusCode);
@@ -435,7 +435,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products?search=abc&searchField=PasswordHash");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert — request still succeeds (search clause is silently dropped, no results match nothing)
         Assert.Equal(200, context.Response.StatusCode);
@@ -451,7 +451,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products/_field/1/InternalSecretField");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(404, context.Response.StatusCode);
@@ -467,7 +467,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products?from=orders&via=CustomerId");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(403, context.Response.StatusCode);
@@ -483,7 +483,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/products?from=orders");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(403, context.Response.StatusCode);
@@ -500,7 +500,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/customers?from=orders&via=CustomerId");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -523,7 +523,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/orders/101?traverseRelationships=true");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -551,7 +551,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/orders/201");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -575,7 +575,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/orders?traverseRelationships=true&filter=OrderNumber:ORD-003");
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -602,7 +602,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreatePostHttpContext("/api/_lookup/orders/_batch?traverseRelationships=true", new { ids = new[] { "401" } });
 
         // Act
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -624,7 +624,7 @@ public class LookupApiHandlerTests : IDisposable
         var context = CreateHttpContext("GET", "/api/_lookup/orders/501?traverseRelationships=true");
 
         // Act — should not throw; missing related entity is silently skipped
-        await _server.RequestHandler(context);
+        await _server.RequestHandler(context.ToBmw());
 
         // Assert
         Assert.Equal(200, context.Response.StatusCode);
@@ -699,8 +699,8 @@ public class LookupApiHandlerTests : IDisposable
 
     private class MockHtmlRenderer : IHtmlRenderer
     {
-        public ValueTask RenderPage(HttpContext context) => ValueTask.CompletedTask;
-        public ValueTask RenderPage(HttpContext context, PageInfo page, IBareWebHost app) => ValueTask.CompletedTask;
+        public ValueTask RenderPage(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask RenderPage(BmwContext context, PageInfo page, IBareWebHost app) => ValueTask.CompletedTask;
         public ValueTask<ReadOnlyMemory<byte>> RenderToBytesAsync(IHtmlTemplate template, string[] keys, string[] values, string[] appkeys, string[] appvalues, IBareWebHost app, string[]? tableColumnTitles = null, string[][]? tableRows = null, FormDefinition? formDefinition = null, TemplateLoop[]? templateLoops = null) => ValueTask.FromResult<ReadOnlyMemory<byte>>(ReadOnlyMemory<byte>.Empty);
         public ValueTask RenderToStreamAsync(System.IO.Pipelines.PipeWriter writer, IHtmlTemplate template, string[] keys, string[] values, string[] appkeys, string[] appvalues, IBareWebHost app, string[]? tableColumnTitles = null, string[][]? tableRows = null, FormDefinition? formDefinition = null, TemplateLoop[]? templateLoops = null) => ValueTask.CompletedTask;
     }

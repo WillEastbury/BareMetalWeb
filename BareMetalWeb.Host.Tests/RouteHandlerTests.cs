@@ -1471,9 +1471,9 @@ public class RouteHandlerTests : IDisposable
 
     private class MockHtmlRenderer : IHtmlRenderer
     {
-        public ValueTask RenderPage(HttpContext context) => ValueTask.CompletedTask;
+        public ValueTask RenderPage(BmwContext context) => ValueTask.CompletedTask;
 
-        public ValueTask RenderPage(HttpContext context, PageInfo page, IBareWebHost app) => ValueTask.CompletedTask;
+        public ValueTask RenderPage(BmwContext context, PageInfo page, IBareWebHost app) => ValueTask.CompletedTask;
 
         public ValueTask<ReadOnlyMemory<byte>> RenderToBytesAsync(
             IHtmlTemplate template, string[] keys, string[] values,

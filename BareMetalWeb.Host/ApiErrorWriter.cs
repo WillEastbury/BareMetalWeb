@@ -68,7 +68,27 @@ internal static class ApiErrorWriter
     private static readonly JsonWriterOptions WriterOptions = new() { Indented = false };
 
     /// <summary>
-    /// Write an <see cref="ApiError"/> as a JSON response.
+    /// Write an <see cref="ApiError"/> directly to a <see cref="BmwContext"/>.
+    /// Uses PipeWriter (IBufferWriter) — zero intermediate allocation.
+    /// </summary>
+    internal static async ValueTask WriteAsync(BareMetalWeb.Core.BmwContext context, ApiError error, CancellationToken ct = default)
+    {
+        context.StatusCode = error.Status;
+        context.ContentType = "application/problem+json";
+
+        if (error.ErrorId is not null)
+        {
+            context.ResponseHeaders["X-Error-Id"] = error.ErrorId;
+        }
+
+        // Utf8JsonWriter accepts IBufferWriter<byte> — PipeWriter implements it
+        await using var writer = new Utf8JsonWriter(context.ResponseBody, WriterOptions);
+        WriteErrorBody(writer, error);
+        await writer.FlushAsync(ct);
+    }
+
+    /// <summary>
+    /// Write an <see cref="ApiError"/> as a JSON response (HttpResponse bridge).
     /// Sets status code, content type, and <c>X-Error-Id</c> header.
     /// </summary>
     internal static async ValueTask WriteAsync(HttpResponse response, ApiError error, CancellationToken ct = default)
@@ -82,7 +102,12 @@ internal static class ApiErrorWriter
         }
 
         await using var writer = new Utf8JsonWriter(response.Body, WriterOptions);
+        WriteErrorBody(writer, error);
+        await writer.FlushAsync(ct);
+    }
 
+    private static void WriteErrorBody(Utf8JsonWriter writer, ApiError error)
+    {
         writer.WriteStartObject();
 
         if (error.Type is not null)
@@ -117,7 +142,6 @@ internal static class ApiErrorWriter
         }
 
         writer.WriteEndObject();
-        await writer.FlushAsync(ct);
     }
 
     // ── Convenience factories for common errors ─────────────────────────

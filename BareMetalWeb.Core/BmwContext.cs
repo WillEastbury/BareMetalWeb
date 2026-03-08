@@ -1,4 +1,5 @@
 using System.IO.Pipelines;
+using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using BareMetalWeb.Core.Host;
@@ -7,33 +8,91 @@ using BareMetalWeb.Rendering;
 namespace BareMetalWeb.Core;
 
 /// <summary>
-/// Lightweight request context that wraps only the Kestrel features BMW needs.
-/// Created once per request in the pipeline entry point; avoids repeated
-/// IFeatureCollection lookups and HttpContext.Items dictionary access in handlers.
+/// Lightweight request context built directly from Kestrel features.
+/// No <see cref="HttpContext"/> allocation in the hot path — features are
+/// resolved once in <see cref="CreateFromFeatures"/> and stored. Handlers
+/// that still need the full ASP.NET API surface get a lazily-allocated
+/// <see cref="DefaultHttpContext"/> via the <see cref="HttpContext"/> property.
 /// </summary>
 /// <remarks>
-/// During migration, <see cref="HttpContext"/> remains available so existing
-/// handlers continue to work unchanged. New handlers should prefer the
-/// strongly-typed fields on this struct.
+/// Pipeline path: socket → Kestrel → IHttpApplication → BmwContext → BMW router → PipeWriter
 /// </remarks>
 public sealed class BmwContext
 {
-    // ── Request data (populated once in CreateFrom) ─────────────────────
+    // ── Request data (populated once) ──────────────────────────────────
     public BmwRequest Request;
 
     // ── Pipelines ───────────────────────────────────────────────────────
     public PipeReader RequestBody { get; }
     public PipeWriter ResponseBody { get; }
 
-    // ── Features resolved once ──────────────────────────────────────────
-    public IHttpResponseFeature ResponseFeature { get; }
-    public IHttpConnectionFeature? ConnectionFeature { get; }
+    // ── Features (resolved once, never looked up again) ─────────────────
+    private readonly IHttpRequestFeature _requestFeature;
+    private readonly IHttpResponseFeature _responseFeature;
+    private readonly IHttpResponseBodyFeature? _responseBodyFeature;
+    private readonly IHttpConnectionFeature? _connectionFeature;
+    private readonly IFeatureCollection _features;
+
+    // ── Direct response accessors (hot-path, zero HttpContext) ──────────
+    /// <summary>HTTP response status code.</summary>
+    public int StatusCode { get => _responseFeature.StatusCode; set => _responseFeature.StatusCode = value; }
+
+    /// <summary>Response headers — same IHeaderDictionary Kestrel uses internally.</summary>
+    public IHeaderDictionary ResponseHeaders => _responseFeature.Headers;
+
+    /// <summary>True once the first byte of the response body has been sent.</summary>
+    public bool HasResponseStarted => _responseFeature.HasStarted;
+
+    /// <summary>Response Content-Type header.</summary>
+    public string? ContentType
+    {
+        get => ResponseHeaders.ContentType;
+        set => ResponseHeaders.ContentType = value;
+    }
+
+    /// <summary>Response Content-Length header.</summary>
+    public long? ContentLength
+    {
+        get => ResponseHeaders.ContentLength;
+        set => ResponseHeaders.ContentLength = value;
+    }
+
+    // ── Direct request accessors (hot-path, zero HttpContext) ───────────
+    /// <summary>Request headers — same IHeaderDictionary from the Kestrel request feature.</summary>
+    public IHeaderDictionary RequestHeaders => _requestFeature.Headers;
+
+    /// <summary>Request scheme (http or https).</summary>
+    public string RequestScheme => _requestFeature.Scheme;
+
+    /// <summary>True when the request arrived over HTTPS (or was forwarded as such).</summary>
+    public bool IsHttps => string.Equals(RequestScheme, "https", StringComparison.OrdinalIgnoreCase);
+
+    // ── Exposed features (for callers that need the raw interface) ──────
+    public IHttpResponseFeature ResponseFeature => _responseFeature;
+    public IHttpConnectionFeature? ConnectionFeature => _connectionFeature;
 
     // ── BMW runtime state ───────────────────────────────────────────────
     public IBareWebHost App { get; }
-    public PageInfo? PageInfo { get; set; }
 
-    /// <summary>Unique correlation ID for this request (extracted from X-Trace-ID or generated).</summary>
+    /// <summary>Page metadata for the current route (set by router dispatch).</summary>
+    public PageMetaData? PageMetaData { get; set; }
+
+    /// <summary>Page context for the current route (template values, loops, tables).</summary>
+    public PageContext? PageContext { get; set; }
+
+    /// <summary>Combined page info (computed from PageMetaData + PageContext).</summary>
+    public PageInfo? PageInfo
+    {
+        get => PageMetaData != null && PageContext != null
+            ? new PageInfo(PageMetaData, PageContext) : null;
+        set
+        {
+            if (value != null) { PageMetaData = value.PageMetaData; PageContext = value.PageContext; }
+            else { PageMetaData = null; PageContext = null; }
+        }
+    }
+
+    /// <summary>Unique correlation ID for this request (X-Trace-ID header or Kestrel trace identifier).</summary>
     public string CorrelationId { get; }
 
     /// <summary>Route parameters extracted by the jump-table or pattern router.</summary>
@@ -48,106 +107,84 @@ public sealed class BmwContext
     public string? RouteExtra;
     /// <summary>Key name for <see cref="RouteExtra"/> (e.g. "field", "command").</summary>
     public string? RouteExtraKey;
-    /// <summary>Compiled entity ordinal from RuntimeSnapshot (-1 = unresolved). Enables O(1) array-indexed metadata access.</summary>
+    /// <summary>Compiled entity ordinal from RuntimeSnapshot (-1 = unresolved).</summary>
     public int EntityOrdinal = -1;
 
-    // ── Migration bridge ────────────────────────────────────────────────
-    /// <summary>
-    /// The underlying ASP.NET HttpContext. Available during migration so
-    /// existing handlers can still access the full API surface. New code
-    /// should use the strongly-typed fields instead.
-    /// </summary>
-    public HttpContext HttpContext { get; }
-
-    /// <summary>Bridge: access the HTTP response via the underlying HttpContext.</summary>
-    public HttpResponse Response => HttpContext.Response;
-
-    /// <summary>Bridge: access the HTTP request via the underlying HttpContext.</summary>
-    public HttpRequest HttpRequest => HttpContext.Request;
-
-    /// <summary>Bridge: access the connection info.</summary>
-    public ConnectionInfo Connection => HttpContext.Connection;
-
-    /// <summary>Bridge: access request services (DI container).</summary>
-    public IServiceProvider? RequestServices => HttpContext.RequestServices;
+    // ── Per-request storage (replaces HttpContext.Items for pipeline data) ──
+    /// <summary>CSP nonce for the current request (generated on first access).</summary>
+    public string? CspNonce { get; set; }
 
     /// <summary>Source IP extracted once from the connection feature.</summary>
     public string SourceIp { get; }
 
-    /// <summary>Cancellation token from the underlying connection.</summary>
-    public CancellationToken RequestAborted => HttpContext.RequestAborted;
+    /// <summary>Cancellation token signalled when the client disconnects.</summary>
+    public CancellationToken RequestAborted { get; }
+
+    // ── Lazy HttpContext bridge ─────────────────────────────────────────
+    // Only allocated when handler code accesses the full ASP.NET API surface
+    // (cookies, form reading, DI, etc.). Pipeline code uses direct accessors.
+    private HttpContext? _httpContext;
+
+    /// <summary>
+    /// Lazily-allocated HttpContext for handlers that need the full ASP.NET API.
+    /// Pipeline code should use direct accessors (StatusCode, ResponseHeaders, etc.) instead.
+    /// </summary>
+    public HttpContext HttpContext => _httpContext ??= new DefaultHttpContext(_features);
+
+    /// <summary>Bridge: HTTP response via lazy HttpContext (prefer direct accessors).</summary>
+    public HttpResponse Response => HttpContext.Response;
+
+    /// <summary>Bridge: HTTP request via lazy HttpContext (prefer RequestHeaders).</summary>
+    public HttpRequest HttpRequest => HttpContext.Request;
+
+    /// <summary>Bridge: connection info via lazy HttpContext.</summary>
+    public ConnectionInfo Connection => HttpContext.Connection;
+
+    /// <summary>Bridge: DI container via lazy HttpContext.</summary>
+    public IServiceProvider? RequestServices => HttpContext.RequestServices;
+
+    // ── Constructor ─────────────────────────────────────────────────────
 
     private BmwContext(
-        HttpContext httpContext,
+        IFeatureCollection features,
+        IHttpRequestFeature requestFeature,
+        IHttpResponseFeature responseFeature,
+        IHttpResponseBodyFeature? responseBodyFeature,
+        IHttpConnectionFeature? connectionFeature,
         BmwRequest request,
         PipeReader requestBody,
         PipeWriter responseBody,
-        IHttpResponseFeature responseFeature,
-        IHttpConnectionFeature? connectionFeature,
         IBareWebHost app,
         string sourceIp,
-        string correlationId)
+        string correlationId,
+        CancellationToken requestAborted)
     {
-        HttpContext = httpContext;
+        _features = features;
+        _requestFeature = requestFeature;
+        _responseFeature = responseFeature;
+        _responseBodyFeature = responseBodyFeature;
+        _connectionFeature = connectionFeature;
         Request = request;
         RequestBody = requestBody;
         ResponseBody = responseBody;
-        ResponseFeature = responseFeature;
-        ConnectionFeature = connectionFeature;
         App = app;
         SourceIp = sourceIp;
         CorrelationId = correlationId;
+        RequestAborted = requestAborted;
     }
 
-    /// <summary>
-    /// Creates a <see cref="BmwContext"/> from an <see cref="HttpContext"/>,
-    /// resolving all required features exactly once.
-    /// </summary>
-    public static BmwContext CreateFrom(HttpContext httpContext, IBareWebHost app)
-    {
-        var features = httpContext.Features;
-        var responseFeature = features.Get<IHttpResponseFeature>()!;
-        var connectionFeature = features.Get<IHttpConnectionFeature>();
-        var responseBodyFeature = features.Get<IHttpResponseBodyFeature>();
-
-        var request = new BmwRequest(
-            httpContext.Request.Method,
-            httpContext.Request.Path.Value ?? "/",
-            httpContext.Request.QueryString.Value ?? string.Empty);
-
-        var sourceIp = connectionFeature?.RemoteIpAddress?.ToString() ?? "unknown";
-
-        // Extract or generate correlation ID
-        var correlationId = httpContext.Request.Headers.TryGetValue("X-Trace-ID", out var traceHeader) && traceHeader.Count > 0
-            ? traceHeader[0]!
-            : httpContext.TraceIdentifier;
-
-        return new BmwContext(
-            httpContext,
-            request,
-            httpContext.Request.BodyReader,
-            responseBodyFeature?.Writer ?? httpContext.Response.BodyWriter,
-            responseFeature,
-            connectionFeature,
-            app,
-            sourceIp,
-            correlationId);
-    }
+    // ── Factory methods ─────────────────────────────────────────────────
 
     /// <summary>
-    /// Creates a <see cref="BmwContext"/> directly from Kestrel's
-    /// <see cref="IFeatureCollection"/> — used by <c>BmwApplication</c>
-    /// when running without the ASP.NET middleware pipeline.
-    /// A <see cref="DefaultHttpContext"/> is created as a migration bridge.
+    /// Creates a <see cref="BmwContext"/> directly from Kestrel's feature collection.
+    /// Zero HttpContext allocation — features are resolved once and stored.
     /// </summary>
     public static BmwContext CreateFromFeatures(IFeatureCollection features, IBareWebHost app)
     {
-        var httpContext = new DefaultHttpContext(features);
-
-        var responseFeature = features.Get<IHttpResponseFeature>()!;
-        var connectionFeature = features.Get<IHttpConnectionFeature>();
-        var responseBodyFeature = features.Get<IHttpResponseBodyFeature>();
         var requestFeature = features.Get<IHttpRequestFeature>()!;
+        var responseFeature = features.Get<IHttpResponseFeature>()!;
+        var responseBodyFeature = features.Get<IHttpResponseBodyFeature>();
+        var connectionFeature = features.Get<IHttpConnectionFeature>();
 
         var request = new BmwRequest(
             requestFeature.Method,
@@ -156,19 +193,86 @@ public sealed class BmwContext
 
         var sourceIp = connectionFeature?.RemoteIpAddress?.ToString() ?? "unknown";
 
-        var correlationId = httpContext.Request.Headers.TryGetValue("X-Trace-ID", out var traceHeader) && traceHeader.Count > 0
+        var correlationId = (requestFeature.Headers.TryGetValue("X-Trace-ID", out var traceHeader) && traceHeader.Count > 0)
             ? traceHeader[0]!
-            : httpContext.TraceIdentifier;
+            : features.Get<IHttpRequestIdentifierFeature>()?.TraceIdentifier
+              ?? Guid.NewGuid().ToString("N")[..16];
+
+        var requestBody = features.Get<IRequestBodyPipeFeature>()?.Reader
+            ?? PipeReader.Create(requestFeature.Body);
+
+        var responseBody = responseBodyFeature?.Writer
+            ?? PipeWriter.Create(Stream.Null);
+
+        var requestAborted = features.Get<IHttpRequestLifetimeFeature>()?.RequestAborted
+            ?? CancellationToken.None;
 
         return new BmwContext(
-            httpContext,
-            request,
-            httpContext.Request.BodyReader,
-            responseBodyFeature?.Writer ?? httpContext.Response.BodyWriter,
+            features,
+            requestFeature,
             responseFeature,
+            responseBodyFeature,
             connectionFeature,
+            request,
+            requestBody,
+            responseBody,
             app,
             sourceIp,
-            correlationId);
+            correlationId,
+            requestAborted);
+    }
+
+    /// <summary>
+    /// Migration bridge: creates from an existing <see cref="HttpContext"/>.
+    /// Pre-sets the lazy HttpContext so no additional allocation occurs.
+    /// </summary>
+    public static BmwContext CreateFrom(HttpContext httpContext, IBareWebHost app)
+    {
+        var ctx = CreateFromFeatures(httpContext.Features, app);
+        ctx._httpContext = httpContext;
+        return ctx;
+    }
+
+    // ── Response helpers (zero-allocation hot-path writes) ──────────────
+
+    /// <summary>
+    /// Writes a UTF-8 string directly to the PipeWriter response body.
+    /// Zero intermediate allocation — encodes directly into PipeWriter's buffer.
+    /// </summary>
+    public async ValueTask WriteResponseAsync(string text, CancellationToken ct = default)
+    {
+        var maxByteCount = Encoding.UTF8.GetMaxByteCount(text.Length);
+        var memory = ResponseBody.GetMemory(maxByteCount);
+        int written = Encoding.UTF8.GetBytes(text, memory.Span);
+        ResponseBody.Advance(written);
+        await ResponseBody.FlushAsync(ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Writes raw bytes directly to the response body PipeWriter.</summary>
+    public ValueTask<FlushResult> WriteResponseAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default)
+        => ResponseBody.WriteAsync(data, ct);
+
+    /// <summary>Sets a redirect response.</summary>
+    public void Redirect(string url, int statusCode = StatusCodes.Status302Found)
+    {
+        StatusCode = statusCode;
+        ResponseHeaders.Location = url;
+    }
+
+    /// <summary>Resets response state (status code + headers). Only valid before headers are sent.</summary>
+    public void ClearResponse()
+    {
+        if (!HasResponseStarted)
+        {
+            _responseFeature.StatusCode = 200;
+            _responseFeature.ReasonPhrase = null;
+            _responseFeature.Headers.Clear();
+        }
+    }
+
+    /// <summary>Aborts the underlying connection.</summary>
+    public void Abort()
+    {
+        _features.Get<IHttpRequestLifetimeFeature>()?.Abort();
     }
 }

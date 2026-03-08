@@ -31,7 +31,7 @@ public static class ReportHtmlRenderer
         IBareWebHost? host = null,
         string? nonce = null,
         string? csrfToken = null,
-        HttpContext? context = null)
+        BareMetalWeb.Core.BmwContext? context = null)
     {
         var safeNonce = WebUtility.HtmlEncode(nonce ?? string.Empty);
         var safeToken = WebUtility.HtmlEncode(csrfToken ?? string.Empty);
@@ -239,7 +239,7 @@ public static class ReportHtmlRenderer
     /// <summary>Appends the standard site footer element, closing Bootstrap scripts, and body/html tags to <paramref name="sb"/>.
     /// When <paramref name="host"/> is provided the footer includes the copyright bar and theme selector matching index.footer.html.
     /// When <paramref name="context"/> is provided and both the <c>showhst=true</c> query parameter and <see cref="IBareWebHost.ShowHostDiagnostics"/> are set, a diagnostic banner is also appended.</summary>
-    internal static void AppendChromeFooter(StringBuilder sb, string safeNonce, IBareWebHost? host = null, HttpContext? context = null)
+    internal static void AppendChromeFooter(StringBuilder sb, string safeNonce, IBareWebHost? host = null, BareMetalWeb.Core.BmwContext? context = null)
     {
         if (host != null)
         {

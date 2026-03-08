@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
@@ -165,12 +166,13 @@ public sealed class TenantRegistry
     /// Returns an <see cref="IDisposable"/> scope that clears the tenant when disposed.
     /// Returns <c>null</c> when multitenancy is disabled.
     /// </summary>
-    public IDisposable? ResolveForRequest(HttpContext context)
+    public IDisposable? ResolveForRequest(BmwContext context)
     {
         if (!_options.Enabled)
             return null;
 
-        var host = context.Request.Host.Host; // strips port
+        var hostHeader = context.RequestHeaders.Host.ToString();
+        var host = hostHeader.Contains(':') ? hostHeader[..hostHeader.IndexOf(':')] : hostHeader;
         if (_byHost.TryGetValue(host, out var tenant))
             return DataStoreProvider.SetCurrentTenant(tenant);
 

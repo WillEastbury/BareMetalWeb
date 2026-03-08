@@ -75,7 +75,7 @@ public static class CompressionHelper
         => SelectEncoding(context.Request.Headers.AcceptEncoding.ToString());
 
     public static string? SelectEncoding(BmwContext context)
-        => SelectEncoding(context.HttpRequest.Headers.AcceptEncoding.ToString());
+        => SelectEncoding(context.RequestHeaders.AcceptEncoding.ToString());
 
     /// <summary>Compresses <paramref name="data"/> using Brotli at Fastest level.</summary>
     public static byte[] CompressBrotli(ReadOnlySpan<byte> data)
@@ -119,5 +119,15 @@ public static class CompressionHelper
 
         response.Headers.ContentEncoding = encoding;
         response.Headers.Append("Vary", "Accept-Encoding");
+    }
+
+    /// <summary>BmwContext overload — writes directly to feature headers.</summary>
+    public static void ApplyHeaders(BmwContext context, string? encoding)
+    {
+        if (string.IsNullOrEmpty(encoding))
+            return;
+
+        context.ResponseHeaders.ContentEncoding = encoding;
+        context.ResponseHeaders.Append("Vary", "Accept-Encoding");
     }
 }
