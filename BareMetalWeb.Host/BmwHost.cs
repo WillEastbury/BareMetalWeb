@@ -94,7 +94,13 @@ public sealed class BmwHost : IAsyncDisposable
         catch (OperationCanceledException) { }
 
         _logger.LogInfo("BmwHost shutting down...");
+        Console.WriteLine("[BMW Shutdown] Shutdown signal received — draining background services...");
+
+        // Drain background services before stopping Kestrel
+        await _application.Server.DrainBackgroundServicesAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false);
+
         await _server.StopAsync(CancellationToken.None).ConfigureAwait(false);
+        Console.WriteLine("[BMW Shutdown] Kestrel stopped.");
         _logger.LogInfo("BmwHost stopped.");
     }
 

@@ -41,6 +41,22 @@ public static class BareMetalWebExtensions
         Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
         Console.WriteLine();
 
+        // Validate configuration — fail fast on invalid values (#1271)
+        config.LogConfiguration();
+        var configErrors = config.Validate();
+        if (configErrors.Count > 0)
+        {
+            Console.WriteLine();
+            Console.WriteLine("[BMW Startup] ✗ Configuration validation FAILED:");
+            foreach (var err in configErrors)
+                Console.WriteLine($"[BMW Startup]   ERROR: {err}");
+            throw new InvalidOperationException(
+                $"Configuration validation failed with {configErrors.Count} error(s). " +
+                $"Fix Metal.config and restart. First error: {configErrors[0]}");
+        }
+        Console.WriteLine($"[BMW Startup] Configuration validated ({config.Keys.Count()} keys, 0 errors)");
+        Console.WriteLine();
+
         // Logger & data root
         IBufferedLogger logger = ProgramSetup.CreateLogger(config);
         logger.LogInfo("Starting BareMetalWeb server...");

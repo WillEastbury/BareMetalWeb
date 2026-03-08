@@ -378,21 +378,75 @@ public class BareMetalWebServer : IBareWebHost
     }
 
     private Task? _loggerTask;
+    private readonly List<(string Name, Task Task)> _backgroundTasks = new();
+
     private void StartBackgroundServices()
     {
         _loggerTask = BufferedLogger.RunAsync(cts.Token);
-        Task clientPruneTask = ClientRequests.RunPruningAsync(cts.Token);
-        Task todoPeriodicityTask = new TodoPeriodicityService(BufferedLogger).RunAsync(cts.Token);
-        Task scheduledActionTask = new ScheduledActionService(BufferedLogger).RunAsync(cts.Token);
-        _ = clientPruneTask;
-        _ = todoPeriodicityTask;
-        _ = scheduledActionTask;
+
+        var clientPruneTask = ClientRequests.RunPruningAsync(cts.Token);
+        _backgroundTasks.Add(("ClientRequestPruning", clientPruneTask));
+
+        var todoPeriodicityTask = new TodoPeriodicityService(BufferedLogger).RunAsync(cts.Token);
+        _backgroundTasks.Add(("TodoPeriodicity", todoPeriodicityTask));
+
+        var scheduledActionTask = new ScheduledActionService(BufferedLogger).RunAsync(cts.Token);
+        _backgroundTasks.Add(("ScheduledActions", scheduledActionTask));
 
         // WAL segment compaction background service
         if (DataStoreProvider.PrimaryProvider is WalDataProvider walProvider)
         {
-            Task compactionTask = new WalCompactor(walProvider.WalStore).RunAsync(cts.Token);
-            _ = compactionTask;
+            var compactionTask = new WalCompactor(walProvider.WalStore).RunAsync(cts.Token);
+            _backgroundTasks.Add(("WalCompactor", compactionTask));
+        }
+    }
+
+    /// <summary>
+    /// Waits for all background services to complete after cancellation has been
+    /// requested, with a configurable timeout. Logs drain progress.
+    /// </summary>
+    public async Task DrainBackgroundServicesAsync(TimeSpan timeout)
+    {
+        var pending = _backgroundTasks.Where(t => !t.Task.IsCompleted).ToList();
+        if (pending.Count == 0)
+        {
+            BufferedLogger.LogInfo("[Shutdown] No background services to drain.");
+            Console.WriteLine("[BMW Shutdown] No background services to drain.");
+            return;
+        }
+
+        Console.WriteLine($"[BMW Shutdown] Waiting for {pending.Count} background service(s) to drain: {string.Join(", ", pending.Select(t => t.Name))}");
+        BufferedLogger.LogInfo($"[Shutdown] Draining {pending.Count} background services (timeout: {timeout.TotalSeconds}s)...");
+
+        var allTasks = Task.WhenAll(pending.Select(t => t.Task));
+        var completed = await Task.WhenAny(allTasks, Task.Delay(timeout)).ConfigureAwait(false);
+
+        if (completed == allTasks)
+        {
+            Console.WriteLine($"[BMW Shutdown] All background services drained successfully.");
+            BufferedLogger.LogInfo("[Shutdown] All background services drained.");
+        }
+        else
+        {
+            var stillRunning = _backgroundTasks.Where(t => !t.Task.IsCompleted).Select(t => t.Name).ToList();
+            Console.WriteLine($"[BMW Shutdown] Drain timeout ({timeout.TotalSeconds}s) — {stillRunning.Count} service(s) still running: {string.Join(", ", stillRunning)}");
+            BufferedLogger.LogInfo($"[Shutdown] Drain timeout — forcing shutdown with {stillRunning.Count} service(s) still running: {string.Join(", ", stillRunning)}");
+        }
+
+        // WAL checkpoint — ensure all pending writes are flushed
+        if (DataStoreProvider.PrimaryProvider is WalDataProvider walProv)
+        {
+            try
+            {
+                walProv.WalStore.TakeSnapshot();
+                Console.WriteLine("[BMW Shutdown] WAL snapshot checkpoint written.");
+                BufferedLogger.LogInfo("[Shutdown] WAL snapshot checkpoint written.");
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                Console.WriteLine($"[BMW Shutdown] WAL checkpoint failed: {ex.Message}");
+                BufferedLogger.LogError("[Shutdown] WAL checkpoint failed.", ex);
+            }
         }
     }
     public async Task RequestHandler(HttpContext context)

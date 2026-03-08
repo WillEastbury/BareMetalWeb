@@ -24,6 +24,9 @@ public sealed class BmwApplication : IHttpApplication<BmwContext>
 {
     private readonly BareMetalWebServer _server;
 
+    /// <summary>The underlying server instance, exposed for shutdown coordination.</summary>
+    public BareMetalWebServer Server => _server;
+
     public BmwApplication(BareMetalWebServer server)
     {
         _server = server;
