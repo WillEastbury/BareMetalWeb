@@ -78,4 +78,25 @@ public static class RouteHash
         }
         return hash;
     }
+
+    /// <summary>
+    /// Seeded FNV-1a hash over two concatenated strings without allocating.
+    /// Produces the same result as <c>Hash(string.Concat(prefix, suffix), seed)</c>.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static uint Hash(string prefix, string suffix, uint seed)
+    {
+        uint hash = FnvOffsetBasis ^ seed;
+        for (int i = 0; i < prefix.Length; i++)
+        {
+            hash ^= prefix[i];
+            hash *= FnvPrime;
+        }
+        for (int i = 0; i < suffix.Length; i++)
+        {
+            hash ^= suffix[i];
+            hash *= FnvPrime;
+        }
+        return hash;
+    }
 }

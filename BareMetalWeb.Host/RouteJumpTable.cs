@@ -207,6 +207,37 @@ public sealed class RouteJumpTable
         return false;
     }
 
+    /// <summary>
+    /// Look up a route whose key is the logical concatenation of <paramref name="prefix"/>
+    /// and <paramref name="suffix"/> without allocating the concatenated string.
+    /// The slot key is compared by first checking the prefix, then the suffix.
+    /// </summary>
+    public bool TryLookupConcat(string prefix, string suffix, out RouteHandlerData data)
+    {
+        var slots = _slots;
+        if (slots.Length == 0)
+        {
+            data = default;
+            return false;
+        }
+
+        uint hash = RouteHash.Hash(prefix, suffix, _seed);
+        uint idx = hash & _mask;
+        ref var slot = ref slots[idx];
+
+        if (slot.Key != null &&
+            slot.Key.Length == prefix.Length + suffix.Length &&
+            slot.Key.AsSpan().StartsWith(prefix.AsSpan(), StringComparison.Ordinal) &&
+            slot.Key.AsSpan(prefix.Length).SequenceEqual(suffix.AsSpan()))
+        {
+            data = slot.Data;
+            return true;
+        }
+
+        data = default;
+        return false;
+    }
+
     private static int NextPowerOfTwo(int v)
     {
         v--;

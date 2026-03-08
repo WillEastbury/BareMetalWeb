@@ -127,14 +127,26 @@ public static class RouteMatching
     /// </summary>
     public static bool TryMatch(string path, CompiledRoute compiled, out Dictionary<string, string> parameters)
     {
+        parameters = new(compiled.ParameterCount);
+        return TryMatchCore(path, compiled, parameters);
+    }
+
+    /// <summary>
+    /// Match using a caller-supplied dictionary (cleared before use).
+    /// Avoids per-call dictionary allocation in hot loops.
+    /// </summary>
+    public static bool TryMatch(string path, CompiledRoute compiled, Dictionary<string, string> parameters)
+    {
+        parameters.Clear();
+        return TryMatchCore(path, compiled, parameters);
+    }
+
+    private static bool TryMatchCore(string path, CompiledRoute compiled, Dictionary<string, string> parameters)
+    {
         if (compiled.IsRegex)
         {
-            parameters = new(0);
             return compiled.RegexPattern!.IsMatch(path);
         }
-
-        // Pre-size the dictionary to the exact parameter count — avoids rehashing.
-        parameters = new(compiled.ParameterCount);
 
         var pathSpan = path.AsSpan().Trim('/');
         var segments = compiled.Segments;

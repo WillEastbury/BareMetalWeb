@@ -612,8 +612,8 @@ public class BareMetalWebServer : IBareWebHost
                 BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|200", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp });
                 return;
             }
-            // Jump table also handles "ALL" verb routes
-            if (_jumpTable.TryLookup(string.Concat("ALL ", requestPath), out RouteHandlerData allPage))
+            // Jump table also handles "ALL" verb routes (allocation-free concat lookup)
+            if (_jumpTable.TryLookupConcat("ALL ", requestPath, out RouteHandlerData allPage))
             {
                 Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 if (allPage.PageInfo != null)
@@ -646,20 +646,26 @@ public class BareMetalWebServer : IBareWebHost
             }
             // Pattern match fallback— iterate most-specific routes first so that literal
             // segments (e.g. /api/_lookup/{type}) beat generic routes (e.g. /api/{type}/{id}).
+            // Skip routes with no parameters (already covered by jump table).
             bool methodNotAllowed = false;
+            var matchParams = new Dictionary<string, string>(8, StringComparer.Ordinal);
+            // Pattern-match fallback: single pass handles both verb-specific and ALL routes.
+            // Skip parameterless non-regex routes — those are already in the jump table.
+            // Reuse one dictionary across all TryMatch calls to avoid per-call allocations.
             foreach (var (_, routeData, compiled) in GetSortedRoutes())
             {
-                if (RouteMatching.TryMatch(requestPath, compiled, out var parameters))
+                if (!compiled.IsRegex && compiled.ParameterCount == 0) continue;
+
+                if (RouteMatching.TryMatch(requestPath, compiled, matchParams))
                 {
-                    if (!compiled.Verb.Equals(method, StringComparison.OrdinalIgnoreCase))
+                    if (!compiled.Verb.Equals(method, StringComparison.OrdinalIgnoreCase) &&
+                        !compiled.Verb.Equals("ALL", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (!compiled.Verb.Equals("ALL", StringComparison.OrdinalIgnoreCase))
-                            methodNotAllowed = true;
+                        methodNotAllowed = true;
                         continue;
                     }
                     Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
-                    // a routed parameter match ! --> grab it and inject it into the rendering parameters
-                    var injectedPage = RouteInfoHelpers.InjectRouteParametersIntoPageInfo(routeData, parameters);
+                    var injectedPage = RouteInfoHelpers.InjectRouteParametersIntoPageInfo(routeData, matchParams);
                     if (injectedPage.PageInfo != null)
                     {
                         bmwCtx.SetPageInfo(injectedPage.PageInfo);
@@ -671,44 +677,11 @@ public class BareMetalWebServer : IBareWebHost
                         return;
                     }
                     await injectedPage.Handler(bmwCtx);
-                    var paramParts = new string[parameters.Count];
+                    var paramParts = new string[matchParams.Count];
                     int paramIdx = 0;
-                    foreach (var p in parameters)
+                    foreach (var p in matchParams)
                         paramParts[paramIdx++] = $"{p.Key}={p.Value}";
                     BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|{method}|{compiled.Verb}|{string.Join(", ", paramParts)}|200", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp });
-                    return;
-                }
-            }
-            foreach (var kvp in _compiledRoutes)
-            {
-                var compiled = kvp.Value;
-                if (!compiled.Verb.Equals("ALL", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                if (RouteMatching.TryMatch(requestPath, compiled, out var parameters))
-                {
-                    // _compiledRoutes and routes are always kept in sync by RegisterRoute;
-                    // this TryGetValue is a defensive guard against future concurrent modifications.
-                    if (!routes.TryGetValue(kvp.Key, out var routeData))
-                        continue;
-                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
-                    var injectedPage = RouteInfoHelpers.InjectRouteParametersIntoPageInfo(routeData, parameters);
-                    if (injectedPage.PageInfo != null)
-                    {
-                        bmwCtx.SetPageInfo(injectedPage.PageInfo);
-                    }
-                    if (!await IsAuthorizedAsync(injectedPage.PageInfo, bmwCtx, context.RequestAborted).ConfigureAwait(false))
-                    {
-                        await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
-                        await RenderForbidden(bmwCtx);
-                        return;
-                    }
-                    await injectedPage.Handler(bmwCtx);
-                    var paramParts2 = new string[parameters.Count];
-                    int paramIdx2 = 0;
-                    foreach (var p in parameters)
-                        paramParts2[paramIdx2++] = $"{p.Key}={p.Value}";
-                    BufferedLogger.Log(BmwLogLevel.Info, $"{routeKey}|{method}|{compiled.Verb}|{string.Join(", ", paramParts2)}|200", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp });
                     return;
                 }
             }
