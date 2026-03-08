@@ -2,6 +2,7 @@ using System;
 using System.Buffers.Binary;
 using System.IO;
 using System.IO.MemoryMappedFiles;
+using System.Threading;
 using BareMetalWeb.Core.Interfaces;
 
 namespace BareMetalWeb.Data;
@@ -31,7 +32,7 @@ internal sealed class MappedPagedFile : IPagedFile
     private int _pageSize;
     private int _dataStartPage;
     private readonly long _fileLength;
-    private volatile bool _disposed;
+    private int _disposed; // 0 = live, 1 = disposed (atomic via Interlocked)
 
     public MappedPagedFile(string filePath, int expectedPageSize)
     {
@@ -77,12 +78,14 @@ internal sealed class MappedPagedFile : IPagedFile
     /// </summary>
     public unsafe int ReadPage(long pageIndex, Span<byte> buffer)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(Volatile.Read(ref _disposed) != 0, this);
         if (buffer.Length < _pageSize)
             throw new ArgumentException("Buffer must be at least one page in size.", nameof(buffer));
+        if (pageIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(pageIndex), "Page index must be non-negative.");
 
         long offset = (pageIndex + _dataStartPage) * (long)_pageSize;
-        if (offset >= _fileLength)
+        if (offset < 0 || offset >= _fileLength)
             return 0;
 
         int available = (int)Math.Min(_pageSize, _fileLength - offset);
@@ -109,8 +112,7 @@ internal sealed class MappedPagedFile : IPagedFile
 
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
         _accessor.Dispose();
         _mmf.Dispose();
     }
