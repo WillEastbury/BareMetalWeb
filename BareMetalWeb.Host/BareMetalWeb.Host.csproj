@@ -10,11 +10,13 @@
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- AOT: produce a single native binary with no JIT dependency -->
     <PublishAot>true</PublishAot>
-    <!-- Emit multi-versioned code paths for all x86-64-v3 features so IsSupported
+    <!-- Emit multi-versioned code paths for x86-64-v3 features so IsSupported
          checks are true runtime guards instead of compile-time constants.
-         Without this, the AOT baseline (SSE2/SSE4.2/POPCNT) is the only active tier
-         and all AVX/FMA/BMI paths are dead-code-eliminated. -->
-    <InstructionSet>avx,avx2,fma,bmi,bmi2,lzcnt</InstructionSet>
+         Without this, the AOT baseline (SSE4.2/POPCNT) is the only active tier
+         and all AVX/FMA/BMI paths are dead-code-eliminated.
+         NativeAOT uses IlcInstructionSet (not InstructionSet, which is JIT-only).
+         .NET 10 uses bundled instruction set names (avx2 implies avx, sse4.2, etc.). -->
+    <IlcInstructionSet>avx2,fma,bmi2,lzcnt</IlcInstructionSet>
     <!-- Trimming: full mode trims all assemblies (not just opt-in ones), aggressively
          removing unused framework code and reducing the in-memory code footprint. -->
     <PublishTrimmed>true</PublishTrimmed>

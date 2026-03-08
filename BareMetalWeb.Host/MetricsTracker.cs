@@ -6,9 +6,6 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
-using BareMetalWeb.Interfaces;
-using System.Runtime.Intrinsics.Arm;
-using System.Runtime.Intrinsics.X86;
 
 namespace BareMetalWeb.Host;
 
@@ -321,7 +318,7 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             new[] { "Data Location", DataRoot ?? "(default)" },
 
             new[] { "⚡ SIMD & VECTOR", "" },
-            new[] { "SIMD Vector Width", $"{System.Numerics.Vector<float>.Count * 4 * 8}-bit ({System.Numerics.Vector<float>.Count} floats)" },
+            new[] { "SIMD Vector Width", $"{SimdCapabilities.Current.VectorBitWidth}-bit ({SimdCapabilities.Current.FloatVectorWidth} floats)" },
 
             new[] { "🚀 ACTIVE ACCELERATION PATHS", "" },
             new[] { "Vector Distance (ANN)", DataLayerCapabilities.VectorDistancePath },
@@ -393,29 +390,32 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
 
     private static string[][] GetSimdFeatureRows()
     {
+        var caps = SimdCapabilities.Current;
         var features = new List<string[]>();
         if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
         {
-            features.Add(new[] { "ARM AdvSimd (NEON)", AdvSimd.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "ARM AdvSimd.Arm64", AdvSimd.Arm64.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "ARM Aes", System.Runtime.Intrinsics.Arm.Aes.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "ARM Crc32", Crc32.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "ARM Crc32.Arm64", Crc32.Arm64.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "ARM Dp", Dp.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "ARM Sha256", Sha256.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "ARM AdvSimd (NEON)", caps.AdvSimd ? "✓" : "✗" });
+            features.Add(new[] { "ARM AdvSimd.Arm64", caps.AdvSimdArm64 ? "✓" : "✗" });
+            features.Add(new[] { "ARM Aes", caps.ArmAes ? "✓" : "✗" });
+            features.Add(new[] { "ARM Crc32", caps.ArmCrc32 ? "✓" : "✗" });
+            features.Add(new[] { "ARM Crc32.Arm64", caps.ArmCrc32Arm64 ? "✓" : "✗" });
+            features.Add(new[] { "ARM Dp", caps.ArmDp ? "✓" : "✗" });
+            features.Add(new[] { "ARM Sha256", caps.ArmSha256 ? "✓" : "✗" });
         }
         else
         {
-            features.Add(new[] { "x86 SSE2", Sse2.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "x86 SSE4.2", Sse42.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "x86 AVX", Avx.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "x86 AVX2", Avx2.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "x86 AVX-512F", Avx512F.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "x86 FMA", Fma.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "x86 BMI1", Bmi1.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "x86 BMI2", Bmi2.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "x86 POPCNT", Popcnt.IsSupported ? "✓" : "✗" });
-            features.Add(new[] { "x86 LZCNT", Lzcnt.IsSupported ? "✓" : "✗" });
+            features.Add(new[] { "x86 SSE2", caps.Sse2 ? "✓" : "✗" });
+            features.Add(new[] { "x86 SSE4.2", caps.Sse42 ? "✓" : "✗" });
+            features.Add(new[] { "x86 AVX", caps.Avx ? "✓" : "✗" });
+            features.Add(new[] { "x86 AVX2", caps.Avx2 ? "✓" : "✗" });
+            features.Add(new[] { "x86 AVX-512F", caps.Avx512F ? "✓" : "✗" });
+            features.Add(new[] { "x86 FMA", caps.Fma ? "✓" : "✗" });
+            features.Add(new[] { "x86 BMI1", caps.Bmi1 ? "✓" : "✗" });
+            features.Add(new[] { "x86 BMI2", caps.Bmi2 ? "✓" : "✗" });
+            features.Add(new[] { "x86 POPCNT", caps.Popcnt ? "✓" : "✗" });
+            features.Add(new[] { "x86 LZCNT", caps.Lzcnt ? "✓" : "✗" });
+            foreach (var warning in caps.GetMismatchWarnings())
+                features.Add(new[] { "⚠ Config mismatch", warning });
         }
         return features.ToArray();
     }

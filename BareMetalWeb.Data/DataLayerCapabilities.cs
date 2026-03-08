@@ -1,14 +1,12 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using System.Runtime.Intrinsics.Arm;
-using System.Runtime.Intrinsics.X86;
 
 namespace BareMetalWeb.Data;
 
 /// <summary>
 /// Describes which hardware-accelerated code paths are active in the data layer
-/// on the current CPU. Use <see cref="Describe"/> to obtain a human-readable
-/// summary suitable for startup logs and the metrics dashboard.
+/// on the current CPU. All detection flows through <see cref="SimdCapabilities.Current"/>
+/// — no direct <c>IsSupported</c> checks.
 /// </summary>
 public static class DataLayerCapabilities
 {
@@ -21,16 +19,7 @@ public static class DataLayerCapabilities
     /// <summary>
     /// The acceleration path used by <c>WalCrc32C</c> for checksum computation.
     /// </summary>
-    public static string Crc32CPath
-    {
-        get
-        {
-            if (Crc32.Arm64.IsSupported) return "ARM64 CRC32C (64-bit, hardware)";
-            if (Sse42.X64.IsSupported)   return "x86 SSE4.2 CRC32Q (64-bit, hardware)";
-            if (Sse42.IsSupported)       return "x86 SSE4.2 CRC32D (32-bit, hardware)";
-            return "Software slicing-by-4 (no hardware CRC)";
-        }
-    }
+    public static string Crc32CPath => SimdCapabilities.Current.Crc32CPath;
 
     /// <summary>
     /// The acceleration path used by <c>WalLatin1Key32.CompareTo</c> for
@@ -94,9 +83,10 @@ public static class DataLayerCapabilities
     /// </summary>
     public static string Describe()
     {
+        var caps = SimdCapabilities.Current;
         return
-            $"Portable SIMD width : {Vector<float>.Count * sizeof(float) * 8}-bit " +
-            $"({Vector<float>.Count} floats/iter, Vector<float> baseline)\n" +
+            $"Portable SIMD width : {caps.VectorBitWidth}-bit " +
+            $"({caps.FloatVectorWidth} floats/iter, Vector<float> baseline)\n" +
             $"Vector distance     : {VectorDistancePath}\n" +
             $"Column query scan   : {ColumnQueryPath}\n" +
             $"Bitmask filter      : {BitmaskFilterPipelinePath}\n" +

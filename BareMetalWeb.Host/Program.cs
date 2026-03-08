@@ -28,6 +28,8 @@ Console.WriteLine($"  Storage:  {GetStorageInfo()}");
 Console.WriteLine($"  OS:       {RuntimeInformation.OSDescription}");
 Console.WriteLine($"  Runtime:  {RuntimeInformation.FrameworkDescription}");
 Console.WriteLine($"  {SimdCapabilities.Current.ToLogLine()}");
+foreach (var warning in SimdCapabilities.Current.GetMismatchWarnings())
+    Console.WriteLine($"  {warning}");
 var contentRoot = Directory.GetCurrentDirectory();
 var config = BmwConfig.Load(contentRoot);
 
