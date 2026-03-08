@@ -7,6 +7,7 @@ const string Banner = """
     ╔══════════════════════════════════════════════════════════╗
     ║  BareMetalWeb Intelligence CLI                          ║
     ║  Hybrid Embeddings + BitNet b1.58 Ternary Engine        ║
+    ║  2-bit packed · native memory · zero-skip sparse        ║
     ╚══════════════════════════════════════════════════════════╝
 
     """;
@@ -29,8 +30,11 @@ var config = new BitNetModelConfig(
 var intents = AdminToolCatalogue.GetIntentDefinitions();
 var classifier = new KeywordIntentClassifier(intents);
 var executor = AdminToolCatalogue.CreateRegistry();
-var engine = new BitNetEngine(config);
+using var engine = new BitNetEngine(config);
 engine.LoadTestModel(ModelLoadOptions.Aggressive);
+
+// Force GC to reclaim the temporary sbyte[] arrays used during construction
+GC.Collect(2, GCCollectionMode.Aggressive, true, true);
 
 var orchestrator = new IntelligenceOrchestrator(classifier, executor, engine);
 sw.Stop();
@@ -130,6 +134,7 @@ static void PrintStats(BitNetEngine engine, BitNetModelConfig config)
     Console.ResetColor();
     Console.WriteLine($"    Working set:       {proc.WorkingSet64 / (1024 * 1024),6} MB");
     Console.WriteLine($"    GC heap:           {GC.GetTotalMemory(false) / (1024 * 1024),6} MB");
+    Console.WriteLine($"    Native alloc:      {engine.NativeBytesAllocated / (1024 * 1024),6} MB");
     Console.WriteLine($"    GC Gen0/1/2:       {GC.CollectionCount(0)}/{GC.CollectionCount(1)}/{GC.CollectionCount(2)}");
     Console.WriteLine();
 
@@ -146,8 +151,9 @@ static void PrintStats(BitNetEngine engine, BitNetModelConfig config)
         Console.WriteLine($"    Layers:            {ms.LayerCount,6}");
         Console.WriteLine($"    Total weights:     {ms.TotalWeights,12:N0}");
         Console.WriteLine($"    Sparsity:          {ms.Sparsity,9:P1}");
-        Console.WriteLine($"    Stored (sbyte):    {ms.StoredBytes / (1024 * 1024),6} MB");
-        Console.WriteLine($"    Packed (2-bit):    {ms.PackedBytes / (1024 * 1024),6} MB");
+        Console.WriteLine($"    Was (sbyte):       {ms.StoredBytes / (1024 * 1024),6} MB");
+        Console.WriteLine($"    Now (2-bit native):{engine.NativeBytesAllocated / (1024 * 1024),6} MB");
+        Console.WriteLine($"    Compression:       {ms.CompressionSavings,9:P0} smaller");
     }
 
     Console.WriteLine();
@@ -245,31 +251,39 @@ static void RunPruneComparison(BitNetModelConfig config)
         ("Maximum",     new ModelLoadOptions { PruneVocabulary = true, LayerPruneRatio = 0.50f, HeadPruneRatio = 0.50f }),
     };
 
-    Console.WriteLine("    {0,-16} {1,8} {2,8} {3,7} {4,9} {5,8}", "Level", "RAM", "Vocab", "Layers", "Sparsity", "Packed");
-    Console.WriteLine("    {0,-16} {1,8} {2,8} {3,7} {4,9} {5,8}", "─────", "───", "─────", "──────", "────────", "──────");
+    Console.WriteLine("    {0,-16} {1,10} {2,8} {3,8} {4,7} {5,9} {6,8}", "Level", "WorkSet", "GCHeap", "Native", "Layers", "Sparsity", "Vocab");
+    Console.WriteLine("    {0,-16} {1,10} {2,8} {3,8} {4,7} {5,9} {6,8}", "─────", "──────", "──────", "──────", "──────", "────────", "─────");
 
     foreach (var (name, opts) in levels)
     {
         GC.Collect(2, GCCollectionMode.Aggressive, true, true);
-        long before = GC.GetTotalMemory(true);
-        var e = new BitNetEngine(config);
+        var proc = Process.GetCurrentProcess();
+        proc.Refresh();
+        long wsBefore = proc.WorkingSet64;
+
+        using var e = new BitNetEngine(config);
         e.LoadTestModel(opts);
         GC.Collect(2, GCCollectionMode.Aggressive, true, true);
-        long after = GC.GetTotalMemory(true);
-        long delta = after - before;
+
+        proc.Refresh();
+        long wsAfter = proc.WorkingSet64;
+        long wsDelta = wsAfter - wsBefore;
 
         int vocab = e.VocabPruneStats?.PrunedVocabSize ?? config.VocabSize;
         int layers = e.ModelStats?.LayerCount ?? config.NumLayers;
         float sparsity = e.ModelStats?.Sparsity ?? 0f;
-        long packed = e.ModelStats?.PackedBytes ?? 0;
+        long nativeBytes = e.NativeBytesAllocated;
+        long gcHeap = GC.GetTotalMemory(false);
 
         Console.Write($"    {name,-16}");
         Console.ForegroundColor = ConsoleColor.White;
-        Console.Write($" {delta / (1024 * 1024),5} MB");
+        Console.Write($" {wsAfter / (1024 * 1024),7} MB");
         Console.ResetColor();
-        Console.WriteLine($" {vocab,8} {layers,7} {sparsity,9:P1} {packed / (1024 * 1024),5} MB");
-
-        e = null;
+        Console.Write($" {gcHeap / (1024 * 1024),5} MB");
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($" {nativeBytes / (1024 * 1024),5} MB");
+        Console.ResetColor();
+        Console.WriteLine($" {layers,7} {sparsity,9:P1} {vocab,8}");
     }
 
     Console.WriteLine();

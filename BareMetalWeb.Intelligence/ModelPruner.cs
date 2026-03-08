@@ -154,4 +154,10 @@ public readonly record struct ModelSizeStats(
         $"Zeros: {ZeroWeights:N0} ({Sparsity:P1} sparsity), " +
         $"Size: {StoredBytes / 1024:N0} KB stored / {PackedBytes / 1024:N0} KB packed (2-bit), " +
         $"Layers: {LayerCount}";
+
+    /// <summary>
+    /// Savings ratio from sbyte[] to 2-bit packed native: 1.0 - (packed / stored).
+    /// </summary>
+    public float CompressionSavings =>
+        StoredBytes > 0 ? 1f - (float)PackedBytes / StoredBytes : 0f;
 }

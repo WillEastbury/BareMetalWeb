@@ -8,26 +8,34 @@ namespace BareMetalWeb.Intelligence;
 /// Demonstrates the architecture for ternary {-1,0,+1} model inference
 /// using integer-only SIMD arithmetic. No floating point on the hot path.
 ///
-/// Spike: provides the inference loop structure and layer operations.
-/// A real deployment would load a trained GGUF-like ternary model file.
+/// After load + pruning, weights are compressed to 2-bit packed native memory
+/// (NativeTernaryMatrix) — 4× smaller than sbyte[] and entirely off the GC heap.
 /// </summary>
-public sealed class BitNetEngine : IBitNetEngine
+public sealed class BitNetEngine : IBitNetEngine, IDisposable
 {
     private readonly BitNetModelConfig _config;
-    private TernaryLayer[]? _layers;
-    private sbyte[]? _embeddings;       // [vocabSize × hiddenDim] or pruned
-    private sbyte[]? _outputHead;       // [vocabSize × hiddenDim] or pruned
     private VocabularyPruner? _pruner;
     private PruneStats? _pruneStats;
     private ModelSizeStats? _modelStats;
 
-    public bool IsLoaded => _layers is not null;
+    // Compressed storage — 2-bit packed in native (unmanaged) memory
+    private NativeTernaryMatrix[]? _compressedAttn;
+    private NativeTernaryMatrix[]? _compressedFfn;
+    private NativeTernaryMatrix? _compressedEmbeddings;
+    private NativeTernaryMatrix? _compressedOutputHead;
+    private int _layerCount;
+    private bool _isLoaded;
+
+    public bool IsLoaded => _isLoaded;
 
     /// <summary>Vocabulary pruning stats, available after load with pruning enabled.</summary>
     public PruneStats? VocabPruneStats => _pruneStats;
 
     /// <summary>Model size stats, available after load.</summary>
     public ModelSizeStats? ModelStats => _modelStats;
+
+    /// <summary>Total native (unmanaged) bytes allocated for compressed weights.</summary>
+    public long NativeBytesAllocated { get; private set; }
 
     public BitNetEngine(BitNetModelConfig? config = null)
     {
@@ -36,7 +44,8 @@ public sealed class BitNetEngine : IBitNetEngine
 
     /// <summary>
     /// Load a test model with optional DataScaffold-informed vocabulary pruning
-    /// and layer/head pruning.
+    /// and layer/head pruning. After pruning, compresses all weights to 2-bit
+    /// packed native memory and frees managed arrays.
     /// </summary>
     public void LoadTestModel(ModelLoadOptions? options = null)
     {
@@ -44,19 +53,19 @@ public sealed class BitNetEngine : IBitNetEngine
         int dim = _config.HiddenDim;
         int vocab = _config.VocabSize;
 
-        // 1. Create layers
-        _layers = new TernaryLayer[_config.NumLayers];
+        // 1. Create layers (temporary managed arrays)
+        var layers = new TernaryLayer[_config.NumLayers];
         for (int i = 0; i < _config.NumLayers; i++)
-            _layers[i] = TernaryLayer.CreateRandom(dim, _config.NumHeads);
+            layers[i] = TernaryLayer.CreateRandom(dim, _config.NumHeads);
 
         // 2. Create embedding and output head weights
         var rng = Random.Shared;
-        _embeddings = new sbyte[vocab * dim];
-        _outputHead = new sbyte[vocab * dim];
-        for (int i = 0; i < _embeddings.Length; i++)
+        var embeddings = new sbyte[vocab * dim];
+        var outputHead = new sbyte[vocab * dim];
+        for (int i = 0; i < embeddings.Length; i++)
         {
-            _embeddings[i] = (sbyte)(rng.Next(3) - 1);
-            _outputHead[i] = (sbyte)(rng.Next(3) - 1);
+            embeddings[i] = (sbyte)(rng.Next(3) - 1);
+            outputHead[i] = (sbyte)(rng.Next(3) - 1);
         }
 
         // 3. Vocabulary pruning — informed by DataScaffold metadata
@@ -64,33 +73,74 @@ public sealed class BitNetEngine : IBitNetEngine
         if (options.PruneVocabulary)
         {
             _pruner = options.CustomPruner ?? VocabularyPruner.FromDataScaffold();
-
-            // Build a synthetic token list for the spike (real impl: read from model file)
             var tokenList = BuildSyntheticVocabulary(vocab);
             _pruner.BuildRemapTable(tokenList, specialTokenCount: options.SpecialTokenCount);
 
-            _embeddings = _pruner.PruneEmbeddings(_embeddings, dim);
-            _outputHead = _pruner.PruneOutputHead(_outputHead, dim);
+            embeddings = _pruner.PruneEmbeddings(embeddings, dim);
+            outputHead = _pruner.PruneOutputHead(outputHead, dim);
             activeVocab = _pruner.PrunedVocabSize;
 
             _pruneStats = _pruner.GetStats(dim);
         }
 
         // 4. Layer pruning — drop last N layers for constrained domain
-        if (options.LayerPruneRatio > 0f && _layers.Length > 1)
+        if (options.LayerPruneRatio > 0f && layers.Length > 1)
         {
-            int keepLayers = Math.Max(1, (int)(_layers.Length * (1f - options.LayerPruneRatio)));
-            _layers = ModelPruner.PruneLayers(_layers, keepLayers);
+            int keepLayers = Math.Max(1, (int)(layers.Length * (1f - options.LayerPruneRatio)));
+            layers = ModelPruner.PruneLayers(layers, keepLayers);
         }
 
         // 5. Attention head pruning — zero out low-importance heads
         if (options.HeadPruneRatio > 0f)
         {
-            ModelPruner.PruneAttentionHeads(_layers, _config.NumHeads, options.HeadPruneRatio);
+            ModelPruner.PruneAttentionHeads(layers, _config.NumHeads, options.HeadPruneRatio);
         }
 
-        // 6. Calculate final model stats
-        _modelStats = ModelPruner.CalculateSize(_layers, activeVocab, dim);
+        // 6. Calculate logical model stats (before compression)
+        _modelStats = ModelPruner.CalculateSize(layers, activeVocab, dim);
+
+        // 7. Compress to 2-bit packed native memory
+        CompressToNative(layers, embeddings, outputHead, activeVocab, dim);
+
+        _isLoaded = true;
+    }
+
+    /// <summary>
+    /// Pack all weight matrices from sbyte[] into 2-bit NativeTernaryMatrix.
+    /// After packing, managed arrays become eligible for GC.
+    /// </summary>
+    private void CompressToNative(
+        TernaryLayer[] layers,
+        sbyte[] embeddings,
+        sbyte[] outputHead,
+        int activeVocab,
+        int dim)
+    {
+        // Dispose any previous compressed data
+        DisposeNative();
+
+        _layerCount = layers.Length;
+        _compressedAttn = new NativeTernaryMatrix[layers.Length];
+        _compressedFfn = new NativeTernaryMatrix[layers.Length];
+
+        for (int i = 0; i < layers.Length; i++)
+        {
+            _compressedAttn[i] = NativeTernaryMatrix.Pack(layers[i].AttentionWeights, dim, dim);
+            _compressedFfn[i] = NativeTernaryMatrix.Pack(layers[i].FfnWeights, dim, dim);
+        }
+
+        _compressedEmbeddings = NativeTernaryMatrix.Pack(embeddings, activeVocab, dim);
+        _compressedOutputHead = NativeTernaryMatrix.Pack(outputHead, activeVocab, dim);
+
+        // Calculate total native allocation
+        NativeBytesAllocated = 0;
+        for (int i = 0; i < layers.Length; i++)
+        {
+            NativeBytesAllocated += _compressedAttn[i].BytesAllocated;
+            NativeBytesAllocated += _compressedFfn[i].BytesAllocated;
+        }
+        NativeBytesAllocated += _compressedEmbeddings.BytesAllocated;
+        NativeBytesAllocated += _compressedOutputHead.BytesAllocated;
     }
 
     public ValueTask<string> GenerateAsync(
@@ -98,11 +148,9 @@ public sealed class BitNetEngine : IBitNetEngine
         int maxTokens = 256,
         CancellationToken ct = default)
     {
-        if (_layers is null)
+        if (!_isLoaded)
             return ValueTask.FromResult("[Engine not loaded — no model file available]");
 
-        // Spike: demonstrates the inference pipeline structure
-        // Real impl would tokenise → embed → layer stack → logits → detokenise
         var result = RunInference(prompt.Span, maxTokens, ct);
         return ValueTask.FromResult(result);
     }
@@ -111,48 +159,35 @@ public sealed class BitNetEngine : IBitNetEngine
     {
         int dim = _config.HiddenDim;
 
-        // Allocate working buffers (would use ArrayPool in production for reuse)
         int[] hidden = new int[dim];
         int[] scratch = new int[dim];
         int[] output = new int[dim];
 
-        // Simple hash-based "embedding" for spike (real impl: lookup table)
         InitHiddenState(prompt, hidden);
 
-        // Forward pass through all layers
-        for (int layerIdx = 0; layerIdx < _layers!.Length; layerIdx++)
+        // Forward pass through compressed layers (2-bit packed, native memory)
+        for (int layerIdx = 0; layerIdx < _layerCount; layerIdx++)
         {
             ct.ThrowIfCancellationRequested();
-            ref TernaryLayer layer = ref _layers[layerIdx];
 
-            // Pre-norm
+            // Pre-norm → attention → residual
             TernaryTensor.RmsNormalize(hidden, scratch);
-
-            // Ternary attention (simplified: single-head self-proj for spike)
-            TernaryTensor.MatVecMultiply(
-                layer.AttentionWeights, scratch, output,
-                dim, dim);
-
-            // Residual connection
+            _compressedAttn![layerIdx].MatVecMultiply(scratch, output);
             TernaryTensor.Add(hidden, output, hidden);
 
-            // FFN: pre-norm → ternary matmul → residual
+            // Pre-norm → FFN → residual
             TernaryTensor.RmsNormalize(hidden, scratch);
-            TernaryTensor.MatVecMultiply(
-                layer.FfnWeights, scratch, output,
-                dim, dim);
+            _compressedFfn![layerIdx].MatVecMultiply(scratch, output);
             TernaryTensor.Add(hidden, output, hidden);
         }
 
-        // Final norm
         TernaryTensor.RmsNormalize(hidden, output);
 
-        // Top-k selection on output logits
         Span<int> topK = stackalloc int[3];
         TernaryTensor.TopK(output, topK, 3);
 
         return $"[BitNet spike] Inference complete. Top logit indices: {topK[0]}, {topK[1]}, {topK[2]}. " +
-               $"Hidden dim: {dim}, layers: {_layers!.Length}. " +
+               $"Hidden dim: {dim}, layers: {_layerCount}. " +
                $"Vocab: {(_pruner is not null ? $"{_pruner.PrunedVocabSize} (pruned from {_pruner.OriginalVocabSize})" : $"{_config.VocabSize}")}. " +
                $"Prompt length: {prompt.Length} chars.";
     }
@@ -161,19 +196,16 @@ public sealed class BitNetEngine : IBitNetEngine
     private static void InitHiddenState(ReadOnlySpan<char> prompt, Span<int> hidden)
     {
         hidden.Clear();
-        // Distribute prompt character hashes across hidden dimensions
         for (int i = 0; i < prompt.Length; i++)
         {
             int idx = (i * 31 + prompt[i]) % hidden.Length;
             if (idx < 0) idx += hidden.Length;
-            hidden[idx] += prompt[i] - 64; // Centre around zero
+            hidden[idx] += prompt[i] - 64;
         }
     }
 
     private static IReadOnlyList<string> BuildSyntheticVocabulary(int vocabSize)
     {
-        // Spike: creates a synthetic token list.
-        // Real impl would read the tokeniser vocabulary from the model file.
         var tokens = new string[vocabSize];
         tokens[0] = "<PAD>";
         tokens[1] = "<BOS>";
@@ -182,7 +214,6 @@ public sealed class BitNetEngine : IBitNetEngine
         for (int i = 4; i < vocabSize; i++)
             tokens[i] = $"tok_{i}";
 
-        // Inject real domain tokens at known positions so pruning is demonstrable
         string[] domainTokens = [
             "query", "entity", "list", "describe", "search", "status",
             "help", "index", "system", "field", "schema", "data",
@@ -193,6 +224,31 @@ public sealed class BitNetEngine : IBitNetEngine
             tokens[i + 4] = domainTokens[i];
 
         return tokens;
+    }
+
+    private void DisposeNative()
+    {
+        if (_compressedAttn is not null)
+        {
+            foreach (var m in _compressedAttn) m?.Dispose();
+            _compressedAttn = null;
+        }
+        if (_compressedFfn is not null)
+        {
+            foreach (var m in _compressedFfn) m?.Dispose();
+            _compressedFfn = null;
+        }
+        _compressedEmbeddings?.Dispose();
+        _compressedOutputHead?.Dispose();
+        _compressedEmbeddings = null;
+        _compressedOutputHead = null;
+        NativeBytesAllocated = 0;
+    }
+
+    public void Dispose()
+    {
+        DisposeNative();
+        _isLoaded = false;
     }
 }
 
