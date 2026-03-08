@@ -434,7 +434,7 @@ static string GetCpuModel()
 {
     try
     {
-        if (File.Exists("/proc/cpuinfo"))
+        if (OperatingSystem.IsLinux() && File.Exists("/proc/cpuinfo"))
         {
             foreach (var line in File.ReadLines("/proc/cpuinfo"))
             {
@@ -444,6 +444,23 @@ static string GetCpuModel()
                     var idx = line.IndexOf(':');
                     if (idx >= 0) return line[(idx + 1)..].Trim();
                 }
+            }
+        }
+        else if (OperatingSystem.IsWindows())
+        {
+            var cpu = Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER");
+            if (!string.IsNullOrEmpty(cpu)) return cpu;
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("sysctl", "-n machdep.cpu.brand_string")
+            { RedirectStandardOutput = true, UseShellExecute = false };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc != null)
+            {
+                var result = proc.StandardOutput.ReadToEnd().Trim();
+                proc.WaitForExit(1000);
+                if (!string.IsNullOrEmpty(result)) return result;
             }
         }
     }
