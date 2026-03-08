@@ -134,6 +134,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         if (string.IsNullOrWhiteSpace(rootPath))
             throw new ArgumentException("Root path cannot be null or whitespace.", nameof(rootPath));
 
+        Console.WriteLine($"[BMW WAL] Initializing WalDataProvider (root: {rootPath})");
         _rootPath      = rootPath;
         _serializer    = serializer     ?? BinaryObjectSerializer.CreateDefault(rootPath);
         _queryEvaluator = queryEvaluator ?? new DataQueryEvaluator();
@@ -141,9 +142,12 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
         var walDir = Path.Combine(rootPath, WalSubFolder);
         Directory.CreateDirectory(walDir);
+        Console.WriteLine($"[BMW WAL] Creating WalStore (dir: {walDir})");
         _walStore = new WalStore(walDir);
+        Console.WriteLine($"[BMW WAL] WalStore ready — creating IndexStore + SearchIndexManager");
         _indexStore = new IndexStore(this, logger);
         _searchIndexManager = new SearchIndexManager(rootPath, logger);
+        Console.WriteLine($"[BMW WAL] WalDataProvider initialized");
     }
 
     /// <summary>

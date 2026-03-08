@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
@@ -32,17 +33,28 @@ public static class BareMetalWebExtensions
         string contentRoot,
         Action<BareMetalWebServer, IRouteHandlers, IPageInfoFactory, IHtmlTemplate>? configureRoutes = null)
     {
+        var startupSw = Stopwatch.StartNew();
+        Console.WriteLine();
+        Console.WriteLine("╔══════════════════════════════════════════════════════════════╗");
+        Console.WriteLine("║              BareMetalWeb — Startup Diagnostics             ║");
+        Console.WriteLine("╚══════════════════════════════════════════════════════════════╝");
+        Console.WriteLine();
+
         // Logger & data root
         IBufferedLogger logger = ProgramSetup.CreateLogger(config);
         logger.LogInfo("Starting BareMetalWeb server...");
+        Console.WriteLine($"[BMW Startup] Logger created ({logger.GetType().Name})");
 
         var dataRoot = config.GetValue("Data.Root", Path.Combine(contentRoot, "Data"));
         ProgramSetup.ResetDataIfRequested(config, contentRoot, dataRoot, logger);
         CookieProtection.ConfigureKeyRoot(dataRoot);
+        Console.WriteLine($"[BMW Startup] Data root: {dataRoot}");
 
         // Data store
+        var phaseSw = Stopwatch.StartNew();
         ISchemaAwareObjectSerializer serializer = BinaryObjectSerializer.CreateDefault(dataRoot);
         IDataQueryEvaluator queryEvaluator = new DataQueryEvaluator();
+        Console.WriteLine($"[BMW Startup] Serializer + query evaluator created ({phaseSw.ElapsedMilliseconds}ms)");
 
         // Initialize binary wire API with the same signing key
         if (serializer is BinaryObjectSerializer bos)
@@ -50,6 +62,7 @@ public static class BareMetalWebExtensions
             BinaryApiHandlers.Initialize(bos.GetSigningKeyCopy(), logger);
         }
         LookupApiHandlers.Init(logger);
+        Console.WriteLine($"[BMW Startup] Binary API + Lookup handlers initialized");
 
         // Register system entities explicitly (AOT-safe, no assembly scanning).
         DataScaffold.RegisterEntity<AppSetting>();
@@ -70,8 +83,11 @@ public static class BareMetalWebExtensions
         DataScaffold.RegisterEntity<FileAttachment>();
         DataScaffold.RegisterEntity<RecordComment>();
         DataScaffold.RegisterEntity<InboxMessage>();
+        Console.WriteLine($"[BMW Startup] Registered {DataScaffold.Entities.Count} system entities (AOT-safe)");
 
+        phaseSw.Restart();
         IDataObjectStore dataStore = ProgramSetup.CreateDataStore(config, contentRoot, serializer, queryEvaluator, logger);
+        Console.WriteLine($"[BMW Startup] Data store created with WAL provider ({phaseSw.ElapsedMilliseconds}ms)");
 
         // ── Multitenancy ──────────────────────────────────────────────────────
         // Build the TenantRegistry and wire up additional per-tenant stores.
@@ -94,6 +110,7 @@ public static class BareMetalWebExtensions
             dataStore,
             systemProvider);
         tenantRegistry.RegisterSystemTenant(systemTenant);
+        Console.WriteLine($"[BMW Startup] Multitenancy: {(multitenancyOptions.Enabled ? "ENABLED" : "disabled (single-tenant)")}, default tenant: {multitenancyOptions.DefaultTenantId}");
 
         if (multitenancyOptions.Enabled)
         {
@@ -116,17 +133,21 @@ public static class BareMetalWebExtensions
         DataScaffold.LargeListThreshold = config.GetValue("LookupSearch.LargeListThreshold", 20);
 
         // Runtime entity registry — load persisted EntityDefinitions from storage and compile
+        phaseSw.Restart();
         await RuntimeEntityRegistry.BuildAsync(
             dataStore,
             new RuntimeEntityCompiler(),
             systemProvider as WalDataProvider,
             dataRoot,
             msg => logger.LogInfo($"[RuntimeEntityRegistry] {msg}")).ConfigureAwait(false);
+        Console.WriteLine($"[BMW Startup] RuntimeEntityRegistry built ({phaseSw.ElapsedMilliseconds}ms)");
 
         // Compile metadata into dense runtime tables (struct-of-arrays)
+        phaseSw.Restart();
         MetadataCompiler.CompileAndSwap(DataScaffold.Entities);
         logger.LogInfo($"[MetadataCompiler] Compiled {RuntimeSnapshot.Current!.Entities.Count} entities, " +
                        $"{RuntimeSnapshot.Current.Fields.Count} fields");
+        Console.WriteLine($"[BMW Startup] MetadataCompiler: {RuntimeSnapshot.Current.Entities.Count} entities, {RuntimeSnapshot.Current.Fields.Count} fields ({phaseSw.ElapsedMilliseconds}ms)");
 
         // Permissions
         var permSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -157,6 +178,7 @@ public static class BareMetalWebExtensions
         IPageInfoFactory pageInfoFactory = new PageInfoFactory();
         IMetricsTracker metricsTracker = new MetricsTracker();
         IClientRequestTracker throttling = ProgramSetup.CreateClientRequestTracker(config, logger);
+        Console.WriteLine($"[BMW Startup] Rendering stack initialized (HtmlRenderer, TemplateStore, PageInfoFactory)");
 
         // Route handlers
         bool allowAccountCreation = config.GetValue("Auth.AllowAccountCreation", false);
@@ -198,6 +220,7 @@ public static class BareMetalWebExtensions
 
         IRouteHandlers routeHandlers = new RouteHandlers(htmlRenderer, templateStore, allowAccountCreation, dataRoot, auditService, settingDefaults, logger, config);
         EntraIdService.Init(logger);
+        Console.WriteLine($"[BMW Startup] Route handlers + EntraID initialized");
         IHtmlTemplate mainTemplate = templateStore.Get("Index");
         CancellationTokenSource cts = new CancellationTokenSource();
 
@@ -238,16 +261,19 @@ public static class BareMetalWebExtensions
 
         // Infrastructure configuration
         ProgramSetup.ConfigureStaticFiles(config, appInfo);
+        Console.WriteLine($"[BMW Startup] Static files configured (root: {appInfo.StaticFiles.RootPathFull}, in-memory cache: {appInfo.StaticFiles.EnableInMemoryCache})");
 
         // Load pre-built per-theme CSS bundles from disk into memory.
         // Theme files are committed to the repository (generated by tools/download-assets.js).
         CssBundleService.LoadAssets(appInfo.StaticFiles.RootPathFull);
         if (!CssBundleService.HasBundles)
             logger.LogInfo("CssBundleService: no theme bundles found on disk — run 'node tools/download-assets.js' to generate them.");
+        Console.WriteLine($"[BMW Startup] CSS bundles: {(CssBundleService.HasBundles ? "loaded" : "none found")}");
 
         // Build JS bundle from static JS files.
         // bootstrap.bundle.min.js must be present (committed to repository or generated by tools/download-assets.js).
         JsBundleService.BuildBundle(Path.Combine(appInfo.StaticFiles.RootPathFull, "js"));
+        Console.WriteLine($"[BMW Startup] JS bundle built");
 
         // Build the pre-compressed in-memory static asset cache.
         // All compressible files up to InMemoryCacheMaxFileSizeBytes are Brotli- and
@@ -265,17 +291,35 @@ public static class BareMetalWebExtensions
         ProgramSetup.ConfigureCors(config, appInfo);
         ProgramSetup.ConfigureHttps(config, appInfo);
         ProgramSetup.ConfigureProxyRoutes(config, appInfo, logger, pageInfoFactory);
+        Console.WriteLine($"[BMW Startup] CORS, HTTPS, proxy routes configured");
 
         // Built-in routes
+        Console.WriteLine($"[BMW Startup] Registering routes...");
+        var routeCountBefore = appInfo.routes.Count;
         appInfo.RegisterStaticRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+        Console.WriteLine($"[BMW Startup]   Static routes: +{appInfo.routes.Count - routeCountBefore} ({appInfo.routes.Count} total)");
+
+        routeCountBefore = appInfo.routes.Count;
         appInfo.RegisterAuthRoutes(routeHandlers, pageInfoFactory, mainTemplate, allowAccountCreation);
+        Console.WriteLine($"[BMW Startup]   Auth routes:   +{appInfo.routes.Count - routeCountBefore} ({appInfo.routes.Count} total)");
+
+        routeCountBefore = appInfo.routes.Count;
         appInfo.RegisterMonitoringRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+        Console.WriteLine($"[BMW Startup]   Monitoring:    +{appInfo.routes.Count - routeCountBefore} ({appInfo.routes.Count} total)");
+
+        routeCountBefore = appInfo.routes.Count;
         appInfo.RegisterAdminRoutes(routeHandlers, pageInfoFactory, mainTemplate);
+        Console.WriteLine($"[BMW Startup]   Admin routes:  +{appInfo.routes.Count - routeCountBefore} ({appInfo.routes.Count} total)");
+
+        routeCountBefore = appInfo.routes.Count;
         appInfo.RegisterEntityMetadataRoute(pageInfoFactory);  // must be before RegisterApiRoutes
         appInfo.RegisterRuntimeApiRoutes(pageInfoFactory);       // /meta/entity/{name}, POST /query, POST /intent
         appInfo.RegisterLookupApiRoutes(pageInfoFactory);       // must be before RegisterApiRoutes
+        Console.WriteLine($"[BMW Startup]   Meta/Runtime:  +{appInfo.routes.Count - routeCountBefore} ({appInfo.routes.Count} total)");
+
         ActionApiHandlers.Initialize();                           // action engine lock manager
         NotificationService.Initialize(logger);                   // notification channels
+        Console.WriteLine($"[BMW Startup]   ActionAPI + NotificationService initialized");
 
         // Initialize cluster state with local lease (single-instance default)
         var clusterState = new BareMetalWeb.Data.ClusterState(new BareMetalWeb.Data.LocalLeaseAuthority());
@@ -288,15 +332,18 @@ public static class BareMetalWebExtensions
         ClusterApiHandlers.Initialize(clusterState, compactorState);
         ProxyRouteHandler.Initialize(clusterState);
         TenantApiHandlers.Initialize(tenantRegistry);
+        Console.WriteLine($"[BMW Startup]   Cluster + Compactor state initialized (local lease)");
 
         // Vector ANN index manager
         var vectorIndexManager = new BareMetalWeb.Data.VectorIndexManager(dataRoot, logger);
         VectorApiHandlers.Initialize(vectorIndexManager);
+        Console.WriteLine($"[BMW Startup]   Vector index manager initialized");
 
         // Attach write fencing to the primary WAL provider
         if (DataStoreProvider.PrimaryProvider is BareMetalWeb.Data.WalDataProvider walProvider)
             walProvider.SetClusterState(clusterState);
 
+        routeCountBefore = appInfo.routes.Count;
         appInfo.RegisterBinaryApiRoutes(routeHandlers, pageInfoFactory, mainTemplate);       // binary wire-format API
         appInfo.RegisterApiRoutes(routeHandlers, pageInfoFactory);
         appInfo.RegisterInboxRoutes(pageInfoFactory);
@@ -306,13 +353,20 @@ public static class BareMetalWebExtensions
         appInfo.RegisterViewRoutes(pageInfoFactory);
         appInfo.RegisterMcpRoutes(pageInfoFactory);
         appInfo.RegisterOpenApiRoute(pageInfoFactory);
+        Console.WriteLine($"[BMW Startup]   API/UI routes: +{appInfo.routes.Count - routeCountBefore} ({appInfo.routes.Count} total)");
 
         // Custom routes from caller
+        routeCountBefore = appInfo.routes.Count;
         configureRoutes?.Invoke(appInfo, routeHandlers, pageInfoFactory, mainTemplate);
+        if (appInfo.routes.Count > routeCountBefore)
+            Console.WriteLine($"[BMW Startup]   Custom routes: +{appInfo.routes.Count - routeCountBefore} ({appInfo.routes.Count} total)");
+
+        Console.WriteLine($"[BMW Startup] Route registration complete — {appInfo.routes.Count} routes total");
 
         // Finalise
         await appInfo.BuildAppInfoMenuOptionsAsync();
         await appInfo.WireUpRequestHandlingAndLoggerAsyncLifetime();
+        Console.WriteLine($"[BMW Startup] Menu options built, request handler wired");
 
         // Fire-and-forget: warm up search index metadata in the background so the
         // first real query does not pay the reflection/compilation cost.
@@ -322,8 +376,15 @@ public static class BareMetalWebExtensions
             {
                 await Task.Delay(2000);
                 warmupProvider.WarmSearchIndexMetadata();
+                Console.WriteLine($"[BMW Startup] Search index metadata warm-up complete (background)");
             });
+            Console.WriteLine($"[BMW Startup] Search index warm-up scheduled (2s delay)");
         }
+
+        startupSw.Stop();
+        Console.WriteLine();
+        Console.WriteLine($"[BMW Startup] ✓ Initialization complete in {startupSw.ElapsedMilliseconds}ms");
+        Console.WriteLine();
 
         return appInfo;
     }

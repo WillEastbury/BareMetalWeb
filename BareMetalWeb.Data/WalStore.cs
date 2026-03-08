@@ -314,6 +314,7 @@ public sealed class WalStore : IDisposable
     /// </summary>
     private void Recover()
     {
+        var recoverSw = System.Diagnostics.Stopwatch.StartNew();
         ulong snapshotPtr = WalConstants.NullPtr;
 
         // V2 spec §9: load latest snapshot first, then replay WAL tail only
@@ -321,9 +322,15 @@ public sealed class WalStore : IDisposable
         {
             HeadMap.BulkLoad(snapKeys, snapHeads);
             Volatile.Write(ref _visibleCommitPtr, snapshotPtr);
+            Console.WriteLine($"[BMW WAL] Snapshot loaded: {snapKeys.Length} keys, ptr=0x{snapshotPtr:X16}");
+        }
+        else
+        {
+            Console.WriteLine($"[BMW WAL] No snapshot found — full WAL replay required");
         }
 
         var segments = DiscoverSegments();  // sorted descending
+        Console.WriteLine($"[BMW WAL] Discovered {segments.Count} WAL segment(s)");
 
         // Build head map from newest segment to oldest.
         // Use Dictionary (O(1) inserts) instead of SortedDictionary (O(log n) inserts)
@@ -378,6 +385,10 @@ public sealed class WalStore : IDisposable
 
         // Always start a new segment; don't resume the previous active segment.
         _nextSegmentId = segments.Count > 0 ? segments[0].segId + 1 : 0;
+
+        HeadMap.CopyArrays(out var finalKeys, out _);
+        recoverSw.Stop();
+        Console.WriteLine($"[BMW WAL] Recovery complete: {finalKeys.Length} total keys in head map, {headEntries.Count} keys from WAL replay, next segment={_nextSegmentId} ({recoverSw.ElapsedMilliseconds}ms)");
     }
 
     /// <summary>Returns segment (segId, filePath) pairs sorted descending by segId.</summary>
