@@ -104,9 +104,13 @@ int w = (e & 1) * (1 - (e & 2));  // e = 2-bit value
 
 | Priority | Platform | Method | Width |
 |----------|----------|--------|-------|
-| 1 | x86 AVX2 | `DotProductAvx2` | 256-bit — 16 weights (4 packed bytes) per iteration |
-| 2 | ARM NEON | _(stub, not yet implemented)_ | 128-bit — 8 weights per iteration |
-| 3 | All | Scalar fallback | 4 weights per iteration |
+| 1 | ARM SVE2 | `DotProductSve2` | Scalable (128–2048 bit) — in-register decode, no LUT |
+| 2 | ARM SVE | `DotProductSve` | Scalable (128–2048 bit) — LUT decode, fused MLA |
+| 3 | x86 AVX-512 | `DotProductAvx512` | 512-bit — 32 weights (8 packed bytes) per iteration |
+| 4 | x86 AVX2 | `DotProductAvx2` | 256-bit — 16 weights (4 packed bytes) per iteration |
+| 5 | ARM NEON | `DotProductNeon` | 128-bit — 8 weights (2 packed bytes) per iteration |
+| 6 | Sparse skip | `DotProductSparse` | Non-zero bytes only (high-sparsity, no SIMD) |
+| 7 | All | `DotProductScalar` | 4 weights per iteration |
 
 **Optimizations:**
 
@@ -258,12 +262,16 @@ The Intelligence module extends the SIMD acceleration documented in
 
 | Component | x86 | ARM | Fallback |
 |-----------|-----|-----|----------|
-| Ternary dot product | AVX2 (16 weights/iter) | NEON stub | Scalar (4 weights/iter) |
+| Ternary dot product | AVX-512 (32/iter) / AVX2 (16/iter) | SVE2 (scalable, in-register) / SVE (scalable, LUT) / NEON (8/iter) | Scalar (4/iter) |
 | Prefetch | SSE `Prefetch0` | No-op (JIT constant) | No-op |
+| Horizontal sum | `Vector512/256.Sum` | `Sve.AddAcross` (SADDV) | Manual element sum |
+| Multiply-accumulate | Separate MUL + ADD | `Sve.MultiplyAdd` (fused MLA) | Separate MUL + ADD |
 | Cosine similarity | Scalar int | Scalar int | Scalar int |
 
-The AVX2 dot product processes 4 packed bytes (16 ternary weights) per iteration
-using `Vector256<int>` operations with zero-skip acceleration for sparse rows.
+The SVE2 path uses `GatherVectorByteZeroExtend` for in-register byte replication
+and per-lane shift/mask for branchless 2-bit ternary decode — eliminating LUT
+memory access entirely. The SVE path uses LUT decode with scalable `Vector<int>`
+that adapts to the hardware SVE width (128–2048 bits).
 
 ---
 
@@ -288,13 +296,10 @@ using `Vector256<int>` operations with zero-skip acceleration for sparse rows.
 
 ## Future Work
 
-- **ARM NEON dot product** — `AdvSimd` intrinsics for Pi 5 (128-bit, 8 weights
-  per iteration). Import added, implementation pending.
 - **Real model weights** — load actual BitNet b1.58 checkpoints instead of
   synthetic random tensors.
 - **ONNX embeddings fast path** — sentence embeddings for high-confidence intent
   matching before falling back to ternary inference.
-- **AVX-512 widening** — 32 weights per iteration on server CPUs.
 - **Sparse block skip-list** — index zero-byte runs for O(1) skip in very sparse
   matrices.
 

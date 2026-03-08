@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Intrinsics;
@@ -38,6 +39,11 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     private ushort[][]? _skipIndex; // per-row non-zero byte offsets for sparse skip
     private bool _disposed;
 
+    // SVE in-register decode pattern vectors (lazy-initialized)
+    private static Vector<int> s_sveByteIdxVec;
+    private static Vector<uint> s_sveShiftVec;
+    private static volatile bool s_svePatternsReady;
+
     public int Rows => _rows;
     public int Cols => _cols;
     /// <summary>Logical packed bytes per row (ceil(cols / 4)).</summary>
@@ -67,6 +73,27 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
             lut[i + 3] = Decode2Bit(b >> 6);
         }
         return lut;
+    }
+
+    /// <summary>
+    /// Initialize SVE2 in-register decode pattern vectors.
+    /// byteIdx: [0,0,0,0, 1,1,1,1, ...] — which packed byte each int32 lane reads.
+    /// shifts:  [0,2,4,6, 0,2,4,6, ...] — bit shift to isolate each lane's 2-bit field.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void InitSveDecodePatterns()
+    {
+        int count = Vector<int>.Count;
+        var byteIdx = new int[count];
+        var shifts = new uint[count];
+        for (int i = 0; i < count; i++)
+        {
+            byteIdx[i] = i >> 2;
+            shifts[i] = (uint)((i & 3) << 1);
+        }
+        s_sveByteIdxVec = new Vector<int>(byteIdx);
+        s_sveShiftVec = new Vector<uint>(shifts);
+        s_svePatternsReady = true;
     }
 
     private NativeTernaryMatrix(int rows, int cols)
@@ -165,6 +192,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
                 : 0f);
 
         if (matrix._stats.ZeroByteRatio > 0.4f
+            && !Sve.IsSupported
             && !Vector512.IsHardwareAccelerated
             && !Vector256.IsHardwareAccelerated
             && !AdvSimd.IsSupported)
@@ -175,9 +203,9 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
 
     /// <summary>
     /// Dot product of matrix row with an input vector.
-    /// Dispatches to AVX-512 (32 weights/iter), AVX2 (16 weights/iter),
-    /// NEON (8 weights/iter), sparse skip, or scalar (4 weights/iter).
-    /// All paths use LUT decode, prefetching, and zero-skip acceleration.
+    /// Dispatches to SVE2, SVE, AVX-512, AVX2, NEON, sparse skip, or scalar.
+    /// All paths use zero-skip acceleration. SVE2 uses in-register decode;
+    /// others use LUT decode with prefetching.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int DotProductRow(int row, ReadOnlySpan<int> input)
@@ -194,8 +222,16 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         int sum;
         int col;
 
-        // Dispatch: AVX-512 > AVX2 > NEON > Sparse skip > Scalar
-        if (Vector512.IsHardwareAccelerated && fullBytes >= 8)
+        // Dispatch: SVE2 > SVE > AVX-512 > AVX2 > NEON > Sparse skip > Scalar
+        if (Sve2.IsSupported && fullBytes >= (Vector<int>.Count >> 2))
+        {
+            sum = DotProductSve2(rowPtr, in inputRef, fullBytes, out col);
+        }
+        else if (Sve.IsSupported && fullBytes >= (Vector<int>.Count >> 2))
+        {
+            sum = DotProductSve(rowPtr, in inputRef, fullBytes, out col);
+        }
+        else if (Vector512.IsHardwareAccelerated && fullBytes >= 8)
         {
             sum = DotProductAvx512(rowPtr, in inputRef, fullBytes, out col);
         }
@@ -395,8 +431,169 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     }
 
     /// <summary>
-    /// Scalar fallback with LUT decode: processes 4 weights per iteration.
+    /// ARM SVE path: scalable vector width with LUT decode.
+    /// Processes Vector&lt;int&gt;.Count weights per iteration (128–2048 bits).
+    /// Uses Sve.MultiplyAdd (fused MLA) and Sve.AddAcross (SADDV) for reduction.
     /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int DotProductSve(
+        byte* rowPtr,
+        in int inputRef,
+        int fullBytes,
+        out int col)
+    {
+        int vecCount = Vector<int>.Count;
+        int bytesPerVec = vecCount >> 2;
+
+        Vector<int> acc = Vector<int>.Zero;
+        col = 0;
+        int b = 0;
+
+        ref int lutRef = ref MemoryMarshal.GetArrayDataReference(s_decodeLut);
+        int* wBuf = stackalloc int[vecCount];
+
+        for (; b + bytesPerVec <= fullBytes; b += bytesPerVec, col += vecCount)
+        {
+            // Zero-skip: check packed bytes (JIT constant-folds bytesPerVec branches)
+            if (bytesPerVec == 1)
+            {
+                if (rowPtr[b] == 0) continue;
+            }
+            else if (bytesPerVec == 2)
+            {
+                if (*(ushort*)(rowPtr + b) == 0) continue;
+            }
+            else if (bytesPerVec == 4)
+            {
+                if (*(uint*)(rowPtr + b) == 0) continue;
+            }
+            else if (bytesPerVec == 8)
+            {
+                if (*(ulong*)(rowPtr + b) == 0) continue;
+            }
+
+            // LUT decode packed bytes into stack buffer
+            for (int k = 0; k < bytesPerVec; k++)
+            {
+                int lutBase = rowPtr[b + k] << 2;
+                wBuf[k * 4]     = Unsafe.Add(ref lutRef, lutBase);
+                wBuf[k * 4 + 1] = Unsafe.Add(ref lutRef, lutBase + 1);
+                wBuf[k * 4 + 2] = Unsafe.Add(ref lutRef, lutBase + 2);
+                wBuf[k * 4 + 3] = Unsafe.Add(ref lutRef, lutBase + 3);
+            }
+
+            var weights = new Vector<int>(new ReadOnlySpan<int>(wBuf, vecCount));
+            var inputs = new Vector<int>(
+                MemoryMarshal.CreateReadOnlySpan(
+                    ref Unsafe.Add(ref Unsafe.AsRef(in inputRef), col), vecCount));
+
+            // Fused multiply-accumulate (MLA instruction)
+            acc = Sve.MultiplyAdd(acc, weights, inputs);
+        }
+
+        // SVE horizontal reduction (SADDV — single instruction)
+        int sum = (int)Sve.AddAcross(acc).GetElement(0);
+
+        // Scalar remainder
+        for (; b < fullBytes; b++, col += 4)
+        {
+            byte packed = rowPtr[b];
+            if (packed == 0) continue;
+            int lutBase = packed << 2;
+            sum += s_decodeLut[lutBase] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col);
+            sum += s_decodeLut[lutBase + 1] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 1);
+            sum += s_decodeLut[lutBase + 2] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 2);
+            sum += s_decodeLut[lutBase + 3] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 3);
+        }
+
+        return sum;
+    }
+
+    /// <summary>
+    /// ARM SVE2 path: in-register ternary decode (no LUT memory access).
+    /// Uses GatherVectorByteZeroExtend to replicate packed bytes across lanes,
+    /// then per-lane shift/mask for branchless 2-bit decode.
+    /// Eliminates LUT cache dependency — purely compute-bound.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int DotProductSve2(
+        byte* rowPtr,
+        in int inputRef,
+        int fullBytes,
+        out int col)
+    {
+        if (!s_svePatternsReady) InitSveDecodePatterns();
+
+        int vecCount = Vector<int>.Count;
+        int bytesPerVec = vecCount >> 2;
+
+        Vector<int> acc = Vector<int>.Zero;
+        col = 0;
+        int b = 0;
+
+        var trueMask = Sve.CreateTrueMaskInt32(SveMaskPattern.All);
+        var byteIdx = s_sveByteIdxVec;
+        var shifts = s_sveShiftVec;
+        var mask3 = new Vector<uint>(3);
+
+        for (; b + bytesPerVec <= fullBytes; b += bytesPerVec, col += vecCount)
+        {
+            // Zero-skip
+            if (bytesPerVec == 1)
+            {
+                if (rowPtr[b] == 0) continue;
+            }
+            else if (bytesPerVec == 2)
+            {
+                if (*(ushort*)(rowPtr + b) == 0) continue;
+            }
+            else if (bytesPerVec == 4)
+            {
+                if (*(uint*)(rowPtr + b) == 0) continue;
+            }
+            else if (bytesPerVec == 8)
+            {
+                if (*(ulong*)(rowPtr + b) == 0) continue;
+            }
+
+            // In-register decode:
+            // 1. Gather bytes with lane replication: lane[i] = rowPtr[b + i/4]
+            var rawBytes = Sve.GatherVectorByteZeroExtend(trueMask, rowPtr + b, byteIdx);
+
+            // 2. Per-lane shift to align 2-bit field: shifts = [0,2,4,6,0,2,4,6,...]
+            var shifted = Sve.ShiftRightLogical(
+                Unsafe.BitCast<Vector<int>, Vector<uint>>(rawBytes), shifts);
+
+            // 3. Isolate 2-bit entry and decode: weight = (e & 1) * (1 - (e & 2))
+            var entry = shifted & mask3;
+            var magnitude = Unsafe.BitCast<Vector<uint>, Vector<int>>(entry & Vector<uint>.One);
+            var signBit = Unsafe.BitCast<Vector<uint>, Vector<int>>(entry & new Vector<uint>(2));
+            var weights = magnitude * (Vector<int>.One - signBit);
+
+            var inputs = new Vector<int>(
+                MemoryMarshal.CreateReadOnlySpan(
+                    ref Unsafe.Add(ref Unsafe.AsRef(in inputRef), col), vecCount));
+
+            // Fused multiply-accumulate
+            acc = Sve.MultiplyAdd(acc, weights, inputs);
+        }
+
+        int sum = (int)Sve.AddAcross(acc).GetElement(0);
+
+        // Scalar remainder
+        for (; b < fullBytes; b++, col += 4)
+        {
+            byte packed = rowPtr[b];
+            if (packed == 0) continue;
+            int lutBase = packed << 2;
+            sum += s_decodeLut[lutBase] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col);
+            sum += s_decodeLut[lutBase + 1] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 1);
+            sum += s_decodeLut[lutBase + 2] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 2);
+            sum += s_decodeLut[lutBase + 3] * Unsafe.Add(ref Unsafe.AsRef(in inputRef), col + 3);
+        }
+
+        return sum;
+    }
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int DotProductScalar(
         byte* rowPtr,
@@ -658,6 +855,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
                 ? (float)zeroByteCount / totalLogicalBytes : 0f);
 
         if (matrix._stats.ZeroByteRatio > 0.4f
+            && !Sve.IsSupported
             && !Vector512.IsHardwareAccelerated
             && !Vector256.IsHardwareAccelerated
             && !AdvSimd.IsSupported)
