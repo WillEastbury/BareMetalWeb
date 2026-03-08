@@ -57,6 +57,13 @@ public sealed class ClientRequestTracker : IClientRequestTracker
         var nowUtc = DateTime.UtcNow;
         retryAfterSeconds = null;
 
+        // Always bypass throttling for loopback addresses
+        if (clientIp is "127.0.0.1" or "::1")
+        {
+            reason = string.Empty;
+            return false;
+        }
+
         if (_allowList.Contains(clientIp))
         {
             RecordRequest(clientIp, nowUtc);
