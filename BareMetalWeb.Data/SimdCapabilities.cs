@@ -7,7 +7,10 @@ namespace BareMetalWeb.Data;
 
 /// <summary>
 /// Reports available CPU SIMD/hardware-acceleration features at startup or on demand.
-/// Used for diagnostics, logging, and capability-gating of hot-path SIMD code.
+/// Uses both the runtime's IsSupported checks (which reflect OS/BIOS/env-var state)
+/// and raw CPUID queries (which reflect what the silicon actually advertises).
+/// When these disagree the dashboard can pinpoint whether the block is OS/BIOS-level
+/// (OSXSAVE not enabled) or a DOTNET_Enable* environment variable override.
 /// </summary>
 public sealed class SimdCapabilities
 {
@@ -17,7 +20,7 @@ public sealed class SimdCapabilities
     /// <summary>Number of single-precision floats that fit in one portable SIMD register.</summary>
     public int FloatVectorWidth { get; }
 
-    // ─── x86 / x64 ───────────────────────────────────────────────────────────
+    // ─── x86 / x64 runtime-enabled ───────────────────────────────────────────
     public bool Sse2   { get; }
     public bool Sse42  { get; }
     public bool Avx    { get; }
@@ -28,6 +31,19 @@ public sealed class SimdCapabilities
     public bool Bmi2   { get; }
     public bool Popcnt { get; }
     public bool Lzcnt  { get; }
+
+    // ─── x86 / x64 raw CPUID (what the silicon advertises) ───────────────────
+    public bool CpuHasSse2    { get; }
+    public bool CpuHasSse42   { get; }
+    public bool CpuHasAvx     { get; }
+    public bool CpuHasAvx2    { get; }
+    public bool CpuHasFma     { get; }
+    public bool CpuHasAvx512F { get; }
+    public bool CpuHasBmi1    { get; }
+    public bool CpuHasBmi2    { get; }
+    public bool CpuHasPopcnt  { get; }
+    public bool CpuHasLzcnt   { get; }
+    public bool OsXSaveEnabled { get; }
 
     // ─── ARM ─────────────────────────────────────────────────────────────────
     public bool AdvSimd     { get; }
@@ -50,7 +66,7 @@ public sealed class SimdCapabilities
         IsHardwareAccelerated = System.Numerics.Vector.IsHardwareAccelerated;
         FloatVectorWidth      = System.Numerics.Vector<float>.Count;
 
-        // x86
+        // x86 runtime checks
         Sse2    = System.Runtime.Intrinsics.X86.Sse2.IsSupported;
         Sse42   = System.Runtime.Intrinsics.X86.Sse42.IsSupported;
         Avx     = System.Runtime.Intrinsics.X86.Avx.IsSupported;
@@ -61,6 +77,27 @@ public sealed class SimdCapabilities
         Bmi2    = System.Runtime.Intrinsics.X86.Bmi2.IsSupported;
         Popcnt  = System.Runtime.Intrinsics.X86.Popcnt.IsSupported;
         Lzcnt   = System.Runtime.Intrinsics.X86.Lzcnt.IsSupported;
+
+        // Raw CPUID — what the silicon actually advertises
+        if (X86Base.IsSupported)
+        {
+            var (_, _, ecx1, edx1) = X86Base.CpuId(1, 0);
+            CpuHasSse2    = (edx1 & (1 << 26)) != 0;
+            CpuHasSse42   = (ecx1 & (1 << 20)) != 0;
+            CpuHasPopcnt  = (ecx1 & (1 << 23)) != 0;
+            CpuHasFma     = (ecx1 & (1 << 12)) != 0;
+            OsXSaveEnabled = (ecx1 & (1 << 27)) != 0; // OSXSAVE — OS enabled XSAVE for AVX state
+            CpuHasAvx     = (ecx1 & (1 << 28)) != 0;
+
+            var (_, ebx7, _, _) = X86Base.CpuId(7, 0);
+            CpuHasAvx2    = (ebx7 & (1 <<  5)) != 0;
+            CpuHasBmi1    = (ebx7 & (1 <<  3)) != 0;
+            CpuHasBmi2    = (ebx7 & (1 <<  8)) != 0;
+            CpuHasAvx512F = (ebx7 & (1 << 16)) != 0;
+
+            var (_, _, ecxExt, _) = X86Base.CpuId(unchecked((int)0x80000001), 0);
+            CpuHasLzcnt   = (ecxExt & (1 << 5)) != 0;
+        }
 
         // ARM
         AdvSimd      = System.Runtime.Intrinsics.Arm.AdvSimd.IsSupported;

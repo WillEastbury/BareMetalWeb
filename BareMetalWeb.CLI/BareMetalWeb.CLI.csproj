@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
+    <InstructionSet>avx,avx2,fma,avx512f,bmi1,bmi2,lzcnt,popcnt</InstructionSet>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>full</TrimMode>
     <SelfContained>true</SelfContained>
