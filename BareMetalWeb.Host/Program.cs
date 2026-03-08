@@ -433,7 +433,12 @@ static class ProgramSetup
 
         return serverOptions =>
         {
-            var listenPort = config.GetValue("Kestrel.Port", 5000);
+            // Respect PORT / WEBSITES_PORT env vars (Azure App Service, containers)
+            var envPort = Environment.GetEnvironmentVariable("PORT")
+                       ?? Environment.GetEnvironmentVariable("WEBSITES_PORT");
+            var listenPort = !string.IsNullOrEmpty(envPort) && int.TryParse(envPort, out var ep)
+                ? ep
+                : config.GetValue("Kestrel.Port", 5000);
             serverOptions.ListenAnyIP(listenPort);
 
             var http2Enabled = config.GetValue("Kestrel.Http2Enabled", true);
