@@ -237,6 +237,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             if (ipRetry.HasValue)
                 context.Response.Headers.RetryAfter = ((int)Math.Ceiling(ipRetry.Value.TotalSeconds)).ToString();
+            _logger?.LogInfo($"login|rate-limit|ip={remoteIp}|retry={FormatThrottleMessage(ipRetry)}");
             RenderLoginForm(context, FormatThrottleMessage(ipRetry), string.Empty);
             await _renderer.RenderPage(context.HttpContext);
             return;
@@ -293,6 +294,7 @@ public sealed class RouteHandlers : IRouteHandlers
             context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
             if (userRetry.HasValue)
                 context.Response.Headers.RetryAfter = ((int)Math.Ceiling(userRetry.Value.TotalSeconds)).ToString();
+            _logger?.LogInfo($"login|rate-limit|user={identifier}|ip={remoteIp}|retry={FormatThrottleMessage(userRetry)}");
             RenderLoginForm(context, FormatThrottleMessage(userRetry), identifier);
             await _renderer.RenderPage(context.HttpContext);
             return;
@@ -503,7 +505,11 @@ public sealed class RouteHandlers : IRouteHandlers
         var regIpKey = BuildMfaAttemptKey("register:ip", remoteIp);
         if (IsThrottled(regIpKey, RegisterIpMaxAttempts, out var regRetry))
         {
-            RenderRegisterForm(context, $"Too many registration attempts. Try again later.", null, null, null);
+            context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            if (regRetry.HasValue)
+                context.Response.Headers.RetryAfter = ((int)Math.Ceiling(regRetry.Value.TotalSeconds)).ToString();
+            _logger?.LogInfo($"register|rate-limit|ip={remoteIp}|retry={FormatThrottleMessage(regRetry)}");
+            RenderRegisterForm(context, FormatThrottleMessage(regRetry), null, null, null);
             await _renderer.RenderPage(context.HttpContext);
             return;
         }
