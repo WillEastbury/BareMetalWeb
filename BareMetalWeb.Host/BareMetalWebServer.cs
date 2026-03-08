@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Reflection;
 using Microsoft.AspNetCore.Http;
@@ -91,7 +92,9 @@ public class BareMetalWebServer : IBareWebHost
     /// Null (default) means multitenancy is disabled and the system store is used for all requests.
     /// </summary>
     public TenantRegistry? TenantRegistry { get; set; }
-    private readonly Dictionary<string, MenuCacheEntry> _menuCache = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, MenuCacheEntry> _menuCache = new(StringComparer.Ordinal);
+    private DateTime _lastMenuCacheScavenge = DateTime.UtcNow;
+    private const int MaxMenuCacheEntries = 2048;
     private int _routesVersion = 0;
     private readonly Dictionary<string, CompiledRoute> _compiledRoutes = new(StringComparer.Ordinal);
     private List<(string Key, RouteHandlerData Data, CompiledRoute Compiled)>? _sortedRoutes;
@@ -153,7 +156,7 @@ public class BareMetalWebServer : IBareWebHost
                 return;
             }
 
-            _menuCache.Remove(cacheKey);
+            _menuCache.TryRemove(cacheKey, out _);
         }
         foreach (var rte in routes)
         {
@@ -306,6 +309,7 @@ public class BareMetalWebServer : IBareWebHost
         {
             var cacheKey = BuildMenuCacheKey(user, _routesVersion);
             _menuCache[cacheKey] = new MenuCacheEntry(MenuOptionsList.ToArray(), DateTime.UtcNow.Add(MenuCacheTtl));
+            ScavengeMenuCache();
         }
     }
     public delegate Task BareMetalRequestDelegate(HttpContext ctx, IHtmlRenderer renderer, PageInfo page, BareMetalWebServer app, IOutputCache cache);
@@ -1075,6 +1079,30 @@ public class BareMetalWebServer : IBareWebHost
         : $"<a href=\"{System.Net.WebUtility.HtmlEncode(url)}\" class=\"text-white-50 ms-2\">Privacy Policy</a>";
 
     private readonly record struct MenuCacheEntry(IMenuOption[] Options, DateTime ExpiresUtc);
+
+    private void ScavengeMenuCache()
+    {
+        var now = DateTime.UtcNow;
+        if ((now - _lastMenuCacheScavenge).TotalSeconds < 15) return;
+        _lastMenuCacheScavenge = now;
+
+        // Evict all expired entries
+        foreach (var kvp in _menuCache)
+        {
+            if (kvp.Value.ExpiresUtc < now)
+                _menuCache.TryRemove(kvp.Key, out _);
+        }
+
+        // Hard cap: if still over limit, evict oldest entries
+        if (_menuCache.Count > MaxMenuCacheEntries)
+        {
+            foreach (var kvp in _menuCache.OrderBy(x => x.Value.ExpiresUtc))
+            {
+                _menuCache.TryRemove(kvp.Key, out _);
+                if (_menuCache.Count <= MaxMenuCacheEntries) break;
+            }
+        }
+    }
 
     private static bool TryGetForwardedHost(HttpContext context, out HostString host)
     {
