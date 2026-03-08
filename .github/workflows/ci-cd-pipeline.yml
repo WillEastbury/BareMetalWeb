@@ -96,7 +96,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: version
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -130,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [version, l1-0-build-check]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -250,7 +250,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [version, l1-0-build-check]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -301,7 +301,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: l1-1-upgrade-ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -347,7 +347,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: l1-1-upgrade-ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -386,7 +386,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: l1-1-upgrade-ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -426,7 +426,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [l1-2-integration-ci, l1-3-performance-ci, l1-4-performance-big-ci]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -482,7 +482,7 @@ jobs:
       info_version: ${{ needs.version.outputs.info_version }}
       tag:          ${{ needs.version.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -666,7 +666,7 @@ jobs:
     needs: l2-0-release-candidate
     environment: canary-ring-0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Download deploy package
         uses: actions/download-artifact@v4
@@ -749,7 +749,7 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build early-access deploy matrix from deploy-list.json
         id: matrix
@@ -806,7 +806,7 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build full-rollout deploy matrix from deploy-list.json
         id: matrix
