@@ -3,6 +3,8 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
@@ -526,6 +528,21 @@ static class ProgramSetup
                 ? ep
                 : config.GetValue("Kestrel.Port", 5000);
             serverOptions.ListenAnyIP(listenPort);
+
+            // HTTPS: listen on a second port when a certificate is configured
+            var httpsPort = config.GetValue("Kestrel.HttpsPort", 0);
+            var certPath = config.GetValue("Kestrel.CertPath", "");
+            var certPassword = Environment.GetEnvironmentVariable("KESTREL_CERT_PASSWORD") ?? config.GetValue("Kestrel.CertPassword", "");
+            if (httpsPort > 0 && !string.IsNullOrEmpty(certPath) && File.Exists(certPath))
+            {
+                serverOptions.ListenAnyIP(httpsPort, listenOptions =>
+                {
+                    var cert = string.IsNullOrEmpty(certPassword)
+                        ? System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(certPath, Path.ChangeExtension(certPath, ".key"))
+                        : new System.Security.Cryptography.X509Certificates.X509Certificate2(certPath, certPassword);
+                    listenOptions.UseHttps(cert);
+                });
+            }
 
             var http2Enabled = config.GetValue("Kestrel.Http2Enabled", true);
             var http3Enabled = config.GetValue("Kestrel.Http3Enabled", false);

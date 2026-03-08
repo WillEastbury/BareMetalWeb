@@ -14,6 +14,8 @@ data:
     Data.Root|/app/Data
     Kestrel.Http2Enabled|true
     Kestrel.Http3Enabled|false
+    Kestrel.HttpsPort|5233
+    Kestrel.CertPath|/app/tls/tls.crt
     Kestrel.MaxStreamsPerConnection|100
     Kestrel.InitialConnectionWindowSize|131072
     Kestrel.InitialStreamWindowSize|98304
