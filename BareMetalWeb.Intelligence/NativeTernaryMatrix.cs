@@ -39,10 +39,14 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     private ushort[][]? _skipIndex; // per-row non-zero byte offsets for sparse skip
     private int _disposedFlag; // 0 = alive, 1 = disposed — must use Interlocked
 
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003 // Sve is experimental
     // SVE in-register decode pattern vectors (lazy-initialized)
     private static Vector<int> s_sveByteIdxVec;
     private static Vector<uint> s_sveShiftVec;
     private static volatile bool s_svePatternsReady;
+#pragma warning restore SYSLIB5003
+#endif
 
     public int Rows => _rows;
     public int Cols => _cols;
@@ -75,6 +79,8 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         return lut;
     }
 
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
     /// <summary>
     /// Initialize SVE2 in-register decode pattern vectors.
     /// byteIdx: [0,0,0,0, 1,1,1,1, ...] — which packed byte each int32 lane reads.
@@ -95,6 +101,8 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         s_sveShiftVec = new Vector<uint>(shifts);
         s_svePatternsReady = true;
     }
+#pragma warning restore SYSLIB5003
+#endif
 
     private NativeTernaryMatrix(int rows, int cols)
     {
@@ -192,7 +200,11 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
                 : 0f);
 
         if (matrix._stats.ZeroByteRatio > 0.4f
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
             && !Sve.IsSupported
+#pragma warning restore SYSLIB5003
+#endif
             && !Vector512.IsHardwareAccelerated
             && !Vector256.IsHardwareAccelerated
             && !AdvSimd.IsSupported)
@@ -229,6 +241,8 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         int col;
 
         // Dispatch: SVE2 > SVE > AVX-512 > AVX2 > NEON > Sparse skip > Scalar
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
         if (Sve2.IsSupported && fullBytes >= (Vector<int>.Count >> 2))
         {
             sum = DotProductSve2(rowPtr, in inputRef, fullBytes, out col);
@@ -237,7 +251,10 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         {
             sum = DotProductSve(rowPtr, in inputRef, fullBytes, out col);
         }
-        else if (Vector512.IsHardwareAccelerated && fullBytes >= 8)
+        else
+#pragma warning restore SYSLIB5003
+#endif
+        if (Vector512.IsHardwareAccelerated && fullBytes >= 8)
         {
             sum = DotProductAvx512(rowPtr, in inputRef, fullBytes, out col);
         }
@@ -436,6 +453,8 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         return sum;
     }
 
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
     /// <summary>
     /// ARM SVE path: scalable vector width with LUT decode.
     /// Processes Vector&lt;int&gt;.Count weights per iteration (128–2048 bits).
@@ -600,6 +619,9 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
 
         return sum;
     }
+#pragma warning restore SYSLIB5003
+#endif
+
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int DotProductScalar(
         byte* rowPtr,
@@ -867,7 +889,11 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
                 ? (float)zeroByteCount / totalLogicalBytes : 0f);
 
         if (matrix._stats.ZeroByteRatio > 0.4f
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
             && !Sve.IsSupported
+#pragma warning restore SYSLIB5003
+#endif
             && !Vector512.IsHardwareAccelerated
             && !Vector256.IsHardwareAccelerated
             && !AdvSimd.IsSupported)
