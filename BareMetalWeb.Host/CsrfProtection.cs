@@ -92,11 +92,24 @@ public static class CsrfProtection
 
     private static bool FixedTimeEquals(string left, string right)
     {
-        var leftBytes = Encoding.UTF8.GetBytes(left);
-        var rightBytes = Encoding.UTF8.GetBytes(right);
-        if (leftBytes.Length != rightBytes.Length)
+        // #1243: Use stackalloc to avoid per-request heap allocations
+        const int MaxStackSize = 256;
+        int leftByteCount = Encoding.UTF8.GetByteCount(left);
+        int rightByteCount = Encoding.UTF8.GetByteCount(right);
+        if (leftByteCount != rightByteCount)
             return false;
 
-        return CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
+        if (leftByteCount > MaxStackSize)
+        {
+            var leftBytes = Encoding.UTF8.GetBytes(left);
+            var rightBytes = Encoding.UTF8.GetBytes(right);
+            return CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
+        }
+
+        Span<byte> leftSpan = stackalloc byte[leftByteCount];
+        Span<byte> rightSpan = stackalloc byte[rightByteCount];
+        Encoding.UTF8.GetBytes(left, leftSpan);
+        Encoding.UTF8.GetBytes(right, rightSpan);
+        return CryptographicOperations.FixedTimeEquals(leftSpan, rightSpan);
     }
 }

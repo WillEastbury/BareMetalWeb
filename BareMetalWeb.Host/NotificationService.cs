@@ -217,14 +217,39 @@ public static class NotificationService
             _ => throw new InvalidOperationException($"Unknown channel type: {channel.ChannelType}")
         };
 
+        // #1247: Retry with exponential backoff (3 attempts)
+        const int maxRetries = 3;
+        int[] delaysMs = [0, 2_000, 8_000];
+        Exception? lastEx = null;
+
         try
         {
-            await transport.SendAsync(recipient, subject, body, ct);
-            _logger?.LogInfo($"Notification sent via {channel.ChannelType}: {channel.Name} → {recipient}");
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError($"Notification failed: {channel.Name} → {recipient}", ex);
+            for (int attempt = 0; attempt < maxRetries; attempt++)
+            {
+                if (attempt > 0)
+                {
+                    try { await Task.Delay(delaysMs[attempt], ct); }
+                    catch (OperationCanceledException) { break; }
+                }
+
+                try
+                {
+                    await transport.SendAsync(recipient, subject, body, ct);
+                    _logger?.LogInfo($"Notification sent via {channel.ChannelType}: {channel.Name} → {recipient}");
+                    return;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    lastEx = ex;
+                    _logger?.LogError($"Notification attempt {attempt + 1}/{maxRetries} failed: {channel.Name} → {recipient}", ex);
+                }
+            }
+
+            if (lastEx != null)
+            {
+                _logger?.LogError($"Notification permanently failed after {maxRetries} attempts: {channel.Name} → {recipient}", lastEx);
+            }
         }
         finally
         {
