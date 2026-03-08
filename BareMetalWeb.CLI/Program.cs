@@ -9,6 +9,7 @@ namespace BareMetalWeb.CLI;
 // AOT-compatible JSON contexts
 [JsonSerializable(typeof(BmwConfig))]
 [JsonSerializable(typeof(Dictionary<string, string>))]
+[JsonSerializable(typeof(Dictionary<string, int>))]
 [JsonSerializable(typeof(Dictionary<string, JsonElement>[]))]
 [JsonSerializable(typeof(JsonDocument))]
 [JsonSerializable(typeof(JsonElement))]
@@ -19,6 +20,8 @@ namespace BareMetalWeb.CLI;
 [JsonSerializable(typeof(MetaCommand[]))]
 [JsonSerializable(typeof(MetaCommand))]
 [JsonSerializable(typeof(string[]))]
+[JsonSerializable(typeof(SeedRequest))]
+[JsonSerializable(typeof(JobStatusResponse))]
 [JsonSourceGenerationOptions(WriteIndented = true, PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 internal partial class BmwJsonContext : JsonSerializerContext { }
 
@@ -81,6 +84,23 @@ internal sealed class MetaCommand
     [JsonPropertyName("order")] public int Order { get; set; }
 }
 
+internal sealed class SeedRequest
+{
+    [JsonPropertyName("clearExisting")] public bool ClearExisting { get; set; }
+    [JsonPropertyName("entities")] public Dictionary<string, int> Entities { get; set; } = new();
+}
+
+internal sealed class JobStatusResponse
+{
+    [JsonPropertyName("jobId")] public string JobId { get; set; } = "";
+    [JsonPropertyName("operationName")] public string OperationName { get; set; } = "";
+    [JsonPropertyName("status")] public string Status { get; set; } = "";
+    [JsonPropertyName("percentComplete")] public int PercentComplete { get; set; }
+    [JsonPropertyName("description")] public string? Description { get; set; }
+    [JsonPropertyName("error")] public string? Error { get; set; }
+    [JsonPropertyName("statusUrl")] public string? StatusUrl { get; set; }
+}
+
 internal static class Program
 {
     private static string ConfigDir => Path.Combine(
@@ -131,6 +151,7 @@ internal static class Program
                 "command" => await RunCommand(rest),
                 "import" => await ImportEntities(rest),
                 "export" => await ExportEntities(rest),
+                "seed" => await SeedData(rest),
                 "config" => ShowConfig(),
                 "help" or "--help" or "-h" => Help(0),
                 "--version" or "-v" or "version" => ShowVersion(),
@@ -643,6 +664,130 @@ internal static class Program
         return 0;
     }
 
+    // --- seed ---
+    static async Task<int> SeedData(string[] args)
+    {
+        if (string.IsNullOrEmpty(_config.Url))
+            return Help(1, "Not connected. Run: metal connect <url>");
+
+        bool clearExisting = false;
+        var entityCounts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var arg in args)
+        {
+            if (arg is "--clear" or "--clear-existing")
+            {
+                clearExisting = true;
+                continue;
+            }
+            var eqIdx = arg.IndexOf('=');
+            if (eqIdx > 0 && int.TryParse(arg[(eqIdx + 1)..], out var count))
+            {
+                if (count <= 0) return Help(1, $"Count for '{arg[..eqIdx]}' must be a positive integer.");
+                entityCounts[arg[..eqIdx]] = count;
+                continue;
+            }
+            return Help(1, $"Unrecognised argument: {arg}\nUsage: metal seed [--clear] [type=count ...]");
+        }
+
+        // If no entity types specified, fetch all and use a default count of 10 each
+        if (entityCounts.Count == 0)
+        {
+            var meta = await FetchMeta();
+            if (meta == null) return 1;
+            foreach (var e in meta)
+                entityCounts[e.Slug] = 10;
+            if (entityCounts.Count == 0)
+            {
+                Console.Error.WriteLine("No entity types found on the server.");
+                return 1;
+            }
+            Console.WriteLine($"No entity types specified — using all {entityCounts.Count} types with 10 records each.");
+        }
+
+        var request = new SeedRequest { ClearExisting = clearExisting, Entities = entityCounts };
+        var json = JsonSerializer.Serialize(request, BmwJsonContext.Default.SeedRequest);
+
+        Console.WriteLine($"Seeding {entityCounts.Count} entity type(s){(clearExisting ? " (clearing existing data first)" : "")}...");
+
+        var resp = await PostWithCsrf("/api/admin/sample-data",
+            new StringContent(json, Encoding.UTF8, "application/json"));
+
+        if (resp.StatusCode == HttpStatusCode.Forbidden)
+        {
+            Console.Error.WriteLine("403 Forbidden - ensure you are logged in as an admin: metal login");
+            return 1;
+        }
+        if (resp.StatusCode != HttpStatusCode.Accepted && !resp.IsSuccessStatusCode)
+        {
+            await PrintError(resp);
+            return 1;
+        }
+
+        var body = await resp.Content.ReadAsStringAsync();
+        var jobResp = JsonSerializer.Deserialize(body, BmwJsonContext.Default.JobStatusResponse);
+        if (jobResp == null || string.IsNullOrEmpty(jobResp.JobId))
+        {
+            Console.Error.WriteLine("Unexpected response from server - could not get job ID.");
+            return 1;
+        }
+
+        Console.WriteLine($"Job queued: {jobResp.JobId}  Polling for completion...");
+
+        var statusUrl = $"/api/jobs/{jobResp.JobId}";
+        int lastPercent = -1;
+        while (true)
+        {
+            await Task.Delay(2000);
+            var pollResp = await _http.GetAsync(statusUrl);
+            if (pollResp.StatusCode == HttpStatusCode.NotFound)
+            {
+                Console.Error.WriteLine("\nJob not found - it may have been pruned.");
+                return 1;
+            }
+            if (!pollResp.IsSuccessStatusCode && pollResp.StatusCode != HttpStatusCode.Accepted)
+            {
+                await PrintError(pollResp);
+                return 1;
+            }
+            var pollBody = await pollResp.Content.ReadAsStringAsync();
+            var status = JsonSerializer.Deserialize(pollBody, BmwJsonContext.Default.JobStatusResponse);
+            if (status == null) break;
+
+            if (status.PercentComplete != lastPercent)
+            {
+                lastPercent = status.PercentComplete;
+                var bar = BuildProgressBar(status.PercentComplete, 30);
+                // Truncate description to a fixed width so \r overwrites cleanly
+                var desc = status.Description ?? string.Empty;
+                if (desc.Length > 50) desc = desc[..47] + "...";
+                Console.Write($"\r  {bar} {status.PercentComplete,3}%  {desc,-50}");
+            }
+
+            if (string.Equals(status.Status, "succeeded", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine();
+                Console.WriteLine($"Seed complete. {status.Description}");
+                return 0;
+            }
+            if (string.Equals(status.Status, "failed", StringComparison.OrdinalIgnoreCase))
+            {
+                Console.WriteLine();
+                Console.Error.WriteLine($"Seed failed: {status.Error ?? status.Description}");
+                return 1;
+            }
+        }
+
+        Console.WriteLine();
+        return 0;
+    }
+
+    static string BuildProgressBar(int percent, int width)
+    {
+        var filled = (percent * width + 50) / 100;
+        return "[" + new string('#', filled) + new string('-', width - filled) + "]";
+    }
+
     // --- version ---
     static int ShowVersion()
     {
@@ -998,6 +1143,12 @@ internal static class Program
               export <type> [options]     Export entities
                 --format=csv|json  --output=file.csv
 
+            Dev / Admin:
+              seed [--clear] [type=count ...]
+                                          Seed sample data for dev environment setup.
+                                          If no types given, seeds all types with 10 records each.
+                --clear                   Clear existing records before seeding
+
             Examples:
               metal connect https://mysite.azurewebsites.net abc123key
               metal login
@@ -1016,6 +1167,8 @@ internal static class Program
               metal command orders abc123 Approve
               metal import products data.json
               metal export products --format=csv --output=products.csv
+              metal seed
+              metal seed --clear to-do=20 customers=5
               metal logout
             """);
         return exitCode;
