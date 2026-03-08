@@ -303,6 +303,14 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Sample Gallery", "" }, "admin", false, 0),
             routeHandlers.GalleryDeployPostHandler));
 
+        // Webstore — browse and install shared templates from the control plane
+        host.RegisterRoute("GET /admin/webstore", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Template Webstore", "" }, "admin", true, 3, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
+            routeHandlers.WebStoreHandler));
+        host.RegisterRoute("POST /admin/webstore/install/{package}", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Template Webstore", "" }, "admin", false, 0),
+            routeHandlers.WebStoreInstallHandler));
+
         // Data & Index Sizing — disk and in-memory index footprint per table
         host.RegisterRoute("GET /admin/data-sizes", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Data & Index Sizing", "" }, "admin", true, 4, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),

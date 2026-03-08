@@ -1,5 +1,31 @@
 namespace BareMetalWeb.ControlPlane;
 
+// ── Webstore / gallery template models ──────────────────────────────────────
+
+/// <summary>Summary of a template package available on the control plane webstore.</summary>
+public sealed class GalleryListing
+{
+    public string? Name { get; set; }
+    public string? Slug { get; set; }
+    public string? Description { get; set; }
+    public string? Icon { get; set; }
+    public string? Version { get; set; }
+    public string? Author { get; set; }
+    public int EntityCount { get; set; }
+    public int FieldCount { get; set; }
+    public string? Category { get; set; }
+    public string? PublishedAt { get; set; }
+    public long Downloads { get; set; }
+}
+
+/// <summary>Response wrapper for the webstore listing endpoint.</summary>
+public sealed class GalleryListingResponse
+{
+    public List<GalleryListing>? Packages { get; set; }
+}
+
+// ── Telemetry models ────────────────────────────────────────────────────────
+
 /// <summary>Periodic health/version/uptime report from an instance.</summary>
 public sealed class InstanceHeartbeat
 {

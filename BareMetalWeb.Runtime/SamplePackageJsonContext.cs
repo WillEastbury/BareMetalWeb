@@ -34,4 +34,4 @@ namespace BareMetalWeb.Runtime;
 [JsonSourceGenerationOptions(
     PropertyNameCaseInsensitive = true,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
-internal partial class SamplePackageJsonContext : JsonSerializerContext { }
+public partial class SamplePackageJsonContext : JsonSerializerContext { }

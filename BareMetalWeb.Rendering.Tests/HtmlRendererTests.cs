@@ -104,7 +104,7 @@ internal sealed class StubBareWebHost : IBareWebHost
 
     public void RegisterRoute(string path, RouteHandlerData routeHandler) { }
     public Task RenderForbidden(BmwContext context) => Task.CompletedTask;
-    public Task RequestHandler(HttpContext context) => Task.CompletedTask;
+    public Task RequestHandler(BmwContext context) => Task.CompletedTask;
     public Task WireUpRequestHandlingAndLoggerAsyncLifetime() => Task.CompletedTask;
 }
 
@@ -444,40 +444,44 @@ public class HtmlRendererCompressionTests
     [Fact]
     public async Task RenderPage_WithBrotliAcceptEncoding_SetsBrContentEncoding()
     {
-        var context = CreateHttpContext("br");
-        await _renderer.RenderPage(context, MakePageInfo(), _app);
+        var httpCtx = CreateHttpContext("br");
+        var bmwCtx = BmwContext.CreateFrom(httpCtx, _app);
+        await _renderer.RenderPage(bmwCtx, MakePageInfo(), _app);
 
-        Assert.Equal("br", context.Response.Headers.ContentEncoding.ToString());
-        Assert.Contains("Accept-Encoding", context.Response.Headers.Vary.ToString());
+        Assert.Equal("br", httpCtx.Response.Headers.ContentEncoding.ToString());
+        Assert.Contains("Accept-Encoding", httpCtx.Response.Headers.Vary.ToString());
     }
 
     [Fact]
     public async Task RenderPage_WithGzipAcceptEncoding_SetsGzipContentEncoding()
     {
-        var context = CreateHttpContext("gzip");
-        await _renderer.RenderPage(context, MakePageInfo(), _app);
+        var httpCtx = CreateHttpContext("gzip");
+        var bmwCtx = BmwContext.CreateFrom(httpCtx, _app);
+        await _renderer.RenderPage(bmwCtx, MakePageInfo(), _app);
 
-        Assert.Equal("gzip", context.Response.Headers.ContentEncoding.ToString());
-        Assert.Contains("Accept-Encoding", context.Response.Headers.Vary.ToString());
+        Assert.Equal("gzip", httpCtx.Response.Headers.ContentEncoding.ToString());
+        Assert.Contains("Accept-Encoding", httpCtx.Response.Headers.Vary.ToString());
     }
 
     [Fact]
     public async Task RenderPage_WithNoAcceptEncoding_NoContentEncodingHeader()
     {
-        var context = CreateHttpContext();
-        await _renderer.RenderPage(context, MakePageInfo(), _app);
+        var httpCtx = CreateHttpContext();
+        var bmwCtx = BmwContext.CreateFrom(httpCtx, _app);
+        await _renderer.RenderPage(bmwCtx, MakePageInfo(), _app);
 
-        Assert.Empty(context.Response.Headers.ContentEncoding.ToString());
+        Assert.Empty(httpCtx.Response.Headers.ContentEncoding.ToString());
     }
 
     [Fact]
     public async Task RenderPage_WithBrotliAcceptEncoding_BodyIsDecompressibleBrotli()
     {
-        var context = CreateHttpContext("br");
-        await _renderer.RenderPage(context, MakePageInfo("Test content for brotli"), _app);
+        var httpCtx = CreateHttpContext("br");
+        var bmwCtx = BmwContext.CreateFrom(httpCtx, _app);
+        await _renderer.RenderPage(bmwCtx, MakePageInfo("Test content for brotli"), _app);
 
-        context.Response.Body.Seek(0, SeekOrigin.Begin);
-        using var bs = new BrotliStream(context.Response.Body, CompressionMode.Decompress);
+        httpCtx.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var bs = new BrotliStream(httpCtx.Response.Body, CompressionMode.Decompress);
         using var result = new MemoryStream();
         bs.CopyTo(result);
         var html = Encoding.UTF8.GetString(result.ToArray());
@@ -487,11 +491,12 @@ public class HtmlRendererCompressionTests
     [Fact]
     public async Task RenderPage_WithGzipAcceptEncoding_BodyIsDecompressibleGzip()
     {
-        var context = CreateHttpContext("gzip");
-        await _renderer.RenderPage(context, MakePageInfo("Test content for gzip"), _app);
+        var httpCtx = CreateHttpContext("gzip");
+        var bmwCtx = BmwContext.CreateFrom(httpCtx, _app);
+        await _renderer.RenderPage(bmwCtx, MakePageInfo("Test content for gzip"), _app);
 
-        context.Response.Body.Seek(0, SeekOrigin.Begin);
-        using var gz = new GZipStream(context.Response.Body, CompressionMode.Decompress);
+        httpCtx.Response.Body.Seek(0, SeekOrigin.Begin);
+        using var gz = new GZipStream(httpCtx.Response.Body, CompressionMode.Decompress);
         using var result = new MemoryStream();
         gz.CopyTo(result);
         var html = Encoding.UTF8.GetString(result.ToArray());
@@ -507,7 +512,7 @@ public class DiagnosticBannerTests
         return host;
     }
 
-    private static HttpContext CreateContext(string? showhst = null, string? xForwardedHost = null)
+    private static BmwContext CreateContext(IBareWebHost host, string? showhst = null, string? xForwardedHost = null)
     {
         var ctx = new DefaultHttpContext();
         if (showhst != null)
@@ -515,14 +520,14 @@ public class DiagnosticBannerTests
         if (xForwardedHost != null)
             ctx.Request.Headers["X-Forwarded-Host"] = xForwardedHost;
         ctx.Request.Host = new HostString("localhost");
-        return ctx;
+        return BmwContext.CreateFrom(ctx, host);
     }
 
     [Fact]
     public void ShouldShowDiagnosticBanner_AppSettingFalse_ReturnsFalse()
     {
         var host = CreateHost(false);
-        var context = CreateContext("true");
+        var context = CreateContext(host, "true");
         Assert.False(HtmlRenderer.ShouldShowDiagnosticBanner(context, host));
     }
 
@@ -530,7 +535,7 @@ public class DiagnosticBannerTests
     public void ShouldShowDiagnosticBanner_QsParamMissing_ReturnsFalse()
     {
         var host = CreateHost(true);
-        var context = CreateContext(showhst: null);
+        var context = CreateContext(host, showhst: null);
         Assert.False(HtmlRenderer.ShouldShowDiagnosticBanner(context, host));
     }
 
@@ -538,7 +543,7 @@ public class DiagnosticBannerTests
     public void ShouldShowDiagnosticBanner_QsParamFalse_ReturnsFalse()
     {
         var host = CreateHost(true);
-        var context = CreateContext("false");
+        var context = CreateContext(host, "false");
         Assert.False(HtmlRenderer.ShouldShowDiagnosticBanner(context, host));
     }
 
@@ -546,7 +551,7 @@ public class DiagnosticBannerTests
     public void ShouldShowDiagnosticBanner_BothTrue_ReturnsTrue()
     {
         var host = CreateHost(true);
-        var context = CreateContext("true");
+        var context = CreateContext(host, "true");
         Assert.True(HtmlRenderer.ShouldShowDiagnosticBanner(context, host));
     }
 
@@ -554,7 +559,7 @@ public class DiagnosticBannerTests
     public void ShouldShowDiagnosticBanner_QsParamCaseInsensitive_ReturnsTrue()
     {
         var host = CreateHost(true);
-        var context = CreateContext("True");
+        var context = CreateContext(host, "True");
         Assert.True(HtmlRenderer.ShouldShowDiagnosticBanner(context, host));
     }
 
@@ -581,7 +586,7 @@ public class DiagnosticBannerTests
     {
         var host = CreateHost(true);
         host.Metrics = new StubMetricsTracker();
-        var context = CreateContext("true", "proxy.example.com");
+        var context = CreateContext(host, "true", "proxy.example.com");
         var html = HtmlRenderer.BuildDiagnosticBannerHtml(context, host, 1024);
         Assert.Contains("proxy.example.com", html);
         Assert.Contains("bm-diag-banner", html);
@@ -592,7 +597,7 @@ public class DiagnosticBannerTests
     {
         var host = CreateHost(true);
         host.Metrics = new StubMetricsTracker();
-        var context = CreateContext("true");
+        var context = CreateContext(host, "true");
         var html = HtmlRenderer.BuildDiagnosticBannerHtml(context, host, 512);
         Assert.Contains("localhost", html);
         Assert.Contains("512", html);

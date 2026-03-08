@@ -45,6 +45,8 @@ public interface IRouteHandlers
     ValueTask EntityDesignerHandler(BmwContext context);
     ValueTask GalleryHandler(BmwContext context);
     ValueTask GalleryDeployPostHandler(BmwContext context);
+    ValueTask WebStoreHandler(BmwContext context);
+    ValueTask WebStoreInstallHandler(BmwContext context);
     ValueTask DataApiListHandler(BmwContext context);
     ValueTask DataApiImportHandler(BmwContext context);
     ValueTask DataApiGetHandler(BmwContext context);

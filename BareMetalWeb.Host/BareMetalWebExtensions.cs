@@ -631,7 +631,9 @@ public static class BareMetalWebExtensions
             }
 
             appInfo.ControlPlane = cpService;
+            RouteHandlers.WebStoreClient = cpClient;
             Console.WriteLine($"[BMW Startup] Control plane telemetry: streaming to {cpUrl}");
+            Console.WriteLine($"[BMW Startup] Template webstore: enabled at /admin/webstore");
         }
         else
         {

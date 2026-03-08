@@ -995,6 +995,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask EntityDesignerHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask GalleryHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask GalleryDeployPostHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask WebStoreHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask WebStoreInstallHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiListHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiImportHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask DataApiGetHandler(BmwContext context) => ValueTask.CompletedTask;

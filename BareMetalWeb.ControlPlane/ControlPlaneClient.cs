@@ -83,4 +83,57 @@ public sealed class ControlPlaneClient
             }
         });
     }
+
+    // ── GET operations (synchronous, awaitable) ─────────────────────────────
+
+    /// <summary>GET a typed response from the control plane. Returns null on any failure.</summary>
+    public async Task<T?> GetAsync<T>(string path) where T : class
+    {
+        if (!IsConfigured) return null;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}{path}");
+            request.Headers.TryAddWithoutValidation("ApiKey", _apiKey);
+            using var response = await Http.SendAsync(request).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger?.Log(BmwLogLevel.Debug,
+                    $"[BMW ControlPlane] GET {path} returned {(int)response.StatusCode}");
+                return null;
+            }
+            var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            return JsonSerializer.Deserialize<T>(json, JsonOpts);
+        }
+        catch (Exception ex)
+        {
+            _logger?.Log(BmwLogLevel.Debug,
+                $"[BMW ControlPlane] GET {path} failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>GET raw JSON string from the control plane. Returns null on any failure.</summary>
+    public async Task<string?> GetRawAsync(string path)
+    {
+        if (!IsConfigured) return null;
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}{path}");
+            request.Headers.TryAddWithoutValidation("ApiKey", _apiKey);
+            using var response = await Http.SendAsync(request).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger?.Log(BmwLogLevel.Debug,
+                    $"[BMW ControlPlane] GET {path} returned {(int)response.StatusCode}");
+                return null;
+            }
+            return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger?.Log(BmwLogLevel.Debug,
+                $"[BMW ControlPlane] GET {path} failed: {ex.Message}");
+            return null;
+        }
+    }
 }

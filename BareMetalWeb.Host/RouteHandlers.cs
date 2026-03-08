@@ -21,6 +21,7 @@ using BareMetalWeb.Core.Delegates;
 using BareMetalWeb.Rendering.Models;
 using BareMetalWeb.Core;
 using BareMetalWeb.Runtime;
+using BareMetalWeb.ControlPlane;
 
 namespace BareMetalWeb.Host;
 
@@ -35,6 +36,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private readonly IBufferedLogger? _logger;
     private readonly BmwConfig? _config;
     private readonly IReadOnlyList<(string SettingId, string Value, string Description)> _settingDefaults;
+    internal static ControlPlaneClient? WebStoreClient { get; set; }
     private const string MfaChallengeCookieName = "mfa_challenge_id";
     private static readonly TimeSpan MfaPendingLifetime = TimeSpan.FromMinutes(5);
     private const int MfaPendingMaxFailures = 5;
@@ -4362,6 +4364,185 @@ public sealed class RouteHandlers : IRouteHandlers
 
         context.Response.Redirect("/admin/gallery");
         _ = message; // redirect supersedes any rendered message
+    }
+
+    // ── Webstore: browse + install remote templates from control plane ───────
+
+    public async ValueTask WebStoreHandler(BmwContext context)
+    {
+        await BuildPageHandler(async ctx =>
+        {
+            var sb = new StringBuilder(4096);
+            sb.Append("<h4><i class=\"bi bi-shop me-2\"></i>Template Webstore</h4>");
+
+            if (WebStoreClient is null || !WebStoreClient.IsConfigured)
+            {
+                sb.Append("<div class=\"alert alert-info\">Webstore is not configured. Set <code>ControlPlane.Url</code> and <code>ControlPlane.ApiKey</code> in Metal.config to browse shared templates.</div>");
+                ctx.SetStringValue("title", "Template Webstore");
+                ctx.SetStringValue("html_message", sb.ToString());
+                return;
+            }
+
+            // Fetch remote listings
+            var listings = await WebStoreClient.GetAsync<List<GalleryListing>>(
+                "/api/data/GalleryTemplate").ConfigureAwait(false);
+
+            if (listings is null || listings.Count == 0)
+            {
+                sb.Append("<div class=\"alert alert-secondary\">No templates available on the control plane. Publish packages to the <code>GalleryTemplate</code> entity on the control plane to make them available here.</div>");
+                ctx.SetStringValue("title", "Template Webstore");
+                ctx.SetStringValue("html_message", sb.ToString());
+                return;
+            }
+
+            // Check which are already deployed locally
+            var existingDefs = await DataStoreProvider.Current
+                .QueryAsync<EntityDefinition>(null, ctx.RequestAborted).ConfigureAwait(false);
+            var existingSlugs = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var def in existingDefs)
+            {
+                var slug = def.Slug ?? string.Empty;
+                if (slug.Length > 0) existingSlugs.Add(slug);
+            }
+
+            sb.Append("<p class=\"text-muted\">Browse and install shared templates from the central control plane.</p>");
+            sb.Append("<div class=\"row g-3\">");
+
+            var csrfToken = CsrfProtection.EnsureToken(ctx);
+
+            foreach (var listing in listings)
+            {
+                var slug = listing.Slug ?? string.Empty;
+                var isDeployed = existingSlugs.Contains(slug);
+                var badgeClass = isDeployed ? "bg-success" : "bg-secondary";
+                var badgeLabel = isDeployed ? "Installed" : "Available";
+                var btnClass = isDeployed ? "btn-outline-secondary" : "btn-primary";
+                var btnLabel = isDeployed ? "Re-install" : "Install";
+
+                sb.Append("<div class=\"col-md-6 col-lg-4\">");
+                sb.Append("<div class=\"card h-100\">");
+                sb.Append("<div class=\"card-body\">");
+                sb.Append($"<h5 class=\"card-title\"><i class=\"bi {WebUtility.HtmlEncode(listing.Icon ?? "bi-box")} me-2\"></i>{WebUtility.HtmlEncode(listing.Name ?? slug)}</h5>");
+                if (!string.IsNullOrEmpty(listing.Author))
+                    sb.Append($"<p class=\"text-muted small mb-1\">by {WebUtility.HtmlEncode(listing.Author)}</p>");
+                sb.Append($"<p class=\"card-text text-muted small\">{WebUtility.HtmlEncode(listing.Description ?? "")}</p>");
+                sb.Append($"<p><span class=\"badge {badgeClass}\">{badgeLabel}</span>");
+                if (!string.IsNullOrEmpty(listing.Version))
+                    sb.Append($" <span class=\"badge bg-light text-dark\">v{WebUtility.HtmlEncode(listing.Version)}</span>");
+                sb.Append($" <span class=\"text-muted small\">{listing.EntityCount} entit{(listing.EntityCount == 1 ? "y" : "ies")}, {listing.FieldCount} field{(listing.FieldCount == 1 ? "" : "s")}</span>");
+                if (listing.Downloads > 0)
+                    sb.Append($" <span class=\"text-muted small\">· {listing.Downloads} install{(listing.Downloads == 1 ? "" : "s")}</span>");
+                sb.Append("</p>");
+                sb.Append($"<form method=\"post\" action=\"/admin/webstore/install/{WebUtility.HtmlEncode(slug)}\">");
+                sb.Append($"<input type=\"hidden\" name=\"{CsrfProtection.FormFieldName}\" value=\"{WebUtility.HtmlEncode(csrfToken)}\">");
+                sb.Append($"<button type=\"submit\" class=\"btn {btnClass} btn-sm\">{btnLabel}</button>");
+                sb.Append("</form>");
+                sb.Append("</div></div></div>");
+            }
+
+            sb.Append("</div>");
+            ctx.SetStringValue("title", "Template Webstore");
+            ctx.SetStringValue("html_message", sb.ToString());
+        })(context);
+    }
+
+    public async ValueTask WebStoreInstallHandler(BmwContext context)
+    {
+        var packageSlug = GetRouteValue(context, "package") ?? string.Empty;
+
+        if (!context.HttpRequest.HasFormContentType)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("Invalid form submission.");
+            return;
+        }
+
+        var form = await context.HttpRequest.ReadFormAsync();
+        if (!CsrfProtection.ValidateFormToken(context, form))
+        {
+            await BuildPageHandler(ctx =>
+            {
+                ctx.SetStringValue("title", "Template Webstore");
+                ctx.SetStringValue("html_message", "<div class=\"alert alert-danger\">Invalid security token. Please try again.</div>");
+            })(context);
+            return;
+        }
+
+        if (WebStoreClient is null || !WebStoreClient.IsConfigured)
+        {
+            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            await context.Response.WriteAsync("Webstore not configured.");
+            return;
+        }
+
+        // Fetch the full package JSON from the control plane
+        var packageJson = await WebStoreClient.GetRawAsync(
+            $"/api/data/GalleryTemplate/{WebUtility.UrlEncode(packageSlug)}/package")
+            .ConfigureAwait(false);
+
+        if (string.IsNullOrEmpty(packageJson))
+        {
+            await BuildPageHandler(ctx =>
+            {
+                ctx.SetStringValue("title", "Template Webstore");
+                ctx.SetStringValue("html_message", $"<div class=\"alert alert-danger\">Package '{WebUtility.HtmlEncode(packageSlug)}' not found on control plane.</div>");
+            })(context);
+            return;
+        }
+
+        // Deserialize using the AOT-safe context
+        SamplePackage? pkg;
+        try
+        {
+            pkg = JsonSerializer.Deserialize(packageJson,
+                SamplePackageJsonContext.Default.SamplePackage);
+        }
+        catch (JsonException ex)
+        {
+            _logger?.LogError($"Webstore|deserialize-failed|{packageSlug}", ex);
+            await BuildPageHandler(ctx =>
+            {
+                ctx.SetStringValue("title", "Template Webstore");
+                ctx.SetStringValue("html_message", $"<div class=\"alert alert-danger\">Failed to parse package '{WebUtility.HtmlEncode(packageSlug)}': {WebUtility.HtmlEncode(ex.Message)}</div>");
+            })(context);
+            return;
+        }
+
+        if (pkg is null)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Invalid package data.");
+            return;
+        }
+
+        // Deploy using existing gallery infrastructure
+        var messages = RentStringList();
+        var deployed = await SampleGalleryService.DeployPackageAsync(
+            pkg,
+            DataStoreProvider.Current,
+            overwrite: false,
+            msg => messages.Add(msg),
+            context.RequestAborted)
+            .ConfigureAwait(false);
+        ReturnStringList(messages);
+
+        // Hot-reload
+        if (deployed.Count > 0)
+        {
+            try
+            {
+                await RuntimeEntityRegistry.RebuildAsync().ConfigureAwait(false);
+                MetadataCompiler.CompileAndSwap(DataScaffold.Entities);
+                PermissionResolver.Invalidate();
+                _logger?.LogInfo($"Webstore|installed|{packageSlug}|entities={deployed.Count}|registry-rebuilt");
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError($"Webstore|rebuild-failed|{packageSlug}", ex);
+            }
+        }
+
+        context.Response.Redirect("/admin/webstore");
     }
 
     private async ValueTask ApplyUploadFieldsFromFormAsync(BmwContext context, DataEntityMetadata meta, BaseDataObject instance, IFormCollection form, List<string> errors)
