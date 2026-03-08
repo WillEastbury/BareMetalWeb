@@ -1606,6 +1606,14 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         }
 
         var fileShare = access == FileAccess.Read ? FileShare.ReadWrite : FileShare.Read;
+
+        // Use memory-mapped paged file for read-only access (index loading)
+        if (access == FileAccess.Read)
+        {
+            try { return new MappedPagedFile(path, pageSize); }
+            catch { /* fall through to FileStream path */ }
+        }
+
         var stream    = new FileStream(path, FileMode.OpenOrCreate, access, fileShare, 4096, options);
         return new LocalPagedFile(stream, pageSize);
     }

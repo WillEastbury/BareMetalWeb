@@ -473,4 +473,57 @@ runtime.
 
 ---
 
-_Status: Updated @ commit HEAD (2026-03-06) — added BitmaskFilterPipeline section; extended hardware acceleration section with SimdDistance FMA paths, WalLatin1Key32 word comparison, CRC slicing-by-4 software fallback; added striped WalHeadMap description; added WAL Segment Compaction section documenting materialised-view compaction strategy_
+## Memory-Mapped I/O Layer
+
+The data layer uses memory-mapped files to reduce syscall overhead on read-heavy
+paths. Two components provide mmap access:
+
+### MappedSegmentCache
+
+Thread-safe cache of `MemoryMappedFile` views, one per WAL segment file. Stored
+in `WalStore` and consulted **before** the `SafeFileHandle`/`RandomAccess` fallback
+path on every `TryReadOpPayload` and `TryReadFullOp` call.
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  Read path (hot)                                         │
+│  TryReadOpPayload(ptr, key)                              │
+│    1. MappedSegmentCache.GetOrCreate(segId)  ← mmap      │
+│    2. MappedSegment.ReadRecord(offset)       ← unsafe    │
+│    3. TryExtractPayloadFromRecord(buffer)    ← parse     │
+│    fallback: GetOrOpenReaderHandle(segId)    ← SafeFile  │
+│              RandomAccess.Read(handle, ...)               │
+└──────────────────────────────────────────────────────────┘
+```
+
+- `ConcurrentDictionary<uint, Lazy<MappedSegment?>>` ensures one mapping per
+  segment with lazy thread-safe initialisation.
+- `MappedSegment` uses `MemoryMappedViewAccessor` with `AcquirePointer`/
+  `ReleasePointer` for zero-copy reads via unsafe pointer spans.
+- Records are still copied into pooled `byte[]` buffers because CRC
+  verification (`VerifyRecordCrc`) requires a **mutable** `Span<byte>`.
+- On compaction, `Evict(segId)` disposes the mapping so the next read re-maps
+  the compacted file. `ObjectDisposedException` during concurrent reads triggers
+  a graceful fallback to the `SafeFileHandle` path.
+
+### MappedPagedFile
+
+Read-only `IPagedFile` implementation backed by `MemoryMappedFile`. Used by
+`WalDataProvider.OpenPagedFile` when `access == FileAccess.Read` (index loading).
+Parses the same header format as `LocalPagedFile` (magic `0x50414745`, version 1).
+Falls back to `LocalPagedFile` (FileStream) if mapping fails.
+
+```
+IPagedFile
+├── LocalPagedFile   (FileStream, read-write)
+└── MappedPagedFile  (MemoryMappedFile, read-only)
+```
+
+**Performance characteristics:**
+- Eliminates per-read `open()`/`close()` syscalls for WAL segment reads
+- OS page cache serves repeated reads without kernel-user copies
+- Index page reads use a single `mmap` instead of seek+read per page
+
+---
+
+_Status: Updated @ commit HEAD — added Memory-Mapped I/O Layer section documenting MappedSegmentCache and MappedPagedFile_

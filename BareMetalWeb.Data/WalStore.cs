@@ -55,6 +55,9 @@ public sealed class WalStore : IDisposable
     // #1240: Cached read handles per segment — RandomAccess.Read is thread-safe
     private readonly ConcurrentDictionary<uint, SafeFileHandle> _readerHandles = new();
 
+    // Memory-mapped segment cache for zero-overhead reads via OS page cache
+    private readonly MappedSegmentCache _mappedSegments;
+
     // ── Public surface ────────────────────────────────────────────────────────
 
     /// <summary>In-memory head map: key → Ptr of the latest committed record for that key.</summary>
@@ -110,6 +113,7 @@ public sealed class WalStore : IDisposable
         _directory       = directory;
         _maxSegmentBytes = maxSegmentBytes;
         Encryption       = encryption ?? WalPayloadCodec.GetDefaultEncryption();
+        _mappedSegments  = new MappedSegmentCache(directory);
         Directory.CreateDirectory(directory);
         KeyAllocator = WalTableKeyAllocator.Load(directory);
         Recover();
@@ -231,6 +235,30 @@ public sealed class WalStore : IDisposable
 
         try
         {
+            // Try memory-mapped path first (zero open overhead)
+            var mapped = _mappedSegments.GetOrCreate(segId);
+            if (mapped != null)
+            {
+                try
+                {
+                    var buffer = mapped.ReadRecord(offset32, out int totalBytes);
+                    if (buffer != null)
+                    {
+                        try
+                        {
+                            return TryExtractPayloadFromRecord(
+                                buffer.AsSpan(0, totalBytes), key, out payload, Encryption);
+                        }
+                        finally
+                        {
+                            ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+                        }
+                    }
+                }
+                catch (ObjectDisposedException) { /* segment evicted during read — fall through */ }
+            }
+
+            // Fallback to SafeFileHandle path
             var handle = GetOrOpenReaderHandle(segId);
             if (handle == null) return false;
             return TryReadOpPayloadFromHandle(handle, offset32, key, out payload, Encryption);
@@ -268,6 +296,8 @@ public sealed class WalStore : IDisposable
             try { kvp.Value.Dispose(); } catch { /* best-effort */ }
         }
         _readerHandles.Clear();
+
+        _mappedSegments.Dispose();
 
         ProjectionManager.Dispose();
         KeyAllocator.Dispose();
@@ -470,6 +500,7 @@ public sealed class WalStore : IDisposable
         {
             // No live keys reference this segment — it can be deleted
             EvictReaderHandle(segmentId);
+            _mappedSegments.Evict(segmentId);
             try { File.Delete(originalPath); } catch { /* best effort */ }
             EngineMetrics.RecordCompaction(EngineMetrics.ElapsedUs(startTicks), originalSize);
             return;
@@ -515,6 +546,7 @@ public sealed class WalStore : IDisposable
         {
             // All entries were tombstones — delete the segment
             EvictReaderHandle(segmentId);
+            _mappedSegments.Evict(segmentId);
             try { File.Delete(originalPath); } catch { /* best effort */ }
             EngineMetrics.RecordCompaction(EngineMetrics.ElapsedUs(startTicks), originalSize);
             return;
@@ -545,6 +577,7 @@ public sealed class WalStore : IDisposable
             // Fsync is handled by WriteFooterAndClose above.
             // Atomic rename over the original segment.
             EvictReaderHandle(segmentId);
+            _mappedSegments.Evict(segmentId);
             File.Move(tmpPath, originalPath, overwrite: true);
         }
         catch
@@ -706,6 +739,9 @@ public sealed class WalStore : IDisposable
                 return;
             }
 
+            // Evict cached handles/mappings before atomic rename
+            EvictReaderHandle(segmentId);
+            _mappedSegments.Evict(segmentId);
             File.Move(tmpPath, segPath, overwrite: true);
 
             int updateCount = 0;
@@ -781,6 +817,30 @@ public sealed class WalStore : IDisposable
 
         try
         {
+            // Try memory-mapped path first
+            var mapped = _mappedSegments.GetOrCreate(segId);
+            if (mapped != null)
+            {
+                try
+                {
+                    var buffer = mapped.ReadRecord(offset32, out int totalBytes);
+                    if (buffer != null)
+                    {
+                        try
+                        {
+                            return TryExtractFullOpFromRecord(
+                                buffer.AsSpan(0, totalBytes), key, out op, Encryption);
+                        }
+                        finally
+                        {
+                            ArrayPool<byte>.Shared.Return(buffer, clearArray: true);
+                        }
+                    }
+                }
+                catch (ObjectDisposedException) { /* segment evicted — fall through */ }
+            }
+
+            // Fallback to SafeFileHandle path
             var handle = GetOrOpenReaderHandle(segId);
             if (handle == null) return false;
             return TryReadFullOpFromHandle(handle, offset32, key, out op, Encryption);
@@ -1051,6 +1111,116 @@ public sealed class WalStore : IDisposable
             if (off > span.Length) return false;
         }
 
+        return false;
+    }
+
+    /// <summary>
+    /// Extracts a key's payload from a pre-read, CRC-verified record buffer.
+    /// Shared by both the mmap and SafeFileHandle read paths.
+    /// </summary>
+    private static bool TryExtractPayloadFromRecord(ReadOnlySpan<byte> record, ulong targetKey,
+        out ReadOnlyMemory<byte> payload, WalEnvelopeEncryption? encryption = null)
+    {
+        payload = default;
+        if (!WalSegmentReader.VerifyRecordCrc(record.ToArray())) return false;
+
+        int off = WalConstants.RecordHeaderBytes;
+        if (off + 16 > record.Length) return false;
+        uint opCount = BinaryPrimitives.ReadUInt32LittleEndian(record[(off + 8)..]);
+        off += 16;
+
+        for (uint i = 0; i < opCount; i++)
+        {
+            if (off + 44 > record.Length) return false;
+            ulong key           = BinaryPrimitives.ReadUInt64LittleEndian(record[off..]);
+            uint  compressedLen = BinaryPrimitives.ReadUInt32LittleEndian(record[(off + 32)..]);
+
+            if (key == targetKey)
+            {
+                ushort codec           = BinaryPrimitives.ReadUInt16LittleEndian(record[(off + 26)..]);
+                uint   uncompressedLen = BinaryPrimitives.ReadUInt32LittleEndian(record[(off + 28)..]);
+                off += 44;
+
+                if (codec != WalConstants.CodecNone && codec != WalConstants.CodecBrotli
+                    && codec != WalConstants.CodecEncryptedNone && codec != WalConstants.CodecEncryptedBrotli)
+                    throw new InvalidDataException(
+                        $"Unknown WAL op codec 0x{codec:X4} for key 0x{key:X16}.");
+
+                if (compressedLen == 0) { payload = ReadOnlyMemory<byte>.Empty; return true; }
+                if (compressedLen > MaxPayloadSize) return false;
+                if (off + compressedLen > record.Length) return false;
+
+                var raw = record.Slice(off, (int)compressedLen).ToArray();
+                payload = WalPayloadCodec.Decompress(raw, codec, uncompressedLen, encryption);
+                return true;
+            }
+
+            if (compressedLen > int.MaxValue - 44) return false;
+            off = checked(off + 44 + (int)compressedLen);
+            if (off > record.Length) return false;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Extracts a full <see cref="WalOp"/> from a pre-read, CRC-verified record buffer.
+    /// Shared by both the mmap and SafeFileHandle read paths.
+    /// </summary>
+    private static bool TryExtractFullOpFromRecord(ReadOnlySpan<byte> record, ulong targetKey,
+        out WalOp op, WalEnvelopeEncryption? encryption = null)
+    {
+        op = default;
+        if (!WalSegmentReader.VerifyRecordCrc(record.ToArray())) return false;
+
+        int off = WalConstants.RecordHeaderBytes;
+        if (off + 16 > record.Length) return false;
+        uint opCount = BinaryPrimitives.ReadUInt32LittleEndian(record[(off + 8)..]);
+        off += 16;
+
+        for (uint i = 0; i < opCount; i++)
+        {
+            if (off + 44 > record.Length) return false;
+
+            ulong  key            = BinaryPrimitives.ReadUInt64LittleEndian(record[off..]);
+            ulong  prevPtr        = BinaryPrimitives.ReadUInt64LittleEndian(record[(off + 8)..]);
+            ulong  schemaSig      = BinaryPrimitives.ReadUInt64LittleEndian(record[(off + 16)..]);
+            ushort opType         = BinaryPrimitives.ReadUInt16LittleEndian(record[(off + 24)..]);
+            ushort codec          = BinaryPrimitives.ReadUInt16LittleEndian(record[(off + 26)..]);
+            uint   uncompressedLen = BinaryPrimitives.ReadUInt32LittleEndian(record[(off + 28)..]);
+            uint   compressedLen  = BinaryPrimitives.ReadUInt32LittleEndian(record[(off + 32)..]);
+            uint   flags          = BinaryPrimitives.ReadUInt32LittleEndian(record[(off + 36)..]);
+            if (compressedLen > int.MaxValue - 44) return false;
+            off += 44;
+
+            if (key == targetKey)
+            {
+                if (compressedLen > MaxPayloadSize) return false;
+                if (off + compressedLen > record.Length) return false;
+
+                byte[] rawPayload = compressedLen > 0
+                    ? record.Slice(off, (int)compressedLen).ToArray()
+                    : [];
+
+                bool encrypted = codec == WalConstants.CodecEncryptedNone
+                    || codec == WalConstants.CodecEncryptedBrotli;
+
+                op = new WalOp
+                {
+                    Key             = key,
+                    PrevPtr         = prevPtr,
+                    SchemaSignature = schemaSig,
+                    OpType          = opType,
+                    Codec           = codec,
+                    UncompressedLen = uncompressedLen,
+                    Flags           = flags,
+                    Payload         = rawPayload,
+                };
+                return true;
+            }
+
+            off = checked(off + (int)compressedLen);
+            if (off > record.Length) return false;
+        }
         return false;
     }
 }
