@@ -7,10 +7,8 @@ using System.Threading;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
-#if NET7_0_OR_GREATER
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
-#endif
 
 namespace BareMetalWeb.Host;
 
@@ -396,7 +394,6 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
     private static string[][] GetSimdFeatureRows()
     {
         var features = new List<string[]>();
-#if NET7_0_OR_GREATER
         if (RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
         {
             features.Add(new[] { "ARM AdvSimd (NEON)", AdvSimd.IsSupported ? "✓" : "✗" });
@@ -420,7 +417,6 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             features.Add(new[] { "x86 POPCNT", Popcnt.IsSupported ? "✓" : "✗" });
             features.Add(new[] { "x86 LZCNT", Lzcnt.IsSupported ? "✓" : "✗" });
         }
-#endif
         return features.ToArray();
     }
 }

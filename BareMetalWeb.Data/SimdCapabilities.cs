@@ -1,9 +1,7 @@
 using System.Runtime.CompilerServices;
-#if NET7_0_OR_GREATER
 using System.Numerics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
-#endif
 
 namespace BareMetalWeb.Data;
 
@@ -49,7 +47,6 @@ public sealed class SimdCapabilities
 
     private SimdCapabilities()
     {
-#if NET7_0_OR_GREATER
         IsHardwareAccelerated = System.Numerics.Vector.IsHardwareAccelerated;
         FloatVectorWidth      = System.Numerics.Vector<float>.Count;
 
@@ -72,19 +69,12 @@ public sealed class SimdCapabilities
         ArmAes       = System.Runtime.Intrinsics.Arm.Aes.IsSupported;
         ArmSha256    = System.Runtime.Intrinsics.Arm.Sha256.IsSupported;
         ArmDp        = System.Runtime.Intrinsics.Arm.Dp.IsSupported;
-#if NET9_0_OR_GREATER
 #pragma warning disable SYSLIB5003
         Sve          = System.Runtime.Intrinsics.Arm.Sve.IsSupported;
         Sve2         = Sve && IsSve2Supported();
 #pragma warning restore SYSLIB5003
-#endif
 
         BestTier = DetermineBestTier();
-#else
-        IsHardwareAccelerated = false;
-        FloatVectorWidth      = 1;
-        BestTier              = "Scalar";
-#endif
     }
 
     private static SimdCapabilities? _instance;
@@ -128,7 +118,6 @@ public sealed class SimdCapabilities
 
     private string DetermineBestTier()
     {
-#if NET7_0_OR_GREATER
         if (Avx512F)          return "AVX-512F";
         if (Fma && Avx2)      return "AVX2+FMA";
         if (Avx2)             return "AVX2";
@@ -140,11 +129,9 @@ public sealed class SimdCapabilities
         if (Sse42)            return "SSE4.2";
         if (Sse2)             return "SSE2";
         if (IsHardwareAccelerated) return "Vector<T>";
-#endif
         return "Scalar";
     }
 
-#if NET9_0_OR_GREATER
 #pragma warning disable SYSLIB5003
     private static bool IsSve2Supported()
     {
@@ -152,5 +139,4 @@ public sealed class SimdCapabilities
         catch { return false; }
     }
 #pragma warning restore SYSLIB5003
-#endif
 }

@@ -1,9 +1,7 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-#if NET7_0_OR_GREATER
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
-#endif
 
 namespace BareMetalWeb.Data;
 
@@ -27,11 +25,9 @@ public static class DataLayerCapabilities
     {
         get
         {
-#if NET7_0_OR_GREATER
             if (Crc32.Arm64.IsSupported) return "ARM64 CRC32C (64-bit, hardware)";
             if (Sse42.X64.IsSupported)   return "x86 SSE4.2 CRC32Q (64-bit, hardware)";
             if (Sse42.IsSupported)       return "x86 SSE4.2 CRC32D (32-bit, hardware)";
-#endif
             return "Software slicing-by-4 (no hardware CRC)";
         }
     }

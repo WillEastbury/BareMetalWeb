@@ -2,11 +2,9 @@ using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.X86;
-#if NET9_0_OR_GREATER
-#pragma warning disable SYSLIB5003 // Sve is experimental
+#pragma warning disable SYSLIB5003
 using System.Runtime.Intrinsics.Arm;
 #pragma warning restore SYSLIB5003
-#endif
 
 namespace BareMetalWeb.Data;
 
@@ -39,12 +37,10 @@ public static class DictionaryColumnFilter
         if (Avx2.IsSupported)
             return FilterEqualsAvx2(encodedColumn, dictionaryIndex, outputIndexes);
 
-#if NET9_0_OR_GREATER
 #pragma warning disable SYSLIB5003
         if (Sve.IsSupported)
             return FilterEqualsSve(encodedColumn, dictionaryIndex, outputIndexes);
 #pragma warning restore SYSLIB5003
-#endif
 
         if (Vector.IsHardwareAccelerated && Vector<int>.Count >= 4)
             return FilterEqualsVector(encodedColumn, dictionaryIndex, outputIndexes);
@@ -64,12 +60,10 @@ public static class DictionaryColumnFilter
         if (Avx2.IsSupported)
             return FilterNotEqualsAvx2(encodedColumn, dictionaryIndex, outputIndexes);
 
-#if NET9_0_OR_GREATER
 #pragma warning disable SYSLIB5003
         if (Sve.IsSupported)
             return FilterNotEqualsSve(encodedColumn, dictionaryIndex, outputIndexes);
 #pragma warning restore SYSLIB5003
-#endif
 
         if (Vector.IsHardwareAccelerated && Vector<int>.Count >= 4)
             return FilterNotEqualsVector(encodedColumn, dictionaryIndex, outputIndexes);
@@ -199,7 +193,6 @@ public static class DictionaryColumnFilter
 
     // ── SVE path: scalable-width vectors with predicated tail handling ────
 
-#if NET9_0_OR_GREATER
 #pragma warning disable SYSLIB5003
 
     /// <summary>
@@ -281,7 +274,6 @@ public static class DictionaryColumnFilter
     }
 
 #pragma warning restore SYSLIB5003
-#endif
 
     // ── Portable Vector<int> path ──────────────────────────────────────────
 

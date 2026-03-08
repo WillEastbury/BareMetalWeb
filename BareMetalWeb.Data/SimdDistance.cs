@@ -1,11 +1,9 @@
 using System;
 using System.Numerics;
 using System.Runtime.CompilerServices;
-#if NET7_0_OR_GREATER
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
-#endif
 
 namespace BareMetalWeb.Data;
 
@@ -15,6 +13,7 @@ namespace BareMetalWeb.Data;
 /// <list type="bullet">
 ///   <item>x86 AVX-512F: 16 floats/cycle with FMA</item>
 ///   <item>x86 AVX2 + FMA: 8 floats/cycle with fused multiply-add</item>
+///   <item>x86 AVX2: 8 floats/cycle (multiply + add)</item>
 ///   <item>ARM64 AdvSimd: 4 floats/cycle with NEON FMA</item>
 ///   <item>Fallback: <see cref="Vector{T}"/> (auto-vectorised by the JIT)</item>
 /// </list>
@@ -27,11 +26,10 @@ internal static class SimdDistance
     {
         System.Diagnostics.Debug.Assert(a.Length == b.Length,
             "SimdDistance: both vectors must have the same dimension.");
-#if NET7_0_OR_GREATER
         if (Avx512F.IsSupported)   return CosineAvx512(a, b);
         if (Fma.IsSupported)       return CosineAvx2Fma(a, b);
+        if (Avx2.IsSupported)      return CosineAvx2(a, b);
         if (AdvSimd.IsSupported)   return CosineNeon(a, b);
-#endif
         return CosineVector(a, b);
     }
 
@@ -41,11 +39,10 @@ internal static class SimdDistance
     {
         System.Diagnostics.Debug.Assert(a.Length == b.Length,
             "SimdDistance: both vectors must have the same dimension.");
-#if NET7_0_OR_GREATER
         if (Avx512F.IsSupported)   return DotProductAvx512(a, b);
         if (Fma.IsSupported)       return DotProductAvx2Fma(a, b);
+        if (Avx2.IsSupported)      return DotProductAvx2(a, b);
         if (AdvSimd.IsSupported)   return DotProductNeon(a, b);
-#endif
         return DotProductVector(a, b);
     }
 
@@ -55,11 +52,10 @@ internal static class SimdDistance
     {
         System.Diagnostics.Debug.Assert(a.Length == b.Length,
             "SimdDistance: both vectors must have the same dimension.");
-#if NET7_0_OR_GREATER
         if (Avx512F.IsSupported)   return EuclideanAvx512(a, b);
         if (Fma.IsSupported)       return EuclideanAvx2Fma(a, b);
+        if (Avx2.IsSupported)      return EuclideanAvx2(a, b);
         if (AdvSimd.IsSupported)   return EuclideanNeon(a, b);
-#endif
         return EuclideanVector(a, b);
     }
 
@@ -84,11 +80,10 @@ internal static class SimdDistance
     {
         get
         {
-#if NET7_0_OR_GREATER
             if (Avx512F.IsSupported) return "x86 AVX-512F (16 floats/iter, FMA)";
             if (Fma.IsSupported)     return "x86 AVX2 + FMA (8 floats/iter)";
+            if (Avx2.IsSupported)    return "x86 AVX2 (8 floats/iter)";
             if (AdvSimd.IsSupported) return "ARM64 AdvSimd NEON (4 floats/iter, FMA)";
-#endif
             return $"Vector<float> generic ({Vector<float>.Count} floats/iter)";
         }
     }
@@ -169,8 +164,6 @@ internal static class SimdDistance
 
         return MathF.Sqrt(sum);
     }
-
-#if NET7_0_OR_GREATER
 
     // ── x86 AVX-512F + FMA (16 floats / iteration) ──────────────────────────
 
@@ -318,6 +311,79 @@ internal static class SimdDistance
         return MathF.Sqrt(sum);
     }
 
+    // ── x86 AVX2 without FMA (8 floats / iteration, multiply + add) ────────
+
+    private static float CosineAvx2(float[] a, float[] b)
+    {
+        int i = 0;
+        var dotAcc   = Vector256<float>.Zero;
+        var normAAcc = Vector256<float>.Zero;
+        var normBAcc = Vector256<float>.Zero;
+
+        for (; i <= a.Length - Vector256<float>.Count; i += Vector256<float>.Count)
+        {
+            var va = Vector256.LoadUnsafe(ref a[i]);
+            var vb = Vector256.LoadUnsafe(ref b[i]);
+            dotAcc   = Avx.Add(Avx.Multiply(va, vb), dotAcc);
+            normAAcc = Avx.Add(Avx.Multiply(va, va), normAAcc);
+            normBAcc = Avx.Add(Avx.Multiply(vb, vb), normBAcc);
+        }
+
+        float dot   = HSum256(dotAcc);
+        float normA = HSum256(normAAcc);
+        float normB = HSum256(normBAcc);
+
+        for (; i < a.Length; i++)
+        {
+            dot   += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+
+        if (normA == 0 || normB == 0) return 1f;
+        return 1f - dot / (MathF.Sqrt(normA) * MathF.Sqrt(normB));
+    }
+
+    private static float DotProductAvx2(float[] a, float[] b)
+    {
+        int i = 0;
+        var dotAcc = Vector256<float>.Zero;
+
+        for (; i <= a.Length - Vector256<float>.Count; i += Vector256<float>.Count)
+        {
+            var va = Vector256.LoadUnsafe(ref a[i]);
+            var vb = Vector256.LoadUnsafe(ref b[i]);
+            dotAcc = Avx.Add(Avx.Multiply(va, vb), dotAcc);
+        }
+
+        float dot = HSum256(dotAcc);
+        for (; i < a.Length; i++)
+            dot += a[i] * b[i];
+
+        return -dot;
+    }
+
+    private static float EuclideanAvx2(float[] a, float[] b)
+    {
+        int i = 0;
+        var sumAcc = Vector256<float>.Zero;
+
+        for (; i <= a.Length - Vector256<float>.Count; i += Vector256<float>.Count)
+        {
+            var diff = Vector256.LoadUnsafe(ref a[i]) - Vector256.LoadUnsafe(ref b[i]);
+            sumAcc = Avx.Add(Avx.Multiply(diff, diff), sumAcc);
+        }
+
+        float sum = HSum256(sumAcc);
+        for (; i < a.Length; i++)
+        {
+            float d = a[i] - b[i];
+            sum += d * d;
+        }
+
+        return MathF.Sqrt(sum);
+    }
+
     // ── ARM64 AdvSimd / NEON (4 floats / iteration, FMA) ────────────────────
 
     private static float CosineNeon(float[] a, float[] b)
@@ -405,6 +471,4 @@ internal static class SimdDistance
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static float HSum128(Vector128<float> v)
         => Vector128.Sum(v);
-
-#endif
 }

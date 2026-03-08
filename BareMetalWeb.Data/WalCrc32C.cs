@@ -1,9 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-#if NET7_0_OR_GREATER
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
-#endif
 
 namespace BareMetalWeb.Data;
 
@@ -58,14 +56,12 @@ internal static class WalCrc32C
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static uint Compute(ReadOnlySpan<byte> data)
     {
-#if NET7_0_OR_GREATER
         if (Crc32.Arm64.IsSupported)
             return ComputeArm64(data);
         if (Sse42.X64.IsSupported)
             return ComputeSse42X64(data);
         if (Sse42.IsSupported)
             return ComputeSse42(data);
-#endif
         return ComputeSoftware(data);
     }
 
@@ -104,7 +100,6 @@ internal static class WalCrc32C
         return ~crc;
     }
 
-#if NET7_0_OR_GREATER
     private static uint ComputeArm64(ReadOnlySpan<byte> data)
     {
         uint crc = 0xFFFF_FFFFu;
@@ -161,5 +156,4 @@ internal static class WalCrc32C
 
         return ~crc;
     }
-#endif
 }

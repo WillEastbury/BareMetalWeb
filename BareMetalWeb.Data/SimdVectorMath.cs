@@ -1,18 +1,16 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-#if NET7_0_OR_GREATER
 using System.Runtime.Intrinsics;
 using System.Runtime.Intrinsics.Arm;
 using System.Runtime.Intrinsics.X86;
-#endif
 
 namespace BareMetalWeb.Data;
 
 /// <summary>
 /// SIMD-accelerated floating-point vector math primitives used by the ANN vector index.
 /// Dispatch order (highest performance first):
-///   x86-64:  AVX2 + FMA  →  SSE2  →  portable Vector&lt;float&gt;
+///   x86-64:  AVX2 + FMA  →  AVX2  →  portable Vector&lt;float&gt;
 ///   ARM64:   AdvSimd (NEON)  →  portable Vector&lt;float&gt;
 /// All paths give numerically equivalent results (within normal IEEE-754 float rounding).
 /// </summary>
@@ -28,12 +26,12 @@ internal static class SimdVectorMath
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float DotProduct(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
-#if NET7_0_OR_GREATER
         if (Fma.IsSupported && Avx.IsSupported)
             return DotProductFmaAvx(a, b);
+        if (Avx2.IsSupported)
+            return DotProductAvx2(a, b);
         if (AdvSimd.IsSupported)
             return DotProductAdvSimd(a, b);
-#endif
         return DotProductPortable(a, b);
     }
 
@@ -45,12 +43,12 @@ internal static class SimdVectorMath
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static float EuclideanDistanceSquared(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
     {
-#if NET7_0_OR_GREATER
         if (Fma.IsSupported && Avx.IsSupported)
             return EuclideanSqFmaAvx(a, b);
+        if (Avx2.IsSupported)
+            return EuclideanSqAvx2(a, b);
         if (AdvSimd.IsSupported)
             return EuclideanSqAdvSimd(a, b);
-#endif
         return EuclideanSqPortable(a, b);
     }
 
@@ -106,8 +104,6 @@ internal static class SimdVectorMath
         }
         return sum;
     }
-
-#if NET7_0_OR_GREATER
 
     // ─── x86 AVX2 + FMA paths ────────────────────────────────────────────────
     // FMA processes 8 floats per cycle with fused multiply-add (no intermediate rounding).
@@ -169,6 +165,45 @@ internal static class SimdVectorMath
         return Sse.AddScalar(sum2, shuf2).ToScalar();
     }
 
+    // ─── x86 AVX2 paths (no FMA) ─────────────────────────────────────────────
+    // AVX2 processes 8 floats per cycle using separate multiply + add.
+
+    private static float DotProductAvx2(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
+    {
+        var aV  = MemoryMarshal.Cast<float, Vector256<float>>(a);
+        var bV  = MemoryMarshal.Cast<float, Vector256<float>>(b);
+        var acc = Vector256<float>.Zero;
+
+        for (int k = 0; k < aV.Length; k++)
+            acc = Avx.Add(Avx.Multiply(aV[k], bV[k]), acc);
+
+        float sum = HorizontalSum256(acc);
+        for (int i = aV.Length * 8; i < a.Length; i++)
+            sum += a[i] * b[i];
+        return sum;
+    }
+
+    private static float EuclideanSqAvx2(ReadOnlySpan<float> a, ReadOnlySpan<float> b)
+    {
+        var aV  = MemoryMarshal.Cast<float, Vector256<float>>(a);
+        var bV  = MemoryMarshal.Cast<float, Vector256<float>>(b);
+        var acc = Vector256<float>.Zero;
+
+        for (int k = 0; k < aV.Length; k++)
+        {
+            var diff = Avx.Subtract(aV[k], bV[k]);
+            acc = Avx.Add(Avx.Multiply(diff, diff), acc);
+        }
+
+        float sum = HorizontalSum256(acc);
+        for (int i = aV.Length * 8; i < a.Length; i++)
+        {
+            float d = a[i] - b[i];
+            sum += d * d;
+        }
+        return sum;
+    }
+
     // ─── ARM AdvSimd (NEON) paths ─────────────────────────────────────────────
     // AdvSimd processes 4 floats per cycle using 128-bit NEON registers.
 
@@ -209,6 +244,4 @@ internal static class SimdVectorMath
         }
         return sum;
     }
-
-#endif
 }
