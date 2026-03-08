@@ -390,6 +390,11 @@ public class BareMetalWebServer : IBareWebHost
     }
     public async Task RequestHandler(HttpContext context)
     {
+        // ── Bench fast-paths: bypass entire pipeline for perf diagnostics ──
+        // Static readonly bool lets JIT eliminate this branch in production.
+        if (BenchmarkEndpoints.Enabled && BenchmarkEndpoints.TryHandle(context))
+            return;
+
         var stopwatch = Stopwatch.StartNew();
 
         // ── Create BmwContext: resolve features once per request ─────────

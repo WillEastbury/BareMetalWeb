@@ -1,0 +1,141 @@
+using System.Runtime.CompilerServices;
+using BareMetalWeb.Core;
+using Microsoft.AspNetCore.Http;
+
+namespace BareMetalWeb.Host;
+
+/// <summary>
+/// Ultra-minimal benchmark endpoints for performance diagnostics.
+/// <list type="bullet">
+///   <item><c>/_null</c>  — raw Kestrel ceiling: bypasses entire BMW pipeline.</item>
+///   <item><c>/_router</c> — Kestrel + EntityPrefixRouter resolution only.</item>
+/// </list>
+/// Enabled by <c>BMW_ENABLE_BENCH_ENDPOINTS=1</c> environment variable.
+/// </summary>
+internal static class BenchmarkEndpoints
+{
+    /// <summary>
+    /// Static readonly so the JIT can fold the branch and eliminate dead code
+    /// when the env var is not set (production default).
+    /// </summary>
+    internal static readonly bool Enabled =
+        string.Equals(
+            Environment.GetEnvironmentVariable("BMW_ENABLE_BENCH_ENDPOINTS"),
+            "1",
+            StringComparison.Ordinal);
+
+    private static readonly byte[] OkBody = "OK"u8.ToArray();
+
+    private static EntityPrefixRouter? _benchRouter;
+    private static readonly object _routerLock = new();
+
+    /// <summary>
+    /// Fast-path check. Call at the very top of RequestHandler — before
+    /// BmwContext creation, stopwatch, rate limiter, CORS, or any middleware.
+    /// Returns true (and writes the response) if the path matched a bench endpoint.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static bool TryHandle(HttpContext context)
+    {
+        // PathString.Value is pre-computed by Kestrel — no allocation here.
+        var path = context.Request.Path.Value;
+
+        // Length gate: /_null = 6, /_router = 8.  Anything shorter or null → skip.
+        if (path is null || path.Length < 6)
+            return false;
+
+        // Use ordinal char comparison on 2nd char to split the two paths
+        // before falling into full string equality. Avoids scanning both
+        // strings on every request.
+        if (path.Length == 6 && path[1] == 'n')
+        {
+            if (string.Equals(path, "/_null", StringComparison.Ordinal))
+            {
+                WriteOk(context.Response);
+                return true;
+            }
+        }
+        else if (path.Length == 8 && path[1] == 'r')
+        {
+            if (string.Equals(path, "/_router", StringComparison.Ordinal))
+            {
+                HandleRouter(context.Response);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// /_null — absolute minimum: write two pre-computed bytes, nothing else.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void WriteOk(HttpResponse response)
+    {
+        response.StatusCode = 200;
+        response.ContentType = "text/plain";
+        response.ContentLength = 2;
+        var span = response.BodyWriter.GetSpan(2);
+        OkBody.CopyTo(span);
+        response.BodyWriter.Advance(2);
+    }
+
+    /// <summary>
+    /// /_router — exercise EntityPrefixRouter.TryResolve on a real entity slug,
+    /// then write the same two-byte response. No WAL, no rendering, no auth.
+    /// </summary>
+    private static void HandleRouter(HttpResponse response)
+    {
+        var router = EnsureRouter();
+        // Resolve "customer" via the byte-span path (zero-allocation hot path).
+        // The slug doesn't need to exist — we're benchmarking the dispatch, not the result.
+        router.TryResolve("customer"u8, out _, out _);
+
+        WriteOk(response);
+    }
+
+    /// <summary>
+    /// Lazily build an EntityPrefixRouter from DataScaffold entities.
+    /// Double-checked lock: first request pays the build cost, subsequent
+    /// requests get a volatile read of the already-built instance.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static EntityPrefixRouter EnsureRouter()
+    {
+        var r = Volatile.Read(ref _benchRouter);
+        if (r is not null) return r;
+
+        lock (_routerLock)
+        {
+            r = Volatile.Read(ref _benchRouter);
+            if (r is not null) return r;
+
+            var router = new EntityPrefixRouter();
+            var entities = DataScaffold.Entities;
+
+            if (entities is { Count: > 0 })
+            {
+                var slugs = new List<string>(entities.Count);
+                for (int i = 0; i < entities.Count; i++)
+                {
+                    var slug = entities[i].Slug;
+                    if (!string.IsNullOrEmpty(slug))
+                        slugs.Add(slug);
+                }
+
+                if (slugs.Count > 0)
+                {
+                    router.Build(slugs);
+                    Volatile.Write(ref _benchRouter, router);
+                    return router;
+                }
+            }
+
+            // Fallback when no entities are scaffolded yet
+            router.Build(new[] { "customer", "order", "invoice", "product" });
+            Volatile.Write(ref _benchRouter, router);
+            return router;
+        }
+    }
+}
