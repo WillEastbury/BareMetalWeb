@@ -17,7 +17,7 @@ namespace BareMetalWeb.Data;
 /// CRC32C covers all bytes from offset 0 up to (but not including) the footer CRC field.
 /// </para>
 /// </summary>
-internal static class WalSnapshot
+public static class WalSnapshot
 {
     private const uint   SnapMagic    = 0x534E4150u; // "SNAP" LE
     private const uint   SnapEndMagic = 0x534E5045u; // "SNPE" LE

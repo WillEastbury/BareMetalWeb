@@ -88,6 +88,18 @@ public sealed class WalStore : IDisposable
     /// <summary>The directory containing segment files (internal for compaction).</summary>
     internal string SegmentDirectory => _directory;
 
+    /// <summary>
+    /// Creates a point-in-time snapshot of the current head map to disk.
+    /// Safe to call while the store is actively processing writes.
+    /// Returns true if a snapshot was written, false if no data to snapshot.
+    /// </summary>
+    public bool TakeSnapshot()
+    {
+        if (_visibleCommitPtr == WalConstants.NullPtr) return false;
+        WalSnapshot.Write(_directory, _visibleCommitPtr, HeadMap);
+        return true;
+    }
+
     /// <summary>Convenience proxy for <see cref="WalHeadMap.TryGetHead"/>.</summary>
     public bool TryGetHead(ulong key, out ulong ptr) => HeadMap.TryGetHead(key, out ptr);
 

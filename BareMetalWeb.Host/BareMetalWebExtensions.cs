@@ -8,6 +8,7 @@ using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Interfaces;
 using BareMetalWeb.Runtime;
+using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Host;
 
@@ -362,6 +363,75 @@ public static class BareMetalWebExtensions
             Console.WriteLine($"[BMW Startup]   Custom routes: +{appInfo.routes.Count - routeCountBefore} ({appInfo.routes.Count} total)");
 
         Console.WriteLine($"[BMW Startup] Route registration complete — {appInfo.routes.Count} routes total");
+
+        // ── Automated backup service (#1270) ──────────────────────────────────
+        WalBackupService? backupService = null;
+        if (config.GetValue("Backup.Enabled", false)
+            && DataStoreProvider.PrimaryProvider is WalDataProvider backupWalProvider)
+        {
+            var walDir = Path.Combine(dataRoot, "wal");
+            var backupDir = config.GetValue("Backup.Directory", Path.Combine(dataRoot, "backups"));
+            var intervalMin = config.GetValue("Backup.IntervalMinutes", 360);
+            var retentionDays = config.GetValue("Backup.RetentionDays", 30);
+
+            backupService = new WalBackupService(
+                backupWalProvider.WalStore,
+                walDir,
+                backupDir,
+                intervalMin,
+                retentionDays,
+                logger);
+            backupService.Start();
+            Console.WriteLine($"[BMW Startup] Backup service started (interval: {intervalMin}min, retention: {retentionDays}d, dir: {backupDir})");
+
+            // Admin endpoint: POST /api/admin/backup — trigger on-demand backup
+            appInfo.RegisterRoute("POST /api/admin/backup", new RouteHandlerData(
+                pageInfoFactory.RawPage("admin", true),
+                async context =>
+                {
+                    try
+                    {
+                        var backupPath = backupService.CreateBackup();
+                        context.Response.StatusCode = 200;
+                        context.Response.ContentType = "application/json";
+                        await context.Response.WriteAsync($"{{\"status\":\"ok\",\"path\":\"{backupPath.Replace("\\", "\\\\")}\"}}")
+                            .ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        context.Response.StatusCode = 500;
+                        context.Response.ContentType = "application/json";
+                        await context.Response.WriteAsync($"{{\"status\":\"error\",\"message\":\"{ex.Message}\"}}")
+                            .ConfigureAwait(false);
+                    }
+                }));
+
+            // Admin endpoint: GET /api/admin/backups — list available backups
+            appInfo.RegisterRoute("GET /api/admin/backups", new RouteHandlerData(
+                pageInfoFactory.RawPage("admin", true),
+                async context =>
+                {
+                    var backups = backupService.ListBackups();
+                    context.Response.StatusCode = 200;
+                    context.Response.ContentType = "application/json";
+                    var sb = new System.Text.StringBuilder();
+                    sb.Append('[');
+                    for (int i = 0; i < backups.Count; i++)
+                    {
+                        if (i > 0) sb.Append(',');
+                        var b = backups[i];
+                        sb.Append($"{{\"name\":\"{b.Name}\",\"timestamp\":\"{b.Timestamp:O}\",\"commitPtr\":\"{b.CommitPtr}\",\"files\":{b.FileCount},\"size\":\"{b.SizeDisplay}\"}}");
+                    }
+                    sb.Append(']');
+                    await context.Response.WriteAsync(sb.ToString()).ConfigureAwait(false);
+                }));
+
+            Console.WriteLine($"[BMW Startup]   Backup routes: +2 ({appInfo.routes.Count} total)");
+        }
+        else if (!config.GetValue("Backup.Enabled", false))
+        {
+            Console.WriteLine($"[BMW Startup] Backup service: disabled (set Backup.Enabled|true in Metal.config)");
+        }
 
         // Finalise
         await appInfo.BuildAppInfoMenuOptionsAsync();

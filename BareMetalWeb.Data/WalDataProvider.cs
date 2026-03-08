@@ -74,8 +74,8 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     private readonly IBufferedLogger?          _logger;
     private WalStore                  _walStore;
 
-    /// <summary>Exposes the underlying WAL store for background services (e.g. compaction).</summary>
-    internal WalStore WalStore => _walStore;
+    /// <summary>Exposes the underlying WAL store for background services (e.g. compaction, backup).</summary>
+    public WalStore WalStore => _walStore;
 
     private IndexStore                _indexStore;
     private SearchIndexManager        _searchIndexManager;
