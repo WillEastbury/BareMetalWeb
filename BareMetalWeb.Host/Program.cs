@@ -21,6 +21,10 @@ var asmVersion = typeof(BareMetalWebServer).Assembly
     ?? typeof(BareMetalWebServer).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 Console.WriteLine($"  Version:  {asmVersion}");
 Console.WriteLine($"  Arch:     {RuntimeInformation.ProcessArchitecture}");
+Console.WriteLine($"  CPU:      {GetCpuModel()}");
+Console.WriteLine($"  Cores:    {Environment.ProcessorCount}");
+Console.WriteLine($"  RAM:      {GC.GetGCMemoryInfo().TotalAvailableMemoryBytes / (1024 * 1024)} MB");
+Console.WriteLine($"  Storage:  {GetStorageInfo()}");
 Console.WriteLine($"  OS:       {RuntimeInformation.OSDescription}");
 Console.WriteLine($"  Runtime:  {RuntimeInformation.FrameworkDescription}");
 Console.WriteLine($"  {SimdCapabilities.Current.ToLogLine()}");
@@ -425,6 +429,39 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
 // ── Direct Kestrel hosting ────────────────────────────────────────────
 await using var host = BmwHost.Create(server, configureKestrel);
 await host.RunAsync();
+
+static string GetCpuModel()
+{
+    try
+    {
+        if (File.Exists("/proc/cpuinfo"))
+        {
+            foreach (var line in File.ReadLines("/proc/cpuinfo"))
+            {
+                if (line.StartsWith("model name", StringComparison.OrdinalIgnoreCase) ||
+                    line.StartsWith("Model", StringComparison.OrdinalIgnoreCase))
+                {
+                    var idx = line.IndexOf(':');
+                    if (idx >= 0) return line[(idx + 1)..].Trim();
+                }
+            }
+        }
+    }
+    catch { }
+    return RuntimeInformation.ProcessArchitecture.ToString();
+}
+
+static string GetStorageInfo()
+{
+    try
+    {
+        var drive = new DriveInfo(Path.GetPathRoot(Environment.CurrentDirectory) ?? "/");
+        var totalGb = drive.TotalSize / (1024 * 1024 * 1024);
+        var freeGb = drive.AvailableFreeSpace / (1024 * 1024 * 1024);
+        return $"{freeGb} GB free / {totalGb} GB total";
+    }
+    catch { return "unknown"; }
+}
 
 static class ProgramSetup
 {
