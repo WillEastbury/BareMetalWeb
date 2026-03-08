@@ -88,6 +88,14 @@ while (true)
             PrintTools(executor);
             continue;
 
+        case "layers":
+            PrintLayerStats(engine);
+            continue;
+
+        case "semantic":
+            RunSemanticComparison(config);
+            continue;
+
         case "bench":
             RunBenchmark(orchestrator);
             continue;
@@ -113,6 +121,8 @@ static void PrintHelp()
     Console.WriteLine("  │    stats, mem   — Show model & memory stats     │");
     Console.WriteLine("  │    gc           — Force GC and show memory      │");
     Console.WriteLine("  │    tools        — List available admin tools     │");
+    Console.WriteLine("  │    layers       — Per-layer sparsity stats      │");
+    Console.WriteLine("  │    semantic     — Run semantic pruning comparison│");
     Console.WriteLine("  │    bench        — Run inference benchmark       │");
     Console.WriteLine("  │    compare      — Compare pruning levels RAM    │");
     Console.WriteLine("  │    exit, quit   — Exit                          │");
@@ -154,6 +164,28 @@ static void PrintStats(BitNetEngine engine, BitNetModelConfig config)
         Console.WriteLine($"    Was (sbyte):       {ms.StoredBytes / (1024 * 1024),6} MB");
         Console.WriteLine($"    Now (2-bit native):{engine.NativeBytesAllocated / (1024 * 1024),6} MB");
         Console.WriteLine($"    Compression:       {ms.CompressionSavings,9:P0} smaller");
+    }
+
+    if (engine.GroupPruneInfo is { } gp)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkCyan;
+        Console.WriteLine("  ── Group-of-4 Pruning ────────────────────────────");
+        Console.ResetColor();
+        Console.WriteLine($"    Attn groups zeroed:  {gp.AttnGroupsZeroed,12:N0} / {gp.TotalAttnGroups:N0} ({gp.AttnGroupSparsity:P0} @ L1<={gp.AttnThreshold})");
+        Console.WriteLine($"    FFN groups zeroed:   {gp.FfnGroupsZeroed,12:N0} / {gp.TotalFfnGroups:N0} ({gp.FfnGroupSparsity:P0} @ L1<={gp.FfnThreshold})");
+        Console.WriteLine($"    Total weights zeroed:{gp.TotalWeightsZeroed,12:N0}");
+    }
+
+    if (engine.SemanticPruneInfo is { } sp)
+    {
+        Console.ForegroundColor = ConsoleColor.DarkCyan;
+        Console.WriteLine("  ── Semantic Pruning (coarse→fine) ────────────────");
+        Console.ResetColor();
+        Console.WriteLine($"    Heads pruned:       {sp.HeadsPruned,6}");
+        Console.WriteLine($"    Neurons pruned:     {sp.NeuronsPruned,6}");
+        Console.WriteLine($"    Blocks pruned:      {sp.BlocksPruned,6}");
+        Console.WriteLine($"    Fine groups pruned: {sp.FineGroupsPruned,6}");
+        Console.WriteLine($"    Accuracy:           {sp.PrePruneAccuracy,5:P0} → {sp.PostPruneAccuracy:P0} ({sp.TestCaseCount} cases)");
     }
 
     Console.WriteLine();
@@ -204,6 +236,43 @@ static async Task RunQuery(IntelligenceOrchestrator orch, string input)
     Console.WriteLine();
 }
 
+static void PrintLayerStats(BitNetEngine engine)
+{
+    if (engine.LayerStats is not { } stats || stats.Count == 0)
+    {
+        Console.WriteLine("    No layer stats available.");
+        Console.WriteLine();
+        return;
+    }
+
+    Console.ForegroundColor = ConsoleColor.DarkCyan;
+    Console.WriteLine("  ── Per-Layer Sparsity ────────────────────────────");
+    Console.ResetColor();
+
+    Console.WriteLine("    {0,-12} {1,14} {2,14} {3,12} {4,12}",
+        "Layer", "Attn Weights", "Attn 0-bytes", "FFN Weights", "FFN 0-bytes");
+    Console.WriteLine("    {0,-12} {1,14} {2,14} {3,12} {4,12}",
+        "─────", "────────────", "────────────", "───────────", "───────────");
+
+    for (int i = 0; i < stats.Count; i++)
+    {
+        var (attn, ffn) = stats[i];
+        Console.Write($"    Layer {i,-5}");
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.Write($" {attn.LogicalWeights,12:N0}  ");
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($" {attn.ZeroByteRatio,11:P0}  ");
+        Console.ForegroundColor = ConsoleColor.White;
+        Console.Write($" {ffn.LogicalWeights,10:N0}  ");
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($" {ffn.ZeroByteRatio,10:P0}");
+        Console.ResetColor();
+        Console.WriteLine();
+    }
+
+    Console.WriteLine();
+}
+
 static void RunBenchmark(IntelligenceOrchestrator orch)
 {
     Console.Write("  Running 50 inferences... ");
@@ -248,7 +317,14 @@ static void RunPruneComparison(BitNetModelConfig config)
         ("No pruning",  ModelLoadOptions.NoPruning),
         ("Vocab only",  ModelLoadOptions.Default),
         ("Aggressive",  ModelLoadOptions.Aggressive),
-        ("Maximum",     new ModelLoadOptions { PruneVocabulary = true, LayerPruneRatio = 0.50f, HeadPruneRatio = 0.50f }),
+        ("Maximum",     new ModelLoadOptions
+        {
+            PruneVocabulary = true,
+            LayerPruneRatio = 0.50f,
+            HeadPruneRatio = 0.50f,
+            GroupPruneAttnThreshold = 2,
+            GroupPruneFfnThreshold = 3,
+        }),
     };
 
     Console.WriteLine("    {0,-16} {1,10} {2,8} {3,8} {4,7} {5,9} {6,8}", "Level", "WorkSet", "GCHeap", "Native", "Layers", "Sparsity", "Vocab");
@@ -286,5 +362,90 @@ static void RunPruneComparison(BitNetModelConfig config)
         Console.WriteLine($" {layers,7} {sparsity,9:P1} {vocab,8}");
     }
 
+    Console.WriteLine();
+}
+
+static void RunSemanticComparison(BitNetModelConfig config)
+{
+    // Use a smaller model for the interactive comparison to keep it fast
+    var smallConfig = new BitNetModelConfig(
+        HiddenDim: 256,
+        NumLayers: 4,
+        NumHeads: 4,
+        VocabSize: 1000,
+        MaxSeqLen: 512);
+
+    Console.ForegroundColor = ConsoleColor.DarkCyan;
+    Console.WriteLine("  ── Semantic Pruning Comparison (256-dim model) ───");
+    Console.ResetColor();
+
+    var levels = new (string Name, ModelLoadOptions Opts)[]
+    {
+        ("Magnitude only",  new ModelLoadOptions
+        {
+            PruneVocabulary = true,
+            GroupPruneAttnThreshold = 1,
+            GroupPruneFfnThreshold = 2,
+        }),
+        ("Semantic (0.95)",  new ModelLoadOptions
+        {
+            PruneVocabulary = true,
+            GroupPruneAttnThreshold = 1,
+            GroupPruneFfnThreshold = 2,
+            SemanticPruning = true,
+            SemanticDriftThreshold = 0.95f,
+        }),
+        ("Semantic (0.90)",  new ModelLoadOptions
+        {
+            PruneVocabulary = true,
+            GroupPruneAttnThreshold = 1,
+            GroupPruneFfnThreshold = 2,
+            SemanticPruning = true,
+            SemanticDriftThreshold = 0.90f,
+        }),
+    };
+
+    Console.WriteLine("    {0,-18} {1,10} {2,7} {3,8} {4,7} {5,7} {6,6}",
+        "Level", "Sparsity", "Heads", "Neurons", "Blocks", "Fine", "Acc");
+    Console.WriteLine("    {0,-18} {1,10} {2,7} {3,8} {4,7} {5,7} {6,6}",
+        "─────", "────────", "─────", "───────", "──────", "────", "───");
+
+    foreach (var (name, opts) in levels)
+    {
+        var sw = Stopwatch.StartNew();
+        using var e = new BitNetEngine(smallConfig);
+        e.LoadTestModel(opts);
+        sw.Stop();
+
+        float sparsity = e.ModelStats?.Sparsity ?? 0f;
+        var sp = e.SemanticPruneInfo;
+
+        Console.Write($"    {name,-18}");
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($" {sparsity,9:P1}");
+        Console.ResetColor();
+
+        if (sp is { } s)
+        {
+            Console.Write($" {s.HeadsPruned,7}");
+            Console.Write($" {s.NeuronsPruned,8}");
+            Console.Write($" {s.BlocksPruned,7}");
+            Console.Write($" {s.FineGroupsPruned,7}");
+            Console.ForegroundColor = ConsoleColor.White;
+            Console.Write($" {s.PostPruneAccuracy,5:P0}");
+            Console.ResetColor();
+        }
+        else
+        {
+            Console.Write($" {"—",7} {"—",8} {"—",7} {"—",7} {"—",5}");
+        }
+
+        Console.ForegroundColor = ConsoleColor.DarkGray;
+        Console.Write($"  ({sw.ElapsedMilliseconds}ms)");
+        Console.ResetColor();
+        Console.WriteLine();
+    }
+
+    GC.Collect(2, GCCollectionMode.Aggressive, true, true);
     Console.WriteLine();
 }

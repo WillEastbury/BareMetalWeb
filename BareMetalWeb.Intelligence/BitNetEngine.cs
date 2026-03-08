@@ -17,6 +17,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private VocabularyPruner? _pruner;
     private PruneStats? _pruneStats;
     private ModelSizeStats? _modelStats;
+    private GroupPruneStats? _groupPruneStats;
+    private SemanticPruningStats? _semanticPruneStats;
 
     // Compressed storage — 2-bit packed in native (unmanaged) memory
     private NativeTernaryMatrix[]? _compressedAttn;
@@ -34,8 +36,17 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// <summary>Model size stats, available after load.</summary>
     public ModelSizeStats? ModelStats => _modelStats;
 
+    /// <summary>Group-of-four structured pruning stats, available after load.</summary>
+    public GroupPruneStats? GroupPruneInfo => _groupPruneStats;
+
+    /// <summary>Coarse-to-fine semantic pruning stats, available after load.</summary>
+    public SemanticPruningStats? SemanticPruneInfo => _semanticPruneStats;
+
     /// <summary>Total native (unmanaged) bytes allocated for compressed weights.</summary>
     public long NativeBytesAllocated { get; private set; }
+
+    /// <summary>Per-layer sparsity statistics (attention + FFN), available after load.</summary>
+    public IReadOnlyList<(MatrixStats Attn, MatrixStats Ffn)>? LayerStats { get; private set; }
 
     public BitNetEngine(BitNetModelConfig? config = null)
     {
@@ -96,10 +107,31 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             ModelPruner.PruneAttentionHeads(layers, _config.NumHeads, options.HeadPruneRatio);
         }
 
-        // 6. Calculate logical model stats (before compression)
+        // 6. Group-of-four structured pruning — aligns with packed byte boundaries
+        if (options.GroupPruneAttnThreshold > 0 || options.GroupPruneFfnThreshold > 0)
+        {
+            _groupPruneStats = ModelPruner.PruneLayerGroups(
+                layers, dim,
+                options.GroupPruneAttnThreshold,
+                options.GroupPruneFfnThreshold);
+        }
+
+        // 7. Coarse-to-fine semantic pruning — after magnitude, before packing
+        if (options.SemanticPruning)
+        {
+            _semanticPruneStats = SemanticPruner.Prune(
+                layers, dim, _config.NumHeads,
+                corpus: null,
+                headPruneRatio: options.SemanticHeadPruneRatio,
+                neuronPruneRatio: options.SemanticNeuronPruneRatio,
+                blockPruneRatio: options.SemanticBlockPruneRatio,
+                driftThreshold: options.SemanticDriftThreshold);
+        }
+
+        // 8. Calculate logical model stats (after all pruning)
         _modelStats = ModelPruner.CalculateSize(layers, activeVocab, dim);
 
-        // 7. Compress to 2-bit packed native memory
+        // 9. Compress to 2-bit packed native memory
         CompressToNative(layers, embeddings, outputHead, activeVocab, dim);
 
         _isLoaded = true;
@@ -132,15 +164,18 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _compressedEmbeddings = NativeTernaryMatrix.Pack(embeddings, activeVocab, dim);
         _compressedOutputHead = NativeTernaryMatrix.Pack(outputHead, activeVocab, dim);
 
-        // Calculate total native allocation
+        // Calculate total native allocation and per-layer stats
         NativeBytesAllocated = 0;
+        var layerStatsList = new (MatrixStats Attn, MatrixStats Ffn)[layers.Length];
         for (int i = 0; i < layers.Length; i++)
         {
             NativeBytesAllocated += _compressedAttn[i].BytesAllocated;
             NativeBytesAllocated += _compressedFfn[i].BytesAllocated;
+            layerStatsList[i] = (_compressedAttn[i].Stats, _compressedFfn[i].Stats);
         }
         NativeBytesAllocated += _compressedEmbeddings.BytesAllocated;
         NativeBytesAllocated += _compressedOutputHead.BytesAllocated;
+        LayerStats = layerStatsList;
     }
 
     public ValueTask<string> GenerateAsync(
@@ -243,6 +278,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _compressedEmbeddings = null;
         _compressedOutputHead = null;
         NativeBytesAllocated = 0;
+        LayerStats = null;
     }
 
     public void Dispose()
@@ -284,6 +320,33 @@ public sealed record ModelLoadOptions
     /// <summary>Ratio of attention heads to zero out per layer (0.0 = none, 0.25 = prune 25%).</summary>
     public float HeadPruneRatio { get; init; }
 
+    /// <summary>
+    /// Group-of-four L1 threshold for attention weights.
+    /// Groups with L1 sum ≤ threshold are zeroed (0 = disabled, 1 = conservative, 2 = moderate).
+    /// </summary>
+    public int GroupPruneAttnThreshold { get; init; }
+
+    /// <summary>
+    /// Group-of-four L1 threshold for FFN weights.
+    /// FFN layers tolerate more aggressive pruning (0 = disabled, 2 = moderate, 3 = aggressive).
+    /// </summary>
+    public int GroupPruneFfnThreshold { get; init; }
+
+    /// <summary>Enable coarse-to-fine semantic pruning after magnitude pruning.</summary>
+    public bool SemanticPruning { get; init; }
+
+    /// <summary>Ratio of attention heads to evaluate for semantic pruning (0.0–1.0).</summary>
+    public float SemanticHeadPruneRatio { get; init; } = 0.20f;
+
+    /// <summary>Ratio of neurons to evaluate for semantic pruning (0.0–1.0).</summary>
+    public float SemanticNeuronPruneRatio { get; init; } = 0.15f;
+
+    /// <summary>Ratio of blocks to evaluate for semantic pruning (0.0–1.0).</summary>
+    public float SemanticBlockPruneRatio { get; init; } = 0.10f;
+
+    /// <summary>Minimum cosine similarity for hidden-state drift screening (0.90–0.99).</summary>
+    public float SemanticDriftThreshold { get; init; } = 0.95f;
+
     /// <summary>Number of special tokens to always retain (PAD, BOS, EOS, UNK).</summary>
     public int SpecialTokenCount { get; init; } = 4;
 
@@ -292,12 +355,14 @@ public sealed record ModelLoadOptions
 
     public static readonly ModelLoadOptions Default = new();
 
-    /// <summary>Aggressive pruning: vocab + 25% layers + 25% heads.</summary>
+    /// <summary>Aggressive pruning: vocab + 25% layers + 25% heads + group-of-4.</summary>
     public static readonly ModelLoadOptions Aggressive = new()
     {
         PruneVocabulary = true,
         LayerPruneRatio = 0.25f,
         HeadPruneRatio = 0.25f,
+        GroupPruneAttnThreshold = 1,
+        GroupPruneFfnThreshold = 2,
     };
 
     /// <summary>No pruning — load the full model.</summary>
@@ -306,6 +371,8 @@ public sealed record ModelLoadOptions
         PruneVocabulary = false,
         LayerPruneRatio = 0f,
         HeadPruneRatio = 0f,
+        GroupPruneAttnThreshold = 0,
+        GroupPruneFfnThreshold = 0,
     };
 }
 

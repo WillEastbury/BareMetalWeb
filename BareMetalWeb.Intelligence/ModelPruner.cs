@@ -89,6 +89,80 @@ public static class ModelPruner
     }
 
     /// <summary>
+    /// Group-of-four structured pruning. Operates on aligned 4-weight groups
+    /// that map 1:1 to packed bytes in NativeTernaryMatrix. If the L1 norm of
+    /// a group is below <paramref name="threshold"/>, all 4 weights are zeroed,
+    /// producing a 0x00 packed byte that the dot-product skips entirely.
+    /// </summary>
+    /// <param name="weights">Ternary weight array to prune in-place.</param>
+    /// <param name="cols">Number of columns (for row-major stride).</param>
+    /// <param name="threshold">L1 threshold (1–4). Groups with sum ≤ threshold are zeroed.</param>
+    /// <returns>Number of 4-weight groups zeroed.</returns>
+    public static int PruneGroupsOfFour(sbyte[] weights, int cols, int threshold)
+    {
+        if (threshold <= 0) return 0;
+        int rows = weights.Length / cols;
+        int groupsPerRow = cols >> 2; // full groups of 4 per row
+        int groupsZeroed = 0;
+
+        for (int r = 0; r < rows; r++)
+        {
+            int rowOffset = r * cols;
+            for (int g = 0; g < groupsPerRow; g++)
+            {
+                int idx = rowOffset + g * 4;
+                int l1 = Math.Abs(weights[idx])
+                        + Math.Abs(weights[idx + 1])
+                        + Math.Abs(weights[idx + 2])
+                        + Math.Abs(weights[idx + 3]);
+
+                if (l1 <= threshold)
+                {
+                    weights[idx] = 0;
+                    weights[idx + 1] = 0;
+                    weights[idx + 2] = 0;
+                    weights[idx + 3] = 0;
+                    groupsZeroed++;
+                }
+            }
+        }
+
+        return groupsZeroed;
+    }
+
+    /// <summary>
+    /// Apply group-of-four pruning to all layers with layer-specific thresholds.
+    /// FFN layers tolerate more aggressive pruning than attention layers.
+    /// </summary>
+    /// <returns>Statistics about groups zeroed per matrix type.</returns>
+    public static GroupPruneStats PruneLayerGroups(
+        TernaryLayer[] layers,
+        int cols,
+        int attnThreshold = 1,
+        int ffnThreshold = 2)
+    {
+        int totalAttnGroups = 0;
+        int totalFfnGroups = 0;
+
+        for (int i = 0; i < layers.Length; i++)
+        {
+            totalAttnGroups += PruneGroupsOfFour(layers[i].AttentionWeights, cols, attnThreshold);
+            totalFfnGroups += PruneGroupsOfFour(layers[i].FfnWeights, cols, ffnThreshold);
+        }
+
+        int groupsPerMatrix = (layers[0].AttentionWeights.Length / cols) * (cols >> 2);
+        int totalMatrices = layers.Length;
+
+        return new GroupPruneStats(
+            AttnGroupsZeroed: totalAttnGroups,
+            FfnGroupsZeroed: totalFfnGroups,
+            TotalAttnGroups: groupsPerMatrix * totalMatrices,
+            TotalFfnGroups: groupsPerMatrix * totalMatrices,
+            AttnThreshold: attnThreshold,
+            FfnThreshold: ffnThreshold);
+    }
+
+    /// <summary>
     /// Get the total ternary weight count across all layers.
     /// Useful for calculating memory before/after pruning.
     /// </summary>
@@ -160,4 +234,31 @@ public readonly record struct ModelSizeStats(
     /// </summary>
     public float CompressionSavings =>
         StoredBytes > 0 ? 1f - (float)PackedBytes / StoredBytes : 0f;
+}
+
+/// <summary>
+/// Statistics from group-of-four structured pruning.
+/// </summary>
+public readonly record struct GroupPruneStats(
+    int AttnGroupsZeroed,
+    int FfnGroupsZeroed,
+    int TotalAttnGroups,
+    int TotalFfnGroups,
+    int AttnThreshold,
+    int FfnThreshold
+)
+{
+    public float AttnGroupSparsity => TotalAttnGroups > 0
+        ? (float)AttnGroupsZeroed / TotalAttnGroups : 0f;
+
+    public float FfnGroupSparsity => TotalFfnGroups > 0
+        ? (float)FfnGroupsZeroed / TotalFfnGroups : 0f;
+
+    public int TotalGroupsZeroed => AttnGroupsZeroed + FfnGroupsZeroed;
+
+    public int TotalWeightsZeroed => TotalGroupsZeroed * 4;
+
+    public string Summary =>
+        $"Group pruning: Attn {AttnGroupsZeroed:N0}/{TotalAttnGroups:N0} ({AttnGroupSparsity:P0} @ L1≤{AttnThreshold}), " +
+        $"FFN {FfnGroupsZeroed:N0}/{TotalFfnGroups:N0} ({FfnGroupSparsity:P0} @ L1≤{FfnThreshold})";
 }

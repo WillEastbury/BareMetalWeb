@@ -138,4 +138,130 @@ public class ModelPrunerTests
         Assert.Contains("Layers: 2", stats.Summary);
         Assert.Contains("packed", stats.Summary);
     }
+
+    // ── Group-of-four pruning tests ──────────────────────────────
+
+    [Fact]
+    public void PruneGroupsOfFour_ZerosLowL1Groups()
+    {
+        // 1 row of 8 weights: two groups of 4
+        // Group 0: {1, 0, 0, 0} → L1 = 1 → zeroed at threshold 1
+        // Group 1: {1, -1, 1, 0} → L1 = 3 → kept at threshold 1
+        sbyte[] weights = [1, 0, 0, 0, 1, -1, 1, 0];
+
+        int zeroed = ModelPruner.PruneGroupsOfFour(weights, cols: 8, threshold: 1);
+
+        Assert.Equal(1, zeroed);
+        Assert.Equal(0, weights[0]); // group 0 zeroed
+        Assert.Equal(0, weights[1]);
+        Assert.Equal(0, weights[2]);
+        Assert.Equal(0, weights[3]);
+        Assert.Equal(1, weights[4]); // group 1 kept
+        Assert.Equal(-1, weights[5]);
+    }
+
+    [Fact]
+    public void PruneGroupsOfFour_ThresholdZero_NoPruning()
+    {
+        sbyte[] weights = [1, 0, 0, 0, 0, 0, 0, 0];
+
+        int zeroed = ModelPruner.PruneGroupsOfFour(weights, cols: 8, threshold: 0);
+
+        Assert.Equal(0, zeroed);
+        Assert.Equal(1, weights[0]); // unchanged
+    }
+
+    [Fact]
+    public void PruneGroupsOfFour_HighThreshold_ZerosEverything()
+    {
+        sbyte[] weights = [1, -1, 1, -1, 1, 0, 0, 0];
+
+        int zeroed = ModelPruner.PruneGroupsOfFour(weights, cols: 8, threshold: 4);
+
+        Assert.Equal(2, zeroed);
+        Assert.True(weights.All(w => w == 0));
+    }
+
+    [Fact]
+    public void PruneGroupsOfFour_MultiRow_PrunesPerRow()
+    {
+        // 2 rows × 4 cols
+        // Row 0: {1, 0, 0, 0} L1=1 → zeroed at threshold 1
+        // Row 1: {1, 1, 0, 0} L1=2 → kept at threshold 1
+        sbyte[] weights = [1, 0, 0, 0, 1, 1, 0, 0];
+
+        int zeroed = ModelPruner.PruneGroupsOfFour(weights, cols: 4, threshold: 1);
+
+        Assert.Equal(1, zeroed);
+        Assert.Equal(0, weights[0]); // row 0 zeroed
+        Assert.Equal(1, weights[4]); // row 1 kept
+    }
+
+    [Fact]
+    public void PruneGroupsOfFour_AlreadyZero_NotDoubleCounted()
+    {
+        sbyte[] weights = [0, 0, 0, 0, 1, -1, 1, -1];
+
+        int zeroed = ModelPruner.PruneGroupsOfFour(weights, cols: 8, threshold: 1);
+
+        // Group 0 is already zero → L1=0 ≤ 1, so counted as zeroed
+        Assert.Equal(1, zeroed);
+    }
+
+    [Fact]
+    public void PruneLayerGroups_DifferentThresholds_ForAttnAndFfn()
+    {
+        int dim = 8;
+        var layers = new TernaryLayer[2];
+        for (int i = 0; i < 2; i++)
+        {
+            layers[i] = new TernaryLayer
+            {
+                AttentionWeights = new sbyte[dim * dim],
+                FfnWeights = new sbyte[dim * dim]
+            };
+            // Fill with low-magnitude groups: every group has L1 = 1
+            for (int g = 0; g < dim * dim; g += 4)
+            {
+                layers[i].AttentionWeights[g] = 1;
+                layers[i].FfnWeights[g] = 1;
+            }
+        }
+
+        // Attn threshold 0 (skip), FFN threshold 1 (prune L1≤1 groups)
+        var stats = ModelPruner.PruneLayerGroups(layers, dim,
+            attnThreshold: 0, ffnThreshold: 1);
+
+        Assert.Equal(0, stats.AttnGroupsZeroed);
+        Assert.True(stats.FfnGroupsZeroed > 0);
+        Assert.Equal(0f, stats.AttnGroupSparsity);
+        Assert.True(stats.FfnGroupSparsity > 0f);
+    }
+
+    [Fact]
+    public void PruneLayerGroups_Stats_HasCorrectTotals()
+    {
+        int dim = 8;
+        var layers = new TernaryLayer[1];
+        layers[0] = TernaryLayer.CreateRandom(dim, 4);
+
+        var stats = ModelPruner.PruneLayerGroups(layers, dim,
+            attnThreshold: 1, ffnThreshold: 2);
+
+        // Total groups = rows * groups_per_row = 8 * (8/4) = 16 per matrix
+        Assert.Equal(16, stats.TotalAttnGroups);
+        Assert.Equal(16, stats.TotalFfnGroups);
+        Assert.True(stats.TotalWeightsZeroed == stats.TotalGroupsZeroed * 4);
+    }
+
+    [Fact]
+    public void GroupPruneStats_Summary_ContainsThresholds()
+    {
+        var stats = new GroupPruneStats(10, 20, 100, 100, 1, 2);
+
+        Assert.Contains("L1≤1", stats.Summary);
+        Assert.Contains("L1≤2", stats.Summary);
+        Assert.Contains("Attn", stats.Summary);
+        Assert.Contains("FFN", stats.Summary);
+    }
 }

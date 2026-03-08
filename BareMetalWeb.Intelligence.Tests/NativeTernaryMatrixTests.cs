@@ -5,14 +5,48 @@ namespace BareMetalWeb.Intelligence.Tests;
 public class NativeTernaryMatrixTests
 {
     [Fact]
-    public void Pack_CorrectSize()
+    public void Pack_CorrectDimensions()
     {
         var weights = new sbyte[] { 1, 0, -1, 1, 0, -1, 1, 0 };
         using var matrix = NativeTernaryMatrix.Pack(weights, 2, 4);
 
         Assert.Equal(2, matrix.Rows);
         Assert.Equal(4, matrix.Cols);
-        Assert.Equal(2, matrix.BytesAllocated); // 2 rows × 1 byte/row
+        Assert.Equal(1, matrix.PackedRowBytes);  // ceil(4/4) = 1
+        Assert.Equal(32, matrix.RowStrideBytes); // AlignUp(1, 32) = 32
+    }
+
+    [Fact]
+    public void Pack_RowAlignment_Is32ByteAligned()
+    {
+        // 17 cols → PackedRowBytes = 5, RowStrideBytes = 32
+        var weights = new sbyte[3 * 17];
+        using var matrix = NativeTernaryMatrix.Pack(weights, 3, 17);
+
+        Assert.Equal(5, matrix.PackedRowBytes);
+        Assert.Equal(32, matrix.RowStrideBytes);
+        Assert.Equal(3 * 32, matrix.BytesAllocated);
+    }
+
+    [Fact]
+    public void Pack_LargeRow_AlignedCorrectly()
+    {
+        // 2048 cols → PackedRowBytes = 512, RowStrideBytes = 512 (already aligned)
+        var weights = new sbyte[2048];
+        using var matrix = NativeTernaryMatrix.Pack(weights, 1, 2048);
+
+        Assert.Equal(512, matrix.PackedRowBytes);
+        Assert.Equal(512, matrix.RowStrideBytes);
+    }
+
+    [Fact]
+    public void AlignUp_RoundsCorrectly()
+    {
+        Assert.Equal(32, NativeTernaryMatrix.AlignUp(1, 32));
+        Assert.Equal(32, NativeTernaryMatrix.AlignUp(31, 32));
+        Assert.Equal(32, NativeTernaryMatrix.AlignUp(32, 32));
+        Assert.Equal(64, NativeTernaryMatrix.AlignUp(33, 32));
+        Assert.Equal(512, NativeTernaryMatrix.AlignUp(512, 32));
     }
 
     [Fact]
@@ -54,14 +88,13 @@ public class NativeTernaryMatrixTests
     [Fact]
     public void DotProductRow_MixedTernary_MatchesReference()
     {
-        // Same test as TernaryTensor: weights [1,-1,0,1,-1,0,1,-1], input [10..80]
         var weights = new sbyte[] { 1, -1, 0, 1, -1, 0, 1, -1 };
         var input = new int[] { 10, 20, 30, 40, 50, 60, 70, 80 };
         using var matrix = NativeTernaryMatrix.Pack(weights, 1, 8);
 
         int result = matrix.DotProductRow(0, input);
 
-        Assert.Equal(-30, result); // 10-20+0+40-50+0+70-80 = -30
+        Assert.Equal(-30, result);
     }
 
     [Fact]
@@ -86,9 +119,30 @@ public class NativeTernaryMatrixTests
     }
 
     [Fact]
+    public void DotProductRow_2048Dim_MatchesTernaryTensor()
+    {
+        // Full-size dimension — exercises AVX2 path with prefetch
+        int size = 2048;
+        var weights = new sbyte[size];
+        var input = new int[size];
+        var rng = new Random(99);
+
+        for (int i = 0; i < size; i++)
+        {
+            weights[i] = (sbyte)(rng.Next(3) - 1);
+            input[i] = rng.Next(-500, 500);
+        }
+
+        int expected = TernaryTensor.DotProductTernary(weights, input);
+        using var matrix = NativeTernaryMatrix.Pack(weights, 1, size);
+        int actual = matrix.DotProductRow(0, input);
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
     public void MatVecMultiply_IdentityLike_ReturnsInput()
     {
-        // 4×4 diagonal identity in ternary
         var weights = new sbyte[]
         {
             1, 0, 0, 0,
@@ -118,11 +172,33 @@ public class NativeTernaryMatrixTests
         for (int i = 0; i < input.Length; i++)
             input[i] = rng.Next(-50, 50);
 
-        // Reference: TernaryTensor
         var expected = new int[rows];
         TernaryTensor.MatVecMultiply(weights, input, expected, rows, cols);
 
-        // Packed native
+        var actual = new int[rows];
+        using var matrix = NativeTernaryMatrix.Pack(weights, rows, cols);
+        matrix.MatVecMultiply(input, actual);
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void MatVecMultiply_LargeAligned_MatchesTernaryTensor()
+    {
+        // 128×128 — tests AVX2 + alignment on large data
+        int rows = 128, cols = 128;
+        var weights = new sbyte[rows * cols];
+        var input = new int[cols];
+        var rng = new Random(777);
+
+        for (int i = 0; i < weights.Length; i++)
+            weights[i] = (sbyte)(rng.Next(3) - 1);
+        for (int i = 0; i < input.Length; i++)
+            input[i] = rng.Next(-200, 200);
+
+        var expected = new int[rows];
+        TernaryTensor.MatVecMultiply(weights, input, expected, rows, cols);
+
         var actual = new int[rows];
         using var matrix = NativeTernaryMatrix.Pack(weights, rows, cols);
         matrix.MatVecMultiply(input, actual);
@@ -133,7 +209,6 @@ public class NativeTernaryMatrixTests
     [Fact]
     public void Pack_NonMultipleOf4Cols_HandlesCorrectly()
     {
-        // 7 cols — not a multiple of 4, tests tail handling
         var weights = new sbyte[] { 1, -1, 0, 1, -1, 0, 1 };
         var input = new int[] { 10, 20, 30, 40, 50, 60, 70 };
         using var matrix = NativeTernaryMatrix.Pack(weights, 1, 7);
@@ -147,7 +222,6 @@ public class NativeTernaryMatrixTests
     [Fact]
     public void CountNonZeros_ReturnsCorrectCount()
     {
-        // 4 weights: 1, 0, -1, 1 → 3 non-zeros
         var weights = new sbyte[] { 1, 0, -1, 1 };
         using var matrix = NativeTernaryMatrix.Pack(weights, 1, 4);
 
@@ -155,23 +229,53 @@ public class NativeTernaryMatrixTests
     }
 
     [Fact]
-    public void CountZeroBytes_AllZeros_AllBytesZero()
+    public void CountZeroBytes_AllZeros_CountsLogicalOnly()
     {
         var weights = new sbyte[] { 0, 0, 0, 0, 0, 0, 0, 0 };
         using var matrix = NativeTernaryMatrix.Pack(weights, 2, 4);
 
-        Assert.Equal(2, matrix.CountZeroBytes()); // 2 bytes, both zero
+        // 2 logical bytes (1 per row), both zero — padding bytes excluded
+        Assert.Equal(2, matrix.CountZeroBytes());
     }
 
     [Fact]
-    public void BytesAllocated_Is4xSmaller()
+    public void Stats_ComputedDuringPack()
     {
+        var weights = new sbyte[64];
+        // Set some non-zero values
+        for (int i = 0; i < 16; i++)
+            weights[i] = 1;
+        using var matrix = NativeTernaryMatrix.Pack(weights, 4, 16);
+
+        var stats = matrix.Stats;
+        Assert.Equal(64, stats.LogicalWeights);
+        Assert.Equal(16, stats.PackedBytes);  // 4 rows × 4 bytes/row
+        Assert.True(stats.ZeroByteCount > 0);
+        Assert.True(stats.ZeroByteRatio > 0f);
+        Assert.True(stats.ZeroByteRatio <= 1f);
+    }
+
+    [Fact]
+    public void Stats_AllZeros_FullZeroByteRatio()
+    {
+        var weights = new sbyte[32];
+        using var matrix = NativeTernaryMatrix.Pack(weights, 2, 16);
+
+        Assert.Equal(1f, matrix.Stats.ZeroByteRatio);
+        Assert.Equal(8, matrix.Stats.ZeroByteCount); // 2 rows × 4 bytes/row
+    }
+
+    [Fact]
+    public void BytesAllocated_ReflectsAlignment()
+    {
+        // 64×128: PackedRowBytes=32 (aligned), so BytesAllocated = 64*32
         int rows = 64, cols = 128;
         var weights = new sbyte[rows * cols];
         using var matrix = NativeTernaryMatrix.Pack(weights, rows, cols);
 
-        Assert.Equal(rows * cols / 4, matrix.BytesAllocated);
-        Assert.Equal(weights.Length / 4, matrix.BytesAllocated);
+        Assert.Equal(32, matrix.PackedRowBytes);
+        Assert.Equal(32, matrix.RowStrideBytes);
+        Assert.Equal(64 * 32, matrix.BytesAllocated);
     }
 
     [Fact]
@@ -192,7 +296,7 @@ public class NativeTernaryMatrixTests
         var matrix = NativeTernaryMatrix.Pack(weights, 16, 16);
 
         matrix.Dispose();
-        matrix.Dispose(); // Should not throw
+        matrix.Dispose();
     }
 
     [Fact]
@@ -201,21 +305,18 @@ public class NativeTernaryMatrixTests
         GC.Collect(2, GCCollectionMode.Aggressive, true, true);
         long heapBefore = GC.GetTotalMemory(true);
 
-        // Allocate 1MB of weights in native memory
         int rows = 512, cols = 512;
-        var managedWeights = new sbyte[rows * cols]; // 256KB managed (temporary)
+        var managedWeights = new sbyte[rows * cols];
         using var matrix = NativeTernaryMatrix.Pack(managedWeights, rows, cols);
         managedWeights = null!;
 
         GC.Collect(2, GCCollectionMode.Aggressive, true, true);
         long heapAfter = GC.GetTotalMemory(true);
 
-        // The NativeTernaryMatrix object itself is small (~50 bytes on heap)
-        // Weight data (64KB packed) is in native memory, not GC heap
-        // Allow 512KB slack for test runner overhead
         long heapGrowth = heapAfter - heapBefore;
         Assert.True(heapGrowth < 512 * 1024,
             $"GC heap grew by {heapGrowth} bytes — expected < 512KB (weight data should be native)");
-        Assert.Equal(64 * 1024, matrix.BytesAllocated); // 256KB / 4 = 64KB in native
+        // 512 cols / 4 = 128 bytes/row, AlignUp(128,32)=128, 512*128 = 65536
+        Assert.Equal(65536, matrix.BytesAllocated);
     }
 }
