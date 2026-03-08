@@ -75,8 +75,14 @@ public sealed class BmwHost : IAsyncDisposable
 
         await _server.StartAsync(_application, linkedCts.Token).ConfigureAwait(false);
 
+        // Log listening addresses for diagnostics
+        foreach (var address in _server.Features.Get<Microsoft.AspNetCore.Hosting.Server.Features.IServerAddressesFeature>()?.Addresses ?? [])
+            _logger.LogInfo($"Now listening on: {address}");
+
         _logger.LogInfo($"BmwHost started — PID {Environment.ProcessId} — direct Kestrel hosting (no ASP.NET middleware)");
         Console.WriteLine($"BmwHost started — PID {Environment.ProcessId} — direct Kestrel hosting");
+        foreach (var address in _server.Features.Get<Microsoft.AspNetCore.Hosting.Server.Features.IServerAddressesFeature>()?.Addresses ?? [])
+            Console.WriteLine($"  Listening on: {address}");
 
         // Block until cancellation
         try
