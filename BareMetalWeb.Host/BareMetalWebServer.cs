@@ -29,6 +29,7 @@ public class BareMetalWebServer : IBareWebHost
     public IBufferedLogger BufferedLogger { get; }
     public IMetricsTracker Metrics { get; }
     public IClientRequestTracker ClientRequests { get; }
+    internal ApiRateLimiter ApiLimiter { get; } = new();
     public IHtmlRenderer HtmlRenderer { get; }
     public Dictionary<string, RouteHandlerData> routes { get; set; } = new();
     private string _appName = "";
@@ -555,6 +556,36 @@ public class BareMetalWebServer : IBareWebHost
             // Build the menu/session context now — only for actual page/API requests,
             // not for static assets (bundles, files) served above.
             await BuildAppInfoMenuOptionsAsync(bmwCtx, context.RequestAborted).ConfigureAwait(false);
+
+            // ── Per-identity API rate limiting (#1264) ──────────────────────
+            if (requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
+            {
+                bool isWrite = !string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase);
+                if (!ApiLimiter.TryAcquire(sourceIp, isWrite, out int apiRetryAfter))
+                {
+                    context.Response.Headers.RetryAfter = apiRetryAfter.ToString();
+                    if (IsAjaxRequest(context))
+                    {
+                        await ApiErrorWriter.WriteAsync(context.Response,
+                            ApiErrorWriter.RateLimited(retryAfterSeconds: apiRetryAfter),
+                            context.RequestAborted);
+                    }
+                    else
+                    {
+                        context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                        context.Response.ContentType = "text/plain";
+                        await context.Response.WriteAsync(
+                            $"API rate limit exceeded. Retry after {apiRetryAfter}s.");
+                    }
+                    BufferedLogger.Log(BmwLogLevel.Warn,
+                        $"{routeKey}|429|api-rate-limit|{(isWrite ? "write" : "read")}", rid,
+                        new LogFields { Method = method, Path = requestPath, StatusCode = 429,
+                            SourceIp = sourceIp, Detail = $"api-rate-limit:{(isWrite ? "write" : "read")}" });
+                    stopwatch.Stop();
+                    Metrics.RecordThrottled(stopwatch.Elapsed);
+                    return;
+                }
+            }
 
             long dispatchStart = Stopwatch.GetTimestamp();
             // ── Jump table: O(1) exact-match dispatch ───────────────────────

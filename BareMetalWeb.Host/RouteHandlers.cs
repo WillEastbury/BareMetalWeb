@@ -45,6 +45,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private static DateTime _lastMfaScavenge = DateTime.UtcNow;
     private const int LoginIpMaxAttempts = 10;
     private const int LoginUserMaxAttempts = 5;
+    private const int RegisterIpMaxAttempts = 3;
     private const int SsoCallbackIpMaxAttempts = 10;
     private static readonly TimeSpan DataQueryTimeout = TimeSpan.FromSeconds(30);
 
@@ -500,7 +501,7 @@ public sealed class RouteHandlers : IRouteHandlers
         // Rate limiting — same pattern as login
         var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         var regIpKey = BuildMfaAttemptKey("register:ip", remoteIp);
-        if (IsThrottled(regIpKey, LoginIpMaxAttempts, out var regRetry))
+        if (IsThrottled(regIpKey, RegisterIpMaxAttempts, out var regRetry))
         {
             RenderRegisterForm(context, $"Too many registration attempts. Try again later.", null, null, null);
             await _renderer.RenderPage(context.HttpContext);

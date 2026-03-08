@@ -40,6 +40,10 @@ internal static class PrometheusFormatter
         WriteType(sb, "bmw_http_requests_throttled_total", "counter");
         WriteCounter(sb, "bmw_http_requests_throttled_total", snap.ThrottledRequests);
 
+        WriteHelp(sb, "bmw_http_requests_in_flight", "HTTP requests currently being processed.");
+        WriteType(sb, "bmw_http_requests_in_flight", "gauge");
+        WriteGauge(sb, "bmw_http_requests_in_flight", snap.RequestsInFlight);
+
         WriteHelp(sb, "bmw_http_requests_errors_total", "Total HTTP error requests (4xx+5xx).");
         WriteType(sb, "bmw_http_requests_errors_total", "counter");
         WriteCounter(sb, "bmw_http_requests_errors_total", snap.ErrorRequests);
