@@ -38,6 +38,19 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Home", "<p></p>" }, "Public", false, 60),
             routeHandlers.DefaultPageHandler));
 
+        // Browsers always request /favicon.ico at the root — redirect to the
+        // actual static path and cache the redirect for one year so subsequent
+        // page loads never hit this route again.
+        host.RegisterRoute("GET /favicon.ico", new RouteHandlerData(
+            pageInfoFactory.RawPage("Public", false),
+            context =>
+            {
+                context.Response.StatusCode = 301;
+                context.Response.Headers["Location"] = "/static/favicon.ico";
+                context.Response.Headers["Cache-Control"] = "public, max-age=31536000, immutable";
+                return ValueTask.CompletedTask;
+            }));
+
         host.RegisterRoute("GET /status", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "", "" }, "Public", false, 1),
             routeHandlers.BuildPageHandler(context =>
