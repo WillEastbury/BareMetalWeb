@@ -22,6 +22,7 @@ COPY . .
 ARG VERSION=0.0.0+local
 RUN dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
     --configuration Release \
+    --self-contained \
     --output /app \
     -p:InformationalVersion="${VERSION}"
 
