@@ -11,7 +11,7 @@ data:
 
   # Metal.config overrides (pipe-delimited key|value)
   Metal.config: |
-    Data.Root|/data
+    Data.Root|/app/Data
     Kestrel.Http2Enabled|true
     Kestrel.Http3Enabled|false
     Kestrel.MaxStreamsPerConnection|100

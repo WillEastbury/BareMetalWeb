@@ -28,8 +28,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: baremetalweb
-          # Update tag to match your container.yml build output
-          image: ghcr.io/willeastbury/baremetalweb:latest
+          image: metalclusterregistry.azurecr.io/baremetalweb:latest
           imagePullPolicy: Always
           ports:
             - name: http
