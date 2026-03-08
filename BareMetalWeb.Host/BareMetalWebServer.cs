@@ -773,6 +773,10 @@ public class BareMetalWebServer : IBareWebHost
         if (requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
             return false;
 
+        // Health endpoint must always be reachable for load balancers / monitoring
+        if (requestPath.Equals("/health", StringComparison.OrdinalIgnoreCase))
+            return false;
+
         var staticPrefix = StaticFiles?.NormalizedRequestPathPrefix;
         if (string.IsNullOrWhiteSpace(staticPrefix))
             staticPrefix = StaticFiles?.RequestPathPrefix;
