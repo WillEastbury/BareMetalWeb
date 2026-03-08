@@ -812,7 +812,7 @@ public class BareMetalWebServer : IBareWebHost
         context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
         context.Response.Headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
         if (isHttps)
-            context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+            context.Response.Headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload";
         // HTTP/1.x keep-alive hint so clients reuse TCP connections across requests
         if (context.Request.Protocol is "HTTP/1.0" or "HTTP/1.1")
             context.Response.Headers["Keep-Alive"] = "timeout=60, max=1000";
