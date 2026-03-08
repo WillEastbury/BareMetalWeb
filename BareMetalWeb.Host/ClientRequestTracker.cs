@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-
+using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core.Interfaces;
@@ -58,7 +58,7 @@ public sealed class ClientRequestTracker : IClientRequestTracker
         retryAfterSeconds = null;
 
         // Always bypass throttling for loopback addresses
-        if (clientIp is "127.0.0.1" or "::1")
+        if (IPAddress.TryParse(clientIp, out var addr) && IPAddress.IsLoopback(addr))
         {
             reason = string.Empty;
             return false;
