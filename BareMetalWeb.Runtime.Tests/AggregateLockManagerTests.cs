@@ -10,12 +10,8 @@ namespace BareMetalWeb.Runtime.Tests;
 /// <summary>Tests for <see cref="AggregateLockManager"/>.</summary>
 public class AggregateLockManagerTests
 {
-    private static void WaitUntil(Func<bool> condition, int timeoutMs = 5000, int intervalMs = 25)
-    {
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        while (!condition() && sw.ElapsedMilliseconds < timeoutMs)
-            Thread.Sleep(intervalMs);
-    }
+    private static void WaitUntil(Func<bool> condition, int timeoutMs = 5000)
+        => SpinWait.SpinUntil(condition, timeoutMs);
 
     private static AggregateLockManager MakeManager() => new();
 
