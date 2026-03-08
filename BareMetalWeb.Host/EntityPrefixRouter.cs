@@ -204,8 +204,15 @@ public sealed class EntityPrefixRouter
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryResolve(ReadOnlySpan<char> entitySlug, out string resolvedName, out int ordinal)
     {
-        // Stack-encode up to 128 chars (covers any realistic entity name)
+        // Stack-encode up to 128 bytes (covers any realistic entity name).
+        // Guard against multi-byte overflow: max UTF-8 expansion is 3× for BMP chars.
         Span<byte> buf = stackalloc byte[128];
+        if (entitySlug.Length > 42) // 42 chars × 3 bytes = 126 bytes max
+        {
+            resolvedName = null!;
+            ordinal = -1;
+            return false;
+        }
         int written = Encoding.UTF8.GetBytes(entitySlug, buf);
         return TryResolve(buf[..written], out resolvedName, out ordinal);
     }
@@ -275,6 +282,7 @@ public sealed class EntityPrefixRouter
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool Match(ReadOnlySpan<byte> span, string literal)
     {
+        if (literal.Length > 42) return false; // guard stackalloc overflow
         Span<byte> buf = stackalloc byte[128];
         int len = Encoding.UTF8.GetBytes(literal.AsSpan(), buf);
         return span.SequenceEqual(buf[..len]);

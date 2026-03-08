@@ -37,7 +37,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     private readonly bool _ownsMemory;      // false for mmap-backed matrices
     private MatrixStats _stats;
     private ushort[][]? _skipIndex; // per-row non-zero byte offsets for sparse skip
-    private bool _disposed;
+    private int _disposedFlag; // 0 = alive, 1 = disposed — must use Interlocked
 
     // SVE in-register decode pattern vectors (lazy-initialized)
     private static Vector<int> s_sveByteIdxVec;
@@ -51,7 +51,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     /// <summary>Aligned stride per row (multiple of 32 bytes).</summary>
     public int RowStrideBytes => _rowStrideBytes;
     public long BytesAllocated => _totalBytes;
-    public bool IsDisposed => _disposed;
+    public bool IsDisposed => Volatile.Read(ref Unsafe.AsRef(in _disposedFlag)) != 0;
     /// <summary>Sparsity and packing statistics computed during Pack().</summary>
     public MatrixStats Stats => _stats;
 
@@ -212,8 +212,14 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     {
         if ((uint)row >= (uint)_rows)
             ThrowRowOutOfRange(row);
+        if (input.Length < _cols)
+            ThrowInputTooShort(input.Length, _cols);
 
-        byte* rowPtr = _data + (long)row * _rowStrideBytes;
+        byte* ptr = _data;
+        if (ptr == null)
+            ThrowObjectDisposed();
+
+        byte* rowPtr = ptr + (long)row * _rowStrideBytes;
         int fullBytes = _cols >> 2;
         int tailWeights = _cols & 3;
 
@@ -699,6 +705,8 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     /// </summary>
     public void MatVecMultiply(ReadOnlySpan<int> input, Span<int> output)
     {
+        if (_data == null)
+            ThrowObjectDisposed();
         if (input.Length < _cols)
             throw new ArgumentException($"Input length {input.Length} < cols {_cols}");
         if (output.Length < _rows)
@@ -734,6 +742,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     /// </summary>
     public long CountNonZeros()
     {
+        if (_data == null) ThrowObjectDisposed();
         long nnz = 0;
         for (int r = 0; r < _rows; r++)
         {
@@ -766,6 +775,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     /// </summary>
     public long CountZeroBytes()
     {
+        if (_data == null) ThrowObjectDisposed();
         long count = 0;
         for (int r = 0; r < _rows; r++)
         {
@@ -778,27 +788,28 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
 
     public void Dispose()
     {
-        if (!_disposed)
-        {
-            if (_ownsMemory && _data != null)
-            {
-                NativeMemory.Free(_data);
-            }
-            _data = null;
-            _disposed = true;
-            GC.SuppressFinalize(this);
-        }
+        if (Interlocked.Exchange(ref _disposedFlag, 1) != 0)
+            return;
+
+        byte* ptr = _data;
+        _data = null;
+
+        if (_ownsMemory && ptr != null)
+            NativeMemory.Free(ptr);
+
+        GC.SuppressFinalize(this);
     }
 
     ~NativeTernaryMatrix()
     {
-        if (!_disposed)
-        {
-            if (_ownsMemory && _data != null)
-                NativeMemory.Free(_data);
-            _data = null;
-            _disposed = true;
-        }
+        if (Interlocked.Exchange(ref _disposedFlag, 1) != 0)
+            return;
+
+        byte* ptr = _data;
+        _data = null;
+
+        if (_ownsMemory && ptr != null)
+            NativeMemory.Free(ptr);
     }
 
     // ── Snapshot serialisation helpers ───────────────────────────────────
@@ -809,6 +820,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
     /// </summary>
     public long CopyPackedDataTo(Span<byte> destination)
     {
+        if (_data == null) ThrowObjectDisposed();
         if (destination.Length < _totalBytes)
             throw new ArgumentException(
                 $"Destination {destination.Length} < required {_totalBytes}");
@@ -866,6 +878,14 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
 
     private static void ThrowRowOutOfRange(int row) =>
         throw new ArgumentOutOfRangeException(nameof(row), $"Row index {row} out of range");
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowInputTooShort(int actual, int required) =>
+        throw new ArgumentException($"Input length {actual} < required cols {required}");
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void ThrowObjectDisposed() =>
+        throw new ObjectDisposedException(nameof(NativeTernaryMatrix));
 }
 
 /// <summary>
