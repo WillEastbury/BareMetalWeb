@@ -1,4 +1,6 @@
 using System.Collections.Concurrent;
+using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Core;
@@ -13,6 +15,15 @@ using BareMetalWeb.Rendering.Interfaces;
 using BareMetalWeb.Rendering.Models;
 
 // ── Configuration ──────────────────────────────────────────────────────
+Console.WriteLine("BMW Platform INIT");
+var asmVersion = typeof(BareMetalWebServer).Assembly
+    .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+    ?? typeof(BareMetalWebServer).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+Console.WriteLine($"  Version:  {asmVersion}");
+Console.WriteLine($"  Arch:     {RuntimeInformation.ProcessArchitecture}");
+Console.WriteLine($"  OS:       {RuntimeInformation.OSDescription}");
+Console.WriteLine($"  Runtime:  {RuntimeInformation.FrameworkDescription}");
+Console.WriteLine($"  {SimdCapabilities.Current.ToLogLine()}");
 var contentRoot = Directory.GetCurrentDirectory();
 var config = BmwConfig.Load(contentRoot);
 
