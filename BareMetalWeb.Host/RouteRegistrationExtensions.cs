@@ -191,6 +191,11 @@ public static class RouteRegistrationExtensions
         IPageInfoFactory pageInfoFactory,
         IHtmlTemplate mainTemplate)
     {
+        // Prometheus scrape endpoint — public, no auth, text/plain exposition format
+        host.RegisterRoute("GET /metrics/prometheus", new RouteHandlerData(
+            pageInfoFactory.RawPage("Public", false),
+            PrometheusFormatter.WriteMetricsAsync));
+
         // Metrics
         host.RegisterRoute("GET /metrics", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Metric Viewer", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),

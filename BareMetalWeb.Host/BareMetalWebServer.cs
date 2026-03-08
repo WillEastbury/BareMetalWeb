@@ -794,10 +794,11 @@ public class BareMetalWebServer : IBareWebHost
         if (requestPath.StartsWith("/api/", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        // Health/readiness probes must always be reachable for load balancers / monitoring
+        // Health/readiness probes and Prometheus scrape must always be reachable
         if (requestPath.Equals("/health", StringComparison.OrdinalIgnoreCase)
             || requestPath.Equals("/healthz", StringComparison.OrdinalIgnoreCase)
-            || requestPath.Equals("/readyz", StringComparison.OrdinalIgnoreCase))
+            || requestPath.Equals("/readyz", StringComparison.OrdinalIgnoreCase)
+            || requestPath.Equals("/metrics/prometheus", StringComparison.OrdinalIgnoreCase))
             return false;
 
         var staticPrefix = StaticFiles?.NormalizedRequestPathPrefix;
