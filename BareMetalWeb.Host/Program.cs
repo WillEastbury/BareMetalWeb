@@ -595,7 +595,8 @@ static class ProgramSetup
         var level = Enum.TryParse<BmwLogLevel>(levelStr, ignoreCase: true, out var parsed)
             ? parsed
             : BmwLogLevel.Info;
-        return new DiskBufferedLogger(folder, level);
+        var redactPII = config.GetValue("Logging.RedactPII", true);
+        return new DiskBufferedLogger(folder, level, redactPII);
     }
 
     public static IDataObjectStore CreateDataStore(BmwConfig config, string contentRoot, ISchemaAwareObjectSerializer serializer, IDataQueryEvaluator queryEvaluator, IBufferedLogger logger)

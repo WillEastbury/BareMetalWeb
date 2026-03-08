@@ -218,7 +218,7 @@ public static class EntraIdService
         if (string.IsNullOrEmpty(userInfo.Email))
             return null;
 
-        _logger?.LogInfo($"SSO|provision|email={userInfo.Email}|objectId={userInfo.ObjectId}");
+        _logger?.LogInfo($"SSO|provision|email={LogRedactor.RedactEmail(userInfo.Email)}|objectId={userInfo.ObjectId}");
 
         // Find existing user by email
         var user = await Users.FindByEmailAsync(userInfo.Email, cancellationToken)

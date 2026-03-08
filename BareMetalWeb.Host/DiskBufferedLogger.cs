@@ -14,10 +14,8 @@ namespace BareMetalWeb.Host;
 
 public sealed class DiskBufferedLogger : IBufferedLogger
 {
-    // SECURITY: Audit log files are written as plaintext and may contain PII (user names, entity IDs,
-    // operation details, error messages). No log redaction or encryption-at-rest is applied. Consider
-    // implementing log field redaction middleware for sensitive patterns (passwords, tokens, PII) and
-    // encrypting log files on disk for compliance. See issue #1201.
+    // SECURITY: PII redaction is applied when RedactPII is enabled (#1272).
+    // Log encryption-at-rest is available when BMW_WAL_ENCRYPTION_KEY is configured.
     private readonly string _logFolder;
     private readonly object _lock = new();
     private DateTime? _lastInfoMinuteUtc;
@@ -30,12 +28,16 @@ public sealed class DiskBufferedLogger : IBufferedLogger
     /// <summary>The minimum log level. Entries below this are suppressed with zero allocation.</summary>
     public BmwLogLevel MinimumLevel { get; set; }
 
+    /// <summary>When true, PII patterns (emails, IPs, tokens) are redacted before writing to disk.</summary>
+    public bool RedactPII { get; set; }
+
     private static readonly string[] s_levelLabels = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "OFF" };
 
-    public DiskBufferedLogger(string logFolder, BmwLogLevel minimumLevel = BmwLogLevel.Info)
+    public DiskBufferedLogger(string logFolder, BmwLogLevel minimumLevel = BmwLogLevel.Info, bool redactPII = false)
     {
         _logFolder = logFolder;
         MinimumLevel = minimumLevel;
+        RedactPII = redactPII;
     }
 
     /// <summary>Returns true if the given level would be logged. Use as a guard to avoid allocations.</summary>
@@ -104,8 +106,10 @@ public sealed class DiskBufferedLogger : IBufferedLogger
 
     // ── JSON formatting ────────────────────────────────────────────────────
 
-    private static string FormatJsonEntry(BmwLogLevel level, string message, string? correlationId, LogFields? fields, Exception? ex)
+    private string FormatJsonEntry(BmwLogLevel level, string message, string? correlationId, LogFields? fields, Exception? ex)
     {
+        bool redact = RedactPII;
+
         using var ms = new MemoryStream(256);
         using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { SkipValidation = true }))
         {
@@ -114,7 +118,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
             w.WriteString("level", s_levelLabels[(int)level]);
             if (correlationId != null)
                 w.WriteString("rid", correlationId);
-            w.WriteString("msg", message);
+            w.WriteString("msg", redact ? LogRedactor.RedactFreeText(message) : message);
 
             if (fields != null)
             {
@@ -123,14 +127,14 @@ public sealed class DiskBufferedLogger : IBufferedLogger
                 if (fields.StatusCode.HasValue) w.WriteNumber("status", fields.StatusCode.Value);
                 if (fields.DurationMs.HasValue) w.WriteNumber("ms", Math.Round(fields.DurationMs.Value, 2));
                 if (fields.UserId != null) w.WriteString("uid", fields.UserId);
-                if (fields.SourceIp != null) w.WriteString("ip", fields.SourceIp);
-                if (fields.Detail != null) w.WriteString("detail", fields.Detail);
+                if (fields.SourceIp != null) w.WriteString("ip", redact ? LogRedactor.RedactIp(fields.SourceIp) : fields.SourceIp);
+                if (fields.Detail != null) w.WriteString("detail", redact ? LogRedactor.RedactFreeText(fields.Detail) : fields.Detail);
             }
 
             if (ex != null)
             {
                 w.WriteString("error", ex.GetType().Name);
-                w.WriteString("stack", ex.ToString());
+                w.WriteString("stack", redact ? LogRedactor.RedactFreeText(ex.ToString()) : ex.ToString());
             }
 
             w.WriteEndObject();

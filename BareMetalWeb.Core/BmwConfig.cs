@@ -146,6 +146,7 @@ public sealed class BmwConfig
         ValidateBool(errors, "Data.ResetOnStartup");
         ValidateBool(errors, "EntraId.Enabled");
         ValidateBool(errors, "Backup.Enabled");
+        ValidateBool(errors, "Logging.RedactPII");
 
         // Enum validation
         if (_values.TryGetValue("Https.RedirectMode", out var redirectMode))

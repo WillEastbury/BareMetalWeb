@@ -724,7 +724,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         if (user == null)
         {
-            _logger?.LogInfo($"SSO|callback-provision-denied|{sourceIp}|email={userInfo.Email}");
+            _logger?.LogInfo($"SSO|callback-provision-denied|{sourceIp}|email={LogRedactor.RedactEmail(userInfo.Email)}");
             await BuildPageHandler(ctx =>
             {
                 RenderLoginForm(ctx, "Your account could not be provisioned. Contact your administrator.", null);
@@ -735,7 +735,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         if (!user.IsActive)
         {
-            _logger?.LogInfo($"SSO|callback-inactive|{sourceIp}|email={userInfo.Email}");
+            _logger?.LogInfo($"SSO|callback-inactive|{sourceIp}|email={LogRedactor.RedactEmail(userInfo.Email)}");
             await BuildPageHandler(ctx =>
             {
                 RenderLoginForm(ctx, "Your account has been deactivated.", null);
@@ -746,7 +746,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // Sign in
         RegisterSuccess(ssoIpKey);
-        _logger?.LogInfo($"SSO|callback-success|{sourceIp}|email={userInfo.Email}|user={user.Key}");
+        _logger?.LogInfo($"SSO|callback-success|{sourceIp}|email={LogRedactor.RedactEmail(userInfo.Email)}|user={user.Key}");
         await UserAuth.SignInAsync(context, user, rememberMe: false, context.RequestAborted)
             .ConfigureAwait(false);
 
