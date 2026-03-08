@@ -13,6 +13,8 @@ public interface IMetricsTracker
     void RecordUiRender(TimeSpan elapsed);
     void RecordSerialization(TimeSpan elapsed);
     void RecordGcPause(TimeSpan elapsed);
+    void EnterRequest();
+    void LeaveRequest();
     void GetMetricTable(out string[] tableColumns, out string[][] tableRows);
     MetricsSnapshot GetSnapshot();
 }

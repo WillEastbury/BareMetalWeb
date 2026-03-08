@@ -457,6 +457,7 @@ public class BareMetalWebServer : IBareWebHost
             return;
 
         var stopwatch = Stopwatch.StartNew();
+        Metrics.EnterRequest();
 
         // ── Create BmwContext: resolve features once per request ─────────
         var bmwCtx = BmwContext.CreateFrom(context, this);
@@ -723,6 +724,7 @@ public class BareMetalWebServer : IBareWebHost
         }
         finally
         {
+            Metrics.LeaveRequest();
             stopwatch.Stop();
             var statusCode = context.Response?.StatusCode ?? 0;
             Metrics.RecordRequest(statusCode, stopwatch.Elapsed);

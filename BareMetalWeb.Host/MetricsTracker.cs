@@ -27,6 +27,7 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
     private long _requests5xx;
     private long _requestsOther;
     private long _throttledRequests;
+    private long _requestsInFlight;
 
     private long _routeDispatchTicks;
     private long _routeDispatchCount;
@@ -105,6 +106,9 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
         Interlocked.Add(ref _gcPauseTicks, elapsed.Ticks);
     }
 
+    public void EnterRequest() => Interlocked.Increment(ref _requestsInFlight);
+    public void LeaveRequest() => Interlocked.Decrement(ref _requestsInFlight);
+
     public MetricsSnapshot GetSnapshot()
     {
         var total = Interlocked.Read(ref _totalRequests);
@@ -159,6 +163,7 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             requests5xx,
             requestsOther,
             throttled,
+            Interlocked.Read(ref _requestsInFlight),
             _currentProcess.Id,
             _currentProcess.WorkingSet64,
             _currentProcess.VirtualMemorySize64,
