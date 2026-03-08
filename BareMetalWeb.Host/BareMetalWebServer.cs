@@ -142,7 +142,6 @@ public class BareMetalWebServer : IBareWebHost
     }
     public async ValueTask BuildAppInfoMenuOptionsAsync(BmwContext? context = null, CancellationToken cancellationToken = default)
     {
-        MenuOptionsList.Clear();
         var user = context != null ? await UserAuth.GetUserAsync(context, cancellationToken).ConfigureAwait(false) : null;
         bool isAnonymous = user == null;
         var userPermissions = new HashSet<string>(user?.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
@@ -158,6 +157,9 @@ public class BareMetalWebServer : IBareWebHost
 
             _menuCache.TryRemove(cacheKey, out _);
         }
+
+        // Build into a local list so concurrent readers never see a partially-built menu (#1303)
+        var menuOptions = new List<IMenuOption>();
         foreach (var rte in routes)
         {
             var pageInfo = rte.Value.PageInfo;
@@ -216,7 +218,7 @@ public class BareMetalWebServer : IBareWebHost
 
             bool requiresLoggedIn = requiresAuthenticated || (!requiresAnonymous && requiredPermissions.Length > 0);
 
-            MenuOptionsList.Add(new MenuOption(
+            menuOptions.Add(new MenuOption(
                 href,
                 label,
                 pageInfo.PageMetaData.ShowOnNavBar,
@@ -273,7 +275,7 @@ public class BareMetalWebServer : IBareWebHost
 
             bool entityRightAligned = string.Equals(entity.NavGroup, "Admin", StringComparison.OrdinalIgnoreCase);
 
-            MenuOptionsList.Add(new MenuOption(
+            menuOptions.Add(new MenuOption(
                 href: $"/{entity.Slug}",
                 label: entity.Name,
                 showOnNavBar: true,
@@ -288,7 +290,7 @@ public class BareMetalWebServer : IBareWebHost
 
         if (!isAnonymous)
         {
-            MenuOptionsList.Add(new MenuOption(
+            menuOptions.Add(new MenuOption(
                 href: "/logout",
                 label: "Logout",
                 showOnNavBar: true,
@@ -297,18 +299,21 @@ public class BareMetalWebServer : IBareWebHost
                 colorClass: "btn-warning"));
         }
 
-        var loginIndex = MenuOptionsList.FindIndex(option => string.Equals(option.Href, "/login", StringComparison.OrdinalIgnoreCase));
+        var loginIndex = menuOptions.FindIndex(option => string.Equals(option.Href, "/login", StringComparison.OrdinalIgnoreCase));
         if (loginIndex >= 0)
         {
-            var loginOption = MenuOptionsList[loginIndex];
-            MenuOptionsList.RemoveAt(loginIndex);
-            MenuOptionsList.Add(loginOption);
+            var loginOption = menuOptions[loginIndex];
+            menuOptions.RemoveAt(loginIndex);
+            menuOptions.Add(loginOption);
         }
+
+        // Atomic swap — readers always see a complete, consistent list
+        MenuOptionsList = menuOptions;
 
         if (context != null)
         {
             var cacheKey = BuildMenuCacheKey(user, _routesVersion);
-            _menuCache[cacheKey] = new MenuCacheEntry(MenuOptionsList.ToArray(), DateTime.UtcNow.Add(MenuCacheTtl));
+            _menuCache[cacheKey] = new MenuCacheEntry(menuOptions.ToArray(), DateTime.UtcNow.Add(MenuCacheTtl));
             ScavengeMenuCache();
         }
     }
