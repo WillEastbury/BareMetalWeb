@@ -159,6 +159,14 @@ public static class BareMetalWebExtensions
             msg => logger.LogInfo($"[RuntimeEntityRegistry] {msg}")).ConfigureAwait(false);
         Console.WriteLine($"[BMW Startup] RuntimeEntityRegistry built ({phaseSw.ElapsedMilliseconds}ms)");
 
+        // Build capability graph from metadata (#1259)
+        phaseSw.Restart();
+        var capGraphBuilder = new BareMetalWeb.Runtime.CapabilityGraph.CapabilityGraphBuilder(RuntimeEntityRegistry.Current);
+        var capGraph = await capGraphBuilder.BuildAsync(dataStore).ConfigureAwait(false);
+        BareMetalWeb.Runtime.CapabilityGraph.CapabilityGraphRegistry.Current = capGraph;
+        var (nodeCount, edgeCount, entityCount) = capGraph.Stats;
+        Console.WriteLine($"[BMW Startup] CapabilityGraph: {nodeCount} nodes, {edgeCount} edges, {entityCount} entities ({phaseSw.ElapsedMilliseconds}ms)");
+
         // Compile metadata into dense runtime tables (struct-of-arrays)
         phaseSw.Restart();
         MetadataCompiler.CompileAndSwap(DataScaffold.Entities);
@@ -448,6 +456,65 @@ public static class BareMetalWebExtensions
         {
             Console.WriteLine($"[BMW Startup] Backup service: disabled (set Backup.Enabled|true in Metal.config)");
         }
+
+        // Admin endpoint: GET /api/admin/capabilities — capability graph summary
+        appInfo.RegisterRoute("GET /api/admin/capabilities", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", true),
+            async context =>
+            {
+                var graph = BareMetalWeb.Runtime.CapabilityGraph.CapabilityGraphRegistry.Current;
+                if (graph == null)
+                {
+                    context.Response.StatusCode = 503;
+                    await context.Response.WriteAsync("{\"error\":\"Capability graph not yet built\"}").ConfigureAwait(false);
+                    return;
+                }
+                context.Response.ContentType = "application/json";
+                var (nodes, edges, entities) = graph.Stats;
+                using var ms = new System.IO.MemoryStream(1024);
+                using (var w = new System.Text.Json.Utf8JsonWriter(ms))
+                {
+                    w.WriteStartObject();
+                    w.WriteString("builtUtc", graph.BuiltUtc.ToString("O"));
+                    w.WriteNumber("nodeCount", nodes);
+                    w.WriteNumber("edgeCount", edges);
+                    w.WriteNumber("entityCount", entities);
+                    w.WriteStartArray("nodes");
+                    foreach (var n in graph.Nodes)
+                    {
+                        w.WriteStartObject();
+                        w.WriteNumber("id", n.Id);
+                        w.WriteString("type", n.Type.ToString());
+                        w.WriteNumber("entityIndex", n.EntityIndex);
+                        w.WriteString("label", n.Label);
+                        if (n.Detail != null) w.WriteString("detail", n.Detail);
+                        w.WriteEndObject();
+                    }
+                    w.WriteEndArray();
+                    w.WriteStartArray("edges");
+                    foreach (var e in graph.Edges)
+                    {
+                        w.WriteStartObject();
+                        w.WriteNumber("from", e.FromNode);
+                        w.WriteNumber("to", e.ToNode);
+                        w.WriteEndObject();
+                    }
+                    w.WriteEndArray();
+                    w.WriteStartArray("entities");
+                    foreach (var ent in graph.Entities)
+                    {
+                        w.WriteStartObject();
+                        w.WriteString("entityId", ent.EntityId);
+                        w.WriteString("name", ent.Name);
+                        w.WriteString("slug", ent.Slug);
+                        w.WriteEndObject();
+                    }
+                    w.WriteEndArray();
+                    w.WriteEndObject();
+                }
+                await context.Response.Body.WriteAsync(ms.ToArray()).ConfigureAwait(false);
+            }));
+        Console.WriteLine($"[BMW Startup]   Capability graph route: +1");
 
         // Finalise
         await appInfo.BuildAppInfoMenuOptionsAsync();
