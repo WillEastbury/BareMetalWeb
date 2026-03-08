@@ -1,4 +1,4 @@
-name: Build and Push Container Image
+name: Build and Push Container Images
 
 on:
   push:
@@ -13,17 +13,23 @@ concurrency:
 permissions:
   contents: read
   packages: write
+  id-token: write
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  GHCR_REGISTRY: ghcr.io
+  GHCR_IMAGE: ${{ github.repository }}
+  ACR_NAME: metalclusterregistry
+  ACR_LOGIN_SERVER: metalclusterregistry.azurecr.io
+  ACR_IMAGE: baremetalweb
 
 jobs:
-  build-and-push:
+  version:
+    name: Compute version
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+      info_version: ${{ steps.version.outputs.info_version }}
     steps:
-      - uses: actions/checkout@v6
-
       - name: Compute version
         id: version
         run: |
@@ -38,22 +44,30 @@ jobs:
             echo "tag=${MAJOR}.${DATE}.${BUILD}" >> $GITHUB_OUTPUT
           fi
 
-      - name: Log in to GitHub Container Registry
+  # ── Linux amd64 ────────────────────────────────────────────────────────
+  build-linux-amd64:
+    name: Linux amd64
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ${{ env.GHCR_REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
+      - name: Azure Login
+        uses: azure/login@v2
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=${{ steps.version.outputs.tag }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
-            type=sha,prefix=
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -62,10 +76,114 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          platforms: linux/amd64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: |
+            ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-amd64
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-amd64
           build-args: |
-            VERSION=${{ steps.version.outputs.info_version }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            VERSION=${{ needs.version.outputs.info_version }}
+          cache-from: type=gha,scope=linux-amd64
+          cache-to: type=gha,mode=max,scope=linux-amd64
+
+  # ── Linux arm64 ────────────────────────────────────────────────────────
+  build-linux-arm64:
+    name: Linux arm64
+    needs: version
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-arm64
+            ${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-arm64
+          build-args: |
+            VERSION=${{ needs.version.outputs.info_version }}
+          cache-from: type=gha,scope=linux-arm64
+          cache-to: type=gha,mode=max,scope=linux-arm64
+
+  # ── Windows amd64 ──────────────────────────────────────────────────────
+  build-windows-amd64:
+    name: Windows amd64
+    needs: version
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.GHCR_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Build and push
+        shell: bash
+        run: |
+          TAG="${{ needs.version.outputs.tag }}"
+          VERSION="${{ needs.version.outputs.info_version }}"
+
+          for registry in "${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}" "${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}"; do
+            docker build \
+              -f Dockerfile.windows \
+              -t "${registry}:${TAG}-windows-amd64" \
+              --build-arg "VERSION=${VERSION}" \
+              .
+            docker push "${registry}:${TAG}-windows-amd64"
+          done
+
+  # ── Summary ────────────────────────────────────────────────────────────
+  summary:
+    name: Build summary
+    needs: [version, build-linux-amd64, build-linux-arm64, build-windows-amd64]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          TAG="${{ needs.version.outputs.tag }}"
+          echo "### 🐳 Container Images Built" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Platform | Tag |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-----|" >> $GITHUB_STEP_SUMMARY
+          echo "| Linux amd64 | \`${TAG}-linux-amd64\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Linux arm64 | \`${TAG}-linux-arm64\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Windows amd64 | \`${TAG}-windows-amd64\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "To deploy: update \`kubectl/statefulset.yaml\` image tag to the desired version." >> $GITHUB_STEP_SUMMARY
