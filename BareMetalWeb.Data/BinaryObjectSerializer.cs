@@ -1311,6 +1311,15 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             return resolved;
         }
 
+        // Cross-assembly resolution for core BCL types (e.g. System.String)
+        // Type.GetType handles assembly-qualified names across loaded assemblies.
+        resolved = Type.GetType(typeName, throwOnError: false, ignoreCase: false);
+        if (resolved != null)
+        {
+            KnownTypes.TryAdd(typeName, resolved);
+            return resolved;
+        }
+
         throw new InvalidOperationException($"Unable to resolve type '{typeName}'. Register it with BinaryObjectSerializer.RegisterKnownType<T>() at startup.");
     }
 
