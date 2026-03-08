@@ -3,6 +3,7 @@
 **/Logs/
 
 kubectl
+!kubectl/
 minikube-linux-arm64
 openapi-todo.yaml
 terraform

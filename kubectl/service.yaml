@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: baremetalweb
+  namespace: baremetalweb
+  labels:
+    app.kubernetes.io/name: baremetalweb
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: baremetalweb
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP

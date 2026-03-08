@@ -1,0 +1,16 @@
+**/bin/
+**/obj/
+**/publish/
+**/.vs/
+**/.vscode/
+**/.idea/
+**/node_modules/
+**/*.user
+**/*.suo
+**/TestResults/
+**/*.Tests/
+.git/
+.github/
+kubectl/
+*.md
+LICENSE
