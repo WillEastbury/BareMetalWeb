@@ -436,18 +436,38 @@ static string GetCpuModel()
     {
         if (OperatingSystem.IsLinux() && File.Exists("/proc/cpuinfo"))
         {
+            // Prefer "model name" (x86 full brand string) over "Model" (ARM board name)
+            string? modelName = null;
+            string? model = null;
             foreach (var line in File.ReadLines("/proc/cpuinfo"))
             {
-                if (line.StartsWith("model name", StringComparison.OrdinalIgnoreCase) ||
-                    line.StartsWith("Model", StringComparison.OrdinalIgnoreCase))
+                if (line.StartsWith("model name", StringComparison.OrdinalIgnoreCase))
                 {
                     var idx = line.IndexOf(':');
-                    if (idx >= 0) return line[(idx + 1)..].Trim();
+                    if (idx >= 0) { modelName = line[(idx + 1)..].Trim(); break; }
+                }
+                else if (model == null && line.StartsWith("Model", StringComparison.OrdinalIgnoreCase)
+                         && !line.StartsWith("model name", StringComparison.OrdinalIgnoreCase))
+                {
+                    var idx = line.IndexOf(':');
+                    if (idx >= 0) model = line[(idx + 1)..].Trim();
                 }
             }
+            if (!string.IsNullOrEmpty(modelName)) return modelName;
+            if (!string.IsNullOrEmpty(model)) return model;
         }
         else if (OperatingSystem.IsWindows())
         {
+            // PROCESSOR_IDENTIFIER gives "Intel64 Family 6 Model 154" — try registry first
+            var psi = new System.Diagnostics.ProcessStartInfo("powershell", "-NoProfile -Command \"(Get-CimInstance Win32_Processor).Name\"")
+            { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc != null)
+            {
+                var result = proc.StandardOutput.ReadToEnd().Trim();
+                proc.WaitForExit(2000);
+                if (!string.IsNullOrEmpty(result)) return result;
+            }
             var cpu = Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER");
             if (!string.IsNullOrEmpty(cpu)) return cpu;
         }
