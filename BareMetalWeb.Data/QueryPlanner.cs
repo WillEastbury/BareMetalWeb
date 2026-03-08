@@ -194,7 +194,12 @@ public sealed class QueryPlanner
         if (!DataScaffold.TryGetEntity(entitySlug, out var meta))
             return int.MaxValue;
 
-        // Use cached count if available, otherwise estimate from metadata
+        // Prefer row count from columnar stats (always available after first query)
+        int statsCount = ColumnarStore.StatsRegistry.GetRowCount(meta.Name);
+        if (statsCount >= 0)
+            return statsCount;
+
+        // Fall back to async count if it completes synchronously
         try
         {
             var count = meta.Handlers.CountAsync(null, CancellationToken.None);

@@ -78,7 +78,7 @@ internal static class ColumnQueryExecutor
             if (field == null) continue;
 
             var clauseMask = BuildClauseMask(rows, clause, field, n, wordCount);
-            if (clauseMask == null) return new List<T>(0);
+            if (clauseMask == null) continue; // skip unsupported clause — fall back to post-filter
 
             if (combined == null)
                 combined = clauseMask;

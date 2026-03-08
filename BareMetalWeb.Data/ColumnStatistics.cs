@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 
@@ -9,38 +10,44 @@ namespace BareMetalWeb.Data;
 /// reorder clauses, and choose between scan paths.
 ///
 /// <para>Statistics are lightweight value types stored per field name.
-/// They are rebuilt on every <c>Build()</c> and maintained incrementally
-/// on <c>UpsertRow</c> / <c>RemoveRow</c>.</para>
+/// They are rebuilt on every <c>Build()</c> call. After incremental
+/// <c>UpsertRow</c> / <c>RemoveRow</c> operations the stats become
+/// stale — <see cref="ColumnStatsRegistry.IsStale"/> can be checked
+/// by callers that need accurate estimates.</para>
 /// </summary>
 internal readonly struct ColumnStats
 {
-    /// <summary>Total number of live rows when stats were computed.</summary>
+    /// <summary>Total number of live (valid-bit-set) rows when stats were computed.</summary>
     public int RowCount { get; init; }
 
-    /// <summary>Number of distinct values in the column.</summary>
+    /// <summary>Number of distinct values in the column (among valid rows).</summary>
     public int DistinctCount { get; init; }
 
-    /// <summary>Number of null/default (zero) values.</summary>
+    /// <summary>Number of rows whose validity bit was cleared (deleted/empty slots).</summary>
     public int NullCount { get; init; }
 
-    /// <summary>Minimum value (as long for int/long, as double-bits for float/double).</summary>
+    /// <summary>Minimum value (as long for int/long, as bit-cast long for float/double).</summary>
     public long MinValue { get; init; }
 
-    /// <summary>Maximum value (as long for int/long, as double-bits for float/double).</summary>
+    /// <summary>Maximum value (as long for int/long, as bit-cast long for float/double).</summary>
     public long MaxValue { get; init; }
 
     /// <summary>
     /// Equi-depth histogram bucket boundaries (stored as long).
     /// Each bucket covers approximately <c>RowCount / BucketCount</c> rows.
     /// A null/empty array means no histogram was built (too few rows).
+    /// Bucket count adapts to min(<see cref="MaxBucketCount"/>, distinct, validRowCount).
     /// </summary>
     public long[]? HistogramBoundaries { get; init; }
 
     /// <summary>Whether the column stores floating-point data (min/max are bit-cast).</summary>
     public bool IsFloatingPoint { get; init; }
 
-    /// <summary>Default bucket count for equi-depth histograms.</summary>
-    internal const int DefaultBucketCount = 64;
+    /// <summary>Maximum bucket count for equi-depth histograms.</summary>
+    internal const int MaxBucketCount = 64;
+
+    /// <summary>Minimum number of valid rows required to build a histogram.</summary>
+    internal const int MinRowsForHistogram = 8;
 }
 
 /// <summary>
@@ -244,7 +251,7 @@ internal static class QueryCostEstimator
         if (stats.IsFloatingPoint)
         {
             if (value is double d) target = BitConverter.DoubleToInt64Bits(d);
-            else if (value is float f) target = BitConverter.DoubleToInt64Bits(f);
+            else if (value is float f) target = (long)BitConverter.SingleToInt32Bits(f);
             else return 0.33; // can't position → default
         }
         else
@@ -305,12 +312,17 @@ internal static class QueryCostEstimator
 
 /// <summary>
 /// Builds and caches <see cref="ColumnStats"/> per entity per field.
-/// Thread-safe: stats are rebuilt atomically and swapped via volatile reference.
+/// Thread-safe: <see cref="ConcurrentDictionary{TKey,TValue}"/> handles concurrent reads/writes.
+/// Stats are rebuilt atomically during <see cref="ColumnarStore.Build{T}"/> and become
+/// stale after incremental <c>UpsertRow</c> / <c>RemoveRow</c> operations.
 /// </summary>
 internal sealed class ColumnStatsRegistry
 {
     // entityName → (fieldName → stats)
-    private volatile ConcurrentDictionary<string, Dictionary<string, ColumnStats>> _registry = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Dictionary<string, ColumnStats>> _registry = new(StringComparer.OrdinalIgnoreCase);
+
+    // Tracks whether stats have been invalidated by incremental mutations.
+    private readonly ConcurrentDictionary<string, bool> _stale = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Collects statistics for all numeric columns during a columnar store build.
@@ -335,6 +347,7 @@ internal sealed class ColumnStatsRegistry
             stats[name] = BuildFloatStats(col, validMask, rowCount);
 
         _registry[entityName] = stats;
+        _stale[entityName] = false;
     }
 
     /// <summary>Returns stats for a specific entity, or an empty dictionary if none collected.</summary>
@@ -345,6 +358,26 @@ internal sealed class ColumnStatsRegistry
         return EmptyStats;
     }
 
+    /// <summary>
+    /// Returns the RowCount from any column's stats for the given entity,
+    /// or -1 if no stats are available (used by QueryPlanner as a cardinality hint).
+    /// </summary>
+    internal int GetRowCount(string entityName)
+    {
+        if (!_registry.TryGetValue(entityName, out var stats))
+            return -1;
+        foreach (var s in stats.Values)
+            return s.RowCount;
+        return -1;
+    }
+
+    /// <summary>Marks stats as stale for the given entity (after UpsertRow/RemoveRow).</summary>
+    internal void MarkStale(string entityName) => _stale[entityName] = true;
+
+    /// <summary>Returns true if stats for the given entity have been invalidated by incremental mutations.</summary>
+    internal bool IsStale(string entityName) =>
+        !_stale.TryGetValue(entityName, out var stale) || stale;
+
     private static readonly Dictionary<string, ColumnStats> EmptyStats = new();
 
     // ── Per-type stat builders ──────────────────────────────────────────────
@@ -352,166 +385,301 @@ internal sealed class ColumnStatsRegistry
     private static ColumnStats BuildIntStats(int[] col, ulong[] validMask, int rowCount)
     {
         int min = int.MaxValue, max = int.MinValue;
-        int nullCount = 0, n = Math.Min(rowCount, col.Length);
-        var seen = new HashSet<int>();
+        int validCount = 0, n = Math.Min(rowCount, col.Length);
 
+        // First pass: min/max + count valid rows
         for (int i = 0; i < n; i++)
         {
             if (!IsValid(validMask, i)) continue;
             int v = col[i];
-            if (v == 0) nullCount++;
             if (v < min) min = v;
             if (v > max) max = v;
-            seen.Add(v);
+            validCount++;
         }
+
+        int nullCount = n - validCount;
+
+        // Distinct count via sort-based approach (avoids HashSet allocation)
+        int distinct = CountDistinctInt(col, validMask, n, validCount);
 
         return new ColumnStats
         {
-            RowCount = rowCount,
-            DistinctCount = seen.Count,
+            RowCount = validCount,
+            DistinctCount = distinct,
             NullCount = nullCount,
             MinValue = min == int.MaxValue ? 0 : min,
             MaxValue = max == int.MinValue ? 0 : max,
             IsFloatingPoint = false,
-            HistogramBoundaries = BuildHistogram(col, validMask, n, seen.Count),
+            HistogramBoundaries = BuildHistogramInt(col, validMask, n, validCount, distinct),
         };
     }
 
     private static ColumnStats BuildLongStats(long[] col, ulong[] validMask, int rowCount)
     {
         long min = long.MaxValue, max = long.MinValue;
-        int nullCount = 0, n = Math.Min(rowCount, col.Length);
-        var seen = new HashSet<long>();
+        int validCount = 0, n = Math.Min(rowCount, col.Length);
 
         for (int i = 0; i < n; i++)
         {
             if (!IsValid(validMask, i)) continue;
             long v = col[i];
-            if (v == 0) nullCount++;
             if (v < min) min = v;
             if (v > max) max = v;
-            seen.Add(v);
+            validCount++;
         }
+
+        int nullCount = n - validCount;
+        int distinct = CountDistinctLong(col, validMask, n, validCount);
 
         return new ColumnStats
         {
-            RowCount = rowCount,
-            DistinctCount = seen.Count,
+            RowCount = validCount,
+            DistinctCount = distinct,
             NullCount = nullCount,
             MinValue = min == long.MaxValue ? 0 : min,
             MaxValue = max == long.MinValue ? 0 : max,
             IsFloatingPoint = false,
-            HistogramBoundaries = BuildHistogramLong(col, validMask, n, seen.Count),
+            HistogramBoundaries = BuildHistogramLong(col, validMask, n, validCount, distinct),
         };
     }
 
     private static ColumnStats BuildDoubleStats(double[] col, ulong[] validMask, int rowCount)
     {
         double min = double.MaxValue, max = double.MinValue;
-        int nullCount = 0, n = Math.Min(rowCount, col.Length);
-        var seen = new HashSet<long>(); // bit-cast for distinct counting
+        int validCount = 0, n = Math.Min(rowCount, col.Length);
 
         for (int i = 0; i < n; i++)
         {
             if (!IsValid(validMask, i)) continue;
             double v = col[i];
-            if (v == 0.0) nullCount++;
             if (v < min) min = v;
             if (v > max) max = v;
-            seen.Add(BitConverter.DoubleToInt64Bits(v));
+            validCount++;
         }
+
+        int nullCount = n - validCount;
+        int distinct = CountDistinctDouble(col, validMask, n, validCount);
 
         return new ColumnStats
         {
-            RowCount = rowCount,
-            DistinctCount = seen.Count,
+            RowCount = validCount,
+            DistinctCount = distinct,
             NullCount = nullCount,
             MinValue = min == double.MaxValue ? 0 : BitConverter.DoubleToInt64Bits(min),
             MaxValue = max == double.MinValue ? 0 : BitConverter.DoubleToInt64Bits(max),
             IsFloatingPoint = true,
+            HistogramBoundaries = BuildHistogramDouble(col, validMask, n, validCount, distinct),
         };
     }
 
     private static ColumnStats BuildFloatStats(float[] col, ulong[] validMask, int rowCount)
     {
         float min = float.MaxValue, max = float.MinValue;
-        int nullCount = 0, n = Math.Min(rowCount, col.Length);
-        var seen = new HashSet<int>(); // bit-cast
+        int validCount = 0, n = Math.Min(rowCount, col.Length);
 
         for (int i = 0; i < n; i++)
         {
             if (!IsValid(validMask, i)) continue;
             float v = col[i];
-            if (v == 0f) nullCount++;
             if (v < min) min = v;
             if (v > max) max = v;
-            seen.Add(BitConverter.SingleToInt32Bits(v));
+            validCount++;
         }
+
+        int nullCount = n - validCount;
+        int distinct = CountDistinctFloat(col, validMask, n, validCount);
 
         return new ColumnStats
         {
-            RowCount = rowCount,
-            DistinctCount = seen.Count,
+            RowCount = validCount,
+            DistinctCount = distinct,
             NullCount = nullCount,
-            MinValue = min == float.MaxValue ? 0 : BitConverter.DoubleToInt64Bits(min),
-            MaxValue = max == float.MinValue ? 0 : BitConverter.DoubleToInt64Bits(max),
+            MinValue = min == float.MaxValue ? 0 : (long)BitConverter.SingleToInt32Bits(min),
+            MaxValue = max == float.MinValue ? 0 : (long)BitConverter.SingleToInt32Bits(max),
             IsFloatingPoint = true,
+            HistogramBoundaries = BuildHistogramFloat(col, validMask, n, validCount, distinct),
         };
     }
 
-    // ── Histogram builders ──────────────────────────────────────────────────
+    // ── Sort-based distinct counting (avoids HashSet allocation) ────────────
+    // Rents a temp array from ArrayPool, copies valid values, sorts, counts unique.
 
-    /// <summary>
-    /// Builds an equi-depth histogram for an int column.
-    /// Each bucket boundary is the value at position (i × rowCount/bucketCount)
-    /// in the sorted value list, giving roughly equal row counts per bucket.
-    /// </summary>
-    private static long[]? BuildHistogram(int[] col, ulong[] validMask, int n, int distinct)
+    private static int CountDistinctInt(int[] col, ulong[] validMask, int n, int validCount)
     {
-        if (distinct < ColumnStats.DefaultBucketCount || n < ColumnStats.DefaultBucketCount)
-            return null; // too few values for a useful histogram
-
-        // Collect valid values
-        var values = new int[n];
-        int count = 0;
+        if (validCount == 0) return 0;
+        var buf = ArrayPool<int>.Shared.Rent(validCount);
+        int c = 0;
         for (int i = 0; i < n; i++)
         {
             if (!IsValid(validMask, i)) continue;
-            values[count++] = col[i];
+            buf[c++] = col[i];
         }
-        Array.Sort(values, 0, count);
+        Array.Sort(buf, 0, c);
+        int distinct = 1;
+        for (int i = 1; i < c; i++)
+            if (buf[i] != buf[i - 1]) distinct++;
+        ArrayPool<int>.Shared.Return(buf);
+        return distinct;
+    }
 
-        int buckets = Math.Min(ColumnStats.DefaultBucketCount, count);
+    private static int CountDistinctLong(long[] col, ulong[] validMask, int n, int validCount)
+    {
+        if (validCount == 0) return 0;
+        var buf = ArrayPool<long>.Shared.Rent(validCount);
+        int c = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (!IsValid(validMask, i)) continue;
+            buf[c++] = col[i];
+        }
+        Array.Sort(buf, 0, c);
+        int distinct = 1;
+        for (int i = 1; i < c; i++)
+            if (buf[i] != buf[i - 1]) distinct++;
+        ArrayPool<long>.Shared.Return(buf);
+        return distinct;
+    }
+
+    private static int CountDistinctDouble(double[] col, ulong[] validMask, int n, int validCount)
+    {
+        if (validCount == 0) return 0;
+        // Bit-cast to long for exact equality (avoids NaN != NaN issues)
+        var buf = ArrayPool<long>.Shared.Rent(validCount);
+        int c = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (!IsValid(validMask, i)) continue;
+            buf[c++] = BitConverter.DoubleToInt64Bits(col[i]);
+        }
+        Array.Sort(buf, 0, c);
+        int distinct = 1;
+        for (int i = 1; i < c; i++)
+            if (buf[i] != buf[i - 1]) distinct++;
+        ArrayPool<long>.Shared.Return(buf);
+        return distinct;
+    }
+
+    private static int CountDistinctFloat(float[] col, ulong[] validMask, int n, int validCount)
+    {
+        if (validCount == 0) return 0;
+        var buf = ArrayPool<int>.Shared.Rent(validCount);
+        int c = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (!IsValid(validMask, i)) continue;
+            buf[c++] = BitConverter.SingleToInt32Bits(col[i]);
+        }
+        Array.Sort(buf, 0, c);
+        int distinct = 1;
+        for (int i = 1; i < c; i++)
+            if (buf[i] != buf[i - 1]) distinct++;
+        ArrayPool<int>.Shared.Return(buf);
+        return distinct;
+    }
+
+    // ── Histogram builders ──────────────────────────────────────────────────
+    // Adaptive bucket count: min(MaxBucketCount, distinct, validCount).
+    // Requires at least MinRowsForHistogram valid rows and ≥ 2 distinct values.
+
+    private static long[]? BuildHistogramInt(int[] col, ulong[] validMask, int n, int validCount, int distinct)
+    {
+        if (validCount < ColumnStats.MinRowsForHistogram || distinct < 2)
+            return null;
+
+        var buf = ArrayPool<int>.Shared.Rent(validCount);
+        int c = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (!IsValid(validMask, i)) continue;
+            buf[c++] = col[i];
+        }
+        Array.Sort(buf, 0, c);
+
+        int buckets = Math.Min(ColumnStats.MaxBucketCount, Math.Min(distinct, c));
         var boundaries = new long[buckets + 1];
         for (int b = 0; b <= buckets; b++)
         {
-            int idx = (int)((long)b * (count - 1) / buckets);
-            boundaries[b] = values[idx];
+            int idx = (int)((long)b * (c - 1) / buckets);
+            boundaries[b] = buf[idx];
         }
+        ArrayPool<int>.Shared.Return(buf);
         return boundaries;
     }
 
-    private static long[]? BuildHistogramLong(long[] col, ulong[] validMask, int n, int distinct)
+    private static long[]? BuildHistogramLong(long[] col, ulong[] validMask, int n, int validCount, int distinct)
     {
-        if (distinct < ColumnStats.DefaultBucketCount || n < ColumnStats.DefaultBucketCount)
+        if (validCount < ColumnStats.MinRowsForHistogram || distinct < 2)
             return null;
 
-        var values = new long[n];
-        int count = 0;
+        var buf = ArrayPool<long>.Shared.Rent(validCount);
+        int c = 0;
         for (int i = 0; i < n; i++)
         {
             if (!IsValid(validMask, i)) continue;
-            values[count++] = col[i];
+            buf[c++] = col[i];
         }
-        Array.Sort(values, 0, count);
+        Array.Sort(buf, 0, c);
 
-        int buckets = Math.Min(ColumnStats.DefaultBucketCount, count);
+        int buckets = Math.Min(ColumnStats.MaxBucketCount, Math.Min(distinct, c));
         var boundaries = new long[buckets + 1];
         for (int b = 0; b <= buckets; b++)
         {
-            int idx = (int)((long)b * (count - 1) / buckets);
-            boundaries[b] = values[idx];
+            int idx = (int)((long)b * (c - 1) / buckets);
+            boundaries[b] = buf[idx];
         }
+        ArrayPool<long>.Shared.Return(buf);
+        return boundaries;
+    }
+
+    private static long[]? BuildHistogramDouble(double[] col, ulong[] validMask, int n, int validCount, int distinct)
+    {
+        if (validCount < ColumnStats.MinRowsForHistogram || distinct < 2)
+            return null;
+
+        // Sort by bit-cast representation for consistent ordering with stats min/max
+        var buf = ArrayPool<long>.Shared.Rent(validCount);
+        int c = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (!IsValid(validMask, i)) continue;
+            buf[c++] = BitConverter.DoubleToInt64Bits(col[i]);
+        }
+        Array.Sort(buf, 0, c);
+
+        int buckets = Math.Min(ColumnStats.MaxBucketCount, Math.Min(distinct, c));
+        var boundaries = new long[buckets + 1];
+        for (int b = 0; b <= buckets; b++)
+        {
+            int idx = (int)((long)b * (c - 1) / buckets);
+            boundaries[b] = buf[idx];
+        }
+        ArrayPool<long>.Shared.Return(buf);
+        return boundaries;
+    }
+
+    private static long[]? BuildHistogramFloat(float[] col, ulong[] validMask, int n, int validCount, int distinct)
+    {
+        if (validCount < ColumnStats.MinRowsForHistogram || distinct < 2)
+            return null;
+
+        // Bit-cast to int for sort; store as long in boundaries for consistency
+        var buf = ArrayPool<int>.Shared.Rent(validCount);
+        int c = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (!IsValid(validMask, i)) continue;
+            buf[c++] = BitConverter.SingleToInt32Bits(col[i]);
+        }
+        Array.Sort(buf, 0, c);
+
+        int buckets = Math.Min(ColumnStats.MaxBucketCount, Math.Min(distinct, c));
+        var boundaries = new long[buckets + 1];
+        for (int b = 0; b <= buckets; b++)
+        {
+            int idx = (int)((long)b * (c - 1) / buckets);
+            boundaries[b] = (long)buf[idx];
+        }
+        ArrayPool<int>.Shared.Return(buf);
         return boundaries;
     }
 
@@ -537,9 +705,9 @@ internal enum ScanPath
 
 /// <summary>
 /// Full cost breakdown for a query — used for diagnostics, EXPLAIN output,
-/// and plan selection.
+/// and plan selection. Struct to avoid allocation on the query hot path.
 /// </summary>
-internal sealed class QueryCostBreakdown
+internal readonly struct QueryCostBreakdown
 {
     /// <summary>Total rows in the entity store.</summary>
     public int TotalRows { get; init; }
@@ -557,16 +725,16 @@ internal sealed class QueryCostBreakdown
     public double EstimatedCost { get; init; }
 
     /// <summary>Per-clause detail.</summary>
-    public ClauseCostDetail[] ClauseDetails { get; init; } = Array.Empty<ClauseCostDetail>();
+    public ClauseCostDetail[] ClauseDetails { get; init; }
 
     /// <summary>Optimal clause execution order (most selective first).</summary>
-    public int[] ClauseOrder { get; init; } = Array.Empty<int>();
+    public int[] ClauseOrder { get; init; }
 }
 
 /// <summary>Cost detail for a single query clause.</summary>
-internal sealed class ClauseCostDetail
+internal readonly struct ClauseCostDetail
 {
-    public string Field { get; init; } = "";
+    public string Field { get; init; }
     public QueryOperator Operator { get; init; }
     public double Selectivity { get; init; }
     public int EstimatedMatchingRows { get; init; }

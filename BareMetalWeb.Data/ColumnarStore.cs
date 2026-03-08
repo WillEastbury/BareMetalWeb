@@ -48,6 +48,9 @@ internal sealed class ColumnarStore
     // so GetOrBuildColumnarStore detects "needs rebuild" only when Invalidate() is called.
     private long _version;
 
+    // Entity name for this store instance (set on first Build, used for stats staleness tracking).
+    private string? _entityName;
+
     // Per-column statistics registry — shared across all ColumnarStore instances.
     // Stats are collected during Build() and used by QueryCostEstimator.
     internal static readonly ColumnStatsRegistry StatsRegistry = new();
@@ -163,6 +166,7 @@ internal sealed class ColumnarStore
             }
 
             Interlocked.Increment(ref _version);
+            _entityName = meta.Name;
 
             // Collect per-column statistics for query cost estimation
             StatsRegistry.CollectStats(
@@ -222,6 +226,8 @@ internal sealed class ColumnarStore
             }
 
             SetValidBit(_validMask, ordinal);
+
+            if (_entityName != null) StatsRegistry.MarkStale(_entityName);
             return true;
         }
         finally
@@ -246,6 +252,8 @@ internal sealed class ColumnarStore
                 return false;
 
             ClearValidBit(_validMask, ordinal);
+
+            if (_entityName != null) StatsRegistry.MarkStale(_entityName);
             return true;
         }
         finally
