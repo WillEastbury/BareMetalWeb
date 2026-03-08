@@ -60,8 +60,9 @@ public sealed class WalStore : IDisposable
 
     // ── Public surface ────────────────────────────────────────────────────────
 
-    /// <summary>In-memory head map: key → Ptr of the latest committed record for that key.</summary>
-    public WalHeadMap HeadMap { get; } = new();
+    /// <summary>In-memory head map: key → Ptr of the latest committed record for that key.
+    /// Uses direct ordinal-based indexing for O(1) cache-friendly reads.</summary>
+    public WalDirectIndex HeadMap { get; } = new();
 
     /// <summary>In-memory segment index: segmentId → set of WAL keys in that segment.</summary>
     public WalSegmentIndex SegmentIndex { get; } = new();
@@ -100,7 +101,7 @@ public sealed class WalStore : IDisposable
         return true;
     }
 
-    /// <summary>Convenience proxy for <see cref="WalHeadMap.TryGetHead"/>.</summary>
+    /// <summary>Convenience proxy for <see cref="WalDirectIndex.TryGetHead"/>.</summary>
     public bool TryGetHead(ulong key, out ulong ptr) => HeadMap.TryGetHead(key, out ptr);
 
     /// <summary>

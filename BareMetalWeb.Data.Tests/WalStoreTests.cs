@@ -131,12 +131,12 @@ public sealed class WalStoreTests : IDisposable
         Assert.NotEqual(c1, c2);
     }
 
-    // ── WalHeadMap ───────────────────────────────────────────────────────────
+    // ── WalDirectIndex ───────────────────────────────────────────────────────────
 
     [Fact]
     public void HeadMap_SetAndGet_SingleKey()
     {
-        using var map = new WalHeadMap();
+        using var map = new WalDirectIndex();
         ulong key = WalConstants.PackKey(1, 100);
         ulong ptr = WalConstants.PackPtr(0, 16);
         map.SetHead(key, ptr);
@@ -147,7 +147,7 @@ public sealed class WalStoreTests : IDisposable
     [Fact]
     public void HeadMap_MissingKey_ReturnsFalse()
     {
-        using var map = new WalHeadMap();
+        using var map = new WalDirectIndex();
         Assert.False(map.TryGetHead(0xDEAD_BEEFul, out ulong ptr));
         Assert.Equal(WalConstants.NullPtr, ptr);
     }
@@ -155,7 +155,7 @@ public sealed class WalStoreTests : IDisposable
     [Fact]
     public void HeadMap_Update_OverwritesExisting()
     {
-        using var map = new WalHeadMap();
+        using var map = new WalDirectIndex();
         ulong key  = WalConstants.PackKey(2, 200);
         ulong ptr1 = WalConstants.PackPtr(0, 16);
         ulong ptr2 = WalConstants.PackPtr(1, 32);
@@ -168,7 +168,7 @@ public sealed class WalStoreTests : IDisposable
     [Fact]
     public void HeadMap_MultipleKeys_SortedBinarySearch()
     {
-        using var map = new WalHeadMap();
+        using var map = new WalDirectIndex();
         // Insert out-of-order
         for (uint r = 10; r >= 1; r--)
         {
@@ -187,7 +187,7 @@ public sealed class WalStoreTests : IDisposable
     [Fact]
     public void HeadMap_BulkLoad_Roundtrip()
     {
-        using var map = new WalHeadMap();
+        using var map = new WalDirectIndex();
         var keys  = new ulong[] { 1, 5, 10, 100 };
         var heads = new ulong[] { 10, 50, 100, 1000 };
         map.BulkLoad(keys, heads);
@@ -196,27 +196,41 @@ public sealed class WalStoreTests : IDisposable
         Assert.Equal(50uL, v);
     }
 
-    // ── WalHeadMap: striped (sharded) behaviour ──────────────────────────────
+    // ── WalDirectIndex: multi-table behaviour ──────────────────────────────
 
     [Fact]
-    public void HeadMap_Striped_DefaultShardCountIsPowerOfTwo()
+    public void HeadMap_DirectIndex_O1Lookup()
     {
-        int n = WalHeadMap.DefaultShardCount;
-        Assert.True(n > 0 && (n & (n - 1)) == 0, $"DefaultShardCount {n} is not a positive power of two.");
+        using var map = new WalDirectIndex();
+        for (uint r = 1; r <= 1000; r++)
+        {
+            ulong key = WalConstants.PackKey(1, r);
+            map.SetHead(key, WalConstants.PackPtr(0, r * 8));
+        }
+        Assert.Equal(1000, map.Count);
+        for (uint r = 1; r <= 1000; r++)
+        {
+            Assert.True(map.TryGetHead(WalConstants.PackKey(1, r), out ulong ptr));
+            Assert.Equal(WalConstants.PackPtr(0, r * 8), ptr);
+        }
     }
 
     [Fact]
-    public void HeadMap_Striped_InvalidShardCount_Throws()
+    public void HeadMap_DirectIndex_Remove_Tombstones()
     {
-        Assert.Throws<ArgumentOutOfRangeException>(() => new WalHeadMap(0).Dispose());
-        Assert.Throws<ArgumentOutOfRangeException>(() => new WalHeadMap(3).Dispose());
-        Assert.Throws<ArgumentOutOfRangeException>(() => new WalHeadMap(-1).Dispose());
+        using var map = new WalDirectIndex();
+        ulong key = WalConstants.PackKey(1, 42);
+        map.SetHead(key, WalConstants.PackPtr(0, 100));
+        Assert.True(map.TryGetHead(key, out _));
+        map.Remove(key);
+        Assert.False(map.TryGetHead(key, out _));
     }
+
 
     [Fact]
     public void HeadMap_Striped_KeysAcrossDifferentTables_AllReadable()
     {
-        using var map = new WalHeadMap(shardCount: 4);
+        using var map = new WalDirectIndex();
 
         // Insert keys for 8 different tableIds — they fan out across the 4 shards
         for (uint tableId = 0; tableId < 8; tableId++)
@@ -240,7 +254,7 @@ public sealed class WalStoreTests : IDisposable
     [Fact]
     public void HeadMap_Striped_BulkLoad_DistributesAcrossShards()
     {
-        using var map = new WalHeadMap(shardCount: 4);
+        using var map = new WalDirectIndex();
 
         // Build a globally sorted array spanning 16 tableIds
         var sortedKeys  = new ulong[16];
@@ -264,7 +278,7 @@ public sealed class WalStoreTests : IDisposable
     [Fact]
     public void HeadMap_Striped_CopyArrays_MergesShardsIntoSortedOutput()
     {
-        using var map = new WalHeadMap(shardCount: 4);
+        using var map = new WalDirectIndex();
 
         // Insert keys that will land in at least two different shards
         // tableId 0 → shard 0,  tableId 1 → shard 1
@@ -294,7 +308,7 @@ public sealed class WalStoreTests : IDisposable
     [Fact]
     public void HeadMap_Striped_BatchSetHeads_CrossShardKeys_AllUpdated()
     {
-        using var map = new WalHeadMap(shardCount: 4);
+        using var map = new WalDirectIndex();
 
         // Keys across all 4 shards (tableIds 0,1,2,3)
         ulong[] keys = [
@@ -318,7 +332,7 @@ public sealed class WalStoreTests : IDisposable
     [Fact]
     public void HeadMap_Striped_BatchSetHeads_PerKeyPtrs_CrossShard()
     {
-        using var map = new WalHeadMap(shardCount: 4);
+        using var map = new WalDirectIndex();
 
         // Keys sorted ascending, spanning two shards
         ulong[] keys = [

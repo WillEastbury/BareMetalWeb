@@ -4,7 +4,7 @@ using System.IO;
 namespace BareMetalWeb.Data;
 
 /// <summary>
-/// Persisted checkpoint of the <see cref="WalHeadMap"/>.
+/// Persisted checkpoint of the <see cref="WalDirectIndex"/>.
 ///
 /// <para>
 /// Snapshot file format (little-endian):
@@ -34,7 +34,7 @@ public static class WalSnapshot
     /// Writes a snapshot of <paramref name="headMap"/> to disk, atomically replacing
     /// any previous snapshot in <paramref name="directory"/>.
     /// </summary>
-    public static void Write(string directory, ulong snapshotPtr, WalHeadMap headMap)
+    public static void Write(string directory, ulong snapshotPtr, WalDirectIndex headMap)
     {
         // Snapshot the head map arrays under read lock via a temporary BulkLoad-compatible read.
         ulong[] keys;
