@@ -3,6 +3,9 @@
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
+# Install clang for AOT native compilation
+RUN apt-get update && apt-get install -y --no-install-recommends clang zlib1g-dev && rm -rf /var/lib/apt/lists/*
+
 # Copy solution and project files first for layer caching
 COPY BareMetalWeb.sln ./
 COPY BareMetalWeb.Core/BareMetalWeb.Core.csproj BareMetalWeb.Core/
