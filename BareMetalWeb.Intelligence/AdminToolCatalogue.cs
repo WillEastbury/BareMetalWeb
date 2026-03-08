@@ -1,5 +1,6 @@
 using BareMetalWeb.Core;
 using BareMetalWeb.Intelligence.Interfaces;
+using BareMetalWeb.Runtime.CapabilityGraph;
 
 namespace BareMetalWeb.Intelligence;
 
@@ -39,6 +40,10 @@ public static class AdminToolCatalogue
         new("help",
             "Show available commands and capabilities",
             ["help", "commands", "what", "can", "you", "do", "capabilities"]),
+
+        new("plan-workflow",
+            "Generate a multi-step workflow plan from natural language",
+            ["plan", "workflow", "automate", "steps", "pipeline", "sequence", "batch", "multi", "chain"]),
     ];
 
     /// <summary>
@@ -87,6 +92,12 @@ public static class AdminToolCatalogue
             "Show available commands",
             [],
             HelpHandler);
+
+        registry.Register(
+            "plan-workflow",
+            "Generate a multi-step workflow plan from natural language intent",
+            [new ToolParameter("intent", "Natural language description of the workflow", true)],
+            PlanWorkflowHandler);
 
         return registry;
     }
@@ -231,11 +242,40 @@ public static class AdminToolCatalogue
         sb.AppendLine("  • list entities     — Show all registered data entities");
         sb.AppendLine("  • describe <entity> — Show fields and metadata for an entity");
         sb.AppendLine("  • query <entity>    — Query records from an entity");
+        sb.AppendLine("  • plan workflow     — Generate a multi-step workflow plan from natural language");
         sb.AppendLine("  • system status     — Show memory, GC, uptime diagnostics");
         sb.AppendLine("  • index status      — Show search index health");
         sb.AppendLine("  • help              — Show this help message");
         sb.AppendLine();
         sb.AppendLine("Architecture: Keyword intent classifier (fast path) + BitNet ternary engine (complex queries)");
         return ValueTask.FromResult(ToolResult.Ok(sb.ToString()));
+    }
+
+    private static ValueTask<ToolResult> PlanWorkflowHandler(
+        IReadOnlyDictionary<string, string> parameters, CancellationToken ct)
+    {
+        var graph = BareMetalWeb.Runtime.CapabilityGraph.CapabilityGraphRegistry.Current;
+        if (graph == null)
+            return ValueTask.FromResult(ToolResult.Fail("Capability graph not yet built — server is still initializing."));
+
+        if (!parameters.TryGetValue("intent", out var intent) || string.IsNullOrWhiteSpace(intent))
+        {
+            // If no explicit "intent" parameter, concatenate all parameter values
+            // (the orchestrator may pass the raw query as parameters)
+            var sb = new System.Text.StringBuilder();
+            foreach (var kvp in parameters)
+                if (!string.IsNullOrWhiteSpace(kvp.Value))
+                    sb.Append(kvp.Value).Append(' ');
+            intent = sb.ToString().Trim();
+
+            if (string.IsNullOrWhiteSpace(intent))
+                return ValueTask.FromResult(ToolResult.Fail("Please describe the workflow you want to create."));
+        }
+
+        var planner = new WorkflowPlanner(graph);
+        var plan = planner.GeneratePlan(intent);
+        var output = WorkflowPlanner.FormatPlan(plan);
+
+        return ValueTask.FromResult(plan.IsValid ? ToolResult.Ok(output) : ToolResult.Ok(output));
     }
 }

@@ -516,6 +516,75 @@ public static class BareMetalWebExtensions
             }));
         Console.WriteLine($"[BMW Startup]   Capability graph route: +1");
 
+        // Admin endpoint: POST /api/admin/workflow-plan — generate a workflow plan from NL intent (#1260)
+        appInfo.RegisterRoute("POST /api/admin/workflow-plan", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var graph = BareMetalWeb.Runtime.CapabilityGraph.CapabilityGraphRegistry.Current;
+                if (graph == null)
+                {
+                    context.Response.StatusCode = 503;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Capability graph not yet built\"}").ConfigureAwait(false);
+                    return;
+                }
+
+                string intent;
+                using (var reader = new System.IO.StreamReader(context.HttpRequest.Body, System.Text.Encoding.UTF8))
+                    intent = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
+
+                if (string.IsNullOrWhiteSpace(intent))
+                {
+                    context.Response.StatusCode = 400;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Request body must contain the workflow intent text\"}").ConfigureAwait(false);
+                    return;
+                }
+
+                var planner = new BareMetalWeb.Runtime.CapabilityGraph.WorkflowPlanner(graph);
+                var plan = planner.GeneratePlan(intent);
+
+                context.Response.ContentType = "application/json";
+                context.Response.StatusCode = 200;
+                using var ms = new System.IO.MemoryStream(512);
+                using (var w = new System.Text.Json.Utf8JsonWriter(ms))
+                {
+                    w.WriteStartObject();
+                    w.WriteBoolean("isValid", plan.IsValid);
+                    w.WriteString("createdUtc", plan.CreatedUtc.ToString("O"));
+                    w.WriteString("originalInput", plan.OriginalInput);
+
+                    w.WriteStartArray("steps");
+                    foreach (var step in plan.Steps)
+                    {
+                        w.WriteStartObject();
+                        w.WriteNumber("order", step.Order);
+                        w.WriteString("type", step.Type.ToString());
+                        w.WriteString("entity", step.EntitySlug);
+                        w.WriteString("output", step.OutputVariable);
+                        if (step.InputVariable != null) w.WriteString("input", step.InputVariable);
+                        if (step.Condition != null) w.WriteString("condition", step.Condition);
+                        if (step.ActionName != null) w.WriteString("action", step.ActionName);
+                        w.WriteNumber("capabilityNodeId", step.CapabilityNodeId);
+                        w.WriteEndObject();
+                    }
+                    w.WriteEndArray();
+
+                    if (plan.ValidationErrors.Length > 0)
+                    {
+                        w.WriteStartArray("errors");
+                        foreach (var err in plan.ValidationErrors)
+                            w.WriteStringValue(err);
+                        w.WriteEndArray();
+                    }
+
+                    w.WriteEndObject();
+                }
+                await context.Response.Body.WriteAsync(ms.ToArray()).ConfigureAwait(false);
+            }));
+        Console.WriteLine($"[BMW Startup]   Workflow planner route: +1");
+
         // Finalise
         await appInfo.BuildAppInfoMenuOptionsAsync();
         await appInfo.WireUpRequestHandlingAndLoggerAsyncLifetime();
