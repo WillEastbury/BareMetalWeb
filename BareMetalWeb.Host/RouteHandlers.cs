@@ -3149,8 +3149,10 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var snapshot = app.Metrics.GetSnapshot();
+        var gcInfo = GC.GetGCMemoryInfo();
         var payload = new Dictionary<string, object?>
         {
+            // ── Request metrics ──
             ["totalRequests"] = snapshot.TotalRequests,
             ["errorRequests"] = snapshot.ErrorRequests,
             ["averageResponseTimeMs"] = snapshot.AverageResponseTime.TotalMilliseconds,
@@ -3165,16 +3167,47 @@ public sealed class RouteHandlers : IRouteHandlers
             ["requests5xx"] = snapshot.Requests5xx,
             ["requestsOther"] = snapshot.RequestsOther,
             ["throttledRequests"] = snapshot.ThrottledRequests,
+
+            // ── Subsystem timers ──
+            ["routeDispatchCount"] = snapshot.RouteDispatchCount,
+            ["routeDispatchAvgMs"] = snapshot.RouteDispatchAverage.TotalMilliseconds,
+            ["walReadCount"] = snapshot.WalReadCount,
+            ["walReadAvgMs"] = snapshot.WalReadAverage.TotalMilliseconds,
+            ["uiRenderCount"] = snapshot.UiRenderCount,
+            ["uiRenderAvgMs"] = snapshot.UiRenderAverage.TotalMilliseconds,
+            ["serializationCount"] = snapshot.SerializationCount,
+            ["serializationAvgMs"] = snapshot.SerializationAverage.TotalMilliseconds,
+
+            // ── GC / Heap metrics ──
+            ["gcGen0Collections"] = snapshot.GcGen0Collections,
+            ["gcGen1Collections"] = snapshot.GcGen1Collections,
+            ["gcGen2Collections"] = snapshot.GcGen2Collections,
+            ["gcTotalAllocatedBytes"] = snapshot.GcTotalAllocatedBytes,
+            ["gcHeapSizeBytes"] = GC.GetTotalMemory(false),
+            ["gcFragmentedBytes"] = gcInfo.FragmentedBytes,
+            ["gcHighMemoryLoadThresholdBytes"] = gcInfo.HighMemoryLoadThresholdBytes,
+            ["gcMemoryLoadBytes"] = gcInfo.MemoryLoadBytes,
+            ["gcTotalAvailableMemoryBytes"] = gcInfo.TotalAvailableMemoryBytes,
+            ["gcPauseTimePercentage"] = gcInfo.PauseTimePercentage,
+            ["gcConcurrent"] = gcInfo.Concurrent,
+            ["gcCompacted"] = gcInfo.Compacted,
+
+            // ── Process / Platform ──
             ["processUptimeSeconds"] = (long)snapshot.ProcessUptime.TotalSeconds,
+            ["processId"] = snapshot.ProcessId,
+            ["workingSet64"] = snapshot.WorkingSet64,
+            ["virtualMemorySize64"] = snapshot.VirtualMemorySize64,
             ["operatingSystem"] = RuntimeInformation.OSDescription,
             ["osArchitecture"] = RuntimeInformation.OSArchitecture.ToString(),
             ["processArchitecture"] = RuntimeInformation.ProcessArchitecture.ToString(),
             ["processorCount"] = Environment.ProcessorCount,
+            ["cpuModel"] = GetCpuModel(),
+            ["totalMemoryMb"] = gcInfo.TotalAvailableMemoryBytes / (1024 * 1024),
+            ["storageFreeGb"] = GetStorageFreeGb(),
+            ["storageTotalGb"] = GetStorageTotalGb(),
             ["dotnetRuntime"] = RuntimeInformation.FrameworkDescription,
+            ["simdTier"] = BareMetalWeb.Data.SimdCapabilities.Current.BestTier,
             ["dataLocation"] = MetricsTracker.DataRoot,
-            ["processId"] = snapshot.ProcessId,
-            ["workingSet64"] = snapshot.WorkingSet64,
-            ["virtualMemorySize64"] = snapshot.VirtualMemorySize64
         };
 
         await WriteJsonResponseAsync(context, payload);
@@ -7454,5 +7487,43 @@ public sealed class RouteHandlers : IRouteHandlers
             if (hasMatchingPermission) break;
         }
         return hasMatchingPermission;
+    }
+
+    private static string GetCpuModel()
+    {
+        try
+        {
+            if (OperatingSystem.IsLinux() && File.Exists("/proc/cpuinfo"))
+            {
+                foreach (var line in File.ReadLines("/proc/cpuinfo"))
+                {
+                    if (line.StartsWith("model name", StringComparison.OrdinalIgnoreCase) ||
+                        line.StartsWith("Model", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var idx = line.IndexOf(':');
+                        if (idx >= 0) return line[(idx + 1)..].Trim();
+                    }
+                }
+            }
+            else if (OperatingSystem.IsWindows())
+            {
+                var cpu = Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER");
+                if (!string.IsNullOrEmpty(cpu)) return cpu;
+            }
+        }
+        catch { }
+        return RuntimeInformation.ProcessArchitecture.ToString();
+    }
+
+    private static long GetStorageFreeGb()
+    {
+        try { return new DriveInfo(Path.GetPathRoot(Environment.CurrentDirectory) ?? "/").AvailableFreeSpace / (1024 * 1024 * 1024); }
+        catch { return -1; }
+    }
+
+    private static long GetStorageTotalGb()
+    {
+        try { return new DriveInfo(Path.GetPathRoot(Environment.CurrentDirectory) ?? "/").TotalSize / (1024 * 1024 * 1024); }
+        catch { return -1; }
     }
 }
