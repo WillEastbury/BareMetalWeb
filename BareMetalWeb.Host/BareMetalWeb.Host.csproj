@@ -14,7 +14,7 @@
          checks are true runtime guards instead of compile-time constants.
          Without this, the AOT baseline (SSE2/SSE4.2/POPCNT) is the only active tier
          and all AVX/FMA/BMI paths are dead-code-eliminated. -->
-    <InstructionSet>avx,avx2,fma,avx512f,bmi1,bmi2,lzcnt,popcnt</InstructionSet>
+    <InstructionSet>avx,avx2,fma,bmi,bmi2,lzcnt</InstructionSet>
     <!-- Trimming: full mode trims all assemblies (not just opt-in ones), aggressively
          removing unused framework code and reducing the in-memory code footprint. -->
     <PublishTrimmed>true</PublishTrimmed>
