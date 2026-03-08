@@ -29,7 +29,7 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.nuget/packages
           key: nuget-${{ hashFiles('**/*.csproj') }}
@@ -71,7 +71,7 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.nuget/packages
           key: nuget-${{ hashFiles('**/*.csproj') }}
@@ -103,7 +103,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.nuget/packages
           key: nuget-${{ hashFiles('**/*.csproj') }}
@@ -124,7 +124,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.nuget/packages
           key: nuget-${{ hashFiles('**/*.csproj') }}
@@ -145,7 +145,7 @@ jobs:
         with:
           dotnet-version: '10.0.x'
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.nuget/packages
           key: nuget-${{ hashFiles('**/*.csproj') }}
@@ -170,7 +170,7 @@ jobs:
         with:
           node-version: '20'
       - name: Cache npm packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: tests/js-unit/node_modules
           key: npm-jest-${{ hashFiles('tests/js-unit/package-lock.json') }}
