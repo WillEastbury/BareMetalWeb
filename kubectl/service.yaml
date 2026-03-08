@@ -5,8 +5,11 @@ metadata:
   namespace: baremetalweb
   labels:
     app.kubernetes.io/name: baremetalweb
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-tcp-idle-timeout: "4"
 spec:
-  type: ClusterIP
+  type: LoadBalancer
+  externalTrafficPolicy: Local
   selector:
     app.kubernetes.io/name: baremetalweb
   ports:
