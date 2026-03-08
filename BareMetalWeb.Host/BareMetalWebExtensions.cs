@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using BareMetalWeb.ControlPlane;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
@@ -601,6 +602,40 @@ public static class BareMetalWebExtensions
                 Console.WriteLine($"[BMW Startup] Search index metadata warm-up complete (background)");
             });
             Console.WriteLine($"[BMW Startup] Search index warm-up scheduled (2s delay)");
+        }
+
+        // ── Control plane telemetry streaming (#1305) ──────────────────────────
+        var cpUrl = config.GetValue("ControlPlane.Url", "");
+        var cpApiKey = config.GetValue("ControlPlane.ApiKey", "");
+        if (!string.IsNullOrEmpty(cpUrl) && !string.IsNullOrEmpty(cpApiKey))
+        {
+            var cpClient = new ControlPlaneClient(cpUrl, cpApiKey, logger);
+            var cpService = new ControlPlaneService(cpClient, metricsTracker, config, logger);
+
+            // Wire optional data sources from WAL layer
+            if (DataStoreProvider.PrimaryProvider is WalDataProvider cpWalProvider)
+            {
+                var walStore = cpWalProvider.WalStore;
+                var cpWalDir = Path.Combine(dataRoot, "wal");
+                cpService.WithDataSources(
+                    recordCount: () => walStore.HeadMap.Count,
+                    walSegmentCount: () =>
+                    {
+                        try { return Directory.GetFiles(cpWalDir, "wal_seg_*.log").Length; }
+                        catch { return 0; }
+                    },
+                    lastBackupAt: () => backupService?.ListBackups().FirstOrDefault()?.Timestamp.ToString("O"),
+                    isLeader: () => clusterState?.IsLeader ?? true,
+                    epoch: () => clusterState?.CurrentEpoch ?? 0
+                );
+            }
+
+            appInfo.ControlPlane = cpService;
+            Console.WriteLine($"[BMW Startup] Control plane telemetry: streaming to {cpUrl}");
+        }
+        else
+        {
+            Console.WriteLine("[BMW Startup] Control plane: disabled (set ControlPlane.Url and ControlPlane.ApiKey in Metal.config)");
         }
 
         startupSw.Stop();

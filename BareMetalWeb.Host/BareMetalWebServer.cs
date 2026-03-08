@@ -8,6 +8,7 @@ using BareMetalWeb.Rendering;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core;
+using BareMetalWeb.ControlPlane;
 
 namespace BareMetalWeb.Host;
 
@@ -92,6 +93,7 @@ public class BareMetalWebServer : IBareWebHost
     /// Null (default) means multitenancy is disabled and the system store is used for all requests.
     /// </summary>
     public TenantRegistry? TenantRegistry { get; set; }
+    internal ControlPlaneService? ControlPlane { get; set; }
     private readonly ConcurrentDictionary<string, MenuCacheEntry> _menuCache = new(StringComparer.Ordinal);
     private DateTime _lastMenuCacheScavenge = DateTime.UtcNow;
     private const int MaxMenuCacheEntries = 2048;
@@ -408,6 +410,13 @@ public class BareMetalWebServer : IBareWebHost
         {
             var compactionTask = new WalCompactor(walProvider.WalStore).RunAsync(cts.Token);
             _backgroundTasks.Add(("WalCompactor", compactionTask));
+        }
+
+        // Control plane telemetry streaming
+        if (ControlPlane is not null)
+        {
+            var cpTask = ControlPlane.RunAsync(cts.Token);
+            _backgroundTasks.Add(("ControlPlane", cpTask));
         }
     }
 
