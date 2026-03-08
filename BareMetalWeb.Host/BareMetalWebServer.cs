@@ -551,7 +551,7 @@ public class BareMetalWebServer : IBareWebHost
             // not for static assets (bundles, files) served above.
             await BuildAppInfoMenuOptionsAsync(bmwCtx, context.RequestAborted).ConfigureAwait(false);
 
-            var dispatchSw = Stopwatch.StartNew();
+            long dispatchStart = Stopwatch.GetTimestamp();
             // ── Jump table: O(1) exact-match dispatch ───────────────────────
             EnsureJumpTable();
             EnsurePrefixRouter();
@@ -565,14 +565,12 @@ public class BareMetalWebServer : IBareWebHost
                 {
                     await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, page.PageInfo, context.RequestAborted).ConfigureAwait(false);
                     await RenderForbidden(bmwCtx);
-                    dispatchSw.Stop();
-                    Metrics.RecordRouteDispatch(dispatchSw.Elapsed);
+                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     return;
                 }
                 await page.Handler(bmwCtx);
                 BufferedLogger.LogInfo($"{routeKey}|200|{sourceIp}");
-                dispatchSw.Stop();
-                Metrics.RecordRouteDispatch(dispatchSw.Elapsed);
+                Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 return;
             }
             // Jump table also handles "ALL" verb routes
@@ -586,14 +584,12 @@ public class BareMetalWebServer : IBareWebHost
                 {
                     await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, allPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                     await RenderForbidden(bmwCtx);
-                    dispatchSw.Stop();
-                    Metrics.RecordRouteDispatch(dispatchSw.Elapsed);
+                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     return;
                 }
                 await allPage.Handler(bmwCtx);
                 BufferedLogger.LogInfo($"{routeKey}|ALL {requestPath}|200|{sourceIp}");
-                dispatchSw.Stop();
-                Metrics.RecordRouteDispatch(dispatchSw.Elapsed);
+                Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 return;
             }
             // ── Prefix router: O(1) entity dispatch for /api/{type} routes ──
@@ -603,14 +599,12 @@ public class BareMetalWebServer : IBareWebHost
                 {
                     await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, prefixPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                     await RenderForbidden(bmwCtx);
-                    dispatchSw.Stop();
-                    Metrics.RecordRouteDispatch(dispatchSw.Elapsed);
+                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     return;
                 }
                 await prefixPage.Handler(bmwCtx);
                 BufferedLogger.LogInfo($"{routeKey}|200|{sourceIp}|prefix");
-                dispatchSw.Stop();
-                Metrics.RecordRouteDispatch(dispatchSw.Elapsed);
+                Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 return;
             }
             // Pattern match fallback— iterate most-specific routes first so that literal
@@ -636,8 +630,7 @@ public class BareMetalWebServer : IBareWebHost
                     {
                         await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                         await RenderForbidden(bmwCtx);
-                        dispatchSw.Stop();
-                        Metrics.RecordRouteDispatch(dispatchSw.Elapsed);
+                        Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                         return;
                     }
                     await injectedPage.Handler(bmwCtx);
@@ -646,8 +639,7 @@ public class BareMetalWebServer : IBareWebHost
                     foreach (var p in parameters)
                         paramParts[paramIdx++] = $"{p.Key}={p.Value}";
                     BufferedLogger.LogInfo($"{routeKey}|{method}|{compiled.Verb}|{string.Join(", ", paramParts)}|200|{sourceIp}");
-                    dispatchSw.Stop();
-                    Metrics.RecordRouteDispatch(dispatchSw.Elapsed);
+                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     return;
                 }
             }
@@ -672,8 +664,7 @@ public class BareMetalWebServer : IBareWebHost
                     {
                         await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, injectedPage.PageInfo, context.RequestAborted).ConfigureAwait(false);
                         await RenderForbidden(bmwCtx);
-                        dispatchSw.Stop();
-                        Metrics.RecordRouteDispatch(dispatchSw.Elapsed);
+                        Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                         return;
                     }
                     await injectedPage.Handler(bmwCtx);
@@ -682,8 +673,7 @@ public class BareMetalWebServer : IBareWebHost
                     foreach (var p in parameters)
                         paramParts2[paramIdx2++] = $"{p.Key}={p.Value}";
                     BufferedLogger.LogInfo($"{routeKey}|{method}|{compiled.Verb}|{string.Join(", ", paramParts2)}|200|{sourceIp}");
-                    dispatchSw.Stop();
-                    Metrics.RecordRouteDispatch(dispatchSw.Elapsed);
+                    Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                     return;
                 }
             }
@@ -693,15 +683,13 @@ public class BareMetalWebServer : IBareWebHost
                 bmwCtx.SetPageInfo(ErrorPageInfo);
                 await HtmlRenderer.RenderPage(bmwCtx.HttpContext);
                 BufferedLogger.LogInfo($"{routeKey}|405|{sourceIp}");
-                dispatchSw.Stop();
-                Metrics.RecordRouteDispatch(dispatchSw.Elapsed);
+                Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
                 return;
             }
             bmwCtx.SetPageInfo(NotFoundPageInfo);
             await HtmlRenderer.RenderPage(bmwCtx.HttpContext); // Still nothing? 404
             BufferedLogger.LogInfo($"{routeKey}|404|{sourceIp}");
-            dispatchSw.Stop();
-            Metrics.RecordRouteDispatch(dispatchSw.Elapsed);
+            Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
         }
         catch (OperationCanceledException oce)
         {
