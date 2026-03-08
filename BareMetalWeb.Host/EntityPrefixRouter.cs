@@ -59,10 +59,19 @@ public sealed class EntityPrefixRouter
     private EntityRoute[] _routes = Array.Empty<EntityRoute>();
     private int _count;
 
-    // Metrics (thread-safe via Interlocked)
+    // Metrics — shared totals (updated in batches from thread-local accumulators).
     private long _dispatchTicks;
     private long _dispatchCount;
     private long _matchAttempts;
+
+    // Thread-local accumulators — flushed every 64 calls to avoid
+    // Interlocked memory barriers (LDAXR/STLXR) on the ARM hot path.
+    // NativeAOT has no JIT to speculatively elide barriers, so every
+    // Interlocked op compiles to a full LL/SC sequence (2-3× costlier
+    // than x86 LOCK prefix).
+    [ThreadStatic] private static long t_ticks;
+    [ThreadStatic] private static int t_count;
+    [ThreadStatic] private static int t_attempts;
 
     /// <summary>Number of registered entities.</summary>
     public int Count => _count;
@@ -156,8 +165,6 @@ public sealed class EntityPrefixRouter
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool TryResolve(ReadOnlySpan<byte> entitySlug, out string resolvedName, out int ordinal)
     {
-        long start = Stopwatch.GetTimestamp();
-
         if (entitySlug.IsEmpty || _buckets.Length == 0)
         {
             resolvedName = null!;
@@ -165,7 +172,23 @@ public sealed class EntityPrefixRouter
             return false;
         }
 
-        int bucket = AsciiLower(entitySlug[0]) - 'a';
+        // Read system timer AFTER the empty guard — CNTVCT_EL0 on ARM is
+        // a system-register read that serialises the pipeline.
+        long start = Stopwatch.GetTimestamp();
+
+        // Pre-lowercase the slug once using branchless masking, then use
+        // SequenceEqual for all bucket comparisons. Under NativeAOT the
+        // BCL SequenceEqual compiles to AdvSimd-accelerated memcmp on ARM64.
+        if (entitySlug.Length > 128)
+        {
+            resolvedName = null!;
+            ordinal = -1;
+            return false;
+        }
+        Span<byte> lowered = stackalloc byte[entitySlug.Length];
+        AsciiLowerSpan(entitySlug, lowered);
+
+        int bucket = lowered[0] - 'a';
         if ((uint)bucket >= 26)
         {
             resolvedName = null!;
@@ -182,7 +205,7 @@ public sealed class EntityPrefixRouter
             attempts++;
             ref readonly var entry = ref entries[i];
 
-            if (MatchIgnoreAsciiCase(entitySlug, entry.Bytes))
+            if (lowered.Length == entry.Bytes.Length && lowered.SequenceEqual(entry.Bytes))
             {
                 resolvedName = entry.Name;
                 ordinal = entry.Ordinal;
@@ -314,15 +337,51 @@ public sealed class EntityPrefixRouter
         Interlocked.Exchange(ref _matchAttempts, 0);
     }
 
+    /// <summary>
+    /// Branchless ASCII lowercase. Under NativeAOT the compiler emits a
+    /// real conditional branch for ternaries on ARM64; this arithmetic
+    /// version produces SUB / SUB / ASR / AND / ORR — five pipelined
+    /// instructions, zero branches.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static byte AsciiLower(byte b) => (b >= (byte)'A' && b <= (byte)'Z') ? (byte)(b | 0x20) : b;
+    private static byte AsciiLower(byte b)
+    {
+        uint diff = (uint)(b - 'A');
+        uint mask = (uint)((int)(diff - 26) >> 31) & 0x20;
+        return (byte)(b | mask);
+    }
 
+    /// <summary>
+    /// Bulk-lowercase <paramref name="src"/> into <paramref name="dst"/>
+    /// using the branchless mask. Caller must ensure equal lengths.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void AsciiLowerSpan(ReadOnlySpan<byte> src, Span<byte> dst)
+    {
+        for (int i = 0; i < src.Length; i++)
+            dst[i] = AsciiLower(src[i]);
+    }
+
+    /// <summary>
+    /// Batch-record dispatch metrics via thread-local accumulators.
+    /// Flushes to shared Interlocked counters every 64 calls, reducing
+    /// ARM64 LL/SC barrier overhead by ~64×.
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private void RecordDispatch(long startTimestamp, int attempts)
     {
-        long elapsed = Stopwatch.GetTimestamp() - startTimestamp;
-        Interlocked.Add(ref _dispatchTicks, elapsed);
-        Interlocked.Increment(ref _dispatchCount);
-        Interlocked.Add(ref _matchAttempts, attempts);
+        t_ticks += Stopwatch.GetTimestamp() - startTimestamp;
+        t_count++;
+        t_attempts += attempts;
+
+        if ((t_count & 63) == 0)
+        {
+            Interlocked.Add(ref _dispatchTicks, t_ticks);
+            Interlocked.Add(ref _dispatchCount, t_count);
+            Interlocked.Add(ref _matchAttempts, t_attempts);
+            t_ticks = 0;
+            t_count = 0;
+            t_attempts = 0;
+        }
     }
 }
