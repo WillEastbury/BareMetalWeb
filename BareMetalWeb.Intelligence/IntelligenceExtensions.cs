@@ -27,7 +27,7 @@ public static class IntelligenceExtensions
         if (enableBitNet)
         {
             engine = new BitNetEngine();
-            engine.LoadTestModel();
+            engine.LoadTestModel(ModelLoadOptions.Aggressive);
         }
 
         _orchestrator = new IntelligenceOrchestrator(classifier, executor, engine);

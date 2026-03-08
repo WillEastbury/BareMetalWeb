@@ -15,7 +15,7 @@ public class IntelligenceOrchestratorTests
         if (withBitNet)
         {
             engine = new BitNetEngine();
-            engine.LoadTestModel();
+            engine.LoadTestModel(ModelLoadOptions.NoPruning);
         }
 
         return new IntelligenceOrchestrator(classifier, executor, engine);
