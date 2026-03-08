@@ -61,7 +61,7 @@ public sealed class WalTableKeyAllocator : IDisposable
 
         try
         {
-            byte[] buf = File.ReadAllBytes(path);
+            byte[] buf = EncryptedFileIO.ReadDecrypted(path, "seqids");
             if (buf.Length < 12) return allocator; // header (8) + CRC (4)
 
             var s = buf.AsSpan();
@@ -173,7 +173,10 @@ public sealed class WalTableKeyAllocator : IDisposable
 
         string path    = Path.Combine(_directory, FileName);
         string tmpPath = path + ".tmp";
-        File.WriteAllBytes(tmpPath, buf);
+
+        // Encrypt at rest when BMW_WAL_ENCRYPTION_KEY is configured
+        var encrypted = EncryptedFileIO.Encrypt(buf, "seqids");
+        File.WriteAllBytes(tmpPath, encrypted);
         File.Move(tmpPath, path, overwrite: true);
     }
 

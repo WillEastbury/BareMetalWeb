@@ -74,7 +74,10 @@ internal static class WalSnapshot
         // Write atomically: write to .tmp, fsync, rename, then fsync directory
         string path    = Path.Combine(directory, FileName);
         string tmpPath = path + ".tmp";
-        File.WriteAllBytes(tmpPath, buf);
+
+        // Encrypt at rest when BMW_WAL_ENCRYPTION_KEY is configured
+        var encrypted = EncryptedFileIO.Encrypt(buf, "snapshot");
+        File.WriteAllBytes(tmpPath, encrypted);
 
         // #1170: fsync the temp file so data is durable before the rename
         using (var fs = new FileStream(tmpPath, FileMode.Open, FileAccess.Read, FileShare.None))
@@ -112,7 +115,7 @@ internal static class WalSnapshot
         if (!File.Exists(path)) return false;
 
         byte[] buf;
-        try { buf = File.ReadAllBytes(path); }
+        try { buf = EncryptedFileIO.ReadDecrypted(path, "snapshot"); }
         catch (IOException) { return false; }
 
         if (buf.Length < HeaderBytes + FooterBytes) return false;

@@ -1683,7 +1683,8 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
         try
         {
-            var bytes = File.ReadAllBytes(path);
+            var fileContext = $"idmap:{typeName}";
+            var bytes = EncryptedFileIO.ReadDecrypted(path, fileContext);
             if (bytes.Length < 16) return map;  // header(12) + crc(4)
 
             var span = bytes.AsSpan();
@@ -1785,9 +1786,13 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         // mid-write never corrupts the primary IdMap file.
         var path    = GetIdMapPath(typeName);
         var tmpPath = path + ".tmp";
+
+        // Encrypt at rest when BMW_WAL_ENCRYPTION_KEY is configured
+        var fileContext = $"idmap:{typeName}";
+        var encrypted = EncryptedFileIO.Encrypt(buf.AsSpan(0, size), fileContext);
         using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write, FileShare.None))
         {
-            fs.Write(buf, 0, size);
+            fs.Write(encrypted, 0, encrypted.Length);
             fs.Flush(flushToDisk: true);
         }
         File.Move(tmpPath, path, overwrite: true);
@@ -1863,7 +1868,9 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     {
         try
         {
-            var bytes = File.ReadAllBytes(path);
+            var fileName = Path.GetFileNameWithoutExtension(path);
+            var fileContext = $"schema:{fileName}";
+            var bytes = EncryptedFileIO.ReadDecrypted(path, fileContext);
             return JsonSerializer.Deserialize(bytes, BmwDataJsonContext.Default.SchemaDefinitionFile);
         }
         catch (Exception ex)
@@ -1877,7 +1884,8 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     {
         var path  = GetSchemaFilePath(type, schema.Version);
         var bytes = JsonSerializer.SerializeToUtf8Bytes(schema, BmwDataJsonContext.Default.SchemaDefinitionFile);
-        File.WriteAllBytes(path, bytes);
+        var fileContext = $"schema:{type.Name}:{schema.Version}";
+        EncryptedFileIO.WriteEncrypted(path, bytes, fileContext);
     }
 
     private object GetSchemaLock(Type type)

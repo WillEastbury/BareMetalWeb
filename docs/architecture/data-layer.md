@@ -526,4 +526,49 @@ IPagedFile
 
 ---
 
-_Status: Updated @ commit HEAD — added Memory-Mapped I/O Layer section documenting MappedSegmentCache and MappedPagedFile_
+## Encryption at Rest
+
+When `BMW_WAL_ENCRYPTION_KEY` is set (base-64 encoded 32-byte AES-256 key),
+all metadata files are encrypted using AES-256-GCM with HKDF-SHA256-derived
+per-file keys. This extends the existing WAL payload encryption to cover the
+full storage surface.
+
+### Covered storage
+
+| File | Context (HKDF info) | Write point |
+|------|---------------------|-------------|
+| WAL snapshots | `snapshot` | `WalSnapshot.Write` |
+| Seq ID allocators | `seqids` | `WalTableKeyAllocator.Flush` |
+| ID maps (per entity) | `idmap:{typeName}` | `WalDataProvider.PersistIdMapCore` |
+| Schema files | `schema:{type}:{ver}` | `WalDataProvider.SaveSchemaFile` |
+| Search indexes | `searchindex:{type}` | `SearchIndexManager.SaveIndex` |
+| Audit logs | `auditlog` | `DiskBufferedLogger` (per-line) |
+
+### Wire format (`EncryptedFileIO`)
+
+```
+ENCF(4) | Version(2) | Reserved(2) | Nonce(12) | PlaintextLen(4) | Ciphertext(N) | Tag(16)
+```
+
+### Key derivation
+
+Each file type gets an independent AES-256 key derived via
+`HKDF.DeriveKey(SHA256, KEK, 32, info: fileContext)`. The `fileContext` string
+ensures different file types use different keys even with the same KEK.
+
+### Backward compatibility
+
+`EncryptedFileIO.Decrypt` checks for the `ENCF` magic header. Pre-encryption
+plaintext files are returned as-is, so existing data remains readable after
+enabling encryption. Files are transparently upgraded to encrypted format on
+next write.
+
+### Not yet covered
+
+- **Paged index files** (`LocalPagedFile`): per-page encryption requires
+  restructuring the page format to accommodate nonce+tag overhead. Tracked
+  separately.
+
+---
+
+_Status: Updated @ commit HEAD — added Encryption at Rest section; added Memory-Mapped I/O Layer section_

@@ -788,8 +788,11 @@ public sealed class SearchIndexManager
 
         try
         {
-            // Use binary format for faster loading and smaller file size
-            using var stream = File.OpenRead(path);
+            // Decrypt if encrypted, passthrough if plaintext (backward compatible)
+            var fileContext = $"searchindex:{type.Name}";
+            var decrypted = EncryptedFileIO.ReadDecrypted(path, fileContext);
+
+            using var stream = new MemoryStream(decrypted);
             using var reader = new BinaryReader(stream, Encoding.UTF8);
 
             // Read version header
@@ -886,8 +889,9 @@ public sealed class SearchIndexManager
             var path = GetIndexPath(type);
             var tempPath = path + ".tmp";
 
-            using (var stream = File.Create(tempPath))
-            using (var writer = new BinaryWriter(stream, Encoding.UTF8))
+            byte[] plainBytes;
+            using (var ms = new MemoryStream())
+            using (var writer = new BinaryWriter(ms, Encoding.UTF8))
             {
                 // Write version
                 writer.Write(2);
@@ -915,7 +919,14 @@ public sealed class SearchIndexManager
                         writer.Write(token);
                     }
                 }
+
+                writer.Flush();
+                plainBytes = ms.ToArray();
             }
+
+            // Encrypt at rest when BMW_WAL_ENCRYPTION_KEY is configured
+            var fileContext = $"searchindex:{type.Name}";
+            EncryptedFileIO.WriteEncrypted(tempPath, plainBytes, fileContext);
 
             // Atomic replace using overwrite parameter (available in .NET 6+)
             File.Move(tempPath, path, overwrite: true);

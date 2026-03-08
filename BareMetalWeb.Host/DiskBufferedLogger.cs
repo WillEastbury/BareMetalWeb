@@ -216,9 +216,22 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         {
             try
             {
-                using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 4096, useAsync: true);
-                using var writer = new StreamWriter(stream);
-                await writer.WriteAsync(content).ConfigureAwait(false);
+                // Encrypt log content at rest when BMW_WAL_ENCRYPTION_KEY is configured
+                if (BareMetalWeb.Data.EncryptedFileIO.IsEnabled())
+                {
+                    var plainBytes = System.Text.Encoding.UTF8.GetBytes(content);
+                    var encrypted = BareMetalWeb.Data.EncryptedFileIO.Encrypt(plainBytes, "auditlog");
+                    var line = Convert.ToBase64String(encrypted);
+                    using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 4096, useAsync: true);
+                    using var writer = new StreamWriter(stream);
+                    await writer.WriteLineAsync(line).ConfigureAwait(false);
+                }
+                else
+                {
+                    using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 4096, useAsync: true);
+                    using var writer = new StreamWriter(stream);
+                    await writer.WriteAsync(content).ConfigureAwait(false);
+                }
                 return;
             }
             catch (IOException) when (attempt < 2)
@@ -236,9 +249,21 @@ public sealed class DiskBufferedLogger : IBufferedLogger
             {
                 using var stream = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite, 4096, useAsync: true);
                 using var writer = new StreamWriter(stream);
+
+                // Encrypt each log line at rest when BMW_WAL_ENCRYPTION_KEY is configured
+                bool encrypt = BareMetalWeb.Data.EncryptedFileIO.IsEnabled();
                 foreach (var line in lines)
                 {
-                    await writer.WriteLineAsync(line).ConfigureAwait(false);
+                    if (encrypt)
+                    {
+                        var plainBytes = System.Text.Encoding.UTF8.GetBytes(line);
+                        var encrypted = BareMetalWeb.Data.EncryptedFileIO.Encrypt(plainBytes, "auditlog");
+                        await writer.WriteLineAsync(Convert.ToBase64String(encrypted)).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await writer.WriteLineAsync(line).ConfigureAwait(false);
+                    }
                 }
                 return;
             }
