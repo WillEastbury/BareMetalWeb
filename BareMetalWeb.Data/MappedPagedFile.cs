@@ -95,6 +95,7 @@ internal sealed class MappedPagedFile : IPagedFile
         _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
         try
         {
+            if (ptr == null) return 0;
             new ReadOnlySpan<byte>(ptr + _accessor.PointerOffset + offset, available)
                 .CopyTo(buffer);
             return available;
@@ -126,6 +127,8 @@ internal sealed class MappedPagedFile : IPagedFile
         _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
         try
         {
+            if (ptr == null)
+                throw new InvalidOperationException("Failed to acquire pointer for paged file.");
             var header = new ReadOnlySpan<byte>(ptr + _accessor.PointerOffset, Math.Min(20, (int)_fileLength));
 
             uint magic = BinaryPrimitives.ReadUInt32LittleEndian(header.Slice(HeaderMagicOffset, 4));

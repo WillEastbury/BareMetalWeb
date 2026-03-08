@@ -133,6 +133,7 @@ internal sealed class MappedSegment : IDisposable
             _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
             try
             {
+                if (ptr == null) return 0;
                 new ReadOnlySpan<byte>(ptr + _accessor.PointerOffset + offset, available)
                     .CopyTo(destination);
                 return available;
@@ -165,12 +166,13 @@ internal sealed class MappedSegment : IDisposable
             throw new ObjectDisposedException(nameof(MappedSegment));
         try
         {
-            if (offset32 + WalConstants.RecordHeaderBytes > _length) return null;
+            if (offset32 + (long)WalConstants.RecordHeaderBytes > _length) return null;
 
             byte* ptr = null;
             _accessor.SafeMemoryMappedViewHandle.AcquirePointer(ref ptr);
             try
             {
+                if (ptr == null) return null;
                 byte* basePtr = ptr + _accessor.PointerOffset;
 
                 // Read and validate record header without allocating
