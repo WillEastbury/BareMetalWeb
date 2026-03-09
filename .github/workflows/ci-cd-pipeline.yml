@@ -88,7 +88,7 @@ jobs:
   # ─────────────────────────────────────────────────────────────────────────────
   # L1.0 – AOT/Trim Build Check
   # Verifies the host compiles and links successfully with native AOT + full
-  # trim (Debug config, linux-x64).  This is the pre-merge gate – if it fails
+  # trim (Release config, linux-x64).  This is the pre-merge gate – if it fails
   # we abort everything else immediately.
   # ─────────────────────────────────────────────────────────────────────────────
   l1-0-build-check:
@@ -106,10 +106,10 @@ jobs:
       - name: Restore
         run: dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj --runtime linux-x64
 
-      - name: AOT/Trim publish (Debug, linux-x64)
+      - name: AOT/Trim publish (Release, linux-x64)
         run: |
           dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
-            --configuration Debug \
+            --configuration Release \
             --runtime linux-x64 \
             --self-contained true \
             --no-restore \
