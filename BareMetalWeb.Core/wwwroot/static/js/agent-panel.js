@@ -8,6 +8,11 @@
 
   const ENDPOINT = '/api/agent/chat';
 
+  function getCsrfToken() {
+    var el = document.querySelector('meta[name="csrf-token"]');
+    return el ? el.getAttribute('content') : '';
+  }
+
   // State
   let isOpen = false;
   let messages = [];
@@ -126,7 +131,7 @@
     try {
       const resp = await fetch(ENDPOINT, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken(), 'X-Requested-With': 'BareMetalWeb' },
         body: JSON.stringify({ message: text, history: messages.slice(-10).map(m => ({ role: m.role, content: m.text })) }),
       });
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`);

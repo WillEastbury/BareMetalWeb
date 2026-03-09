@@ -1,6 +1,11 @@
 (function () {
     'use strict';
 
+    function getCsrfToken() {
+        var el = document.querySelector('meta[name="csrf-token"]');
+        return el ? el.getAttribute('content') : '';
+    }
+
     var FIELD_TYPES = [
         { value: 'string', label: 'String' },
         { value: 'multiline', label: 'Text Area' },
@@ -353,7 +358,7 @@
             syncEntityFromInputs(); syncFieldsFromInputs();
             fetch('/api/_binary/design-sessions', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken(), 'X-Requested-With': 'BareMetalWeb' },
                 body: JSON.stringify({ sessionName: sessionName, designJson: JSON.stringify(buildJson()), isOpen: true })
             }).then(function (r) {
                 if (!r.ok) throw new Error('HTTP ' + r.status);

@@ -95,8 +95,10 @@
         });
     }
 
-    // ── Lookup cache ──────────────────────────────────────────────────────────
+    // ── Lookup cache (bounded) ──────────────────────────────────────────────
     var _lookupCache = {};
+    var _lookupCacheKeys = [];
+    var LOOKUP_CACHE_MAX = 100;
 
     function fetchLookupOptions(targetSlug, queryField, queryValue, sortField, sortDir, queryOperator) {
         var key = targetSlug + '|' + (queryField || '') + '|' + (queryOperator || '') + '|' + (queryValue || '') + '|' + (sortField || '') + '|' + (sortDir || '');
@@ -117,7 +119,13 @@
 
         var url = API + '/' + encodeURIComponent(targetSlug) + (params.length ? '?' + params.join('&') : '');
         return apiFetch(url).then(function (items) {
+            // Evict oldest entry if cache is full
+            if (_lookupCacheKeys.length >= LOOKUP_CACHE_MAX) {
+                var evict = _lookupCacheKeys.shift();
+                delete _lookupCache[evict];
+            }
             _lookupCache[key] = Array.isArray(items) ? items : (items.items || []);
+            _lookupCacheKeys.push(key);
             return _lookupCache[key];
         }).catch(function (err) {
             console.warn('Lookup fetch failed for ' + targetSlug + ':', err);
@@ -127,7 +135,11 @@
 
     function clearLookupCache(slug) {
         Object.keys(_lookupCache).forEach(function (k) {
-            if (k.indexOf(slug + '|') === 0) delete _lookupCache[k];
+            if (k.indexOf(slug + '|') === 0) {
+                delete _lookupCache[k];
+                var idx = _lookupCacheKeys.indexOf(k);
+                if (idx >= 0) _lookupCacheKeys.splice(idx, 1);
+            }
         });
     }
 
@@ -202,15 +214,20 @@
 
     function parseOrdinalData(view, fieldNames) {
         var offset = 0;
+        var byteLen = view.byteLength;
+        if (byteLen < 6) throw new Error('Ordinal data too short');
         var rowCount = view.getUint32(offset, true); offset += 4;
         var fieldCount = view.getUint16(offset, true); offset += 2;
+        if (rowCount > 1000000 || fieldCount > 10000) throw new Error('Ordinal data exceeds safe bounds');
         var rows = [];
         var decoder = new TextDecoder();
         for (var r = 0; r < rowCount; r++) {
             var row = {};
             for (var f = 0; f < fieldCount; f++) {
+                if (offset + 2 > byteLen) throw new Error('Ordinal data truncated at field length');
                 var len = view.getUint16(offset, true); offset += 2;
-                var val = decoder.decode(new Uint8Array(view.buffer, offset, len));
+                if (offset + len > byteLen) throw new Error('Ordinal data truncated at field value');
+                var val = decoder.decode(new Uint8Array(view.buffer, view.byteOffset + offset, len));
                 offset += len;
                 if (f < fieldNames.length) row[fieldNames[f]] = val;
             }
@@ -358,6 +375,20 @@
     }
 
     // ── Lightweight Markdown → HTML ─────────────────────────────────────────
+    // Allowlist of tags produced by renderMarkdownToHtml — strip anything else.
+    var _mdAllowedTags = /^(p|br|h[1-6]|strong|em|code|pre|a|ul|ol|li|hr|div|span|blockquote|table|thead|tbody|tr|th|td|img)$/i;
+
+    function sanitizeHtml(html) {
+        // Strip any HTML tag not in the allowlist, and remove dangerous attributes
+        // (on*, style with expressions, src/href with javascript:)
+        return html
+            .replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)\b[^>]*>/g, function (match, tag) {
+                if (!_mdAllowedTags.test(tag)) return '';
+                // Remove event handler attributes (onclick, onerror, etc.)
+                return match.replace(/\s+on\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]*)/gi, '');
+            });
+    }
+
     function renderMarkdownToHtml(md) {
         if (!md) return '';
         var html = escHtml(md);
@@ -385,7 +416,7 @@
         html = '<p>' + html + '</p>';
         // Single newlines → <br>
         html = html.replace(/\n/g, '<br>');
-        return html;
+        return sanitizeHtml(html);
     }
 
     function fmtValue(val, fieldType) {
@@ -2947,7 +2978,8 @@
                 fetch(API + '/' + encodeURIComponent(slug) + '/' + encodeURIComponent(id) + '/_attachments', {
                     method: 'POST',
                     body: fd,
-                    credentials: 'same-origin'
+                    credentials: 'same-origin',
+                    headers: { 'X-CSRF-Token': getCsrfToken(), 'X-Requested-With': 'BareMetalWeb' }
                 })
                 .then(function (resp) {
                     if (!resp.ok) return resp.text().then(function (t) { throw new Error(t || resp.statusText); });
@@ -5249,7 +5281,7 @@
             item.addEventListener('click', function () {
               var id = item.getAttribute('data-inbox-id');
               if (item.classList.contains('fw-semibold')) {
-                fetch(BASE + '/api/inbox/' + id + '/read', { method: 'POST', credentials: 'same-origin' })
+                fetch(BASE + '/api/inbox/' + id + '/read', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': getCsrfToken(), 'X-Requested-With': 'BareMetalWeb' } })
                   .then(function () {
                     item.classList.remove('list-group-item-light', 'fw-semibold');
                     var dot = item.querySelector('.bi-circle-fill');
@@ -5269,7 +5301,7 @@
 
     readAllBtn.addEventListener('click', function () {
       readAllBtn.disabled = true;
-      fetch(BASE + '/api/inbox/read-all', { method: 'POST', credentials: 'same-origin' })
+      fetch(BASE + '/api/inbox/read-all', { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': getCsrfToken(), 'X-Requested-With': 'BareMetalWeb' } })
         .then(function () { loadMessages(); })
         .catch(function () { readAllBtn.disabled = false; });
     });

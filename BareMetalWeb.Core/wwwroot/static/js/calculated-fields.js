@@ -10,8 +10,9 @@
     // Track calculated field expressions
     const expressions = new Map();
 
-    // Cache parsed AST per field to avoid JSON.parse on every recalculation
+    // Cache parsed AST per field to avoid JSON.parse on every recalculation (bounded)
     const _astCache = new Map();
+    const AST_CACHE_MAX = 200;
 
     // Debounce timer
     let debounceTimer = null;
@@ -160,6 +161,10 @@
                 var ast = _astCache.get(field);
                 if (!ast) {
                     ast = JSON.parse(expressionJson);
+                    // Evict oldest if cache is full
+                    if (_astCache.size >= AST_CACHE_MAX) {
+                        _astCache.delete(_astCache.keys().next().value);
+                    }
                     _astCache.set(field, ast);
                 }
                 var result = window.bmwEvalAst(ast, window.parseFieldValue);
