@@ -152,9 +152,10 @@ public static class ActionApiHandlers
         {
             await WriteError(context, 409, "Lock acquisition timed out. Retry later.");
         }
-        catch (Exception)
+        catch (Exception ex)
         {
-            await WriteError(context, 500, "An internal error occurred.");
+            System.Diagnostics.Debug.WriteLine($"[ActionApiHandlers] Action '{actionId}' on '{typeSlug}' failed: {ex}");
+            await WriteError(context, 500, $"Action failed: {ex.Message}");
         }
     }
 
