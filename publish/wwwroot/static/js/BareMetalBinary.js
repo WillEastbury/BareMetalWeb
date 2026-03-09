@@ -14,6 +14,11 @@ const BareMetalBinary = (() => {
   const utf8 = new TextEncoder();
   const utf8d = new TextDecoder('utf-8');
 
+  // Pre-built two-character hex lookup table (0x00..0xFF → '00'..'ff').
+  // Eliminates per-byte .toString(16).padStart(2,'0') allocations in readGuid.
+  const _HEX_LUT = new Array(256);
+  for (let _i = 0; _i < 256; _i++) _HEX_LUT[_i] = _i.toString(16).padStart(2, '0');
+
   let _cryptoKey = null; // CryptoKey for HMAC-SHA256
 
   // ────────── Key management ──────────
@@ -70,11 +75,16 @@ const BareMetalBinary = (() => {
       return neg ? -val : val;
     }
     readChar() { return String.fromCharCode(this.readUInt16()); }
-    readBytes(n) { this.ensure(n); const s = this.buf.slice(this.off, this.off + n); this.off += n; return s; }
+    readBytes(n) { this.ensure(n); const s = this.buf.subarray(this.off, this.off + n); this.off += n; return s; }
     readGuid() {
-      const b = this.readBytes(16);
-      const h = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
-      return h.slice(0,8)+'-'+h.slice(8,12)+'-'+h.slice(12,16)+'-'+h.slice(16,20)+'-'+h.slice(20);
+      // Use pre-built hex LUT to avoid per-byte toString+padStart allocations.
+      this.ensure(16);
+      const b = this.buf; const o = this.off; this.off += 16;
+      return _HEX_LUT[b[o]]  +_HEX_LUT[b[o+1]] +_HEX_LUT[b[o+2]] +_HEX_LUT[b[o+3]] +'-'+
+             _HEX_LUT[b[o+4]] +_HEX_LUT[b[o+5]] +'-'+
+             _HEX_LUT[b[o+6]] +_HEX_LUT[b[o+7]] +'-'+
+             _HEX_LUT[b[o+8]] +_HEX_LUT[b[o+9]] +'-'+
+             _HEX_LUT[b[o+10]]+_HEX_LUT[b[o+11]]+_HEX_LUT[b[o+12]]+_HEX_LUT[b[o+13]]+_HEX_LUT[b[o+14]]+_HEX_LUT[b[o+15]];
     }
     readIdentifier() {
       // 16 bytes: hi LE (8) + lo LE (8) — base-37 encoded
@@ -142,9 +152,18 @@ const BareMetalBinary = (() => {
     writeBytes(bytes) { this.ensure(bytes.length); this.u8.set(bytes, this.off); this.off += bytes.length; }
     writeGuid(str) {
       const hex = str.replace(/-/g, '');
-      const b = new Uint8Array(16);
-      for (let i = 0; i < 16; i++) b[i] = parseInt(hex.substr(i*2, 2), 16);
-      this.writeBytes(b);
+      if (hex.length !== 32) throw new Error('Invalid GUID: expected 32 hex chars');
+      this.ensure(16);
+      // Parse two hex chars per byte directly via charCode arithmetic — avoids parseInt + substr.
+      for (let i = 0; i < 16; i++) {
+        const hi = hex.charCodeAt(i * 2);
+        const lo = hex.charCodeAt(i * 2 + 1);
+        // Validate: '0'–'9' (48–57), 'A'–'F' (65–70), 'a'–'f' (97–102)
+        if (!((hi >= 48 && hi <= 57) || (hi >= 65 && hi <= 70) || (hi >= 97 && hi <= 102)) ||
+            !((lo >= 48 && lo <= 57) || (lo >= 65 && lo <= 70) || (lo >= 97 && lo <= 102)))
+          throw new Error('Invalid GUID hex character at position ' + (i * 2));
+        this.u8[this.off++] = (((hi < 58 ? hi - 48 : (hi | 32) - 87) << 4) | (lo < 58 ? lo - 48 : (lo | 32) - 87));
+      }
     }
     writeString(s) {
       if (s === null || s === undefined) { this.writeInt32(-1); return; }
