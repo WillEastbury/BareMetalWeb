@@ -29,8 +29,9 @@ public sealed class VocabularyPruner
 
     /// <summary>
     /// Build the domain vocabulary from BareMetalWeb DataScaffold metadata.
-    /// Includes entity names, field names, JSON structural tokens, and
-    /// a minimal set of English function words for natural queries.
+    /// Includes entity names, field names, field types, action/command names,
+    /// lookup relationships, related document references, query operators,
+    /// permissions, and a minimal set of English function words.
     /// </summary>
     public static VocabularyPruner FromDataScaffold()
     {
@@ -48,7 +49,11 @@ public sealed class VocabularyPruner
         foreach (var t in ToolActionTokens)
             tokens.Add(t);
 
-        // DataScaffold entity and field names
+        // Query operators — users may type "contains", "equals", "greater than" etc.
+        foreach (var t in QueryOperatorTokens)
+            tokens.Add(t);
+
+        // DataScaffold entity metadata — full semantic graph
         try
         {
             var entities = BareMetalWeb.Core.DataScaffold.Entities;
@@ -56,12 +61,32 @@ public sealed class VocabularyPruner
             {
                 foreach (var entity in entities)
                 {
-                    // Add entity name tokens (split camelCase/PascalCase)
+                    // Entity name + slug (split camelCase)
                     foreach (var word in SplitIdentifier(entity.Name))
                         tokens.Add(word.ToLowerInvariant());
                     tokens.Add(entity.Name.ToLowerInvariant());
                     tokens.Add(entity.Slug.ToLowerInvariant());
 
+                    // Singular form (strip trailing 's') for natural language queries
+                    if (entity.Slug.EndsWith('s') && entity.Slug.Length > 2)
+                        tokens.Add(entity.Slug[..^1].ToLowerInvariant());
+
+                    // Permissions tokens (e.g. "admin", "read", "write")
+                    if (!string.IsNullOrEmpty(entity.Permissions))
+                    {
+                        foreach (var perm in entity.Permissions.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                        {
+                            tokens.Add(perm.ToLowerInvariant());
+                            foreach (var word in SplitIdentifier(perm))
+                                tokens.Add(word.ToLowerInvariant());
+                        }
+                    }
+
+                    // Nav group
+                    if (!string.IsNullOrEmpty(entity.NavGroup))
+                        tokens.Add(entity.NavGroup.ToLowerInvariant());
+
+                    // Fields — names, types, and relationship metadata
                     if (entity.Fields is not null)
                     {
                         foreach (var field in entity.Fields)
@@ -70,14 +95,107 @@ public sealed class VocabularyPruner
                                 tokens.Add(word.ToLowerInvariant());
                             tokens.Add(field.Name.ToLowerInvariant());
                             tokens.Add(field.FieldType.ToString().ToLowerInvariant());
+
+                            // Field group (e.g. "Contact Details", "Billing")
+                            if (!string.IsNullOrEmpty(field.FieldGroup))
+                            {
+                                tokens.Add(field.FieldGroup.ToLowerInvariant());
+                                foreach (var word in field.FieldGroup.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                                    tokens.Add(word.ToLowerInvariant());
+                            }
+
+                            // Label (display text may differ from name)
+                            if (!string.IsNullOrEmpty(field.Label))
+                            {
+                                foreach (var word in field.Label.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                                    tokens.Add(word.ToLowerInvariant());
+                            }
+
+                            // Lookup target — FK relationship
+                            if (field.Lookup is not null)
+                            {
+                                tokens.Add("lookup");
+                                tokens.Add("related");
+                                if (!string.IsNullOrEmpty(field.Lookup.TargetSlug))
+                                {
+                                    tokens.Add(field.Lookup.TargetSlug.ToLowerInvariant());
+                                    foreach (var word in SplitIdentifier(field.Lookup.TargetSlug))
+                                        tokens.Add(word.ToLowerInvariant());
+                                }
+                                if (!string.IsNullOrEmpty(field.Lookup.DisplayField))
+                                    tokens.Add(field.Lookup.DisplayField.ToLowerInvariant());
+                            }
+
+                            // Related document reference
+                            if (field.RelatedDocument is not null)
+                            {
+                                tokens.Add("related");
+                                tokens.Add("document");
+                                if (!string.IsNullOrEmpty(field.RelatedDocument.DisplayField))
+                                    tokens.Add(field.RelatedDocument.DisplayField.ToLowerInvariant());
+                            }
+
+                            // Child entity slug
+                            if (!string.IsNullOrEmpty(field.ChildEntitySlug))
+                            {
+                                tokens.Add(field.ChildEntitySlug.ToLowerInvariant());
+                                tokens.Add("child");
+                                tokens.Add("parent");
+                            }
                         }
+                    }
+
+                    // Commands (remote methods)
+                    if (entity.Commands is not null)
+                    {
+                        foreach (var cmd in entity.Commands)
+                        {
+                            tokens.Add(cmd.Name.ToLowerInvariant());
+                            foreach (var word in SplitIdentifier(cmd.Name))
+                                tokens.Add(word.ToLowerInvariant());
+                            if (!string.IsNullOrEmpty(cmd.Label))
+                            {
+                                foreach (var word in cmd.Label.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                                    tokens.Add(word.ToLowerInvariant());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Runtime-defined entity actions (may not overlap with DataScaffold commands)
+            var registry = BareMetalWeb.Runtime.RuntimeEntityRegistry.Current;
+            if (registry is not null)
+            {
+                foreach (var model in registry.All)
+                {
+                    tokens.Add(model.Name.ToLowerInvariant());
+                    tokens.Add(model.Slug.ToLowerInvariant());
+
+                    foreach (var action in model.Actions)
+                    {
+                        tokens.Add(action.Name.ToLowerInvariant());
+                        foreach (var word in SplitIdentifier(action.Name))
+                            tokens.Add(word.ToLowerInvariant());
+                        if (!string.IsNullOrEmpty(action.Label))
+                        {
+                            foreach (var word in action.Label.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+                                tokens.Add(word.ToLowerInvariant());
+                        }
+                    }
+
+                    foreach (var field in model.Fields)
+                    {
+                        tokens.Add(field.Name.ToLowerInvariant());
+                        foreach (var word in SplitIdentifier(field.Name))
+                            tokens.Add(word.ToLowerInvariant());
                     }
                 }
             }
         }
         catch
         {
-            // DataScaffold may not be initialised yet — that's fine,
+            // DataScaffold/RuntimeEntityRegistry may not be initialised yet — that's fine,
             // we still have the base vocabulary
         }
 
@@ -219,10 +337,30 @@ public sealed class VocabularyPruner
         "status", "diagnostics", "memory", "uptime",
         "index", "rebuild", "reindex", "search",
         "help", "commands", "capabilities",
-        "chlorine", "temperature", "ph", "orp", // domain-specific examples
+        "show", "display", "view", "open", "detail", "lookup",
+        "execute", "run", "invoke", "action", "command",
         "user", "session", "audit", "log",
         "data", "schema", "fields", "properties",
-        "count", "total", "average", "sum", "min", "max"
+        "count", "total", "average", "sum", "min", "max",
+        "create", "update", "delete", "save", "remove",
+        "filter", "sort", "order", "by", "where", "limit",
+        "first", "last", "latest", "recent", "newest", "oldest"
+    ];
+
+    private static readonly string[] QueryOperatorTokens =
+    [
+        "equals", "equal", "is", "notequals", "not",
+        "contains", "contain", "like", "match", "matching",
+        "startswith", "starts", "endswith", "ends",
+        "greaterthan", "greater", "more", "above", "over",
+        "lessthan", "less", "fewer", "below", "under",
+        "between", "range",
+        "in", "notin",
+        "before", "after", "since", "until",
+        "empty", "null", "blank", "missing",
+        "true", "false", "yes", "no",
+        "active", "inactive", "enabled", "disabled",
+        "complete", "completed", "incomplete", "pending", "done"
     ];
 
     /// <summary>
