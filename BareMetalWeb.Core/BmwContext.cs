@@ -92,6 +92,9 @@ public sealed class BmwContext
         }
     }
 
+    /// <summary>Pre-compiled render plans for this route (set by jump table dispatch). Null = use parsing path.</summary>
+    public object? CompiledPlans { get; set; }
+
     /// <summary>Unique correlation ID for this request (X-Trace-ID header or Kestrel trace identifier).</summary>
     public string CorrelationId { get; }
 

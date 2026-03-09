@@ -614,6 +614,7 @@ public class BareMetalWebServer : IBareWebHost
                 {
                     bmwCtx.SetPageInfo(page.PageInfo);
                 }
+                bmwCtx.CompiledPlans = page.CompiledPlans;
                 if (!await IsAuthorizedAsync(page.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
                 {
                     await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, page.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);

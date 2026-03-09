@@ -193,6 +193,121 @@ public class HtmlRenderer : IHtmlRenderer
         lock (_planLock) { _planCache.Clear(); }
     }
 
+    // ── Route-level pre-bound plan execution ───────────────────────────────────
+    // These methods use RouteRenderPlans compiled at jump-table build time.
+    // No template lookup, no lazy compilation — plans are already bound.
+
+    /// <summary>
+    /// Fastest path: uses pre-bound route plans, writes directly to PipeWriter.
+    /// Plans were compiled and ordinal-bound at jump-table build time.
+    /// </summary>
+    private async ValueTask RenderWithPlansAsync(
+        PipeWriter writer, RouteRenderPlans plans,
+        IHtmlTemplate template,
+        string[] keys, string[] values,
+        IBareWebHost app,
+        string[]? tableColumnTitles, string[][]? tableRows,
+        FormDefinition? formDefinition)
+    {
+        Write(writer, _fragments.DocTypeAndHeadStart);
+        Write(writer, template.Encoding.WebName);
+        Write(writer, "'>");
+
+        plans.Head.Execute(writer, keys, values, app.AppMetaDataKeys, app.AppMetaDataValues);
+
+        Write(writer, _fragments.HeadEndAndBodyStart);
+
+        int byteCount = 2
+            + (tableColumnTitles is not null && tableRows is not null ? 1 : 0)
+            + (formDefinition is not null ? 1 : 0);
+        var byteKeysArr = new string[byteCount];
+        var byteValuesArr = new byte[byteCount][];
+        byteKeysArr[0] = "links_left";
+        byteValuesArr[0] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: false);
+        byteKeysArr[1] = "links_right";
+        byteValuesArr[1] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: true);
+        int idx = 2;
+        if (tableColumnTitles != null && tableRows != null)
+        {
+            byteKeysArr[idx] = "table";
+            byteValuesArr[idx++] = _fragments.RenderTable(tableColumnTitles, tableRows);
+        }
+        if (formDefinition is not null)
+        {
+            byteKeysArr[idx] = "form";
+            byteValuesArr[idx] = _fragments.RenderForm(formDefinition);
+        }
+
+        plans.Body.Execute(writer, keys, values, app.AppMetaDataKeys, app.AppMetaDataValues, byteKeysArr, byteValuesArr);
+        plans.Footer.Execute(writer, keys, values, app.AppMetaDataKeys, app.AppMetaDataValues);
+
+        if (!string.IsNullOrEmpty(template.Script))
+        {
+            Write(writer, _fragments.ScriptTagStart);
+            plans.Script.Execute(writer, keys, values, app.AppMetaDataKeys, app.AppMetaDataValues);
+            Write(writer, _fragments.ScriptTagEnd);
+        }
+
+        Write(writer, _fragments.BodyEndAndHtmlEnd);
+        await writer.FlushAsync();
+        t_stats.FlushCount++;
+    }
+
+    /// <summary>
+    /// Pre-bound route plans rendering to ArrayBufferWriter for compression path.
+    /// </summary>
+    private ReadOnlyMemory<byte> RenderToBytesWithPlans(
+        RouteRenderPlans plans, IHtmlTemplate template,
+        string[] keys, string[] values,
+        IBareWebHost app,
+        string[]? tableColumnTitles, string[][]? tableRows,
+        FormDefinition? formDefinition)
+    {
+        var arena = new ArrayBufferWriter<byte>(16384);
+
+        WriteToBuffer(arena, _fragments.DocTypeAndHeadStart);
+        WriteToBuffer(arena, template.Encoding.WebName);
+        WriteToBuffer(arena, "'>");
+
+        plans.Head.Execute(arena, keys, values, app.AppMetaDataKeys, app.AppMetaDataValues);
+
+        WriteToBuffer(arena, _fragments.HeadEndAndBodyStart);
+
+        int byteCount = 2
+            + (tableColumnTitles is not null && tableRows is not null ? 1 : 0)
+            + (formDefinition is not null ? 1 : 0);
+        var byteKeysArr = new string[byteCount];
+        var byteValuesArr = new byte[byteCount][];
+        byteKeysArr[0] = "links_left";
+        byteValuesArr[0] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: false);
+        byteKeysArr[1] = "links_right";
+        byteValuesArr[1] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: true);
+        int idx = 2;
+        if (tableColumnTitles != null && tableRows != null)
+        {
+            byteKeysArr[idx] = "table";
+            byteValuesArr[idx++] = _fragments.RenderTable(tableColumnTitles, tableRows);
+        }
+        if (formDefinition is not null)
+        {
+            byteKeysArr[idx] = "form";
+            byteValuesArr[idx] = _fragments.RenderForm(formDefinition);
+        }
+
+        plans.Body.Execute(arena, keys, values, app.AppMetaDataKeys, app.AppMetaDataValues, byteKeysArr, byteValuesArr);
+        plans.Footer.Execute(arena, keys, values, app.AppMetaDataKeys, app.AppMetaDataValues);
+
+        if (!string.IsNullOrEmpty(template.Script))
+        {
+            WriteToBuffer(arena, _fragments.ScriptTagStart);
+            plans.Script.Execute(arena, keys, values, app.AppMetaDataKeys, app.AppMetaDataValues);
+            WriteToBuffer(arena, _fragments.ScriptTagEnd);
+        }
+
+        WriteToBuffer(arena, _fragments.BodyEndAndHtmlEnd);
+        return arena.WrittenMemory;
+    }
+
     /// <summary>
     /// Zero-copy compiled streaming renderer. Pre-compiled RenderPlans write directly
     /// to the PipeWriter with no intermediate buffer. Single flush at the end.
@@ -1075,40 +1190,29 @@ public class HtmlRenderer : IHtmlRenderer
         bool needsBanner = ShouldShowDiagnosticBanner(context, app);
         bool hasLoops = page.PageContext.TemplateLoops is { Length: > 0 };
 
+        // Route-level pre-bound plans from jump table (fastest path)
+        var routePlans = context.CompiledPlans as RouteRenderPlans;
+
         // Zero-copy path: compiled plan writes directly to the response PipeWriter.
         // Only possible when we don't need post-processing (compression, banner, loops).
         if (!needsCompression && !needsBanner && !hasLoops)
         {
             CompressionHelper.ApplyHeaders(context, encoding);
-            await RenderToStreamCompiledAsync(
-                context.ResponseBody,
-                page.PageMetaData.Template,
-                page.PageContext.PageMetaDataKeys,
-                page.PageContext.PageMetaDataValues,
-                app.AppMetaDataKeys,
-                app.AppMetaDataValues,
-                app,
-                page.PageContext.TableColumnTitles,
-                page.PageContext.TableData,
-                page.PageContext.FormDefinition,
-                page.PageContext.TemplateLoops);
-        }
-        else
-        {
-            // Buffered path: render to bytes, then compress/inject banner.
-            ReadOnlyMemory<byte> output = hasLoops
-                ? await RenderToBytesAsync(
+            if (routePlans != null)
+            {
+                await RenderWithPlansAsync(
+                    context.ResponseBody, routePlans,
                     page.PageMetaData.Template,
                     page.PageContext.PageMetaDataKeys,
                     page.PageContext.PageMetaDataValues,
-                    app.AppMetaDataKeys,
-                    app.AppMetaDataValues,
-                    app,
-                    page.PageContext.TableColumnTitles,
+                    app, page.PageContext.TableColumnTitles,
                     page.PageContext.TableData,
-                    page.PageContext.FormDefinition,
-                    page.PageContext.TemplateLoops)
-                : await RenderToBytesCompiledAsync(
+                    page.PageContext.FormDefinition);
+            }
+            else
+            {
+                await RenderToStreamCompiledAsync(
+                    context.ResponseBody,
                     page.PageMetaData.Template,
                     page.PageContext.PageMetaDataKeys,
                     page.PageContext.PageMetaDataValues,
@@ -1119,6 +1223,50 @@ public class HtmlRenderer : IHtmlRenderer
                     page.PageContext.TableData,
                     page.PageContext.FormDefinition,
                     page.PageContext.TemplateLoops);
+            }
+        }
+        else
+        {
+            // Buffered path: render to bytes, then compress/inject banner.
+            ReadOnlyMemory<byte> output;
+            if (hasLoops)
+            {
+                output = await RenderToBytesAsync(
+                    page.PageMetaData.Template,
+                    page.PageContext.PageMetaDataKeys,
+                    page.PageContext.PageMetaDataValues,
+                    app.AppMetaDataKeys,
+                    app.AppMetaDataValues,
+                    app,
+                    page.PageContext.TableColumnTitles,
+                    page.PageContext.TableData,
+                    page.PageContext.FormDefinition,
+                    page.PageContext.TemplateLoops);
+            }
+            else if (routePlans != null)
+            {
+                output = RenderToBytesWithPlans(
+                    routePlans, page.PageMetaData.Template,
+                    page.PageContext.PageMetaDataKeys,
+                    page.PageContext.PageMetaDataValues,
+                    app, page.PageContext.TableColumnTitles,
+                    page.PageContext.TableData,
+                    page.PageContext.FormDefinition);
+            }
+            else
+            {
+                output = await RenderToBytesCompiledAsync(
+                    page.PageMetaData.Template,
+                    page.PageContext.PageMetaDataKeys,
+                    page.PageContext.PageMetaDataValues,
+                    app.AppMetaDataKeys,
+                    app.AppMetaDataValues,
+                    app,
+                    page.PageContext.TableColumnTitles,
+                    page.PageContext.TableData,
+                    page.PageContext.FormDefinition,
+                    page.PageContext.TemplateLoops);
+            }
 
             if (needsBanner)
             {

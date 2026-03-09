@@ -327,3 +327,34 @@ public sealed class RenderPlan
         stats.BytesWritten += bytesWritten;
     }
 }
+
+/// <summary>
+/// Pre-compiled render plans for a route's four template sections.
+/// Built once at startup from the jump table, plans use SoA ordinal-indexed
+/// lookups with zero string comparisons on the hot render path.
+/// </summary>
+public sealed class RouteRenderPlans
+{
+    public RenderPlan Head { get; }
+    public RenderPlan Body { get; }
+    public RenderPlan Footer { get; }
+    public RenderPlan Script { get; }
+
+    public RouteRenderPlans(RenderPlan head, RenderPlan body, RenderPlan footer, RenderPlan script)
+    {
+        Head = head;
+        Body = body;
+        Footer = footer;
+        Script = script;
+    }
+
+    /// <summary>Compile plans from a template's four sections.</summary>
+    public static RouteRenderPlans FromTemplate(BareMetalWeb.Interfaces.IHtmlTemplate template)
+    {
+        return new RouteRenderPlans(
+            RenderPlan.Compile(template.Head),
+            RenderPlan.Compile(template.Body),
+            RenderPlan.Compile(template.Footer),
+            RenderPlan.Compile(template.Script));
+    }
+}

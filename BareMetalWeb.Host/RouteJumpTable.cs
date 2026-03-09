@@ -1,6 +1,7 @@
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Interfaces;
+using BareMetalWeb.Rendering;
 
 namespace BareMetalWeb.Host;
 
@@ -130,15 +131,25 @@ public sealed class RouteJumpTable
                 $"Could not find a perfect hash seed for {exactRoutes.Count} routes " +
                 $"in {tableSize}-slot table after {maxMultiplier}× expansion.");
 
-        // Populate the table using the winning seed
+        // Populate the table using the winning seed, compiling render plans for templated routes
         var slots = new Slot[tableSize];
+        int compiledPlanCount = 0;
         for (int i = 0; i < exactRoutes.Count; i++)
         {
             uint idx = RouteHash.Hash(exactRoutes[i].Key, seed) & mask;
+            var data = exactRoutes[i].Data;
+
+            // Pre-compile render plans for routes with templates
+            if (data.PageInfo?.PageMetaData?.Template != null && data.CompiledPlans == null)
+            {
+                data.CompiledPlans = RouteRenderPlans.FromTemplate(data.PageInfo.PageMetaData.Template);
+                compiledPlanCount++;
+            }
+
             slots[idx] = new Slot
             {
                 Key = exactRoutes[i].Key,
-                Data = exactRoutes[i].Data
+                Data = data
             };
         }
 
@@ -150,7 +161,8 @@ public sealed class RouteJumpTable
 
         logger.LogInfo(
             $"Perfect route table built: {exactRoutes.Count} exact routes in " +
-            $"{tableSize}-slot table, seed={seed} (load factor {(double)exactRoutes.Count / tableSize:P0})");
+            $"{tableSize}-slot table, seed={seed} (load factor {(double)exactRoutes.Count / tableSize:P0}), " +
+            $"{compiledPlanCount} render plans compiled");
     }
 
     /// <summary>
