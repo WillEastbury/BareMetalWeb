@@ -53,6 +53,22 @@ BareMetalWeb uses a 5-workflow pipeline that chains automated CI with gated CD r
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+## Concurrency & Cancellation
+
+CI1, CI2, and CD1 share a single concurrency group (`deploy-pipeline-<ref>`). When a new
+push lands on `main`, any in-progress run across those three stages is **cancelled** and
+the pipeline restarts from CI1. This guarantees only the latest commit is ever being
+validated or deployed — no overlapping or stale deployments.
+
+| Workflows | Concurrency group | cancel-in-progress |
+|-----------|------------------|--------------------|
+| CI1, CI2, CD1 | `deploy-pipeline-${{ github.ref }}` | **true** — new push abandons old run |
+| CD2 | `cd2-early-adopters` | **false** — queues if already running |
+| CD3 | `cd3-full-rollout` | **false** — queues if already running |
+
+PR runs of CI1 are in their own group (`deploy-pipeline-refs/pull/…`) so they never
+cancel or block the main-branch pipeline.
+
 ## Workflow Details
 
 ### CI1 · Unit Tests (`unit-tests.yml`)

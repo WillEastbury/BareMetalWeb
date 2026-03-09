@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: unit-tests-${{ github.ref }}
+  group: deploy-pipeline-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:

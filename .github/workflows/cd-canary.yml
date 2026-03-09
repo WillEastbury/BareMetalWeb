@@ -28,8 +28,8 @@ on:
         type: string
 
 concurrency:
-  group: cd1-canary
-  cancel-in-progress: false
+  group: deploy-pipeline-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read

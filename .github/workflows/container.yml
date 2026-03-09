@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci2-container-${{ github.ref }}
+  group: deploy-pipeline-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
