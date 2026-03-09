@@ -47,7 +47,14 @@ public sealed record DataFieldMetadata(
     string? FieldGroup = null,
     int ColumnSpan = 12,
     DataIndexAttribute? DataIndex = null,
-    bool HasSingletonFlag = false
+    bool HasSingletonFlag = false,
+    /// <summary>
+    /// Ordered allowed values for Enum fields on virtual (gallery/runtime) entities.
+    /// Null for compiled C# entities whose allowed values are derived from the CLR enum type.
+    /// When set, rendering prefers this list over <see cref="ClrType"/> for enum option building
+    /// and for converting integer ordinals to display names (e.g. timetable day headers).
+    /// </summary>
+    IReadOnlyList<string>? EnumValues = null
 )
 {
     /// <summary>CLR type of this field, captured once at registration to avoid PropertyInfo access.</summary>
@@ -774,7 +781,9 @@ public static class DataScaffold
                     : null;
 
             lookupOptions ??= effectiveFieldType == FormFieldType.Enum
-                ? BuildEnumOptions(field.ClrType)
+                ? (field.EnumValues != null && field.EnumValues.Count > 0
+                    ? BuildEnumOptionsFromValues(field.EnumValues)
+                    : BuildEnumOptions(field.ClrType))
                 : null;
 
             string? lookupTargetType = null;
@@ -1684,7 +1693,14 @@ public static class DataScaffold
         {
             var dayKey = dayGroupEntry.Key;
             var dayGroup = dayGroupEntry.Value;
-            var dayName = Enum.GetName(dayField.ClrType, dayKey) ?? dayKey.ToString();
+            // Use stored EnumValues for virtual entities (ClrType is typeof(string)), otherwise use CLR enum reflection.
+            string dayName;
+            if (dayField.EnumValues != null && dayKey >= 0 && dayKey < dayField.EnumValues.Count)
+                dayName = dayField.EnumValues[dayKey];
+            else if (dayField.ClrType.IsEnum)
+                dayName = Enum.GetName(dayField.ClrType, dayKey) ?? dayKey.ToString();
+            else
+                dayName = dayKey.ToString();
             html.Append($"<div class=\"bm-timetable-day-section mb-4\">");
             html.Append($"<h3 class=\"bm-timetable-day-header\">{WebUtility.HtmlEncode(dayName)}</h3>");
 
@@ -2143,6 +2159,18 @@ public static class DataScaffold
         var result = new KeyValuePair<string, string>[names.Length];
         for (int i = 0; i < names.Length; i++)
             result[i] = new KeyValuePair<string, string>(names[i], DeCamelcaseWithId(names[i]));
+        return result;
+    }
+
+    /// <summary>
+    /// Builds enum options from an explicit list of value names (used for virtual/gallery entities
+    /// whose enum values are stored as strings rather than a CLR enum type).
+    /// </summary>
+    private static IReadOnlyList<KeyValuePair<string, string>> BuildEnumOptionsFromValues(IReadOnlyList<string> values)
+    {
+        var result = new KeyValuePair<string, string>[values.Count];
+        for (int i = 0; i < values.Count; i++)
+            result[i] = new KeyValuePair<string, string>(values[i], DeCamelcaseWithId(values[i]));
         return result;
     }
 
