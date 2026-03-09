@@ -124,8 +124,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         // Arrange & Act
         _server.RegisterStaticRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
-        // Assert — /, /status, /statusRaw, /health, /healthz, /readyz
-        Assert.Equal(6, _server.routes.Count);
+        // Assert — /, /favicon.ico, /status, /statusRaw, /health, /healthz, /readyz
+        Assert.Equal(7, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -413,17 +413,6 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void RegisterAdminRoutes_RegistersSampleDataRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("GET /admin/sample-data"));
-        Assert.True(_server.routes.ContainsKey("POST /admin/sample-data"));
-    }
-
-    [Fact]
     public void RegisterAdminRoutes_RegistersReloadTemplatesRoute()
     {
         // Arrange & Act
@@ -445,17 +434,6 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void RegisterAdminRoutes_SampleDataRoute_HasAdminPermission()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        var route = _server.routes["GET /admin/sample-data"];
-        Assert.Equal("admin", route.PageInfo!.PageMetaData.PermissionsNeeded);
-    }
-
-    [Fact]
     public void RegisterAdminRoutes_ReloadTemplatesRoute_HasAdminPermission()
     {
         // Arrange & Act
@@ -473,29 +451,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.Equal(13, _server.routes.Count);
-    }
-
-    [Fact]
-    public void RegisterAdminRoutes_AlwaysRegistersWipeRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert — routes are always registered; 419 gating is done at runtime via the settings store
-        Assert.True(_server.routes.ContainsKey("GET /admin/wipe-data"));
-        Assert.True(_server.routes.ContainsKey("POST /admin/wipe-data"));
-    }
-
-    [Fact]
-    public void RegisterAdminRoutes_WipeDataRoute_HasAdminPermission()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        var route = _server.routes["GET /admin/wipe-data"];
-        Assert.Equal("admin", route.PageInfo!.PageMetaData.PermissionsNeeded);
+        Assert.Equal(11, _server.routes.Count);
     }
 
     [Fact]

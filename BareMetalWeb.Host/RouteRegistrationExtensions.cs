@@ -275,26 +275,12 @@ public static class RouteRegistrationExtensions
             routeHandlers.LogsDownloadHandler));
 
         // Sample data generation
-        host.RegisterRoute("GET /admin/sample-data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Generate Sample Data", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
-            routeHandlers.SampleDataHandler));
-        host.RegisterRoute("POST /admin/sample-data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Generate Sample Data", "" }, "admin", false, 1),
-            routeHandlers.SampleDataPostHandler));
-
         // Template management
         host.RegisterRoute("GET /admin/reload-templates", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.ReloadTemplatesHandler));
 
         // Wipe all data — always registered; returns 419 if admin.allowWipeData setting is not configured
-        host.RegisterRoute("GET /admin/wipe-data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", true, 0, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "⚠️ Danger"),
-            routeHandlers.WipeDataHandler));
-        host.RegisterRoute("POST /admin/wipe-data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", false, 0),
-            routeHandlers.WipeDataPostHandler));
-
         // Entity designer — visual editor for creating virtual entity JSON definitions
         host.RegisterRoute("GET /admin/entity-designer", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Entity Designer", "" }, "admin", true, 2, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
@@ -1571,135 +1557,59 @@ public static class RouteRegistrationExtensions
         IPageInfoFactory pageInfoFactory)
     {
         // List all reports
-        host.RegisterRoute("GET /reports", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Reports", navSubGroup: "🔧 Tools"),
-            async context =>
-            {
-                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                if (user == null) { context.Response.Redirect("/login"); return; }
-                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
-
-                var reports = new List<ReportDefinition>(DataStoreProvider.Current.Query<ReportDefinition>(null));
-                reports.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
-                var csrfToken = CsrfProtection.EnsureToken(context);
-                var safeToken = WebUtility.HtmlEncode(csrfToken);
-                var nonce = context.GetCspNonce();
-                var safeNonce = WebUtility.HtmlEncode(nonce);
-
-                var sb = new StringBuilder(4096);
-                ReportHtmlRenderer.AppendChromeHead(sb, "Reports", safeNonce, safeToken);
-                ReportHtmlRenderer.AppendChromeNavbar(sb, host, safeNonce);
-                sb.Append("<div class=\"container-fluid py-4 px-4 bm-content\">");
-                sb.Append("<div class=\"card shadow-sm bm-page-card\">");
-                sb.Append("<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
-                sb.Append("<h1 class=\"h5 mb-0\"><i class=\"bi bi-bar-chart-fill\"></i> Reports</h1>");
-                sb.Append("<a href=\"/report-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New Report</a>");
-                sb.Append("</div><div class=\"card-body\">");
-
-                if (reports.Count == 0)
-                {
-                    sb.Append("<div class=\"text-center py-5 text-muted\">No reports defined yet. Create one via <a href=\"/report-definitions/create\">Report Definitions</a>.</div>");
-                }
-                else
-                {
-                    sb.Append("<div class=\"table-responsive\"><table class=\"table table-hover table-bordered align-middle mb-0\">");
-                    sb.Append("<thead class=\"table-light\"><tr><th>Name</th><th>Description</th><th>Root Entity</th><th></th></tr></thead><tbody>");
-                    foreach (var r in reports)
-                    {
-                        sb.Append("<tr><td><strong>");
-                        sb.Append(WebUtility.HtmlEncode(r.Name));
-                        sb.Append("</strong></td><td>");
-                        sb.Append(WebUtility.HtmlEncode(r.Description));
-                        sb.Append("</td><td><code>");
-                        sb.Append(WebUtility.HtmlEncode(r.RootEntity));
-                        sb.Append("</code></td><td><a class=\"btn btn-sm btn-primary\" href=\"/reports/");
-                        sb.Append(WebUtility.UrlEncode(r.Key.ToString()));
-                        sb.Append("\"><i class=\"bi bi-play-fill\"></i> Run</a></td></tr>");
-                    }
-                    sb.Append("</tbody></table></div>");
-                }
-
-                sb.Append("</div></div></div>");
-                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context);
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await context.Response.WriteAsync(sb.ToString());
-            }));
-
         // Run a report → HTML
-        host.RegisterRoute("GET /reports/{id}", new RouteHandlerData(
+        // ── GET /api/reports — JSON list of all report definitions ────────
+        host.RegisterRoute("GET /api/reports", new RouteHandlerData(
             pageInfoFactory.RawPage("admin", false),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                if (user == null) { context.Response.Redirect("/login"); return; }
-                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
-                var id = GetRouteParam(context, "id");
-                if (string.IsNullOrWhiteSpace(id))
-                {
-                    context.Response.StatusCode = 400;
-                    await context.Response.WriteAsync("Missing report id.");
-                    return;
-                }
+                var reports = new List<ReportDefinition>(DataStoreProvider.Current.Query<ReportDefinition>(null));
+                reports.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
 
-                if (!uint.TryParse(id, out var parsedId))
+                context.Response.ContentType = "application/json";
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
                 {
-                    context.Response.StatusCode = 400;
-                    await context.Response.WriteAsync("Invalid report id.");
-                    return;
-                }
-
-                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(parsedId, context.RequestAborted).ConfigureAwait(false);
-                if (def == null)
-                {
-                    context.Response.StatusCode = 404;
-                    await context.Response.WriteAsync("Report not found.");
-                    return;
-                }
-
-                var parameters = def.Parameters;
-                Dictionary<string, string>? runtimeParams = null;
-                if (parameters.Count > 0)
-                {
-                    runtimeParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var p in parameters)
+                    w.WriteStartArray();
+                    foreach (var r in reports)
                     {
-                        var val = context.HttpRequest.Query.TryGetValue(p.Name, out var qv) ? qv.ToString() : p.DefaultValue;
-                        runtimeParams[p.Name] = val;
+                        w.WriteStartObject();
+                        w.WriteNumber("id", r.Key);
+                        w.WriteString("name", r.Name);
+                        w.WriteString("description", r.Description);
+                        w.WriteString("rootEntity", r.RootEntity);
+                        w.WriteNumber("parameterCount", r.Parameters.Count);
+
+                        w.WritePropertyName("parameters");
+                        w.WriteStartArray();
+                        foreach (var p in r.Parameters)
+                        {
+                            w.WriteStartObject();
+                            w.WriteString("name", p.Name);
+                            w.WriteString("label", p.Label);
+                            w.WriteString("type", p.Type);
+                            w.WriteString("defaultValue", p.DefaultValue);
+                            if (p.Options != null && p.Options.Count > 0)
+                            {
+                                w.WritePropertyName("options");
+                                w.WriteStartArray();
+                                foreach (var o in p.Options) w.WriteStringValue(o);
+                                w.WriteEndArray();
+                            }
+                            if (!string.IsNullOrEmpty(p.FieldSource))
+                                w.WriteString("fieldSource", p.FieldSource);
+                            w.WriteEndObject();
+                        }
+                        w.WriteEndArray();
+
+                        w.WriteEndObject();
                     }
+                    w.WriteEndArray();
                 }
-
-                var executor = new ReportExecutor(DataStoreProvider.Current);
-                ReportResult result;
-                try
-                {
-                    result = await executor.ExecuteAsync(def, runtimeParams, context.RequestAborted).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    context.Response.StatusCode = 500;
-                    context.Response.ContentType = "text/plain";
-                    await context.Response.WriteAsync($"Error executing report: {WebUtility.HtmlEncode(ex.Message)}");
-                    return;
-                }
-
-                context.Response.ContentType = "text/html; charset=utf-8";
-                var pipeWriter = System.IO.Pipelines.PipeWriter.Create(context.Response.Body);
-                await ReportHtmlRenderer.RenderAsync(
-                    pipeWriter,
-                    result,
-                    def.Name,
-                    def.Description,
-                    parameters.Count > 0 ? parameters : null,
-                    runtimeParams,
-                    id,
-                    host,
-                    context.GetCspNonce(),
-                    CsrfProtection.EnsureToken(context),
-                    context);
-                await pipeWriter.CompleteAsync();
             }));
 
         // JSON results via API
@@ -2289,49 +2199,6 @@ public static class RouteRegistrationExtensions
             sb.Append("</ul></li>");
         }
     }
-
-    internal static void AppendVNextLeftNavItems(StringBuilder sb, List<IMenuOption> options)
-    {
-        var leftAligned = new List<IMenuOption>();
-        foreach (var o in options)
-        {
-            if (!o.RightAligned && o.ShowOnNavBar)
-                leftAligned.Add(o);
-        }
-        var renderedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var option in leftAligned)
-        {
-            if (string.IsNullOrWhiteSpace(option.Group))
-            {
-                var cssClass = option.HighlightAsButton
-                    ? $"btn {(string.IsNullOrWhiteSpace(option.ColorClass) ? "btn-outline-light" : option.ColorClass)} btn-sm ms-2"
-                    : string.IsNullOrWhiteSpace(option.ColorClass) ? "nav-link" : $"nav-link {option.ColorClass}";
-                sb.Append($"<li class=\"nav-item\"><a class=\"{WebUtility.HtmlEncode(cssClass)}\" href=\"{WebUtility.HtmlEncode(option.Href)}\">{WebUtility.HtmlEncode(option.Label)}</a></li>");
-                continue;
-            }
-
-            if (renderedGroups.Contains(option.Group))
-                continue;
-
-            renderedGroups.Add(option.Group);
-            var groupItems = new List<IMenuOption>();
-            foreach (var o in leftAligned)
-            {
-                if (string.Equals(o.Group, option.Group, StringComparison.OrdinalIgnoreCase))
-                    groupItems.Add(o);
-            }
-
-            sb.Append($"<li class=\"nav-item dropdown\"><a class=\"nav-link dropdown-toggle\" href=\"#\" role=\"button\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\">{WebUtility.HtmlEncode(option.Group)}</a>");
-            sb.Append("<ul class=\"dropdown-menu\">");
-            foreach (var item in groupItems)
-            {
-                sb.Append($"<li><a class=\"dropdown-item\" href=\"{WebUtility.HtmlEncode(item.Href)}\">{WebUtility.HtmlEncode(item.Label)}</a></li>");
-            }
-            sb.Append("</ul></li>");
-        }
-    }
-
     /// <summary>Parses a POST /query JSON body into a <see cref="QueryDefinition"/>.</summary>
     private static QueryDefinition? BuildQueryFromJson(JsonElement root)
     {
@@ -2453,102 +2320,7 @@ public static class RouteRegistrationExtensions
         IPageInfoFactory pageInfoFactory)
     {
         // ── GET /dashboards — HTML listing ───────────────────────────────────
-        host.RegisterRoute("GET /dashboards", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right,
-                navLabel: "Dashboards", navSubGroup: "🔧 Tools"),
-            async context =>
-            {
-                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                if (user == null) { context.Response.Redirect("/login"); return; }
-                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
-                { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
-
-                var dashboards = new List<DashboardDefinition>(DataStoreProvider.Current.Query<DashboardDefinition>(null));
-                dashboards.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
-                var nonce = context.GetCspNonce();
-                var safeNonce = WebUtility.HtmlEncode(nonce);
-                var safeToken = WebUtility.HtmlEncode(CsrfProtection.EnsureToken(context));
-
-                var sb = new StringBuilder(4096);
-                ReportHtmlRenderer.AppendChromeHead(sb, "Dashboards", safeNonce, safeToken);
-                ReportHtmlRenderer.AppendChromeNavbar(sb, host, safeNonce);
-                sb.Append("<div class=\"container-fluid py-4 px-4 bm-content\">");
-                sb.Append("<div class=\"card shadow-sm bm-page-card\">");
-                sb.Append("<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
-                sb.Append("<h1 class=\"h5 mb-0\"><i class=\"bi bi-speedometer2\"></i> Dashboards</h1>");
-                sb.Append("<a href=\"/dashboard-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New Dashboard</a>");
-                sb.Append("</div><div class=\"card-body\">");
-
-                if (dashboards.Count == 0)
-                {
-                    sb.Append("<div class=\"text-center py-5 text-muted\">No dashboards defined yet. Create one via <a href=\"/dashboard-definitions/create\">Dashboard Definitions</a>.</div>");
-                }
-                else
-                {
-                    sb.Append("<div class=\"row g-3\">");
-                    foreach (var d in dashboards)
-                    {
-                        var tiles = d.Tiles;
-                        sb.Append("<div class=\"col-sm-6 col-md-4 col-lg-3\">");
-                        sb.Append("<div class=\"card h-100\">");
-                        sb.Append("<div class=\"card-body\">");
-                        sb.Append("<h5 class=\"card-title\"><i class=\"bi bi-speedometer2 me-2\"></i>");
-                        sb.Append(WebUtility.HtmlEncode(d.Name));
-                        sb.Append("</h5>");
-                        if (!string.IsNullOrWhiteSpace(d.Description))
-                        {
-                            sb.Append("<p class=\"card-text text-muted small\">");
-                            sb.Append(WebUtility.HtmlEncode(d.Description));
-                            sb.Append("</p>");
-                        }
-                        sb.Append("<p class=\"card-text\"><small class=\"text-muted\">");
-                        sb.Append(tiles.Count);
-                        sb.Append(" KPI tile");
-                        if (tiles.Count != 1) sb.Append('s');
-                        sb.Append("</small></p>");
-                        sb.Append("</div><div class=\"card-footer\">");
-                        sb.Append("<a href=\"/dashboards/");
-                        sb.Append(WebUtility.UrlEncode(d.Key.ToString()));
-                        sb.Append("\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-eye\"></i> View</a>");
-                        sb.Append("</div></div></div>");
-                    }
-                    sb.Append("</div>");
-                }
-
-                sb.Append("</div></div></div>");
-                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context);
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await context.Response.WriteAsync(sb.ToString());
-            }));
-
         // ── GET /dashboards/{id} — HTML dashboard render ─────────────────────
-        host.RegisterRoute("GET /dashboards/{id}", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", false),
-            async context =>
-            {
-                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                if (user == null) { context.Response.Redirect("/login"); return; }
-                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
-                { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
-
-                var id = GetRouteParam(context, "id");
-                if (string.IsNullOrWhiteSpace(id) || !uint.TryParse(id, out var dashId))
-                { context.Response.StatusCode = 400; await context.Response.WriteAsync("Invalid dashboard id."); return; }
-
-                var def = await DataStoreProvider.Current.LoadAsync<DashboardDefinition>(dashId, context.RequestAborted).ConfigureAwait(false);
-                if (def == null)
-                { context.Response.StatusCode = 404; await context.Response.WriteAsync("Dashboard not found."); return; }
-
-                var nonce = context.GetCspNonce();
-                var safeNonce = WebUtility.HtmlEncode(nonce);
-                var safeToken = WebUtility.HtmlEncode(CsrfProtection.EnsureToken(context));
-
-                var pipeWriter = System.IO.Pipelines.PipeWriter.Create(context.Response.Body);
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await DashboardHtmlRenderer.RenderAsync(pipeWriter, def, host, safeNonce, safeToken, context, context.RequestAborted);
-                await pipeWriter.CompleteAsync();
-            }));
-
         // ── GET /api/dashboards — JSON list ──────────────────────────────────
         host.RegisterRoute("GET /api/dashboards", new RouteHandlerData(
             pageInfoFactory.RawPage("admin", false),
@@ -2651,118 +2423,7 @@ public static class RouteRegistrationExtensions
         var _engine = new ViewEngine();
 
         // ── GET /views ── list all view definitions ───────────────────────────
-        host.RegisterRoute("GET /views", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right,
-                navLabel: "Views", navSubGroup: "🔧 Tools"),
-            async context =>
-            {
-                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                if (user == null) { context.Response.Redirect("/login"); return; }
-                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
-
-                var views = new List<ViewDefinition>(DataStoreProvider.Current.Query<ViewDefinition>(null));
-                views.Sort((a, b) => string.Compare(a.ViewName, b.ViewName, StringComparison.Ordinal));
-                var csrfToken = CsrfProtection.EnsureToken(context);
-                var safeToken = WebUtility.HtmlEncode(csrfToken);
-                var nonce = context.GetCspNonce();
-                var safeNonce = WebUtility.HtmlEncode(nonce);
-
-                var sb = new StringBuilder(4096);
-                ReportHtmlRenderer.AppendChromeHead(sb, "Views", safeNonce, safeToken);
-                ReportHtmlRenderer.AppendChromeNavbar(sb, host, safeNonce);
-                sb.Append("<div class=\"container-fluid py-4 px-4 bm-content\">");
-                sb.Append("<div class=\"card shadow-sm bm-page-card\">");
-                sb.Append("<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
-                sb.Append("<h1 class=\"h5 mb-0\"><i class=\"bi bi-table\"></i> Views</h1>");
-                sb.Append("<a href=\"/view-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New View</a>");
-                sb.Append("</div><div class=\"card-body\">");
-
-                if (views.Count == 0)
-                {
-                    sb.Append("<div class=\"text-center py-5 text-muted\">No views defined yet. Create one via <a href=\"/view-definitions/create\">View Definitions</a>.</div>");
-                }
-                else
-                {
-                    sb.Append("<div class=\"table-responsive\"><table class=\"table table-hover table-bordered align-middle mb-0\">");
-                    sb.Append("<thead class=\"table-light\"><tr><th>Name</th><th>Root Entity</th><th>Materialised</th><th></th></tr></thead><tbody>");
-                    foreach (var v in views)
-                    {
-                        sb.Append("<tr><td><strong>");
-                        sb.Append(WebUtility.HtmlEncode(v.ViewName));
-                        sb.Append("</strong></td><td><code>");
-                        sb.Append(WebUtility.HtmlEncode(v.RootEntity));
-                        sb.Append("</code></td><td>");
-                        sb.Append(v.Materialised ? "<span class=\"badge bg-success\">Yes</span>" : "<span class=\"badge bg-secondary\">No</span>");
-                        sb.Append("</td><td><a class=\"btn btn-sm btn-primary\" href=\"/views/");
-                        sb.Append(WebUtility.UrlEncode(v.Key.ToString()));
-                        sb.Append("\"><i class=\"bi bi-play-fill\"></i> Run</a></td></tr>");
-                    }
-                    sb.Append("</tbody></table></div>");
-                }
-
-                sb.Append("</div></div></div>");
-                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context);
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await context.Response.WriteAsync(sb.ToString());
-            }));
-
         // ── GET /views/{id} ── execute view → HTML ────────────────────────────
-        host.RegisterRoute("GET /views/{id}", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", false),
-            async context =>
-            {
-                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                if (user == null) { context.Response.Redirect("/login"); return; }
-                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
-
-                var id = GetRouteParam(context, "id");
-                if (string.IsNullOrWhiteSpace(id) || !uint.TryParse(id, out var viewKey))
-                {
-                    context.Response.StatusCode = 400;
-                    await context.Response.WriteAsync("Missing or invalid view id.");
-                    return;
-                }
-
-                var def = await DataStoreProvider.Current.LoadAsync<ViewDefinition>(viewKey, context.RequestAborted).ConfigureAwait(false);
-                if (def == null)
-                {
-                    context.Response.StatusCode = 404;
-                    await context.Response.WriteAsync("View not found.");
-                    return;
-                }
-
-                ReportResult result;
-                try
-                {
-                    result = await _engine.ExecuteAsync(def, context.RequestAborted).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    context.Response.StatusCode = 500;
-                    context.Response.ContentType = "text/plain";
-                    await context.Response.WriteAsync($"Error executing view: {WebUtility.HtmlEncode(ex.Message)}");
-                    return;
-                }
-
-                context.Response.ContentType = "text/html; charset=utf-8";
-                var pipeWriter = System.IO.Pipelines.PipeWriter.Create(context.Response.Body);
-                await ReportHtmlRenderer.RenderAsync(
-                    pipeWriter,
-                    result,
-                    def.ViewName,
-                    $"Root: {def.RootEntity}",
-                    null,
-                    null,
-                    id,
-                    host,
-                    context.GetCspNonce(),
-                    CsrfProtection.EnsureToken(context),
-                    context);
-                await pipeWriter.CompleteAsync();
-            }));
-
         // ── GET /api/views ── list view definitions as JSON ───────────────────
         host.RegisterRoute("GET /api/views", new RouteHandlerData(
             pageInfoFactory.RawPage("admin", false),

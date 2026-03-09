@@ -5117,7 +5117,7 @@
     // Tools dropdown (sample data, wipe data)
     const toolsLi = el('li', { className: 'nav-item dropdown' });
     const toolsToggle = el('a', {
-      className: 'nav-link dropdown-toggle' + (['_sample-data', '_wipe-data', '_query-plans', '_dashboards'].includes(activeSlug) ? ' active' : ''),
+      className: 'nav-link dropdown-toggle' + (['_sample-data', '_wipe-data', '_query-plans', '_dashboards', '_reports', '_views'].includes(activeSlug) ? ' active' : ''),
       href: '#', role: 'button', title: 'Admin Tools'
     });
     toolsToggle.setAttribute('data-bs-toggle', 'dropdown');
@@ -5129,7 +5129,9 @@
       { slug: '_sample-data', label: '\uD83E\uDDEA Generate Sample Data' },
       { slug: '_wipe-data',   label: '\uD83D\uDDD1\uFE0F Wipe All Data' },
       { slug: '_query-plans', label: '\uD83D\uDCCA Query Plan History' },
-      { slug: '_dashboards',  label: '\uD83D\uDCCA Dashboards' }
+      { slug: '_dashboards',  label: '\uD83D\uDCCA Dashboards' },
+      { slug: '_reports',     label: '\uD83D\uDCCA Reports' },
+      { slug: '_views',       label: '\uD83D\uDD0D Views' }
     ].forEach(function (t) {
       const mli = el('li');
       const ma  = el('a', { className: 'dropdown-item' + (activeSlug === t.slug ? ' active' : ''), href: BASE + '/' + t.slug, textContent: t.label });
@@ -5830,6 +5832,318 @@
     _dashboardRefreshHandle = setInterval(loadDashboard, 60000);
   }
 
+  // ── Reports ──────────────────────────────────────────────────────────────
+
+  function renderReportsListPage(container) {
+    container.appendChild(el('h2', { className: 'mb-3', innerHTML: '<i class="bi bi-bar-chart-fill me-2"></i>Reports' }));
+    container.appendChild(el('p', { className: 'text-muted', textContent: 'Saved cross-entity reports. Create and manage reports via Report Definitions.' }));
+
+    var addLink = el('a', { href: BASE + '/report-definitions/create', className: 'btn btn-sm btn-primary mb-3', textContent: '+ New Report' });
+    addLink.setAttribute('data-go', '');
+    container.appendChild(addLink);
+
+    var listWrap = el('div');
+    container.appendChild(listWrap);
+
+    apiFetch('/api/reports')
+      .then(function (reports) {
+        listWrap.innerHTML = '';
+        if (!Array.isArray(reports) || reports.length === 0) {
+          listWrap.innerHTML = '<div class="bm-empty-state"><i class="bi bi-bar-chart-fill"></i><p>No reports defined yet</p><small>Create one via <a href="' + BASE + '/report-definitions/create" data-go>Report Definitions</a></small></div>';
+          wire();
+          return;
+        }
+        var html = '<div class="table-responsive"><table class="table table-hover table-bordered align-middle mb-0">';
+        html += '<thead class="table-light"><tr><th>Name</th><th>Description</th><th>Root Entity</th><th>Parameters</th><th></th></tr></thead><tbody>';
+        reports.forEach(function (r) {
+          html += '<tr><td><strong>' + escHtml(r.name) + '</strong></td>' +
+            '<td>' + escHtml(r.description || '') + '</td>' +
+            '<td><code>' + escHtml(r.rootEntity || '') + '</code></td>' +
+            '<td>' + (r.parameterCount > 0 ? '<span class="badge bg-info">' + r.parameterCount + '</span>' : '<span class="text-muted">—</span>') + '</td>' +
+            '<td><a class="btn btn-sm btn-primary" href="' + BASE + '/_reports/' + encodeURIComponent(String(r.id)) + '" data-go><i class="bi bi-play-fill"></i> Run</a></td></tr>';
+        });
+        html += '</tbody></table></div>';
+        listWrap.innerHTML = html;
+        wire();
+      })
+      .catch(function (err) {
+        listWrap.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';
+      });
+  }
+
+  function renderReportViewPage(container, reportId) {
+    var hdr = el('div', { className: 'd-flex align-items-center gap-3 mb-3 flex-wrap' });
+    hdr.appendChild(el('h2', { className: 'mb-0', innerHTML: '<i class="bi bi-bar-chart-fill me-2"></i>Report' }));
+    var backLink = el('a', { href: BASE + '/_reports', className: 'btn btn-outline-secondary btn-sm', innerHTML: '<i class="bi bi-arrow-left"></i> All Reports' });
+    backLink.setAttribute('data-go', '');
+    hdr.appendChild(backLink);
+    container.appendChild(hdr);
+
+    var descEl = el('p', { className: 'text-muted' });
+    container.appendChild(descEl);
+
+    var paramWrap = el('div', { className: 'mb-3' });
+    container.appendChild(paramWrap);
+
+    var resultWrap = el('div');
+    container.appendChild(resultWrap);
+
+    // First fetch the report metadata to get parameters
+    apiFetch('/api/reports')
+      .then(function (reports) {
+        var def = null;
+        if (Array.isArray(reports)) {
+          for (var i = 0; i < reports.length; i++) {
+            if (String(reports[i].id) === String(reportId)) { def = reports[i]; break; }
+          }
+        }
+        if (!def) {
+          resultWrap.innerHTML = '<div class="alert alert-danger">Report not found.</div>';
+          return;
+        }
+
+        hdr.querySelector('h2').innerHTML = '<i class="bi bi-bar-chart-fill me-2"></i>' + escHtml(def.name);
+        if (def.description) descEl.textContent = def.description;
+
+        var params = def.parameters || [];
+        var paramValues = {};
+        var paramSelectsToPopulate = [];
+
+        if (params.length > 0) {
+          var form = el('form', { className: 'card card-body mb-3 bg-light' });
+          form.appendChild(el('h6', { className: 'mb-3', textContent: 'Parameters' }));
+          var row = el('div', { className: 'row g-2 align-items-end' });
+
+          params.forEach(function (p) {
+            var col = el('div', { className: 'col-auto' });
+            col.appendChild(el('label', { className: 'form-label small', htmlFor: 'rp_' + p.name, textContent: p.label || p.name }));
+            var inp;
+            if (p.type === 'select' || p.fieldSource) {
+              inp = el('select', { className: 'form-select form-select-sm', id: 'rp_' + p.name, name: p.name });
+              inp.appendChild(el('option', { value: '', textContent: '— All —' }));
+              if (p.options && p.options.length > 0) {
+                p.options.forEach(function (o) {
+                  var parts = o.split('|');
+                  var val = parts[0], label = parts.length > 1 ? parts[1] : parts[0];
+                  var opt = el('option', { value: val, textContent: label });
+                  if (val === p.defaultValue) opt.selected = true;
+                  inp.appendChild(opt);
+                });
+              }
+              if (p.fieldSource) {
+                paramSelectsToPopulate.push({ select: inp, fieldSource: p.fieldSource, defaultValue: p.defaultValue });
+              }
+            } else if (p.type === 'date') {
+              inp = el('input', { type: 'date', className: 'form-control form-control-sm', id: 'rp_' + p.name, name: p.name, value: p.defaultValue || '' });
+            } else if (p.type === 'number') {
+              inp = el('input', { type: 'number', className: 'form-control form-control-sm', id: 'rp_' + p.name, name: p.name, value: p.defaultValue || '' });
+            } else {
+              inp = el('input', { type: 'text', className: 'form-control form-control-sm', id: 'rp_' + p.name, name: p.name, value: p.defaultValue || '' });
+            }
+            col.appendChild(inp);
+            row.appendChild(col);
+          });
+
+          var btnCol = el('div', { className: 'col-auto' });
+          var runBtn = el('button', { type: 'submit', className: 'btn btn-primary btn-sm', innerHTML: '<i class="bi bi-play-fill"></i> Run' });
+          btnCol.appendChild(runBtn);
+          row.appendChild(btnCol);
+          form.appendChild(row);
+          paramWrap.appendChild(form);
+
+          form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            var pv = {};
+            params.forEach(function (p) {
+              var el2 = form.querySelector('[name="' + p.name + '"]');
+              if (el2 && el2.value) pv[p.name] = el2.value;
+            });
+            executeReport(pv);
+          });
+
+          // Populate dynamic dropdowns
+          paramSelectsToPopulate.forEach(function (item) {
+            var parts = item.fieldSource.split('.');
+            if (parts.length === 2) {
+              apiFetch('/api/reports/_distinct/' + encodeURIComponent(parts[0]) + '/' + encodeURIComponent(parts[1]))
+                .then(function (values) {
+                  if (Array.isArray(values)) {
+                    values.forEach(function (v) {
+                      var opt = el('option', { value: v, textContent: v });
+                      if (v === item.defaultValue) opt.selected = true;
+                      item.select.appendChild(opt);
+                    });
+                  }
+                });
+            }
+          });
+        }
+
+        // Execute with defaults immediately
+        var defaultParams = {};
+        params.forEach(function (p) { if (p.defaultValue) defaultParams[p.name] = p.defaultValue; });
+        executeReport(defaultParams);
+      })
+      .catch(function (err) {
+        resultWrap.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';
+      });
+
+    function executeReport(paramValues) {
+      resultWrap.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading…</span></div></div>';
+      var qs = '';
+      var keys = Object.keys(paramValues || {});
+      if (keys.length > 0) {
+        qs = '?' + keys.map(function (k) { return encodeURIComponent(k) + '=' + encodeURIComponent(paramValues[k]); }).join('&');
+      }
+
+      apiFetch('/api/reports/' + encodeURIComponent(reportId) + qs)
+        .then(function (data) {
+          resultWrap.innerHTML = '';
+
+          // Summary bar
+          var summary = el('div', { className: 'd-flex align-items-center gap-3 mb-2 flex-wrap' });
+          summary.appendChild(el('span', { className: 'text-muted small', textContent: data.totalRows + ' row' + (data.totalRows !== 1 ? 's' : '') + (data.isTruncated ? ' (truncated)' : '') }));
+          summary.appendChild(el('span', { className: 'text-muted small', textContent: 'Generated: ' + new Date(data.generatedAt).toLocaleString() }));
+          var csvLink = el('a', {
+            href: '/api/reports/' + encodeURIComponent(reportId) + (qs ? qs + '&' : '?') + 'format=csv',
+            className: 'btn btn-outline-secondary btn-sm',
+            innerHTML: '<i class="bi bi-download"></i> CSV',
+            target: '_blank'
+          });
+          summary.appendChild(csvLink);
+          resultWrap.appendChild(summary);
+
+          if (!data.columns || data.columns.length === 0 || !data.rows || data.rows.length === 0) {
+            resultWrap.appendChild(el('div', { className: 'text-center py-4 text-muted', textContent: 'No data returned.' }));
+            return;
+          }
+
+          var cols = data.columns;
+          var html = '<div class="table-responsive"><table class="table table-sm table-hover table-bordered align-middle">';
+          html += '<thead class="table-dark"><tr>';
+          cols.forEach(function (c) { html += '<th>' + escHtml(c) + '</th>'; });
+          html += '</tr></thead><tbody>';
+          data.rows.forEach(function (row) {
+            html += '<tr>';
+            cols.forEach(function (c) {
+              var val = row[c];
+              html += '<td>' + (val != null ? escHtml(String(val)) : '<span class="text-muted">—</span>') + '</td>';
+            });
+            html += '</tr>';
+          });
+          html += '</tbody></table></div>';
+          var tableDiv = el('div');
+          tableDiv.innerHTML = html;
+          resultWrap.appendChild(tableDiv);
+        })
+        .catch(function (err) {
+          resultWrap.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';
+        });
+    }
+  }
+
+  // ── Views ───────────────────────────────────────────────────────────────
+
+  function renderViewsListPage(container) {
+    container.appendChild(el('h2', { className: 'mb-3', innerHTML: '<i class="bi bi-table me-2"></i>Views' }));
+    container.appendChild(el('p', { className: 'text-muted', textContent: 'Saved cross-entity views with optional materialisation. Create and manage views via View Definitions.' }));
+
+    var addLink = el('a', { href: BASE + '/view-definitions/create', className: 'btn btn-sm btn-primary mb-3', textContent: '+ New View' });
+    addLink.setAttribute('data-go', '');
+    container.appendChild(addLink);
+
+    var listWrap = el('div');
+    container.appendChild(listWrap);
+
+    apiFetch('/api/views')
+      .then(function (views) {
+        listWrap.innerHTML = '';
+        if (!Array.isArray(views) || views.length === 0) {
+          listWrap.innerHTML = '<div class="bm-empty-state"><i class="bi bi-table"></i><p>No views defined yet</p><small>Create one via <a href="' + BASE + '/view-definitions/create" data-go>View Definitions</a></small></div>';
+          wire();
+          return;
+        }
+        var html = '<div class="table-responsive"><table class="table table-hover table-bordered align-middle mb-0">';
+        html += '<thead class="table-light"><tr><th>Name</th><th>Root Entity</th><th>Materialised</th><th></th></tr></thead><tbody>';
+        views.forEach(function (v) {
+          html += '<tr><td><strong>' + escHtml(v.viewName) + '</strong></td>' +
+            '<td><code>' + escHtml(v.rootEntity || '') + '</code></td>' +
+            '<td>' + (v.materialised ? '<span class="badge bg-success">Yes</span>' : '<span class="badge bg-secondary">No</span>') + '</td>' +
+            '<td><a class="btn btn-sm btn-primary" href="' + BASE + '/_views/' + encodeURIComponent(String(v.id)) + '" data-go><i class="bi bi-play-fill"></i> Run</a></td></tr>';
+        });
+        html += '</tbody></table></div>';
+        listWrap.innerHTML = html;
+        wire();
+      })
+      .catch(function (err) {
+        listWrap.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';
+      });
+  }
+
+  function renderViewExecutePage(container, viewId) {
+    var hdr = el('div', { className: 'd-flex align-items-center gap-3 mb-3 flex-wrap' });
+    hdr.appendChild(el('h2', { className: 'mb-0', innerHTML: '<i class="bi bi-table me-2"></i>View' }));
+    var backLink = el('a', { href: BASE + '/_views', className: 'btn btn-outline-secondary btn-sm', innerHTML: '<i class="bi bi-arrow-left"></i> All Views' });
+    backLink.setAttribute('data-go', '');
+    hdr.appendChild(backLink);
+    var refreshBtn = el('button', { className: 'btn btn-outline-secondary btn-sm', innerHTML: '<i class="bi bi-arrow-clockwise"></i> Refresh' });
+    hdr.appendChild(refreshBtn);
+    container.appendChild(hdr);
+
+    var resultWrap = el('div');
+    container.appendChild(resultWrap);
+
+    function loadView() {
+      resultWrap.innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading…</span></div></div>';
+      apiFetch('/api/views/' + encodeURIComponent(viewId))
+        .then(function (data) {
+          resultWrap.innerHTML = '';
+          if (data.name) hdr.querySelector('h2').innerHTML = '<i class="bi bi-table me-2"></i>' + escHtml(data.name);
+
+          var summary = el('div', { className: 'd-flex align-items-center gap-3 mb-2 flex-wrap' });
+          summary.appendChild(el('span', { className: 'text-muted small', textContent: data.totalRows + ' row' + (data.totalRows !== 1 ? 's' : '') + (data.isTruncated ? ' (truncated)' : '') }));
+          summary.appendChild(el('span', { className: 'text-muted small', textContent: 'Generated: ' + new Date(data.generatedAt).toLocaleString() }));
+          var csvLink = el('a', {
+            href: '/api/views/' + encodeURIComponent(viewId) + '?format=csv',
+            className: 'btn btn-outline-secondary btn-sm',
+            innerHTML: '<i class="bi bi-download"></i> CSV',
+            target: '_blank'
+          });
+          summary.appendChild(csvLink);
+          resultWrap.appendChild(summary);
+
+          if (!data.columns || data.columns.length === 0 || !data.rows || data.rows.length === 0) {
+            resultWrap.appendChild(el('div', { className: 'text-center py-4 text-muted', textContent: 'No data returned.' }));
+            return;
+          }
+
+          var cols = data.columns;
+          var html = '<div class="table-responsive"><table class="table table-sm table-hover table-bordered align-middle">';
+          html += '<thead class="table-dark"><tr>';
+          cols.forEach(function (c) { html += '<th>' + escHtml(c) + '</th>'; });
+          html += '</tr></thead><tbody>';
+          data.rows.forEach(function (row) {
+            html += '<tr>';
+            cols.forEach(function (c) {
+              var val = row[c];
+              html += '<td>' + (val != null ? escHtml(String(val)) : '<span class="text-muted">—</span>') + '</td>';
+            });
+            html += '</tr>';
+          });
+          html += '</tbody></table></div>';
+          var tableDiv = el('div');
+          tableDiv.innerHTML = html;
+          resultWrap.appendChild(tableDiv);
+        })
+        .catch(function (err) {
+          resultWrap.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';
+        });
+    }
+
+    refreshBtn.addEventListener('click', loadView);
+    loadView();
+  }
+
   async function route() {
     // Cancel any in-flight navigation fetches from the previous route
     cancelNavigation();
@@ -5932,6 +6246,42 @@
         const main = el('div', { className: 'container mt-3' });
         R.appendChild(main);
         renderDashboardViewPage(main, rawId);
+        wire(); return;
+      }
+
+      // ── Reports list page ─────────────────────────────────────────────────
+      if (slug === '_reports' && !rawId) {
+        R.replaceChildren(navbar('_reports'));
+        const main = el('div', { className: 'container mt-3' });
+        R.appendChild(main);
+        renderReportsListPage(main);
+        wire(); return;
+      }
+
+      // ── Individual report execution ───────────────────────────────────────
+      if (slug === '_reports' && rawId) {
+        R.replaceChildren(navbar('_reports'));
+        const main = el('div', { className: 'container mt-3' });
+        R.appendChild(main);
+        renderReportViewPage(main, rawId);
+        wire(); return;
+      }
+
+      // ── Views list page ───────────────────────────────────────────────────
+      if (slug === '_views' && !rawId) {
+        R.replaceChildren(navbar('_views'));
+        const main = el('div', { className: 'container mt-3' });
+        R.appendChild(main);
+        renderViewsListPage(main);
+        wire(); return;
+      }
+
+      // ── Individual view execution ─────────────────────────────────────────
+      if (slug === '_views' && rawId) {
+        R.replaceChildren(navbar('_views'));
+        const main = el('div', { className: 'container mt-3' });
+        R.appendChild(main);
+        renderViewExecutePage(main, rawId);
         wire(); return;
       }
 

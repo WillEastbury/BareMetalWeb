@@ -180,24 +180,6 @@ public class RouteHandlerTests : IDisposable
     }
 
     // ──────────────────────────────────────────────────────────────
-    //  EscapeRtf tests
-    // ──────────────────────────────────────────────────────────────
-
-    [Theory]
-    [InlineData(null, "")]
-    [InlineData("", "")]
-    [InlineData("hello", "hello")]
-    [InlineData("back\\slash", "back\\\\slash")]
-    [InlineData("{braces}", "\\{braces\\}")]
-    [InlineData("line\nbreak", "line\\par break")]
-    [InlineData("carriage\rreturn", "carriagereturn")]
-    public void EscapeRtf_VariousInputs_ReturnsExpected(string? input, string expected)
-    {
-        var result = InvokeStatic<string>("EscapeRtf", input!);
-        Assert.Equal(expected, result);
-    }
-
-    // ──────────────────────────────────────────────────────────────
     //  FormatSizeBytes tests
     // ──────────────────────────────────────────────────────────────
 
