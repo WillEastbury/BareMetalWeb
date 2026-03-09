@@ -545,7 +545,8 @@ static class ProgramSetup
                 var sslOptions = new System.Net.Security.SslServerAuthenticationOptions
                 {
                     ServerCertificate = cert,
-                    EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+                    EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls13,
+                    AllowRenegotiation = false,
                     ApplicationProtocols = [System.Net.Security.SslApplicationProtocol.Http11],
                 };
                 serverOptions.ListenAnyIP(httpsPort, listenOptions =>
