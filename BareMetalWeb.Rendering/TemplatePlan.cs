@@ -43,7 +43,7 @@ public readonly struct RenderSegment
 /// A precompiled render plan: a flat array of segments that can be executed
 /// in linear order to produce the HTML output.
 /// </summary>
-public sealed class RenderPlan
+public sealed class TemplateRenderPlan
 {
     public readonly RenderSegment[] Segments;
     public readonly string[] FieldKeys;
@@ -51,7 +51,7 @@ public sealed class RenderPlan
     /// <summary>Total bytes of all static fragments (for size estimation).</summary>
     public readonly int StaticByteCount;
 
-    public RenderPlan(RenderSegment[] segments, string[] fieldKeys)
+    public TemplateRenderPlan(RenderSegment[] segments, string[] fieldKeys)
     {
         Segments = segments;
         FieldKeys = fieldKeys;
@@ -64,8 +64,8 @@ public sealed class RenderPlan
         StaticByteCount = total;
     }
 
-    /// <summary>Compile a template string into a RenderPlan. Forwards to <see cref="TemplatePlanCompiler.Compile"/>.</summary>
-    public static RenderPlan Compile(string template) => TemplatePlanCompiler.Compile(template);
+    /// <summary>Compile a template string into a TemplateRenderPlan. Forwards to <see cref="TemplatePlanCompiler.Compile"/>.</summary>
+    public static TemplateRenderPlan Compile(string template) => TemplatePlanCompiler.Compile(template);
 
     /// <summary>Execute this plan via PipeWriter.</summary>
     public void Execute(
@@ -104,21 +104,21 @@ public sealed class RenderPlan
 
 /// <summary>
 /// Compiles a template string with <c>{{key}}</c> placeholders into a
-/// <see cref="RenderPlan"/> at startup time.
+/// <see cref="TemplateRenderPlan"/> at startup time.
 /// </summary>
 public static class TemplatePlanCompiler
 {
     private static readonly Encoding Utf8 = Encoding.UTF8;
 
     /// <summary>
-    /// Parses <paramref name="template"/> and produces a <see cref="RenderPlan"/>.
+    /// Parses <paramref name="template"/> and produces a <see cref="TemplateRenderPlan"/>.
     /// Static text between tokens is pre-encoded to UTF-8 bytes.
     /// Dynamic tokens become field indices into the returned key array.
     /// </summary>
-    public static RenderPlan Compile(string template)
+    public static TemplateRenderPlan Compile(string template)
     {
         if (string.IsNullOrEmpty(template))
-            return new RenderPlan(Array.Empty<RenderSegment>(), Array.Empty<string>());
+            return new TemplateRenderPlan(Array.Empty<RenderSegment>(), Array.Empty<string>());
 
         var segments = new List<RenderSegment>();
         var fieldKeys = new List<string>();
@@ -165,12 +165,12 @@ public static class TemplatePlanCompiler
             pos = bodyStart + closeIdx + 2;
         }
 
-        return new RenderPlan(segments.ToArray(), fieldKeys.ToArray());
+        return new TemplateRenderPlan(segments.ToArray(), fieldKeys.ToArray());
     }
 }
 
 /// <summary>
-/// Executes a compiled <see cref="RenderPlan"/> against a set of key-value pairs,
+/// Executes a compiled <see cref="TemplateRenderPlan"/> against a set of key-value pairs,
 /// writing output directly to a <see cref="PipeWriter"/>.
 /// </summary>
 public static class TemplatePlanExecutor
@@ -183,7 +183,7 @@ public static class TemplatePlanExecutor
     /// </summary>
     public static void Execute(
         PipeWriter writer,
-        RenderPlan plan,
+        TemplateRenderPlan plan,
         string[] pageKeys,
         string[] pageValues,
         string[] appKeys,
@@ -230,7 +230,7 @@ public static class TemplatePlanExecutor
     /// </summary>
     public static void ExecuteWithResolvedValues(
         PipeWriter writer,
-        RenderPlan plan,
+        TemplateRenderPlan plan,
         string?[] resolvedValues)
     {
         var segments = plan.Segments;
@@ -320,7 +320,7 @@ public static class TemplatePlanExecutor
     /// <summary>Execute plan writing to an IBufferWriter (for buffered rendering).</summary>
     public static void Execute(
         IBufferWriter<byte> writer,
-        RenderPlan plan,
+        TemplateRenderPlan plan,
         string[] pageKeys, string[] pageValues,
         string[] appKeys, string[] appValues)
     {
@@ -350,7 +350,7 @@ public static class TemplatePlanExecutor
     /// <summary>Execute with pre-resolved values to IBufferWriter.</summary>
     public static void ExecuteWithResolvedValues(
         IBufferWriter<byte> writer,
-        RenderPlan plan,
+        TemplateRenderPlan plan,
         string?[] resolvedValues)
     {
         var segments = plan.Segments;

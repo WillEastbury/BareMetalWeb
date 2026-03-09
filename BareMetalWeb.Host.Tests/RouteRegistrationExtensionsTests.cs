@@ -392,7 +392,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterMonitoringRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.Equal(4, _server.routes.Count);
+        Assert.Equal(6, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
