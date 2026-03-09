@@ -444,8 +444,7 @@ public class BareMetalWebServer : IBareWebHost
             RegisterRoute("GET /bmw/cli", new RouteHandlerData(null, async (BmwContext ctx) =>
             {
                 ctx.StatusCode = 200;
-                ctx.ContentType = "text/plain";
-                await ctx.WriteResponseAsync(_protocolDescriptor!.GenerateCliReference());
+                ctx.ContentType = "application/javascript";                await ctx.WriteResponseAsync(_protocolDescriptor!.GenerateCliReference());
             }));
 
             BufferedLogger.LogInfo($"Binary transport initialized: {_binaryTransport.RegisteredHandlerCount} handlers in jump table, {_protocolDescriptor.Routes.Count} protocol routes");

@@ -182,33 +182,158 @@ public class BmwProtocolDescriptorTests
     }
 
     [Fact]
-    public void GenerateJsSdk_ProducesValidJs()
+    public void GenerateJsSdk_ProducesEsmModule()
     {
         var routes = BuildTestRoutes();
         var compiled = CompileRoutes(routes);
         var desc = BmwProtocolDescriptor.Build(routes, compiled);
 
         string sdk = desc.GenerateJsSdk();
-        Assert.Contains("BmwSdk", sdk);
+
+        // ESM exports
+        Assert.Contains("export class BMWClient", sdk);
+        Assert.Contains("export {", sdk);
+        Assert.Contains("import { BMWClient }", sdk); // usage comment
+
+        // Core methods
+        Assert.Contains("connect(", sdk);
+        Assert.Contains("send(opcode", sdk);
+        Assert.Contains("close()", sdk);
         Assert.Contains("encodeFrame", sdk);
-        Assert.Contains("connect", sdk);
-        Assert.Contains("send", sdk);
-        // Should contain entity methods
-        Assert.Contains("orders", sdk);
-        Assert.Contains("users", sdk);
+        Assert.Contains("decodeResponse", sdk);
+
+        // Generated route methods on prototype
+        Assert.Contains("BMWClient.prototype.listOrders", sdk);
+        Assert.Contains("BMWClient.prototype.getOrders", sdk);
+        Assert.Contains("BMWClient.prototype.createOrders", sdk);
+        Assert.Contains("BMWClient.prototype.updateOrders", sdk);
+        Assert.Contains("BMWClient.prototype.deleteOrders", sdk);
+        Assert.Contains("BMWClient.prototype.listUsers", sdk);
+        Assert.Contains("BMWClient.prototype.getUsers", sdk);
     }
 
     [Fact]
-    public void GenerateCliReference_ListsCommands()
+    public void GenerateJsSdk_EntityClasses()
+    {
+        var routes = BuildTestRoutes();
+        var compiled = CompileRoutes(routes);
+        var desc = BmwProtocolDescriptor.Build(routes, compiled);
+
+        string sdk = desc.GenerateJsSdk();
+        Assert.Contains("export class Orders", sdk);
+        Assert.Contains("export class Users", sdk);
+        Assert.Contains("Object.assign(this, data)", sdk);
+    }
+
+    [Fact]
+    public void GenerateJsSdk_InlinesOpcodes()
+    {
+        var routes = BuildTestRoutes();
+        var compiled = CompileRoutes(routes);
+        var desc = BmwProtocolDescriptor.Build(routes, compiled);
+
+        string sdk = desc.GenerateJsSdk();
+
+        // listOrders: GET(0) route=1 → opcode = (0<<11)|1 = 1
+        Assert.Contains("return this.send(1, 0)", sdk);
+
+        // createOrders: POST(3) route=2 → opcode = (3<<11)|2 = 6146
+        Assert.Contains("return this.send(6146, 0, data)", sdk);
+    }
+
+    [Fact]
+    public void GenerateJsSdk_IsCached()
+    {
+        var routes = BuildTestRoutes();
+        var compiled = CompileRoutes(routes);
+        var desc = BmwProtocolDescriptor.Build(routes, compiled);
+
+        string sdk1 = desc.GenerateJsSdk();
+        string sdk2 = desc.GenerateJsSdk();
+        Assert.Same(sdk1, sdk2);
+    }
+
+    [Fact]
+    public void GenerateJsSdk_RoutesLookupTable()
+    {
+        var routes = BuildTestRoutes();
+        var compiled = CompileRoutes(routes);
+        var desc = BmwProtocolDescriptor.Build(routes, compiled);
+
+        string sdk = desc.GenerateJsSdk();
+        // Constructor builds routes name→opcode map
+        Assert.Contains("this.routes[r.name] = r.opcode", sdk);
+    }
+
+    [Fact]
+    public void GenerateJsSdk_WriteMethodsAcceptData()
+    {
+        var routes = BuildTestRoutes();
+        var compiled = CompileRoutes(routes);
+        var desc = BmwProtocolDescriptor.Build(routes, compiled);
+
+        string sdk = desc.GenerateJsSdk();
+        // POST without ID: createOrders(data)
+        Assert.Contains("prototype.createOrders = function(data)", sdk);
+        // PUT with ID: updateOrders(id, data)
+        Assert.Contains("prototype.updateOrders = function(id, data)", sdk);
+    }
+
+    [Fact]
+    public void GenerateJsSdk_ReadMethodsNoData()
+    {
+        var routes = BuildTestRoutes();
+        var compiled = CompileRoutes(routes);
+        var desc = BmwProtocolDescriptor.Build(routes, compiled);
+
+        string sdk = desc.GenerateJsSdk();
+        // GET list: listOrders()
+        Assert.Contains("prototype.listOrders = function()", sdk);
+        // GET by ID: getOrders(id)
+        Assert.Contains("prototype.getOrders = function(id)", sdk);
+        // DELETE by ID: deleteOrders(id)
+        Assert.Contains("prototype.deleteOrders = function(id)", sdk);
+    }
+
+    [Fact]
+    public void GenerateCliReference_ProducesNodeScript()
     {
         var routes = BuildTestRoutes();
         var compiled = CompileRoutes(routes);
         var desc = BmwProtocolDescriptor.Build(routes, compiled);
 
         string cli = desc.GenerateCliReference();
-        Assert.Contains("bmw orders", cli);
-        Assert.Contains("bmw users", cli);
-        Assert.Contains("opcode=", cli);
+
+        // Shebang and ESM imports
+        Assert.Contains("#!/usr/bin/env node", cli);
+        Assert.Contains("import { WebSocket }", cli);
+        Assert.Contains("import { readFileSync }", cli);
+
+        // Command table with opcodes
+        Assert.Contains("'orders:list':", cli);
+        Assert.Contains("'orders:create':", cli);
+        Assert.Contains("'orders:get':", cli);
+        Assert.Contains("'users:list':", cli);
+
+        // Binary frame encoding
+        Assert.Contains("encodeFrame", cli);
+        Assert.Contains("encodePayload", cli);
+
+        // WebSocket connection
+        Assert.Contains("new WebSocket(host)", cli);
+        Assert.Contains("BMW_HOST", cli);
+    }
+
+    [Fact]
+    public void GenerateCliReference_IsCached()
+    {
+        var routes = BuildTestRoutes();
+        var compiled = CompileRoutes(routes);
+        var desc = BmwProtocolDescriptor.Build(routes, compiled);
+
+        string cli1 = desc.GenerateCliReference();
+        string cli2 = desc.GenerateCliReference();
+        Assert.Same(cli1, cli2);
     }
 
     [Fact]
