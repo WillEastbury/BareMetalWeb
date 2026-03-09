@@ -70,6 +70,7 @@ public sealed class AdminAssistantService
             AIFunctionFactory.Create(QueryTools.QueryEntities),
             AIFunctionFactory.Create(QueryTools.CountEntities),
             AIFunctionFactory.Create(QueryTools.LoadEntity),
+            AIFunctionFactory.Create(QueryTools.SearchByName),
 
             // CRUD tools
             AIFunctionFactory.Create(CrudTools.SaveEntity),

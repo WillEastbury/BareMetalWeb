@@ -1,4 +1,5 @@
 using BareMetalWeb.Core;
+using BareMetalWeb.Data;
 using BareMetalWeb.Intelligence.Interfaces;
 using BareMetalWeb.Runtime.CapabilityGraph;
 
@@ -27,7 +28,11 @@ public static class AdminToolCatalogue
 
         new("list-entities",
             "List all registered data entities",
-            ["list", "show", "entities", "types", "data", "models", "schema", "all"]),
+            ["list", "entities", "types", "data", "models", "schema", "all"]),
+
+        new("show-entity",
+            "Show a specific entity record by ID or name",
+            ["show", "display", "view", "open", "detail", "record", "item", "lookup"]),
 
         new("describe-entity",
             "Describe fields and metadata for a specific entity",
@@ -87,10 +92,20 @@ public static class AdminToolCatalogue
             DescribeEntityHandler);
 
         registry.Register(
+            "show-entity",
+            "Show a specific entity record by ID or name",
+            [
+                new ToolParameter("entity", "Entity name or slug", true),
+                new ToolParameter("query", "Record ID or name to search for", false),
+            ],
+            ShowEntityHandler);
+
+        registry.Register(
             "query-entity",
             "Query records from a data entity",
             [
                 new ToolParameter("entity", "Entity name or slug", true),
+                new ToolParameter("query", "Optional search text to filter results", false),
                 new ToolParameter("limit", "Max records to return", false),
             ],
             QueryEntityHandler);
@@ -171,13 +186,10 @@ public static class AdminToolCatalogue
 
         try
         {
-            var entities = DataScaffold.Entities;
-            var entity = entities?.FirstOrDefault(e =>
-                string.Equals(e.Name, entityName, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(e.Slug, entityName, StringComparison.OrdinalIgnoreCase));
+            var entity = ResolveEntity(entityName);
 
             if (entity is null)
-                return ValueTask.FromResult(ToolResult.Fail($"Entity '{entityName}' not found."));
+                return ValueTask.FromResult(ToolResult.Fail($"Entity '{entityName}' not found. Use 'list entities' to see available types."));
 
             var sb = new System.Text.StringBuilder(512);
             sb.AppendLine($"Entity: {entity.Name}");
@@ -203,6 +215,56 @@ public static class AdminToolCatalogue
         }
     }
 
+    private static async ValueTask<ToolResult> ShowEntityHandler(
+        IReadOnlyDictionary<string, string> parameters, CancellationToken ct)
+    {
+        if (!parameters.TryGetValue("entity", out var entityName) || string.IsNullOrEmpty(entityName))
+            return ToolResult.Fail("Please specify an entity name.");
+
+        try
+        {
+            var entity = ResolveEntity(entityName);
+            if (entity is null)
+                return ToolResult.Fail($"Entity '{entityName}' not found. Use 'list entities' to see available types.");
+
+            parameters.TryGetValue("query", out var searchText);
+
+            // Try numeric ID first
+            if (!string.IsNullOrWhiteSpace(searchText) && uint.TryParse(searchText.Trim(), out var id))
+            {
+                var item = await entity.Handlers.LoadAsync(id, ct).ConfigureAwait(false);
+                if (item is null)
+                    return ToolResult.Fail($"No {entity.Name} record found with ID {id}.");
+
+                return ToolResult.Ok(FormatRecord(entity, item));
+            }
+
+            // Search by text across string fields
+            if (!string.IsNullOrWhiteSpace(searchText))
+            {
+                var matches = await SearchByText(entity, searchText.Trim(), ct).ConfigureAwait(false);
+                if (matches.Count == 0)
+                    return ToolResult.Fail($"No {entity.Name} records found matching '{searchText}'.");
+
+                if (matches.Count == 1)
+                    return ToolResult.Ok(FormatRecord(entity, matches[0]));
+
+                var sb = new System.Text.StringBuilder(512);
+                sb.AppendLine($"Found {matches.Count} {entity.Name} records matching '{searchText}':");
+                sb.AppendLine();
+                foreach (var match in matches)
+                    sb.AppendLine(FormatRecordSummary(entity, match));
+                return ToolResult.Ok(sb.ToString());
+            }
+
+            return ToolResult.Fail($"Please specify an ID or name to look up. Example: 'show {entity.Slug} 65' or 'show {entity.Slug} John'.");
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail($"Show failed: {ex.GetType().Name}");
+        }
+    }
+
     private static async ValueTask<ToolResult> QueryEntityHandler(
         IReadOnlyDictionary<string, string> parameters, CancellationToken ct)
     {
@@ -215,27 +277,38 @@ public static class AdminToolCatalogue
 
         try
         {
-            var entities = DataScaffold.Entities;
-            var entity = entities?.FirstOrDefault(e =>
-                string.Equals(e.Name, entityName, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(e.Slug, entityName, StringComparison.OrdinalIgnoreCase));
-
+            var entity = ResolveEntity(entityName);
             if (entity is null)
-                return ToolResult.Fail($"Entity '{entityName}' not found.");
+                return ToolResult.Fail($"Entity '{entityName}' not found. Use 'list entities' to see available types.");
+
+            // If a search query is provided, search by text
+            parameters.TryGetValue("query", out var searchText);
+            if (!string.IsNullOrWhiteSpace(searchText))
+            {
+                var matches = await SearchByText(entity, searchText.Trim(), ct).ConfigureAwait(false);
+                if (matches.Count == 0)
+                    return ToolResult.Ok($"No {entity.Name} records found matching '{searchText}'.");
+
+                var sb = new System.Text.StringBuilder(512);
+                sb.AppendLine($"Found {matches.Count} {entity.Name} record(s) matching '{searchText}':");
+                sb.AppendLine();
+                foreach (var match in matches.Take(limit))
+                    sb.AppendLine(FormatRecordSummary(entity, match));
+                return ToolResult.Ok(sb.ToString());
+            }
 
             var count = await entity.Handlers.CountAsync(null, ct).ConfigureAwait(false);
             var items = await entity.Handlers.QueryAsync(null, ct).ConfigureAwait(false);
             var list = items.Take(limit).ToList();
 
-            var sb = new System.Text.StringBuilder(256);
-            sb.AppendLine($"{entity.Name}: {count} total records (showing {list.Count})");
+            var output = new System.Text.StringBuilder(256);
+            output.AppendLine($"{entity.Name}: {count} total records (showing {list.Count})");
+            output.AppendLine();
 
             foreach (var item in list)
-            {
-                sb.AppendLine($"  [{item.Key}] {item}");
-            }
+                output.AppendLine(FormatRecordSummary(entity, item));
 
-            return ToolResult.Ok(sb.ToString());
+            return ToolResult.Ok(output.ToString());
         }
         catch (Exception ex)
         {
@@ -273,14 +346,17 @@ public static class AdminToolCatalogue
     {
         var sb = new System.Text.StringBuilder(512);
         sb.AppendLine("Available commands:");
-        sb.AppendLine("  • list entities     — Show all registered data entities");
-        sb.AppendLine("  • describe <entity> — Show fields and metadata for an entity");
-        sb.AppendLine("  • query <entity>    — Query records from an entity");
-        sb.AppendLine("  • plan workflow     — Generate a multi-step workflow plan from natural language");
-        sb.AppendLine("  • system status     — Show memory, GC, uptime diagnostics");
-        sb.AppendLine("  • index status      — Show search index health");
-        sb.AppendLine("  • help              — Show this help message");
+        sb.AppendLine("  • list entities       — Show all registered data entities");
+        sb.AppendLine("  • describe <entity>   — Show fields and metadata for an entity");
+        sb.AppendLine("  • show <entity> <id>  — Show a record by numeric ID");
+        sb.AppendLine("  • show <entity> <name>— Search for a record by name");
+        sb.AppendLine("  • query <entity>      — Query records from an entity");
+        sb.AppendLine("  • plan workflow       — Generate a multi-step workflow plan from natural language");
+        sb.AppendLine("  • system status       — Show memory, GC, uptime diagnostics");
+        sb.AppendLine("  • index status        — Show search index health");
+        sb.AppendLine("  • help                — Show this help message");
         sb.AppendLine();
+        sb.AppendLine("Entity names are flexible — singular/plural forms and abbreviations are accepted.");
         sb.AppendLine("Architecture: Keyword intent classifier (fast path) + BitNet ternary engine (complex queries)");
         return ValueTask.FromResult(ToolResult.Ok(sb.ToString()));
     }
@@ -311,5 +387,171 @@ public static class AdminToolCatalogue
         var output = WorkflowPlanner.FormatPlan(plan);
 
         return ValueTask.FromResult(plan.IsValid ? ToolResult.Ok(output) : ToolResult.Ok(output));
+    }
+
+    // ── Entity resolution helpers ──────────────────────────────────────────────
+
+    /// <summary>
+    /// Resolves an entity by exact slug, exact name, singular form (strips trailing 's'),
+    /// or partial/prefix match. Returns null if no match found.
+    /// </summary>
+    private static DataEntityMetadata? ResolveEntity(string input)
+    {
+        var entities = DataScaffold.Entities;
+        if (entities is null || entities.Count == 0) return null;
+
+        // Exact slug or name match
+        foreach (var e in entities)
+        {
+            if (string.Equals(e.Slug, input, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(e.Name, input, StringComparison.OrdinalIgnoreCase))
+                return e;
+        }
+
+        // Singular → plural: try appending 's'
+        var plural = input + "s";
+        foreach (var e in entities)
+        {
+            if (string.Equals(e.Slug, plural, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(e.Name, plural, StringComparison.OrdinalIgnoreCase))
+                return e;
+        }
+
+        // Plural → singular: try stripping trailing 's', 'es', 'ies'→'y'
+        if (input.Length > 3 && input.EndsWith("ies", StringComparison.OrdinalIgnoreCase))
+        {
+            var singular = input[..^3] + "y";
+            foreach (var e in entities)
+                if (string.Equals(e.Slug, singular, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(e.Name, singular, StringComparison.OrdinalIgnoreCase))
+                    return e;
+        }
+        else if (input.Length > 2 && input.EndsWith("es", StringComparison.OrdinalIgnoreCase))
+        {
+            var singular = input[..^2];
+            foreach (var e in entities)
+                if (string.Equals(e.Slug, singular, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(e.Name, singular, StringComparison.OrdinalIgnoreCase))
+                    return e;
+        }
+        else if (input.Length > 1 && input.EndsWith('s'))
+        {
+            var singular = input[..^1];
+            foreach (var e in entities)
+                if (string.Equals(e.Slug, singular, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(e.Name, singular, StringComparison.OrdinalIgnoreCase))
+                    return e;
+        }
+
+        // Prefix/contains match (e.g. "cust" matches "customers")
+        foreach (var e in entities)
+        {
+            if (e.Slug.StartsWith(input, StringComparison.OrdinalIgnoreCase) ||
+                e.Name.StartsWith(input, StringComparison.OrdinalIgnoreCase))
+                return e;
+        }
+
+        foreach (var e in entities)
+        {
+            if (e.Slug.Contains(input, StringComparison.OrdinalIgnoreCase) ||
+                e.Name.Contains(input, StringComparison.OrdinalIgnoreCase))
+                return e;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Searches records by text, matching against all string-type fields.
+    /// </summary>
+    private static async Task<List<BaseDataObject>> SearchByText(
+        DataEntityMetadata entity, string searchText, CancellationToken ct)
+    {
+        var items = await entity.Handlers.QueryAsync(null, ct).ConfigureAwait(false);
+        var layout = EntityLayoutCompiler.GetOrCompile(entity);
+        var matches = new List<BaseDataObject>();
+
+        // Find string-type fields to search against
+        var stringFields = new List<FieldRuntime>();
+        foreach (var f in layout.Fields)
+        {
+            if (f.ClrType == typeof(string))
+                stringFields.Add(f);
+        }
+
+        foreach (var item in items)
+        {
+            foreach (var field in stringFields)
+            {
+                try
+                {
+                    var val = field.Getter(item)?.ToString();
+                    if (val != null && val.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matches.Add(item);
+                        break;
+                    }
+                }
+                catch { }
+            }
+
+            if (matches.Count >= 25) break;
+        }
+
+        return matches;
+    }
+
+    /// <summary>
+    /// Formats a single record with all field values for detailed display.
+    /// </summary>
+    private static string FormatRecord(DataEntityMetadata entity, BaseDataObject item)
+    {
+        var layout = EntityLayoutCompiler.GetOrCompile(entity);
+        var sb = new System.Text.StringBuilder(512);
+        sb.AppendLine($"{entity.Name} #{item.Key}");
+        sb.AppendLine();
+
+        foreach (var field in layout.Fields)
+        {
+            try
+            {
+                var val = field.Getter(item);
+                sb.AppendLine($"  {field.Name}: {val ?? "(empty)"}");
+            }
+            catch { sb.AppendLine($"  {field.Name}: (error reading)"); }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Formats a record as a one-line summary showing key identifying fields.
+    /// </summary>
+    private static string FormatRecordSummary(DataEntityMetadata entity, BaseDataObject item)
+    {
+        var layout = EntityLayoutCompiler.GetOrCompile(entity);
+        var parts = new List<string>(6);
+
+        int shown = 0;
+        foreach (var field in layout.Fields)
+        {
+            if (shown >= 4) break;
+            try
+            {
+                var val = field.Getter(item);
+                if (val != null)
+                {
+                    var str = val.ToString();
+                    if (!string.IsNullOrWhiteSpace(str))
+                    {
+                        parts.Add($"{field.Name}={str}");
+                        shown++;
+                    }
+                }
+            }
+            catch { }
+        }
+
+        return $"  [{item.Key}] {string.Join(", ", parts)}";
     }
 }

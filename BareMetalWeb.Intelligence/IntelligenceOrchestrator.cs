@@ -90,24 +90,37 @@ public sealed class IntelligenceOrchestrator
     {
         var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        // Extract entity name for entity-related intents
-        if (intentName is "describe-entity" or "query-entity")
+        // Extract entity name and optional search text for entity-related intents
+        if (intentName is "describe-entity" or "query-entity" or "show-entity")
         {
             var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            // Look for the entity name after keyword verbs
-            string[] skipWords = ["describe", "show", "list", "query", "find", "search",
-                                  "get", "fetch", "count", "how", "many", "fields",
-                                  "of", "for", "the", "a", "an", "in", "from", "all", "me"];
+            string[] skipWords = ["describe", "show", "display", "view", "open", "list",
+                                  "query", "find", "search", "get", "fetch", "count",
+                                  "how", "many", "fields", "of", "for", "the", "a",
+                                  "an", "in", "from", "all", "me", "record", "detail"];
+
+            bool foundEntity = false;
+            var queryParts = new List<string>();
 
             foreach (var word in words)
             {
-                if (!Array.Exists(skipWords, s =>
-                    string.Equals(s, word, StringComparison.OrdinalIgnoreCase)))
+                if (!foundEntity)
                 {
-                    parameters["entity"] = word;
-                    break;
+                    if (!Array.Exists(skipWords, s =>
+                        string.Equals(s, word, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        parameters["entity"] = word;
+                        foundEntity = true;
+                    }
+                }
+                else
+                {
+                    queryParts.Add(word);
                 }
             }
+
+            if (queryParts.Count > 0)
+                parameters["query"] = string.Join(' ', queryParts);
         }
 
         return parameters;
