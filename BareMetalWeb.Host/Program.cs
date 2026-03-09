@@ -548,6 +548,7 @@ static class ProgramSetup
                     EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls13,
                     AllowRenegotiation = false,
                     CertificateRevocationCheckMode = System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck,
+                    CipherSuitesPolicy = new System.Net.Security.CipherSuitesPolicy([System.Net.Security.TlsCipherSuite.TLS_AES_128_GCM_SHA256]),
                     ApplicationProtocols = [System.Net.Security.SslApplicationProtocol.Http11],
                 };
                 serverOptions.ListenAnyIP(httpsPort, listenOptions =>
@@ -555,7 +556,7 @@ static class ProgramSetup
                     listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1;
                     listenOptions.Use(next => new TlsConnectionMiddleware(next, sslOptions).OnConnectionAsync);
                 });
-                Console.WriteLine($"[BMW TLS] HTTPS configured on port {httpsPort} (direct SslStream, TLS 1.2+1.3, HTTP/1.1)");
+                Console.WriteLine($"[BMW TLS] HTTPS configured on port {httpsPort} (direct SslStream, TLS 1.3, AES-128-GCM-SHA256)");
             }
 
             var http2Enabled = config.GetValue("Kestrel.Http2Enabled", true);
