@@ -883,7 +883,7 @@ jobs:
       artifact-name:   deploy-package
       health-check-url: ${{ matrix.url }}
     secrets:
-      azure-credentials: ${{ secrets[matrix.secret] }}
+      azure-credentials: ${{ secrets.AZURE_CREDENTIALS_TENANTS }}
 
   l2-2-monitor-early-access:
     name: "L2.2 · Monitor Early-Access Tenants (20 min)"
