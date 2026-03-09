@@ -4,7 +4,7 @@
 # Triggered automatically when CI1 (Unit Tests) passes on main.
 # 1. AOT-publishes per-arch native binaries (linux-amd64, linux-arm64, win-amd64)
 # 2. Packages each into a thin container (Dockerfile.prebuilt — no SDK layer)
-# 3. Pushes labeled images to GHCR + ACR
+# 3. Pushes labeled images to ACR
 # 4. Uploads AOT artifacts for downstream CD workflows
 #
 # Downstream: CD1 (cd-canary.yml) triggers on this workflow's success.
@@ -26,12 +26,9 @@ concurrency:
 
 permissions:
   contents: read
-  packages: write
   id-token: write
 
 env:
-  GHCR_REGISTRY: ghcr.io
-  GHCR_IMAGE: willeastbury/baremetalweb
   ACR_NAME: metalclusterregistry
   ACR_LOGIN_SERVER: metalclusterregistry.azurecr.io
   ACR_IMAGE: baremetalweb
@@ -196,13 +193,6 @@ jobs:
           name: aot-linux-amd64
           path: ./publish
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -225,7 +215,6 @@ jobs:
           push: true
           build-args: PUBLISH_DIR=./publish
           tags: |
-            ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-amd64
             ${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-amd64
           labels: |
             org.opencontainers.image.title=BareMetalWeb
@@ -247,13 +236,6 @@ jobs:
         with:
           name: aot-linux-arm64
           path: ./publish
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Azure Login
         uses: azure/login@v2
@@ -277,7 +259,6 @@ jobs:
           push: true
           build-args: PUBLISH_DIR=./publish
           tags: |
-            ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-arm64
             ${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-arm64
           labels: |
             org.opencontainers.image.title=BareMetalWeb
@@ -300,13 +281,6 @@ jobs:
           name: aot-windows-amd64
           path: ./publish
 
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -321,18 +295,16 @@ jobs:
         shell: bash
         run: |
           TAG="${{ needs.version.outputs.tag }}"
-          for registry in "${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}" "${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}"; do
-            docker build \
-              -f Dockerfile.windows.prebuilt \
-              -t "${registry}:${TAG}-windows-amd64" \
-              --build-arg "PUBLISH_DIR=./publish" \
-              --label "org.opencontainers.image.title=BareMetalWeb" \
-              --label "org.opencontainers.image.version=${TAG}" \
-              --label "org.opencontainers.image.revision=${{ github.sha }}" \
-              --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
-              .
-            docker push "${registry}:${TAG}-windows-amd64"
-          done
+          docker build \
+            -f Dockerfile.windows.prebuilt \
+            -t "${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${TAG}-windows-amd64" \
+            --build-arg "PUBLISH_DIR=./publish" \
+            --label "org.opencontainers.image.title=BareMetalWeb" \
+            --label "org.opencontainers.image.version=${TAG}" \
+            --label "org.opencontainers.image.revision=${{ github.sha }}" \
+            --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
+            .
+          docker push "${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${TAG}-windows-amd64"
 
   # ── Summary ────────────────────────────────────────────────────────────
   summary:
