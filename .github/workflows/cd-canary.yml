@@ -34,6 +34,7 @@ concurrency:
 permissions:
   contents: read
   id-token: write
+  actions: read
 
 env:
   ACR_LOGIN_SERVER: metalclusterregistry.azurecr.io
@@ -159,6 +160,22 @@ jobs:
           key: nuget-${{ hashFiles('**/*.csproj') }}
           restore-keys: nuget-
 
+      - name: Download JIT deploy package (from CI2)
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-package
+          path: ./publish
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build JIT deploy package (workflow_dispatch fallback)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release --output ./publish
+
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -166,9 +183,6 @@ jobs:
 
       - name: Deploy to CI base (reset data)
         run: |
-          dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
-          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
-            --configuration Release --output ./publish
           touch ./publish/reset-data.flag
           az webapp stop --name baremetalweb-cireset --resource-group baremetalweb-rg
           az webapp config appsettings set --name baremetalweb-cireset --resource-group baremetalweb-rg \
@@ -227,6 +241,22 @@ jobs:
           key: nuget-${{ hashFiles('**/*.csproj') }}
           restore-keys: nuget-
 
+      - name: Download JIT deploy package (from CI2)
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: deploy-package
+          path: ./publish
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build JIT deploy package (workflow_dispatch fallback)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release --output ./publish
+
       - name: Azure Login
         uses: azure/login@v2
         with:
@@ -234,9 +264,6 @@ jobs:
 
       - name: Deploy to upgrade instance (preserve data)
         run: |
-          dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
-          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
-            --configuration Release --output ./publish
           az webapp stop --name baremetalweb-upgrade --resource-group baremetalweb-rg
           az webapp config appsettings set --name baremetalweb-upgrade --resource-group baremetalweb-rg \
             --settings WEBSITE_RUN_FROM_PACKAGE=0 --output none
