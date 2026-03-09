@@ -3246,27 +3246,25 @@ public static class DataScaffold
         {
             try
             {
-                var rows = DataJsonWriter.ParseListOfStringDicts(jsonValue);
-                if (rows != null)
+                using var doc = JsonDocument.Parse(jsonValue);
+                foreach (var row in doc.RootElement.EnumerateArray())
                 {
-                    foreach (var row in rows)
+                    sb.Append("<tr>");
+                    for (int i = 0; i < childFields.Count; i++)
                     {
-                        sb.Append("<tr>");
-                        foreach (var child in childFields)
+                        var child = childFields[i];
+                        var displayText = row.TryGetProperty(child.Name, out var prop) ? prop.GetString() ?? string.Empty : string.Empty;
+                        if (child.LookupOptions != null)
                         {
-                            row.TryGetValue(child.Name, out var rawVal);
-                            var displayText = rawVal ?? string.Empty;
-                            if (child.LookupOptions != null)
+                            foreach (var opt in child.LookupOptions)
                             {
-                                var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                                foreach (var opt in child.LookupOptions)
-                                    map[opt.Key] = opt.Value;
-                                displayText = map.TryGetValue(displayText, out var resolved) ? resolved : displayText;
+                                if (string.Equals(opt.Key, displayText, StringComparison.OrdinalIgnoreCase))
+                                { displayText = opt.Value; break; }
                             }
-                            sb.Append($"<td data-label=\"{WebUtility.HtmlEncode(child.Label)}\">{WebUtility.HtmlEncode(displayText)}</td>");
                         }
-                        sb.Append("</tr>");
+                        sb.Append($"<td data-label=\"{WebUtility.HtmlEncode(child.Label)}\">{WebUtility.HtmlEncode(displayText)}</td>");
                     }
+                    sb.Append("</tr>");
                 }
             }
             catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Failed to parse child list JSON for field {field.Name}: {ex.Message}"); }
