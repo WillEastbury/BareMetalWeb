@@ -111,6 +111,8 @@ public class BareMetalWebServer : IBareWebHost
     private int _routeByIdVersion = -1;
     /// <summary>Max RouteId currently assigned (for bounds checking).</summary>
     private ushort _maxRouteId;
+    /// <summary>Binary WebSocket transport with branch-free jump table dispatch.</summary>
+    private BmwBinaryTransport? _binaryTransport;
     public BareMetalWebServer(
         string appName,
         string companyDescription,
@@ -403,11 +405,27 @@ public class BareMetalWebServer : IBareWebHost
             BufferedLogger.LogInfo($"Route ID table built: {routes.Count} routes, max ID={maxId}");
         }
     }
+
+    /// <summary>Ensures the binary WebSocket transport is initialized and populated from current routes.</summary>
+    private void EnsureBinaryTransport()
+    {
+        if (_binaryTransport == null)
+        {
+            _binaryTransport = new BmwBinaryTransport();
+            _binaryTransport.PopulateFromRoutes(routes, this);
+
+            // Register the WebSocket upgrade endpoint
+            RegisterRoute("GET /bmw/ws", new RouteHandlerData(null, BmwWebSocketHandler.CreateHandler(_binaryTransport)));
+            BufferedLogger.LogInfo($"Binary transport initialized: {_binaryTransport.RegisteredHandlerCount} handlers in jump table");
+        }
+    }
+
     public Task WireUpRequestHandlingAndLoggerAsyncLifetime()
     {
         RegisterRouteMetadataEndpoint();
         EnsureJumpTable();
         EnsureRouteIdTable();
+        EnsureBinaryTransport();
         StartBackgroundServices();
         BufferedLogger.LogInfo($"WireUpRequestHandlingAndLoggerAsyncLifetime completed and request handling is live.");
         return Task.CompletedTask;
