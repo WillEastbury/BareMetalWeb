@@ -2277,6 +2277,17 @@ public static class DataScaffold
     }
 
     /// <summary>
+    /// Builds enum options for a field, preferring <see cref="DataFieldMetadata.EnumValues"/> (used
+    /// for virtual/gallery entities whose CLR type is <see cref="string"/>) over CLR enum reflection.
+    /// </summary>
+    public static IReadOnlyList<KeyValuePair<string, string>> BuildEnumOptions(DataFieldMetadata field)
+    {
+        if (field.EnumValues != null && field.EnumValues.Count > 0)
+            return BuildEnumOptionsFromValues(field.EnumValues);
+        return BuildEnumOptions(field.ClrType);
+    }
+
+    /// <summary>
     /// Builds enum options from an explicit list of value names (used for virtual/gallery entities
     /// whose enum values are stored as strings rather than a CLR enum type).
     /// </summary>
