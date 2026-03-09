@@ -22,6 +22,39 @@ public class IntelligenceOrchestratorTests
     }
 
     [Fact]
+    public async Task ProcessAsync_Greeting_Hi_ReturnsGreeting()
+    {
+        var orch = CreateOrchestrator();
+
+        var response = await orch.ProcessAsync("hi");
+
+        Assert.Contains("Hello", response.Message);
+        Assert.Equal("greeting", response.ResolvedIntent);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_Greeting_Hello_ReturnsGreeting()
+    {
+        var orch = CreateOrchestrator();
+
+        var response = await orch.ProcessAsync("hello");
+
+        Assert.Contains("Hello", response.Message);
+        Assert.Equal("greeting", response.ResolvedIntent);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_Farewell_Bye_ReturnsFarewell()
+    {
+        var orch = CreateOrchestrator();
+
+        var response = await orch.ProcessAsync("bye");
+
+        Assert.Contains("Goodbye", response.Message);
+        Assert.Equal("farewell", response.ResolvedIntent);
+    }
+
+    [Fact]
     public async Task ProcessAsync_EmptyQuery_ReturnsPrompt()
     {
         var orch = CreateOrchestrator();
