@@ -31,7 +31,7 @@ permissions:
 
 env:
   GHCR_REGISTRY: ghcr.io
-  GHCR_IMAGE: ${{ github.repository }}
+  GHCR_IMAGE: willeastbury/baremetalweb
   ACR_NAME: metalclusterregistry
   ACR_LOGIN_SERVER: metalclusterregistry.azurecr.io
   ACR_IMAGE: baremetalweb
