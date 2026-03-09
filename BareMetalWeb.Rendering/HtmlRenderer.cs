@@ -14,12 +14,34 @@ using BareMetalWeb.Rendering.Interfaces;
 using BareMetalWeb.Rendering.Models;
 namespace BareMetalWeb.Rendering;
 
+/// <summary>Per-render statistics collected during a single page render cycle.</summary>
+public struct RenderStats
+{
+    public int WriteCount;
+    public int BytesWritten;
+    public int FlushCount;
+    public int TokenCount;
+    public int FragmentCount;
+
+    public override readonly string ToString() =>
+        $"writes={WriteCount} bytes={BytesWritten} flushes={FlushCount} tokens={TokenCount} fragments={FragmentCount}";
+}
+
 public class HtmlRenderer : IHtmlRenderer
 {
     public static Action<TimeSpan>? OnRenderComplete;
+    public static Action<TimeSpan, RenderStats>? OnRenderCompleteWithStats;
 
     private static readonly Encoding Utf8 = Encoding.UTF8;
     private readonly IHtmlFragmentRenderer _fragments;
+
+    [ThreadStatic] private static RenderStats t_stats;
+
+    /// <summary>Returns a ref to the thread-local render stats for use by RenderPlan.</summary>
+    public static ref RenderStats GetStats() => ref t_stats;
+
+    /// <summary>When true, uses the arena renderer (single contiguous buffer) instead of PipeWriter streaming.</summary>
+    public static bool UseArenaRenderer { get; set; }
 
     public HtmlRenderer(IHtmlFragmentRenderer fragments)
     {
@@ -33,6 +55,59 @@ public class HtmlRenderer : IHtmlRenderer
         await RenderToStreamAsync(pipeWriter, template, keys, values, appkeys, appvalues, app, tableColumnTitles, tableRows, formDefinition, templateLoops);
         await pipeWriter.CompleteAsync();
         return ms.TryGetBuffer(out var buffer) ? buffer : ms.ToArray();
+    }
+
+    /// <summary>
+    /// Arena-based renderer: writes all output into a single contiguous ArrayBufferWriter,
+    /// then copies to the PipeWriter in one GetSpan/Advance/Flush cycle.
+    /// Reduces PipeWriter overhead by eliminating per-fragment GetSpan calls.
+    /// </summary>
+    public async ValueTask<ReadOnlyMemory<byte>> RenderToBytesArenaAsync(IHtmlTemplate template, string[] keys, string[] values, string[] appkeys, string[] appvalues, IBareWebHost app, string[]? tableColumnTitles = null, string[][]? tableRows = null, FormDefinition? formDefinition = null, TemplateLoop[]? templateLoops = null)
+    {
+        var arena = new ArrayBufferWriter<byte>(16384);
+
+        WriteToBuffer(arena, _fragments.DocTypeAndHeadStart);
+        WriteToBuffer(arena, template.Encoding.WebName);
+        WriteToBuffer(arena, "'>");
+
+        RenderSectionToBuffer(arena, template.Head, keys, values, appkeys, appvalues, null, null, templateLoops);
+
+        WriteToBuffer(arena, _fragments.HeadEndAndBodyStart);
+
+        int byteCount = 2
+            + (tableColumnTitles is not null && tableRows is not null ? 1 : 0)
+            + (formDefinition is not null ? 1 : 0);
+        var byteKeysArr = new string[byteCount];
+        var byteValuesArr = new byte[byteCount][];
+        byteKeysArr[0] = "links_left";
+        byteValuesArr[0] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: false);
+        byteKeysArr[1] = "links_right";
+        byteValuesArr[1] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: true);
+        int idx = 2;
+        if (tableColumnTitles != null && tableRows != null)
+        {
+            byteKeysArr[idx] = "table";
+            byteValuesArr[idx++] = _fragments.RenderTable(tableColumnTitles, tableRows);
+        }
+        if (formDefinition is not null)
+        {
+            byteKeysArr[idx] = "form";
+            byteValuesArr[idx] = _fragments.RenderForm(formDefinition);
+        }
+
+        RenderSectionToBuffer(arena, template.Body, keys, values, appkeys, appvalues, byteKeysArr, byteValuesArr, templateLoops);
+        RenderSectionToBuffer(arena, template.Footer, keys, values, appkeys, appvalues, null, null, templateLoops);
+
+        if (!string.IsNullOrEmpty(template.Script))
+        {
+            WriteToBuffer(arena, _fragments.ScriptTagStart);
+            RenderSectionToBuffer(arena, template.Script, keys, values, appkeys, appvalues, null, null, templateLoops);
+            WriteToBuffer(arena, _fragments.ScriptTagEnd);
+        }
+
+        WriteToBuffer(arena, _fragments.BodyEndAndHtmlEnd);
+
+        return arena.WrittenMemory;
     }
 
     public async ValueTask RenderToStreamAsync(PipeWriter writer, IHtmlTemplate template, string[] keys, string[] values, string[] appkeys, string[] appvalues, IBareWebHost app, string[]? tableColumnTitles = null, string[][]? tableRows = null, FormDefinition? formDefinition = null, TemplateLoop[]? templateLoops = null)
@@ -80,6 +155,152 @@ public class HtmlRenderer : IHtmlRenderer
 
         Write(writer, _fragments.BodyEndAndHtmlEnd);
         await writer.FlushAsync();
+        t_stats.FlushCount++;
+    }
+
+    // ── Compiled plan cache ────────────────────────────────────────────────────
+    // Plans are compiled once per template and cached. Template content is immutable
+    // after startup so the cache never needs invalidation during normal operation.
+
+    private static readonly Dictionary<string, CompiledTemplatePlans> _planCache = new();
+    private static readonly object _planLock = new();
+
+    private readonly record struct CompiledTemplatePlans(
+        RenderPlan Head, RenderPlan Body, RenderPlan Footer, RenderPlan Script);
+
+    private static CompiledTemplatePlans GetOrCompilePlans(IHtmlTemplate template)
+    {
+        // Use Head+Body hash as cache key (templates are reference-stable after startup)
+        var key = string.Concat(template.Head.GetHashCode().ToString("x8"), template.Body.GetHashCode().ToString("x8"));
+        lock (_planLock)
+        {
+            if (_planCache.TryGetValue(key, out var cached))
+                return cached;
+
+            var plans = new CompiledTemplatePlans(
+                RenderPlan.Compile(template.Head),
+                RenderPlan.Compile(template.Body),
+                RenderPlan.Compile(template.Footer),
+                RenderPlan.Compile(template.Script));
+            _planCache[key] = plans;
+            return plans;
+        }
+    }
+
+    /// <summary>Clears compiled template plan cache (call after template reload).</summary>
+    public static void InvalidatePlanCache()
+    {
+        lock (_planLock) { _planCache.Clear(); }
+    }
+
+    /// <summary>
+    /// Zero-copy compiled streaming renderer. Pre-compiled RenderPlans write directly
+    /// to the PipeWriter with no intermediate buffer. Single flush at the end.
+    /// </summary>
+    public async ValueTask RenderToStreamCompiledAsync(PipeWriter writer, IHtmlTemplate template, string[] keys, string[] values, string[] appkeys, string[] appvalues, IBareWebHost app, string[]? tableColumnTitles = null, string[][]? tableRows = null, FormDefinition? formDefinition = null, TemplateLoop[]? templateLoops = null)
+    {
+        var plans = GetOrCompilePlans(template);
+
+        // Structural fragments: doctype + encoding
+        Write(writer, _fragments.DocTypeAndHeadStart);
+        Write(writer, template.Encoding.WebName);
+        Write(writer, "'>");
+
+        // Head section via compiled plan
+        plans.Head.Execute(writer, keys, values, appkeys, appvalues);
+
+        Write(writer, _fragments.HeadEndAndBodyStart);
+
+        // Build byte-rendered tokens for body
+        int byteCount = 2
+            + (tableColumnTitles is not null && tableRows is not null ? 1 : 0)
+            + (formDefinition is not null ? 1 : 0);
+        var byteKeysArr = new string[byteCount];
+        var byteValuesArr = new byte[byteCount][];
+        byteKeysArr[0] = "links_left";
+        byteValuesArr[0] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: false);
+        byteKeysArr[1] = "links_right";
+        byteValuesArr[1] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: true);
+        int idx = 2;
+        if (tableColumnTitles != null && tableRows != null)
+        {
+            byteKeysArr[idx] = "table";
+            byteValuesArr[idx++] = _fragments.RenderTable(tableColumnTitles, tableRows);
+        }
+        if (formDefinition is not null)
+        {
+            byteKeysArr[idx] = "form";
+            byteValuesArr[idx] = _fragments.RenderForm(formDefinition);
+        }
+
+        // Body + footer via compiled plan (PipeWriter is IBufferWriter<byte> — zero copy)
+        plans.Body.Execute(writer, keys, values, appkeys, appvalues, byteKeysArr, byteValuesArr);
+        plans.Footer.Execute(writer, keys, values, appkeys, appvalues);
+
+        if (!string.IsNullOrEmpty(template.Script))
+        {
+            Write(writer, _fragments.ScriptTagStart);
+            plans.Script.Execute(writer, keys, values, appkeys, appvalues);
+            Write(writer, _fragments.ScriptTagEnd);
+        }
+
+        Write(writer, _fragments.BodyEndAndHtmlEnd);
+        await writer.FlushAsync();
+        t_stats.FlushCount++;
+    }
+
+    /// <summary>
+    /// Compiled + buffered path: uses compiled plans writing to ArrayBufferWriter,
+    /// returns the bytes for compression. Falls back to this when response needs
+    /// post-processing (compression, banner injection).
+    /// </summary>
+    public ValueTask<ReadOnlyMemory<byte>> RenderToBytesCompiledAsync(IHtmlTemplate template, string[] keys, string[] values, string[] appkeys, string[] appvalues, IBareWebHost app, string[]? tableColumnTitles = null, string[][]? tableRows = null, FormDefinition? formDefinition = null, TemplateLoop[]? templateLoops = null)
+    {
+        var plans = GetOrCompilePlans(template);
+        var arena = new ArrayBufferWriter<byte>(16384);
+
+        WriteToBuffer(arena, _fragments.DocTypeAndHeadStart);
+        WriteToBuffer(arena, template.Encoding.WebName);
+        WriteToBuffer(arena, "'>");
+
+        plans.Head.Execute(arena, keys, values, appkeys, appvalues);
+
+        WriteToBuffer(arena, _fragments.HeadEndAndBodyStart);
+
+        int byteCount = 2
+            + (tableColumnTitles is not null && tableRows is not null ? 1 : 0)
+            + (formDefinition is not null ? 1 : 0);
+        var byteKeysArr = new string[byteCount];
+        var byteValuesArr = new byte[byteCount][];
+        byteKeysArr[0] = "links_left";
+        byteValuesArr[0] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: false);
+        byteKeysArr[1] = "links_right";
+        byteValuesArr[1] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: true);
+        int idx = 2;
+        if (tableColumnTitles != null && tableRows != null)
+        {
+            byteKeysArr[idx] = "table";
+            byteValuesArr[idx++] = _fragments.RenderTable(tableColumnTitles, tableRows);
+        }
+        if (formDefinition is not null)
+        {
+            byteKeysArr[idx] = "form";
+            byteValuesArr[idx] = _fragments.RenderForm(formDefinition);
+        }
+
+        plans.Body.Execute(arena, keys, values, appkeys, appvalues, byteKeysArr, byteValuesArr);
+        plans.Footer.Execute(arena, keys, values, appkeys, appvalues);
+
+        if (!string.IsNullOrEmpty(template.Script))
+        {
+            WriteToBuffer(arena, _fragments.ScriptTagStart);
+            plans.Script.Execute(arena, keys, values, appkeys, appvalues);
+            WriteToBuffer(arena, _fragments.ScriptTagEnd);
+        }
+
+        WriteToBuffer(arena, _fragments.BodyEndAndHtmlEnd);
+
+        return ValueTask.FromResult<ReadOnlyMemory<byte>>(arena.WrittenMemory);
     }
     private static void RenderSection(
         PipeWriter writer,
@@ -453,6 +674,8 @@ public class HtmlRenderer : IHtmlRenderer
         Span<byte> buffer = writer.GetSpan(byteCount);
         Utf8.GetBytes(text, buffer);
         writer.Advance(byteCount);
+        t_stats.WriteCount++;
+        t_stats.BytesWritten += byteCount;
     }
 
     private static void Write(PipeWriter writer, byte[] encodedtext)
@@ -461,30 +684,259 @@ public class HtmlRenderer : IHtmlRenderer
         Span<byte> buffer = writer.GetSpan(byteCount);
         encodedtext.CopyTo(buffer);
         writer.Advance(byteCount);
+        t_stats.WriteCount++;
+        t_stats.BytesWritten += byteCount;
+        t_stats.FragmentCount++;
     }
 
     private static void Write(PipeWriter writer, ReadOnlySpan<char> span)
     {
-        // Worst case: 4 bytes per char in UTF-8
         int maxBytes = Utf8.GetMaxByteCount(span.Length);
         Span<byte> buffer = writer.GetSpan(maxBytes);
-
         int bytesWritten = Utf8.GetBytes(span, buffer);
         writer.Advance(bytesWritten);
+        t_stats.WriteCount++;
+        t_stats.BytesWritten += bytesWritten;
     }
 
     private static void Write(PipeWriter writer, char c)
     {
-        // Intentionally using span-over-char to avoid allocation
         Span<byte> buffer = writer.GetSpan(4);
         int bytesWritten = Utf8.GetBytes(
             new ReadOnlySpan<char>(ref c),
             buffer);
         writer.Advance(bytesWritten);
+        t_stats.WriteCount++;
+        t_stats.BytesWritten += bytesWritten;
+    }
+
+    // ── Arena (IBufferWriter<byte>) write methods ──────────────────────────────
+
+    private static void WriteToBuffer(IBufferWriter<byte> writer, string text)
+    {
+        int byteCount = Utf8.GetByteCount(text);
+        Span<byte> buffer = writer.GetSpan(byteCount);
+        Utf8.GetBytes(text, buffer);
+        writer.Advance(byteCount);
+        t_stats.WriteCount++;
+        t_stats.BytesWritten += byteCount;
+    }
+
+    private static void WriteToBuffer(IBufferWriter<byte> writer, byte[] encodedtext)
+    {
+        Span<byte> buffer = writer.GetSpan(encodedtext.Length);
+        encodedtext.CopyTo(buffer);
+        writer.Advance(encodedtext.Length);
+        t_stats.WriteCount++;
+        t_stats.BytesWritten += encodedtext.Length;
+        t_stats.FragmentCount++;
+    }
+
+    private static void WriteToBuffer(IBufferWriter<byte> writer, ReadOnlySpan<char> span)
+    {
+        int maxBytes = Utf8.GetMaxByteCount(span.Length);
+        Span<byte> buffer = writer.GetSpan(maxBytes);
+        int bytesWritten = Utf8.GetBytes(span, buffer);
+        writer.Advance(bytesWritten);
+        t_stats.WriteCount++;
+        t_stats.BytesWritten += bytesWritten;
+    }
+
+    private static void WriteTokenValueToBuffer(IBufferWriter<byte> writer, ReadOnlySpan<char> keySpan, string value)
+    {
+        t_stats.TokenCount++;
+        if (keySpan.StartsWith("html_".AsSpan(), StringComparison.Ordinal))
+        {
+            if (!string.IsNullOrEmpty(value))
+                WriteToBuffer(writer, value);
+        }
+        else
+            WriteHtmlEncodedToBuffer(writer, value);
+    }
+
+    private static void WriteHtmlEncodedToBuffer(IBufferWriter<byte> writer, string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        ReadOnlySpan<char> span = text.AsSpan();
+        int i = 0;
+        int segStart = 0;
+
+        while (i < span.Length)
+        {
+            char c = span[i];
+            ReadOnlySpan<char> entity;
+            switch (c)
+            {
+                case '&':  entity = "&amp;".AsSpan();  break;
+                case '<':  entity = "&lt;".AsSpan();   break;
+                case '>':  entity = "&gt;".AsSpan();   break;
+                case '"':  entity = "&quot;".AsSpan(); break;
+                case '\'': entity = "&#39;".AsSpan();  break;
+                default:   i++;                        continue;
+            }
+
+            if (i > segStart)
+                WriteToBuffer(writer, span.Slice(segStart, i - segStart));
+
+            WriteToBuffer(writer, entity);
+            i++;
+            segStart = i;
+        }
+
+        if (segStart < span.Length)
+            WriteToBuffer(writer, span.Slice(segStart));
+    }
+
+    private static void RenderSectionToBuffer(
+        IBufferWriter<byte> writer,
+        string template,
+        string[] keys,
+        string[] values,
+        string[] appkeys,
+        string[] appvalues,
+        string[]? keysforbytesrendered,
+        byte[][]? bytesrendered,
+        TemplateLoop[]? templateLoops,
+        string[]? scopedKeys = null,
+        string[]? scopedValues = null)
+    {
+        RenderSectionToBuffer(writer, template.AsSpan(), keys, values, appkeys, appvalues, keysforbytesrendered, bytesrendered, templateLoops, scopedKeys, scopedValues);
+    }
+
+    private static void RenderSectionToBuffer(
+        IBufferWriter<byte> writer,
+        ReadOnlySpan<char> span,
+        string[] keys,
+        string[] values,
+        string[] appkeys,
+        string[] appvalues,
+        string[]? keysforbytesrendered,
+        byte[][]? bytesrendered,
+        TemplateLoop[]? templateLoops,
+        string[]? scopedKeys,
+        string[]? scopedValues)
+    {
+        int pos = 0;
+        while (pos < span.Length)
+        {
+            int openIdx = span.Slice(pos).IndexOf("{{".AsSpan());
+
+            if (openIdx < 0)
+            {
+                WriteToBuffer(writer, span.Slice(pos));
+                return;
+            }
+
+            if (openIdx > 0)
+                WriteToBuffer(writer, span.Slice(pos, openIdx));
+
+            int bodyStart = pos + openIdx + 2;
+            int closeRelIdx = span.Slice(bodyStart).IndexOf("}}".AsSpan());
+
+            if (closeRelIdx < 0)
+            {
+                WriteToBuffer(writer, span.Slice(pos + openIdx, 2));
+                pos = pos + openIdx + 1;
+                continue;
+            }
+
+            var keySpan = span.Slice(bodyStart, closeRelIdx);
+            int tokenEnd = bodyStart + closeRelIdx + 2;
+
+            if (TryParseLoopToken(keySpan, out var loopKey) &&
+                TryFindClosingTag(span, tokenEnd, LoopTagKind.Loop, loopKey, out var endTagStart, out var endTagEnd))
+            {
+                if (TryGetLoop(loopKey, templateLoops, out var loop))
+                {
+                    var loopBody = span.Slice(tokenEnd, endTagStart - tokenEnd);
+                    foreach (var item in loop.Items)
+                    {
+                        var (itemKeys, itemValues) = BuildScopedKeyValues(item, scopedKeys, scopedValues);
+                        RenderSectionToBuffer(writer, loopBody, keys, values, appkeys, appvalues, keysforbytesrendered, bytesrendered, templateLoops, itemKeys, itemValues);
+                    }
+                }
+                pos = endTagEnd + 1;
+                continue;
+            }
+
+            if (TryParseForToken(keySpan, out var forSpec) &&
+                TryFindClosingTag(span, tokenEnd, LoopTagKind.For, forSpec.Variable, out endTagStart, out endTagEnd))
+            {
+                var loopBody = span.Slice(tokenEnd, endTagStart - tokenEnd);
+                foreach (var iterationValue in EnumerateForLoopValues(forSpec))
+                {
+                    var (itemKeys, itemValues) = BuildScopedKeyValues(
+                        new Dictionary<string, string>(StringComparer.Ordinal) { [forSpec.Variable] = iterationValue },
+                        scopedKeys, scopedValues);
+                    RenderSectionToBuffer(writer, loopBody, keys, values, appkeys, appvalues, keysforbytesrendered, bytesrendered, templateLoops, itemKeys, itemValues);
+                }
+                pos = endTagEnd + 1;
+                continue;
+            }
+
+            bool matched = false;
+
+            if (!matched && scopedKeys != null && scopedValues != null)
+            {
+                for (int k = 0; k < scopedKeys.Length; k++)
+                {
+                    if (keySpan.SequenceEqual(scopedKeys[k]))
+                    {
+                        WriteTokenValueToBuffer(writer, keySpan, scopedValues[k]);
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!matched)
+            {
+                for (int k = 0; k < keys.Length; k++)
+                {
+                    if (keySpan.SequenceEqual(keys[k]))
+                    {
+                        WriteTokenValueToBuffer(writer, keySpan, values[k]);
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!matched)
+            {
+                for (int k = 0; k < appkeys.Length; k++)
+                {
+                    if (keySpan.SequenceEqual(appkeys[k]))
+                    {
+                        WriteTokenValueToBuffer(writer, keySpan, appvalues[k]);
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!matched && keysforbytesrendered != null && bytesrendered != null)
+            {
+                for (int k = 0; k < keysforbytesrendered.Length; k++)
+                {
+                    if (keySpan.SequenceEqual(keysforbytesrendered[k]))
+                    {
+                        WriteToBuffer(writer, bytesrendered[k]);
+                        matched = true;
+                        break;
+                    }
+                }
+            }
+
+            pos = tokenEnd;
+        }
     }
 
     private static void WriteTokenValue(PipeWriter writer, ReadOnlySpan<char> keySpan, string value)
     {
+        t_stats.TokenCount++;
         // Keys prefixed with "html_" carry pre-rendered HTML and must be written raw.
         // All other tokens are HTML-encoded for defense-in-depth XSS protection.
         if (keySpan.StartsWith("html_".AsSpan(), StringComparison.Ordinal))
@@ -550,6 +1002,7 @@ public class HtmlRenderer : IHtmlRenderer
 
     public async ValueTask RenderPage(BmwContext context, PageInfo page, IBareWebHost app)
     {
+        t_stats = default; // reset per-render counters
         var renderSw = Stopwatch.StartNew();
         // Ensure CSP nonce is in page context — search without List allocation
         var pageContext = page.PageContext;
@@ -614,40 +1067,79 @@ public class HtmlRenderer : IHtmlRenderer
             page = page with { PageContext = pageContext };
         }
 
-        ReadOnlyMemory<byte> output = await RenderToBytesAsync(
-            page.PageMetaData.Template,
-            page.PageContext.PageMetaDataKeys,
-            page.PageContext.PageMetaDataValues,
-            app.AppMetaDataKeys,
-            app.AppMetaDataValues,
-            app,
-            page.PageContext.TableColumnTitles,
-            page.PageContext.TableData,
-            page.PageContext.FormDefinition,
-            page.PageContext.TemplateLoops
-        );
-
-        if (ShouldShowDiagnosticBanner(context, app))
-        {
-            var bannerHtml = BuildDiagnosticBannerHtml(context, app, output.Length);
-            output = InjectBeforeBodyEnd(output.Span, Utf8.GetBytes(bannerHtml));
-        }
-
         context.StatusCode = page.PageMetaData.StatusCode;
         context.ContentType = page.PageMetaData.Template.ContentTypeHeader;
 
         var encoding = CompressionHelper.SelectEncoding(context);
-        ReadOnlyMemory<byte> responseBytes = encoding switch
+        bool needsCompression = encoding is "br" or "gzip";
+        bool needsBanner = ShouldShowDiagnosticBanner(context, app);
+        bool hasLoops = page.PageContext.TemplateLoops is { Length: > 0 };
+
+        // Zero-copy path: compiled plan writes directly to the response PipeWriter.
+        // Only possible when we don't need post-processing (compression, banner, loops).
+        if (!needsCompression && !needsBanner && !hasLoops)
         {
-            "br"   => CompressionHelper.CompressBrotli(output.Span),
-            "gzip" => CompressionHelper.CompressGzip(output.Span),
-            _      => output
-        };
-        CompressionHelper.ApplyHeaders(context, encoding);
-        context.ContentLength = responseBytes.Length;
-        await context.ResponseBody.WriteAsync(responseBytes);
+            CompressionHelper.ApplyHeaders(context, encoding);
+            await RenderToStreamCompiledAsync(
+                context.ResponseBody,
+                page.PageMetaData.Template,
+                page.PageContext.PageMetaDataKeys,
+                page.PageContext.PageMetaDataValues,
+                app.AppMetaDataKeys,
+                app.AppMetaDataValues,
+                app,
+                page.PageContext.TableColumnTitles,
+                page.PageContext.TableData,
+                page.PageContext.FormDefinition,
+                page.PageContext.TemplateLoops);
+        }
+        else
+        {
+            // Buffered path: render to bytes, then compress/inject banner.
+            ReadOnlyMemory<byte> output = hasLoops
+                ? await RenderToBytesAsync(
+                    page.PageMetaData.Template,
+                    page.PageContext.PageMetaDataKeys,
+                    page.PageContext.PageMetaDataValues,
+                    app.AppMetaDataKeys,
+                    app.AppMetaDataValues,
+                    app,
+                    page.PageContext.TableColumnTitles,
+                    page.PageContext.TableData,
+                    page.PageContext.FormDefinition,
+                    page.PageContext.TemplateLoops)
+                : await RenderToBytesCompiledAsync(
+                    page.PageMetaData.Template,
+                    page.PageContext.PageMetaDataKeys,
+                    page.PageContext.PageMetaDataValues,
+                    app.AppMetaDataKeys,
+                    app.AppMetaDataValues,
+                    app,
+                    page.PageContext.TableColumnTitles,
+                    page.PageContext.TableData,
+                    page.PageContext.FormDefinition,
+                    page.PageContext.TemplateLoops);
+
+            if (needsBanner)
+            {
+                var bannerHtml = BuildDiagnosticBannerHtml(context, app, output.Length);
+                output = InjectBeforeBodyEnd(output.Span, Utf8.GetBytes(bannerHtml));
+            }
+
+            ReadOnlyMemory<byte> responseBytes = encoding switch
+            {
+                "br"   => CompressionHelper.CompressBrotli(output.Span),
+                "gzip" => CompressionHelper.CompressGzip(output.Span),
+                _      => output
+            };
+            CompressionHelper.ApplyHeaders(context, encoding);
+            context.ContentLength = responseBytes.Length;
+            await context.ResponseBody.WriteAsync(responseBytes);
+        }
+
         renderSw.Stop();
         OnRenderComplete?.Invoke(renderSw.Elapsed);
+        OnRenderCompleteWithStats?.Invoke(renderSw.Elapsed, t_stats);
 
     }
 
