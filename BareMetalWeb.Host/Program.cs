@@ -539,13 +539,21 @@ static class ProgramSetup
             var certPassword = Environment.GetEnvironmentVariable("KESTREL_CERT_PASSWORD") ?? config.GetValue("Kestrel.CertPassword", "");
             if (httpsPort > 0 && !string.IsNullOrEmpty(certPath) && File.Exists(certPath))
             {
+                var cert = string.IsNullOrEmpty(certPassword)
+                    ? System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(certPath, Path.ChangeExtension(certPath, ".key"))
+                    : new System.Security.Cryptography.X509Certificates.X509Certificate2(certPath, certPassword);
+                var sslOptions = new System.Net.Security.SslServerAuthenticationOptions
+                {
+                    ServerCertificate = cert,
+                    EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls12 | System.Security.Authentication.SslProtocols.Tls13,
+                    ApplicationProtocols = [System.Net.Security.SslApplicationProtocol.Http11],
+                };
                 serverOptions.ListenAnyIP(httpsPort, listenOptions =>
                 {
-                    var cert = string.IsNullOrEmpty(certPassword)
-                        ? System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(certPath, Path.ChangeExtension(certPath, ".key"))
-                        : new System.Security.Cryptography.X509Certificates.X509Certificate2(certPath, certPassword);
-                    listenOptions.UseHttps(cert);
+                    listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1;
+                    listenOptions.Use(next => new TlsConnectionMiddleware(next, sslOptions).OnConnectionAsync);
                 });
+                Console.WriteLine($"[BMW TLS] HTTPS configured on port {httpsPort} (direct SslStream, TLS 1.2+1.3, HTTP/1.1)");
             }
 
             var http2Enabled = config.GetValue("Kestrel.Http2Enabled", true);
