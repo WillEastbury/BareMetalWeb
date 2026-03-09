@@ -68,6 +68,7 @@ public sealed class BmwContext
     public bool IsHttps => string.Equals(RequestScheme, "https", StringComparison.OrdinalIgnoreCase);
 
     // ── Exposed features (for callers that need the raw interface) ──────
+    public IFeatureCollection Features => _features;
     public IHttpResponseFeature ResponseFeature => _responseFeature;
     public IHttpConnectionFeature? ConnectionFeature => _connectionFeature;
 

@@ -293,7 +293,6 @@ public static class StaticAssetCache
         if (!string.IsNullOrEmpty(effectiveEncoding))
         {
             context.Response.Headers.ContentEncoding = effectiveEncoding;
-            context.Response.Headers.Append("Vary", "Accept-Encoding");
         }
 
         context.Response.ContentLength = variant.Length;

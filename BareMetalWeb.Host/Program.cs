@@ -542,21 +542,30 @@ static class ProgramSetup
                 var cert = string.IsNullOrEmpty(certPassword)
                     ? System.Security.Cryptography.X509Certificates.X509Certificate2.CreateFromPemFile(certPath, Path.ChangeExtension(certPath, ".key"))
                     : new System.Security.Cryptography.X509Certificates.X509Certificate2(certPath, certPassword);
+
+                // Pre-warm: build certificate context (parses chain, caches for handshakes)
+                var certContext = System.Net.Security.SslStreamCertificateContext.Create(cert, additionalCertificates: null, offline: true);
+
                 var sslOptions = new System.Net.Security.SslServerAuthenticationOptions
                 {
-                    ServerCertificate = cert,
+                    ServerCertificateContext = certContext,
                     EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls13,
                     AllowRenegotiation = false,
+                    ClientCertificateRequired = false,
                     CertificateRevocationCheckMode = System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck,
                     CipherSuitesPolicy = new System.Net.Security.CipherSuitesPolicy([System.Net.Security.TlsCipherSuite.TLS_AES_128_GCM_SHA256]),
                     ApplicationProtocols = [System.Net.Security.SslApplicationProtocol.Http11],
                 };
+
+                // Pre-warm: loopback TLS handshake to initialize OpenSSL state machine
+                WarmUpTls(sslOptions);
+
                 serverOptions.ListenAnyIP(httpsPort, listenOptions =>
                 {
                     listenOptions.Protocols = Microsoft.AspNetCore.Server.Kestrel.Core.HttpProtocols.Http1;
                     listenOptions.Use(next => new TlsConnectionMiddleware(next, sslOptions).OnConnectionAsync);
                 });
-                Console.WriteLine($"[BMW TLS] HTTPS configured on port {httpsPort} (direct SslStream, TLS 1.3, AES-128-GCM-SHA256)");
+                Console.WriteLine($"[BMW TLS] HTTPS configured on port {httpsPort} (direct SslStream, TLS 1.3, AES-128-GCM-SHA256, pre-warmed)");
             }
 
             var http2Enabled = config.GetValue("Kestrel.Http2Enabled", true);
@@ -852,6 +861,45 @@ static class ProgramSetup
             };
             var proxyHandler = new ProxyRouteHandler(legacyRoute, logger);
             appInfo.RegisterRoute($"ALL {proxyRoute}", new RouteHandlerData(pageInfoFactory.RawPage("Public", false), proxyHandler.HandleAsync));
+        }
+    }
+
+    /// <summary>
+    /// Performs a loopback TLS handshake to pre-warm OpenSSL internals, certificate chain
+    /// parsing, and SslStream state machine before the first real connection arrives.
+    /// </summary>
+    public static void WarmUpTls(System.Net.Security.SslServerAuthenticationOptions serverOptions)
+    {
+        try
+        {
+            using var server = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+            server.Start();
+            var port = ((System.Net.IPEndPoint)server.LocalEndpoint).Port;
+
+            var clientTask = Task.Run(async () =>
+            {
+                using var client = new System.Net.Sockets.TcpClient();
+                await client.ConnectAsync(System.Net.IPAddress.Loopback, port);
+                using var sslClient = new System.Net.Security.SslStream(client.GetStream(), false,
+                    (_, _, _, _) => true); // accept self-signed for warmup
+                await sslClient.AuthenticateAsClientAsync(new System.Net.Security.SslClientAuthenticationOptions
+                {
+                    TargetHost = "warmup",
+                    EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls13,
+                });
+            });
+
+            using var accepted = server.AcceptTcpClient();
+            using var sslServer = new System.Net.Security.SslStream(accepted.GetStream(), false);
+            sslServer.AuthenticateAsServerAsync(serverOptions).GetAwaiter().GetResult();
+            clientTask.GetAwaiter().GetResult();
+
+            server.Stop();
+            Console.WriteLine("[BMW TLS] Pre-warm handshake complete");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[BMW TLS] Pre-warm skipped: {ex.Message}");
         }
     }
 }

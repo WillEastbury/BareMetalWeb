@@ -5,6 +5,15 @@ using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Host;
 
+/// <summary>
+/// Connection-level feature carrying a pre-generated CSP nonce.
+/// Set once per connection, read by every request on that connection.
+/// </summary>
+public interface IConnectionNonceFeature
+{
+    string Nonce { get; }
+}
+
 public static class HttpContextCspExtensions
 {
     private const string CspNonceKey = "BareMetalWeb.CspNonce";
@@ -26,6 +35,14 @@ public static class HttpContextCspExtensions
     {
         if (context.Items.TryGetValue(CspNonceKey, out var value) && value is string nonce)
             return nonce;
+
+        // Try connection-level nonce (one RNG call per connection, not per request)
+        var connNonce = context.Features.Get<IConnectionNonceFeature>();
+        if (connNonce != null)
+        {
+            context.Items[CspNonceKey] = connNonce.Nonce;
+            return connNonce.Nonce;
+        }
         
         return GenerateCspNonce(context);
     }
@@ -43,6 +60,15 @@ public static class HttpContextCspExtensions
     {
         if (context.CspNonce is string existing)
             return existing;
+
+        // Try connection-level nonce (one RNG call per connection, not per request)
+        var connNonce = context.Features?.Get<IConnectionNonceFeature>();
+        if (connNonce != null)
+        {
+            context.CspNonce = connNonce.Nonce;
+            return connNonce.Nonce;
+        }
+
         return GenerateCspNonce(context);
     }
 }

@@ -214,7 +214,6 @@ public static class StaticFileService
         if (!string.IsNullOrWhiteSpace(contentEncoding))
         {
             context.Response.Headers.ContentEncoding = contentEncoding;
-            context.Response.Headers.Append("Vary", "Accept-Encoding");
         }
 
         var allowDynamicCompression = options.EnableDynamicCompression
@@ -281,7 +280,6 @@ public static class StaticFileService
         if (allowDynamicCompression && compressionSelection.Kind != CompressionKind.None)
         {
             context.Response.Headers.ContentEncoding = compressionSelection.Kind == CompressionKind.Brotli ? "br" : "gzip";
-            context.Response.Headers.Append("Vary", "Accept-Encoding");
 
             if (HttpMethods.IsHead(context.HttpRequest.Method))
                 return true;

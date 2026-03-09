@@ -33,12 +33,17 @@ internal sealed class TlsConnectionMiddleware(
             context.Transport = new SslDuplexPipe(sslReader, sslWriter);
             context.Features.Set<ITlsConnectionFeature>(new TlsFeature(sslStream));
 
+            // One nonce per connection — avoids per-request RNG call
+            var (slotIndex, epoch, nonce) = ConnectionNoncePool.Rent();
+            context.Features.Set<IConnectionNonceFeature>(new ConnectionNonceFeature(slotIndex, epoch, nonce));
+
             try
             {
                 await next(context);
             }
             finally
             {
+                ConnectionNoncePool.Return(slotIndex, epoch);
                 context.Transport = original;
                 await sslReader.CompleteAsync();
                 await sslWriter.CompleteAsync();
