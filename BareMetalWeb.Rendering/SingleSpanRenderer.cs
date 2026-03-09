@@ -5,7 +5,7 @@ using System.Text;
 namespace BareMetalWeb.Rendering;
 
 /// <summary>
-/// Renders a compiled <see cref="RenderPlan"/> into a single contiguous buffer,
+/// Renders a compiled <see cref="TemplateRenderPlan"/> into a single contiguous buffer,
 /// eliminating repeated <c>PipeWriter.GetSpan</c>/<c>Advance</c> calls.
 /// One <c>GetSpan</c> → one <c>Advance</c> → one <c>FlushAsync</c>.
 /// </summary>
@@ -19,7 +19,7 @@ public static class SingleSpanRenderer
     /// <summary>
     /// Estimates the total byte size needed for the rendered output.
     /// </summary>
-    public static int EstimateTotalSize(RenderPlan plan, string?[] resolvedValues)
+    public static int EstimateTotalSize(TemplateRenderPlan plan, string?[] resolvedValues)
     {
         int total = plan.StaticByteCount;
 
@@ -46,7 +46,7 @@ public static class SingleSpanRenderer
     /// PipeWriter span. Returns the number of bytes written.
     /// </summary>
     public static int RenderToSpan(
-        RenderPlan plan,
+        TemplateRenderPlan plan,
         string?[] resolvedValues,
         Span<byte> buffer)
     {
@@ -92,7 +92,7 @@ public static class SingleSpanRenderer
     /// </summary>
     public static async ValueTask RenderAsync(
         PipeWriter writer,
-        RenderPlan plan,
+        TemplateRenderPlan plan,
         string[] pageKeys,
         string[] pageValues,
         string[] appKeys,
@@ -112,7 +112,7 @@ public static class SingleSpanRenderer
     /// </summary>
     public static async ValueTask RenderAsync(
         PipeWriter writer,
-        RenderPlan plan,
+        TemplateRenderPlan plan,
         string?[] resolvedValues)
     {
         int estimatedSize = EstimateTotalSize(plan, resolvedValues);
@@ -124,7 +124,7 @@ public static class SingleSpanRenderer
     }
 
     private static string?[] ResolveValues(
-        RenderPlan plan,
+        TemplateRenderPlan plan,
         string[] pageKeys, string[] pageValues,
         string[] appKeys, string[] appValues)
     {

@@ -659,6 +659,11 @@ public class BareMetalWebServer : IBareWebHost
                         if (idPage.PageInfo != null)
                             bmwCtx.SetPageInfo(idPage.PageInfo);
                         bmwCtx.CompiledPlans = idPage.CompiledPlans;
+
+                        // Hydrate route parameters from query string so handlers
+                        // (GetRouteValue / GetRouteParam) work identically to path-based dispatch.
+                        HydrateRouteParamsFromQuery(bmwCtx, idPage.RouteKey);
+
                         if (!await IsAuthorizedAsync(idPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
                         {
                             await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, idPage.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);
@@ -919,6 +924,69 @@ public class BareMetalWebServer : IBareWebHost
             if (id > ushort.MaxValue) return 0; // overflow guard
         }
         return id;
+    }
+
+    /// <summary>
+    /// Populates BmwContext route parameter fields from the query string
+    /// when dispatching via numeric route ID. Uses the CompiledRoute segments
+    /// to map query keys → EntitySlug, EntityId, RouteExtra, or RouteParameters.
+    /// </summary>
+    internal void HydrateRouteParamsFromQuery(BmwContext ctx, string? routeKey)
+    {
+        if (routeKey == null || !_compiledRoutes.TryGetValue(routeKey, out var compiled))
+            return;
+        if (compiled.ParameterCount == 0)
+            return;
+
+        var qs = ctx.Request.QueryString;
+        if (qs.Length <= 1) // empty or just "?"
+            return;
+
+        foreach (var seg in compiled.Segments)
+        {
+            if (seg.Kind != RouteSegmentKind.Parameter && seg.Kind != RouteSegmentKind.CatchAll)
+                continue;
+
+            var val = ReadQueryParam(qs, seg.Value);
+            if (val == null)
+                continue;
+
+            if (seg.Value == "type")
+                ctx.EntitySlug = val;
+            else if (seg.Value == "id")
+                ctx.EntityId = val;
+            else
+            {
+                ctx.RouteParameters ??= new Dictionary<string, string>(compiled.ParameterCount);
+                ctx.RouteParameters[seg.Value] = val;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reads a single query parameter value from a raw query string without allocating
+    /// an IQueryCollection. Returns null if not found.
+    /// </summary>
+    internal static string? ReadQueryParam(string qs, string key)
+    {
+        // qs starts with '?', scan for key=value pairs separated by '&'
+        int pos = 1; // skip '?'
+        while (pos < qs.Length)
+        {
+            int ampIdx = qs.IndexOf('&', pos);
+            int end = ampIdx < 0 ? qs.Length : ampIdx;
+
+            int eqIdx = qs.IndexOf('=', pos);
+            if (eqIdx >= pos && eqIdx < end)
+            {
+                var k = qs.AsSpan(pos, eqIdx - pos);
+                if (k.Equals(key.AsSpan(), StringComparison.OrdinalIgnoreCase))
+                    return Uri.UnescapeDataString(qs.Substring(eqIdx + 1, end - eqIdx - 1));
+            }
+
+            pos = end + 1;
+        }
+        return null;
     }
 
     private static async ValueTask<bool> IsAuthorizedAsync(PageInfo? pageInfo, BmwContext context, CancellationToken cancellationToken = default)

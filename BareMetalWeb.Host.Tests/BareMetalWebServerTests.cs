@@ -966,6 +966,116 @@ public class BareMetalWebServerTests : IDisposable
 
     #endregion
 
+    #region Numeric Route ID Param Hydration Tests
+
+    [Fact]
+    public void ReadQueryParam_FindsMatchingParameter()
+    {
+        Assert.Equal("John", BareMetalWebServer.ReadQueryParam("?name=John&age=30", "name"));
+        Assert.Equal("30", BareMetalWebServer.ReadQueryParam("?name=John&age=30", "age"));
+        Assert.Null(BareMetalWebServer.ReadQueryParam("?name=John", "missing"));
+    }
+
+    [Fact]
+    public void ReadQueryParam_HandlesUrlEncodedValues()
+    {
+        Assert.Equal("Hello World", BareMetalWebServer.ReadQueryParam("?msg=Hello%20World", "msg"));
+        Assert.Equal("@#$", BareMetalWebServer.ReadQueryParam("?s=%40%23%24", "s"));
+    }
+
+    [Fact]
+    public void ReadQueryParam_IsCaseInsensitive()
+    {
+        Assert.Equal("val", BareMetalWebServer.ReadQueryParam("?Type=val", "type"));
+        Assert.Equal("val", BareMetalWebServer.ReadQueryParam("?TYPE=val", "type"));
+    }
+
+    [Fact]
+    public void ReadQueryParam_EmptyOrMinimalQueryString()
+    {
+        Assert.Null(BareMetalWebServer.ReadQueryParam("", "key"));
+        Assert.Null(BareMetalWebServer.ReadQueryParam("?", "key"));
+    }
+
+    [Fact]
+    public async Task NumericDispatch_HydratesEntitySlugAndId()
+    {
+        EnsureStore();
+        string? capturedType = null;
+        string? capturedId = null;
+
+        _server.RegisterRoute("GET /api/{type}/{id}", new RouteHandlerData(
+            CreatePageInfo("Entity Get"),
+            async (ctx) =>
+            {
+                capturedType = ctx.EntitySlug;
+                capturedId = ctx.EntityId;
+                await Task.CompletedTask;
+            }));
+
+        // Find the route ID that was assigned
+        var routeId = _server.routes["GET /api/{type}/{id}"].RouteId;
+
+        var context = CreateHttpContext("GET", $"/{routeId}");
+        context.Request.QueryString = new QueryString("?type=users&id=42");
+        await _server.RequestHandler(context.ToBmw());
+
+        Assert.Equal("users", capturedType);
+        Assert.Equal("42", capturedId);
+    }
+
+    [Fact]
+    public async Task NumericDispatch_HydratesRouteParameters()
+    {
+        EnsureStore();
+        Dictionary<string, string>? capturedParams = null;
+
+        _server.RegisterRoute("GET /page/{slug}", new RouteHandlerData(
+            CreatePageInfo("Page View"),
+            async (ctx) =>
+            {
+                capturedParams = ctx.RouteParameters;
+                await Task.CompletedTask;
+            }));
+
+        var routeId = _server.routes["GET /page/{slug}"].RouteId;
+
+        var context = CreateHttpContext("GET", $"/{routeId}");
+        context.Request.QueryString = new QueryString("?slug=about-us");
+        await _server.RequestHandler(context.ToBmw());
+
+        Assert.NotNull(capturedParams);
+        Assert.Equal("about-us", capturedParams["slug"]);
+    }
+
+    [Fact]
+    public async Task NumericDispatch_NoParamsRoute_SkipsHydration()
+    {
+        EnsureStore();
+        var executed = false;
+
+        _server.RegisterRoute("GET /healthz", new RouteHandlerData(
+            CreatePageInfo("Health"),
+            async (ctx) =>
+            {
+                executed = true;
+                // Should not have any route parameters set
+                Assert.Null(ctx.EntitySlug);
+                Assert.Null(ctx.EntityId);
+                Assert.Null(ctx.RouteParameters);
+                await Task.CompletedTask;
+            }));
+
+        var routeId = _server.routes["GET /healthz"].RouteId;
+
+        var context = CreateHttpContext("GET", $"/{routeId}");
+        await _server.RequestHandler(context.ToBmw());
+
+        Assert.True(executed);
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private static PageInfo CreatePageInfo(

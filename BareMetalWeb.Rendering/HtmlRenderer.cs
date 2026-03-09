@@ -14,7 +14,6 @@ using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Rendering.Interfaces;
 using BareMetalWeb.Rendering.Models;
 namespace BareMetalWeb.Rendering;
-
 public class HtmlRenderer : IHtmlRenderer
 {
     public static Action<TimeSpan>? OnRenderComplete;
