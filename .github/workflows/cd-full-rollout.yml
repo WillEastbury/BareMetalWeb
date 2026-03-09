@@ -196,7 +196,14 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Fail if upstream was skipped
+        if: needs.deploy-production.result == 'skipped' && needs.deploy-aks.result == 'skipped'
+        run: |
+          echo "::error::Upstream jobs skipped — CD3 did not run."
+          exit 1
+
       - name: Summary
+        if: "!(needs.deploy-production.result == 'skipped' && needs.deploy-aks.result == 'skipped')"
         run: |
           echo "### 🎉 CD3 Full Production Rollout" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

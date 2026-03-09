@@ -251,7 +251,14 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Fail if upstream was skipped
+        if: needs.release.result == 'skipped'
+        run: |
+          echo "::error::Upstream jobs skipped — CD2 did not run."
+          exit 1
+
       - name: Summary
+        if: needs.release.result != 'skipped'
         run: |
           echo "### 🚀 CD2 Early Adopter Rollout" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

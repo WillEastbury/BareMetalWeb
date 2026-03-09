@@ -28,7 +28,7 @@ on:
         type: string
 
 concurrency:
-  group: deploy-pipeline-${{ github.ref }}
+  group: cd1-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -350,7 +350,14 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Fail if gate was skipped
+        if: needs.version.result == 'skipped'
+        run: |
+          echo "::error::CI2 did not pass — CD1 skipped."
+          exit 1
+
       - name: Summary
+        if: needs.version.result != 'skipped'
         run: |
           TAG="${{ needs.version.outputs.image_tag }}"
           echo "### 🧪 CD1 Canary — Extended Test Results" >> $GITHUB_STEP_SUMMARY

@@ -190,7 +190,14 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Fail if gate was skipped
+        if: needs.version.result == 'skipped'
+        run: |
+          echo "::error::CI1 did not pass — CI2 skipped."
+          exit 1
+
       - name: Summary
+        if: needs.version.result != 'skipped'
         run: |
           TAG="${{ needs.version.outputs.tag }}"
           echo "### 🏗️ CI2 Build Summary" >> $GITHUB_STEP_SUMMARY
