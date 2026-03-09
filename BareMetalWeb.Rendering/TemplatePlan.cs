@@ -63,6 +63,43 @@ public sealed class RenderPlan
         }
         StaticByteCount = total;
     }
+
+    /// <summary>Compile a template string into a RenderPlan. Forwards to <see cref="TemplatePlanCompiler.Compile"/>.</summary>
+    public static RenderPlan Compile(string template) => TemplatePlanCompiler.Compile(template);
+
+    /// <summary>Execute this plan via PipeWriter.</summary>
+    public void Execute(
+        PipeWriter writer,
+        string[] pageKeys, string[] pageValues,
+        string[] appKeys, string[] appValues)
+        => TemplatePlanExecutor.Execute(writer, this, pageKeys, pageValues, appKeys, appValues);
+
+    /// <summary>Execute this plan via PipeWriter with byte-rendered tokens.</summary>
+    public void Execute(
+        PipeWriter writer,
+        string[] pageKeys, string[] pageValues,
+        string[] appKeys, string[] appValues,
+        string[] byteKeys, byte[][] byteValues)
+        => TemplatePlanExecutor.Execute(writer, this, pageKeys, pageValues, appKeys, appValues);
+
+    /// <summary>Execute this plan via IBufferWriter.</summary>
+    public void Execute(
+        IBufferWriter<byte> writer,
+        string[] pageKeys, string[] pageValues,
+        string[] appKeys, string[] appValues)
+        => TemplatePlanExecutor.Execute(writer, this, pageKeys, pageValues, appKeys, appValues);
+
+    /// <summary>Execute this plan via IBufferWriter with byte-rendered tokens.</summary>
+    public void Execute(
+        IBufferWriter<byte> writer,
+        string[] pageKeys, string[] pageValues,
+        string[] appKeys, string[] appValues,
+        string[] byteKeys, byte[][] byteValues)
+        => TemplatePlanExecutor.Execute(writer, this, pageKeys, pageValues, appKeys, appValues);
+
+    /// <summary>Execute with pre-resolved values. Forwards to <see cref="TemplatePlanExecutor.ExecuteWithResolvedValues"/>.</summary>
+    public void ExecuteWithResolvedValues(PipeWriter writer, string?[] resolvedValues)
+        => TemplatePlanExecutor.ExecuteWithResolvedValues(writer, this, resolvedValues);
 }
 
 /// <summary>
@@ -276,5 +313,68 @@ public static class TemplatePlanExecutor
         var buffer = writer.GetSpan(maxBytes);
         int written = Utf8.GetBytes(chars, buffer);
         writer.Advance(written);
+    }
+
+    // ── IBufferWriter<byte> overloads (for ArrayBufferWriter / compiled-to-bytes path) ──
+
+    /// <summary>Execute plan writing to an IBufferWriter (for buffered rendering).</summary>
+    public static void Execute(
+        IBufferWriter<byte> writer,
+        RenderPlan plan,
+        string[] pageKeys, string[] pageValues,
+        string[] appKeys, string[] appValues)
+    {
+        var resolved = new string?[plan.FieldKeys.Length];
+        for (int f = 0; f < plan.FieldKeys.Length; f++)
+        {
+            var key = plan.FieldKeys[f];
+            string? val = null;
+            for (int k = 0; k < pageKeys.Length; k++)
+            {
+                if (string.Equals(key, pageKeys[k], StringComparison.Ordinal))
+                { val = pageValues[k]; break; }
+            }
+            if (val == null)
+            {
+                for (int k = 0; k < appKeys.Length; k++)
+                {
+                    if (string.Equals(key, appKeys[k], StringComparison.Ordinal))
+                    { val = appValues[k]; break; }
+                }
+            }
+            resolved[f] = val;
+        }
+        ExecuteWithResolvedValues(writer, plan, resolved);
+    }
+
+    /// <summary>Execute with pre-resolved values to IBufferWriter.</summary>
+    public static void ExecuteWithResolvedValues(
+        IBufferWriter<byte> writer,
+        RenderPlan plan,
+        string?[] resolvedValues)
+    {
+        var segments = plan.Segments;
+        for (int i = 0; i < segments.Length; i++)
+        {
+            ref readonly var seg = ref segments[i];
+            if (seg.IsStatic)
+            {
+                var src = seg.Fragment.Span;
+                var dest = writer.GetSpan(src.Length);
+                src.CopyTo(dest);
+                writer.Advance(src.Length);
+            }
+            else
+            {
+                var val = seg.FieldIndex < resolvedValues.Length ? resolvedValues[seg.FieldIndex] : null;
+                if (val != null)
+                {
+                    int byteCount = Utf8.GetByteCount(val);
+                    var buffer = writer.GetSpan(byteCount);
+                    Utf8.GetBytes(val, buffer);
+                    writer.Advance(byteCount);
+                }
+            }
+        }
     }
 }
