@@ -16,7 +16,7 @@
          and all AVX/FMA/BMI paths are dead-code-eliminated.
          NativeAOT uses IlcInstructionSet (not InstructionSet, which is JIT-only).
          .NET 10 uses bundled instruction set names (avx2 implies avx, sse4.2, etc.). -->
-    <IlcInstructionSet>x86-64-v3</IlcInstructionSet>
+    <IlcInstructionSet Condition="!$(RuntimeIdentifier.Contains('arm'))">x86-64-v3</IlcInstructionSet>
     <!-- Trimming: full mode trims all assemblies (not just opt-in ones), aggressively
          removing unused framework code and reducing the in-memory code footprint. -->
     <PublishTrimmed>true</PublishTrimmed>
