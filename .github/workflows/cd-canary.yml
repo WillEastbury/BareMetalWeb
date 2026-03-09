@@ -1,0 +1,344 @@
+# ────────────────────────────────────────────────────────────────────────────────
+# CD1 — Canary Deploy + Extended Tests
+#
+# Triggered automatically when CI2 (container.yml) succeeds on main.
+# 1. Deploys the newly built container image to the AKS canary environment
+# 2. Runs three extended test stages (all must pass):
+#    - Setup test:      fresh deploy validation (reset data, smoke test)
+#    - Performance test: regression check with small + large data sets
+#    - Upgrade test:     deploy over existing data, integration tests
+# 3. If all pass → pipeline stops. CD2 must be triggered manually.
+#
+# Downstream: CD2 (cd-early-adopters.yml) is triggered manually after review.
+# ────────────────────────────────────────────────────────────────────────────────
+name: "CD1 · Canary Deploy & Extended Tests"
+
+run-name: "CD1 · Canary — V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+
+on:
+  workflow_run:
+    workflows: ["CI2 · AOT Build & Container Push"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (e.g. 1.20260309.42-linux-arm64). Leave empty to use latest CI2 build.'
+        required: false
+        type: string
+
+concurrency:
+  group: cd1-canary
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  ACR_LOGIN_SERVER: metalclusterregistry.azurecr.io
+  ACR_IMAGE: baremetalweb
+  AKS_CLUSTER: metalcluster
+  AKS_RESOURCE_GROUP: Personal
+  NAMESPACE: baremetalweb
+
+jobs:
+  # ── Gate: skip if CI2 failed ────────────────────────────────────────────
+  gate:
+    name: Check CI2 result
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - run: echo "CI2 passed — proceeding with canary deployment"
+
+  # ── Version ─────────────────────────────────────────────────────────────
+  version:
+    name: Resolve image tag
+    needs: gate
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.resolve.outputs.image_tag }}
+      image: ${{ steps.resolve.outputs.image }}
+    steps:
+      - name: Resolve image tag
+        id: resolve
+        run: |
+          if [[ -n "${{ inputs.image_tag }}" ]]; then
+            TAG="${{ inputs.image_tag }}"
+          else
+            MAJOR="${{ vars.MAJOR_VERSION || '1' }}"
+            DATE="$(date +%Y%m%d)"
+            BUILD="${{ github.run_number }}"
+            TAG="${MAJOR}.${DATE}.${BUILD}-linux-arm64"
+          fi
+          echo "image_tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "image=${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${TAG}" >> $GITHUB_OUTPUT
+
+  # ── Deploy to AKS ──────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to AKS
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --name ${{ env.AKS_CLUSTER }} \
+            --resource-group ${{ env.AKS_RESOURCE_GROUP }} \
+            --overwrite-existing
+
+      - name: Apply manifests
+        run: kubectl apply -f kubectl/
+
+      - name: Deploy image
+        run: |
+          IMAGE="${{ needs.version.outputs.image }}"
+          kubectl set image statefulset/baremetalweb \
+            baremetalweb="${IMAGE}" \
+            --namespace ${{ env.NAMESPACE }}
+          echo "### 🚀 Deploying: \`${IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status statefulset/baremetalweb \
+            --namespace ${{ env.NAMESPACE }} \
+            --timeout=300s
+
+      - name: Health check
+        run: |
+          for i in $(seq 1 6); do
+            POD=$(kubectl get pod -n ${{ env.NAMESPACE }} \
+              -l app.kubernetes.io/name=baremetalweb \
+              -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+            if [[ -z "${POD}" ]]; then
+              echo "Attempt ${i}/6 — no pod found, waiting 10s..."
+              sleep 10
+              continue
+            fi
+            READY=$(kubectl get pod -n ${{ env.NAMESPACE }} "${POD}" \
+              -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || true)
+            if [[ "${READY}" == "True" ]]; then
+              echo "✓ Pod ${POD} is Running and Ready"
+              echo "### ✅ Deployed: \`${POD}\`" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            echo "Attempt ${i}/6 — waiting 10s..."
+            sleep 10
+          done
+          echo "::error::Health check failed after 6 attempts"
+          exit 1
+
+  # ── Setup Test (fresh deploy validation) ────────────────────────────────
+  setup-test:
+    name: "Setup Test"
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deploy to CI base (reset data)
+        run: |
+          dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release --output ./publish
+          touch ./publish/reset-data.flag
+          az webapp stop --name baremetalweb-cireset --resource-group baremetalweb-rg
+          az webapp config appsettings set --name baremetalweb-cireset --resource-group baremetalweb-rg \
+            --settings WEBSITE_RUN_FROM_PACKAGE=0 --output none
+          cd ./publish && zip -qr ../deploy.zip .
+          az webapp deploy --name baremetalweb-cireset --resource-group baremetalweb-rg \
+            --src-path ../deploy.zip --type zip --clean true
+          az webapp start --name baremetalweb-cireset --resource-group baremetalweb-rg
+          sleep 30
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+
+      - name: Install Playwright
+        working-directory: tests/playwright
+        run: |
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Smoke tests (fresh instance)
+        working-directory: tests/playwright
+        env:
+          BASE_URL: https://baremetalweb-cireset.azurewebsites.net
+          CIMIGRATE_TEST_USERNAME:    ${{ secrets.CIMIGRATE_TEST_USERNAME }}
+          CIMIGRATE_TEST_DISPLAYNAME: ${{ secrets.CIMIGRATE_TEST_DISPLAYNAME }}
+          CIMIGRATE_TEST_PASSWORD:    ${{ secrets.CIMIGRATE_TEST_PASSWORD }}
+        run: npx playwright test --grep "@smoke"
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cd1-setup-test-report
+          path: tests/playwright/playwright-report/
+          retention-days: 7
+
+  # ── Upgrade Test (existing data) ────────────────────────────────────────
+  upgrade-test:
+    name: "Upgrade Test"
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS_UPGRADE }}
+
+      - name: Deploy to upgrade instance (preserve data)
+        run: |
+          dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release --output ./publish
+          az webapp stop --name baremetalweb-upgrade --resource-group baremetalweb-rg
+          az webapp config appsettings set --name baremetalweb-upgrade --resource-group baremetalweb-rg \
+            --settings WEBSITE_RUN_FROM_PACKAGE=0 --output none
+          cd ./publish && zip -qr ../deploy.zip .
+          az webapp deploy --name baremetalweb-upgrade --resource-group baremetalweb-rg \
+            --src-path ../deploy.zip --type zip --clean true
+          az webapp start --name baremetalweb-upgrade --resource-group baremetalweb-rg
+          sleep 30
+
+      - name: Run integration tests
+        env:
+          CIMIGRATE_BASE_URL: https://baremetalweb-upgrade.azurewebsites.net
+          CIMIGRATE_TEST_USERNAME:    ${{ secrets.CIMIGRATE_TEST_USERNAME }}
+          CIMIGRATE_TEST_DISPLAYNAME: ${{ secrets.CIMIGRATE_TEST_DISPLAYNAME }}
+          CIMIGRATE_TEST_PASSWORD:    ${{ secrets.CIMIGRATE_TEST_PASSWORD }}
+        run: |
+          dotnet restore BareMetalWeb.IntegrationTests/BareMetalWeb.IntegrationTests.csproj
+          dotnet build BareMetalWeb.IntegrationTests/BareMetalWeb.IntegrationTests.csproj \
+            --configuration Release --no-restore
+          dotnet test BareMetalWeb.IntegrationTests/BareMetalWeb.IntegrationTests.csproj \
+            --no-build --configuration Release --verbosity normal \
+            --blame-hang-timeout 120s \
+            --filter "Category=Integration|FullyQualifiedName~IntegrationTests" \
+            --results-directory TestResults --logger "trx"
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cd1-upgrade-test-results
+          path: TestResults/
+          retention-days: 7
+
+  # ── Performance Test ────────────────────────────────────────────────────
+  performance-test:
+    name: "Performance Test"
+    needs: upgrade-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Build performance tests
+        run: |
+          dotnet restore BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj
+          dotnet build BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj \
+            --configuration Release --no-restore
+
+      - name: Run performance tests (small dataset)
+        run: |
+          dotnet run --project BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj \
+            --configuration Release --no-build \
+            -- --addresses 100 --customers 50 --products 25 --units 10
+
+      - name: Run performance tests (large dataset)
+        run: |
+          dotnet run --project BareMetalWeb.PerformanceTests/BareMetalWeb.PerformanceTests.csproj \
+            --configuration Release --no-build \
+            -- --addresses 10000 --customers 5000 --products 2500 --units 1000
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cd1-perf-results
+          path: report/
+          retention-days: 7
+
+  # ── Summary ─────────────────────────────────────────────────────────────
+  summary:
+    name: CD1 Summary
+    needs: [version, setup-test, upgrade-test, performance-test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          TAG="${{ needs.version.outputs.image_tag }}"
+          echo "### 🧪 CD1 Canary — Extended Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Test | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Setup Test | ${{ needs.setup-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Upgrade Test | ${{ needs.upgrade-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Performance Test | ${{ needs.performance-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ needs.setup-test.result }}" == "success" && \
+                "${{ needs.upgrade-test.result }}" == "success" && \
+                "${{ needs.performance-test.result }}" == "success" ]]; then
+            echo "### ✅ All extended tests passed for \`${TAG}\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Next:** Manually trigger CD2 (cd-early-adopters.yml) with tag \`${TAG}\` to start rollout." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Extended tests failed — rollout blocked" >> $GITHUB_STEP_SUMMARY
+          fi

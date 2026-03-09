@@ -1,0 +1,26 @@
+# ── Thin container from pre-built AOT binary ────────────────────────────
+# Used by CI2 (container.yml) to package AOT artifacts into a container
+# WITHOUT re-running dotnet publish inside Docker.
+#
+# Usage:
+#   docker build -f Dockerfile.prebuilt --build-arg PUBLISH_DIR=./publish -t myimage .
+# ─────────────────────────────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble-chiseled
+
+WORKDIR /app
+
+# Copy the pre-built AOT publish output
+ARG PUBLISH_DIR=./publish
+COPY ${PUBLISH_DIR} .
+
+# Persistent data directory — mount a volume here in production
+VOLUME /app/Data
+
+# Default port — override with PORT env var at runtime
+ENV PORT=5232
+EXPOSE 5232
+
+# Non-root user (chiseled images default to 'app' UID 1654)
+USER app
+
+ENTRYPOINT ["./BareMetalWeb.Host"]

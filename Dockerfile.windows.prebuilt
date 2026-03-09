@@ -1,0 +1,16 @@
+# ── Thin container from pre-built AOT binary (Windows Nano Server) ───────
+# Used by CI2 (container.yml) to package Windows AOT artifacts.
+# ─────────────────────────────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-nanoserver-ltsc2022
+
+WORKDIR /app
+
+ARG PUBLISH_DIR=./publish
+COPY ${PUBLISH_DIR} .
+
+VOLUME C:/app/Data
+
+ENV PORT=5232
+EXPOSE 5232
+
+ENTRYPOINT ["BareMetalWeb.Host.exe"]
