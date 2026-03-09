@@ -547,6 +547,7 @@ static class ProgramSetup
                     ServerCertificate = cert,
                     EnabledSslProtocols = System.Security.Authentication.SslProtocols.Tls13,
                     AllowRenegotiation = false,
+                    CertificateRevocationCheckMode = System.Security.Cryptography.X509Certificates.X509RevocationMode.NoCheck,
                     ApplicationProtocols = [System.Net.Security.SslApplicationProtocol.Http11],
                 };
                 serverOptions.ListenAnyIP(httpsPort, listenOptions =>
