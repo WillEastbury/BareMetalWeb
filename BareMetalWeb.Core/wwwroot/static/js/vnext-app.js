@@ -4979,8 +4979,11 @@
   if (!R) return;
 
   // ── SPA Activation: hide server-rendered content, take over navigation ──
+  // Use class-based hiding (not display:none) to avoid CLS — the .bm-ssr-hidden
+  // class uses visibility:hidden + position:absolute so the element is removed
+  // from visual flow without triggering a layout shift.
   const ssrContent = document.querySelector('.bm-ssr-content');
-  if (ssrContent) ssrContent.style.display = 'none';
+  if (ssrContent) ssrContent.classList.add('bm-ssr-hidden');
   R.style.display = '';
 
   // Intercept ALL internal link clicks for SPA navigation (not just [data-go])
