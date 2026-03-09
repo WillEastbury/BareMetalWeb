@@ -9,7 +9,10 @@
     
     // Track calculated field expressions
     const expressions = new Map();
-    
+
+    // Cache parsed AST per field to avoid JSON.parse on every recalculation
+    const _astCache = new Map();
+
     // Debounce timer
     let debounceTimer = null;
     const DEBOUNCE_MS = 150;
@@ -153,7 +156,12 @@
             if (!expressionJson) return;
 
             try {
-                var ast = JSON.parse(expressionJson);
+                // Use cached AST to avoid JSON.parse on every recalculation
+                var ast = _astCache.get(field);
+                if (!ast) {
+                    ast = JSON.parse(expressionJson);
+                    _astCache.set(field, ast);
+                }
                 var result = window.bmwEvalAst(ast, window.parseFieldValue);
                 
                 // Update the field
@@ -176,21 +184,23 @@
     }
 
     /**
-     * Sets up event listeners for input changes.
+     * Sets up event listeners for input changes using event delegation
+     * to avoid per-element listener accumulation.
      */
     function setupEventListeners() {
-        // Get all input fields
-        const inputs = document.querySelectorAll('input, select, textarea');
-        
-        inputs.forEach(input => {
-            // Skip calculated fields themselves (they're readonly)
-            if (input.dataset.calculated === 'true') {
-                return;
+        document.addEventListener('input', function(e) {
+            var input = e.target;
+            if ((input.tagName === 'INPUT' || input.tagName === 'SELECT' || input.tagName === 'TEXTAREA')
+                && input.dataset.calculated !== 'true') {
+                debouncedRecalculate();
             }
-
-            // Listen for changes
-            input.addEventListener('input', debouncedRecalculate);
-            input.addEventListener('change', debouncedRecalculate);
+        });
+        document.addEventListener('change', function(e) {
+            var input = e.target;
+            if ((input.tagName === 'INPUT' || input.tagName === 'SELECT' || input.tagName === 'TEXTAREA')
+                && input.dataset.calculated !== 'true') {
+                debouncedRecalculate();
+            }
         });
     }
 

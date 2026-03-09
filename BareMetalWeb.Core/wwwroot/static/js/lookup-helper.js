@@ -169,11 +169,23 @@
     }
 
     function escapeHtml(str) {
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;');
+        var s = String(str);
+        var out = '';
+        var last = 0;
+        for (var i = 0; i < s.length; i++) {
+            var ent;
+            switch (s.charCodeAt(i)) {
+                case 38: ent = '&amp;'; break;
+                case 60: ent = '&lt;'; break;
+                case 62: ent = '&gt;'; break;
+                case 34: ent = '&quot;'; break;
+                default: continue;
+            }
+            if (i > last) out += s.substring(last, i);
+            out += ent;
+            last = i + 1;
+        }
+        return last === 0 ? s : out + s.substring(last);
     }
 
     // Handle row selection in the search modal
