@@ -908,6 +908,16 @@ public static class DataScaffold
                 continue;
             }
 
+            // Metadata-driven child list: virtual entity ChildList field with ChildEntitySlug
+            if (field.FieldType == FormFieldType.ChildList
+                && !string.IsNullOrWhiteSpace(field.ChildEntitySlug)
+                && TryGetEntity(field.ChildEntitySlug!, out var childViewMeta))
+            {
+                var html = BuildMetadataChildListViewHtml(field, childViewMeta, value as string);
+                rows.Add((field.Label, html, true));
+                continue;
+            }
+
             if (IsDictionaryType(field.ClrType, out var valueType))
             {
                 var html = BuildDictionaryViewHtml(field, valueType, value as IEnumerable);
@@ -997,6 +1007,14 @@ public static class DataScaffold
     /// </summary>
     public static IReadOnlyList<Dictionary<string, object?>>? BuildSubFieldSchemas(DataFieldMetadata field)
     {
+        // Metadata-driven child list: virtual entity with ChildEntitySlug (no CLR List<T> type available)
+        if (field.FieldType == FormFieldType.ChildList
+            && !string.IsNullOrWhiteSpace(field.ChildEntitySlug)
+            && TryGetEntity(field.ChildEntitySlug!, out var childMeta))
+        {
+            return BuildSubFieldSchemasFromEntity(childMeta, field);
+        }
+
         if (!IsChildListType(field.ClrType, out var childType))
             return null;
 
@@ -1103,8 +1121,104 @@ public static class DataScaffold
     }
 
     /// <summary>
-    /// Extracts nested child data from an entity instance
+    /// Builds sub-field schemas for a metadata-driven (gallery/virtual entity) ChildList field.
+    /// Mirrors the dictionary structure of <see cref="BuildSubFieldSchemas"/> for CLR-based entities
+    /// so the VNext SPA receives a consistent schema regardless of whether the child is a
+    /// compiled C# type or a runtime-registered virtual entity.
     /// </summary>
+    private static IReadOnlyList<Dictionary<string, object?>> BuildSubFieldSchemasFromEntity(DataEntityMetadata childMeta, DataFieldMetadata parentField)
+    {
+        var result = new List<Dictionary<string, object?>>();
+        var sortedFields = new List<DataFieldMetadata>(childMeta.Fields);
+        sortedFields.Sort((a, b) => a.Order.CompareTo(b.Order));
+
+        foreach (var cf in sortedFields)
+        {
+            if (!cf.Create && !cf.Edit) continue;
+
+            var effectiveType = cf.Lookup != null ? FormFieldType.LookupList : cf.FieldType;
+
+            var fd = new Dictionary<string, object?>
+            {
+                ["name"]     = cf.Name,
+                ["label"]    = cf.Label,
+                ["type"]     = effectiveType.ToString(),
+                ["required"] = cf.Required,
+                ["readOnly"] = cf.ReadOnly
+            };
+
+            if (cf.Lookup != null)
+            {
+                var targetMeta = cf.Lookup.TargetSlug != null
+                    && TryGetEntity(cf.Lookup.TargetSlug, out var bySlug) ? bySlug
+                    : GetEntityByType(cf.Lookup.TargetType);
+                fd["lookup"] = new Dictionary<string, object?>
+                {
+                    ["targetSlug"]    = targetMeta?.Slug,
+                    ["targetName"]    = targetMeta?.Name,
+                    ["valueField"]    = cf.Lookup.ValueField,
+                    ["displayField"]  = cf.Lookup.DisplayField,
+                    ["queryField"]    = cf.Lookup.QueryField,
+                    ["queryValue"]    = cf.Lookup.QueryValue,
+                    ["sortField"]     = cf.Lookup.SortField,
+                    ["sortDirection"] = cf.Lookup.SortDirection.ToString()
+                };
+                fd["enumValues"]       = null;
+                fd["lookupCopyFields"] = string.IsNullOrEmpty(cf.LookupCopyFields) ? null : (object)cf.LookupCopyFields;
+                fd["lookupTargetSlug"] = targetMeta?.Slug;
+            }
+            else if (effectiveType == FormFieldType.Enum)
+            {
+                fd["lookup"] = null;
+                var enumOpts = cf.EnumValues != null && cf.EnumValues.Count > 0
+                    ? BuildEnumOptionsFromValues(cf.EnumValues)
+                    : BuildEnumOptions(cf.ClrType);
+                var enumList = new List<object>(enumOpts.Count);
+                foreach (var o in enumOpts)
+                    enumList.Add((object)new Dictionary<string, object?> { ["value"] = o.Key, ["label"] = o.Value });
+                fd["enumValues"]       = enumList;
+                fd["lookupCopyFields"] = null;
+                fd["lookupTargetSlug"] = null;
+            }
+            else
+            {
+                fd["lookup"]           = null;
+                fd["enumValues"]       = null;
+                fd["lookupCopyFields"] = null;
+                fd["lookupTargetSlug"] = null;
+            }
+
+            if (!string.IsNullOrWhiteSpace(cf.CalculatedExpression))
+            {
+                try
+                {
+                    var parser = new ExpressionParser();
+                    var ast    = parser.Parse(cf.CalculatedExpression!);
+                    fd["calculated"] = new Dictionary<string, object?> { ["expression"] = ast.ToJsonAst() };
+                }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Calculated expression parse failed for sub-field {cf.Name}: {ex.Message}"); fd["calculated"] = new Dictionary<string, object?> { ["expression"] = FallbackAstObject }; }
+            }
+            else
+            {
+                fd["calculated"] = null;
+            }
+
+            fd["copyFromParent"] = (!string.IsNullOrWhiteSpace(cf.CopyFromParentField))
+                ? (object)new Dictionary<string, object?>
+                {
+                    ["parentField"] = cf.CopyFromParentField,
+                    ["entitySlug"]  = cf.CopyFromParentSlug,
+                    ["sourceField"] = cf.CopyFromParentSourceField
+                }
+                : null;
+
+            result.Add(fd);
+        }
+
+        return result;
+    }
+
+
     public static IReadOnlyList<(string FieldName, string[] Headers, string[][] Rows)> ExtractNestedData(DataEntityMetadata metadata, object instance)
     {
         var result = new List<(string, string[], string[][])>();
@@ -3110,7 +3224,59 @@ public static class DataScaffold
         return sb.ToString();
     }
 
-    // Child list parsing uses cached GetChildFieldMetadata with pre-compiled setter delegates.
+    /// <summary>
+    /// Builds a read-only HTML table for a metadata-driven (virtual entity) ChildList field.
+    /// Parses the JSON-serialized child rows and renders each row using the child entity's field metadata.
+    /// </summary>
+    private static string BuildMetadataChildListViewHtml(DataFieldMetadata field, DataEntityMetadata childMeta, string? jsonValue)
+    {
+        var childFields = GetChildFieldMetadataFromEntity(childMeta, field);
+        var sb = new StringBuilder(2048);
+        sb.Append("<div class=\"mt-3\">");
+        sb.Append($"<h2 class=\"h6\">{WebUtility.HtmlEncode(field.Label)}</h2>");
+        sb.Append("<div class=\"table-responsive\"><table class=\"table table-striped table-sm align-middle mb-0 bm-table\">");
+        sb.Append("<thead><tr>");
+        foreach (var child in childFields)
+        {
+            sb.Append($"<th>{WebUtility.HtmlEncode(child.Label)}</th>");
+        }
+        sb.Append("</tr></thead><tbody>");
+
+        if (!string.IsNullOrWhiteSpace(jsonValue))
+        {
+            try
+            {
+                var rows = DataJsonWriter.ParseListOfStringDicts(jsonValue);
+                if (rows != null)
+                {
+                    foreach (var row in rows)
+                    {
+                        sb.Append("<tr>");
+                        foreach (var child in childFields)
+                        {
+                            row.TryGetValue(child.Name, out var rawVal);
+                            var displayText = rawVal ?? string.Empty;
+                            if (child.LookupOptions != null)
+                            {
+                                var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                                foreach (var opt in child.LookupOptions)
+                                    map[opt.Key] = opt.Value;
+                                displayText = map.TryGetValue(displayText, out var resolved) ? resolved : displayText;
+                            }
+                            sb.Append($"<td data-label=\"{WebUtility.HtmlEncode(child.Label)}\">{WebUtility.HtmlEncode(displayText)}</td>");
+                        }
+                        sb.Append("</tr>");
+                    }
+                }
+            }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Failed to parse child list JSON for field {field.Name}: {ex.Message}"); }
+        }
+
+        sb.Append("</tbody></table></div></div>");
+        return sb.ToString();
+    }
+
+
     [RequiresUnreferencedCode("Child list parsing requires compiled entity types to be preserved.")]
     private static bool TryParseChildList(string rawValue, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type childType, out object? list)
     {

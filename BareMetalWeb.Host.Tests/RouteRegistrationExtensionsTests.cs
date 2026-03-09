@@ -1116,7 +1116,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
     [Fact]
     public void BuildEntitySchema_ChildListField_ReturnsCustomHtmlTypeWithSubFields()
     {
-        // Arrange — register Order (has List<OrderRow> child collection) and dependencies
+        // Arrange — register Order (virtual/gallery entity with ChildList OrderRows) and dependencies
         _ = HostGalleryTestFixture.State;
         Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
 
@@ -1131,14 +1131,16 @@ public class RouteRegistrationExtensionsTests : IDisposable
             .Cast<Dictionary<string, object?>>()
             .FirstOrDefault(f => string.Equals((string?)f["name"], "OrderRows", StringComparison.Ordinal));
 
-        // Assert — metadata-driven child list field type is "ChildList" with ChildEntitySlug set.
-        // Note: metadata-driven child lists may not have subFields populated via BuildSubFieldSchemas
-        // since they don't use CLR List<T> properties. The VNext SPA resolves sub-fields via the
-        // child entity's schema endpoint instead.
+        // Assert — metadata-driven child list field must use "CustomHtml" type so the VNext SPA
+        // calls renderSubListEditor instead of falling through to a plain text input.
         Assert.NotNull(orderRowsField);
-        var fieldType = (string?)orderRowsField["type"];
-        Assert.True(fieldType == "CustomHtml" || fieldType == "ChildList",
-            $"Expected 'CustomHtml' or 'ChildList' but got '{fieldType}'");
+        Assert.Equal("CustomHtml", (string?)orderRowsField["type"]);
+
+        // subFields must be populated so the SPA's renderSubListEditor has column definitions.
+        var subFields = orderRowsField!["subFields"] as System.Collections.IEnumerable;
+        Assert.NotNull(subFields);
+        var subFieldList = subFields!.Cast<object>().ToList();
+        Assert.NotEmpty(subFieldList);
     }
 
     /// <summary>

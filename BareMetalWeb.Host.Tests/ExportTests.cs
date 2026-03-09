@@ -287,4 +287,33 @@ public class ExportTests
         // Assert - non-list fields return null
         Assert.Null(subFields);
     }
+
+    [Fact]
+    public void BuildSubFieldSchemas_ForVirtualEntityChildList_ReturnsSubFieldsFromChildMeta()
+    {
+        // Arrange — "orders" is a metadata-driven gallery entity with a ChildList "OrderRows"
+        // whose ChildEntitySlug = "order-rows".  No CLR List<T> type exists; CLR type is string.
+        _ = HostGalleryTestFixture.State;
+        Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
+        var orderRowsField = meta!.Fields.FirstOrDefault(f => f.Name == "OrderRows");
+        Assert.NotNull(orderRowsField);
+        Assert.Equal(Rendering.Models.FormFieldType.ChildList, orderRowsField!.FieldType);
+        Assert.Equal(typeof(string), orderRowsField.ClrType); // virtual entity — stored as JSON string
+
+        // Act
+        var subFields = DataScaffold.BuildSubFieldSchemas(orderRowsField);
+
+        // Assert — sub-fields must be populated from the registered "order-rows" entity metadata
+        Assert.NotNull(subFields);
+        Assert.NotEmpty(subFields!);
+
+        // ProductId must be present (it's the first field in the order-rows entity)
+        var productField = subFields.FirstOrDefault(f => (string?)f["name"] == "ProductId");
+        Assert.NotNull(productField);
+        Assert.Equal("LookupList", (string?)productField!["type"]);
+
+        // Quantity must be present
+        var qtyField = subFields.FirstOrDefault(f => (string?)f["name"] == "Quantity");
+        Assert.NotNull(qtyField);
+    }
 }

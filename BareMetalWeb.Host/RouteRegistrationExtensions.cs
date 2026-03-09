@@ -1319,7 +1319,9 @@ public static class RouteRegistrationExtensions
             {
                 ["name"] = f.Name,
                 ["label"] = f.Label,
-                ["type"] = f.Lookup != null ? FormFieldType.LookupList.ToString() : f.FieldType.ToString(),
+                ["type"] = f.Lookup != null ? FormFieldType.LookupList.ToString() :
+                           f.FieldType == FormFieldType.ChildList ? FormFieldType.CustomHtml.ToString() :
+                           f.FieldType.ToString(),
                 ["order"] = f.Order,
                 ["required"] = f.Required,
                 ["list"] = f.List,
