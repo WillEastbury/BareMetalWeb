@@ -4062,10 +4062,9 @@ public sealed class RouteHandlers : IRouteHandlers
                 progress.Report(100, $"Done. Created {summary}.");
             });
 
-        var baseUrl   = $"{context.HttpRequest.Scheme}://{context.HttpRequest.Host}";
-        var statusUrl = $"{baseUrl}/api/jobs/{jobId}";
+        var statusUri = $"/api/jobs/{jobId}";
         context.Response.StatusCode = StatusCodes.Status202Accepted;
-        context.Response.Headers["Location"] = statusUrl;
+        context.Response.Headers["Location"] = statusUri;
         context.Response.Headers["Retry-After"] = "2";
         context.Response.ContentType = "application/json";
         await using (var w = new Utf8JsonWriter(context.Response.Body))
@@ -4074,7 +4073,7 @@ public sealed class RouteHandlers : IRouteHandlers
             w.WriteString("jobId", jobId);
             w.WriteString("status", "queued");
             w.WriteString("operationName", "Generate Sample Data");
-            w.WriteString("statusUrl", statusUrl);
+            w.WriteString("statusUrl", statusUri);
             w.WriteEndObject();
         }
     }
@@ -4152,10 +4151,9 @@ public sealed class RouteHandlers : IRouteHandlers
                 progress.Report(100, $"Done. Wiped storage for {done} provider{(done == 1 ? "" : "s")}.");
             });
 
-        var baseUrl   = $"{context.HttpRequest.Scheme}://{context.HttpRequest.Host}";
-        var statusUrl = $"{baseUrl}/api/jobs/{jobId}";
+        var statusUri = $"/api/jobs/{jobId}";
         context.Response.StatusCode = StatusCodes.Status202Accepted;
-        context.Response.Headers["Location"] = statusUrl;
+        context.Response.Headers["Location"] = statusUri;
         context.Response.Headers["Retry-After"] = "2";
         context.Response.ContentType = "application/json";
         await using (var w = new Utf8JsonWriter(context.Response.Body))
@@ -4164,7 +4162,7 @@ public sealed class RouteHandlers : IRouteHandlers
             w.WriteString("jobId", jobId);
             w.WriteString("status", "queued");
             w.WriteString("operationName", "Wipe All Data");
-            w.WriteString("statusUrl", statusUrl);
+            w.WriteString("statusUrl", statusUri);
             w.WriteEndObject();
         }
     }
