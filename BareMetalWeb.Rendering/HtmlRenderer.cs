@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Net;
+using System.Runtime.CompilerServices;
 using System.Text;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Core;
@@ -14,19 +15,6 @@ using BareMetalWeb.Rendering.Interfaces;
 using BareMetalWeb.Rendering.Models;
 namespace BareMetalWeb.Rendering;
 
-/// <summary>Per-render statistics collected during a single page render cycle.</summary>
-public struct RenderStats
-{
-    public int WriteCount;
-    public int BytesWritten;
-    public int FlushCount;
-    public int TokenCount;
-    public int FragmentCount;
-
-    public override readonly string ToString() =>
-        $"writes={WriteCount} bytes={BytesWritten} flushes={FlushCount} tokens={TokenCount} fragments={FragmentCount}";
-}
-
 public class HtmlRenderer : IHtmlRenderer
 {
     public static Action<TimeSpan>? OnRenderComplete;
@@ -34,11 +22,6 @@ public class HtmlRenderer : IHtmlRenderer
 
     private static readonly Encoding Utf8 = Encoding.UTF8;
     private readonly IHtmlFragmentRenderer _fragments;
-
-    [ThreadStatic] private static RenderStats t_stats;
-
-    /// <summary>Returns a ref to the thread-local render stats for use by RenderPlan.</summary>
-    public static ref RenderStats GetStats() => ref t_stats;
 
     /// <summary>When true, uses the arena renderer (single contiguous buffer) instead of PipeWriter streaming.</summary>
     public static bool UseArenaRenderer { get; set; }
@@ -155,7 +138,7 @@ public class HtmlRenderer : IHtmlRenderer
 
         Write(writer, _fragments.BodyEndAndHtmlEnd);
         await writer.FlushAsync();
-        t_stats.FlushCount++;
+        RenderStatsProvider.GetStats().FlushCount++;
     }
 
     // ── Compiled plan cache ────────────────────────────────────────────────────
@@ -250,7 +233,113 @@ public class HtmlRenderer : IHtmlRenderer
 
         Write(writer, _fragments.BodyEndAndHtmlEnd);
         await writer.FlushAsync();
-        t_stats.FlushCount++;
+        RenderStatsProvider.GetStats().FlushCount++;
+    }
+
+    /// <summary>
+    /// Single-span render path (#1309). Precomputes total output size, acquires one
+    /// contiguous PipeWriter span, renders everything with a moving pointer, then
+    /// calls Advance once and flushes once. Maximum cache locality, minimum PipeWriter overhead.
+    /// Falls back to RenderWithPlansAsync if size estimation fails (plans not yet bound).
+    /// </summary>
+    private async ValueTask RenderWithPlansSingleSpanAsync(
+        PipeWriter writer, RouteRenderPlans plans,
+        IHtmlTemplate template,
+        string[] keys, string[] values,
+        IBareWebHost app,
+        string[]? tableColumnTitles, string[][]? tableRows,
+        FormDefinition? formDefinition)
+    {
+        // Build byte-key arrays (same as multi-write path)
+        int byteCount = 2
+            + (tableColumnTitles is not null && tableRows is not null ? 1 : 0)
+            + (formDefinition is not null ? 1 : 0);
+        var byteKeysArr = new string[byteCount];
+        var byteValuesArr = new byte[byteCount][];
+        byteKeysArr[0] = "links_left";
+        byteValuesArr[0] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: false);
+        byteKeysArr[1] = "links_right";
+        byteValuesArr[1] = _fragments.RenderMenuOptions(app.MenuOptionsList, rightAligned: true);
+        int bIdx = 2;
+        if (tableColumnTitles != null && tableRows != null)
+        {
+            byteKeysArr[bIdx] = "table";
+            byteValuesArr[bIdx++] = _fragments.RenderTable(tableColumnTitles, tableRows);
+        }
+        if (formDefinition is not null)
+        {
+            byteKeysArr[bIdx] = "form";
+            byteValuesArr[bIdx] = _fragments.RenderForm(formDefinition);
+        }
+
+        // Estimate total output size
+        int planSize = plans.EstimateTotalSize(values, app.AppMetaDataValues, byteValuesArr);
+        if (planSize < 0)
+        {
+            // Plans not yet bound — fall back to multi-write path (binds on first Execute)
+            await RenderWithPlansAsync(writer, plans, template, keys, values, app, tableColumnTitles, tableRows, formDefinition);
+            return;
+        }
+
+        // Add structural fragment sizes
+        int structuralSize = _fragments.DocTypeAndHeadStart.Length
+            + Utf8.GetByteCount(template.Encoding.WebName)
+            + 2 // "'>"
+            + _fragments.HeadEndAndBodyStart.Length
+            + _fragments.BodyEndAndHtmlEnd.Length;
+
+        if (!string.IsNullOrEmpty(template.Script))
+            structuralSize += _fragments.ScriptTagStart.Length + _fragments.ScriptTagEnd.Length;
+
+        int totalSize = planSize + structuralSize;
+
+        // Single GetSpan call for the entire response
+        var span = writer.GetSpan(totalSize);
+        int offset = 0;
+
+        // DocType + encoding
+        _fragments.DocTypeAndHeadStart.CopyTo(span.Slice(offset));
+        offset += _fragments.DocTypeAndHeadStart.Length;
+        offset += Utf8.GetBytes(template.Encoding.WebName, span.Slice(offset));
+        span[offset] = (byte)'\'';
+        span[offset + 1] = (byte)'>';
+        offset += 2;
+
+        // Head
+        offset += plans.Head.ExecuteSingleSpan(span.Slice(offset), keys, values, app.AppMetaDataKeys, app.AppMetaDataValues);
+
+        // Head→Body transition
+        _fragments.HeadEndAndBodyStart.CopyTo(span.Slice(offset));
+        offset += _fragments.HeadEndAndBodyStart.Length;
+
+        // Body
+        offset += plans.Body.ExecuteSingleSpan(span.Slice(offset), keys, values, app.AppMetaDataKeys, app.AppMetaDataValues, byteKeysArr, byteValuesArr);
+
+        // Footer
+        offset += plans.Footer.ExecuteSingleSpan(span.Slice(offset), keys, values, app.AppMetaDataKeys, app.AppMetaDataValues);
+
+        // Script
+        if (!string.IsNullOrEmpty(template.Script))
+        {
+            _fragments.ScriptTagStart.CopyTo(span.Slice(offset));
+            offset += _fragments.ScriptTagStart.Length;
+            offset += plans.Script.ExecuteSingleSpan(span.Slice(offset), keys, values, app.AppMetaDataKeys, app.AppMetaDataValues);
+            _fragments.ScriptTagEnd.CopyTo(span.Slice(offset));
+            offset += _fragments.ScriptTagEnd.Length;
+        }
+
+        // Body end
+        _fragments.BodyEndAndHtmlEnd.CopyTo(span.Slice(offset));
+        offset += _fragments.BodyEndAndHtmlEnd.Length;
+
+        // Single Advance + Flush — one GetSpan, one Advance, one Flush
+        writer.Advance(offset);
+        await writer.FlushAsync();
+
+        ref var stats = ref RenderStatsProvider.GetStats();
+        stats.WriteCount = 1;
+        stats.BytesWritten = offset;
+        stats.FlushCount = 1;
     }
 
     /// <summary>
@@ -361,7 +450,7 @@ public class HtmlRenderer : IHtmlRenderer
 
         Write(writer, _fragments.BodyEndAndHtmlEnd);
         await writer.FlushAsync();
-        t_stats.FlushCount++;
+        RenderStatsProvider.GetStats().FlushCount++;
     }
 
     /// <summary>
@@ -789,8 +878,8 @@ public class HtmlRenderer : IHtmlRenderer
         Span<byte> buffer = writer.GetSpan(byteCount);
         Utf8.GetBytes(text, buffer);
         writer.Advance(byteCount);
-        t_stats.WriteCount++;
-        t_stats.BytesWritten += byteCount;
+        RenderStatsProvider.GetStats().WriteCount++;
+        RenderStatsProvider.GetStats().BytesWritten += byteCount;
     }
 
     private static void Write(PipeWriter writer, byte[] encodedtext)
@@ -799,9 +888,9 @@ public class HtmlRenderer : IHtmlRenderer
         Span<byte> buffer = writer.GetSpan(byteCount);
         encodedtext.CopyTo(buffer);
         writer.Advance(byteCount);
-        t_stats.WriteCount++;
-        t_stats.BytesWritten += byteCount;
-        t_stats.FragmentCount++;
+        RenderStatsProvider.GetStats().WriteCount++;
+        RenderStatsProvider.GetStats().BytesWritten += byteCount;
+        RenderStatsProvider.GetStats().FragmentCount++;
     }
 
     private static void Write(PipeWriter writer, ReadOnlySpan<char> span)
@@ -810,8 +899,8 @@ public class HtmlRenderer : IHtmlRenderer
         Span<byte> buffer = writer.GetSpan(maxBytes);
         int bytesWritten = Utf8.GetBytes(span, buffer);
         writer.Advance(bytesWritten);
-        t_stats.WriteCount++;
-        t_stats.BytesWritten += bytesWritten;
+        RenderStatsProvider.GetStats().WriteCount++;
+        RenderStatsProvider.GetStats().BytesWritten += bytesWritten;
     }
 
     private static void Write(PipeWriter writer, char c)
@@ -821,8 +910,8 @@ public class HtmlRenderer : IHtmlRenderer
             new ReadOnlySpan<char>(ref c),
             buffer);
         writer.Advance(bytesWritten);
-        t_stats.WriteCount++;
-        t_stats.BytesWritten += bytesWritten;
+        RenderStatsProvider.GetStats().WriteCount++;
+        RenderStatsProvider.GetStats().BytesWritten += bytesWritten;
     }
 
     // ── Arena (IBufferWriter<byte>) write methods ──────────────────────────────
@@ -833,8 +922,8 @@ public class HtmlRenderer : IHtmlRenderer
         Span<byte> buffer = writer.GetSpan(byteCount);
         Utf8.GetBytes(text, buffer);
         writer.Advance(byteCount);
-        t_stats.WriteCount++;
-        t_stats.BytesWritten += byteCount;
+        RenderStatsProvider.GetStats().WriteCount++;
+        RenderStatsProvider.GetStats().BytesWritten += byteCount;
     }
 
     private static void WriteToBuffer(IBufferWriter<byte> writer, byte[] encodedtext)
@@ -842,9 +931,9 @@ public class HtmlRenderer : IHtmlRenderer
         Span<byte> buffer = writer.GetSpan(encodedtext.Length);
         encodedtext.CopyTo(buffer);
         writer.Advance(encodedtext.Length);
-        t_stats.WriteCount++;
-        t_stats.BytesWritten += encodedtext.Length;
-        t_stats.FragmentCount++;
+        RenderStatsProvider.GetStats().WriteCount++;
+        RenderStatsProvider.GetStats().BytesWritten += encodedtext.Length;
+        RenderStatsProvider.GetStats().FragmentCount++;
     }
 
     private static void WriteToBuffer(IBufferWriter<byte> writer, ReadOnlySpan<char> span)
@@ -853,13 +942,13 @@ public class HtmlRenderer : IHtmlRenderer
         Span<byte> buffer = writer.GetSpan(maxBytes);
         int bytesWritten = Utf8.GetBytes(span, buffer);
         writer.Advance(bytesWritten);
-        t_stats.WriteCount++;
-        t_stats.BytesWritten += bytesWritten;
+        RenderStatsProvider.GetStats().WriteCount++;
+        RenderStatsProvider.GetStats().BytesWritten += bytesWritten;
     }
 
     private static void WriteTokenValueToBuffer(IBufferWriter<byte> writer, ReadOnlySpan<char> keySpan, string value)
     {
-        t_stats.TokenCount++;
+        RenderStatsProvider.GetStats().TokenCount++;
         if (keySpan.StartsWith("html_".AsSpan(), StringComparison.Ordinal))
         {
             if (!string.IsNullOrEmpty(value))
@@ -1051,7 +1140,7 @@ public class HtmlRenderer : IHtmlRenderer
 
     private static void WriteTokenValue(PipeWriter writer, ReadOnlySpan<char> keySpan, string value)
     {
-        t_stats.TokenCount++;
+        RenderStatsProvider.GetStats().TokenCount++;
         // Keys prefixed with "html_" carry pre-rendered HTML and must be written raw.
         // All other tokens are HTML-encoded for defense-in-depth XSS protection.
         if (keySpan.StartsWith("html_".AsSpan(), StringComparison.Ordinal))
@@ -1117,7 +1206,7 @@ public class HtmlRenderer : IHtmlRenderer
 
     public async ValueTask RenderPage(BmwContext context, PageInfo page, IBareWebHost app)
     {
-        t_stats = default; // reset per-render counters
+        RenderStatsProvider.Reset(); // reset per-render counters
         var renderSw = Stopwatch.StartNew();
         // Ensure CSP nonce is in page context — search without List allocation
         var pageContext = page.PageContext;
@@ -1191,7 +1280,7 @@ public class HtmlRenderer : IHtmlRenderer
         bool hasLoops = page.PageContext.TemplateLoops is { Length: > 0 };
 
         // Route-level pre-bound plans from jump table (fastest path)
-        var routePlans = context.CompiledPlans as RouteRenderPlans;
+        var routePlans = context.CompiledPlans;
 
         // Zero-copy path: compiled plan writes directly to the response PipeWriter.
         // Only possible when we don't need post-processing (compression, banner, loops).
@@ -1200,7 +1289,8 @@ public class HtmlRenderer : IHtmlRenderer
             CompressionHelper.ApplyHeaders(context, encoding);
             if (routePlans != null)
             {
-                await RenderWithPlansAsync(
+                // Single-span path: one GetSpan, one Advance, one Flush (fastest possible)
+                await RenderWithPlansSingleSpanAsync(
                     context.ResponseBody, routePlans,
                     page.PageMetaData.Template,
                     page.PageContext.PageMetaDataKeys,
@@ -1287,7 +1377,7 @@ public class HtmlRenderer : IHtmlRenderer
 
         renderSw.Stop();
         OnRenderComplete?.Invoke(renderSw.Elapsed);
-        OnRenderCompleteWithStats?.Invoke(renderSw.Elapsed, t_stats);
+        OnRenderCompleteWithStats?.Invoke(renderSw.Elapsed, RenderStatsProvider.GetStats());
 
     }
 

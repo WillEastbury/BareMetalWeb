@@ -1,7 +1,6 @@
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Interfaces;
-using BareMetalWeb.Rendering;
 
 namespace BareMetalWeb.Host;
 

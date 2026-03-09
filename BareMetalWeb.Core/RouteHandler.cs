@@ -9,11 +9,10 @@ public record struct RouteHandlerData
     public PageInfo? PageInfo { get; set; }
 
     /// <summary>
-    /// Pre-compiled render plans for this route's template (RouteRenderPlans).
-    /// Typed as object to avoid Core→Rendering circular dependency — cast in the renderer.
+    /// Pre-compiled render plans for this route's template sections.
     /// Set at jump-table build time. Null for raw/API routes.
     /// </summary>
-    public object? CompiledPlans { get; set; }
+    public RouteRenderPlans? CompiledPlans { get; set; }
 
     public RouteHandlerData(PageInfo? pageInfo, RouteHandlerDelegate handler)
     {
