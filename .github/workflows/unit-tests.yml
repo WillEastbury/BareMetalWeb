@@ -1,6 +1,6 @@
-name: "CI1 · Unit Tests"
+name: "1 · CI1 — Tests & JIT Build"
 
-run-name: "CI1 · Unit Tests — V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+run-name: "1 · CI1 — Tests & JIT Build — V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
 
 on:
   pull_request:

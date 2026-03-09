@@ -9,13 +9,13 @@
 #
 # Downstream: CD1 (cd-canary.yml) triggers on this workflow's success.
 # ────────────────────────────────────────────────────────────────────────────────
-name: "CI2 · AOT Build & Container Push"
+name: "2 · CI2 — AOT & Containers"
 
-run-name: "CI2 · AOT + Containers — V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+run-name: "2 · CI2 — AOT & Containers — V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
 
 on:
   workflow_run:
-    workflows: ["CI1 · Unit Tests"]
+    workflows: ["1 · CI1 — Tests & JIT Build"]
     types: [completed]
     branches: [main]
   workflow_dispatch:

@@ -5,9 +5,9 @@
 # Gated by the "production-rollout" GitHub Environment (requires manual approval).
 # Deploys to all remaining production-ring tenants from deploy-list.json.
 # ────────────────────────────────────────────────────────────────────────────────
-name: "CD3 · Full Production Rollout"
+name: "5 · CD3 — Full Rollout"
 
-run-name: "CD3 · Full Rollout — ${{ inputs.image_tag }}"
+run-name: "5 · CD3 — Full Rollout — ${{ inputs.image_tag }}"
 
 on:
   workflow_dispatch:

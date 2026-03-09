@@ -11,13 +11,13 @@
 #
 # Downstream: CD2 (cd-early-adopters.yml) is triggered manually after review.
 # ────────────────────────────────────────────────────────────────────────────────
-name: "CD1 · Canary Deploy & Extended Tests"
+name: "3 · CD1 — Canary & Extended Tests"
 
-run-name: "CD1 · Canary — V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+run-name: "3 · CD1 — Canary & Extended Tests — V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
 
 on:
   workflow_run:
-    workflows: ["CI2 · AOT Build & Container Push"]
+    workflows: ["2 · CI2 — AOT & Containers"]
     types: [completed]
     branches: [main]
   workflow_dispatch:

@@ -9,9 +9,9 @@
 #
 # Downstream: CD3 (cd-full-rollout.yml) is triggered manually after review.
 # ────────────────────────────────────────────────────────────────────────────────
-name: "CD2 · Early Adopter Rollout"
+name: "4 · CD2 — Early Adopters"
 
-run-name: "CD2 · Early Adopters — ${{ inputs.image_tag }}"
+run-name: "4 · CD2 — Early Adopters — ${{ inputs.image_tag }}"
 
 on:
   workflow_dispatch:
