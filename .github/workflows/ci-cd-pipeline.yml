@@ -103,16 +103,12 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      - name: Restore
-        run: dotnet restore BareMetalWeb.Host/BareMetalWeb.Host.csproj --runtime linux-x64
-
       - name: AOT/Trim publish (Release, linux-x64)
         run: |
           dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
             --configuration Release \
             --runtime linux-x64 \
             --self-contained true \
-            --no-restore \
             -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
             -p:InformationalVersion=${{ needs.version.outputs.info_version }} \
             -o /tmp/aot-check
