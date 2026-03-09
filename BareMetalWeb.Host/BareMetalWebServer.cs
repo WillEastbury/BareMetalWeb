@@ -113,6 +113,8 @@ public class BareMetalWebServer : IBareWebHost
     private ushort _maxRouteId;
     /// <summary>Binary WebSocket transport with branch-free jump table dispatch.</summary>
     private BmwBinaryTransport? _binaryTransport;
+    /// <summary>Protocol descriptor — single shared contract between server and all clients.</summary>
+    private BmwProtocolDescriptor? _protocolDescriptor;
     public BareMetalWebServer(
         string appName,
         string companyDescription,
@@ -414,9 +416,37 @@ public class BareMetalWebServer : IBareWebHost
             _binaryTransport = new BmwBinaryTransport();
             _binaryTransport.PopulateFromRoutes(routes, this);
 
+            // Build the protocol descriptor — the single shared contract
+            _protocolDescriptor = BmwProtocolDescriptor.Build(routes, _compiledRoutes);
+
             // Register the WebSocket upgrade endpoint
             RegisterRoute("GET /bmw/ws", new RouteHandlerData(null, BmwWebSocketHandler.CreateHandler(_binaryTransport)));
-            BufferedLogger.LogInfo($"Binary transport initialized: {_binaryTransport.RegisteredHandlerCount} handlers in jump table");
+
+            // Register protocol descriptor endpoint
+            RegisterRoute("GET /bmw/protocol", new RouteHandlerData(null, async (BmwContext ctx) =>
+            {
+                ctx.StatusCode = 200;
+                ctx.ContentType = "application/json";
+                await ctx.WriteResponseAsync(_protocolDescriptor!.ToJson());
+            }));
+
+            // Register JS SDK generator endpoint
+            RegisterRoute("GET /bmw/sdk.js", new RouteHandlerData(null, async (BmwContext ctx) =>
+            {
+                ctx.StatusCode = 200;
+                ctx.ContentType = "application/javascript";
+                await ctx.WriteResponseAsync(_protocolDescriptor!.GenerateJsSdk());
+            }));
+
+            // Register CLI reference endpoint
+            RegisterRoute("GET /bmw/cli", new RouteHandlerData(null, async (BmwContext ctx) =>
+            {
+                ctx.StatusCode = 200;
+                ctx.ContentType = "text/plain";
+                await ctx.WriteResponseAsync(_protocolDescriptor!.GenerateCliReference());
+            }));
+
+            BufferedLogger.LogInfo($"Binary transport initialized: {_binaryTransport.RegisteredHandlerCount} handlers in jump table, {_protocolDescriptor.Routes.Count} protocol routes");
         }
     }
 
