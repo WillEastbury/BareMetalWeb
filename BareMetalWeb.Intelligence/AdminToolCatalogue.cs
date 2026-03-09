@@ -17,6 +17,14 @@ public static class AdminToolCatalogue
     /// </summary>
     public static IReadOnlyList<IntentDefinition> GetIntentDefinitions() =>
     [
+        new("greeting",
+            "Respond to a greeting or conversational opener",
+            ["hi", "hello"]),
+
+        new("farewell",
+            "Respond to a farewell or closing message",
+            ["bye", "goodbye"]),
+
         new("list-entities",
             "List all registered data entities",
             ["list", "show", "entities", "types", "data", "models", "schema", "all"]),
@@ -53,6 +61,18 @@ public static class AdminToolCatalogue
     public static ToolRegistry CreateRegistry()
     {
         var registry = new ToolRegistry();
+
+        registry.Register(
+            "greeting",
+            "Respond to a greeting",
+            [],
+            GreetingHandler);
+
+        registry.Register(
+            "farewell",
+            "Respond to a farewell",
+            [],
+            FarewellHandler);
 
         registry.Register(
             "list-entities",
@@ -100,6 +120,20 @@ public static class AdminToolCatalogue
             PlanWorkflowHandler);
 
         return registry;
+    }
+
+    private static ValueTask<ToolResult> GreetingHandler(
+        IReadOnlyDictionary<string, string> parameters, CancellationToken ct)
+    {
+        return ValueTask.FromResult(ToolResult.Ok(
+            "Hello! I can help you query data, manage entities, and perform system operations.\n" +
+            "Type 'help' to see what I can do, or just ask me a question in plain English."));
+    }
+
+    private static ValueTask<ToolResult> FarewellHandler(
+        IReadOnlyDictionary<string, string> parameters, CancellationToken ct)
+    {
+        return ValueTask.FromResult(ToolResult.Ok("Goodbye! Feel free to return anytime."));
     }
 
     private static ValueTask<ToolResult> ListEntitiesHandler(
