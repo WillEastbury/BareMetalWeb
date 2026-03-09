@@ -4978,8 +4978,33 @@
   'use strict';
   BareMetalRest.setRoot('/api/');
 
-  const R   = document.getElementById('vnext-root');
+  const R   = document.getElementById('vnext-root') || document.getElementById('vnext-content');
   if (!R) return;
+
+  // ── SPA Activation: hide server-rendered content, take over navigation ──
+  const ssrContent = document.querySelector('.bm-ssr-content');
+  if (ssrContent) ssrContent.style.display = 'none';
+  R.style.display = '';
+
+  // Intercept ALL internal link clicks for SPA navigation (not just [data-go])
+  document.addEventListener('click', function (e) {
+    const anchor = e.target.closest('a[href]');
+    if (!anchor) return;
+    var href = anchor.getAttribute('href');
+    if (!href || href.startsWith('#') || anchor.target === '_blank') return;
+    if (href.startsWith('http://') || href.startsWith('https://')) {
+      try { var u = new URL(href); if (u.host !== location.host) return; href = u.pathname + u.search; }
+      catch (_) { return; }
+    }
+    // Skip non-SPA paths
+    if (href.startsWith('/api/') || href.startsWith('/auth/') || href.startsWith('/admin/') ||
+        href.startsWith('/login') || href.startsWith('/logout') || href.startsWith('/meta/') ||
+        href.startsWith('/static/') || href.startsWith('/bmw/') ||
+        href === '/status' || href === '/metrics') return;
+    e.preventDefault();
+    go(href);
+  }, true);
+
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
   const el  = (tag, props, children) => {

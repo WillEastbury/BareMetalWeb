@@ -21,6 +21,7 @@ function loadRest() {
   // Build a factory that injects globals; fetch is wrapped so tests can swap global.fetch
   const factory = new Function(
     'fetchFn', 'document', 'location', 'FormData', 'URLSearchParams',
+    'WebSocket', 'TextEncoder', 'TextDecoder', 'DataView', 'Uint8Array',
     // Shadow bare `fetch` with our injectable wrapper inside the IIFE body
     'var fetch = fetchFn;\n' +
     `return (${iife});`
@@ -30,8 +31,33 @@ function loadRest() {
     global.document,
     global.location,
     global.FormData,
-    global.URLSearchParams
+    global.URLSearchParams,
+    global.WebSocket || MockWebSocket,
+    global.TextEncoder || require('util').TextEncoder,
+    global.TextDecoder || require('util').TextDecoder,
+    DataView,
+    Uint8Array
   );
+}
+
+// Minimal WebSocket mock for testing
+class MockWebSocket {
+  constructor(url) {
+    this.url = url;
+    this.binaryType = '';
+    this.readyState = 0;
+    this.onopen = null;
+    this.onerror = null;
+    this.onclose = null;
+    this.onmessage = null;
+    this._sent = [];
+    Promise.resolve().then(() => {
+      this.readyState = 1;
+      if (this.onopen) this.onopen({});
+    });
+  }
+  send(data) { this._sent.push(data); }
+  close() { this.readyState = 3; if (this.onclose) this.onclose({}); }
 }
 
 // ── Shared fetch response builders ────────────────────────────────────────
@@ -353,5 +379,51 @@ describe('BareMetalRest – numeric route dispatch', () => {
     const [url, opts] = global.fetch.mock.calls[0];
     expect(url).toBe('/5');
     expect(opts.method).toBe('POST');
+  });
+});
+
+// ── WebSocket transport ────────────────────────────────────────────────────
+
+describe('BareMetalRest – WebSocket transport', () => {
+  let rest;
+  beforeEach(() => {
+    global.fetch = jest.fn();
+    global.WebSocket = MockWebSocket;
+    rest = loadRest();
+  });
+  afterEach(() => { delete global.WebSocket; });
+
+  test('connectWs() establishes WebSocket connection', async () => {
+    await rest.connectWs('ws://test/bmw/ws');
+    expect(rest.isWsReady()).toBe(true);
+  });
+
+  test('isWsReady() returns false before connect', () => {
+    expect(rest.isWsReady()).toBe(false);
+  });
+
+  test('init() fetches route table, protocol, and connects WS', async () => {
+    global.fetch
+      .mockResolvedValueOnce(jsonResponse([{ verb: 'GET', path: '/api/items', id: 1 }]))
+      .mockResolvedValueOnce(jsonResponse({
+        protocol: 'BMW1.0',
+        routes: [{ name: 'listItems', opcode: 1 }]
+      }));
+    await rest.init();
+    expect(global.fetch).toHaveBeenCalledWith('/bmw/routes');
+    expect(global.fetch).toHaveBeenCalledWith('/bmw/protocol');
+    expect(rest.isWsReady()).toBe(true);
+  });
+
+  test('entity().list() falls back to fetch when WS not connected', async () => {
+    global.fetch.mockResolvedValue(jsonResponse([{ id: 1 }]));
+    const result = await rest.entity('items').list();
+    expect(result).toEqual([{ id: 1 }]);
+    expect(global.fetch).toHaveBeenCalled();
+  });
+
+  test('new exports: connectWs, isWsReady are present', () => {
+    expect(typeof rest.connectWs).toBe('function');
+    expect(typeof rest.isWsReady).toBe('function');
   });
 });
