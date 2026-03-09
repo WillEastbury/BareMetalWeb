@@ -6,58 +6,67 @@ using System.Text;
 namespace BareMetalWeb.Rendering;
 
 /// <summary>
-/// A single segment in a compiled render plan.
-/// Either a static UTF-8 fragment (Fragment != null) or a dynamic token hole (TokenKey != null).
-/// </summary>
-public readonly struct RenderSegment
-{
-    /// <summary>Pre-encoded UTF-8 bytes for static content. Null for dynamic tokens.</summary>
-    public readonly byte[]? Fragment;
-
-    /// <summary>Token key name (without {{ }}). Null for static fragments.</summary>
-    public readonly string? TokenKey;
-
-    /// <summary>True if this token carries pre-rendered HTML (html_ prefix).</summary>
-    public readonly bool IsRawHtml;
-
-    private RenderSegment(byte[]? fragment, string? tokenKey, bool isRawHtml)
-    {
-        Fragment = fragment;
-        TokenKey = tokenKey;
-        IsRawHtml = isRawHtml;
-    }
-
-    public static RenderSegment Static(byte[] fragment) => new(fragment, null, false);
-    public static RenderSegment Token(string key) => new(null, key, key.StartsWith("html_", StringComparison.Ordinal));
-}
-
-/// <summary>
-/// Pre-compiled render plan for a template section. Parses {{ tokens }} at compile time
-/// so runtime rendering is a simple segment iteration with no string scanning.
+/// Pre-compiled render plan using struct-of-arrays layout.
+/// Templates are parsed once at startup into parallel arrays of static fragments
+/// and token names. At first render, token names are bound to ordinal indices
+/// against the actual key arrays — all subsequent renders use O(1) index lookups
+/// with zero string comparisons on the hot path.
 /// </summary>
 public sealed class RenderPlan
 {
     private static readonly Encoding Utf8 = Encoding.UTF8;
 
-    public RenderSegment[] Segments { get; }
+    // ── Struct of arrays (populated at compile time) ───────────────────
 
-    private RenderPlan(RenderSegment[] segments)
+    /// <summary>Number of segments in this plan.</summary>
+    public int Count { get; }
+
+    /// <summary>Per-segment operation. 0 = static fragment.</summary>
+    private readonly byte[] _ops;
+
+    /// <summary>Static UTF-8 fragments indexed by segment ordinal. null for token segments.</summary>
+    private readonly byte[]?[] _fragments;
+
+    /// <summary>Token key names from the template. null for static segments. Used only during Bind().</summary>
+    private readonly string?[] _tokenKeys;
+
+    /// <summary>True if the token is html_ prefixed (raw write, no encoding).</summary>
+    private readonly bool[] _isRawHtml;
+
+    // ── Bound ordinals (populated at bind time) ────────────────────────
+    // Op codes: 0=fragment, 1=page_value, 2=app_value, 3=byte_value, 4=raw_page, 5=raw_app, 6=unresolved(drop)
+
+    /// <summary>Resolved ordinal index into the source array for each token segment.</summary>
+    private readonly int[] _ordinals;
+
+    private volatile bool _bound;
+
+    private RenderPlan(int count, byte[] ops, byte[]?[] fragments, string?[] tokenKeys, bool[] isRawHtml, int[] ordinals)
     {
-        Segments = segments;
+        Count = count;
+        _ops = ops;
+        _fragments = fragments;
+        _tokenKeys = tokenKeys;
+        _isRawHtml = isRawHtml;
+        _ordinals = ordinals;
     }
 
     /// <summary>
     /// Compile a template string into a render plan. Tokens like {{key}} become
-    /// Token segments; everything else becomes pre-encoded UTF-8 Static segments.
-    /// Note: loop constructs (Loop%%, For%%) are not supported in compiled plans
-    /// and will be emitted as regular tokens.
+    /// token segments; everything else becomes pre-encoded UTF-8 static fragments.
+    /// Loop constructs (Loop%%, For%%) are not supported and will be emitted as tokens.
     /// </summary>
     public static RenderPlan Compile(string template)
     {
         if (string.IsNullOrEmpty(template))
-            return new RenderPlan(Array.Empty<RenderSegment>());
+            return new RenderPlan(0, Array.Empty<byte>(), Array.Empty<byte[]?>(), Array.Empty<string?>(), Array.Empty<bool>(), Array.Empty<int>());
 
-        var segments = new List<RenderSegment>();
+        // First pass: count segments
+        var segOps = new List<byte>();
+        var segFragments = new List<byte[]?>();
+        var segTokenKeys = new List<string?>();
+        var segIsRaw = new List<bool>();
+
         var span = template.AsSpan();
         int pos = 0;
 
@@ -67,37 +76,120 @@ public sealed class RenderPlan
 
             if (openIdx < 0)
             {
-                // Remainder is all static
-                segments.Add(RenderSegment.Static(Utf8.GetBytes(span.Slice(pos).ToString())));
+                segOps.Add(0);
+                segFragments.Add(Utf8.GetBytes(span.Slice(pos).ToString()));
+                segTokenKeys.Add(null);
+                segIsRaw.Add(false);
                 break;
             }
 
-            // Static fragment before {{
             if (openIdx > 0)
-                segments.Add(RenderSegment.Static(Utf8.GetBytes(span.Slice(pos, openIdx).ToString())));
+            {
+                segOps.Add(0);
+                segFragments.Add(Utf8.GetBytes(span.Slice(pos, openIdx).ToString()));
+                segTokenKeys.Add(null);
+                segIsRaw.Add(false);
+            }
 
             int bodyStart = pos + openIdx + 2;
             int closeRelIdx = span.Slice(bodyStart).IndexOf("}}".AsSpan());
 
             if (closeRelIdx < 0)
             {
-                // Malformed — emit literal {{ and rest
-                segments.Add(RenderSegment.Static(Utf8.GetBytes(span.Slice(pos + openIdx).ToString())));
+                segOps.Add(0);
+                segFragments.Add(Utf8.GetBytes(span.Slice(pos + openIdx).ToString()));
+                segTokenKeys.Add(null);
+                segIsRaw.Add(false);
                 break;
             }
 
             var key = span.Slice(bodyStart, closeRelIdx).ToString();
-            segments.Add(RenderSegment.Token(key));
+            bool isRaw = key.StartsWith("html_", StringComparison.Ordinal);
+            segOps.Add(6); // unresolved until Bind()
+            segFragments.Add(null);
+            segTokenKeys.Add(key);
+            segIsRaw.Add(isRaw);
 
             pos = bodyStart + closeRelIdx + 2;
         }
 
-        return new RenderPlan(segments.ToArray());
+        int count = segOps.Count;
+        return new RenderPlan(
+            count,
+            segOps.ToArray(),
+            segFragments.ToArray(),
+            segTokenKeys.ToArray(),
+            segIsRaw.ToArray(),
+            new int[count]);
     }
 
     /// <summary>
-    /// Execute this plan, writing output to an IBufferWriter. Token values are looked up
-    /// from the provided key/value arrays. Pre-rendered byte tokens use byteKeys/byteValues.
+    /// Bind token names to ordinal indices against the provided key arrays.
+    /// Called once on first Execute — all subsequent calls use the resolved ordinals.
+    /// Thread-safe: worst case two threads both bind (idempotent, same result).
+    /// </summary>
+    private void Bind(string[] keys, string[] appkeys, string[]? byteKeys)
+    {
+        for (int i = 0; i < Count; i++)
+        {
+            if (_ops[i] == 0) continue; // static fragment — skip
+
+            var tokenKey = _tokenKeys[i]!;
+            bool resolved = false;
+
+            // Check page keys first
+            for (int k = 0; k < keys.Length; k++)
+            {
+                if (string.Equals(tokenKey, keys[k], StringComparison.Ordinal))
+                {
+                    _ops[i] = _isRawHtml[i] ? (byte)4 : (byte)1; // 1=page_value, 4=raw_page
+                    _ordinals[i] = k;
+                    resolved = true;
+                    break;
+                }
+            }
+
+            if (resolved) continue;
+
+            // Check app keys
+            for (int k = 0; k < appkeys.Length; k++)
+            {
+                if (string.Equals(tokenKey, appkeys[k], StringComparison.Ordinal))
+                {
+                    _ops[i] = _isRawHtml[i] ? (byte)5 : (byte)2; // 2=app_value, 5=raw_app
+                    _ordinals[i] = k;
+                    resolved = true;
+                    break;
+                }
+            }
+
+            if (resolved) continue;
+
+            // Check byte-rendered keys (table, form, links)
+            if (byteKeys != null)
+            {
+                for (int k = 0; k < byteKeys.Length; k++)
+                {
+                    if (string.Equals(tokenKey, byteKeys[k], StringComparison.Ordinal))
+                    {
+                        _ops[i] = 3; // byte_value
+                        _ordinals[i] = k;
+                        resolved = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!resolved)
+                _ops[i] = 6; // unresolved — will be dropped at render time
+        }
+
+        _bound = true;
+    }
+
+    /// <summary>
+    /// Execute the plan, writing directly to an IBufferWriter (PipeWriter or ArrayBufferWriter).
+    /// First call binds token ordinals; subsequent calls are pure array-indexed writes.
     /// </summary>
     public void Execute(
         IBufferWriter<byte> writer,
@@ -105,97 +197,97 @@ public sealed class RenderPlan
         string[] appkeys, string[] appvalues,
         string[]? byteKeys = null, byte[][]? byteValues = null)
     {
+        if (!_bound)
+            Bind(keys, appkeys, byteKeys);
+
         ref var stats = ref HtmlRenderer.GetStats();
 
-        for (int s = 0; s < Segments.Length; s++)
+        for (int i = 0; i < Count; i++)
         {
-            ref readonly var seg = ref Segments[s];
-
-            if (seg.Fragment != null)
+            switch (_ops[i])
             {
-                var buffer = writer.GetSpan(seg.Fragment.Length);
-                seg.Fragment.CopyTo(buffer);
-                writer.Advance(seg.Fragment.Length);
-                stats.WriteCount++;
-                stats.BytesWritten += seg.Fragment.Length;
-                stats.FragmentCount++;
-                continue;
-            }
-
-            // Dynamic token — find value
-            var tokenKey = seg.TokenKey!;
-            string? value = null;
-
-            for (int k = 0; k < keys.Length; k++)
-            {
-                if (string.Equals(tokenKey, keys[k], StringComparison.Ordinal))
+                case 0: // Static fragment
                 {
-                    value = values[k];
+                    var frag = _fragments[i]!;
+                    var buf = writer.GetSpan(frag.Length);
+                    frag.CopyTo(buf);
+                    writer.Advance(frag.Length);
+                    stats.WriteCount++;
+                    stats.BytesWritten += frag.Length;
+                    stats.FragmentCount++;
                     break;
                 }
-            }
 
-            if (value == null)
-            {
-                for (int k = 0; k < appkeys.Length; k++)
-                {
-                    if (string.Equals(tokenKey, appkeys[k], StringComparison.Ordinal))
-                    {
-                        value = appvalues[k];
-                        break;
-                    }
-                }
-            }
-
-            // Check byte-rendered tokens (table, form, links)
-            if (value == null && byteKeys != null && byteValues != null)
-            {
-                for (int k = 0; k < byteKeys.Length; k++)
-                {
-                    if (string.Equals(tokenKey, byteKeys[k], StringComparison.Ordinal))
-                    {
-                        var bv = byteValues[k];
-                        var buffer = writer.GetSpan(bv.Length);
-                        bv.CopyTo(buffer);
-                        writer.Advance(bv.Length);
-                        stats.WriteCount++;
-                        stats.BytesWritten += bv.Length;
-                        stats.FragmentCount++;
-                        value = string.Empty; // mark as handled
-                        break;
-                    }
-                }
-                if (value == string.Empty)
+                case 1: // Page value (HTML-encoded)
                 {
                     stats.TokenCount++;
-                    continue;
+                    var val = values[_ordinals[i]];
+                    WriteHtmlEncoded(writer, val, ref stats);
+                    break;
                 }
-            }
 
-            stats.TokenCount++;
-            if (value == null) continue; // unknown token — drop
-
-            if (seg.IsRawHtml)
-            {
-                if (value.Length > 0)
+                case 2: // App value (HTML-encoded)
                 {
-                    int byteCount = Utf8.GetByteCount(value);
-                    var buffer = writer.GetSpan(byteCount);
-                    Utf8.GetBytes(value, buffer);
-                    writer.Advance(byteCount);
-                    stats.WriteCount++;
-                    stats.BytesWritten += byteCount;
+                    stats.TokenCount++;
+                    var val = appvalues[_ordinals[i]];
+                    WriteHtmlEncoded(writer, val, ref stats);
+                    break;
                 }
-            }
-            else
-            {
-                WriteHtmlEncoded(writer, value, ref stats);
+
+                case 3: // Byte-rendered value (table/form/links — already UTF-8)
+                {
+                    stats.TokenCount++;
+                    var bv = byteValues![_ordinals[i]];
+                    var buf = writer.GetSpan(bv.Length);
+                    bv.CopyTo(buf);
+                    writer.Advance(bv.Length);
+                    stats.WriteCount++;
+                    stats.BytesWritten += bv.Length;
+                    stats.FragmentCount++;
+                    break;
+                }
+
+                case 4: // Raw page value (no encoding — html_ prefix)
+                {
+                    stats.TokenCount++;
+                    var val = values[_ordinals[i]];
+                    if (val.Length > 0)
+                    {
+                        int bc = Utf8.GetByteCount(val);
+                        var buf = writer.GetSpan(bc);
+                        Utf8.GetBytes(val, buf);
+                        writer.Advance(bc);
+                        stats.WriteCount++;
+                        stats.BytesWritten += bc;
+                    }
+                    break;
+                }
+
+                case 5: // Raw app value (no encoding)
+                {
+                    stats.TokenCount++;
+                    var val = appvalues[_ordinals[i]];
+                    if (val.Length > 0)
+                    {
+                        int bc = Utf8.GetByteCount(val);
+                        var buf = writer.GetSpan(bc);
+                        Utf8.GetBytes(val, buf);
+                        writer.Advance(bc);
+                        stats.WriteCount++;
+                        stats.BytesWritten += bc;
+                    }
+                    break;
+                }
+
+                // case 6: unresolved — drop silently
             }
         }
     }
 
     private static void WriteHtmlEncoded(IBufferWriter<byte> writer, string text, ref RenderStats stats)
     {
+        if (string.IsNullOrEmpty(text)) return;
+
         var span = text.AsSpan();
         int i = 0, segStart = 0;
 
