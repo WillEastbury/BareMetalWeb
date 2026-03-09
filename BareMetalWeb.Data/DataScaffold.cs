@@ -908,12 +908,12 @@ public static class DataScaffold
                 continue;
             }
 
-            // Metadata-driven child list: virtual entity ChildList field with ChildEntitySlug
+            // Metadata-driven child list: emit data attributes for client-side rendering
             if (field.FieldType == FormFieldType.ChildList
-                && !string.IsNullOrWhiteSpace(field.ChildEntitySlug)
-                && TryGetEntity(field.ChildEntitySlug!, out var childViewMeta))
+                && !string.IsNullOrWhiteSpace(field.ChildEntitySlug))
             {
-                var html = BuildMetadataChildListViewHtml(field, childViewMeta, value as string);
+                var json = value as string ?? "[]";
+                var html = $"<div class=\"vnext-deferred-sublist\" data-field=\"{WebUtility.HtmlEncode(field.Name)}\" data-slug=\"{WebUtility.HtmlEncode(field.ChildEntitySlug)}\" data-json=\"{WebUtility.HtmlEncode(json)}\"></div>";
                 rows.Add((field.Label, html, true));
                 continue;
             }
@@ -3223,57 +3223,6 @@ public static class DataScaffold
         sb.Append("</tbody></table></div></div>");
         return sb.ToString();
     }
-
-    /// <summary>
-    /// Builds a read-only HTML table for a metadata-driven (virtual entity) ChildList field.
-    /// Parses the JSON-serialized child rows and renders each row using the child entity's field metadata.
-    /// </summary>
-    private static string BuildMetadataChildListViewHtml(DataFieldMetadata field, DataEntityMetadata childMeta, string? jsonValue)
-    {
-        var childFields = GetChildFieldMetadataFromEntity(childMeta, field);
-        var sb = new StringBuilder(2048);
-        sb.Append("<div class=\"mt-3\">");
-        sb.Append($"<h2 class=\"h6\">{WebUtility.HtmlEncode(field.Label)}</h2>");
-        sb.Append("<div class=\"table-responsive\"><table class=\"table table-striped table-sm align-middle mb-0 bm-table\">");
-        sb.Append("<thead><tr>");
-        foreach (var child in childFields)
-        {
-            sb.Append($"<th>{WebUtility.HtmlEncode(child.Label)}</th>");
-        }
-        sb.Append("</tr></thead><tbody>");
-
-        if (!string.IsNullOrWhiteSpace(jsonValue))
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(jsonValue);
-                foreach (var row in doc.RootElement.EnumerateArray())
-                {
-                    sb.Append("<tr>");
-                    for (int i = 0; i < childFields.Count; i++)
-                    {
-                        var child = childFields[i];
-                        var displayText = row.TryGetProperty(child.Name, out var prop) ? prop.GetString() ?? string.Empty : string.Empty;
-                        if (child.LookupOptions != null)
-                        {
-                            foreach (var opt in child.LookupOptions)
-                            {
-                                if (string.Equals(opt.Key, displayText, StringComparison.OrdinalIgnoreCase))
-                                { displayText = opt.Value; break; }
-                            }
-                        }
-                        sb.Append($"<td data-label=\"{WebUtility.HtmlEncode(child.Label)}\">{WebUtility.HtmlEncode(displayText)}</td>");
-                    }
-                    sb.Append("</tr>");
-                }
-            }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"Failed to parse child list JSON for field {field.Name}: {ex.Message}"); }
-        }
-
-        sb.Append("</tbody></table></div></div>");
-        return sb.ToString();
-    }
-
 
     [RequiresUnreferencedCode("Child list parsing requires compiled entity types to be preserved.")]
     private static bool TryParseChildList(string rawValue, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type childType, out object? list)

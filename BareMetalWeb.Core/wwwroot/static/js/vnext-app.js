@@ -4923,6 +4923,37 @@
         init();
     }
 
+    // Hydrate server-emitted deferred child list placeholders (tree view SSR path)
+    function hydrateSubLists() {
+        var els = document.querySelectorAll('.vnext-deferred-sublist');
+        if (!els.length) return;
+        els.forEach(function (el) {
+            var slug = el.getAttribute('data-slug');
+            var json = el.getAttribute('data-json');
+            var items;
+            try { items = JSON.parse(json || '[]'); } catch (e) { items = []; }
+            fetch('/meta/' + encodeURIComponent(slug) + '/schema')
+                .then(function (r) { return r.ok ? r.json() : null; })
+                .then(function (schema) {
+                    var field = null;
+                    if (schema && Array.isArray(schema.fields)) {
+                        field = { subFields: schema.fields };
+                    }
+                    el.innerHTML = renderSubListReadonly(items, field);
+                    el.classList.remove('vnext-deferred-sublist');
+                })
+                .catch(function () {
+                    el.innerHTML = renderSubListReadonly(items, null);
+                    el.classList.remove('vnext-deferred-sublist');
+                });
+        });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', hydrateSubLists);
+    } else {
+        setTimeout(hydrateSubLists, 0);
+    }
+
     // Event delegation for high-cardinality lookup search button and row selection
     document.addEventListener('click', function (e) {
         var searchBtn = e.target.closest('[data-vnext-lookup-search]');
