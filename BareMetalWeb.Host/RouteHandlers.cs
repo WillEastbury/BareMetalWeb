@@ -7325,7 +7325,37 @@ public sealed class RouteHandlers : IRouteHandlers
         try
         {
             var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
-            
+
+            // Runtime-defined actions have Method == null; delegate to CommandService
+            if (cmd.Method == null)
+            {
+                var svc = new CommandService();
+                var intent = new CommandIntent
+                {
+                    EntitySlug = meta.Slug,
+                    EntityId = id,
+                    Operation = commandName,
+                    Fields = new Dictionary<string, string?>()
+                };
+                var cmdResult = await svc.ExecuteAsync(intent, context.RequestAborted).ConfigureAwait(false);
+
+                var msg = cmdResult.Success ? "Command executed." : cmdResult.Error;
+
+                if (instance is BaseDataObject bdoRuntime)
+                    await _auditService.AuditRemoteCommandAsync(bdoRuntime, commandName, userName, null,
+                        new RemoteCommandResult(cmdResult.Success, msg ?? string.Empty),
+                        context.RequestAborted).ConfigureAwait(false);
+
+                context.Response.StatusCode = cmdResult.Success ? StatusCodes.Status200OK : StatusCodes.Status422UnprocessableEntity;
+                await WriteJsonResponseAsync(context, new Dictionary<string, object?>
+                {
+                    ["success"] = cmdResult.Success,
+                    ["message"] = msg,
+                    ["data"] = cmdResult.Success ? cmdResult.Data : null
+                });
+                return;
+            }
+
             RemoteCommandResult result;
             var returnType = cmd.Method.ReturnType;
             if (returnType == typeof(RemoteCommandResult))
@@ -7358,8 +7388,9 @@ public sealed class RouteHandlers : IRouteHandlers
         }
         catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"[DataCommandHandler] Command '{commandName}' on '{meta.Slug}/{id}' failed: {ex}");
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = false, ["message"] = "Command failed due to an internal error." });
+            await WriteJsonResponseAsync(context, new Dictionary<string, object?> { ["success"] = false, ["message"] = $"Command failed: {ex.Message}" });
         }
     }
 
