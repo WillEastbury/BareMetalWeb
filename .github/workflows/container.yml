@@ -15,7 +15,7 @@ run-name: "CI2 · AOT + Containers — V${{ vars.MAJOR_VERSION || '1' }}.${{ git
 
 on:
   workflow_run:
-    workflows: ["Unit Tests"]
+    workflows: ["CI1 · Unit Tests"]
     types: [completed]
     branches: [main]
   workflow_dispatch:
