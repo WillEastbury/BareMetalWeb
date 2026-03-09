@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>BMW Forms</title>
+  <link rel="stylesheet" href="bmw.css">
+</head>
+<body>
+  <nav class="n">
+    <strong>BMW</strong>
+    <a href="index.html">Home</a>
+    <a href="dashboard.html">Dashboard</a>
+    <a href="table.html">Tables</a>
+    <a href="form.html">Forms</a>
+  </nav>
+  <div class="s" style="padding:var(--g);max-width:600px">
+    <div class="b">
+      <h3>Create Order</h3>
+      <form class="s">
+        <label>
+          Customer
+          <input class="i" type="text" placeholder="Customer name">
+        </label>
+        <label>
+          Product
+          <input class="i" type="text" placeholder="Product SKU">
+        </label>
+        <div class="r">
+          <label class="c">
+            Quantity
+            <input class="i" type="number" value="1" min="1">
+          </label>
+          <label class="c">
+            Price
+            <input class="i" type="number" step="0.01" placeholder="0.00">
+          </label>
+        </div>
+        <label>
+          Notes
+          <textarea class="i" rows="3" placeholder="Optional notes"></textarea>
+        </label>
+        <div class="r">
+          <button type="submit" class="btn p">Save</button>
+          <button type="reset" class="btn">Reset</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</body>
+</html>
