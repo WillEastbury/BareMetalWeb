@@ -145,7 +145,7 @@ jobs:
   aot-windows-amd64:
     name: "AOT · windows-amd64"
     needs: version
-    runs-on: windows-2022
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
 
@@ -271,7 +271,7 @@ jobs:
   container-windows-amd64:
     name: "Container · windows-amd64"
     needs: [version, aot-windows-amd64]
-    runs-on: windows-2022
+    runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
 

@@ -1,7 +1,7 @@
 # ── Thin container from pre-built AOT binary (Windows Nano Server) ───────
 # Used by CI2 (container.yml) to package Windows AOT artifacts.
 # ─────────────────────────────────────────────────────────────────────────
-FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-nanoserver-ltsc2022
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-nanoserver-ltsc2025
 
 WORKDIR /app
 
