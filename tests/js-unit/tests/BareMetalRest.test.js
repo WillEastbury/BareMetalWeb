@@ -216,3 +216,142 @@ describe('BareMetalRest – call() HTTP semantics', () => {
     expect(opts.headers['Content-Type']).toBeUndefined();
   });
 });
+
+// ── init() – route table loading ──────────────────────────────────────────
+
+describe('BareMetalRest – init() route table', () => {
+  let rest;
+
+  beforeEach(() => {
+    global.fetch = jest.fn();
+    rest = loadRest();
+  });
+
+  afterEach(() => { delete global.fetch; });
+
+  test('init() fetches /bmw/routes and builds route map', async () => {
+    global.fetch.mockResolvedValue(jsonResponse([
+      { id: 1, verb: 'GET', path: '/api/users', params: 0 },
+      { id: 2, verb: 'POST', path: '/api/users', params: 0 },
+      { id: 3, verb: 'GET', path: '/api/users/{id}', params: 1 },
+    ]));
+    await rest.init();
+    expect(global.fetch).toHaveBeenCalledWith('/bmw/routes');
+    expect(rest.resolveRouteId('GET', '/api/users')).toBe(1);
+    expect(rest.resolveRouteId('POST', '/api/users')).toBe(2);
+  });
+
+  test('init() is idempotent — only fetches once', async () => {
+    global.fetch.mockResolvedValue(jsonResponse([
+      { id: 1, verb: 'GET', path: '/api/users', params: 0 },
+    ]));
+    await rest.init();
+    await rest.init();
+    // Only one fetch call for /bmw/routes (not counting other fetches)
+    const routeCalls = global.fetch.mock.calls.filter(c => c[0] === '/bmw/routes');
+    expect(routeCalls).toHaveLength(1);
+  });
+
+  test('init() gracefully handles fetch error', async () => {
+    global.fetch.mockRejectedValue(new Error('network'));
+    await rest.init(); // should not throw
+    expect(rest.resolveRouteId('GET', '/api/users')).toBeNull();
+  });
+
+  test('init() gracefully handles non-ok response', async () => {
+    global.fetch.mockResolvedValue({ ok: false, status: 404 });
+    await rest.init(); // should not throw
+    expect(rest.resolveRouteId('GET', '/api/users')).toBeNull();
+  });
+});
+
+// ── Numeric dispatch – transparent URL rewriting ──────────────────────────
+
+describe('BareMetalRest – numeric route dispatch', () => {
+  let rest;
+
+  beforeEach(async () => {
+    global.fetch = jest.fn().mockImplementation((url) => {
+      if (url === '/bmw/routes') {
+        return Promise.resolve(jsonResponse([
+          { id: 10, verb: 'GET', path: '/api/orders', params: 0 },
+          { id: 11, verb: 'POST', path: '/api/orders', params: 0 },
+          { id: 12, verb: 'GET', path: '/api/orders/{id}', params: 1 },
+          { id: 13, verb: 'PUT', path: '/api/orders/{id}', params: 1 },
+          { id: 14, verb: 'DELETE', path: '/api/orders/{id}', params: 1 },
+        ]));
+      }
+      return Promise.resolve(jsonResponse([]));
+    });
+    rest = loadRest();
+    rest.setRoot('/api/');
+    await rest.init();
+    // Reset fetch mock after init so we only see entity calls
+    global.fetch.mockClear();
+    global.fetch.mockResolvedValue(jsonResponse([]));
+  });
+
+  afterEach(() => { delete global.fetch; });
+
+  test('entity().list() uses numeric URL /10?type=orders', async () => {
+    await rest.entity('orders').list();
+    const url = global.fetch.mock.calls[0][0];
+    expect(url).toBe('/10?type=orders');
+  });
+
+  test('entity().list(params) appends query params with &', async () => {
+    await rest.entity('orders').list({ status: 'open' });
+    const url = global.fetch.mock.calls[0][0];
+    expect(url).toContain('/10?type=orders&');
+    expect(url).toContain('status=open');
+  });
+
+  test('entity().get(id) uses numeric URL /12?type=orders&id=42', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({ id: '42' }));
+    await rest.entity('orders').get('42');
+    const url = global.fetch.mock.calls[0][0];
+    expect(url).toBe('/12?type=orders&id=42');
+  });
+
+  test('entity().create(data) uses numeric URL /11?type=orders', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({ id: '1' }));
+    await rest.entity('orders').create({ item: 'widget' });
+    const url = global.fetch.mock.calls[0][0];
+    expect(url).toBe('/11?type=orders');
+  });
+
+  test('entity().update(id, data) uses numeric URL /13?type=orders&id=7', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({ id: '7' }));
+    await rest.entity('orders').update('7', { qty: 5 });
+    const url = global.fetch.mock.calls[0][0];
+    expect(url).toBe('/13?type=orders&id=7');
+  });
+
+  test('entity().remove(id) uses numeric URL /14?type=orders&id=9', async () => {
+    global.fetch.mockResolvedValue(noContentResponse());
+    await rest.entity('orders').remove('9');
+    const url = global.fetch.mock.calls[0][0];
+    expect(url).toBe('/14?type=orders&id=9');
+  });
+
+  test('falls back to string URL when slug not in route table', async () => {
+    await rest.entity('unknown').list();
+    const url = global.fetch.mock.calls[0][0];
+    expect(url).toBe('/api/unknown');
+  });
+
+  test('byId() dispatches directly by route ID', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({ ok: true }));
+    await rest.byId(42);
+    const url = global.fetch.mock.calls[0][0];
+    expect(url).toBe('/42');
+  });
+
+  test('byId() with method option', async () => {
+    global.fetch.mockResolvedValue(jsonResponse({}));
+    await rest.byId(5, { method: 'POST', body: { x: 1 } });
+    const [url, opts] = global.fetch.mock.calls[0];
+    expect(url).toBe('/5');
+    expect(opts.method).toBe('POST');
+  });
+});
