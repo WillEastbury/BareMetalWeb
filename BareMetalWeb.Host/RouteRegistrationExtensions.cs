@@ -1949,7 +1949,7 @@ public static class RouteRegistrationExtensions
         sb.Append("</head>");
         sb.Append("<body>");
         sb.Append(ReplaceTemplateTokens(navbarSection, tokens));
-        sb.Append("<div class=\"container-fluid py-3\" id=\"vnext-content\"><div class=\"text-center py-5\"><div class=\"spinner-border\" role=\"status\"><span class=\"visually-hidden\">Loading...</span></div></div></div>");
+        sb.Append("<div class=\"container-fluid py-4 px-4 bm-content\" id=\"vnext-content\"><div class=\"text-center py-5\"><div class=\"spinner-border\" role=\"status\"><span class=\"visually-hidden\">Loading...</span></div></div></div>");
         sb.Append("<div id=\"vnext-modal-container\"></div>");
         sb.Append("<div id=\"vnext-toast-container\" class=\"position-fixed top-0 end-0 p-3\"></div>");
         sb.Append(ReplaceTemplateTokens(footerElement, tokens));
