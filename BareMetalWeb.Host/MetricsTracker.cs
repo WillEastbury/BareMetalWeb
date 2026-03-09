@@ -326,12 +326,40 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             new[] { "Key Comparison", DataLayerCapabilities.KeyComparisonPath },
 
             new[] { "🔧 AVAILABLE CPU FEATURES", "" },
-            .. GetSimdFeatureRows()
+            .. GetSimdFeatureRows(),
+
+            .. GetClusterRows()
+        ];
+    }
+
+    private static string[][] GetClusterRows()
+    {
+        var state = ClusterState;
+        if (state == null)
+            return [];
+
+        var snapshot = state.GetSnapshot();
+        var roleLabel = snapshot.Role == BareMetalWeb.Data.ClusterRole.Leader
+            ? "👑 Leader"
+            : "🔄 Follower";
+        var leaseLabel = snapshot.IsLeaseValid ? "✓ Valid" : "✗ Expired";
+
+        return
+        [
+            new[] { "🏆 CLUSTER / LEASE", "" },
+            new[] { "Instance Name", snapshot.InstanceId },
+            new[] { "Role", roleLabel },
+            new[] { "Lease Valid", leaseLabel },
+            new[] { "Epoch", snapshot.Epoch.ToString("N0") },
+            new[] { "Last LSN", snapshot.LastLsn.ToString("N0") },
         ];
     }
 
     /// <summary>Data root directory — set once at startup from configuration.</summary>
     public static string? DataRoot { get; set; }
+
+    /// <summary>Cluster state reference — set once at startup. Null on single-instance deployments.</summary>
+    public static BareMetalWeb.Data.ClusterState? ClusterState { get; set; }
 
     private static string FormatUptime(TimeSpan uptime)
     {
