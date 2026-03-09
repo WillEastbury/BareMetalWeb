@@ -62,6 +62,8 @@ public sealed class BmwProtocolDescriptor
     private readonly Dictionary<int, RouteDescriptor> _byOpcode;
     private readonly Dictionary<string, EntityDescriptor> _entities;
     private string? _cachedJson;
+    private string? _cachedSdk;
+    private string? _cachedCli;
 
     public IReadOnlyList<RouteDescriptor> Routes => _routes;
     public IReadOnlyDictionary<string, RouteDescriptor> RoutesByName => _byName;
@@ -233,166 +235,217 @@ public sealed class BmwProtocolDescriptor
     }
 
     /// <summary>
-    /// Generate a JavaScript SDK module string from the protocol descriptor.
-    /// Creates a virtual SDK where each entity method maps to binary transport opcodes.
+    /// Generate an ECMAScript module (ESM) SDK from the protocol descriptor.
+    /// Produces a BMWClient class with WebSocket binary transport, generated
+    /// route methods, and entity wrapper classes. Loadable via:
+    ///   import { BMWClient } from "/bmw/sdk.js";
+    /// No bundlers, transpilers, or build tools required.
     /// </summary>
     public string GenerateJsSdk()
     {
-        var sb = new StringBuilder(4096);
-        sb.Append("// Auto-generated BMW SDK — do not edit\n");
-        sb.Append("// Protocol: BMW1.0 | Generated: ");
-        sb.Append(DateTime.UtcNow.ToString("O"));
-        sb.Append('\n');
-        sb.Append("const BmwSdk=(()=>{\n'use strict';\n");
-        sb.Append("const _d=");
+        if (_cachedSdk != null) return _cachedSdk;
+
+        var sb = new StringBuilder(8192);
+        sb.Append("// Auto-generated BMW ESM SDK — do not edit\n");
+        sb.Append("// Protocol: BMW1.0\n");
+        sb.Append("// Usage: import { BMWClient } from \"/bmw/sdk.js\";\n\n");
+
+        // Embedded protocol descriptor
+        sb.Append("const descriptor = ");
         sb.Append(ToJson());
-        sb.Append(";\n");
-        sb.Append("const _opcodes=new Map();\n");
-        sb.Append("for(const r of _d.routes)_opcodes.set(r.name,r);\n\n");
+        sb.Append(";\n\n");
 
-        // Frame encode/decode helpers
-        sb.Append("function encodeFrame(method,route,entityId){\n");
-        sb.Append("const b=new Uint8Array(6);\n");
-        sb.Append("const op=(method<<");
+        // Binary frame helpers (module-level, shared by all instances)
+        sb.Append("const ROUTE_BITS = ");
         sb.Append(BmwBinaryTransport.RouteBits);
-        sb.Append(")|route;\n");
-        sb.Append("const v=new DataView(b.buffer);\n");
-        sb.Append("v.setUint16(0,op<<2);\n");
-        sb.Append("v.setUint32(2,entityId,true);\nreturn b;\n}\n\n");
+        sb.Append(";\n");
+        sb.Append("const FRAME_SIZE = ");
+        sb.Append(BmwBinaryTransport.FrameSize);
+        sb.Append(";\n");
+        sb.Append("const PAYLOAD_HDR = ");
+        sb.Append(BmwBinaryTransport.PayloadLengthSize);
+        sb.Append(";\n\n");
 
-        sb.Append("function encodePayload(frame,data){\n");
-        sb.Append("const json=JSON.stringify(data);\n");
-        sb.Append("const enc=new TextEncoder().encode(json);\n");
-        sb.Append("const len=enc.length;\n");
-        sb.Append("const buf=new Uint8Array(frame.length+3+len);\n");
-        sb.Append("buf.set(frame);\n");
-        sb.Append("buf[6]=len&0xFF;buf[7]=(len>>8)&0xFF;buf[8]=(len>>16)&0xFF;\n");
-        sb.Append("buf.set(enc,9);\nreturn buf;\n}\n\n");
+        sb.Append("function encodeFrame(opcode, entityId) {\n");
+        sb.Append("  const b = new Uint8Array(FRAME_SIZE);\n");
+        sb.Append("  const v = new DataView(b.buffer);\n");
+        sb.Append("  v.setUint16(0, opcode << 2);\n");
+        sb.Append("  v.setUint32(2, entityId, true);\n");
+        sb.Append("  return b;\n");
+        sb.Append("}\n\n");
 
-        // WebSocket connection management
-        sb.Append("let _ws=null,_pending=new Map(),_nextId=1;\n");
-        sb.Append("function connect(url){\n");
-        sb.Append("return new Promise((resolve,reject)=>{\n");
-        sb.Append("_ws=new WebSocket(url);\n");
-        sb.Append("_ws.binaryType='arraybuffer';\n");
-        sb.Append("_ws.onopen=()=>resolve(_ws);\n");
-        sb.Append("_ws.onerror=e=>reject(e);\n");
-        sb.Append("_ws.onmessage=e=>{\n");
-        sb.Append("const v=new DataView(e.data);\n");
-        sb.Append("const id=v.getUint32(2,true);\n");
-        sb.Append("const cb=_pending.get(id);\n");
-        sb.Append("if(cb){_pending.delete(id);cb(e.data);}\n");
-        sb.Append("};\n});\n}\n\n");
+        sb.Append("function encodePayload(frame, data) {\n");
+        sb.Append("  const json = JSON.stringify(data);\n");
+        sb.Append("  const enc = new TextEncoder().encode(json);\n");
+        sb.Append("  const len = enc.length;\n");
+        sb.Append("  const buf = new Uint8Array(FRAME_SIZE + PAYLOAD_HDR + len);\n");
+        sb.Append("  buf.set(frame);\n");
+        sb.Append("  buf[6] = len & 0xFF;\n");
+        sb.Append("  buf[7] = (len >> 8) & 0xFF;\n");
+        sb.Append("  buf[8] = (len >> 16) & 0xFF;\n");
+        sb.Append("  buf.set(enc, FRAME_SIZE + PAYLOAD_HDR);\n");
+        sb.Append("  return buf;\n");
+        sb.Append("}\n\n");
 
-        // send() — fire a binary frame and resolve with response
-        sb.Append("function send(method,route,entityId,data){\n");
-        sb.Append("return new Promise((resolve,reject)=>{\n");
-        sb.Append("if(!_ws||_ws.readyState!==1)return reject(new Error('Not connected'));\n");
-        sb.Append("const reqId=entityId||(_nextId++);\n");
-        sb.Append("_pending.set(reqId,buf=>{\n");
-        sb.Append("if(buf.byteLength>6){const dec=new TextDecoder();\n");
-        sb.Append("resolve(JSON.parse(dec.decode(new Uint8Array(buf,9))));\n");
-        sb.Append("}else resolve(null);\n});\n");
-        sb.Append("const frame=encodeFrame(method,route,reqId);\n");
-        sb.Append("if(data!==undefined){_ws.send(encodePayload(frame,data));}\n");
-        sb.Append("else{_ws.send(frame);}\n");
-        sb.Append("});\n}\n\n");
+        sb.Append("function decodeResponse(buf) {\n");
+        sb.Append("  if (buf.byteLength <= FRAME_SIZE) return null;\n");
+        sb.Append("  return JSON.parse(new TextDecoder().decode(\n");
+        sb.Append("    new Uint8Array(buf, FRAME_SIZE + PAYLOAD_HDR)));\n");
+        sb.Append("}\n\n");
 
-        // Generate entity-specific SDK methods
-        foreach (var entity in _entities)
+        // BMWClient class
+        sb.Append("export class BMWClient {\n");
+        sb.Append("  #ws = null;\n");
+        sb.Append("  #pending = new Map();\n");
+        sb.Append("  #nextId = 1;\n");
+        sb.Append("  #connected = false;\n\n");
+
+        sb.Append("  constructor(protocol) {\n");
+        sb.Append("    this.protocol = protocol || descriptor;\n");
+        sb.Append("    this.routes = {};\n");
+        sb.Append("    for (const r of this.protocol.routes) {\n");
+        sb.Append("      this.routes[r.name] = r.opcode;\n");
+        sb.Append("    }\n");
+        sb.Append("  }\n\n");
+
+        sb.Append("  get connected() { return this.#connected; }\n\n");
+
+        // connect() — opens WebSocket, sets up response correlation
+        sb.Append("  connect(url) {\n");
+        sb.Append("    return new Promise((resolve, reject) => {\n");
+        sb.Append("      const wsUrl = url ||\n");
+        sb.Append("        ((typeof location !== 'undefined')\n");
+        sb.Append("          ? `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/bmw/ws`\n");
+        sb.Append("          : 'ws://localhost/bmw/ws');\n");
+        sb.Append("      this.#ws = new WebSocket(wsUrl);\n");
+        sb.Append("      this.#ws.binaryType = 'arraybuffer';\n");
+        sb.Append("      this.#ws.onopen = () => { this.#connected = true; resolve(this); };\n");
+        sb.Append("      this.#ws.onerror = (e) => reject(e);\n");
+        sb.Append("      this.#ws.onclose = () => {\n");
+        sb.Append("        this.#connected = false;\n");
+        sb.Append("        for (const [, cb] of this.#pending) cb(null, new Error('Connection closed'));\n");
+        sb.Append("        this.#pending.clear();\n");
+        sb.Append("      };\n");
+        sb.Append("      this.#ws.onmessage = (e) => {\n");
+        sb.Append("        const v = new DataView(e.data);\n");
+        sb.Append("        const id = v.getUint32(2, true);\n");
+        sb.Append("        const cb = this.#pending.get(id);\n");
+        sb.Append("        if (cb) { this.#pending.delete(id); cb(e.data); }\n");
+        sb.Append("      };\n");
+        sb.Append("    });\n");
+        sb.Append("  }\n\n");
+
+        // send() — encode + dispatch a binary frame, return Promise
+        sb.Append("  send(opcode, entityId, data) {\n");
+        sb.Append("    return new Promise((resolve, reject) => {\n");
+        sb.Append("      if (!this.#ws || this.#ws.readyState !== 1)\n");
+        sb.Append("        return reject(new Error('Not connected'));\n");
+        sb.Append("      const reqId = entityId || (this.#nextId++);\n");
+        sb.Append("      this.#pending.set(reqId, (buf, err) => {\n");
+        sb.Append("        if (err) return reject(err);\n");
+        sb.Append("        resolve(decodeResponse(buf));\n");
+        sb.Append("      });\n");
+        sb.Append("      const frame = encodeFrame(opcode, reqId);\n");
+        sb.Append("      if (data !== undefined) {\n");
+        sb.Append("        this.#ws.send(encodePayload(frame, data));\n");
+        sb.Append("      } else {\n");
+        sb.Append("        this.#ws.send(frame);\n");
+        sb.Append("      }\n");
+        sb.Append("    });\n");
+        sb.Append("  }\n\n");
+
+        // close()
+        sb.Append("  close() {\n");
+        sb.Append("    if (this.#ws) { this.#ws.close(); this.#ws = null; }\n");
+        sb.Append("  }\n");
+        sb.Append("}\n\n");
+
+        // Generated prototype methods for each route
+        sb.Append("// ── Generated route methods ──────────────────────────────────────\n\n");
+        foreach (var route in _routes)
         {
-            string slug = entity.Key;
-            string jsName = ToCamelCase(slug);
-            sb.Append("// ── ");
-            sb.Append(slug);
-            sb.Append(" ──\n");
-            sb.Append("const ");
-            sb.Append(jsName);
-            sb.Append("={\n");
+            sb.Append("BMWClient.prototype.");
+            sb.Append(route.Name);
 
-            foreach (int opcode in entity.Value.Opcodes)
+            if (route.HasPayload)
             {
-                if (!_byOpcode.TryGetValue(opcode, out var route)) continue;
-                int methodOrd = BmwBinaryTransport.GetMethod(opcode);
-                int routeOrd = BmwBinaryTransport.GetRoute(opcode);
-
-                sb.Append("  ");
-                sb.Append(route.Name);
-                sb.Append(':');
-
-                if (route.HasPayload)
+                if (route.ParameterNames.Length > 0)
                 {
-                    // Write methods: fn(data) or fn(id, data)
-                    if (route.ParameterNames.Length > 0)
-                    {
-                        sb.Append("(id,data)=>send(");
-                        sb.Append(methodOrd);
-                        sb.Append(',');
-                        sb.Append(routeOrd);
-                        sb.Append(",id,data)");
-                    }
-                    else
-                    {
-                        sb.Append("(data)=>send(");
-                        sb.Append(methodOrd);
-                        sb.Append(',');
-                        sb.Append(routeOrd);
-                        sb.Append(",0,data)");
-                    }
+                    sb.Append(" = function(id, data) {\n");
+                    sb.Append("  return this.send(");
+                    sb.Append(route.Opcode);
+                    sb.Append(", id, data);\n};\n\n");
                 }
                 else
                 {
-                    // Read methods: fn(id) or fn()
-                    if (route.ParameterNames.Length > 0)
-                    {
-                        sb.Append("(id)=>send(");
-                        sb.Append(methodOrd);
-                        sb.Append(',');
-                        sb.Append(routeOrd);
-                        sb.Append(",id)");
-                    }
-                    else
-                    {
-                        sb.Append("()=>send(");
-                        sb.Append(methodOrd);
-                        sb.Append(',');
-                        sb.Append(routeOrd);
-                        sb.Append(",0)");
-                    }
+                    sb.Append(" = function(data) {\n");
+                    sb.Append("  return this.send(");
+                    sb.Append(route.Opcode);
+                    sb.Append(", 0, data);\n};\n\n");
                 }
-                sb.Append(",\n");
             }
-            sb.Append("};\n\n");
+            else
+            {
+                if (route.ParameterNames.Length > 0)
+                {
+                    sb.Append(" = function(id) {\n");
+                    sb.Append("  return this.send(");
+                    sb.Append(route.Opcode);
+                    sb.Append(", id);\n};\n\n");
+                }
+                else
+                {
+                    sb.Append(" = function() {\n");
+                    sb.Append("  return this.send(");
+                    sb.Append(route.Opcode);
+                    sb.Append(", 0);\n};\n\n");
+                }
+            }
         }
 
-        // Public API
-        sb.Append("return{connect,send,descriptor:_d,opcodes:_opcodes");
+        // Entity wrapper classes
+        sb.Append("// ── Entity classes ───────────────────────────────────────────────\n\n");
         foreach (var entity in _entities)
         {
-            sb.Append(',');
-            sb.Append(ToCamelCase(entity.Key));
+            string className = Capitalize(entity.Key);
+            sb.Append("export class ");
+            sb.Append(className);
+            sb.Append(" {\n");
+            sb.Append("  constructor(data) {\n");
+            sb.Append("    if (data) Object.assign(this, data);\n");
+            sb.Append("  }\n");
+            sb.Append("}\n\n");
         }
-        sb.Append("};\n})();\n");
 
-        return sb.ToString();
+        // Named exports
+        sb.Append("export { descriptor, encodeFrame, decodeResponse };\n");
+
+        _cachedSdk = sb.ToString();
+        return _cachedSdk;
     }
 
     /// <summary>
-    /// Generate CLI command mappings from the protocol descriptor.
-    /// Returns a help-text style listing of available CLI commands.
+    /// Generate a Node.js CLI client script from the protocol descriptor.
+    /// Uses WebSocket binary transport with the same opcode mappings as the browser SDK.
+    /// Executable via: node bmw-cli.js &lt;entity&gt; &lt;action&gt; [id] [payload.json]
     /// </summary>
     public string GenerateCliReference()
     {
-        var sb = new StringBuilder(2048);
-        sb.Append("# BMW CLI Reference\n# Protocol: BMW1.0\n#\n");
-        sb.Append("# Usage: bmw <entity> <action> [id] [payload.json]\n#\n");
+        if (_cachedCli != null) return _cachedCli;
 
+        var sb = new StringBuilder(4096);
+        sb.Append("#!/usr/bin/env node\n");
+        sb.Append("// Auto-generated BMW CLI client — do not edit\n");
+        sb.Append("// Protocol: BMW1.0\n");
+        sb.Append("// Usage: node bmw-cli.js <entity> <action> [id] [payload.json]\n\n");
+
+        sb.Append("import { readFileSync } from 'fs';\n");
+        sb.Append("import { WebSocket } from 'ws';\n\n");
+
+        // Embed the opcode table as a flat lookup
+        sb.Append("const commands = {\n");
         foreach (var entity in _entities)
         {
-            sb.Append("\n# ── ");
-            sb.Append(entity.Key);
-            sb.Append(" ──\n");
-
             foreach (int opcode in entity.Value.Opcodes)
             {
                 if (!_byOpcode.TryGetValue(opcode, out var route)) continue;
@@ -407,22 +460,91 @@ public sealed class BmwProtocolDescriptor
                     "HEAD" => "head",
                     _ => route.Method.ToLowerInvariant()
                 };
-
-                sb.Append("bmw ");
+                sb.Append("  '");
                 sb.Append(entity.Key);
-                sb.Append(' ');
+                sb.Append(':');
                 sb.Append(action);
-                if (route.ParameterNames.Length > 0)
-                    sb.Append(" <id>");
-                if (route.HasPayload)
-                    sb.Append(" <payload.json>");
-                sb.Append("   # opcode=");
+                sb.Append("': { opcode: ");
                 sb.Append(opcode);
-                sb.Append('\n');
+                sb.Append(", hasId: ");
+                sb.Append(route.ParameterNames.Length > 0 ? "true" : "false");
+                sb.Append(", hasPayload: ");
+                sb.Append(route.HasPayload ? "true" : "false");
+                sb.Append(" },\n");
             }
         }
+        sb.Append("};\n\n");
 
-        return sb.ToString();
+        // Frame encoding (same wire format as browser SDK)
+        sb.Append("function encodeFrame(opcode, entityId) {\n");
+        sb.Append("  const b = Buffer.alloc(6);\n");
+        sb.Append("  b.writeUInt16BE(opcode << 2, 0);\n");
+        sb.Append("  b.writeUInt32LE(entityId, 2);\n");
+        sb.Append("  return b;\n");
+        sb.Append("}\n\n");
+
+        sb.Append("function encodePayload(frame, payload) {\n");
+        sb.Append("  const json = Buffer.from(JSON.stringify(payload));\n");
+        sb.Append("  const len = json.length;\n");
+        sb.Append("  const buf = Buffer.alloc(frame.length + 3 + len);\n");
+        sb.Append("  frame.copy(buf);\n");
+        sb.Append("  buf[6] = len & 0xFF;\n");
+        sb.Append("  buf[7] = (len >> 8) & 0xFF;\n");
+        sb.Append("  buf[8] = (len >> 16) & 0xFF;\n");
+        sb.Append("  json.copy(buf, 9);\n");
+        sb.Append("  return buf;\n");
+        sb.Append("}\n\n");
+
+        // Main CLI entry
+        sb.Append("const [,, entity, action, ...rest] = process.argv;\n");
+        sb.Append("const host = process.env.BMW_HOST || 'ws://localhost:5000/bmw/ws';\n\n");
+
+        sb.Append("if (!entity || !action) {\n");
+        sb.Append("  console.log('BMW CLI — Protocol BMW1.0');\n");
+        sb.Append("  console.log('Usage: bmw <entity> <action> [id] [payload.json]\\n');\n");
+        sb.Append("  console.log('Commands:');\n");
+        sb.Append("  for (const k of Object.keys(commands)) {\n");
+        sb.Append("    const [e, a] = k.split(':');\n");
+        sb.Append("    const c = commands[k];\n");
+        sb.Append("    let args = '';\n");
+        sb.Append("    if (c.hasId) args += ' <id>';\n");
+        sb.Append("    if (c.hasPayload) args += ' <payload.json>';\n");
+        sb.Append("    console.log(`  bmw ${e} ${a}${args}  (opcode=${c.opcode})`);\n");
+        sb.Append("  }\n");
+        sb.Append("  process.exit(0);\n");
+        sb.Append("}\n\n");
+
+        sb.Append("const cmd = commands[`${entity}:${action}`];\n");
+        sb.Append("if (!cmd) {\n");
+        sb.Append("  console.error(`Unknown command: ${entity} ${action}`);\n");
+        sb.Append("  process.exit(1);\n");
+        sb.Append("}\n\n");
+
+        sb.Append("let id = 0, payload;\n");
+        sb.Append("if (cmd.hasId && rest.length > 0) id = parseInt(rest.shift(), 10);\n");
+        sb.Append("if (cmd.hasPayload && rest.length > 0) {\n");
+        sb.Append("  const file = rest.shift();\n");
+        sb.Append("  payload = JSON.parse(file === '-' ? readFileSync(0, 'utf8') : readFileSync(file, 'utf8'));\n");
+        sb.Append("}\n\n");
+
+        sb.Append("const ws = new WebSocket(host);\n");
+        sb.Append("ws.binaryType = 'arraybuffer';\n");
+        sb.Append("ws.on('open', () => {\n");
+        sb.Append("  const frame = encodeFrame(cmd.opcode, id);\n");
+        sb.Append("  ws.send(payload ? encodePayload(frame, payload) : frame);\n");
+        sb.Append("});\n");
+        sb.Append("ws.on('message', (buf) => {\n");
+        sb.Append("  if (buf.byteLength > 9) {\n");
+        sb.Append("    const data = Buffer.from(buf).subarray(9).toString('utf8');\n");
+        sb.Append("    try { console.log(JSON.stringify(JSON.parse(data), null, 2)); }\n");
+        sb.Append("    catch { console.log(data); }\n");
+        sb.Append("  } else { console.log('OK'); }\n");
+        sb.Append("  ws.close();\n");
+        sb.Append("});\n");
+        sb.Append("ws.on('error', (e) => { console.error(e.message); process.exit(1); });\n");
+
+        _cachedCli = sb.ToString();
+        return _cachedCli;
     }
 
     // ── Helpers ─────────────────────────────────────────────────────────────
