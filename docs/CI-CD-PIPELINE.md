@@ -203,3 +203,15 @@ Defined in `deploy-list.json` at the repository root:
 2. Enter the same image tag used in CD2
 3. Click **Run workflow**
 4. Approve the `production-rollout` environment when prompted
+
+## Other Workflows
+
+These workflows run independently of the main pipeline:
+
+| Workflow | Trigger | Purpose |
+|----------|---------|---------|
+| `build-cli.yml` | Push to `BareMetalWeb.CLI/`, manual | Cross-platform CLI binary builds |
+| `codeql.yml` | Nightly schedule, manual | GitHub CodeQL security scanning |
+| `deploy-tenant.yml` | Reusable (called by CD2/CD3) | Template for deploying to a single Azure tenant |
+| `download-static-assets.yml` | Manual | Downloads Bootstrap themes, fonts, JS from CDNs |
+| `perf-large.yml` | Nightly schedule, manual | Heavy stress tests with large datasets (trend analysis) |
