@@ -952,7 +952,13 @@ public class HtmlRenderer : IHtmlRenderer
         if (keySpan.StartsWith("html_".AsSpan(), StringComparison.Ordinal))
         {
             if (!string.IsNullOrEmpty(value))
-                WriteToBuffer(writer, value);
+            {
+                // Defense-in-depth: prevent </script> injection even in raw HTML values
+                if (value.Contains("</script", StringComparison.OrdinalIgnoreCase))
+                    WriteToBuffer(writer, value.Replace("</script", "<\\/script", StringComparison.OrdinalIgnoreCase));
+                else
+                    WriteToBuffer(writer, value);
+            }
         }
         else
             WriteHtmlEncodedToBuffer(writer, value);
@@ -1146,7 +1152,13 @@ public class HtmlRenderer : IHtmlRenderer
         if (keySpan.StartsWith("html_".AsSpan(), StringComparison.Ordinal))
         {
             if (!string.IsNullOrEmpty(value))
-                Write(writer, value);
+            {
+                // Defense-in-depth: prevent </script> injection even in raw HTML values
+                if (value.Contains("</script", StringComparison.OrdinalIgnoreCase))
+                    Write(writer, value.Replace("</script", "<\\/script", StringComparison.OrdinalIgnoreCase));
+                else
+                    Write(writer, value);
+            }
         }
         else
             WriteHtmlEncoded(writer, value);

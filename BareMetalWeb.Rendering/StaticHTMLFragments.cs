@@ -522,7 +522,12 @@ public sealed class HtmlFragmentRenderer : IHtmlFragmentRenderer
             case FormFieldType.String:
                 return InputTextTemplate(name, name, value, placeholder, required, minlength, maxlength, pattern, invalidClass, validationFeedback);
             case FormFieldType.CustomHtml:
-                return Encoding.UTF8.GetBytes(field.Html ?? string.Empty);
+                // Sanitize: strip <script> tags and event handler attributes from custom HTML
+                var sanitized = field.Html ?? string.Empty;
+                sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized, @"<script\b[^>]*>[\s\S]*?</script>", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized, @"\s+on\w+\s*=\s*""[^""]*""", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized, @"\s+on\w+\s*=\s*'[^']*'", "", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                return Encoding.UTF8.GetBytes(sanitized);
             case FormFieldType.Enum:
                 return RenderLookupSelect(field, required, selectedValue);
             case FormFieldType.DateOnly:

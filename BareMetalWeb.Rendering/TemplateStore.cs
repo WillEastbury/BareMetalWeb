@@ -29,13 +29,25 @@ public sealed class TemplateStore : ITemplateStore
             if (_cache.TryGetValue(name, out var cached))
                 return cached;
 
-            string basePath = Path.Combine(ResolveTemplatesBasePath(), name.ToLowerInvariant());
+            // Reject path traversal attempts
+            if (name.Contains("..") || name.Contains('/') || name.Contains('\\') ||
+                name.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+                throw new ArgumentException($"Invalid template name: '{name}'");
+
+            var templatesDir = ResolveTemplatesBasePath();
+            string basePath = Path.Combine(templatesDir, name.ToLowerInvariant());
+
+            // Ensure resolved path stays within the templates directory
+            var fullPath = Path.GetFullPath(basePath);
+            var fullTemplatesDir = Path.GetFullPath(templatesDir);
+            if (!fullPath.StartsWith(fullTemplatesDir, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException($"Invalid template name: '{name}'");
 
             var template = new HtmlTemplate(
-                File.ReadAllText(basePath + ".head.html"),
-                File.ReadAllText(basePath + ".body.html"),
-                File.ReadAllText(basePath + ".footer.html"),
-                File.ReadAllText(basePath + ".script.html")
+                File.ReadAllText(fullPath + ".head.html"),
+                File.ReadAllText(fullPath + ".body.html"),
+                File.ReadAllText(fullPath + ".footer.html"),
+                File.ReadAllText(fullPath + ".script.html")
             );
 
             _cache[name] = template;
