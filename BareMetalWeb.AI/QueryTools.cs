@@ -10,10 +10,64 @@ namespace BareMetalWeb.AI;
 /// </summary>
 public static class QueryTools
 {
-    [Description("List all fields for an entity by slug, showing name, type, and whether it's indexed. Use this to know which fields can be filtered/sorted.")]
+    [Description("Search entity records by name or text. Matches against all string fields. Use this when you have a name or text to find instead of a numeric ID. Entity slug is flexible.")]
+    public static async Task<QueryResultInfo> SearchByName(
+        string entitySlug,
+        string searchText,
+        int top = 10)
+    {
+        var meta = ResolveEntity(entitySlug);
+        if (meta == null)
+            return new QueryResultInfo(0, [], $"Entity '{entitySlug}' not found. Available entities: {string.Join(", ", DataScaffold.Entities?.Select(e => e.Slug) ?? [])}.");
+
+        var items = await meta.Handlers.QueryAsync(null, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        var layout = EntityLayoutCompiler.GetOrCompile(meta);
+        var stringFields = layout.Fields.Where(f => f.ClrType == typeof(string)).ToArray();
+
+        var matches = new List<Dictionary<string, object?>>();
+        foreach (var entity in items)
+        {
+            bool matched = false;
+            foreach (var field in stringFields)
+            {
+                try
+                {
+                    var val = field.Getter(entity)?.ToString();
+                    if (val != null && val.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+                    {
+                        matched = true;
+                        break;
+                    }
+                }
+                catch { }
+            }
+
+            if (matched)
+            {
+                var dict = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Key"] = entity.Key
+                };
+                foreach (var field in layout.Fields)
+                {
+                    try { dict[field.Name] = field.Getter(entity); }
+                    catch { dict[field.Name] = null; }
+                }
+                matches.Add(dict);
+                if (matches.Count >= top) break;
+            }
+        }
+
+        return new QueryResultInfo(matches.Count, matches.ToArray(), null);
+    }
+
+    [Description("List all fields for an entity by slug. Entity slug is flexible — accepts singular forms, abbreviations, and partial names.")]
     public static FieldQueryInfo[]? ListEntityFields(string entitySlug)
     {
-        if (!DataScaffold.TryGetEntity(entitySlug, out var meta)) return null;
+        var meta = ResolveEntity(entitySlug);
+        if (meta == null) return null;
 
         var result = new FieldQueryInfo[meta.Fields.Count];
         for (int i = 0; i < meta.Fields.Count; i++)
@@ -24,13 +78,65 @@ public static class QueryTools
         return result;
     }
 
+    /// <summary>
+    /// Resolves an entity by exact slug/name, singular→plural, plural→singular,
+    /// or prefix/substring match.
+    /// </summary>
+    private static DataEntityMetadata? ResolveEntity(string input)
+    {
+        // Exact match first
+        if (DataScaffold.TryGetEntity(input, out var exact)) return exact;
+
+        var entities = DataScaffold.Entities;
+        if (entities is null || entities.Count == 0) return null;
+
+        // Exact name match
+        foreach (var e in entities)
+            if (string.Equals(e.Name, input, StringComparison.OrdinalIgnoreCase)) return e;
+
+        // Singular → plural
+        var plural = input + "s";
+        if (DataScaffold.TryGetEntity(plural, out var p)) return p;
+        foreach (var e in entities)
+            if (string.Equals(e.Name, plural, StringComparison.OrdinalIgnoreCase)) return e;
+
+        // Plural → singular variants
+        if (input.Length > 3 && input.EndsWith("ies", StringComparison.OrdinalIgnoreCase))
+        {
+            var s = input[..^3] + "y";
+            if (DataScaffold.TryGetEntity(s, out var r)) return r;
+        }
+        else if (input.Length > 2 && input.EndsWith("es", StringComparison.OrdinalIgnoreCase))
+        {
+            var s = input[..^2];
+            if (DataScaffold.TryGetEntity(s, out var r)) return r;
+        }
+        else if (input.Length > 1 && input.EndsWith('s'))
+        {
+            var s = input[..^1];
+            if (DataScaffold.TryGetEntity(s, out var r)) return r;
+        }
+
+        // Prefix match
+        foreach (var e in entities)
+            if (e.Slug.StartsWith(input, StringComparison.OrdinalIgnoreCase) ||
+                e.Name.StartsWith(input, StringComparison.OrdinalIgnoreCase)) return e;
+
+        // Contains match
+        foreach (var e in entities)
+            if (e.Slug.Contains(input, StringComparison.OrdinalIgnoreCase) ||
+                e.Name.Contains(input, StringComparison.OrdinalIgnoreCase)) return e;
+
+        return null;
+    }
+
     [Description("Get valid query operators (Equals, NotEquals, Contains, StartsWith, EndsWith, In, NotIn, GreaterThan, LessThan, etc.).")]
     public static string[] GetOperators()
     {
         return Enum.GetNames<QueryOperator>();
     }
 
-    [Description("Query an entity by slug with optional filter clauses, sort field, sort direction, and pagination (top/skip). Returns matching records as field-value dictionaries.")]
+    [Description("Query an entity by slug with optional filter clauses, sort field, sort direction, and pagination (top/skip). Returns matching records as field-value dictionaries. Entity slug is flexible — singular forms, abbreviations, and partial names are accepted.")]
     public static async Task<QueryResultInfo> QueryEntities(
         string entitySlug,
         QueryClauseInput[]? filters = null,
@@ -39,8 +145,9 @@ public static class QueryTools
         int top = 50,
         int skip = 0)
     {
-        if (!DataScaffold.TryGetEntity(entitySlug, out var meta))
-            return new QueryResultInfo(0, [], $"Entity '{entitySlug}' not found.");
+        var meta = ResolveEntity(entitySlug);
+        if (meta == null)
+            return new QueryResultInfo(0, [], $"Entity '{entitySlug}' not found. Available entities: {string.Join(", ", DataScaffold.Entities?.Select(e => e.Slug) ?? [])}.");
 
         var query = new QueryDefinition { Top = top, Skip = skip };
 
@@ -86,12 +193,13 @@ public static class QueryTools
         return new QueryResultInfo(rows.Length, rows, null);
     }
 
-    [Description("Count entities matching optional filter clauses. Faster than QueryEntities when you only need the count.")]
+    [Description("Count entities matching optional filter clauses. Faster than QueryEntities when you only need the count. Entity slug is flexible.")]
     public static async Task<int> CountEntities(
         string entitySlug,
         QueryClauseInput[]? filters = null)
     {
-        if (!DataScaffold.TryGetEntity(entitySlug, out var meta)) return -1;
+        var meta = ResolveEntity(entitySlug);
+        if (meta == null) return -1;
 
         QueryDefinition? query = null;
         if (filters is { Length: > 0 })
@@ -112,10 +220,11 @@ public static class QueryTools
             .ConfigureAwait(false);
     }
 
-    [Description("Load a single entity record by its uint key. Returns field-value dictionary or null if not found.")]
+    [Description("Load a single entity record by its uint key. Returns field-value dictionary or null if not found. Entity slug is flexible.")]
     public static async Task<Dictionary<string, object?>?> LoadEntity(string entitySlug, uint key)
     {
-        if (!DataScaffold.TryGetEntity(entitySlug, out var meta)) return null;
+        var meta = ResolveEntity(entitySlug);
+        if (meta == null) return null;
 
         var entity = await meta.Handlers.LoadAsync(key, CancellationToken.None)
             .ConfigureAwait(false);
