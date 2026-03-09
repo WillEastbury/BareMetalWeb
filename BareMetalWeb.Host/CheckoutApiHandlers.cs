@@ -218,6 +218,7 @@ public static class CheckoutApiHandlers
         context.Response.Cookies.Append(cookieName, id, new CookieOptions
         {
             HttpOnly = true,
+            Secure = context.HttpRequest.IsHttps,
             SameSite = SameSiteMode.Lax,
             MaxAge = TimeSpan.FromDays(365),
             Path = "/"
