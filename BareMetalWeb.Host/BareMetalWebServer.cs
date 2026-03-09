@@ -115,6 +115,8 @@ public class BareMetalWebServer : IBareWebHost
     private BmwBinaryTransport? _binaryTransport;
     /// <summary>Protocol descriptor — single shared contract between server and all clients.</summary>
     private BmwProtocolDescriptor? _protocolDescriptor;
+    private readonly NumericRouteTable _numericRoutes = new();
+    private int _numericRouteVersion = -1;
     public BareMetalWebServer(
         string appName,
         string companyDescription,
@@ -450,6 +452,18 @@ public class BareMetalWebServer : IBareWebHost
         }
     }
 
+    /// <summary>Ensures the numeric route table is rebuilt when routes change.</summary>
+    private void EnsureNumericRouteTable()
+    {
+        if (_numericRouteVersion != _routesVersion)
+        {
+            _numericRoutes.Build(routes);
+            _numericRouteVersion = _routesVersion;
+        }
+    }
+
+    /// <summary>Returns the numeric route table for metadata export.</summary>
+    internal NumericRouteTable NumericRoutes => _numericRoutes;
     public Task WireUpRequestHandlingAndLoggerAsyncLifetime()
     {
         RegisterRouteMetadataEndpoint();
@@ -707,9 +721,11 @@ public class BareMetalWebServer : IBareWebHost
                         if (idPage.PageInfo != null)
                             bmwCtx.SetPageInfo(idPage.PageInfo);
                         bmwCtx.CompiledPlans = idPage.CompiledPlans;
-                        // Hydrate EntitySlug/EntityId/RouteParameters from query string
-                        // so handlers work identically to path-based routing.
-                        HydrateRouteParamsFromQuery(bmwCtx);
+
+                        // Hydrate route parameters from query string so handlers
+                        // (GetRouteValue / GetRouteParam) work identically to path-based dispatch.
+                        HydrateRouteParamsFromQuery(bmwCtx, idPage.RouteKey);
+
                         if (!await IsAuthorizedAsync(idPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
                         {
                             await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, idPage.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);
@@ -973,7 +989,7 @@ public class BareMetalWebServer : IBareWebHost
     }
 
     /// <summary>
-    /// Allocation-free query string parameter reader.
+    /// Allocation-free query string parameter reader (Span overload).
     /// Scans the raw query string for <paramref name="key"/> and returns its value.
     /// </summary>
     [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
@@ -1003,36 +1019,66 @@ public class BareMetalWebServer : IBareWebHost
     }
 
     /// <summary>
-    /// Populates BmwContext.EntitySlug, EntityId, and RouteParameters from query string
-    /// parameters during numeric route dispatch, so entity handlers work identically
-    /// to path-based routing. Recognized params: type, id, field, command.
+    /// Populates BmwContext route parameter fields from the query string
+    /// when dispatching via numeric route ID. Uses the CompiledRoute segments
+    /// to map query keys → EntitySlug, EntityId, RouteExtra, or RouteParameters.
     /// </summary>
-    private static void HydrateRouteParamsFromQuery(BmwContext ctx)
+    internal void HydrateRouteParamsFromQuery(BmwContext ctx, string? routeKey)
     {
-        var qs = ctx.Request.QueryString.AsSpan();
-        if (qs.IsEmpty) return;
+        if (routeKey == null || !_compiledRoutes.TryGetValue(routeKey, out var compiled))
+            return;
+        if (compiled.ParameterCount == 0)
+            return;
 
-        var typeVal = ReadQueryParam(qs, "type".AsSpan());
-        if (!typeVal.IsEmpty)
-            ctx.EntitySlug = typeVal.ToString();
+        var qs = ctx.Request.QueryString;
+        if (qs.Length <= 1) // empty or just "?"
+            return;
 
-        var idVal = ReadQueryParam(qs, "id".AsSpan());
-        if (!idVal.IsEmpty)
-            ctx.EntityId = idVal.ToString();
-
-        var fieldVal = ReadQueryParam(qs, "field".AsSpan());
-        if (!fieldVal.IsEmpty)
+        foreach (var seg in compiled.Segments)
         {
-            ctx.RouteExtra = fieldVal.ToString();
-            ctx.RouteExtraKey = "field";
-        }
+            if (seg.Kind != RouteSegmentKind.Parameter && seg.Kind != RouteSegmentKind.CatchAll)
+                continue;
 
-        var cmdVal = ReadQueryParam(qs, "command".AsSpan());
-        if (!cmdVal.IsEmpty)
-        {
-            ctx.RouteExtra = cmdVal.ToString();
-            ctx.RouteExtraKey = "command";
+            var val = ReadQueryParam(qs, seg.Value);
+            if (val == null)
+                continue;
+
+            if (seg.Value == "type")
+                ctx.EntitySlug = val;
+            else if (seg.Value == "id")
+                ctx.EntityId = val;
+            else
+            {
+                ctx.RouteParameters ??= new Dictionary<string, string>(compiled.ParameterCount);
+                ctx.RouteParameters[seg.Value] = val;
+            }
         }
+    }
+
+    /// <summary>
+    /// Reads a single query parameter value from a raw query string without allocating
+    /// an IQueryCollection. Returns null if not found.
+    /// </summary>
+    internal static string? ReadQueryParam(string qs, string key)
+    {
+        // qs starts with '?', scan for key=value pairs separated by '&'
+        int pos = 1; // skip '?'
+        while (pos < qs.Length)
+        {
+            int ampIdx = qs.IndexOf('&', pos);
+            int end = ampIdx < 0 ? qs.Length : ampIdx;
+
+            int eqIdx = qs.IndexOf('=', pos);
+            if (eqIdx >= pos && eqIdx < end)
+            {
+                var k = qs.AsSpan(pos, eqIdx - pos);
+                if (k.Equals(key.AsSpan(), StringComparison.OrdinalIgnoreCase))
+                    return Uri.UnescapeDataString(qs.Substring(eqIdx + 1, end - eqIdx - 1));
+            }
+
+            pos = end + 1;
+        }
+        return null;
     }
 
     private static async ValueTask<bool> IsAuthorizedAsync(PageInfo? pageInfo, BmwContext context, CancellationToken cancellationToken = default)

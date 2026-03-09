@@ -244,6 +244,11 @@ public static class RouteRegistrationExtensions
                 context.SetStringValue("title", "Suspicious IPs");
                 context.AddTable(tableColumns, tableRows);
             })));
+
+        // Numeric route table metadata — returns RouteId → Verb → Path mapping as JSON
+        host.RegisterRoute("GET /bmw/routes", new RouteHandlerData(
+            pageInfoFactory.RawPage("Public", false),
+            NumericRouteTableHandler.WriteRoutesAsync));
     }
 
     /// <summary>
