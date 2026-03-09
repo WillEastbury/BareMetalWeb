@@ -1,0 +1,25 @@
+/* BMW UI Layout Grammar — custom element styles (<1KB minified)
+   ds=stack dr=row dc=column db=box dn=nav ta=table ch=chart gt=gantt cl=calendar */
+:root{--g:0.75rem;--p:var(--bs-body-bg,#fff);--b:var(--bs-border-color,#dee2e6);--r:6px}
+ds{display:flex;flex-direction:column;gap:var(--g)}
+dr{display:flex;gap:var(--g);flex-wrap:wrap}
+dc{flex:1;min-width:0}
+db{background:var(--p);border:1px solid var(--b);border-radius:var(--r);padding:var(--g)}
+dn{display:flex;gap:var(--g);align-items:center;padding:10px 14px;border-bottom:1px solid var(--b);background:var(--p);font-weight:600}
+ta{display:block;overflow-x:auto}
+ta>table{width:100%;border-collapse:collapse}
+ta>table th,ta>table td{padding:0.4rem 0.6rem;border-bottom:1px solid var(--b);text-align:left}
+ta>table th{font-size:0.7rem;text-transform:uppercase;letter-spacing:0.08em;font-weight:700}
+ta>table tbody tr:hover{background:color-mix(in srgb,var(--b) 20%,transparent)}
+ch{display:block;height:280px;position:relative}
+gt{display:block;overflow-x:auto}
+cl{display:grid;grid-template-columns:repeat(7,1fr);gap:1px;text-align:center}
+cl>*{padding:0.3rem;border:1px solid var(--b);min-height:5rem}
+/* Utility attributes */
+[gap]{gap:var(--g)}
+[pad]{padding:var(--g)}
+[cols="2"]>dc{flex-basis:calc(50% - var(--g))}
+[cols="3"]>dc{flex-basis:calc(33.33% - var(--g))}
+[cols="4"]>dc{flex-basis:calc(25% - var(--g))}
+/* Responsive: stack rows on narrow viewports */
+@media(max-width:768px){dr{flex-direction:column}dc{flex-basis:100%!important}}

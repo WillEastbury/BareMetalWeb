@@ -566,22 +566,19 @@
                         if (!groups[g]) groups[g] = [];
                         groups[g].push(e);
                     });
-            var html = '<div class="p-4"><h2>Data Objects</h2>';
+            var html = '<ds pad><dn>' + escHtml('Data Objects') + '</dn>';
             Object.keys(groups).sort().forEach(function (groupName) {
-                html += '<h4 class="mt-4 mb-3 border-bottom pb-1">' + escHtml(groupName) + '</h4>';
-                html += '<div class="row row-cols-1 row-cols-md-3 g-3 mb-3">';
+                html += '<strong style="margin-top:0.5rem">' + escHtml(groupName) + '</strong>';
+                html += '<dr cols="3">';
                 groups[groupName].forEach(function (e) {
-                    html += '<div class="col"><div class="card h-100 bm-entity-card">' +
-                        '<div class="card-body">' +
-                        '<h5 class="card-title">' + escHtml(e.name) + '</h5>' +
-                        '</div>' +
-                        '<div class="card-footer">' +
-                        '<a class="btn btn-primary btn-sm" href="' + BASE + '/' + escHtml(e.slug) + '">Open</a>' +
-                        '</div></div></div>';
+                    html += '<dc><db>' +
+                        '<strong>' + escHtml(e.name) + '</strong>' +
+                        '<a href="' + BASE + '/' + escHtml(e.slug) + '">Open</a>' +
+                        '</db></dc>';
                 });
-                html += '</div>';
+                html += '</dr>';
             });
-            html += '</div>';
+            html += '</ds>';
             setContent(html);
         }).catch(function (err) { showError('Could not load entities: ' + err.message); });
     }
@@ -687,14 +684,14 @@
         var viewType = meta.viewType || 'Table';
         var activeView = query.view || viewType;
 
-        var html = '<div class="p-3">';
+        var html = '<ds pad>';
         // Breadcrumb
         html += '<nav aria-label="breadcrumb"><ol class="breadcrumb"><li class="breadcrumb-item"><a href="' + BASE + '">Home</a></li>';
         html += '<li class="breadcrumb-item active">' + escHtml(meta.name) + '</li></ol></nav>';
 
         // Title + action bar
-        html += '<div class="d-flex align-items-center mb-3 flex-wrap gap-2">';
-        html += '<h2 class="mb-0 me-3">' + escHtml(meta.name) + '</h2>';
+        html += '<dr>';
+        html += '<h2 style="margin:0">' + escHtml(meta.name) + '</h2>';
         html += '<span class="badge bg-secondary" title="Total records" aria-label="' + total + ' total records">' + total + ' records</span>';
         html += '<a class="btn btn-primary btn-sm" href="' + baseUrl + '/create"><i class="bi bi-plus-lg"></i> New</a>';
         html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=csv" download><i class="bi bi-filetype-csv"></i> Export CSV</a>';
@@ -715,7 +712,7 @@
             html += '<a class="btn btn-outline-secondary' + (activeView === 'Chart' ? ' active' : '') + '" href="' + buildUrl(baseUrl, Object.assign({}, query, { view: 'Chart' })) + '" title="Charts"><i class="bi bi-graph-up"></i></a>';
             html += '</div>';
         }
-        html += '</div>';
+        html += '</dr>';
 
         if (activeView === 'TreeView' || (activeView === '' && viewType === 'TreeView')) {
             html += renderTreeView(meta, items, slug, baseUrl, query);
@@ -823,7 +820,7 @@
             html += '</div>';
 
             // Table layout for wider viewports
-            html += '<div class="d-none d-md-block table-responsive"><table class="table bm-table table-hover table-striped table-sm align-middle">';
+            html += '<ta class="d-none d-md-block"><table class="table bm-table table-hover table-striped table-sm align-middle">';
             html += '<thead><tr>';
             html += '<th scope="col"><input type="checkbox" class="form-check-input" id="vnext-select-all" title="Select all"></th>';
             listFields.forEach(function (f) {
@@ -894,13 +891,13 @@
                 html += tparts.join('');
             }
 
-            html += '</tbody></table></div>';
+            html += '</tbody></table></ta>';
 
             // Pagination
             html += renderPagination(total, skip, top, baseUrl, query);
         }
 
-        html += '</div>';
+        html += '</ds>';
         setContent(html);
 
         // Resolve lookup display values in background

@@ -144,5 +144,130 @@ const BareMetalTemplate = (() => {
     return wrap;
   }
 
-  return { buildForm, buildTable };
+  // ── BMW Layout Grammar helpers ──
+  // Build lightweight custom element DOM: ds=stack dr=row dc=column db=box dn=nav ta=table
+  const ds = (children) => { const e = document.createElement('ds'); (children||[]).forEach(c => e.appendChild(c)); return e; };
+  const dr = (children, attrs) => { const e = document.createElement('dr'); if (attrs) Object.entries(attrs).forEach(([k,v]) => e.setAttribute(k,v)); (children||[]).forEach(c => e.appendChild(c)); return e; };
+  const dc = (children) => { const e = document.createElement('dc'); (children||[]).forEach(c => e.appendChild(c)); return e; };
+  const db = (children, title) => {
+    const e = document.createElement('db');
+    if (title) { const h = mk('strong', { textContent: title }); e.appendChild(h); }
+    (children||[]).forEach(c => e.appendChild(c));
+    return e;
+  };
+  const dn = (text, children) => {
+    const e = document.createElement('dn');
+    if (text) e.appendChild(mk('span', { textContent: text }));
+    (children||[]).forEach(c => e.appendChild(c));
+    return e;
+  };
+  const ta = (tableEl) => { const e = document.createElement('ta'); if (tableEl) e.appendChild(tableEl); return e; };
+  const ch = () => document.createElement('ch');
+  const gt = () => document.createElement('gt');
+  const cl = () => document.createElement('cl');
+
+  // Build a BMW grammar form — uses ds/dr/dc instead of Bootstrap grid
+  function buildBmwForm(layout, fields) {
+    const form = mk('form', {});
+    form.setAttribute('rv-on-submit', 'save');
+    const stack = document.createElement('ds');
+    const cols = layout.columns || 2;
+    let currentRow = null;
+    let colCount = 0;
+
+    (layout.fields || Object.keys(fields)).forEach(name => {
+      const f = fields[name] || {};
+      if (f.type === 'hidden') {
+        const inp = mk('input', { type: 'hidden' });
+        inp.setAttribute('rv-value', name);
+        form.appendChild(inp);
+        return;
+      }
+
+      if (!currentRow || colCount >= cols) {
+        currentRow = document.createElement('dr');
+        stack.appendChild(currentRow);
+        colCount = 0;
+      }
+
+      const col = document.createElement('dc');
+      const lbl = mk('label', {
+        textContent: f.label || name.replace(/([A-Z])/g, ' $1').trim()
+      });
+      lbl.style.fontWeight = '600';
+      lbl.style.fontSize = '0.85rem';
+
+      let inp;
+      if (f.type === 'boolean') {
+        inp = mk('input', { type: 'checkbox' });
+      } else if (f.type === 'textarea') {
+        inp = mk('textarea', { rows: f.rows || 3 });
+        inp.style.width = '100%';
+      } else if (f.type === 'select') {
+        inp = mk('select', {});
+        inp.style.width = '100%';
+        [{ value: '', label: '— select —' }, ...(f.options || [])].forEach(o => {
+          const isObj = o !== null && typeof o === 'object';
+          inp.appendChild(mk('option', {
+            value: isObj ? String(o.value ?? '') : String(o),
+            textContent: isObj ? String(o.label ?? o.value ?? o) : String(o)
+          }));
+        });
+      } else if (f.type === 'file') {
+        inp = mk('input', { type: 'file' });
+        if (f.accept) inp.accept = f.accept;
+      } else {
+        inp = mk('input', { type: INPUT_TYPES[f.type] || 'text' });
+        inp.style.width = '100%';
+      }
+
+      inp.setAttribute('rv-value', name);
+      if (f.required) inp.required = true;
+      if (f.placeholder) inp.placeholder = f.placeholder;
+      if (f.readonly) inp.disabled = true;
+
+      col.append(lbl, inp);
+      currentRow.appendChild(col);
+      colCount++;
+    });
+
+    const foot = document.createElement('dr');
+    const saveBtn = mk('button', { type: 'submit', textContent: 'Save' });
+    saveBtn.style.cssText = 'padding:6px 16px;font-weight:600;cursor:pointer';
+    foot.appendChild(saveBtn);
+    stack.appendChild(foot);
+    form.appendChild(stack);
+    return form;
+  }
+
+  // Build a BMW grammar table — uses <ta> wrapper with plain <table>
+  function buildBmwTable(fields, items, callbacks) {
+    const cb = callbacks || {};
+    const resolve = cb.resolve || ((name, v) => String(v ?? ''));
+    const names = Object.keys(fields).filter(n => !fields[n].readonly).slice(0, 6);
+    const tbl = mk('table', {});
+    const hrow = tbl.createTHead().insertRow();
+    names.forEach(n => hrow.appendChild(mk('th', { textContent: fields[n]?.label || n })));
+    hrow.appendChild(mk('th', {}));
+    const tbody = tbl.createTBody();
+    items.forEach(item => {
+      const tr = tbody.insertRow();
+      names.forEach(n => {
+        const td = tr.insertCell();
+        if (fields[n]?.type === 'boolean') {
+          td.textContent = (item[n] === true || item[n] === 'true' || item[n] === 1) ? '✓' : '✗';
+        } else {
+          td.textContent = resolve(n, item[n]);
+        }
+      });
+      const td = tr.insertCell(); td.style.textAlign = 'right';
+      const id = item.id || item.Id || '';
+      if (cb.onView) { const b = mk('button', { textContent: '👁' }); b.onclick = () => cb.onView(id, item); td.appendChild(b); }
+      if (cb.onEdit) { const b = mk('button', { textContent: '✏' }); b.onclick = () => cb.onEdit(id, item); td.appendChild(b); }
+      if (cb.onDelete) { const b = mk('button', { textContent: '🗑' }); b.onclick = () => cb.onDelete(id, item); td.appendChild(b); }
+    });
+    return ta(tbl);
+  }
+
+  return { buildForm, buildTable, buildBmwForm, buildBmwTable, ds, dr, dc, db, dn, ta, ch, gt, cl };
 })();
