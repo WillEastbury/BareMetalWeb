@@ -227,7 +227,7 @@ public static class TemplatePlanExecutor
     internal static void WriteFragment(PipeWriter writer, ReadOnlySpan<byte> source)
     {
         var dest = writer.GetSpan(source.Length);
-        source.CopyTo(dest);
+        SimdCopy.CopyFragment(source, dest);
         writer.Advance(source.Length);
     }
 
