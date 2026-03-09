@@ -228,7 +228,7 @@
         if (!_ordinalBuf || _ordinalBuf.buffer !== view.buffer) {
             _ordinalBuf = new Uint8Array(view.buffer);
         }
-        var fieldLen = fieldNames.length;
+        var fieldNameCount = fieldNames.length;
         for (var r = 0; r < rowCount; r++) {
             var row = {};
             for (var f = 0; f < fieldCount; f++) {
@@ -236,7 +236,7 @@
                 var len = view.getUint16(offset, true); offset += 2;
                 if (offset + len > byteLen) throw new Error('Ordinal data truncated at field value');
                 // Decode by slicing a view (subarray) — no copy; TextDecoder reads in-place.
-                if (f < fieldLen) row[fieldNames[f]] = len > 0 ? _ordinalDecoder.decode(_ordinalBuf.subarray(offset, offset + len)) : '';
+                if (f < fieldNameCount) row[fieldNames[f]] = len > 0 ? _ordinalDecoder.decode(_ordinalBuf.subarray(offset, offset + len)) : '';
                 offset += len;
             }
             rows[r] = row;
