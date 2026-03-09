@@ -5486,39 +5486,6 @@ public sealed class RouteHandlers : IRouteHandlers
         return safe;
     }
 
-    private static string[][] ViewRowsToArray(IReadOnlyList<(string Label, string Value)> viewRows)
-    {
-        var result = new string[viewRows.Count][];
-        for (int i = 0; i < viewRows.Count; i++)
-            result[i] = new[] { viewRows[i].Label, viewRows[i].Value };
-        return result;
-    }
-
-    private static string[][] PrependIdRow(string recordId, string[][] rows)
-    {
-        var result = new string[rows.Length + 1][];
-        result[0] = new[] { "Id", recordId };
-        Array.Copy(rows, 0, result, 1, rows.Length);
-        return result;
-    }
-
-    private static string[] ConcatArrays(string[] a, string[] b)
-    {
-        var result = new string[a.Length + b.Length];
-        Array.Copy(a, 0, result, 0, a.Length);
-        Array.Copy(b, 0, result, a.Length, b.Length);
-        return result;
-    }
-
-    private static string[] BuildParentValueRow(string parentId, List<(string Label, string Value)> fields)
-    {
-        var result = new string[1 + fields.Count];
-        result[0] = parentId;
-        for (int i = 0; i < fields.Count; i++)
-            result[i + 1] = fields[i].Value;
-        return result;
-    }
-
     private static string JoinEncoded(string separator, IReadOnlyList<string> items)
     {
         var sb = new StringBuilder(256);
@@ -5531,39 +5498,6 @@ public sealed class RouteHandlers : IRouteHandlers
     }
 
     // Export helper methods for nested/embedded components
-
-    private static string EscapeRtf(string text)
-    {
-        if (string.IsNullOrEmpty(text))
-            return string.Empty;
-
-        var builder = new StringBuilder(text.Length);
-        foreach (var ch in text)
-        {
-            switch (ch)
-            {
-                case '\\':
-                    builder.Append("\\\\");
-                    break;
-                case '{':
-                    builder.Append("\\{");
-                    break;
-                case '}':
-                    builder.Append("\\}");
-                    break;
-                case '\n':
-                    builder.Append("\\par ");
-                    break;
-                case '\r':
-                    break;
-                default:
-                    builder.Append(ch <= 0x7E && ch >= 0x20 ? ch : '?');
-                    break;
-            }
-        }
-
-        return builder.ToString();
-    }
 
     private static string StripHtml(string value)
     {

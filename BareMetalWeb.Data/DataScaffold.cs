@@ -1691,21 +1691,6 @@ public static class DataScaffold
             $"Entity type '{type.Name}' is not registered. Register it via DataEntityRegistry or RuntimeEntityRegistry before querying.");
     }
 
-    private static object? LoadByIdForType(Type type, string id, string? slug = null)
-    {
-        var meta = ResolveMeta(type, slug);
-        if (meta != null)
-        {
-            var key = uint.Parse(id);
-            var vt = meta.Handlers.LoadAsync(key, CancellationToken.None);
-            // TODO: convert to async
-            return vt.IsCompleted ? vt.Result : vt.AsTask().GetAwaiter().GetResult();
-        }
-
-        throw new InvalidOperationException(
-            $"Entity type '{type.Name}' is not registered. Register it via DataEntityRegistry or RuntimeEntityRegistry before loading.");
-    }
-
     private static IReadOnlyList<KeyValuePair<string, string>> BuildLookupOptions(IEnumerable items, string valueField, string displayField)
     {
         var options = new List<KeyValuePair<string, string>>();
@@ -2120,33 +2105,6 @@ public static class DataScaffold
         {
             return false;
         }
-    }
-
-    private static string MapChildInputType(Type type, out string step)
-    {
-        step = string.Empty;
-        var effectiveType = Nullable.GetUnderlyingType(type) ?? type;
-        if (effectiveType == typeof(bool))
-            return "checkbox";
-        if (effectiveType == typeof(int) || effectiveType == typeof(long) || effectiveType == typeof(short))
-            return "number";
-        if (effectiveType == typeof(decimal) || effectiveType == typeof(double) || effectiveType == typeof(float))
-        {
-            step = "0.01";
-            return "number";
-        }
-        if (effectiveType == typeof(DateOnly))
-            return "date";
-        if (effectiveType == typeof(TimeOnly))
-            return "time";
-        if (effectiveType == typeof(DateTime) || effectiveType == typeof(DateTimeOffset))
-            return "datetime-local";
-        return "text";
-    }
-
-    private static string EscapeJs(string value)
-    {
-        return value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("'", "\\'");
     }
 
     private static bool IsDictionaryType(Type type, out Type valueType)
