@@ -31,17 +31,18 @@
 
     function updateCheckboxStates() {
         var checkboxes = document.querySelectorAll('[data-row-checkbox]');
-        checkboxes.forEach(function(cb) {
-            var id = cb.getAttribute('data-row-id');
-            cb.checked = selectedIds.has(id);
-        });
-        
+        var checkedCount = 0;
+        for (var i = 0; i < checkboxes.length; i++) {
+            var cb = checkboxes[i];
+            var isChecked = selectedIds.has(cb.getAttribute('data-row-id'));
+            cb.checked = isChecked;
+            if (isChecked) checkedCount++;
+        }
+
         var selectAllCheckbox = document.querySelector('[data-select-all-checkbox]');
         if (selectAllCheckbox) {
-            var allCheckboxes = document.querySelectorAll('[data-row-checkbox]');
-            var checkedCount = Array.from(allCheckboxes).filter(function(cb) { return cb.checked; }).length;
-            selectAllCheckbox.checked = allCheckboxes.length > 0 && checkedCount === allCheckboxes.length;
-            selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < allCheckboxes.length;
+            selectAllCheckbox.checked = checkboxes.length > 0 && checkedCount === checkboxes.length;
+            selectAllCheckbox.indeterminate = checkedCount > 0 && checkedCount < checkboxes.length;
         }
     }
 

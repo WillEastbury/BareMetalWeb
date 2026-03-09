@@ -3,6 +3,18 @@
 (function () {
     'use strict';
 
+    // Cache compiled RegExp objects keyed by pattern string to avoid
+    // recompilation on every keystroke in the validation hot path.
+    var _patternCache = Object.create(null);
+
+    function getPattern(raw) {
+        var cached = _patternCache[raw];
+        if (cached) return cached;
+        cached = new RegExp('^' + raw + '$');
+        _patternCache[raw] = cached;
+        return cached;
+    }
+
     function initFormValidation() {
         // Use event delegation on document to avoid per-element listener accumulation
         document.addEventListener('input', function (e) {
@@ -81,7 +93,7 @@
 
         // Pattern
         if (isValid && input.hasAttribute('pattern') && input.value) {
-            var pattern = new RegExp('^' + input.getAttribute('pattern') + '$');
+            var pattern = getPattern(input.getAttribute('pattern'));
             if (!pattern.test(input.value)) {
                 isValid = false;
                 message = 'Does not match the required format.';

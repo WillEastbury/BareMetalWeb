@@ -131,6 +131,22 @@
         });
     }
 
+    // ── Abort controller for in-flight navigation requests ─────────────────
+    var _navAbortController = null;
+
+    function cancelNavigation() {
+        if (_navAbortController) {
+            _navAbortController.abort();
+            _navAbortController = null;
+        }
+    }
+
+    function getNavSignal() {
+        cancelNavigation();
+        _navAbortController = new AbortController();
+        return _navAbortController.signal;
+    }
+
     // ── HTTP helpers ──────────────────────────────────────────────────────────
     function apiFetch(url, options) {
         var opts = Object.assign({ credentials: 'same-origin', headers: {} }, options || {});
@@ -309,12 +325,26 @@
 
     function escHtml(str) {
         if (str == null) return '';
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
+        var s = String(str);
+        // Single-pass scan replaces 4× regex passes with one loop.
+        // Avoids 4 intermediate string allocations per call.
+        var out = '';
+        var last = 0;
+        for (var i = 0; i < s.length; i++) {
+            var ent;
+            switch (s.charCodeAt(i)) {
+                case 38: ent = '&amp;'; break;  // &
+                case 60: ent = '&lt;'; break;   // <
+                case 62: ent = '&gt;'; break;   // >
+                case 34: ent = '&quot;'; break; // "
+                case 39: ent = '&#39;'; break;  // '
+                default: continue;
+            }
+            if (i > last) out += s.substring(last, i);
+            out += ent;
+            last = i + 1;
+        }
+        return last === 0 ? s : out + s.substring(last);
     }
 
     function syncTagHidden(container) {
@@ -552,7 +582,7 @@
 
             var dataPromise = useInline
                 ? Promise.resolve(_bmwInline)
-                : apiFetch(API + '/' + encodeURIComponent(slug) + '?' + params.join('&'));
+                : apiFetch(API + '/' + encodeURIComponent(slug) + '?' + params.join('&'), { signal: getNavSignal() });
 
             return dataPromise
                 .then(function (result) { renderListResult(meta, result, slug, query, skip, top, search, sort, dir); });
@@ -5684,6 +5714,9 @@
   }
 
   async function route() {
+    // Cancel any in-flight navigation fetches from the previous route
+    cancelNavigation();
+
     const p      = location.pathname.replace(/^\//, '').split('/').filter(Boolean);
     const slug   = p[0], rawId = p[1], action = p[2];
     const id     = (rawId && rawId !== 'create') ? rawId : null;

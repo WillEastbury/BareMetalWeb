@@ -26,7 +26,23 @@
     };
 
     function escHtml(s) {
-        return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        var str = String(s);
+        var out = '';
+        var last = 0;
+        for (var i = 0; i < str.length; i++) {
+            var ent;
+            switch (str.charCodeAt(i)) {
+                case 38: ent = '&amp;'; break;
+                case 60: ent = '&lt;'; break;
+                case 62: ent = '&gt;'; break;
+                case 34: ent = '&quot;'; break;
+                default: continue;
+            }
+            if (i > last) out += str.substring(last, i);
+            out += ent;
+            last = i + 1;
+        }
+        return last === 0 ? str : out + str.substring(last);
     }
 
     function render() {
