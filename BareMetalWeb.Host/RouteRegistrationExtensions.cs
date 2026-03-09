@@ -370,7 +370,12 @@ public static class RouteRegistrationExtensions
                         fieldDef["placeholder"] = f.Placeholder;
                     if (f.Lookup != null)
                     {
-                        var target = DataScaffold.GetEntityByType(f.Lookup.TargetType);
+                        // Prefer slug-based resolution: all virtual entities share typeof(DataRecord)
+                        // so GetEntityByType alone cannot distinguish them.
+                        var target = (f.Lookup.TargetSlug != null
+                            && DataScaffold.TryGetEntity(f.Lookup.TargetSlug, out var bySlugTarget))
+                            ? bySlugTarget
+                            : DataScaffold.GetEntityByType(f.Lookup.TargetType);
                         if (target != null)
                             fieldDef["lookupUrl"] = $"/api/_lookup/{target.Slug}";
                         fieldDef["lookupValueField"]   = f.Lookup.ValueField;
@@ -1332,7 +1337,12 @@ public static class RouteRegistrationExtensions
 
             if (f.Lookup != null)
             {
-                var targetMeta = DataScaffold.GetEntityByType(f.Lookup.TargetType);
+                // Prefer slug-based resolution: all virtual entities share typeof(DataRecord)
+                // so GetEntityByType alone cannot distinguish them.
+                var targetMeta = (f.Lookup.TargetSlug != null
+                    && DataScaffold.TryGetEntity(f.Lookup.TargetSlug, out var bySlugMeta))
+                    ? bySlugMeta
+                    : DataScaffold.GetEntityByType(f.Lookup.TargetType);
                 // The generic /api/{slug} endpoint serialises the entity key as "id".
                 // When the lookup's ValueField is the C# key property ("Key"), map it to
                 // "id" so the VNext SPA's loadLookupSelect correctly matches options.

@@ -162,6 +162,9 @@ public sealed class RuntimeEntityModel
                 RelatedDocument: !string.IsNullOrWhiteSpace(f.RelatedDocumentSlug)
                     && DataScaffold.TryGetEntity(f.RelatedDocumentSlug!, out var relMeta)
                     ? new RelatedDocumentConfig(relMeta.Type, f.RelatedDocumentDisplayField ?? "Id", f.RelatedDocumentSlug)
+                    : null,
+                EnumValues: f.FieldType == Rendering.Models.FormFieldType.Enum && f.EnumValues.Count > 0
+                    ? f.EnumValues
                     : null
             ));
         }

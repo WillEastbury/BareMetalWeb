@@ -291,7 +291,11 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
                     ["placeholder"] = f.Placeholder,
                     ["isComputed"] = f.Computed != null,
                     ["isCalculated"] = f.Calculated != null,
-                    ["lookupTargetSlug"] = f.Lookup != null ? DataScaffold.GetEntityByType(f.Lookup.TargetType)?.Slug : null,
+                    ["lookupTargetSlug"] = f.Lookup != null
+                        ? ((f.Lookup.TargetSlug != null && DataScaffold.TryGetEntity(f.Lookup.TargetSlug, out var lkpMeta))
+                            ? lkpMeta.Slug
+                            : DataScaffold.GetEntityByType(f.Lookup.TargetType)?.Slug)
+                        : null,
                     ["lookupValueField"] = f.Lookup?.ValueField,
                     ["lookupDisplayField"] = f.Lookup?.DisplayField,
                     ["lookupFilterField"] = f.Lookup?.QueryField,

@@ -1141,6 +1141,42 @@ public class RouteRegistrationExtensionsTests : IDisposable
             $"Expected 'CustomHtml' or 'ChildList' but got '{fieldType}'");
     }
 
+    /// <summary>
+    /// Regression test: virtual/gallery entities all share typeof(DataRecord) as their CLR type,
+    /// so GetEntityByType alone cannot resolve the lookup target. BuildEntitySchema must use the
+    /// TargetSlug from the DataLookupConfig to find the target entity and emit a non-null
+    /// targetSlug in the lookup metadata.
+    /// Without this fix the VNext SPA's JS check `if (f.lookup && f.lookup.targetSlug && val)` fails
+    /// and FK cells are rendered as raw IDs.
+    /// </summary>
+    [Fact]
+    public void BuildEntitySchema_VirtualEntityLookupField_EmitsNonNullTargetSlug()
+    {
+        // Arrange — Customer has AddressId with a lookup to Address (both virtual/gallery entities)
+        _ = HostGalleryTestFixture.State;
+        Assert.True(DataScaffold.TryGetEntity("customers", out var meta));
+
+        var method = typeof(RouteRegistrationExtensions).GetMethod(
+            "BuildEntitySchema",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        // Act
+        var schema = (Dictionary<string, object?>)method.Invoke(null, new object[] { meta! })!;
+        var fields = (object[])schema["fields"]!;
+        var addressField = fields
+            .Cast<Dictionary<string, object?>>()
+            .FirstOrDefault(f => string.Equals((string?)f["name"], "AddressId", StringComparison.Ordinal));
+
+        // Assert — targetSlug must be populated so the SPA renders the FK display value
+        Assert.NotNull(addressField);
+        var lookup = addressField["lookup"] as Dictionary<string, object?>;
+        Assert.NotNull(lookup);
+        var targetSlug = (string?)lookup["targetSlug"];
+        Assert.NotNull(targetSlug);
+        Assert.Equal("addresses", targetSlug);
+    }
+
     // ──────────────────────────────────────────────────────────────
     //  Metadata inlining tests
     // ──────────────────────────────────────────────────────────────
