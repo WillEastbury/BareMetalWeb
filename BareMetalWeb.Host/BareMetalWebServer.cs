@@ -98,6 +98,7 @@ public class BareMetalWebServer : IBareWebHost
     private DateTime _lastMenuCacheScavenge = DateTime.UtcNow;
     private const int MaxMenuCacheEntries = 2048;
     private int _routesVersion = 0;
+    private ushort _nextRouteId = 1; // 0 = unassigned
     private readonly Dictionary<string, CompiledRoute> _compiledRoutes = new(StringComparer.Ordinal);
     private List<(string Key, RouteHandlerData Data, CompiledRoute Compiled)>? _sortedRoutes;
     private int _sortedRoutesVersion = -1;
@@ -105,6 +106,11 @@ public class BareMetalWebServer : IBareWebHost
     private int _jumpTableVersion = -1;
     private readonly PrefixRouter _prefixRouter = new();
     private int _prefixRouterVersion = -1;
+    /// <summary>Dense array of handlers indexed by RouteId for O(1) numeric dispatch.</summary>
+    private RouteHandlerData[] _routeById = Array.Empty<RouteHandlerData>();
+    private int _routeByIdVersion = -1;
+    /// <summary>Max RouteId currently assigned (for bounds checking).</summary>
+    private ushort _maxRouteId;
     public BareMetalWebServer(
         string appName,
         string companyDescription,
@@ -322,11 +328,13 @@ public class BareMetalWebServer : IBareWebHost
     public delegate Task BareMetalRequestDelegate(HttpContext ctx, IHtmlRenderer renderer, PageInfo page, BareMetalWebServer app, IOutputCache cache);
     public void RegisterRoute(string path, RouteHandlerData routeHandler)
     {
+        routeHandler.RouteId = _nextRouteId++;
+        routeHandler.RouteKey = path;
         routes[path] = routeHandler;
         _compiledRoutes[path] = new CompiledRoute(path);
         _routesVersion++;
         _sortedRoutes = null; // invalidate sorted cache
-        BufferedLogger.LogInfo($"Route registered: {path} with handler {routeHandler.Handler.Method.Name}");
+        BufferedLogger.LogInfo($"Route registered: {path} [id={routeHandler.RouteId}] with handler {routeHandler.Handler.Method.Name}");
     }
 
     // Returns routes sorted by specificity (most literal segments first), rebuilding only when routes change.
@@ -368,9 +376,38 @@ public class BareMetalWebServer : IBareWebHost
             _prefixRouterVersion = _routesVersion;
         }
     }
+
+    /// <summary>Builds the dense RouteId → handler array when routes change.</summary>
+    private void EnsureRouteIdTable()
+    {
+        if (_routeByIdVersion != _routesVersion)
+        {
+            ushort maxId = 0;
+            foreach (var kvp in routes)
+            {
+                if (kvp.Value.RouteId > maxId)
+                    maxId = kvp.Value.RouteId;
+            }
+
+            var table = new RouteHandlerData[maxId + 1];
+            foreach (var kvp in routes)
+            {
+                var data = kvp.Value;
+                if (data.RouteId > 0)
+                    table[data.RouteId] = data;
+            }
+
+            _routeById = table;
+            _maxRouteId = maxId;
+            _routeByIdVersion = _routesVersion;
+            BufferedLogger.LogInfo($"Route ID table built: {routes.Count} routes, max ID={maxId}");
+        }
+    }
     public Task WireUpRequestHandlingAndLoggerAsyncLifetime()
     {
+        RegisterRouteMetadataEndpoint();
         EnsureJumpTable();
+        EnsureRouteIdTable();
         StartBackgroundServices();
         BufferedLogger.LogInfo($"WireUpRequestHandlingAndLoggerAsyncLifetime completed and request handling is live.");
         return Task.CompletedTask;
@@ -383,7 +420,9 @@ public class BareMetalWebServer : IBareWebHost
     /// </summary>
     public Task WireUpDirectHosting()
     {
+        RegisterRouteMetadataEndpoint();
         EnsureJumpTable();
+        EnsureRouteIdTable();
         StartBackgroundServices();
         BufferedLogger.LogInfo("WireUpDirectHosting completed — ready for BmwHost.RunAsync().");
         return Task.CompletedTask;
@@ -604,6 +643,41 @@ public class BareMetalWebServer : IBareWebHost
             }
 
             long dispatchStart = Stopwatch.GetTimestamp();
+            // ── Numeric route ID dispatch: O(1) array lookup ────────────────
+            // Paths like "/123" are parsed as route IDs for client-optimized dispatch.
+            // Single branchless integer parse, single array index — no hashing, no strings.
+            if (requestPath.Length > 1 && requestPath[1] >= '0' && requestPath[1] <= '9')
+            {
+                EnsureRouteIdTable();
+                uint numericId = ParseRouteId(requestPath);
+                if (numericId > 0 && numericId <= _maxRouteId)
+                {
+                    var idPage = _routeById[numericId];
+                    if (idPage.Handler != null)
+                    {
+                        Metrics.RecordRouteDispatch(Stopwatch.GetElapsedTime(dispatchStart));
+                        if (idPage.PageInfo != null)
+                            bmwCtx.SetPageInfo(idPage.PageInfo);
+                        bmwCtx.CompiledPlans = idPage.CompiledPlans;
+                        if (!await IsAuthorizedAsync(idPage.PageInfo, bmwCtx, bmwCtx.RequestAborted).ConfigureAwait(false))
+                        {
+                            await LogAccessDeniedAsync(routeKey, sourceIp, bmwCtx, idPage.PageInfo, bmwCtx.RequestAborted).ConfigureAwait(false);
+                            await RenderForbidden(bmwCtx);
+                            return;
+                        }
+                        await idPage.Handler(bmwCtx);
+                        BufferedLogger.Log(BmwLogLevel.Info, $"/{numericId}|200|numeric", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 200, SourceIp = sourceIp, Detail = "numeric-route" });
+                        return;
+                    }
+                }
+                // Numeric path but no matching route ID — return 404 immediately
+                bmwCtx.StatusCode = StatusCodes.Status404NotFound;
+                bmwCtx.ContentType = "text/plain";
+                await bmwCtx.WriteResponseAsync($"Route ID {numericId} not found");
+                BufferedLogger.Log(BmwLogLevel.Info, $"/{numericId}|404|numeric", rid, new LogFields { Method = method, Path = requestPath, StatusCode = 404, SourceIp = sourceIp, Detail = "numeric-route-not-found" });
+                return;
+            }
+
             // ── Jump table: O(1) exact-match dispatch ───────────────────────
             EnsureJumpTable();
             EnsurePrefixRouter();
@@ -776,6 +850,77 @@ public class BareMetalWebServer : IBareWebHost
         return true;
     }
 
+    /// <summary>
+    /// Registers the /bmw/routes metadata endpoint that exports the route table
+    /// as JSON: [{routeId, verb, path, params}]. BMW client libraries use this
+    /// to build numeric route ID requests.
+    /// </summary>
+    private void RegisterRouteMetadataEndpoint()
+    {
+        // Only register once (idempotent)
+        if (routes.ContainsKey("GET /bmw/routes")) return;
+
+        RegisterRoute("GET /bmw/routes", new RouteHandlerData(null, async (BmwContext ctx) =>
+        {
+            EnsureRouteIdTable();
+            ctx.StatusCode = 200;
+            ctx.ContentType = "application/json";
+
+            var sb = new System.Text.StringBuilder(4096);
+            sb.Append('[');
+            bool first = true;
+            foreach (var kvp in routes)
+            {
+                var data = kvp.Value;
+                if (data.RouteId == 0) continue;
+
+                if (!first) sb.Append(',');
+                first = false;
+
+                // Parse verb and path from the route key ("GET /login")
+                string routeKeyStr = kvp.Key;
+                int spaceIdx = routeKeyStr.IndexOf(' ');
+                string verb = spaceIdx > 0 ? routeKeyStr[..spaceIdx] : routeKeyStr;
+                string rpath = spaceIdx > 0 ? routeKeyStr[(spaceIdx + 1)..] : "/";
+
+                int paramCount = 0;
+                if (_compiledRoutes.TryGetValue(kvp.Key, out var compiled))
+                    paramCount = compiled.ParameterCount;
+
+                sb.Append("{\"id\":");
+                sb.Append(data.RouteId);
+                sb.Append(",\"verb\":\"");
+                sb.Append(verb);
+                sb.Append("\",\"path\":\"");
+                sb.Append(rpath.Replace("\"", "\\\""));
+                sb.Append("\",\"params\":");
+                sb.Append(paramCount);
+                sb.Append('}');
+            }
+            sb.Append(']');
+
+            await ctx.WriteResponseAsync(sb.ToString());
+        }));
+    }
+
+    /// <summary>
+    /// Branchless ASCII integer parse from a path like "/123" or "/42?query".
+    /// Stops at the first non-digit after the leading '/'. Returns 0 on failure.
+    /// </summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]
+    private static uint ParseRouteId(string path)
+    {
+        uint id = 0;
+        for (int i = 1; i < path.Length; i++)
+        {
+            uint d = (uint)(path[i] - '0');
+            if (d > 9) break; // stop at '?', '/', ' ', or any non-digit
+            id = id * 10 + d;
+            if (id > ushort.MaxValue) return 0; // overflow guard
+        }
+        return id;
+    }
+
     private static async ValueTask<bool> IsAuthorizedAsync(PageInfo? pageInfo, BmwContext context, CancellationToken cancellationToken = default)
     {
         if (pageInfo == null)
@@ -862,7 +1007,12 @@ public class BareMetalWebServer : IBareWebHost
         if (requestPath.Equals("/health", StringComparison.OrdinalIgnoreCase)
             || requestPath.Equals("/healthz", StringComparison.OrdinalIgnoreCase)
             || requestPath.Equals("/readyz", StringComparison.OrdinalIgnoreCase)
-            || requestPath.Equals("/metrics/prometheus", StringComparison.OrdinalIgnoreCase))
+            || requestPath.Equals("/metrics/prometheus", StringComparison.OrdinalIgnoreCase)
+            || requestPath.StartsWith("/bmw/", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        // Numeric route IDs (e.g. /42) must always be reachable
+        if (requestPath.Length > 1 && requestPath[1] >= '0' && requestPath[1] <= '9')
             return false;
 
         var staticPrefix = StaticFiles?.NormalizedRequestPathPrefix;
