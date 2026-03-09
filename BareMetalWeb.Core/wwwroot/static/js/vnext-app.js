@@ -4866,7 +4866,7 @@
             var sm = document.cookie.match(/(?:^|;\s*)bm-selected-skin=([^;]+)/);
             if (sm) {
                 var sk = decodeURIComponent(sm[1]);
-                var allowedSkins = ['default','sidebar','compact','focus'];
+                var allowedSkins = ['default','sidebar','compact','focus','bmw'];
                 if (allowedSkins.indexOf(sk) >= 0 && sk !== 'default') {
                     document.body.setAttribute('data-bm-skin', sk);
                 }

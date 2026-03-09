@@ -80,7 +80,7 @@
 
         // Skin switcher
         const SKIN_KEY = 'bm-selected-skin';
-        const ALLOWED_SKINS = new Set(['default', 'sidebar', 'compact', 'focus']);
+        const ALLOWED_SKINS = new Set(['default', 'sidebar', 'compact', 'focus', 'bmw']);
 
         function getStoredSkin() {
             const cookies = document.cookie ? document.cookie.split(';') : [];
