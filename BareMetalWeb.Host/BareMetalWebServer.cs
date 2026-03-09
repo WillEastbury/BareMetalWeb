@@ -447,6 +447,32 @@ public class BareMetalWebServer : IBareWebHost
             }));
 
             BufferedLogger.LogInfo($"Binary transport initialized: {_binaryTransport.RegisteredHandlerCount} handlers in jump table, {_protocolDescriptor.Routes.Count} protocol routes");
+
+            // Register WAL binary stream endpoint
+            RegisterRoute("GET /bmw/wal/stream", new RouteHandlerData(null, async (BmwContext ctx) =>
+            {
+                if (DataStoreProvider.PrimaryProvider is not WalDataProvider walProv)
+                {
+                    ctx.StatusCode = 503;
+                    await ctx.WriteResponseAsync("WAL provider not available");
+                    return;
+                }
+
+                ctx.StatusCode = 200;
+                ctx.ContentType = "application/octet-stream";
+
+                var entity = ReadQueryParam(ctx.HttpRequest.QueryString.Value.AsSpan(), "entity".AsSpan());
+                if (entity.Length > 0)
+                {
+                    await WalStreamWriter.StreamEntityAsync(
+                        ctx.ResponseBody, walProv, entity.ToString(), ctx.RequestAborted);
+                }
+                else
+                {
+                    await WalStreamWriter.StreamAllAsync(
+                        ctx.ResponseBody, walProv, ctx.RequestAborted);
+                }
+            }));
         }
     }
 
