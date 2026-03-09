@@ -184,21 +184,29 @@
             });
     }
 
+    // Shared Uint8Array view reused across all parseOrdinalData calls to avoid per-cell allocation.
+    var _ordinalBuf = null;
+    var _ordinalDecoder = new TextDecoder('utf-8');
+
     function parseOrdinalData(view, fieldNames) {
         var offset = 0;
         var rowCount = view.getUint32(offset, true); offset += 4;
         var fieldCount = view.getUint16(offset, true); offset += 2;
-        var rows = [];
-        var decoder = new TextDecoder();
+        var rows = new Array(rowCount);
+        // Reuse or create a Uint8Array view over the DataView's buffer.
+        if (!_ordinalBuf || _ordinalBuf.buffer !== view.buffer) {
+            _ordinalBuf = new Uint8Array(view.buffer);
+        }
+        var fieldNameCount = fieldNames.length;
         for (var r = 0; r < rowCount; r++) {
             var row = {};
             for (var f = 0; f < fieldCount; f++) {
                 var len = view.getUint16(offset, true); offset += 2;
-                var val = decoder.decode(new Uint8Array(view.buffer, offset, len));
+                // Decode by slicing a view (subarray) — no copy; TextDecoder reads in-place.
+                if (f < fieldNameCount) row[fieldNames[f]] = len > 0 ? _ordinalDecoder.decode(_ordinalBuf.subarray(offset, offset + len)) : '';
                 offset += len;
-                if (f < fieldNames.length) row[fieldNames[f]] = val;
             }
-            rows.push(row);
+            rows[r] = row;
         }
         return { rows: rows, fieldNames: fieldNames, rowCount: rowCount };
     }
@@ -307,14 +315,21 @@
             .catch(function () {});
     }
 
+    // Single-pass HTML escaper: one scan instead of 5 chained regex replace calls.
     function escHtml(str) {
         if (str == null) return '';
-        return String(str)
-            .replace(/&/g, '&amp;')
-            .replace(/</g, '&lt;')
-            .replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;')
-            .replace(/'/g, '&#39;');
+        var s = String(str);
+        var out = '';
+        for (var i = 0; i < s.length; i++) {
+            var c = s.charCodeAt(i);
+            if      (c === 38) out += '&amp;';   // '&'
+            else if (c === 60) out += '&lt;';    // '<'
+            else if (c === 62) out += '&gt;';    // '>'
+            else if (c === 34) out += '&quot;';  // '"'
+            else if (c === 39) out += '&#39;';   // "'"
+            else               out += s[i];
+        }
+        return out;
     }
 
     function syncTagHidden(container) {
@@ -343,8 +358,8 @@
         html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
         html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-        // Links
-        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+        // Links (only http/https/mailto — block javascript: URIs)
+        html = html.replace(/\[([^\]]+)\]\(((?:https?:\/\/|mailto:)[^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
         // Unordered lists
         html = html.replace(/^\- (.+)$/gm, '<li>$1</li>');
         html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
@@ -380,6 +395,17 @@
 
     function nestedGet(obj, path) {
         if (!obj || !path) return undefined;
+        // Fast path: simple field name with no dot (covers the vast majority of calls)
+        if (path.indexOf('.') === -1) {
+            if (path in obj) return obj[path];
+            var alt = path.charAt(0) === path.charAt(0).toLowerCase()
+                ? path.charAt(0).toUpperCase() + path.slice(1)
+                : path.charAt(0).toLowerCase() + path.slice(1);
+            if (alt in obj) return obj[alt];
+            var lp = path.toLowerCase();
+            for (var k in obj) { if (k.toLowerCase() === lp) return obj[k]; }
+            return undefined;
+        }
         var parts = path.split('.');
         var cur = obj;
         for (var i = 0; i < parts.length; i++) {
@@ -387,15 +413,15 @@
             var p = parts[i];
             if (p in cur) { cur = cur[p]; continue; }
             // Case-insensitive fallback: try camelCase/PascalCase variants
-            var alt = p.charAt(0) === p.charAt(0).toLowerCase()
+            var alt2 = p.charAt(0) === p.charAt(0).toLowerCase()
                 ? p.charAt(0).toUpperCase() + p.slice(1)
                 : p.charAt(0).toLowerCase() + p.slice(1);
-            if (alt in cur) { cur = cur[alt]; continue; }
+            if (alt2 in cur) { cur = cur[alt2]; continue; }
             // Full case-insensitive search as last resort
-            var lp = p.toLowerCase();
+            var lp2 = p.toLowerCase();
             var found = false;
             for (var k in cur) {
-                if (k.toLowerCase() === lp) { cur = cur[k]; found = true; break; }
+                if (k.toLowerCase() === lp2) { cur = cur[k]; found = true; break; }
             }
             if (!found) return undefined;
         }
@@ -705,11 +731,14 @@
             if (items.length === 0) {
                 html += '<div class="bm-empty-state"><i class="bi bi-inbox"></i><p>No records found</p><small>Create one to get started</small></div>';
             } else {
-                items.forEach(function (item) {
+                var cparts = new Array(items.length);
+                for (var ci2 = 0; ci2 < items.length; ci2++) {
+                    var item = items[ci2];
                     var id = item.id || item.Id || '';
                     var encId = encodeURIComponent(id);
-                    html += '<div class="card mb-2"><div class="card-body p-2">';
-                    listFields.forEach(function (f) {
+                    var cp = '<div class="card mb-2"><div class="card-body p-2">';
+                    for (var fi2 = 0; fi2 < listFields.length; fi2++) {
+                        var f = listFields[fi2];
                         var val = nestedGet(item, f.name);
                         var cellHtml;
                         if (f.type === 'CustomHtml' && Array.isArray(val)) {
@@ -719,20 +748,22 @@
                         } else {
                             cellHtml = '<span>' + fmtValue(val, f.type) + '</span>';
                         }
-                        html += '<div class="d-flex justify-content-between"><small class="text-muted">' + escHtml(f.label) + '</small>' + cellHtml + '</div>';
-                    });
-                    html += '<div class="mt-2 d-flex gap-1">';
-                    html += '<a class="btn btn-xs btn-outline-info btn-sm" href="' + baseUrl + '/' + encId + '"><i class="bi bi-eye"></i></a>';
-                    html += '<a class="btn btn-xs btn-outline-warning btn-sm" href="' + baseUrl + '/' + encId + '/edit"><i class="bi bi-pencil"></i></a>';
-                    html += '<button class="btn btn-xs btn-outline-primary btn-sm vnext-row-clone" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '"><i class="bi bi-files"></i></button>';
-                    html += '<button class="btn btn-xs btn-outline-danger btn-sm vnext-row-delete" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '"><i class="bi bi-trash"></i></button>';
-                    commands.forEach(function (cmd) {
+                        cp += '<div class="d-flex justify-content-between"><small class="text-muted">' + escHtml(f.label) + '</small>' + cellHtml + '</div>';
+                    }
+                    cp += '<div class="mt-2 d-flex gap-1">';
+                    cp += '<a class="btn btn-xs btn-outline-info btn-sm" href="' + baseUrl + '/' + encId + '"><i class="bi bi-eye"></i></a>';
+                    cp += '<a class="btn btn-xs btn-outline-warning btn-sm" href="' + baseUrl + '/' + encId + '/edit"><i class="bi bi-pencil"></i></a>';
+                    cp += '<button class="btn btn-xs btn-outline-primary btn-sm vnext-row-clone" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '"><i class="bi bi-files"></i></button>';
+                    cp += '<button class="btn btn-xs btn-outline-danger btn-sm vnext-row-delete" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '"><i class="bi bi-trash"></i></button>';
+                    for (var cmdI = 0; cmdI < commands.length; cmdI++) {
+                        var cmd = commands[cmdI];
                         var cls = cmd.destructive ? 'btn-outline-danger' : 'btn-outline-secondary';
-                        html += '<button class="btn btn-xs btn-sm ' + cls + ' vnext-row-cmd" data-id="' + escHtml(id) + '" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '" title="' + escHtml(cmd.label) + '">' +
+                        cp += '<button class="btn btn-xs btn-sm ' + cls + ' vnext-row-cmd" data-id="' + escHtml(id) + '" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '" title="' + escHtml(cmd.label) + '">' +
                             (cmd.icon ? '<i class="bi ' + escHtml(cmd.icon) + '"></i>' : escHtml(cmd.label)) + '</button>';
-                    });
-                    html += '</div></div></div>';
-                });
+                    }
+                    cparts[ci2] = cp + '</div></div></div>';
+                }
+                html += cparts.join('');
             }
             html += '</div>';
 
@@ -774,34 +805,38 @@
             if (items.length === 0) {
                 html += '<tr><td colspan="' + (listFields.length + 2) + '"><div class="bm-empty-state"><i class="bi bi-inbox"></i><p>No records found</p><small>Create one to get started</small></div></td></tr>';
             } else {
-                items.forEach(function (item) {
+                var tparts = new Array(items.length);
+                for (var ri = 0; ri < items.length; ri++) {
+                    var item = items[ri];
                     var id = item.id || item.Id || '';
                     var encId = encodeURIComponent(id);
-                    html += '<tr data-id="' + escHtml(id) + '">';
-                    html += '<td><input type="checkbox" class="form-check-input vnext-row-select" value="' + escHtml(id) + '"></td>';
-                    listFields.forEach(function (f) {
+                    var rp = '<tr data-id="' + escHtml(id) + '"><td><input type="checkbox" class="form-check-input vnext-row-select" value="' + escHtml(id) + '"></td>';
+                    for (var fi = 0; fi < listFields.length; fi++) {
+                        var f = listFields[fi];
                         var val = nestedGet(item, f.name);
                         if (f.type === 'CustomHtml' && Array.isArray(val)) {
-                            html += '<td data-label="' + escHtml(f.label) + '"><span class="badge bg-secondary">' + val.length + ' item' + (val.length !== 1 ? 's' : '') + '</span></td>';
+                            rp += '<td data-label="' + escHtml(f.label) + '"><span class="badge bg-secondary">' + val.length + ' item' + (val.length !== 1 ? 's' : '') + '</span></td>';
                         } else if (f.lookup && f.lookup.targetSlug && val) {
-                            html += '<td data-label="' + escHtml(f.label) + '" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
+                            rp += '<td data-label="' + escHtml(f.label) + '" data-lookup-field="' + escHtml(f.name) + '" data-target-slug="' + escHtml(f.lookup.targetSlug) + '" data-display-field="' + escHtml(f.lookup.displayField) + '" data-value="' + escHtml(String(val)) + '">' +
                                 '<a href="' + BASE + '/' + escHtml(f.lookup.targetSlug) + '/' + encodeURIComponent(val) + '">' + escHtml(String(val)) + '</a></td>';
                         } else {
-                            html += '<td data-label="' + escHtml(f.label) + '">' + fmtValue(val, f.type) + '</td>';
+                            rp += '<td data-label="' + escHtml(f.label) + '">' + fmtValue(val, f.type) + '</td>';
                         }
-                    });
-                    html += '<td data-label="Actions" class="text-nowrap">';
-                    html += '<a class="btn btn-xs btn-outline-info btn-sm me-1" href="' + baseUrl + '/' + encId + '" title="View"><i class="bi bi-eye"></i></a>';
-                    html += '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encId + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>';
-                    html += '<button class="btn btn-xs btn-outline-primary btn-sm me-1 vnext-row-clone" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '" title="Clone"><i class="bi bi-files"></i></button>';
-                    html += '<button class="btn btn-xs btn-outline-danger btn-sm vnext-row-delete" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '" title="Delete"><i class="bi bi-trash"></i></button>';
-                    commands.forEach(function (cmd) {
+                    }
+                    rp += '<td data-label="Actions" class="text-nowrap">';
+                    rp += '<a class="btn btn-xs btn-outline-info btn-sm me-1" href="' + baseUrl + '/' + encId + '" title="View"><i class="bi bi-eye"></i></a>';
+                    rp += '<a class="btn btn-xs btn-outline-warning btn-sm me-1" href="' + baseUrl + '/' + encId + '/edit" title="Edit"><i class="bi bi-pencil"></i></a>';
+                    rp += '<button class="btn btn-xs btn-outline-primary btn-sm me-1 vnext-row-clone" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '" title="Clone"><i class="bi bi-files"></i></button>';
+                    rp += '<button class="btn btn-xs btn-outline-danger btn-sm vnext-row-delete" data-id="' + escHtml(id) + '" data-slug="' + escHtml(slug) + '" title="Delete"><i class="bi bi-trash"></i></button>';
+                    for (var ci = 0; ci < commands.length; ci++) {
+                        var cmd = commands[ci];
                         var cls = cmd.destructive ? 'btn-outline-danger' : 'btn-outline-secondary';
-                        html += '<button class="btn btn-xs btn-sm ms-1 ' + cls + ' vnext-row-cmd" data-id="' + escHtml(id) + '" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '" title="' + escHtml(cmd.label) + '">' +
+                        rp += '<button class="btn btn-xs btn-sm ms-1 ' + cls + ' vnext-row-cmd" data-id="' + escHtml(id) + '" data-cmd="' + escHtml(cmd.name) + '" data-confirm="' + escHtml(cmd.confirmMessage || '') + '" title="' + escHtml(cmd.label) + '">' +
                             (cmd.icon ? '<i class="bi ' + escHtml(cmd.icon) + '"></i>' : escHtml(cmd.label)) + '</button>';
-                    });
-                    html += '</td></tr>';
-                });
+                    }
+                    tparts[ri] = rp + '</td></tr>';
+                }
+                html += tparts.join('');
             }
 
             html += '</tbody></table></div>';
@@ -987,7 +1022,7 @@
             items.forEach(function (item) { roots.push(nodeMap[item.id || item.Id || '']); });
         }
 
-        // Split-panel layout (mirrors log viewer / SSR tree view)
+        // Split-panel layout (mirrors log viewer / VNext tree view)
         var html = '<div class="bm-data-tree-layout">';
 
         // Left: tree sidebar
@@ -1057,7 +1092,7 @@
         var parentField = meta.parentField ? meta.parentField.name : null;
         var labelField = meta.fields.filter(function (f) { return f.list; }).sort(function (a, b) { return a.order - b.order; })[0];
         var subtitleField = meta.fields.filter(function (f) { return f.list && f !== labelField; }).sort(function (a, b) { return a.order - b.order; })[0];
-        // Look for a title/role field like the SSR version does
+        // Look for a title/role field like the list view does
         var titleField = meta.fields.find(function (f) {
             var n = f.name.toLowerCase();
             return n.indexOf('title') >= 0 || n.indexOf('role') >= 0 || n.indexOf('position') >= 0;
@@ -1272,7 +1307,7 @@
             html += '</div>';
         }
 
-        // Render Gantt chart HTML (matches SSR bm-gantt-* classes)
+        // Render Gantt chart HTML (matches bm-gantt-* classes)
         html += '<div class="bm-gantt-container"><div class="bm-gantt-inner">';
 
         // Year header row
@@ -1319,7 +1354,7 @@
 
         html += '</div></div>';
 
-        // Apply dynamic styles (same as gantt-view.js does for SSR)
+        // Apply dynamic styles (same as gantt-view.js)
         setTimeout(function () {
             var els = document.querySelectorAll('[data-gantt-left],[data-gantt-width],[data-gantt-bg]');
             for (var j = 0; j < els.length; j++) {
@@ -4278,14 +4313,17 @@
             url += '&from=' + encodeURIComponent(fromSlug) + '&via=' + encodeURIComponent(viaField);
         }
         fetch(url, { credentials: 'same-origin' })
-            .then(function (r) { return r.json(); })
+            .then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            })
             .then(function (data) {
-                var rows = (data && data.data) ? data.data : [];
+                var rows = (data && Array.isArray(data.data)) ? data.data : [];
                 if (rows.length === 0) {
                     resultsEl.innerHTML = '<p class="text-muted small">No results found.</p>';
                     return;
                 }
-                var keys = Object.keys(rows[0]);
+                var keys = Object.keys(rows[0] || {});
                 var html = '<table class="table table-sm table-hover table-striped"><thead><tr><th></th>';
                 keys.forEach(function (k) { html += '<th>' + escHtml(k) + '</th>'; });
                 html += '</tr></thead><tbody>';

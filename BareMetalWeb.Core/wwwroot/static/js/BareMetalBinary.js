@@ -152,11 +152,16 @@ const BareMetalBinary = (() => {
     writeBytes(bytes) { this.ensure(bytes.length); this.u8.set(bytes, this.off); this.off += bytes.length; }
     writeGuid(str) {
       const hex = str.replace(/-/g, '');
+      if (hex.length !== 32) throw new Error('Invalid GUID: expected 32 hex chars');
       this.ensure(16);
       // Parse two hex chars per byte directly via charCode arithmetic — avoids parseInt + substr.
       for (let i = 0; i < 16; i++) {
         const hi = hex.charCodeAt(i * 2);
         const lo = hex.charCodeAt(i * 2 + 1);
+        // Validate: '0'–'9' (48–57), 'A'–'F' (65–70), 'a'–'f' (97–102)
+        if (!((hi >= 48 && hi <= 57) || (hi >= 65 && hi <= 70) || (hi >= 97 && hi <= 102)) ||
+            !((lo >= 48 && lo <= 57) || (lo >= 65 && lo <= 70) || (lo >= 97 && lo <= 102)))
+          throw new Error('Invalid GUID hex character at position ' + (i * 2));
         this.u8[this.off++] = (((hi < 58 ? hi - 48 : (hi | 32) - 87) << 4) | (lo < 58 ? lo - 48 : (lo | 32) - 87));
       }
     }
