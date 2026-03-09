@@ -3219,6 +3219,18 @@ public sealed class RouteHandlers : IRouteHandlers
             ["dataLocation"] = MetricsTracker.DataRoot,
         };
 
+        // ── Cluster / Lease ──
+        var clusterSnapshot = MetricsTracker.ClusterState?.GetSnapshot();
+        if (clusterSnapshot != null)
+        {
+            payload["clusterInstanceId"] = clusterSnapshot.InstanceId;
+            payload["clusterRole"] = clusterSnapshot.Role.ToString().ToLowerInvariant();
+            payload["clusterIsLeader"] = clusterSnapshot.Role == BareMetalWeb.Data.ClusterRole.Leader;
+            payload["clusterLeaseValid"] = clusterSnapshot.IsLeaseValid;
+            payload["clusterEpoch"] = clusterSnapshot.Epoch;
+            payload["clusterLastLsn"] = clusterSnapshot.LastLsn;
+        }
+
         await WriteJsonResponseAsync(context, payload);
     }
 

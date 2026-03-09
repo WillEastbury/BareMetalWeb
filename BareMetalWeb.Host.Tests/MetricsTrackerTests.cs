@@ -351,17 +351,17 @@ public class MetricsTrackerTests
         // Assert
         Assert.Contains("Total Requests", metricNames);
         Assert.Contains("Errored Requests (5xx)", metricNames);
-        Assert.Contains("Pages Served 2xx", metricNames);
-        Assert.Contains("Pages Served 4xx", metricNames);
-        Assert.Contains("Pages Served 5xx", metricNames);
-        Assert.Contains("Pages Throttled (429)", metricNames);
-        Assert.Contains("---- MEMORY STATS ----", metricNames);
+        Assert.Contains("2xx Success", metricNames);
+        Assert.Contains("4xx Client Error", metricNames);
+        Assert.Contains("5xx Server Error", metricNames);
+        Assert.Contains("429 Throttled", metricNames);
+        Assert.Contains("💻 MEMORY & PROCESS", metricNames);
         Assert.Contains("Process ID (PID)", metricNames);
-        Assert.Contains("Working Set (bytes)", metricNames);
-        Assert.Contains("Virtual Memory Size (bytes)", metricNames);
-        Assert.Contains("---- CPU / SIMD ----", metricNames);
-        Assert.Contains("Architecture", metricNames);
-        Assert.Contains("Runtime", metricNames);
+        Assert.Contains("Working Set", metricNames);
+        Assert.Contains("Virtual Memory", metricNames);
+        Assert.Contains("🖥️ ENVIRONMENT", metricNames);
+        Assert.Contains("Process Architecture", metricNames);
+        Assert.Contains(".NET Runtime", metricNames);
         Assert.Contains("SIMD Vector Width", metricNames);
     }
 
@@ -380,8 +380,8 @@ public class MetricsTrackerTests
         // Assert
         Assert.Equal("2", metricDict["Total Requests"]);
         Assert.Equal("1", metricDict["Errored Requests (5xx)"]);
-        Assert.Equal("1", metricDict["Pages Served 2xx"]);
-        Assert.Equal("1", metricDict["Pages Served 5xx"]);
+        Assert.Equal("1", metricDict["2xx Success"]);
+        Assert.Equal("1", metricDict["5xx Server Error"]);
     }
 
     [Fact]
@@ -570,9 +570,9 @@ public class MetricsTrackerTests
         Assert.True(rows.Length >= 19, $"Expected at least 19 metric rows (got {rows.Length})");
         Assert.Equal("0", metricDict["Total Requests"]);
         Assert.Equal("0", metricDict["Errored Requests (5xx)"]);
-        Assert.Equal("0", metricDict["Pages Served 2xx"]);
-        Assert.Equal("0", metricDict["Pages Served 5xx"]);
-        Assert.Equal("0", metricDict["Pages Throttled (429)"]);
+        Assert.Equal("0", metricDict["2xx Success"]);
+        Assert.Equal("0", metricDict["5xx Server Error"]);
+        Assert.Equal("0", metricDict["429 Throttled"]);
     }
 
     [Fact]
@@ -673,13 +673,13 @@ public class MetricsTrackerTests
         var metricDict = rows.ToDictionary(r => r[0], r => r[1]);
 
         // Assert – response time values should end with " ms"
-        Assert.EndsWith("ms", metricDict["Average Response Time (All Time)"]);
-        Assert.EndsWith("ms", metricDict["Minimum Response Time (Last 5m)"]);
-        Assert.EndsWith("ms", metricDict["Maximum Response Time (Last 5m)"]);
-        Assert.EndsWith("ms", metricDict["Average Response Time (Last 5m)"]);
-        Assert.EndsWith("ms", metricDict["95th Percentile Response Time (Last 5m)"]);
-        Assert.EndsWith("ms", metricDict["99th Percentile Response Time (Last 5m)"]);
-        Assert.EndsWith("ms", metricDict["Average Response Time (Last 10s)"]);
+        Assert.EndsWith("ms", metricDict["Average (All Time)"]);
+        Assert.EndsWith("ms", metricDict["Minimum (Last 5m)"]);
+        Assert.EndsWith("ms", metricDict["Maximum (Last 5m)"]);
+        Assert.EndsWith("ms", metricDict["Average (Last 5m)"]);
+        Assert.EndsWith("ms", metricDict["P95 (Last 5m)"]);
+        Assert.EndsWith("ms", metricDict["P99 (Last 5m)"]);
+        Assert.EndsWith("ms", metricDict["Average (Last 10s)"]);
     }
 
     [Fact]
@@ -710,5 +710,85 @@ public class MetricsTrackerTests
         // Assert
         Assert.Equal(1, snapshot.TotalRequests);
         Assert.Equal(TimeSpan.Zero, snapshot.AverageResponseTime);
+    }
+
+    [Fact]
+    public async Task GetMetricTable_WithClusterState_ShowsClusterSection()
+    {
+        // Arrange
+        var tracker = new MetricsTracker();
+        var lease = new BareMetalWeb.Data.LocalLeaseAuthority("test-instance-1");
+        var clusterState = new BareMetalWeb.Data.ClusterState(lease);
+        await clusterState.TryBecomeLeaderAsync(CancellationToken.None);
+        MetricsTracker.ClusterState = clusterState;
+
+        try
+        {
+            // Act
+            tracker.GetMetricTable(out _, out var rows);
+            var metricNames = rows.Select(r => r[0]).ToArray();
+            var metricDict = rows.ToDictionary(r => r[0], r => r[1]);
+
+            // Assert — section header and all five fields must be present
+            Assert.Contains("🏆 CLUSTER / LEASE", metricNames);
+            Assert.Contains("Instance Name", metricNames);
+            Assert.Contains("Role", metricNames);
+            Assert.Contains("Lease Valid", metricNames);
+            Assert.Contains("Epoch", metricNames);
+            Assert.Contains("Last LSN", metricNames);
+
+            Assert.Equal("test-instance-1", metricDict["Instance Name"]);
+            Assert.Equal("👑 Leader", metricDict["Role"]);
+            Assert.Equal("✓ Valid", metricDict["Lease Valid"]);
+        }
+        finally
+        {
+            MetricsTracker.ClusterState = null;
+            clusterState.Dispose();
+        }
+    }
+
+    [Fact]
+    public void GetMetricTable_WithFollowerClusterState_ShowsFollowerRole()
+    {
+        // Arrange
+        var tracker = new MetricsTracker();
+        var lease = new BareMetalWeb.Data.LocalLeaseAuthority("follower-instance");
+        // Don't acquire leadership — remains follower
+        var clusterState = new BareMetalWeb.Data.ClusterState(lease);
+        MetricsTracker.ClusterState = clusterState;
+
+        try
+        {
+            // Act
+            tracker.GetMetricTable(out _, out var rows);
+            var metricDict = rows.ToDictionary(r => r[0], r => r[1]);
+
+            // Assert
+            Assert.Equal("follower-instance", metricDict["Instance Name"]);
+            Assert.Equal("🔄 Follower", metricDict["Role"]);
+        }
+        finally
+        {
+            MetricsTracker.ClusterState = null;
+            clusterState.Dispose();
+        }
+    }
+
+    [Fact]
+    public void GetMetricTable_WithoutClusterState_NoClusterSection()
+    {
+        // Arrange
+        var tracker = new MetricsTracker();
+        MetricsTracker.ClusterState = null;
+
+        // Act
+        tracker.GetMetricTable(out _, out var rows);
+        var metricNames = rows.Select(r => r[0]).ToArray();
+
+        // Assert — cluster section must be absent when no cluster state is set
+        Assert.DoesNotContain("🏆 CLUSTER / LEASE", metricNames);
+        Assert.DoesNotContain("Instance Name", metricNames);
+        Assert.DoesNotContain("Role", metricNames);
     }
 }

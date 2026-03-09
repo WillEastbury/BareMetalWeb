@@ -357,6 +357,7 @@ public static class BareMetalWebExtensions
 
         ClusterApiHandlers.Initialize(clusterState, compactorState);
         ProxyRouteHandler.Initialize(clusterState);
+        MetricsTracker.ClusterState = clusterState;
         TenantApiHandlers.Initialize(tenantRegistry);
         Console.WriteLine($"[BMW Startup]   Cluster + Compactor state initialized (local lease)");
 
