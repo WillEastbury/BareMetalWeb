@@ -649,7 +649,7 @@ internal sealed class ColumnarStore
     {
         if (v is int i)    return i;
         if (v is bool b)   return b ? 1 : 0;
-        if (v is Enum)     return (int)Convert.ChangeType(v, typeof(int));
+        if (v is Enum e)   return ((IConvertible)e).ToInt32(null);
         if (v == null)     return 0;
         try { return Convert.ToInt32(v); } catch { return 0; }
     }
@@ -696,7 +696,7 @@ internal sealed class ColumnarStore
                     && DataScaffold.GetEnumLookup(targetType).TryGetValue(s, out var cached)
                     ? cached
                     : value;
-                result = (int)Convert.ChangeType(enumVal, typeof(int));
+                result = ((IConvertible)enumVal).ToInt32(null);
                 return true;
             }
             if (value is bool b) { result = b ? 1 : 0; return true; }

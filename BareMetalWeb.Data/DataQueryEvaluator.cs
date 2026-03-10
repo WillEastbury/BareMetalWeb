@@ -430,14 +430,14 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
                 return d;
             if (effectiveType == typeof(TimeOnly) && TimeOnly.TryParse(s, out var t))
                 return t;
-            if (effectiveType.IsEnum && Enum.TryParse(effectiveType, s, ignoreCase: true, out var enumValue))
+            if (effectiveType.IsEnum && DataScaffold.GetEnumLookup(effectiveType).TryGetValue(s, out var enumValue))
                 return enumValue;
         }
 
         try
         {
-            if (effectiveType.IsEnum)
-                return Enum.ToObject(effectiveType, Convert.ChangeType(value, Enum.GetUnderlyingType(effectiveType))!);
+            if (effectiveType.IsEnum && value is IConvertible ic)
+                return Enum.ToObject(effectiveType, ic.ToInt32(null));
 
             return Convert.ChangeType(value, effectiveType);
         }
