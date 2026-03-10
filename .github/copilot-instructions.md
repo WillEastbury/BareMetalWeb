@@ -1,3 +1,78 @@
+# AUTONOMOUS AGENT WORKFLOW (MANDATORY)
+
+BareMetalWeb uses a multi-agent development model where autonomous agents resolve GitHub issues via isolated git worktrees and pull requests.
+
+## 1. Issue Discovery
+- Use GitHub CLI to list issues: `gh issue list`
+- Select only OPEN issues that are not assigned and do not have a label starting with `claimed:`
+- Claim the issue using:
+  ```bash
+  gh issue edit <issue-number> --add-label claimed:<agent-name>
+  ```
+
+## 2. Workspace Isolation (Git Worktrees)
+- Every issue must be worked in a dedicated git worktree
+- Never modify the main working tree
+- Create worktree with:
+  ```bash
+  git worktree add ../agent-<issue-number> -b agent/<issue-number>-<slug>
+  ```
+- Then `cd` into `../agent-<issue-number>`
+
+## 3. Development Rules
+- Implement minimal surgical changes
+- Follow BareMetalWeb architectural rules
+- Do not introduce MVC, middleware, DI, reflection on hot paths, or unnecessary allocations
+- Respect AOT, trim, and performance constraints already defined in the instructions
+
+## 4. Mandatory Verification
+Before committing:
+- Run `dotnet build BareMetalWeb.sln`
+- Run `dotnet test BareMetalWeb.sln --no-build -v quiet`
+- ARM64/proot environments must follow the runsettings guidance already present in the instructions
+
+## 5. Commit Format
+Commit messages must follow:
+```
+<short description>
+
+Fixes #<issue-number>
+```
+
+## 6. Push Branch
+Push using:
+```bash
+git push -u origin agent/<issue-number>-<slug>
+```
+
+## 7. Pull Request Creation
+Create PR using:
+```bash
+gh pr create --title "<short description>" --body "Closes #<issue-number>"
+```
+Agents must never merge PRs themselves.
+
+## 8. CI Feedback Loop
+- Wait for CI results
+- If CI fails, fix the issue and push to the same branch
+- Do not create additional PRs
+
+## 9. Completion
+- When CI passes, return to issue discovery and select another unclaimed issue
+
+## Multi-Agent Safety Rules
+- Keep changes minimal
+- Avoid broad refactors
+- Avoid formatting-only commits
+- Avoid touching unrelated files
+- Never force push
+- Never rewrite history
+- Never merge PRs
+
+If an issue is unclear, the agent must comment on the GitHub issue asking for clarification instead of guessing.
+
+---
+
 # BareMetalWeb Copilot instructions
 
 ## Project Overview
