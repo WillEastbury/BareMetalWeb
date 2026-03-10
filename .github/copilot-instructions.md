@@ -50,7 +50,7 @@ Create PR using:
 ```bash
 gh pr create --title "<short description>" --body "Closes #<issue-number>"
 ```
-Agents must never merge PRs themselves.
+Agents must never merge PRs themselves unless explicitly instructed to do so by the user. Acceptable instructions include "merge it" or "ship it".
 
 ## 8. CI Feedback Loop
 - Wait for CI results
@@ -67,7 +67,7 @@ Agents must never merge PRs themselves.
 - Avoid touching unrelated files
 - Never force push
 - Never rewrite history
-- Never merge PRs
+- Never merge PRs unless explicitly instructed by the user (e.g. "merge it", "ship it")
 
 If an issue is unclear, the agent must comment on the GitHub issue asking for clarification instead of guessing.
 
