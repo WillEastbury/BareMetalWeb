@@ -447,4 +447,56 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
         }
         return features.ToArray();
     }
+
+    /// <summary>
+    /// Renders metrics as grouped Bootstrap cards, each containing a compact sub-table.
+    /// One card per logical group instead of one row per metric.
+    /// </summary>
+    public string GetMetricGroupsHtml()
+    {
+        GetMetricTable(out _, out string[][] allRows);
+
+        var sb = new System.Text.StringBuilder(4096);
+        sb.Append("<div class=\"row g-3\">");
+
+        string? currentGroup = null;
+        var groupRows = new List<string[]>();
+
+        for (int i = 0; i <= allRows.Length; i++)
+        {
+            bool isHeader = i < allRows.Length && allRows[i].Length >= 2 && allRows[i][1] == "";
+            bool isEnd = i == allRows.Length;
+
+            if ((isHeader || isEnd) && currentGroup != null && groupRows.Count > 0)
+            {
+                sb.Append("<div class=\"col-12 col-lg-6\">");
+                sb.Append("<div class=\"card shadow-sm h-100\">");
+                sb.Append("<div class=\"card-header fw-semibold\">");
+                sb.Append(System.Net.WebUtility.HtmlEncode(currentGroup));
+                sb.Append("</div>");
+                sb.Append("<div class=\"card-body p-0\">");
+                sb.Append("<table class=\"table table-sm table-striped align-middle mb-0\">");
+                sb.Append("<tbody>");
+                foreach (var row in groupRows)
+                {
+                    sb.Append("<tr><td class=\"ps-3\">");
+                    sb.Append(System.Net.WebUtility.HtmlEncode(row[0]));
+                    sb.Append("</td><td class=\"text-end pe-3 text-nowrap\">");
+                    sb.Append(System.Net.WebUtility.HtmlEncode(row[1]));
+                    sb.Append("</td></tr>");
+                }
+                sb.Append("</tbody></table>");
+                sb.Append("</div></div></div>");
+                groupRows.Clear();
+            }
+
+            if (isHeader)
+                currentGroup = allRows[i][0];
+            else if (!isEnd)
+                groupRows.Add(allRows[i]);
+        }
+
+        sb.Append("</div>");
+        return sb.ToString();
+    }
 }
