@@ -49,6 +49,65 @@ METADATA-DRIVEN ARCHITECTURE (CRITICAL — read before every change)
 
 **The goal:** A single compiled binary serves any gallery app configuration. The binary never changes when tenants add entities, fields, views, or workflows — only the metadata changes.
 
+AGENT WORK-IN-PROGRESS TRACKING & CRASH RECOVERY
+--------------------------------------------------
+Agents are ephemeral — they can crash, time out, or be killed at any point.
+To make agent work **resumable and recoverable**, follow these rules:
+
+### 1. Create a WIP branch and PR early
+- Before making any code changes, create a working branch:
+  `agent/<issue-number>-<short-description>` (e.g. `agent/1380-reflection-audit`)
+- Open a **Draft PR** immediately with a `[WIP]` title prefix targeting the appropriate base branch.
+- Tag the PR with the GitHub issue number so the link is visible.
+
+### 2. Commit early and often
+- Make small, incremental commits as you complete each logical unit of work.
+- Each commit message should summarise what was done and what remains:
+  ```
+  [WIP] Remove reflection from SessionSerializer
+
+  Done: replaced typeof() calls with ordinal lookup in SessionSerializer
+  Remaining: DataEntityRegistry, SearchIndexManager still use reflection
+  ```
+- Push after every commit — unpushed work is lost work.
+
+### 3. Comment plan and state on the PR
+- After opening the PR, post an **initial plan comment** listing:
+  - The goal / issue being addressed
+  - The planned steps (checklist format)
+  - Current status
+- After each significant commit (or batch of commits), post a **progress comment** updating:
+  - What was just completed
+  - What remains
+  - Any blockers or decisions needed
+- This creates a recoverable audit trail another agent (or human) can read.
+
+### 4. Tag with machine/process identity
+- Include the following in your **first PR comment** so observers can detect a stalled agent:
+  - `Machine: <hostname>` — from `hostname` or `$HOSTNAME`
+  - `PID: <process-id>` — from `$$` or `$PPID`
+  - `Session: <session-id>` — if available from the agent runtime
+  - `Started: <ISO-8601 timestamp>`
+- If another agent sees a PR tagged with a different machine/PID that has gone stale
+  (no commits or comments for >30 minutes), it may pick up the work by posting a
+  takeover comment and continuing from the last committed state.
+
+### 5. Record worktree status before and after work
+- At the start of a session, record `git status`, `git branch`, and `git log --oneline -5`
+  in your initial PR comment so recovery agents know the exact starting state.
+- Before any long-running operation, commit or stash uncommitted changes.
+- If resuming from a crashed agent's branch, start by reviewing the PR comments and
+  the diff (`git diff main..HEAD`) to understand what was already done.
+
+### 6. Recovery procedure (for a new agent picking up crashed work)
+1. Find the WIP PR by searching: `is:pr is:open author:app/copilot label:in-progress`
+   or by checking the issue for linked PRs.
+2. Read ALL PR comments to reconstruct plan and progress state.
+3. Check out the existing branch — do NOT create a new one.
+4. Run `git log --oneline -10` and `git diff main..HEAD` to see what's done.
+5. Post a **takeover comment** with your own machine/PID/session/timestamp.
+6. Continue from where the previous agent left off.
+
 (If you are seeing this, it means you have successfully loaded the agent instructions file. Please confirm that you understand the design philosophy and key features of the web server as described in the README.md file, and let me know if you have any questions or need further clarification on any aspect of the server's architecture or functionality.)
 
 
