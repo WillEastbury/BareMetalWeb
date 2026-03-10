@@ -620,6 +620,7 @@ internal sealed class StubMetricsTracker : IMetricsTracker
         tableColumns = Array.Empty<string>();
         tableRows = Array.Empty<string[]>();
     }
+    public string GetMetricGroupsHtml() => string.Empty;
     public MetricsSnapshot GetSnapshot() => new MetricsSnapshot(
         0, 0, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.FromMilliseconds(1.5),
         TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, 0, 0, 0, 0, 0, 0, 0, 0, 0, TimeSpan.Zero,
