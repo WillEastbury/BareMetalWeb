@@ -415,6 +415,17 @@ public static class CalculatedFieldService
         if (underlyingType == typeof(bool))
             return Convert.ToBoolean(value);
 
+        if (underlyingType == typeof(DateTime))
+            return Convert.ToDateTime(value);
+
+        if (underlyingType.IsEnum)
+        {
+            if (value is string es && DataScaffold.GetEnumLookup(underlyingType).TryGetValue(es, out var ev))
+                return ev;
+            if (value is IConvertible eic)
+                return Enum.ToObject(underlyingType, eic.ToInt32(null));
+        }
+
         return Convert.ChangeType(value, underlyingType);
     }
 }
