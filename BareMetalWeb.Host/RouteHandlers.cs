@@ -50,6 +50,24 @@ public sealed class RouteHandlers : IRouteHandlers
     private const int RegisterIpMaxAttempts = 3;
     private const int SsoCallbackIpMaxAttempts = 10;
     private static readonly TimeSpan DataQueryTimeout = TimeSpan.FromSeconds(30);
+    private const string ManagementRegistrationEnabledSettingId = "management.registration.enabled";
+    private const string ManagementRegistrationCallbackUrlSettingId = "management.registration.callbackUrl";
+    private const string ManagementRegistrationPrincipalNameSettingId = "management.registration.principalName";
+    private const string ManagementRegistrationTenantIdSettingId = "management.registration.tenantId";
+    private const string ManagementRegistrationClientIdSettingId = "management.registration.clientId";
+    private const string ManagementRegistrationLastStatusSettingId = "management.registration.lastStatus";
+    private const string ManagementRegistrationLastAttemptUtcSettingId = "management.registration.lastAttemptUtc";
+    private const string DefaultManagementPrincipalName = "bmw-deployment-agent";
+    private static readonly HttpClient SetupRegistrationHttp = new(new SocketsHttpHandler
+    {
+        MaxConnectionsPerServer = 2,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(3),
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
+        ConnectTimeout = TimeSpan.FromSeconds(5),
+    })
+    {
+        Timeout = TimeSpan.FromSeconds(10),
+    };
 
     [ThreadStatic] private static StringBuilder? t_cachedSb;
     [ThreadStatic] private static Dictionary<string, string?>? t_formDict;
@@ -1124,7 +1142,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 return;
             }
 
-            RenderSetupForm(ctx, null, null, null);
+            RenderSetupForm(ctx, null, null, null, new SetupRegistrationInput());
         })(context);
     }
 
@@ -1177,24 +1195,44 @@ public sealed class RouteHandlers : IRouteHandlers
         var userName = form["username"].ToString().Trim();
         var email = form["email"].ToString().Trim();
         var password = form["password"].ToString();
+        var registrationInput = ReadSetupRegistrationInput(form);
 
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
-            RenderSetupForm(context, "Invalid security token. Please try again.", userName, email);
+            RenderSetupForm(context, "Invalid security token. Please try again.", userName, email, registrationInput);
             await _renderer.RenderPage(context);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(userName) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
-            RenderSetupForm(context, "Please complete all required fields.", userName, email);
+            RenderSetupForm(context, "Please complete all required fields.", userName, email, registrationInput);
             await _renderer.RenderPage(context);
             return;
         }
 
         if (password.Length > 1024)
         {
-            RenderSetupForm(context, "Password exceeds maximum allowed length.", userName, email);
+            RenderSetupForm(context, "Password exceeds maximum allowed length.", userName, email, registrationInput);
+            await _renderer.RenderPage(context);
+            return;
+        }
+
+        if (registrationInput.Enabled)
+        {
+            var registrationValidationError = ValidateSetupRegistrationInput(registrationInput);
+            if (!string.IsNullOrEmpty(registrationValidationError))
+            {
+                RenderSetupForm(context, registrationValidationError, userName, email, registrationInput);
+                await _renderer.RenderPage(context);
+                return;
+            }
+        }
+
+        if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
+        {
+            context.SetStringValue("title", "Setup");
+            context.SetStringValue("html_message", "<p>Root user already exists.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1213,8 +1251,31 @@ public sealed class RouteHandlers : IRouteHandlers
         await Users.SaveAsync(user);
         await SettingsService.EnsureDefaultsAsync(DataStoreProvider.Current, _settingDefaults, userName, context.RequestAborted).ConfigureAwait(false);
         await EnsureDefaultReports(userName);
-        // Redirect to gallery so the user can deploy modules
-        context.Response.Redirect("/admin/gallery");
+
+        if (!registrationInput.Enabled)
+        {
+            // Redirect to gallery so the user can deploy modules
+            context.Response.Redirect("/admin/gallery");
+            return;
+        }
+
+        var registrationResult = await RegisterManagementPrincipalAsync(registrationInput, userName, context.RequestAborted).ConfigureAwait(false);
+        if (!registrationResult.Success)
+        {
+            context.SetStringValue("title", "Setup Complete");
+            context.SetStringValue("html_message",
+                $"<div class=\"alert alert-warning\">Admin account created, but management registration failed: {WebUtility.HtmlEncode(registrationResult.Message)}</div>" +
+                "<p>You can still sign in and continue setup. Review settings in <strong>Admin → Settings</strong>.</p>" +
+                "<p><a class=\"btn btn-primary\" href=\"/login\">Go to Login</a></p>");
+            await _renderer.RenderPage(context);
+            return;
+        }
+
+        context.SetStringValue("title", "Setup Complete");
+        context.SetStringValue("html_message",
+            $"<div class=\"alert alert-success\">Admin account created and management registration completed for principal <code>{WebUtility.HtmlEncode(registrationResult.PrincipalName)}</code>.</div>" +
+            "<p><a class=\"btn btn-primary\" href=\"/admin/gallery\">Continue to Gallery</a></p>");
+        await _renderer.RenderPage(context);
     }
 
     private static string[] BuildRootPermissions()
@@ -1239,6 +1300,233 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         return permissions.ToArray();
+    }
+
+    private static SetupRegistrationInput ReadSetupRegistrationInput(IFormCollection form)
+    {
+        var principalName = form["management_principal_name"].ToString().Trim();
+        if (string.IsNullOrWhiteSpace(principalName))
+            principalName = DefaultManagementPrincipalName;
+
+        return new SetupRegistrationInput
+        {
+            Enabled = IsTruthyFormValue(form["management_registration_enabled"]),
+            CallbackUrl = form["management_callback_url"].ToString().Trim(),
+            PrincipalName = principalName,
+            TenantId = form["management_tenant_id"].ToString().Trim(),
+            ClientId = form["management_client_id"].ToString().Trim()
+        };
+    }
+
+    private static bool IsTruthyFormValue(StringValues value)
+    {
+        if (value.Count == 0)
+            return false;
+
+        var raw = value.ToString().Trim();
+        return string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase)
+               || raw == "1";
+    }
+
+    private static string? ValidateSetupRegistrationInput(SetupRegistrationInput input)
+    {
+        if (string.IsNullOrWhiteSpace(input.CallbackUrl))
+            return "Management callback URL is required when registration is enabled.";
+
+        if (!Uri.TryCreate(input.CallbackUrl, UriKind.Absolute, out var callbackUri))
+            return "Management callback URL must be an absolute URL.";
+
+        var isHttps = string.Equals(callbackUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        var isLocalHttp = string.Equals(callbackUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                          && callbackUri.IsLoopback;
+        if (!isHttps && !isLocalHttp)
+            return "Management callback URL must use HTTPS (HTTP allowed only for localhost).";
+
+        if (string.IsNullOrWhiteSpace(input.PrincipalName))
+            return "Management principal name is required when registration is enabled.";
+
+        return null;
+    }
+
+    private async ValueTask<SetupRegistrationResult> RegisterManagementPrincipalAsync(
+        SetupRegistrationInput input,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var principal = await LoadSystemPrincipalByUserNameAsync(input.PrincipalName, cancellationToken).ConfigureAwait(false);
+        var isNewPrincipal = principal is null;
+        if (principal is null)
+        {
+            principal = new SystemPrincipal
+            {
+                UserName = input.PrincipalName,
+                DisplayName = input.PrincipalName,
+                Email = $"{input.PrincipalName}@local.invalid",
+                Permissions = new[] { "deployment-agent", "monitoring" },
+                IsActive = true,
+                CreatedBy = actor,
+                UpdatedBy = actor
+            };
+        }
+
+        var rawApiKey = SystemPrincipal.GenerateRawApiKey();
+        principal.AddApiKey(rawApiKey);
+        principal.UpdatedBy = actor;
+        await DataStoreProvider.Current.SaveAsync(principal, cancellationToken).ConfigureAwait(false);
+
+        await UpsertAppSettingAsync(ManagementRegistrationEnabledSettingId, "true",
+            "Enable setup-based management callback registration.", actor, cancellationToken).ConfigureAwait(false);
+        await UpsertAppSettingAsync(ManagementRegistrationCallbackUrlSettingId, input.CallbackUrl,
+            "Management callback endpoint used by setup registration.", actor, cancellationToken).ConfigureAwait(false);
+        await UpsertAppSettingAsync(ManagementRegistrationPrincipalNameSettingId, input.PrincipalName,
+            "System principal name used for setup registration.", actor, cancellationToken).ConfigureAwait(false);
+        await UpsertAppSettingAsync(ManagementRegistrationTenantIdSettingId, input.TenantId,
+            "Management tenant identifier reference.", actor, cancellationToken).ConfigureAwait(false);
+        await UpsertAppSettingAsync(ManagementRegistrationClientIdSettingId, input.ClientId,
+            "Management client identifier reference.", actor, cancellationToken).ConfigureAwait(false);
+        await UpsertAppSettingAsync(ManagementRegistrationLastAttemptUtcSettingId, DateTime.UtcNow.ToString("O"),
+            "Timestamp of the last setup registration attempt.", actor, cancellationToken).ConfigureAwait(false);
+
+        var registrationRequest = new SetupRegistrationRequest
+        {
+            InstanceId = Environment.MachineName,
+            PrincipalName = input.PrincipalName,
+            PrincipalApiKey = rawApiKey,
+            TenantId = input.TenantId,
+            ClientId = input.ClientId,
+            RegisteredBy = actor,
+            RegisteredAtUtc = DateTime.UtcNow.ToString("O")
+        };
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, input.CallbackUrl)
+        {
+            Content = new StringContent(DataJsonWriter.ToJsonString(registrationRequest), Encoding.UTF8, "application/json")
+        };
+        request.Headers.TryAddWithoutValidation("X-Bmw-Registration-Version", "1");
+        request.Headers.TryAddWithoutValidation("X-Bmw-Principal", input.PrincipalName);
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await SetupRegistrationHttp.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex)
+        {
+            await UpsertAppSettingAsync(ManagementRegistrationLastStatusSettingId, "failed:request-exception",
+                "Result of the most recent setup registration callback.", actor, cancellationToken).ConfigureAwait(false);
+            _logger?.LogError("Setup registration callback request failed.", ex);
+            return new SetupRegistrationResult(false, ex.Message, input.PrincipalName);
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            await UpsertAppSettingAsync(ManagementRegistrationLastStatusSettingId, "failed:timeout",
+                "Result of the most recent setup registration callback.", actor, cancellationToken).ConfigureAwait(false);
+            _logger?.LogError("Setup registration callback timed out.", ex);
+            return new SetupRegistrationResult(false, "Callback request timed out.", input.PrincipalName);
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                await UpsertAppSettingAsync(ManagementRegistrationLastStatusSettingId,
+                    $"failed:{(int)response.StatusCode}",
+                    "Result of the most recent setup registration callback.", actor, cancellationToken).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                _logger?.Log(BmwLogLevel.Warn, $"Setup registration callback failed ({(int)response.StatusCode}) for principal '{input.PrincipalName}'.");
+                return new SetupRegistrationResult(false,
+                    $"Callback returned {(int)response.StatusCode}. {TrimForDisplay(body, 256)}",
+                    input.PrincipalName);
+            }
+        }
+
+        await UpsertAppSettingAsync(ManagementRegistrationLastStatusSettingId, "success",
+            "Result of the most recent setup registration callback.", actor, cancellationToken).ConfigureAwait(false);
+        _logger?.LogInfo($"Setup registration completed for principal '{input.PrincipalName}' (newPrincipal={isNewPrincipal}).");
+        return new SetupRegistrationResult(true, "Management registration completed.", input.PrincipalName);
+    }
+
+    private static string TrimForDisplay(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var trimmed = value.Trim();
+        if (trimmed.Length <= maxLength)
+            return trimmed;
+        return trimmed[..maxLength] + "...";
+    }
+
+    private static async ValueTask<SystemPrincipal?> LoadSystemPrincipalByUserNameAsync(string userName, CancellationToken cancellationToken)
+    {
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new() { Field = nameof(SystemPrincipal.UserName), Operator = QueryOperator.Equals, Value = userName }
+            },
+            Top = 1
+        };
+
+        var principals = await DataStoreProvider.Current.QueryAsync<SystemPrincipal>(query, cancellationToken).ConfigureAwait(false);
+        foreach (var principal in principals)
+        {
+            if (string.Equals(principal.UserName, userName, StringComparison.OrdinalIgnoreCase))
+                return principal;
+        }
+
+        return null;
+    }
+
+    private static async ValueTask UpsertAppSettingAsync(
+        string settingId,
+        string value,
+        string description,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = settingId }
+            },
+            Top = 1
+        };
+
+        var settings = await DataStoreProvider.Current.QueryAsync<AppSetting>(query, cancellationToken).ConfigureAwait(false);
+        AppSetting? setting = null;
+        foreach (var existing in settings)
+        {
+            if (string.Equals(existing.SettingId, settingId, StringComparison.OrdinalIgnoreCase))
+            {
+                setting = existing;
+                break;
+            }
+        }
+
+        if (setting is null)
+        {
+            setting = new AppSetting
+            {
+                SettingId = settingId,
+                Value = value,
+                Description = description,
+                CreatedBy = actor,
+                UpdatedBy = actor
+            };
+        }
+        else
+        {
+            setting.Value = value;
+            setting.Description = description;
+            setting.UpdatedBy = actor;
+        }
+
+        await DataStoreProvider.Current.SaveAsync(setting, cancellationToken).ConfigureAwait(false);
+        SettingsService.InvalidateCache(settingId);
     }
 
     private async ValueTask EnsureDefaultReports(string createdBy)
@@ -1379,7 +1667,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private void RenderSetupForm(BmwContext context, string? message, string? userName, string? email)
+    private void RenderSetupForm(BmwContext context, string? message, string? userName, string? email, SetupRegistrationInput registrationInput)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Initial Setup");
@@ -1395,7 +1683,12 @@ public sealed class RouteHandlers : IRouteHandlers
                 new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken),
                 new FormField(FormFieldType.String, "username", "Username", true, "root", Value: userName),
                 new FormField(FormFieldType.Email, "email", "Email", true, "root@example.com", Value: email),
-                new FormField(FormFieldType.Password, "password", "Password", true, "Enter password")
+                new FormField(FormFieldType.Password, "password", "Password", true, "Enter password"),
+                new FormField(FormFieldType.YesNo, "management_registration_enabled", "Enable management principal registration", false, SelectedValue: registrationInput.Enabled ? "true" : "false"),
+                new FormField(FormFieldType.String, "management_callback_url", "Management callback/home URL", false, "https://controlplane.example/api/setup/register", Value: registrationInput.CallbackUrl),
+                new FormField(FormFieldType.String, "management_principal_name", "Management principal name", false, DefaultManagementPrincipalName, Value: registrationInput.PrincipalName),
+                new FormField(FormFieldType.String, "management_tenant_id", "Management tenant ID (reference)", false, "tenant-001", Value: registrationInput.TenantId),
+                new FormField(FormFieldType.String, "management_client_id", "Management client ID (reference)", false, "client-001", Value: registrationInput.ClientId)
             }
         ));
     }
@@ -6317,5 +6610,39 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         try { return new DriveInfo(Path.GetPathRoot(Environment.CurrentDirectory) ?? "/").TotalSize / (1024 * 1024 * 1024); }
         catch { return -1; }
+    }
+
+    private sealed class SetupRegistrationInput
+    {
+        public bool Enabled { get; init; }
+        public string CallbackUrl { get; init; } = string.Empty;
+        public string PrincipalName { get; init; } = DefaultManagementPrincipalName;
+        public string TenantId { get; init; } = string.Empty;
+        public string ClientId { get; init; } = string.Empty;
+    }
+
+    private sealed class SetupRegistrationRequest
+    {
+        public string InstanceId { get; init; } = string.Empty;
+        public string PrincipalName { get; init; } = string.Empty;
+        public string PrincipalApiKey { get; init; } = string.Empty;
+        public string TenantId { get; init; } = string.Empty;
+        public string ClientId { get; init; } = string.Empty;
+        public string RegisteredBy { get; init; } = string.Empty;
+        public string RegisteredAtUtc { get; init; } = string.Empty;
+    }
+
+    private sealed class SetupRegistrationResult
+    {
+        public bool Success { get; }
+        public string Message { get; }
+        public string PrincipalName { get; }
+
+        public SetupRegistrationResult(bool success, string message, string principalName)
+        {
+            Success = success;
+            Message = message;
+            PrincipalName = principalName;
+        }
     }
 }
