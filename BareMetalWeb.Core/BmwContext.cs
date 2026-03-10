@@ -177,6 +177,19 @@ public sealed class BmwContext
         RequestAborted = requestAborted;
     }
 
+    // ── Clone helpers ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns a shallow clone of this context with a different <see cref="ResponseBody"/> writer.
+    /// Used by the binary WebSocket transport to redirect each handler's output into a
+    /// per-frame capture buffer so it can be sent back via <c>webSocket.SendAsync</c>.
+    /// All other state (request, session, features) is shared with the original.
+    /// </summary>
+    public BmwContext CloneWithResponseBody(PipeWriter responseBody)
+        => new(_features, _requestFeature, _responseFeature, _responseBodyFeature,
+               _connectionFeature, Request, RequestBody, responseBody, App,
+               SourceIp, CorrelationId, RequestAborted);
+
     // ── Factory methods ─────────────────────────────────────────────────
 
     /// <summary>
