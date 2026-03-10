@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using BareMetalWeb.Core;
@@ -306,34 +305,21 @@ public static class CalculatedFieldService
         return dependencies;
     }
 
-    // Cached PropertyInfo[] per type for BuildContext fallback (unregistered types).
-    private static readonly ConcurrentDictionary<Type, System.Reflection.PropertyInfo[]> _propertyCache = new();
-
-    private static Dictionary<string, object?> BuildContext(BaseDataObject instance, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
+    private static Dictionary<string, object?> BuildContext(BaseDataObject instance, Type type)
     {
-        // Use compiled layout for efficient field access when available
         var meta = DataScaffold.GetEntityByType(type);
-        if (meta != null)
-        {
-            var layout = EntityLayoutCompiler.GetOrCompile(meta);
-            var context = new Dictionary<string, object?>(layout.Fields.Length + 4);
-            context["Key"] = instance.Key;
-            foreach (var field in layout.Fields)
-            {
-                try { context[field.Name] = field.Getter(instance); }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"CalculatedFieldService: field '{field.Name}' getter failed: {ex.Message}"); context[field.Name] = null; }
-            }
-            return context;
-        }
+        if (meta == null)
+            return new Dictionary<string, object?> { ["Key"] = instance.Key };
 
-        // Fallback for unregistered types — cache PropertyInfo[] per type
-        var ctx = new Dictionary<string, object?>();
-        var props = _propertyCache.GetOrAdd(type, static t => t.GetProperties());
-        foreach (var prop in props)
+        var layout = EntityLayoutCompiler.GetOrCompile(meta);
+        var context = new Dictionary<string, object?>(layout.Fields.Length + 4);
+        context["Key"] = instance.Key;
+        foreach (var field in layout.Fields)
         {
-            ctx[prop.Name] = prop.GetValue(instance);
+            try { context[field.Name] = field.Getter(instance); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"CalculatedFieldService: field '{field.Name}' getter failed: {ex.Message}"); context[field.Name] = null; }
         }
-        return ctx;
+        return context;
     }
 
     private static bool HasCycle(

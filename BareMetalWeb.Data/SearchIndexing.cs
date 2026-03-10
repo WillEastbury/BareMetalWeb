@@ -4,10 +4,8 @@ using System.Buffers.Binary;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Numerics;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -376,56 +374,33 @@ public sealed class SearchIndexManager
     /// Pre-warms the type metadata cache for the given type so that the first
     /// real query does not pay the reflection/compilation cost.
     /// </summary>
-    public void WarmTypeMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
+    public void WarmTypeMetadata(Type type)
     {
         GetOrCreateTypeMetadata(type);
     }
 
-    private TypeMetadata GetOrCreateTypeMetadata([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
+    private TypeMetadata GetOrCreateTypeMetadata(Type type)
     {
         return _typeMetadata.GetOrAdd(type, t =>
         {
-            // Prefer DataScaffold metadata (already has compiled delegates) over raw reflection
             var entityMeta = BareMetalWeb.Core.DataScaffold.GetEntityByType(t);
-            if (entityMeta != null)
-            {
-                var indexed = new List<IndexedFieldAccessor>();
-                var kinds = new HashSet<IndexKind>(4);
-                foreach (var f in entityMeta.Fields)
-                {
-                    if (f.DataIndex != null)
-                    {
-                        indexed.Add(new IndexedFieldAccessor(f.Name, f.ClrType, f.GetValueFn, f.DataIndex));
-                        kinds.Add(f.DataIndex.Kind);
-                    }
-                }
-                return new TypeMetadata
-                {
-                    IndexedFields = indexed.ToArray(),
-                    IndexKinds = kinds
-                };
-            }
+            if (entityMeta == null)
+                return new TypeMetadata { IndexedFields = Array.Empty<IndexedFieldAccessor>(), IndexKinds = new HashSet<IndexKind>(0) };
 
-            // Fallback: scan properties directly (startup only, cached)
-            var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-            var indexedProps = new List<IndexedFieldAccessor>(props.Length);
-            var fallbackKinds = new HashSet<IndexKind>(4);
-
-            foreach (var prop in props)
+            var indexed = new List<IndexedFieldAccessor>();
+            var kinds = new HashSet<IndexKind>(4);
+            foreach (var f in entityMeta.Fields)
             {
-                var attr = prop.GetCustomAttribute<DataIndexAttribute>();
-                if (attr != null)
+                if (f.DataIndex != null)
                 {
-                    var getter = PropertyAccessorFactory.BuildGetter(prop);
-                    indexedProps.Add(new IndexedFieldAccessor(prop.Name, prop.PropertyType, getter, attr));
-                    fallbackKinds.Add(attr.Kind);
+                    indexed.Add(new IndexedFieldAccessor(f.Name, f.ClrType, f.GetValueFn, f.DataIndex));
+                    kinds.Add(f.DataIndex.Kind);
                 }
             }
-
             return new TypeMetadata
             {
-                IndexedFields = indexedProps.ToArray(),
-                IndexKinds = fallbackKinds
+                IndexedFields = indexed.ToArray(),
+                IndexKinds = kinds
             };
         });
     }
