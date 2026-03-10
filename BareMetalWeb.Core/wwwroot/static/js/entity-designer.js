@@ -6,6 +6,32 @@
         return el ? el.getAttribute('content') : '';
     }
 
+    function generateId() {
+        if (typeof crypto !== 'undefined') {
+            if (typeof crypto.randomUUID === 'function') {
+                return crypto.randomUUID();
+            }
+
+            if (typeof crypto.getRandomValues === 'function') {
+                var bytes = new Uint8Array(16);
+                crypto.getRandomValues(bytes);
+                bytes[6] = (bytes[6] & 0x0f) | 0x40;
+                bytes[8] = (bytes[8] & 0x3f) | 0x80;
+                var hex = Array.prototype.map.call(bytes, function (b) {
+                    return b.toString(16).padStart(2, '0');
+                }).join('');
+                return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+            }
+        }
+
+        // Last-resort fallback for older browsers.
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = Math.random() * 16 | 0;
+            var v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
     var FIELD_TYPES = [
         { value: 'string', label: 'String' },
         { value: 'multiline', label: 'Text Area' },
@@ -24,7 +50,7 @@
     var ID_STRATEGIES = ['guid', 'sequential', 'none'];
 
     var entity = {
-        entityId: crypto.randomUUID(),
+        entityId: generateId(),
         name: '', slug: '', showOnNav: true, permissions: '',
         idStrategy: 'guid', navGroup: 'Admin', navOrder: 0,
         viewType: null, parentField: null, fields: []
@@ -261,7 +287,7 @@
             syncEntityFromInputs();
             syncFieldsFromInputs();
             entity.fields.push({
-                fieldId: crypto.randomUUID(), name: '', label: null, type: 'string',
+                fieldId: generateId(), name: '', label: null, type: 'string',
                 required: false, list: true, view: true, edit: true, create: true, values: null,
                 lookupEntity: null, lookupDisplayField: null
             });
@@ -310,7 +336,7 @@
                     var data = JSON.parse(ev.target.result);
                     var def = data.virtualEntities ? data.virtualEntities[0] : data;
                     if (def) {
-                        entity.entityId = def.entityId || crypto.randomUUID();
+                        entity.entityId = def.entityId || generateId();
                         entity.name = def.name || '';
                         entity.slug = def.slug || '';
                         entity.showOnNav = def.showOnNav !== false;
@@ -322,7 +348,7 @@
                         entity.parentField = def.parentField || null;
                         entity.fields = (def.fields || []).map(function (f) {
                             return {
-                                fieldId: f.fieldId || crypto.randomUUID(),
+                                fieldId: f.fieldId || generateId(),
                                 name: f.name || '', label: f.label || null, type: f.type || 'string',
                                 required: !!f.required, list: f.list !== false,
                                 values: f.values || null,
@@ -342,7 +368,7 @@
         if (resetBtn) resetBtn.addEventListener('click', function () {
             if (!confirm('Reset all fields?')) return;
             entity = {
-                entityId: crypto.randomUUID(),
+                entityId: generateId(),
                 name: '', slug: '', showOnNav: true, permissions: '',
                 idStrategy: 'guid', navGroup: 'Admin', navOrder: 0,
                 viewType: null, parentField: null, fields: []
@@ -411,13 +437,13 @@
                     }
                     var session = sessions[0];
                     camelSessionCode = code;
-                    camelSessionKey = session.key || session.Key;
-                    try {
-                        var design = JSON.parse(session.designJson || session.DesignJson || '{}');
+                        camelSessionKey = session.key || session.Key;
+                        try {
+                            var design = JSON.parse(session.designJson || session.DesignJson || '{}');
                         if (design.name) entity.name = design.name;
                         if (design.slug) entity.slug = design.slug;
                         if (design.fields) entity.fields = design.fields.map(function (f) {
-                            return { fieldId: f.fieldId || crypto.randomUUID(), name: f.name || '', label: f.label || null, type: f.type || 'string', required: !!f.required, list: f.list !== false, view: true, edit: true, create: true, values: f.values || null, lookupEntity: f.lookupEntity || null, lookupDisplayField: f.lookupDisplayField || null };
+                            return { fieldId: f.fieldId || generateId(), name: f.name || '', label: f.label || null, type: f.type || 'string', required: !!f.required, list: f.list !== false, view: true, edit: true, create: true, values: f.values || null, lookupEntity: f.lookupEntity || null, lookupDisplayField: f.lookupDisplayField || null };
                         });
                         if (design.navGroup) entity.navGroup = design.navGroup;
                     } catch (e) {}
