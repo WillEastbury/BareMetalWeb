@@ -38,10 +38,6 @@ public interface IRouteHandlers
     ValueTask LogsPruneHandler(BmwContext context);
     ValueTask LogsPrunePostHandler(BmwContext context);
     ValueTask LogsDownloadHandler(BmwContext context);
-    ValueTask SampleDataHandler(BmwContext context);
-    ValueTask SampleDataPostHandler(BmwContext context);
-    ValueTask WipeDataHandler(BmwContext context);
-    ValueTask WipeDataPostHandler(BmwContext context);
     ValueTask EntityDesignerHandler(BmwContext context);
     ValueTask GalleryHandler(BmwContext context);
     ValueTask GalleryDeployPostHandler(BmwContext context);
