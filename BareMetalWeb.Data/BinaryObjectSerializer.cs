@@ -1193,22 +1193,14 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 
     private static Func<object, object?> CreateFieldGetter(FieldInfo field)
     {
-        var instanceParam = System.Linq.Expressions.Expression.Parameter(typeof(object), "instance");
-        var cast = System.Linq.Expressions.Expression.Convert(instanceParam, field.DeclaringType!);
-        var fieldAccess = System.Linq.Expressions.Expression.Field(cast, field);
-        var boxed = System.Linq.Expressions.Expression.Convert(fieldAccess, typeof(object));
-        return System.Linq.Expressions.Expression.Lambda<Func<object, object?>>(boxed, instanceParam).Compile();
+        // AOT-safe: closure over FieldInfo instead of Expression.Compile()
+        return obj => field.GetValue(obj);
     }
 
     private static Action<object, object?> CreateFieldSetter(FieldInfo field)
     {
-        var instanceParam = System.Linq.Expressions.Expression.Parameter(typeof(object), "instance");
-        var valueParam = System.Linq.Expressions.Expression.Parameter(typeof(object), "value");
-        var cast = System.Linq.Expressions.Expression.Convert(instanceParam, field.DeclaringType!);
-        var fieldAccess = System.Linq.Expressions.Expression.Field(cast, field);
-        var convertedValue = System.Linq.Expressions.Expression.Convert(valueParam, field.FieldType);
-        var assign = System.Linq.Expressions.Expression.Assign(fieldAccess, convertedValue);
-        return System.Linq.Expressions.Expression.Lambda<Action<object, object?>>(assign, instanceParam, valueParam).Compile();
+        // AOT-safe: closure over FieldInfo instead of Expression.Compile()
+        return (obj, val) => field.SetValue(obj, val);
     }
 
     private static uint GetSignatureHash(MemberSignature[] members)
