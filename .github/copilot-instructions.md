@@ -314,14 +314,34 @@ Any change to the following areas **MUST** update the corresponding `docs/archit
 2. Correct outdated descriptions — do not append "also" or "alternatively" to preserve stale text.
 3. Append or update the `_Status_` line at the bottom of the affected doc(s) with the current commit hash.
 
+## Issue Pickup & Labeling (MANDATORY)
+
+When you pick up a GitHub issue to work on, you **MUST** label it immediately so others know it is claimed:
+
+1. **Add the `claimed:copilot-cli` label** to mark the issue as taken by an agent:
+   ```bash
+   gh issue edit <number> --add-label "claimed:copilot-cli" --repo WillEastbury/BareMetalWeb
+   ```
+2. **Add the `in-progress` label** once you begin implementation:
+   ```bash
+   gh issue edit <number> --add-label "in-progress" --repo WillEastbury/BareMetalWeb
+   ```
+3. **Remove `in-progress`** when your PR is opened or the work is complete:
+   ```bash
+   gh issue edit <number> --remove-label "in-progress" --repo WillEastbury/BareMetalWeb
+   ```
+
+**Do NOT start coding on an issue without labeling it first.** This prevents duplicate work and gives visibility into what is actively being worked on.
+
 ## Development Workflow
 
-1. Make minimal, surgical changes focused on the specific issue
-2. Build and test frequently to catch issues early
-3. Use existing linters/build tools (do not add new ones unless required)
-4. For data entity changes, update all registries (see Data and Storage section)
-5. Store useful codebase facts using the memory tool for future reference
-6. When architecture changes, update the relevant `docs/architecture/` file(s) immediately (see Documentation Invariants above)
+1. Label the issue (`claimed:copilot-cli`, `in-progress`) — see above
+2. Make minimal, surgical changes focused on the specific issue
+3. Build and test frequently to catch issues early
+4. Use existing linters/build tools (do not add new ones unless required)
+5. For data entity changes, update all registries (see Data and Storage section)
+6. Store useful codebase facts using the memory tool for future reference
+7. When architecture changes, update the relevant `docs/architecture/` file(s) immediately (see Documentation Invariants above)
 
 ## Documentation Requirements (MANDATORY)
 
