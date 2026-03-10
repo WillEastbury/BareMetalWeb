@@ -17,6 +17,7 @@ using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Models;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Primitives;
 
 namespace BareMetalWeb.Host.Tests;
 
@@ -143,6 +144,54 @@ public class RouteHandlerTests : IDisposable
     {
         var result = InvokeStatic<string>("FormatThrottleMessage", (TimeSpan?)TimeSpan.FromSeconds(0.1));
         Assert.Contains("1 seconds", result);
+    }
+
+    [Theory]
+    [InlineData("true", true)]
+    [InlineData("TRUE", true)]
+    [InlineData("on", true)]
+    [InlineData("1", true)]
+    [InlineData("false", false)]
+    [InlineData("0", false)]
+    [InlineData("", false)]
+    public void IsTruthyFormValue_VariousInputs_ReturnsExpected(string value, bool expected)
+    {
+        var result = InvokeStatic<bool>("IsTruthyFormValue", (object)new StringValues(value));
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void ValidateSetupRegistrationInput_MissingCallback_ReturnsError()
+    {
+        var form = new FormCollection(new Dictionary<string, StringValues>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["management_registration_enabled"] = new StringValues("true"),
+            ["management_callback_url"] = StringValues.Empty,
+            ["management_principal_name"] = new StringValues("agent-one")
+        });
+
+        var input = InvokeStaticRaw("ReadSetupRegistrationInput", new[] { typeof(IFormCollection) }, form);
+        Assert.NotNull(input);
+
+        var error = (string?)InvokeStaticRaw("ValidateSetupRegistrationInput", new[] { input!.GetType() }, input);
+        Assert.Equal("Management callback URL is required when registration is enabled.", error);
+    }
+
+    [Fact]
+    public void ValidateSetupRegistrationInput_HttpsCallback_ReturnsNull()
+    {
+        var form = new FormCollection(new Dictionary<string, StringValues>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["management_registration_enabled"] = new StringValues("true"),
+            ["management_callback_url"] = new StringValues("https://controlplane.example/api/setup/register"),
+            ["management_principal_name"] = new StringValues("agent-one")
+        });
+
+        var input = InvokeStaticRaw("ReadSetupRegistrationInput", new[] { typeof(IFormCollection) }, form);
+        Assert.NotNull(input);
+
+        var error = (string?)InvokeStaticRaw("ValidateSetupRegistrationInput", new[] { input!.GetType() }, input);
+        Assert.Null(error);
     }
 
     // ──────────────────────────────────────────────────────────────
