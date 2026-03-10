@@ -203,7 +203,7 @@ public static class GraphQLHandler
             writer.WriteEndObject();
             await writer.FlushAsync(context.RequestAborted);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             context.Response.StatusCode = 400;
             await using var writer = new Utf8JsonWriter(context.Response.Body);

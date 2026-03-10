@@ -1045,7 +1045,7 @@ public static class RouteRegistrationExtensions
                     entitySlug = root.TryGetProperty("entity", out var ep) ? ep.GetString() ?? string.Empty : string.Empty;
                     query = BuildQueryFromJson(root);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     context.Response.StatusCode = 400;
                     context.Response.ContentType = "application/json";
@@ -1102,7 +1102,7 @@ public static class RouteRegistrationExtensions
                             intent.Fields[prop.Name] = prop.Value.ValueKind == JsonValueKind.Null ? null : prop.Value.ToString();
                     }
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     context.Response.StatusCode = 400;
                     context.Response.ContentType = "application/json";
@@ -1665,7 +1665,7 @@ public static class RouteRegistrationExtensions
                 {
                     result = await executor.ExecuteAsync(def, runtimeParams, context.RequestAborted).ConfigureAwait(false);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     context.Response.StatusCode = 500;
                     context.Response.ContentType = "application/json";
@@ -2500,7 +2500,7 @@ public static class RouteRegistrationExtensions
                         result = await _engine.ExecuteAsync(def, context.RequestAborted).ConfigureAwait(false);
                     }
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     context.Response.StatusCode = 500;
                     context.Response.ContentType = "application/json";
@@ -2596,7 +2596,7 @@ public static class RouteRegistrationExtensions
                 {
                     result = await _engine.ExecuteAsync(def, context.RequestAborted).ConfigureAwait(false);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     context.Response.StatusCode = 500;
                     context.Response.ContentType = "application/json";
