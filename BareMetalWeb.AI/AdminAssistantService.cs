@@ -147,7 +147,25 @@ public static class CrudTools
             {
                 try
                 {
-                    var converted = Convert.ChangeType(value, field.ClrType);
+                    object? converted;
+                    var clrType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
+                    if (clrType.IsEnum && value is string es)
+                    {
+                        // Build a case-insensitive name→value map (AI path, not hot)
+                        var names = Enum.GetNames(clrType);
+                        var vals  = Enum.GetValues(clrType);
+                        converted = null;
+                        for (int i = 0; i < names.Length; i++)
+                        {
+                            if (string.Equals(names[i], es, StringComparison.OrdinalIgnoreCase))
+                            { converted = vals.GetValue(i); break; }
+                        }
+                        if (converted == null) continue;
+                    }
+                    else if (clrType.IsEnum && value is IConvertible eic)
+                        converted = Enum.ToObject(clrType, eic.ToInt32(null));
+                    else
+                        converted = Convert.ChangeType(value, clrType);
                     field.Setter(instance, converted);
                 }
                 catch (Exception) { /* skip invalid values */ }
