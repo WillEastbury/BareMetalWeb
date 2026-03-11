@@ -2321,7 +2321,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 await DataScaffold.SaveAsync(meta, instance);
                 if (isCreate) created++; else updated++;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 importErrors.Add($"Row {rowNumber}: Import failed.");
                 skipped++;
@@ -5474,17 +5474,6 @@ public sealed class RouteHandlers : IRouteHandlers
         return safe;
     }
 
-    private static string JoinEncoded(string separator, IReadOnlyList<string> items)
-    {
-        var sb = new StringBuilder(256);
-        for (int i = 0; i < items.Count; i++)
-        {
-            if (i > 0) sb.Append(separator);
-            sb.Append(WebUtility.HtmlEncode(items[i]));
-        }
-        return sb.ToString();
-    }
-
     // Export helper methods for nested/embedded components
 
     private static string StripHtml(string value)
@@ -5745,35 +5734,6 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             dataObject.Touch(userName);
         }
-    }
-    private static bool ParseSampleToggle(IFormCollection form, string key)
-    {
-        var raw = form[key].ToString();
-        if (string.IsNullOrWhiteSpace(raw))
-            return false;
-
-        return string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static int ParseSampleCount(IFormCollection form, string key, List<string> errors)
-    {
-        var raw = form[key].ToString();
-        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) || value < 0)
-        {
-            errors.Add($"{key} must be a non-negative number.");
-            return 0;
-        }
-
-        if (value > 100000)
-        {
-            errors.Add($"{key} is too large (max 100000).");
-            return 0;
-        }
-
-        return value;
     }
 
     private static object? GenerateSampleValue(RuntimeFieldModel field, Random rng)

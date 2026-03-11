@@ -491,7 +491,7 @@ public class BareMetalWebServer : IBareWebHost
     internal NumericRouteTable NumericRoutes => _numericRoutes;
     public Task WireUpRequestHandlingAndLoggerAsyncLifetime()
     {
-        RegisterRouteMetadataEndpoint();
+        EnsureNumericRouteTable();
         EnsureJumpTable();
         EnsureRouteIdTable();
         EnsureBinaryTransport();
@@ -507,7 +507,7 @@ public class BareMetalWebServer : IBareWebHost
     /// </summary>
     public Task WireUpDirectHosting()
     {
-        RegisterRouteMetadataEndpoint();
+        EnsureNumericRouteTable();
         EnsureJumpTable();
         EnsureRouteIdTable();
         StartBackgroundServices();
@@ -940,59 +940,6 @@ public class BareMetalWebServer : IBareWebHost
             return false;
 
         return true;
-    }
-
-    /// <summary>
-    /// Registers the /bmw/routes metadata endpoint that exports the route table
-    /// as JSON: [{routeId, verb, path, params}]. BMW client libraries use this
-    /// to build numeric route ID requests.
-    /// </summary>
-    private void RegisterRouteMetadataEndpoint()
-    {
-        // Only register once (idempotent)
-        if (routes.ContainsKey("GET /bmw/routes")) return;
-
-        RegisterRoute("GET /bmw/routes", new RouteHandlerData(null, async (BmwContext ctx) =>
-        {
-            EnsureRouteIdTable();
-            ctx.StatusCode = 200;
-            ctx.ContentType = "application/json";
-
-            var sb = new System.Text.StringBuilder(4096);
-            sb.Append('[');
-            bool first = true;
-            foreach (var kvp in routes)
-            {
-                var data = kvp.Value;
-                if (data.RouteId == 0) continue;
-
-                if (!first) sb.Append(',');
-                first = false;
-
-                // Parse verb and path from the route key ("GET /login")
-                string routeKeyStr = kvp.Key;
-                int spaceIdx = routeKeyStr.IndexOf(' ');
-                string verb = spaceIdx > 0 ? routeKeyStr[..spaceIdx] : routeKeyStr;
-                string rpath = spaceIdx > 0 ? routeKeyStr[(spaceIdx + 1)..] : "/";
-
-                int paramCount = 0;
-                if (_compiledRoutes.TryGetValue(kvp.Key, out var compiled))
-                    paramCount = compiled.ParameterCount;
-
-                sb.Append("{\"id\":");
-                sb.Append(data.RouteId);
-                sb.Append(",\"verb\":\"");
-                sb.Append(verb);
-                sb.Append("\",\"path\":\"");
-                sb.Append(rpath.Replace("\"", "\\\""));
-                sb.Append("\",\"params\":");
-                sb.Append(paramCount);
-                sb.Append('}');
-            }
-            sb.Append(']');
-
-            await ctx.WriteResponseAsync(sb.ToString());
-        }));
     }
 
     /// <summary>
