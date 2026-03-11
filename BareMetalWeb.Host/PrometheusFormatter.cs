@@ -20,6 +20,7 @@ internal static class PrometheusFormatter
     public static async ValueTask WriteMetricsAsync(BmwContext context)
     {
         var snap = context.App.Metrics.GetSnapshot();
+        var responseTiming = ResponseTimingMetrics.GetSnapshot();
         var engine = EngineMetrics.GetSnapshot();
 
         context.Response.StatusCode = 200;
@@ -109,6 +110,35 @@ internal static class PrometheusFormatter
         WriteHelp(sb, "bmw_serializations_total", "Total serialization operations.");
         WriteType(sb, "bmw_serializations_total", "counter");
         WriteCounter(sb, "bmw_serializations_total", snap.SerializationCount);
+
+        // ── Response write stage metrics (recent window) ─────────────────
+        WriteHelp(sb, "bmw_response_timing_samples", "Recent response timing samples in rolling window.");
+        WriteType(sb, "bmw_response_timing_samples", "gauge");
+        WriteGauge(sb, "bmw_response_timing_samples", responseTiming.SampleCount);
+
+        WriteHelp(sb, "bmw_response_parse_to_first_ms", "Parse-to-first-write timing in milliseconds (recent window).");
+        WriteType(sb, "bmw_response_parse_to_first_ms", "gauge");
+        WriteGauge(sb, "bmw_response_parse_to_first_ms", responseTiming.ParseToFirst.Average.TotalMilliseconds, ("stat", "avg"));
+        WriteGauge(sb, "bmw_response_parse_to_first_ms", responseTiming.ParseToFirst.P95.TotalMilliseconds, ("stat", "p95"));
+        WriteGauge(sb, "bmw_response_parse_to_first_ms", responseTiming.ParseToFirst.Max.TotalMilliseconds, ("stat", "max"));
+
+        WriteHelp(sb, "bmw_response_first_to_flush_start_ms", "First-write to flush-start timing in milliseconds (recent window).");
+        WriteType(sb, "bmw_response_first_to_flush_start_ms", "gauge");
+        WriteGauge(sb, "bmw_response_first_to_flush_start_ms", responseTiming.FirstToFlushStart.Average.TotalMilliseconds, ("stat", "avg"));
+        WriteGauge(sb, "bmw_response_first_to_flush_start_ms", responseTiming.FirstToFlushStart.P95.TotalMilliseconds, ("stat", "p95"));
+        WriteGauge(sb, "bmw_response_first_to_flush_start_ms", responseTiming.FirstToFlushStart.Max.TotalMilliseconds, ("stat", "max"));
+
+        WriteHelp(sb, "bmw_response_flush_await_ms", "Flush-await timing in milliseconds (recent window).");
+        WriteType(sb, "bmw_response_flush_await_ms", "gauge");
+        WriteGauge(sb, "bmw_response_flush_await_ms", responseTiming.FlushAwait.Average.TotalMilliseconds, ("stat", "avg"));
+        WriteGauge(sb, "bmw_response_flush_await_ms", responseTiming.FlushAwait.P95.TotalMilliseconds, ("stat", "p95"));
+        WriteGauge(sb, "bmw_response_flush_await_ms", responseTiming.FlushAwait.Max.TotalMilliseconds, ("stat", "max"));
+
+        WriteHelp(sb, "bmw_response_first_to_flush_ms", "First-write to flush-complete timing in milliseconds (recent window).");
+        WriteType(sb, "bmw_response_first_to_flush_ms", "gauge");
+        WriteGauge(sb, "bmw_response_first_to_flush_ms", responseTiming.FirstToFlush.Average.TotalMilliseconds, ("stat", "avg"));
+        WriteGauge(sb, "bmw_response_first_to_flush_ms", responseTiming.FirstToFlush.P95.TotalMilliseconds, ("stat", "p95"));
+        WriteGauge(sb, "bmw_response_first_to_flush_ms", responseTiming.FirstToFlush.Max.TotalMilliseconds, ("stat", "max"));
 
         // ── Engine / WAL metrics ────────────────────────────────────────
         WriteHelp(sb, "bmw_wal_appends_total", "Total WAL append operations.");
@@ -223,6 +253,12 @@ internal static class PrometheusFormatter
     private static void WriteGauge(StringBuilder sb, string name, long value)
     {
         sb.Append(name).Append(' ').Append(value).Append('\n');
+    }
+
+    private static void WriteGauge(StringBuilder sb, string name, double value, (string key, string val) label)
+    {
+        sb.Append(name).Append('{').Append(label.key).Append("=\"").Append(label.val).Append("\"} ")
+          .AppendFormat("{0:G}", value).Append('\n');
     }
 
     private static void WriteSummaryQuantile(StringBuilder sb, string name, string quantile, double value)
