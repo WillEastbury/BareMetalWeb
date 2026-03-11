@@ -278,7 +278,7 @@ public static class CssBundleService
         context.Response.ContentLength = responseBytes.Length;
 
         if (HttpMethods.IsGet(context.HttpRequest.Method))
-            await context.ResponseBody.WriteAsync(responseBytes);
+            await context.WriteResponseAsync(responseBytes, context.RequestAborted);
 
         return true;
     }

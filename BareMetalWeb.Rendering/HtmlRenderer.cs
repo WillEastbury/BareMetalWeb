@@ -1384,7 +1384,7 @@ public class HtmlRenderer : IHtmlRenderer
             };
             CompressionHelper.ApplyHeaders(context, encoding);
             context.ContentLength = responseBytes.Length;
-            await context.ResponseBody.WriteAsync(responseBytes);
+            await context.WriteResponseAsync(responseBytes, context.RequestAborted);
         }
 
         renderSw.Stop();

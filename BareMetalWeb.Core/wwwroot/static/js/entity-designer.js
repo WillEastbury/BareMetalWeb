@@ -1,37 +1,6 @@
 (function () {
     'use strict';
 
-    function getCsrfToken() {
-        var el = document.querySelector('meta[name="csrf-token"]');
-        return el ? el.getAttribute('content') : '';
-    }
-
-    function generateId() {
-        if (typeof crypto !== 'undefined') {
-            if (typeof crypto.randomUUID === 'function') {
-                return crypto.randomUUID();
-            }
-
-            if (typeof crypto.getRandomValues === 'function') {
-                var bytes = new Uint8Array(16);
-                crypto.getRandomValues(bytes);
-                bytes[6] = (bytes[6] & 0x0f) | 0x40;
-                bytes[8] = (bytes[8] & 0x3f) | 0x80;
-                var hex = Array.prototype.map.call(bytes, function (b) {
-                    return b.toString(16).padStart(2, '0');
-                }).join('');
-                return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
-            }
-        }
-
-        // Last-resort fallback for older browsers.
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
-            var r = Math.random() * 16 | 0;
-            var v = c === 'x' ? r : (r & 0x3 | 0x8);
-            return v.toString(16);
-        });
-    }
-
     var FIELD_TYPES = [
         { value: 'string', label: 'String' },
         { value: 'multiline', label: 'Text Area' },
@@ -43,440 +12,831 @@
         { value: 'time', label: 'Time' },
         { value: 'datetime', label: 'DateTime' },
         { value: 'enum', label: 'Enum (dropdown)' },
-        { value: 'lookup', label: 'Lookup (FK)' }
+        { value: 'lookup', label: 'Lookup (FK)' },
+        { value: 'url', label: 'URL' },
+        { value: 'phone', label: 'Phone' }
     ];
 
-    var VIEW_TYPES = ['Table', 'TreeView', 'OrgChart', 'Timeline', 'Timetable', 'Sankey', 'Calendar', 'Kanban'];
     var ID_STRATEGIES = ['guid', 'sequential', 'none'];
+    var VIEW_TYPES = ['', 'Table', 'TreeView', 'OrgChart', 'Timeline', 'Timetable', 'Sankey', 'Calendar', 'Kanban'];
+    var REPORT_TYPES = ['table', 'summary', 'timeline', 'kanban'];
+    var PERMISSION_LEVELS = ['read', 'write', 'admin'];
 
-    var entity = {
-        entityId: generateId(),
-        name: '', slug: '', showOnNav: true, permissions: '',
-        idStrategy: 'guid', navGroup: 'Admin', navOrder: 0,
-        viewType: null, parentField: null, fields: []
+    var SETTINGS_SLUG = 'settings';
+    var MODULE_SETTING_PREFIX = 'entity-designer.module.';
+
+    var state = {
+        module: createDefaultModule(),
+        selectedFieldIndex: -1,
+        validation: [],
+        status: { kind: 'info', text: 'Edit and Save In Place to persist directly to WAL-backed settings.' }
     };
 
-    function escHtml(s) {
-        var str = String(s);
-        var out = '';
-        var last = 0;
-        for (var i = 0; i < str.length; i++) {
-            var ent;
-            switch (str.charCodeAt(i)) {
-                case 38: ent = '&amp;'; break;
-                case 60: ent = '&lt;'; break;
-                case 62: ent = '&gt;'; break;
-                case 34: ent = '&quot;'; break;
-                default: continue;
-            }
-            if (i > last) out += str.substring(last, i);
-            out += ent;
-            last = i + 1;
-        }
-        return last === 0 ? str : out + str.substring(last);
+    function createDefaultModule() {
+        return {
+            entityId: generateId(),
+            name: '',
+            slug: '',
+            showOnNav: true,
+            isComplete: false,
+            permissions: '',
+            idStrategy: 'guid',
+            navGroup: 'Admin',
+            navOrder: 0,
+            viewType: '',
+            parentField: '',
+            fields: [],
+            reports: [],
+            permissionRules: []
+        };
     }
 
-    function render() {
-        var container = document.getElementById('designer-root');
-        if (!container) return;
-
-        var html = '<div class="row g-3">';
-
-        // Left panel: visual editor
-        html += '<div class="col-lg-7">';
-
-        // Help panel
-        html += '<div class="alert alert-info d-flex gap-2 align-items-start mb-3" role="alert">';
-        html += '<i class="bi bi-info-circle-fill flex-shrink-0 mt-1"></i>';
-        html += '<div><strong>How to use:</strong> Fill in the entity properties and add fields below. The JSON preview updates live. ';
-        html += 'When finished, <strong>Download</strong> the JSON and place it in your <code>virtualEntities.json</code> file under the <code>virtualEntities</code> array, ';
-        html += 'or use <strong>Import JSON</strong> to load an existing definition for editing. ';
-        html += 'Hover over any label for a description of that option. ';
-        html += 'See the <code>docs/ENTITY_DESIGNER.md</code> file in the repository for full documentation.</div>';
-        html += '</div>';
-
-        html += '<div class="card bm-page-card mb-3"><div class="card-header"><h5 class="mb-0"><i class="bi bi-diagram-3 me-2"></i>Entity Designer</h5></div><div class="card-body">';
-
-        // Entity properties
-        html += '<h6 class="fw-bold mb-2">Entity Properties</h6>';
-        html += '<div class="row g-2 mb-3">';
-        html += '<div class="col-md-4"><label class="form-label" title="The entity type name, e.g. Ticket or Product. Used as the display name throughout the admin UI.">Name <span class="text-danger">*</span> <i class="bi bi-question-circle text-muted small"></i></label><input type="text" class="form-control form-control-sm" id="ed-name" value="' + escHtml(entity.name) + '" placeholder="e.g. Ticket" title="The entity type name, e.g. Ticket or Product."></div>';
-        html += '<div class="col-md-4"><label class="form-label" title="URL identifier used in routes and API paths. Auto-derived from Name if left blank, e.g. \'tickets\' for an entity named \'Ticket\'.">Slug <i class="bi bi-question-circle text-muted small"></i></label><input type="text" class="form-control form-control-sm" id="ed-slug" value="' + escHtml(entity.slug || '') + '" placeholder="auto from name" title="URL identifier for routes and API paths. Auto-derived from Name if left blank."></div>';
-        html += '<div class="col-md-4"><label class="form-label" title="Navigation menu group. Entities in the same group appear together in the sidebar. Examples: Admin, System, Sales.">Nav Group <i class="bi bi-question-circle text-muted small"></i></label><input type="text" class="form-control form-control-sm" id="ed-navGroup" value="' + escHtml(entity.navGroup) + '" title="Navigation menu group. Entities in the same group appear together in the sidebar."></div>';
-        html += '</div>';
-        html += '<div class="row g-2 mb-3">';
-        html += '<div class="col-md-3"><label class="form-label" title="Sort order within the Nav Group (ascending, lower numbers appear first).">Nav Order <i class="bi bi-question-circle text-muted small"></i></label><input type="number" class="form-control form-control-sm" id="ed-navOrder" value="' + entity.navOrder + '" title="Sort order within the Nav Group (ascending, lower numbers appear first)."></div>';
-        html += '<div class="col-md-3"><label class="form-label" title="How new record IDs are generated. guid = random UUID (recommended); sequential = auto-increment integer; none = you must supply the ID yourself.">ID Strategy <i class="bi bi-question-circle text-muted small"></i></label><select class="form-select form-select-sm" id="ed-idStrategy" title="How new record IDs are generated. guid = random UUID; sequential = auto-increment integer; none = supply your own.">';
-        ID_STRATEGIES.forEach(function (s) { html += '<option' + (entity.idStrategy === s ? ' selected' : '') + '>' + s + '</option>'; });
-        html += '</select></div>';
-        html += '<div class="col-md-3"><label class="form-label" title="Default view layout for the entity list page. Table is the default. TreeView and OrgChart require a Parent Field. Timeline requires a date field. Kanban requires an Enum field.">View Type <i class="bi bi-question-circle text-muted small"></i></label><select class="form-select form-select-sm" id="ed-viewType" title="Default view layout. Table is the default. TreeView/OrgChart require a Parent Field. Timeline requires a date field. Kanban requires an Enum field."><option value="">Table (default)</option>';
-        VIEW_TYPES.forEach(function (v) { html += '<option value="' + v + '"' + (entity.viewType === v ? ' selected' : '') + '>' + v + '</option>'; });
-        html += '</select></div>';
-        html += '<div class="col-md-3"><label class="form-label" title="Space-separated role names required to access this entity. Leave blank to allow any authenticated user.">Permissions <i class="bi bi-question-circle text-muted small"></i></label><input type="text" class="form-control form-control-sm" id="ed-permissions" value="' + escHtml(entity.permissions || '') + '" placeholder="e.g. admin" title="Space-separated role names required to access this entity. Leave blank for any authenticated user."></div>';
-        html += '</div>';
-        html += '<div class="row g-2 mb-3">';
-        html += '<div class="col-md-3"><div class="form-check mt-4"><input class="form-check-input" type="checkbox" id="ed-showOnNav"' + (entity.showOnNav ? ' checked' : '') + ' title="When checked, this entity appears as a link in the navigation menu."><label class="form-check-label" for="ed-showOnNav" title="When checked, this entity appears as a link in the navigation menu.">Show in Nav <i class="bi bi-question-circle text-muted small"></i></label></div></div>';
-        html += '<div class="col-md-4"><label class="form-label" title="Field name that links a child record to its parent in the same entity. Required for TreeView and OrgChart views, e.g. \'ParentId\'.">Parent Field <i class="bi bi-question-circle text-muted small"></i></label><input type="text" class="form-control form-control-sm" id="ed-parentField" value="' + escHtml(entity.parentField || '') + '" placeholder="for tree/orgchart" title="Field name that links a child record to its parent. Required for TreeView and OrgChart views."></div>';
-        html += '</div>';
-
-        // Fields
-        html += '<hr><h6 class="fw-bold mb-2">Fields <button class="btn btn-sm btn-outline-primary ms-2" id="ed-add-field" title="Add a new field to this entity"><i class="bi bi-plus"></i> Add Field</button></h6>';
-        html += '<div id="ed-fields-list">';
-
-        entity.fields.forEach(function (f, idx) {
-            html += '<div class="card mb-2 ed-field-card" data-idx="' + idx + '">';
-            html += '<div class="card-body p-2">';
-            html += '<div class="row g-2 align-items-center">';
-            html += '<div class="col-auto"><i class="bi bi-grip-vertical text-muted" style="cursor:grab" title="Drag to reorder"></i></div>';
-            html += '<div class="col"><input type="text" class="form-control form-control-sm ed-field-name" placeholder="fieldName" value="' + escHtml(f.name) + '" title="Internal code name for this field. Use camelCase or PascalCase with no spaces, e.g. firstName or IsActive."></div>';
-            html += '<div class="col"><input type="text" class="form-control form-control-sm ed-field-label" placeholder="Label (optional)" value="' + escHtml(f.label || '') + '" title="Human-readable label shown in forms and column headers. Auto-derived from the field name if left blank."></div>';
-            html += '<div class="col"><select class="form-select form-select-sm ed-field-type" title="Data type of this field. Controls validation, rendering and storage format.">';
-            FIELD_TYPES.forEach(function (t) { html += '<option value="' + t.value + '"' + (f.type === t.value ? ' selected' : '') + '>' + t.label + '</option>'; });
-            html += '</select></div>';
-            html += '<div class="col-auto"><div class="form-check"><input class="form-check-input ed-field-required" type="checkbox"' + (f.required ? ' checked' : '') + ' title="When checked, a value must be provided before a record can be saved."><label class="form-check-label small" title="Required — a value must be provided before saving.">Req</label></div></div>';
-            html += '<div class="col-auto"><div class="form-check"><input class="form-check-input ed-field-list" type="checkbox"' + (f.list !== false ? ' checked' : '') + ' title="When checked, this field appears as a column in the entity list/table view."><label class="form-check-label small" title="List — show as a column in the list/table view.">List</label></div></div>';
-            html += '<div class="col-auto"><button class="btn btn-sm btn-outline-danger ed-field-remove" title="Remove this field"><i class="bi bi-trash"></i></button></div>';
-            html += '</div>';
-
-            // Extra config for enum/lookup
-            if (f.type === 'enum') {
-                html += '<div class="mt-2"><label class="form-label small" title="Pipe-separated list of allowed values shown in the dropdown, e.g. Open|In Progress|Closed.">Enum Values (pipe-separated) <i class="bi bi-question-circle text-muted small"></i></label><input type="text" class="form-control form-control-sm ed-field-values" placeholder="e.g. Open|In Progress|Closed" value="' + escHtml((f.values || []).join('|')) + '" title="Pipe-separated list of allowed values, e.g. Open|In Progress|Closed."></div>';
-            }
-            if (f.type === 'lookup') {
-                html += '<div class="row g-2 mt-1">';
-                html += '<div class="col"><input type="text" class="form-control form-control-sm ed-field-lookupEntity" placeholder="Target entity slug" value="' + escHtml(f.lookupEntity || '') + '" title="Slug of the entity this field references, e.g. customers or products."></div>';
-                html += '<div class="col"><input type="text" class="form-control form-control-sm ed-field-lookupDisplayField" placeholder="Display field (e.g. Name)" value="' + escHtml(f.lookupDisplayField || '') + '" title="Field on the target entity to display as the label in dropdowns and read-only views, e.g. Name or Email."></div>';
-                html += '</div>';
-            }
-
-            html += '</div></div>';
-        });
-
-        html += '</div>';
-        html += '</div></div>';
-
-        // Action buttons
-        html += '<div class="d-flex gap-2 mb-3">';
-        html += '<button class="btn btn-primary" id="ed-download" title="Download the entity definition as a JSON file ready to place in virtualEntities.json"><i class="bi bi-download me-1"></i>Download JSON</button>';
-        html += '<button class="btn btn-outline-secondary" id="ed-copy" title="Copy the JSON to the clipboard"><i class="bi bi-clipboard me-1"></i>Copy JSON</button>';
-        html += '<label class="btn btn-outline-secondary mb-0" title="Load an existing entity definition JSON file for editing"><i class="bi bi-upload me-1"></i>Import JSON<input type="file" id="ed-import" accept=".json" class="d-none"></label>';
-        html += '<button class="btn btn-outline-danger ms-auto" id="ed-reset" title="Clear all fields and start a new entity definition"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset</button>';
-        html += '</div>';
-        html += '</div>';
-
-        // Right panel: JSON preview + Camel Mode
-        html += '<div class="col-lg-5">';
-
-        // Camel Mode collaboration panel
-        html += '<div class="card bm-page-card mb-3">';
-        html += '<div class="card-header d-flex justify-content-between align-items-center"><h5 class="mb-0"><i class="bi bi-people-fill me-2"></i>Camel Mode</h5></div>';
-        html += '<div class="card-body">';
-        html += '<p class="small text-muted mb-2">Collaborate on module design. Share a link so multiple people can contribute ideas.</p>';
-        html += '<div class="row g-2 mb-2">';
-        html += '<div class="col-8"><input type="text" class="form-control form-control-sm" id="ed-camel-name" placeholder="Session name" value=""></div>';
-        html += '<div class="col-4"><button class="btn btn-sm btn-primary w-100" id="ed-camel-create">Create Session</button></div>';
-        html += '</div>';
-        html += '<div class="row g-2 mb-2">';
-        html += '<div class="col-8"><input type="text" class="form-control form-control-sm" id="ed-camel-code" placeholder="Share code"></div>';
-        html += '<div class="col-4"><button class="btn btn-sm btn-outline-secondary w-100" id="ed-camel-join">Join Session</button></div>';
-        html += '</div>';
-        html += '<div id="ed-camel-status"></div>';
-        html += '<div id="ed-camel-log" class="mt-2" style="max-height:150px;overflow-y:auto;font-size:0.75rem"></div>';
-        html += '</div></div>';
-
-        html += '<div class="card bm-page-card" style="position:sticky;top:70px"><div class="card-header d-flex justify-content-between align-items-center"><h5 class="mb-0"><i class="bi bi-code-square me-2"></i>JSON Preview</h5></div>';
-        html += '<div class="card-body p-0"><pre id="ed-json-preview" class="p-3 mb-0" style="max-height:75vh;overflow:auto;font-size:0.8rem;background:var(--bs-tertiary-bg,#f8f9fa);border-radius:0 0 1rem 1rem"></pre></div>';
-        html += '</div></div>';
-
-        html += '</div>';
-
-        container.innerHTML = html;
-        updateJsonPreview();
-        wireEvents();
+    function createDefaultField() {
+        return {
+            fieldId: generateId(),
+            name: '',
+            label: '',
+            type: 'string',
+            required: false,
+            list: true,
+            view: true,
+            edit: true,
+            create: true,
+            readOnly: false,
+            nullable: true,
+            multiline: false,
+            values: [],
+            lookupEntity: '',
+            lookupValueField: '',
+            lookupDisplayField: '',
+            lookupQueryField: '',
+            lookupQueryOperator: '',
+            placeholder: '',
+            minLength: null,
+            maxLength: null,
+            rangeMin: null,
+            rangeMax: null,
+            pattern: ''
+        };
     }
 
-    function buildJson() {
-        var out = {
-            entityId: entity.entityId,
-            name: entity.name,
-            showOnNav: entity.showOnNav,
-            idStrategy: entity.idStrategy,
-            navGroup: entity.navGroup,
-            navOrder: entity.navOrder,
-            fields: entity.fields.map(function (f, i) {
-                var field = { fieldId: f.fieldId, name: f.name, type: f.type, order: i + 1, required: f.required, list: f.list };
-                if (f.label) field.label = f.label;
-                if (f.placeholder) field.placeholder = f.placeholder;
-                if (f.type === 'enum' && f.values) field.values = f.values;
-                if (f.type === 'lookup') {
-                    if (f.lookupEntity) field.lookupEntity = f.lookupEntity;
-                    if (f.lookupDisplayField) field.lookupDisplayField = f.lookupDisplayField;
+    function createDefaultReport() {
+        return {
+            id: generateId(),
+            name: '',
+            type: 'table',
+            sourceField: '',
+            aggregation: '',
+            visible: true
+        };
+    }
+
+    function createDefaultPermissionRule() {
+        return {
+            id: generateId(),
+            principal: '',
+            level: 'read',
+            constraint: ''
+        };
+    }
+
+    function getCsrfToken() {
+        var el = document.querySelector('meta[name="csrf-token"]');
+        return el ? el.getAttribute('content') : '';
+    }
+
+    function setStatus(kind, text) {
+        state.status = { kind: kind, text: text };
+        render();
+    }
+
+    function generateId() {
+        if (typeof crypto !== 'undefined') {
+            if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+            if (typeof crypto.getRandomValues === 'function') {
+                var bytes = new Uint8Array(16);
+                crypto.getRandomValues(bytes);
+                bytes[6] = (bytes[6] & 0x0f) | 0x40;
+                bytes[8] = (bytes[8] & 0x3f) | 0x80;
+                var hex = '';
+                for (var i = 0; i < bytes.length; i++) {
+                    var h = bytes[i].toString(16);
+                    hex += h.length === 1 ? '0' + h : h;
                 }
-                if (f.minLength != null) field.minLength = f.minLength;
-                if (f.maxLength != null) field.maxLength = f.maxLength;
-                return field;
+                return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+            }
+        }
+
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+            var r = Math.floor(Math.random() * 16);
+            var v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
+    }
+
+    function escHtml(input) {
+        var str = String(input == null ? '' : input);
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function slugify(value) {
+        return String(value || '').trim().toLowerCase().replace(/[^a-z0-9\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-');
+    }
+
+    function trim(value) { return String(value || '').trim(); }
+
+    function parseNumberOrNull(value) {
+        if (value === '' || value == null) return null;
+        var n = Number(value);
+        return Number.isFinite(n) ? n : null;
+    }
+
+    function ensureSelectedFieldIndex() {
+        if (!state.module.fields.length) {
+            state.selectedFieldIndex = -1;
+            return;
+        }
+        if (state.selectedFieldIndex < 0) {
+            state.selectedFieldIndex = 0;
+            return;
+        }
+        if (state.selectedFieldIndex >= state.module.fields.length) state.selectedFieldIndex = state.module.fields.length - 1;
+    }
+
+    function getSettingIdForModule() {
+        var slug = slugify(state.module.slug || state.module.name);
+        return MODULE_SETTING_PREFIX + (slug || state.module.entityId);
+    }
+
+    function buildExportObject() {
+        var moduleDef = state.module;
+        var out = {
+            entityId: moduleDef.entityId,
+            name: moduleDef.name,
+            showOnNav: !!moduleDef.showOnNav,
+            isComplete: !!moduleDef.isComplete,
+            idStrategy: moduleDef.idStrategy || 'guid',
+            navGroup: moduleDef.navGroup || 'Admin',
+            navOrder: Number(moduleDef.navOrder) || 0,
+            fields: moduleDef.fields.map(function (field, index) {
+                var def = {
+                    fieldId: field.fieldId,
+                    name: field.name,
+                    type: field.type,
+                    order: index + 1,
+                    required: !!field.required,
+                    list: field.list !== false,
+                    view: field.view !== false,
+                    edit: field.edit !== false,
+                    create: field.create !== false,
+                    readOnly: !!field.readOnly,
+                    nullable: field.nullable !== false
+                };
+                if (field.label) def.label = field.label;
+                if (field.multiline) def.multiline = true;
+                if (field.placeholder) def.placeholder = field.placeholder;
+                if (field.type === 'enum' && field.values && field.values.length) def.values = field.values.slice();
+                if (field.type === 'lookup') {
+                    if (field.lookupEntity) def.lookupEntity = field.lookupEntity;
+                    if (field.lookupValueField) def.lookupValueField = field.lookupValueField;
+                    if (field.lookupDisplayField) def.lookupDisplayField = field.lookupDisplayField;
+                    if (field.lookupQueryField) def.lookupQueryField = field.lookupQueryField;
+                    if (field.lookupQueryOperator) def.lookupQueryOperator = field.lookupQueryOperator;
+                }
+                if (field.minLength != null) def.minLength = field.minLength;
+                if (field.maxLength != null) def.maxLength = field.maxLength;
+                if (field.rangeMin != null) def.rangeMin = field.rangeMin;
+                if (field.rangeMax != null) def.rangeMax = field.rangeMax;
+                if (field.pattern) def.pattern = field.pattern;
+                return def;
+            }),
+            reports: moduleDef.reports.map(function (report) {
+                return {
+                    id: report.id,
+                    name: report.name,
+                    type: report.type,
+                    sourceField: report.sourceField,
+                    aggregation: report.aggregation,
+                    visible: report.visible !== false
+                };
+            }),
+            permissionRules: moduleDef.permissionRules.map(function (rule) {
+                return {
+                    id: rule.id,
+                    principal: rule.principal,
+                    level: rule.level,
+                    constraint: rule.constraint
+                };
             })
         };
-        if (entity.slug) out.slug = entity.slug;
-        if (entity.permissions) out.permissions = entity.permissions;
-        if (entity.viewType) out.viewType = entity.viewType;
-        if (entity.parentField) out.parentField = entity.parentField;
+
+        if (moduleDef.slug) out.slug = moduleDef.slug;
+        if (moduleDef.viewType) out.viewType = moduleDef.viewType;
+        if (moduleDef.parentField) out.parentField = moduleDef.parentField;
+
+        var tokenSet = {};
+        var tokens = [];
+        if (moduleDef.permissions) {
+            moduleDef.permissions.split(/[\s,]+/).map(trim).filter(Boolean).forEach(function (token) {
+                if (!tokenSet[token]) {
+                    tokenSet[token] = true;
+                    tokens.push(token);
+                }
+            });
+        }
+        moduleDef.permissionRules.forEach(function (rule) {
+            var principal = trim(rule.principal);
+            if (principal && !tokenSet[principal]) {
+                tokenSet[principal] = true;
+                tokens.push(principal);
+            }
+        });
+        if (tokens.length) out.permissions = tokens.join(' ');
+
         return out;
     }
 
-    function updateJsonPreview() {
-        var el = document.getElementById('ed-json-preview');
-        if (el) el.textContent = JSON.stringify({ virtualEntities: [buildJson()] }, null, 2);
-    }
+    function validate() {
+        var errors = [];
+        var moduleDef = state.module;
 
-    function syncEntityFromInputs() {
-        entity.name = (document.getElementById('ed-name') || {}).value || '';
-        entity.slug = (document.getElementById('ed-slug') || {}).value || '';
-        entity.navGroup = (document.getElementById('ed-navGroup') || {}).value || 'Admin';
-        entity.navOrder = parseInt((document.getElementById('ed-navOrder') || {}).value, 10) || 0;
-        entity.idStrategy = (document.getElementById('ed-idStrategy') || {}).value || 'guid';
-        entity.viewType = (document.getElementById('ed-viewType') || {}).value || null;
-        entity.permissions = (document.getElementById('ed-permissions') || {}).value || '';
-        entity.showOnNav = !!(document.getElementById('ed-showOnNav') || {}).checked;
-        entity.parentField = (document.getElementById('ed-parentField') || {}).value || null;
-    }
+        if (!trim(moduleDef.name)) errors.push('Entity name is required.');
+        if (!trim(moduleDef.slug)) errors.push('Slug is required for in-place save.');
 
-    function syncFieldsFromInputs() {
-        var cards = document.querySelectorAll('.ed-field-card');
-        cards.forEach(function (card, idx) {
-            if (!entity.fields[idx]) return;
-            entity.fields[idx].name = card.querySelector('.ed-field-name').value;
-            entity.fields[idx].label = card.querySelector('.ed-field-label').value || null;
-            entity.fields[idx].type = card.querySelector('.ed-field-type').value;
-            entity.fields[idx].required = card.querySelector('.ed-field-required').checked;
-            entity.fields[idx].list = card.querySelector('.ed-field-list').checked;
-            var valInput = card.querySelector('.ed-field-values');
-            if (valInput) entity.fields[idx].values = valInput.value.split('|').map(function (s) { return s.trim(); }).filter(Boolean);
-            var lookupEntity = card.querySelector('.ed-field-lookupEntity');
-            if (lookupEntity) entity.fields[idx].lookupEntity = lookupEntity.value;
-            var lookupDisplay = card.querySelector('.ed-field-lookupDisplayField');
-            if (lookupDisplay) entity.fields[idx].lookupDisplayField = lookupDisplay.value;
+        var seen = {};
+        moduleDef.fields.forEach(function (field, index) {
+            var row = index + 1;
+            var fieldName = trim(field.name);
+            if (!fieldName) {
+                errors.push('Field #' + row + ' is missing a name.');
+            } else {
+                var key = fieldName.toLowerCase();
+                if (seen[key]) errors.push('Duplicate field name: ' + fieldName + '.');
+                seen[key] = true;
+            }
+
+            if (field.type === 'enum' && (!field.values || !field.values.length)) errors.push('Field "' + (fieldName || ('#' + row)) + '" is enum but has no values.');
+            if (field.type === 'lookup') {
+                if (!trim(field.lookupEntity)) errors.push('Field "' + (fieldName || ('#' + row)) + '" is lookup but has no target entity slug.');
+                if (!trim(field.lookupDisplayField)) errors.push('Field "' + (fieldName || ('#' + row)) + '" is lookup but has no display field.');
+            }
+            if (field.minLength != null && field.maxLength != null && field.minLength > field.maxLength) errors.push('Field "' + (fieldName || ('#' + row)) + '" has minLength greater than maxLength.');
+            if (field.rangeMin != null && field.rangeMax != null && field.rangeMin > field.rangeMax) errors.push('Field "' + (fieldName || ('#' + row)) + '" has rangeMin greater than rangeMax.');
         });
+
+        if ((moduleDef.viewType === 'TreeView' || moduleDef.viewType === 'OrgChart') && !trim(moduleDef.parentField)) errors.push(moduleDef.viewType + ' view requires Parent Field.');
+        moduleDef.permissionRules.forEach(function (rule, index) { if (!trim(rule.principal)) errors.push('Permission rule #' + (index + 1) + ' is missing principal.'); });
+        moduleDef.reports.forEach(function (report, index) { if (!trim(report.name)) errors.push('Report #' + (index + 1) + ' is missing name.'); });
+
+        state.validation = errors;
     }
 
-    function wireEvents() {
-        // Entity property changes
-        ['ed-name', 'ed-slug', 'ed-navGroup', 'ed-navOrder', 'ed-idStrategy', 'ed-viewType', 'ed-permissions', 'ed-parentField'].forEach(function (id) {
-            var el = document.getElementById(id);
-            if (el) el.addEventListener('input', function () { syncEntityFromInputs(); updateJsonPreview(); });
-        });
-        var showNav = document.getElementById('ed-showOnNav');
-        if (showNav) showNav.addEventListener('change', function () { syncEntityFromInputs(); updateJsonPreview(); });
+    function render() {
+        ensureSelectedFieldIndex();
+        validate();
 
-        // Field changes
-        document.querySelectorAll('.ed-field-card').forEach(function (card) {
-            card.querySelectorAll('input, select').forEach(function (inp) {
-                inp.addEventListener('input', function () { syncFieldsFromInputs(); updateJsonPreview(); });
-                inp.addEventListener('change', function () {
-                    syncFieldsFromInputs();
-                    // Re-render if type changed (to show/hide enum values / lookup fields)
-                    if (inp.classList.contains('ed-field-type')) render();
-                    else updateJsonPreview();
-                });
+        var root = document.getElementById('designer-root');
+        if (!root) return;
+
+        var moduleDef = state.module;
+        var selectedField = state.selectedFieldIndex >= 0 ? moduleDef.fields[state.selectedFieldIndex] : null;
+        var settingId = getSettingIdForModule();
+
+        var statusClass = state.status.kind === 'error' ? 'danger' : (state.status.kind === 'success' ? 'success' : (state.status.kind === 'warning' ? 'warning' : 'info'));
+        var canExportBinary = moduleDef.isComplete && state.validation.length === 0;
+
+        var html = '';
+        html += '<div class="row g-3">';
+        html += '  <div class="col-xl-8">';
+        html += '    <div class="card bm-page-card mb-3">';
+        html += '      <div class="card-header d-flex justify-content-between align-items-center">';
+        html += '        <h5 class="mb-0"><i class="bi bi-box-seam me-2"></i>Module Editor</h5>';
+        html += '        <button class="btn btn-sm btn-outline-secondary" data-action="auto-slug"><i class="bi bi-magic me-1"></i>Auto Slug</button>';
+        html += '      </div>';
+        html += '      <div class="card-body">';
+        html += '        <div class="alert alert-info py-2 small mb-3">Single-screen integrated module editor. Save writes directly to WAL-backed settings in-place.</div>';
+        html += '        <div class="row g-2">';
+        html += '          <div class="col-md-4"><label class="form-label">Name <span class="text-danger">*</span></label><input class="form-control form-control-sm" data-section="entity" data-prop="name" value="' + escHtml(moduleDef.name) + '" placeholder="e.g. TelemetryModule"></div>';
+        html += '          <div class="col-md-4"><label class="form-label">Slug <span class="text-danger">*</span></label><input class="form-control form-control-sm" data-section="entity" data-prop="slug" value="' + escHtml(moduleDef.slug) + '" placeholder="telemetry-module"></div>';
+        html += '          <div class="col-md-4"><label class="form-label">Storage Key</label><input class="form-control form-control-sm" value="' + escHtml(settingId) + '" disabled></div>';
+        html += '          <div class="col-md-3"><label class="form-label">Nav Group</label><input class="form-control form-control-sm" data-section="entity" data-prop="navGroup" value="' + escHtml(moduleDef.navGroup) + '"></div>';
+        html += '          <div class="col-md-2"><label class="form-label">Nav Order</label><input type="number" class="form-control form-control-sm" data-section="entity" data-prop="navOrder" value="' + escHtml(moduleDef.navOrder) + '"></div>';
+        html += '          <div class="col-md-2"><label class="form-label">ID Strategy</label><select class="form-select form-select-sm" data-section="entity" data-prop="idStrategy">';
+        ID_STRATEGIES.forEach(function (s) { html += '<option value="' + s + '"' + (moduleDef.idStrategy === s ? ' selected' : '') + '>' + s + '</option>'; });
+        html += '          </select></div>';
+        html += '          <div class="col-md-2"><label class="form-label">View Type</label><select class="form-select form-select-sm" data-section="entity" data-prop="viewType">';
+        VIEW_TYPES.forEach(function (s) {
+            var label = s || 'Table (default)';
+            html += '<option value="' + escHtml(s) + '"' + (moduleDef.viewType === s ? ' selected' : '') + '>' + escHtml(label) + '</option>';
+        });
+        html += '          </select></div>';
+        html += '          <div class="col-md-3"><label class="form-label">Parent Field</label><input class="form-control form-control-sm" data-section="entity" data-prop="parentField" value="' + escHtml(moduleDef.parentField) + '"></div>';
+        html += '          <div class="col-md-9"><label class="form-label">Permissions (tokens)</label><input class="form-control form-control-sm" data-section="entity" data-prop="permissions" value="' + escHtml(moduleDef.permissions) + '" placeholder="e.g. admin deploy-agent"></div>';
+        html += '          <div class="col-md-3 d-flex align-items-end gap-3">';
+        html += '            <div class="form-check"><input type="checkbox" class="form-check-input" id="showOnNav" data-section="entity" data-prop="showOnNav"' + (moduleDef.showOnNav ? ' checked' : '') + '><label class="form-check-label" for="showOnNav">Show in Nav</label></div>';
+        html += '            <div class="form-check"><input type="checkbox" class="form-check-input" id="isComplete" data-section="entity" data-prop="isComplete"' + (moduleDef.isComplete ? ' checked' : '') + '><label class="form-check-label" for="isComplete">Module Complete</label></div>';
+        html += '          </div>';
+        html += '        </div>';
+        html += '      </div>';
+        html += '    </div>';
+
+        html += '    <div class="card bm-page-card mb-3">';
+        html += '      <div class="card-header d-flex justify-content-between align-items-center">';
+        html += '        <h6 class="mb-0"><i class="bi bi-list-columns-reverse me-2"></i>Properties (Fields)</h6>';
+        html += '        <button class="btn btn-sm btn-outline-primary" data-action="add-field"><i class="bi bi-plus"></i> Add Property</button>';
+        html += '      </div>';
+        html += '      <div class="card-body p-0">';
+        html += '        <div class="table-responsive">';
+        html += '          <table class="table table-sm mb-0">';
+        html += '            <thead><tr><th style="width:36px"></th><th>Name</th><th>Type</th><th>Req</th><th>List</th><th style="width:150px"></th></tr></thead><tbody>';
+
+        if (!moduleDef.fields.length) {
+            html += '<tr><td colspan="6" class="text-muted p-3">No properties yet.</td></tr>';
+        } else {
+            moduleDef.fields.forEach(function (field, idx) {
+                html += '<tr' + (idx === state.selectedFieldIndex ? ' class="table-primary"' : '') + '>';
+                html += '<td class="text-muted">' + (idx + 1) + '</td>';
+                html += '<td><input class="form-control form-control-sm" data-section="field-row" data-index="' + idx + '" data-prop="name" value="' + escHtml(field.name) + '" placeholder="fieldName"></td>';
+                html += '<td><select class="form-select form-select-sm" data-section="field-row" data-index="' + idx + '" data-prop="type">';
+                FIELD_TYPES.forEach(function (ft) { html += '<option value="' + ft.value + '"' + (field.type === ft.value ? ' selected' : '') + '>' + ft.label + '</option>'; });
+                html += '</select></td>';
+                html += '<td><input type="checkbox" data-section="field-row" data-index="' + idx + '" data-prop="required"' + (field.required ? ' checked' : '') + '></td>';
+                html += '<td><input type="checkbox" data-section="field-row" data-index="' + idx + '" data-prop="list"' + (field.list !== false ? ' checked' : '') + '></td>';
+                html += '<td class="text-end">';
+                html += '<button class="btn btn-sm btn-outline-secondary me-1" data-action="select-field" data-index="' + idx + '">Edit</button>';
+                html += '<button class="btn btn-sm btn-outline-secondary me-1" data-action="move-field-up" data-index="' + idx + '"><i class="bi bi-arrow-up"></i></button>';
+                html += '<button class="btn btn-sm btn-outline-secondary me-1" data-action="move-field-down" data-index="' + idx + '"><i class="bi bi-arrow-down"></i></button>';
+                html += '<button class="btn btn-sm btn-outline-danger" data-action="remove-field" data-index="' + idx + '"><i class="bi bi-trash"></i></button>';
+                html += '</td></tr>';
             });
+        }
+
+        html += '            </tbody></table></div></div></div>';
+
+        html += '    <div class="card bm-page-card mb-3"><div class="card-header"><h6 class="mb-0"><i class="bi bi-sliders2 me-2"></i>Selected Property Details</h6></div><div class="card-body">';
+        html += selectedField ? renderSelectedFieldEditor(selectedField, state.selectedFieldIndex) : '<div class="text-muted small">Select a property to edit detailed metadata.</div>';
+        html += '    </div></div>';
+
+        html += '    <div class="card bm-page-card mb-3"><div class="card-header d-flex justify-content-between align-items-center"><h6 class="mb-0"><i class="bi bi-bar-chart-line me-2"></i>Reports</h6><button class="btn btn-sm btn-outline-primary" data-action="add-report"><i class="bi bi-plus"></i> Add Report</button></div><div class="card-body p-0">';
+        html += renderReportsTable(moduleDef.reports);
+        html += '    </div></div>';
+
+        html += '    <div class="card bm-page-card mb-3"><div class="card-header d-flex justify-content-between align-items-center"><h6 class="mb-0"><i class="bi bi-shield-lock me-2"></i>Permission Rules</h6><button class="btn btn-sm btn-outline-primary" data-action="add-permission"><i class="bi bi-plus"></i> Add Rule</button></div><div class="card-body p-0">';
+        html += renderPermissionsTable(moduleDef.permissionRules);
+        html += '    </div></div>';
+
+        html += '  </div>';
+        html += '  <div class="col-xl-4">';
+        html += '    <div class="d-flex gap-2 mb-3">';
+        html += '      <button class="btn btn-primary" data-action="save-in-place"><i class="bi bi-save me-1"></i>Save In Place</button>';
+        html += '      <button class="btn btn-outline-secondary" data-action="load-in-place"><i class="bi bi-arrow-repeat me-1"></i>Load Saved</button>';
+        html += '      <button class="btn btn-outline-success" data-action="export-binary"' + (canExportBinary ? '' : ' disabled') + '><i class="bi bi-box-arrow-down me-1"></i>Export Binary</button>';
+        html += '      <button class="btn btn-outline-secondary" data-action="import-binary"><i class="bi bi-box-arrow-in-down me-1"></i>Import Binary</button>';
+        html += '      <input type="file" id="import-binary-input" class="d-none" accept=".bmwmod,application/octet-stream">';
+        html += '      <button class="btn btn-outline-danger ms-auto" data-action="reset"><i class="bi bi-arrow-counterclockwise me-1"></i>Reset</button>';
+        html += '    </div>';
+
+        html += '    <div class="alert alert-' + statusClass + ' small">' + escHtml(state.status.text) + '</div>';
+
+        html += '    <div class="card bm-page-card mb-3"><div class="card-header"><h6 class="mb-0"><i class="bi bi-check2-circle me-2"></i>Validation</h6></div><div class="card-body">';
+        if (!state.validation.length) {
+            html += '<div class="text-success small"><i class="bi bi-check-circle me-1"></i>No validation issues.</div>';
+        } else {
+            html += '<ul class="small text-danger mb-0 ps-3">';
+            state.validation.forEach(function (error) { html += '<li>' + escHtml(error) + '</li>'; });
+            html += '</ul>';
+        }
+        html += '    </div></div>';
+
+        html += '    <div class="card bm-page-card"><div class="card-header"><h6 class="mb-0"><i class="bi bi-journal-check me-2"></i>Module Summary</h6></div><div class="card-body small">';
+        html += '<div><strong>Fields:</strong> ' + moduleDef.fields.length + '</div>';
+        html += '<div><strong>Reports:</strong> ' + moduleDef.reports.length + '</div>';
+        html += '<div><strong>Permission Rules:</strong> ' + moduleDef.permissionRules.length + '</div>';
+        html += '<div><strong>Complete:</strong> ' + (moduleDef.isComplete ? 'Yes' : 'No') + '</div>';
+        html += '<div class="mt-2 text-muted">Binary export is available only when module is complete and validation passes.</div>';
+        html += '    </div></div>';
+
+        html += '  </div></div>';
+
+        root.innerHTML = html;
+    }
+
+    function renderReportsTable(reports) {
+        var html = '<div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Name</th><th>Type</th><th>Source Field</th><th>Aggregation</th><th>Visible</th><th style="width:60px"></th></tr></thead><tbody>';
+        if (!reports.length) html += '<tr><td colspan="6" class="text-muted p-3">No reports yet.</td></tr>';
+        else reports.forEach(function (report, idx) {
+            html += '<tr>';
+            html += '<td><input class="form-control form-control-sm" data-section="report" data-index="' + idx + '" data-prop="name" value="' + escHtml(report.name) + '"></td>';
+            html += '<td><select class="form-select form-select-sm" data-section="report" data-index="' + idx + '" data-prop="type">';
+            REPORT_TYPES.forEach(function (type) { html += '<option value="' + type + '"' + (report.type === type ? ' selected' : '') + '>' + type + '</option>'; });
+            html += '</select></td>';
+            html += '<td><input class="form-control form-control-sm" data-section="report" data-index="' + idx + '" data-prop="sourceField" value="' + escHtml(report.sourceField) + '"></td>';
+            html += '<td><input class="form-control form-control-sm" data-section="report" data-index="' + idx + '" data-prop="aggregation" value="' + escHtml(report.aggregation) + '"></td>';
+            html += '<td><input type="checkbox" data-section="report" data-index="' + idx + '" data-prop="visible"' + (report.visible !== false ? ' checked' : '') + '></td>';
+            html += '<td><button class="btn btn-sm btn-outline-danger" data-action="remove-report" data-index="' + idx + '"><i class="bi bi-trash"></i></button></td></tr>';
+        });
+        html += '</tbody></table></div>';
+        return html;
+    }
+
+    function renderPermissionsTable(rules) {
+        var html = '<div class="table-responsive"><table class="table table-sm mb-0"><thead><tr><th>Principal</th><th>Level</th><th>Constraint</th><th style="width:60px"></th></tr></thead><tbody>';
+        if (!rules.length) html += '<tr><td colspan="4" class="text-muted p-3">No permission rules yet.</td></tr>';
+        else rules.forEach(function (rule, idx) {
+            html += '<tr>';
+            html += '<td><input class="form-control form-control-sm" data-section="permission" data-index="' + idx + '" data-prop="principal" value="' + escHtml(rule.principal) + '" placeholder="deploy-agent"></td>';
+            html += '<td><select class="form-select form-select-sm" data-section="permission" data-index="' + idx + '" data-prop="level">';
+            PERMISSION_LEVELS.forEach(function (level) { html += '<option value="' + level + '"' + (rule.level === level ? ' selected' : '') + '>' + level + '</option>'; });
+            html += '</select></td>';
+            html += '<td><input class="form-control form-control-sm" data-section="permission" data-index="' + idx + '" data-prop="constraint" value="' + escHtml(rule.constraint) + '" placeholder="OwnRecordOnly"></td>';
+            html += '<td><button class="btn btn-sm btn-outline-danger" data-action="remove-permission" data-index="' + idx + '"><i class="bi bi-trash"></i></button></td></tr>';
+        });
+        html += '</tbody></table></div>';
+        return html;
+    }
+
+    function renderSelectedFieldEditor(field, index) {
+        var html = '';
+        html += '<div class="row g-2">';
+        html += '<div class="col-md-4"><label class="form-label small">Label</label><input class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="label" value="' + escHtml(field.label) + '"></div>';
+        html += '<div class="col-md-4"><label class="form-label small">Placeholder</label><input class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="placeholder" value="' + escHtml(field.placeholder) + '"></div>';
+        html += '<div class="col-md-4"><label class="form-label small">Pattern</label><input class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="pattern" value="' + escHtml(field.pattern) + '"></div>';
+        html += '<div class="col-md-2"><label class="form-label small">Min Length</label><input type="number" class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="minLength" value="' + escHtml(field.minLength == null ? '' : field.minLength) + '"></div>';
+        html += '<div class="col-md-2"><label class="form-label small">Max Length</label><input type="number" class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="maxLength" value="' + escHtml(field.maxLength == null ? '' : field.maxLength) + '"></div>';
+        html += '<div class="col-md-2"><label class="form-label small">Range Min</label><input type="number" step="any" class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="rangeMin" value="' + escHtml(field.rangeMin == null ? '' : field.rangeMin) + '"></div>';
+        html += '<div class="col-md-2"><label class="form-label small">Range Max</label><input type="number" step="any" class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="rangeMax" value="' + escHtml(field.rangeMax == null ? '' : field.rangeMax) + '"></div>';
+        html += '<div class="col-md-4 d-flex align-items-end gap-3">';
+        html += '<div class="form-check"><input type="checkbox" class="form-check-input" id="f-view-' + index + '" data-section="selected-field" data-index="' + index + '" data-prop="view"' + (field.view !== false ? ' checked' : '') + '><label class="form-check-label" for="f-view-' + index + '">View</label></div>';
+        html += '<div class="form-check"><input type="checkbox" class="form-check-input" id="f-edit-' + index + '" data-section="selected-field" data-index="' + index + '" data-prop="edit"' + (field.edit !== false ? ' checked' : '') + '><label class="form-check-label" for="f-edit-' + index + '">Edit</label></div>';
+        html += '<div class="form-check"><input type="checkbox" class="form-check-input" id="f-create-' + index + '" data-section="selected-field" data-index="' + index + '" data-prop="create"' + (field.create !== false ? ' checked' : '') + '><label class="form-check-label" for="f-create-' + index + '">Create</label></div>';
+        html += '</div>';
+        html += '<div class="col-md-8 d-flex align-items-end gap-3">';
+        html += '<div class="form-check"><input type="checkbox" class="form-check-input" id="f-readonly-' + index + '" data-section="selected-field" data-index="' + index + '" data-prop="readOnly"' + (field.readOnly ? ' checked' : '') + '><label class="form-check-label" for="f-readonly-' + index + '">Read Only</label></div>';
+        html += '<div class="form-check"><input type="checkbox" class="form-check-input" id="f-nullable-' + index + '" data-section="selected-field" data-index="' + index + '" data-prop="nullable"' + (field.nullable !== false ? ' checked' : '') + '><label class="form-check-label" for="f-nullable-' + index + '">Nullable</label></div>';
+        html += '<div class="form-check"><input type="checkbox" class="form-check-input" id="f-multiline-' + index + '" data-section="selected-field" data-index="' + index + '" data-prop="multiline"' + (field.multiline ? ' checked' : '') + '><label class="form-check-label" for="f-multiline-' + index + '">Multiline</label></div>';
+        html += '</div>';
+
+        if (field.type === 'enum') html += '<div class="col-12"><label class="form-label small">Enum Values (pipe-separated)</label><input class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="valuesPipe" value="' + escHtml((field.values || []).join('|')) + '" placeholder="Open|In Progress|Closed"></div>';
+        if (field.type === 'lookup') {
+            html += '<div class="col-md-3"><label class="form-label small">Lookup Entity</label><input class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="lookupEntity" value="' + escHtml(field.lookupEntity) + '"></div>';
+            html += '<div class="col-md-3"><label class="form-label small">Lookup Value Field</label><input class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="lookupValueField" value="' + escHtml(field.lookupValueField) + '" placeholder="Id"></div>';
+            html += '<div class="col-md-3"><label class="form-label small">Lookup Display Field</label><input class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="lookupDisplayField" value="' + escHtml(field.lookupDisplayField) + '"></div>';
+            html += '<div class="col-md-3"><label class="form-label small">Lookup Query Field</label><input class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="lookupQueryField" value="' + escHtml(field.lookupQueryField) + '"></div>';
+            html += '<div class="col-md-3"><label class="form-label small">Lookup Query Operator</label><input class="form-control form-control-sm" data-section="selected-field" data-index="' + index + '" data-prop="lookupQueryOperator" value="' + escHtml(field.lookupQueryOperator) + '" placeholder="equals"></div>';
+        }
+
+        html += '</div>';
+        return html;
+    }
+
+    function wireRootEvents() {
+        var root = document.getElementById('designer-root');
+        if (!root) return;
+
+        root.addEventListener('click', function (event) {
+            var actionEl = event.target.closest('[data-action]');
+            if (actionEl) {
+                handleAction(actionEl.getAttribute('data-action'), actionEl.getAttribute('data-index'));
+            }
         });
 
-        // Add field
-        var addBtn = document.getElementById('ed-add-field');
-        if (addBtn) addBtn.addEventListener('click', function () {
-            syncEntityFromInputs();
-            syncFieldsFromInputs();
-            entity.fields.push({
-                fieldId: generateId(), name: '', label: null, type: 'string',
-                required: false, list: true, view: true, edit: true, create: true, values: null,
-                lookupEntity: null, lookupDisplayField: null
-            });
+        root.addEventListener('input', handleInputChange);
+        root.addEventListener('change', handleInputChange);
+        root.addEventListener('change', function (event) {
+            var target = event.target;
+            if (target && target.id === 'import-binary-input' && target.files && target.files[0]) {
+                importBinaryFile(target.files[0]);
+                target.value = '';
+            }
+        });
+    }
+
+    function handleInputChange(event) {
+        var target = event.target;
+        if (!target || !target.dataset) return;
+
+        var section = target.dataset.section;
+        if (!section) return;
+
+        var prop = target.dataset.prop;
+        var index = target.dataset.index != null ? parseInt(target.dataset.index, 10) : -1;
+
+        if (section === 'entity') {
+            updateObjectProperty(state.module, prop, target);
             render();
-        });
-
-        // Remove field
-        document.querySelectorAll('.ed-field-remove').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                var idx = parseInt(btn.closest('.ed-field-card').dataset.idx, 10);
-                syncEntityFromInputs();
-                syncFieldsFromInputs();
-                entity.fields.splice(idx, 1);
-                render();
-            });
-        });
-
-        // Download JSON
-        var dlBtn = document.getElementById('ed-download');
-        if (dlBtn) dlBtn.addEventListener('click', function () {
-            syncEntityFromInputs(); syncFieldsFromInputs();
-            var blob = new Blob([JSON.stringify({ virtualEntities: [buildJson()] }, null, 2)], { type: 'application/json' });
-            var a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = (entity.slug || entity.name || 'entity').toLowerCase().replace(/\s+/g, '-') + '.json';
-            a.click();
-        });
-
-        // Copy JSON
-        var copyBtn = document.getElementById('ed-copy');
-        if (copyBtn) copyBtn.addEventListener('click', function () {
-            syncEntityFromInputs(); syncFieldsFromInputs();
-            navigator.clipboard.writeText(JSON.stringify({ virtualEntities: [buildJson()] }, null, 2));
-            copyBtn.innerHTML = '<i class="bi bi-check me-1"></i>Copied!';
-            setTimeout(function () { copyBtn.innerHTML = '<i class="bi bi-clipboard me-1"></i>Copy JSON'; }, 2000);
-        });
-
-        // Import JSON
-        var importInput = document.getElementById('ed-import');
-        if (importInput) importInput.addEventListener('change', function (e) {
-            var file = e.target.files[0];
-            if (!file) return;
-            var reader = new FileReader();
-            reader.onload = function (ev) {
-                try {
-                    var data = JSON.parse(ev.target.result);
-                    var def = data.virtualEntities ? data.virtualEntities[0] : data;
-                    if (def) {
-                        entity.entityId = def.entityId || generateId();
-                        entity.name = def.name || '';
-                        entity.slug = def.slug || '';
-                        entity.showOnNav = def.showOnNav !== false;
-                        entity.permissions = def.permissions || '';
-                        entity.idStrategy = def.idStrategy || 'guid';
-                        entity.navGroup = def.navGroup || 'Admin';
-                        entity.navOrder = def.navOrder || 0;
-                        entity.viewType = def.viewType || null;
-                        entity.parentField = def.parentField || null;
-                        entity.fields = (def.fields || []).map(function (f) {
-                            return {
-                                fieldId: f.fieldId || generateId(),
-                                name: f.name || '', label: f.label || null, type: f.type || 'string',
-                                required: !!f.required, list: f.list !== false,
-                                values: f.values || null,
-                                lookupEntity: f.lookupEntity || null,
-                                lookupDisplayField: f.lookupDisplayField || null
-                            };
-                        });
-                        render();
-                    }
-                } catch (err) { alert('Invalid JSON: ' + err.message); }
-            };
-            reader.readAsText(file);
-        });
-
-        // Reset
-        var resetBtn = document.getElementById('ed-reset');
-        if (resetBtn) resetBtn.addEventListener('click', function () {
-            if (!confirm('Reset all fields?')) return;
-            entity = {
-                entityId: generateId(),
-                name: '', slug: '', showOnNav: true, permissions: '',
-                idStrategy: 'guid', navGroup: 'Admin', navOrder: 0,
-                viewType: null, parentField: null, fields: []
-            };
+            return;
+        }
+        if (section === 'field-row' && index >= 0 && state.module.fields[index]) {
+            updateFieldProperty(state.module.fields[index], prop, target);
             render();
-        });
-
-        // ── Camel Mode event wiring ───────────────────────────────────────
-        var camelCreateBtn = document.getElementById('ed-camel-create');
-        if (camelCreateBtn) camelCreateBtn.addEventListener('click', function () {
-            var sessionName = (document.getElementById('ed-camel-name') || {}).value;
-            if (!sessionName) { alert('Enter a session name'); return; }
-            syncEntityFromInputs(); syncFieldsFromInputs();
-            fetch('/api/_binary/design-sessions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken(), 'X-Requested-With': 'BareMetalWeb' },
-                body: JSON.stringify({ sessionName: sessionName, designJson: JSON.stringify(buildJson()), isOpen: true })
-            }).then(function (r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.json();
-            }).then(function (data) {
-                var code = data.shareCode || data.ShareCode || '';
-                var status = document.getElementById('ed-camel-status');
-                if (status) {
-                    var div = document.createElement('div');
-                    div.className = 'alert alert-success py-1 px-2 small';
-                    div.textContent = 'Session created! Share code: ';
-                    var strong = document.createElement('strong');
-                    strong.textContent = code;
-                    div.appendChild(strong);
-                    div.appendChild(document.createTextNode(' '));
-                    var btn = document.createElement('button');
-                    btn.className = 'btn btn-sm btn-outline-secondary py-0 px-1';
-                    btn.textContent = 'Copy';
-                    btn.onclick = function() { navigator.clipboard.writeText(code); };
-                    div.appendChild(btn);
-                    status.replaceChildren(div);
-                }
-                camelSessionCode = code;
-            }).catch(function (e) {
-                var status = document.getElementById('ed-camel-status');
-                if (status) {
-                    var div = document.createElement('div');
-                    div.className = 'alert alert-danger py-1 px-2 small';
-                    div.textContent = 'Error: ' + e.message;
-                    status.replaceChildren(div);
-                }
-            });
-        });
-
-        var camelJoinBtn = document.getElementById('ed-camel-join');
-        if (camelJoinBtn) camelJoinBtn.addEventListener('click', function () {
-            var code = (document.getElementById('ed-camel-code') || {}).value;
-            if (!code) { alert('Enter a share code'); return; }
-            fetch('/api/_binary/design-sessions?f_shareCode=' + encodeURIComponent(code))
-                .then(function (r) {
-                    if (!r.ok) throw new Error('HTTP ' + r.status);
-                    return r.json();
-                })
-                .then(function (data) {
-                    var sessions = data.items || data;
-                    if (!sessions || sessions.length === 0) {
-                        var status = document.getElementById('ed-camel-status');
-                        if (status) status.innerHTML = '<div class="alert alert-warning py-1 px-2 small">Session not found</div>';
-                        return;
-                    }
-                    var session = sessions[0];
-                    camelSessionCode = code;
-                        camelSessionKey = session.key || session.Key;
-                        try {
-                            var design = JSON.parse(session.designJson || session.DesignJson || '{}');
-                        if (design.name) entity.name = design.name;
-                        if (design.slug) entity.slug = design.slug;
-                        if (design.fields) entity.fields = design.fields.map(function (f) {
-                            return { fieldId: f.fieldId || generateId(), name: f.name || '', label: f.label || null, type: f.type || 'string', required: !!f.required, list: f.list !== false, view: true, edit: true, create: true, values: f.values || null, lookupEntity: f.lookupEntity || null, lookupDisplayField: f.lookupDisplayField || null };
-                        });
-                        if (design.navGroup) entity.navGroup = design.navGroup;
-                    } catch (e) {}
-                    render();
-                    var status = document.getElementById('ed-camel-status');
-                    if (status) {
-                        var div = document.createElement('div');
-                        div.className = 'alert alert-info py-1 px-2 small';
-                        div.textContent = 'Joined session: ' + (session.sessionName || session.SessionName);
-                        status.replaceChildren(div);
-                    }
-                    var log = document.getElementById('ed-camel-log');
-                    if (log && (session.contributionsLog || session.ContributionsLog)) {
-                        var entries = (session.contributionsLog || session.ContributionsLog).split('\n').filter(Boolean);
-                        log.replaceChildren();
-                        entries.forEach(function (e) {
-                            var entryDiv = document.createElement('div');
-                            entryDiv.className = 'text-muted';
-                            entryDiv.textContent = e;
-                            log.appendChild(entryDiv);
-                        });
-                    }
-                });
-        });
+            return;
+        }
+        if (section === 'selected-field' && index >= 0 && state.module.fields[index]) {
+            updateFieldProperty(state.module.fields[index], prop, target);
+            render();
+            return;
+        }
+        if (section === 'report' && index >= 0 && state.module.reports[index]) {
+            updateObjectProperty(state.module.reports[index], prop, target);
+            render();
+            return;
+        }
+        if (section === 'permission' && index >= 0 && state.module.permissionRules[index]) {
+            updateObjectProperty(state.module.permissionRules[index], prop, target);
+            render();
+        }
     }
 
-    var camelSessionCode = null;
-    var camelSessionKey = null;
+    function updateFieldProperty(field, prop, target) {
+        if (prop === 'valuesPipe') {
+            field.values = String(target.value || '').split('|').map(trim).filter(Boolean);
+            return;
+        }
 
-    // Initialize on DOMContentLoaded
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', render);
-    } else {
+        if (prop === 'minLength' || prop === 'maxLength' || prop === 'rangeMin' || prop === 'rangeMax') {
+            field[prop] = parseNumberOrNull(target.value);
+            return;
+        }
+
+        updateObjectProperty(field, prop, target);
+
+        if (prop === 'type') {
+            if (field.type !== 'enum') field.values = [];
+            if (field.type !== 'lookup') {
+                field.lookupEntity = '';
+                field.lookupValueField = '';
+                field.lookupDisplayField = '';
+                field.lookupQueryField = '';
+                field.lookupQueryOperator = '';
+            }
+        }
+    }
+
+    function updateObjectProperty(obj, prop, target) {
+        if (!obj || !prop) return;
+        if (target.type === 'checkbox') { obj[prop] = !!target.checked; return; }
+        if (prop === 'navOrder') { obj[prop] = parseInt(target.value, 10) || 0; return; }
+        obj[prop] = target.value;
+    }
+
+    async function handleAction(action, indexValue) {
+        var index = indexValue != null ? parseInt(indexValue, 10) : -1;
+
+        if (action === 'auto-slug') { state.module.slug = slugify(state.module.slug || state.module.name); render(); return; }
+        if (action === 'add-field') { state.module.fields.push(createDefaultField()); state.selectedFieldIndex = state.module.fields.length - 1; render(); return; }
+        if (action === 'select-field' && index >= 0) { state.selectedFieldIndex = index; render(); return; }
+        if (action === 'remove-field' && index >= 0) { state.module.fields.splice(index, 1); if (state.selectedFieldIndex === index) state.selectedFieldIndex = -1; render(); return; }
+        if (action === 'move-field-up' && index > 0) { var up = state.module.fields[index - 1]; state.module.fields[index - 1] = state.module.fields[index]; state.module.fields[index] = up; state.selectedFieldIndex = index - 1; render(); return; }
+        if (action === 'move-field-down' && index >= 0 && index < state.module.fields.length - 1) { var down = state.module.fields[index + 1]; state.module.fields[index + 1] = state.module.fields[index]; state.module.fields[index] = down; state.selectedFieldIndex = index + 1; render(); return; }
+        if (action === 'add-report') { state.module.reports.push(createDefaultReport()); render(); return; }
+        if (action === 'remove-report' && index >= 0) { state.module.reports.splice(index, 1); render(); return; }
+        if (action === 'add-permission') { state.module.permissionRules.push(createDefaultPermissionRule()); render(); return; }
+        if (action === 'remove-permission' && index >= 0) { state.module.permissionRules.splice(index, 1); render(); return; }
+
+        if (action === 'reset') {
+            if (!confirm('Reset this module editor?')) return;
+            state.module = createDefaultModule();
+            state.selectedFieldIndex = -1;
+            setStatus('info', 'Reset complete.');
+            return;
+        }
+
+        if (action === 'save-in-place') {
+            await saveModuleInPlace();
+            return;
+        }
+
+        if (action === 'load-in-place') {
+            await loadModuleInPlace();
+            return;
+        }
+
+        if (action === 'import-binary') {
+            var importInput = document.getElementById('import-binary-input');
+            if (importInput) importInput.click();
+            return;
+        }
+
+        if (action === 'export-binary') {
+            exportBinary();
+        }
+    }
+
+    function parseJsonList(payload) {
+        if (Array.isArray(payload)) return payload;
+        if (payload && Array.isArray(payload.items)) return payload.items;
+        return [];
+    }
+
+    function normalizeSettingItem(item) {
+        return {
+            key: item.key || item.Key || 0,
+            settingId: item.settingId || item.SettingId || '',
+            value: item.value || item.Value || '',
+            description: item.description || item.Description || ''
+        };
+    }
+
+    async function findSettingById(settingId) {
+        var resp = await fetch('/api/_binary/' + SETTINGS_SLUG + '?f_settingId=' + encodeURIComponent(settingId), {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' }
+        });
+        if (!resp.ok) {
+            throw new Error('Lookup failed (' + resp.status + ')');
+        }
+
+        var data = await resp.json();
+        var list = parseJsonList(data);
+        if (!list.length) return null;
+        return normalizeSettingItem(list[0]);
+    }
+
+    async function saveModuleInPlace() {
+        validate();
+        if (state.validation.length) {
+            setStatus('error', 'Fix validation errors before saving in place.');
+            return;
+        }
+
+        var settingId = getSettingIdForModule();
+        var payload = {
+            SettingId: settingId,
+            Value: JSON.stringify(buildExportObject()),
+            Description: 'Entity Designer module state (single-object).'
+        };
+
+        try {
+            var existing = await findSettingById(settingId);
+            var url = '/api/_binary/' + SETTINGS_SLUG;
+            var method = 'POST';
+            if (existing && existing.key) {
+                method = 'PUT';
+                url += '/' + existing.key;
+                payload.Key = existing.key;
+            }
+
+            var resp = await fetch(url, {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRF-Token': getCsrfToken(),
+                    'X-Requested-With': 'BareMetalWeb'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!resp.ok) {
+                throw new Error('Save failed (' + resp.status + ')');
+            }
+
+            setStatus('success', 'Saved in place to ' + settingId + '.');
+        } catch (error) {
+            setStatus('error', error && error.message ? error.message : 'Save failed.');
+        }
+    }
+
+    async function loadModuleInPlace() {
+        var settingId = getSettingIdForModule();
+        try {
+            var existing = await findSettingById(settingId);
+            if (!existing || !existing.value) {
+                setStatus('warning', 'No saved module found for ' + settingId + '.');
+                return;
+            }
+
+            var parsed = JSON.parse(existing.value);
+            state.module = normalizeImportedModule(parsed);
+            state.selectedFieldIndex = state.module.fields.length ? 0 : -1;
+            setStatus('success', 'Loaded saved module from ' + settingId + '.');
+        } catch (error) {
+            setStatus('error', error && error.message ? error.message : 'Load failed.');
+        }
+    }
+
+    function exportBinary() {
+        validate();
+        if (!state.module.isComplete || state.validation.length) {
+            setStatus('warning', 'Mark module complete and clear validation errors before binary export.');
+            return;
+        }
+
+        var obj = buildExportObject();
+        var bytes = new TextEncoder().encode(JSON.stringify(obj));
+        var blob = new Blob([bytes], { type: 'application/octet-stream' });
+        var name = slugify(state.module.slug || state.module.name || 'module') || 'module';
+
+        var anchor = document.createElement('a');
+        anchor.href = URL.createObjectURL(blob);
+        anchor.download = name + '.bmwmod';
+        anchor.click();
+        setStatus('success', 'Binary module export downloaded (' + name + '.bmwmod).');
+    }
+
+    async function importBinaryFile(file) {
+        try {
+            var buffer = await file.arrayBuffer();
+            var parsed = parseBinaryModule(buffer);
+            state.module = normalizeImportedModule(parsed);
+            state.selectedFieldIndex = state.module.fields.length ? 0 : -1;
+            setStatus('success', 'Imported binary module from ' + file.name + '.');
+        } catch (error) {
+            setStatus('error', error && error.message ? error.message : 'Binary import failed.');
+        }
+    }
+
+    function parseBinaryModule(buffer) {
+        var text = new TextDecoder('utf-8').decode(new Uint8Array(buffer));
+        return JSON.parse(text);
+    }
+
+    function normalizeImportedModule(input) {
+        var obj = input;
+
+        var moduleDef = createDefaultModule();
+        moduleDef.entityId = trim(obj.entityId) || generateId();
+        moduleDef.name = trim(obj.name);
+        moduleDef.slug = trim(obj.slug) || slugify(moduleDef.name);
+        moduleDef.showOnNav = obj.showOnNav !== false;
+        moduleDef.isComplete = !!obj.isComplete;
+        moduleDef.permissions = trim(obj.permissions);
+        moduleDef.idStrategy = trim(obj.idStrategy) || 'guid';
+        moduleDef.navGroup = trim(obj.navGroup) || 'Admin';
+        moduleDef.navOrder = Number(obj.navOrder) || 0;
+        moduleDef.viewType = trim(obj.viewType);
+        moduleDef.parentField = trim(obj.parentField);
+
+        moduleDef.fields = Array.isArray(obj.fields) ? obj.fields.map(function (field) {
+            var out = createDefaultField();
+            out.fieldId = trim(field.fieldId) || generateId();
+            out.name = trim(field.name);
+            out.label = trim(field.label);
+            out.type = trim(field.type) || 'string';
+            out.required = !!field.required;
+            out.list = field.list !== false;
+            out.view = field.view !== false;
+            out.edit = field.edit !== false;
+            out.create = field.create !== false;
+            out.readOnly = !!field.readOnly;
+            out.nullable = field.nullable !== false;
+            out.multiline = !!field.multiline;
+            out.values = Array.isArray(field.values) ? field.values.map(trim).filter(Boolean) : [];
+            out.lookupEntity = trim(field.lookupEntity);
+            out.lookupValueField = trim(field.lookupValueField);
+            out.lookupDisplayField = trim(field.lookupDisplayField);
+            out.lookupQueryField = trim(field.lookupQueryField);
+            out.lookupQueryOperator = trim(field.lookupQueryOperator);
+            out.placeholder = trim(field.placeholder);
+            out.minLength = parseNumberOrNull(field.minLength);
+            out.maxLength = parseNumberOrNull(field.maxLength);
+            out.rangeMin = parseNumberOrNull(field.rangeMin);
+            out.rangeMax = parseNumberOrNull(field.rangeMax);
+            out.pattern = trim(field.pattern);
+            return out;
+        }) : [];
+
+        moduleDef.reports = Array.isArray(obj.reports) ? obj.reports.map(function (report) {
+            var out = createDefaultReport();
+            out.id = trim(report.id) || generateId();
+            out.name = trim(report.name);
+            out.type = trim(report.type) || 'table';
+            out.sourceField = trim(report.sourceField);
+            out.aggregation = trim(report.aggregation);
+            out.visible = report.visible !== false;
+            return out;
+        }) : [];
+
+        moduleDef.permissionRules = Array.isArray(obj.permissionRules) ? obj.permissionRules.map(function (rule) {
+            var out = createDefaultPermissionRule();
+            out.id = trim(rule.id) || generateId();
+            out.principal = trim(rule.principal);
+            out.level = trim(rule.level) || 'read';
+            out.constraint = trim(rule.constraint);
+            return out;
+        }) : [];
+
+        return moduleDef;
+    }
+
+    function init() {
+        wireRootEvents();
         render();
     }
+
+    if (typeof window !== 'undefined') {
+        window.__entityDesignerTestHooks = {
+            normalizeImportedModule: normalizeImportedModule,
+            parseBinaryModule: parseBinaryModule,
+            buildExportObject: function () { return buildExportObject(); },
+            setModule: function (moduleDef) {
+                state.module = normalizeImportedModule(moduleDef);
+                state.selectedFieldIndex = state.module.fields.length ? 0 : -1;
+                render();
+            }
+        };
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
 })();

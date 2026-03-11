@@ -1,8 +1,10 @@
 using System.IO.Pipelines;
 using System.Text;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using BareMetalWeb.Core.Host;
+using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Rendering;
 
 namespace BareMetalWeb.Core;
@@ -98,6 +100,10 @@ public sealed class BmwContext
 
     /// <summary>Unique correlation ID for this request (X-Trace-ID header or Kestrel trace identifier).</summary>
     public string CorrelationId { get; }
+    private readonly long _requestParsedTimestamp;
+    private long _firstByteWriteTimestamp;
+    private int _firstWriteObserved;
+    private int _firstFlushLogged;
 
     /// <summary>Route parameters extracted by the jump-table or pattern router.</summary>
     public Dictionary<string, string>? RouteParameters { get; set; }
@@ -161,6 +167,7 @@ public sealed class BmwContext
         IBareWebHost app,
         string sourceIp,
         string correlationId,
+        long requestParsedTimestamp,
         CancellationToken requestAborted)
     {
         _features = features;
@@ -174,6 +181,7 @@ public sealed class BmwContext
         App = app;
         SourceIp = sourceIp;
         CorrelationId = correlationId;
+        _requestParsedTimestamp = requestParsedTimestamp;
         RequestAborted = requestAborted;
     }
 
@@ -210,6 +218,7 @@ public sealed class BmwContext
 
         var requestAborted = features.Get<IHttpRequestLifetimeFeature>()?.RequestAborted
             ?? CancellationToken.None;
+        var requestParsedTimestamp = Stopwatch.GetTimestamp();
 
         return new BmwContext(
             features,
@@ -223,6 +232,7 @@ public sealed class BmwContext
             app,
             sourceIp,
             correlationId,
+            requestParsedTimestamp,
             requestAborted);
     }
 
@@ -248,13 +258,54 @@ public sealed class BmwContext
         var maxByteCount = Encoding.UTF8.GetMaxByteCount(text.Length);
         var memory = ResponseBody.GetMemory(maxByteCount);
         int written = Encoding.UTF8.GetBytes(text, memory.Span);
+        MarkFirstByteWrite();
         ResponseBody.Advance(written);
         await ResponseBody.FlushAsync(ct).ConfigureAwait(false);
+        TryLogFirstWriteLatency();
     }
 
     /// <summary>Writes raw bytes directly to the response body PipeWriter.</summary>
-    public ValueTask<FlushResult> WriteResponseAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default)
-        => ResponseBody.WriteAsync(data, ct);
+    public async ValueTask<FlushResult> WriteResponseAsync(ReadOnlyMemory<byte> data, CancellationToken ct = default)
+    {
+        MarkFirstByteWrite();
+        var result = await ResponseBody.WriteAsync(data, ct).ConfigureAwait(false);
+        TryLogFirstWriteLatency();
+        return result;
+    }
+
+    private void MarkFirstByteWrite()
+    {
+        if (Interlocked.CompareExchange(ref _firstWriteObserved, 1, 0) == 0)
+            _firstByteWriteTimestamp = Stopwatch.GetTimestamp();
+    }
+
+    private void TryLogFirstWriteLatency()
+    {
+        if (Volatile.Read(ref _firstWriteObserved) == 0)
+            return;
+
+        if (Interlocked.CompareExchange(ref _firstFlushLogged, 1, 0) != 0)
+            return;
+
+        if (!App.BufferedLogger.IsEnabled(BmwLogLevel.Debug))
+            return;
+
+        var now = Stopwatch.GetTimestamp();
+        var parseToFirstMs = (_firstByteWriteTimestamp - _requestParsedTimestamp) * 1000d / Stopwatch.Frequency;
+        var firstToFlushMs = (now - _firstByteWriteTimestamp) * 1000d / Stopwatch.Frequency;
+
+        App.BufferedLogger.Log(
+            BmwLogLevel.Debug,
+            $"response_timing|parse_to_first_ms={parseToFirstMs:F3}|first_to_flush_ms={firstToFlushMs:F3}",
+            CorrelationId,
+            new LogFields
+            {
+                Method = Request.Method,
+                Path = Request.Path,
+                SourceIp = SourceIp,
+                Detail = $"parseToFirstMs={parseToFirstMs:F3};firstToFlushMs={firstToFlushMs:F3}"
+            });
+    }
 
     /// <summary>Sets a redirect response.</summary>
     public void Redirect(string url, int statusCode = StatusCodes.Status302Found)

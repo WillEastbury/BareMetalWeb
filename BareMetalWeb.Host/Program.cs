@@ -37,6 +37,7 @@ var config = BmwConfig.Load(contentRoot);
 
 // Apply Kestrel + thread-pool tuning from config
 var configureKestrel = ProgramSetup.ConfigureKestrel(config);
+var configureSocketTransport = ProgramSetup.ConfigureSocketTransport(config);
 
 // Simple per-IP rate limiter for device code endpoints
 var _deviceRateLimiter = new ConcurrentDictionary<string, (int Count, DateTime Window)>();
@@ -435,7 +436,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
 });
 
 // ── Direct Kestrel hosting ────────────────────────────────────────────
-await using var host = BmwHost.Create(server, configureKestrel);
+await using var host = BmwHost.Create(server, configureKestrel, configureSocketTransport);
 await host.RunAsync();
 
 static string GetCpuModel()
@@ -628,6 +629,15 @@ static class ProgramSetup
 
             // Strip the "Server: Kestrel" header — avoid leaking server identity.
             serverOptions.AddServerHeader = false;
+        };
+    }
+
+    public static Action<Microsoft.AspNetCore.Server.Kestrel.Transport.Sockets.SocketTransportOptions> ConfigureSocketTransport(BmwConfig config)
+    {
+        return socketOptions =>
+        {
+            // Critical for low-latency small responses: disable Nagle at transport layer.
+            socketOptions.NoDelay = config.GetValue("Kestrel.NoDelay", true);
         };
     }
 
