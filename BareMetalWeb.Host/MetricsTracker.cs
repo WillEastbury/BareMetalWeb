@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 
@@ -267,6 +268,7 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
     public void GetMetricTable(out string[] tableColumns, out string[][] tableRows)
     {
         var snapshot = GetSnapshot();
+        var responseTiming = ResponseTimingMetrics.GetSnapshot();
         tableColumns = ["Metric", "Value"];
         tableRows =
         [
@@ -282,6 +284,12 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             new[] { "P95 (Last 5m)", $"{snapshot.RecentP95ResponseTime.TotalMilliseconds:F2} ms" },
             new[] { "P99 (Last 5m)", $"{snapshot.RecentP99ResponseTime.TotalMilliseconds:F2} ms" },
             new[] { "Average (Last 10s)", $"{snapshot.Recent10sAverageResponseTime.TotalMilliseconds:F2} ms" },
+            new[] { "🔬 RESPONSE WRITE STAGES (Last 5m)", "" },
+            new[] { "Samples", responseTiming.SampleCount.ToString("N0") },
+            new[] { "Parse→First Write (avg/p95/max)", $"{responseTiming.ParseToFirst.Average.TotalMilliseconds:F3} / {responseTiming.ParseToFirst.P95.TotalMilliseconds:F3} / {responseTiming.ParseToFirst.Max.TotalMilliseconds:F3} ms" },
+            new[] { "First Write→Flush Start (avg/p95/max)", $"{responseTiming.FirstToFlushStart.Average.TotalMilliseconds:F3} / {responseTiming.FirstToFlushStart.P95.TotalMilliseconds:F3} / {responseTiming.FirstToFlushStart.Max.TotalMilliseconds:F3} ms" },
+            new[] { "Flush Await (avg/p95/max)", $"{responseTiming.FlushAwait.Average.TotalMilliseconds:F3} / {responseTiming.FlushAwait.P95.TotalMilliseconds:F3} / {responseTiming.FlushAwait.Max.TotalMilliseconds:F3} ms" },
+            new[] { "First Write→Flush Complete (avg/p95/max)", $"{responseTiming.FirstToFlush.Average.TotalMilliseconds:F3} / {responseTiming.FirstToFlush.P95.TotalMilliseconds:F3} / {responseTiming.FirstToFlush.Max.TotalMilliseconds:F3} ms" },
 
             new[] { "📈 STATUS CODES", "" },
             new[] { "2xx Success", snapshot.Requests2xx.ToString("N0") },

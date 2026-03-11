@@ -3443,6 +3443,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var snapshot = app.Metrics.GetSnapshot();
+        var responseTiming = ResponseTimingMetrics.GetSnapshot();
         var gcInfo = GC.GetGCMemoryInfo();
         var payload = new Dictionary<string, object?>
         {
@@ -3471,6 +3472,21 @@ public sealed class RouteHandlers : IRouteHandlers
             ["uiRenderAvgMs"] = snapshot.UiRenderAverage.TotalMilliseconds,
             ["serializationCount"] = snapshot.SerializationCount,
             ["serializationAvgMs"] = snapshot.SerializationAverage.TotalMilliseconds,
+
+            // ── Response write stage timings (recent 5m window) ──
+            ["responseTimingSampleCount"] = responseTiming.SampleCount,
+            ["responseTimingParseToFirstAvgMs"] = responseTiming.ParseToFirst.Average.TotalMilliseconds,
+            ["responseTimingParseToFirstP95Ms"] = responseTiming.ParseToFirst.P95.TotalMilliseconds,
+            ["responseTimingParseToFirstMaxMs"] = responseTiming.ParseToFirst.Max.TotalMilliseconds,
+            ["responseTimingFirstToFlushStartAvgMs"] = responseTiming.FirstToFlushStart.Average.TotalMilliseconds,
+            ["responseTimingFirstToFlushStartP95Ms"] = responseTiming.FirstToFlushStart.P95.TotalMilliseconds,
+            ["responseTimingFirstToFlushStartMaxMs"] = responseTiming.FirstToFlushStart.Max.TotalMilliseconds,
+            ["responseTimingFlushAwaitAvgMs"] = responseTiming.FlushAwait.Average.TotalMilliseconds,
+            ["responseTimingFlushAwaitP95Ms"] = responseTiming.FlushAwait.P95.TotalMilliseconds,
+            ["responseTimingFlushAwaitMaxMs"] = responseTiming.FlushAwait.Max.TotalMilliseconds,
+            ["responseTimingFirstToFlushAvgMs"] = responseTiming.FirstToFlush.Average.TotalMilliseconds,
+            ["responseTimingFirstToFlushP95Ms"] = responseTiming.FirstToFlush.P95.TotalMilliseconds,
+            ["responseTimingFirstToFlushMaxMs"] = responseTiming.FirstToFlush.Max.TotalMilliseconds,
 
             // ── GC / Heap metrics ──
             ["gcGen0Collections"] = snapshot.GcGen0Collections,

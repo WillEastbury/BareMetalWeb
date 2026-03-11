@@ -38,6 +38,7 @@ public sealed class BmwHost : IAsyncDisposable
     public static BmwHost Create(
         BareMetalWebServer server,
         Action<KestrelServerOptions>? configureKestrel = null,
+        Action<SocketTransportOptions>? configureSocketTransport = null,
         ILoggerFactory? loggerFactory = null)
     {
         loggerFactory ??= LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Warning));
@@ -62,6 +63,7 @@ public sealed class BmwHost : IAsyncDisposable
                 return socket;
             }
         };
+        configureSocketTransport?.Invoke(transportOptions);
         var transportFactory = new SocketTransportFactory(
             Options.Create(transportOptions),
             loggerFactory);

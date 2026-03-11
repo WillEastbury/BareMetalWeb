@@ -316,7 +316,7 @@ public static class StaticAssetCache
         {
             // Zero-copy: write the ReadOnlyMemory<byte> slice directly to the
             // Kestrel PipeWriter — no intermediate buffer or Stream wrapper.
-            await context.ResponseBody.WriteAsync(variant);
+            await context.WriteResponseAsync(variant, context.RequestAborted);
         }
     }
 
