@@ -39,7 +39,7 @@ const BareMetalRest = (() => {
   }
 
   function _decodeResponse(buf) {
-    if (buf.byteLength <= FRAME_SIZE) return null;
+    if (!buf || buf.byteLength <= FRAME_SIZE + PAYLOAD_HDR) return null;
     return JSON.parse(new TextDecoder().decode(
       new Uint8Array(buf, FRAME_SIZE + PAYLOAD_HDR)));
   }
@@ -348,5 +348,64 @@ const BareMetalRest = (() => {
     };
   }
 
-  return { setRoot, getRoot, entity, call, ensureBinary, isBinaryAvailable, init, byId, resolveRouteId, connectWs, isWsReady };
+  // ── WAL binary stream consumer ──────────────────────────────────────────
+  // GET /bmw/wal/stream[?entity=<slug>]
+  // Wire format: [count:uint32 LE] then per record: [length:uint32 LE] [payload bytes…]
+  // A length of 0 represents a tombstone / deleted record (payload is null).
+
+  /// Parse a raw WAL stream ArrayBuffer into an object { records, complete }.
+  /// records: array of ArrayBuffer (raw BSO1 payload) or null (tombstone).
+  /// complete: false when the buffer was truncated before all declared records were read.
+  function _parseWalStream(buf) {
+    if (!buf || buf.byteLength < 4) return { records: [], complete: true };
+    const view    = new DataView(buf);
+    const count   = view.getUint32(0, true); // little-endian
+    const records = [];
+    let   offset  = 4;
+    let   complete = true;
+    for (let i = 0; i < count; i++) {
+      if (offset + 4 > buf.byteLength) { complete = false; break; }
+      const len = view.getUint32(offset, true);
+      offset += 4;
+      if (len > 0) {
+        if (offset + len > buf.byteLength) { complete = false; break; }
+        records.push(buf.slice(offset, offset + len));
+        offset += len;
+      } else {
+        records.push(null); // tombstone
+      }
+    }
+    return { records, complete };
+  }
+
+  /// Fetch and parse the WAL binary stream for a specific entity.
+  /// Returns a Promise<{ records: ArrayBuffer[], complete: boolean }>.
+  /// Each element of records is a raw BSO1 payload (or null for tombstones).
+  async function walStream(entityName) {
+    if (!entityName) throw new Error('walStream: entityName is required — use walStreamAll() for all entities');
+    const url = '/bmw/wal/stream?entity=' + encodeURIComponent(entityName);
+    const r   = await fetch(url);
+    if (r.status === 401) {
+      location.href = '/login?returnUrl=' + encodeURIComponent(location.href);
+      throw new Error('Unauthorized');
+    }
+    if (!r.ok) throw new Error((await r.text()) || r.statusText);
+    const buf = await r.arrayBuffer();
+    return _parseWalStream(buf);
+  }
+
+  /// Fetch and parse the full WAL binary stream (all entity types combined).
+  /// Returns a Promise<{ records: ArrayBuffer[], complete: boolean }>.
+  async function walStreamAll() {
+    const r = await fetch('/bmw/wal/stream');
+    if (r.status === 401) {
+      location.href = '/login?returnUrl=' + encodeURIComponent(location.href);
+      throw new Error('Unauthorized');
+    }
+    if (!r.ok) throw new Error((await r.text()) || r.statusText);
+    const buf = await r.arrayBuffer();
+    return _parseWalStream(buf);
+  }
+
+  return { setRoot, getRoot, entity, call, ensureBinary, isBinaryAvailable, init, byId, resolveRouteId, connectWs, isWsReady, walStream, walStreamAll };
 })();
