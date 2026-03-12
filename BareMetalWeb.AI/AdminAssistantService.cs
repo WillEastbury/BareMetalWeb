@@ -147,7 +147,7 @@ public static class CrudTools
             {
                 try
                 {
-                    object? converted;
+                    object? converted = null;
                     var clrType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
                     if (clrType.IsEnum && value is string es)
                     {
@@ -163,10 +163,31 @@ public static class CrudTools
                         if (converted == null) continue;
                     }
                     else if (clrType.IsEnum && value is IConvertible eic)
-                        converted = Enum.ToObject(clrType, eic.ToInt32(null));
-                    else
-                        converted = Convert.ChangeType(value, clrType);
-                    field.Setter(instance, converted);
+                        converted = EnumHelper.FromInt32(clrType, eic.ToInt32(null));
+                    else if (value is IConvertible ic)
+                    {
+                        var code = Type.GetTypeCode(clrType);
+                        converted = code switch
+                        {
+                            TypeCode.Int32   => (object)ic.ToInt32(null),
+                            TypeCode.Int64   => ic.ToInt64(null),
+                            TypeCode.Double  => ic.ToDouble(null),
+                            TypeCode.Single  => ic.ToSingle(null),
+                            TypeCode.Decimal => ic.ToDecimal(null),
+                            TypeCode.Boolean => ic.ToBoolean(null),
+                            TypeCode.String  => ic.ToString(null),
+                            TypeCode.Byte    => ic.ToByte(null),
+                            TypeCode.SByte   => ic.ToSByte(null),
+                            TypeCode.Int16   => ic.ToInt16(null),
+                            TypeCode.UInt16  => ic.ToUInt16(null),
+                            TypeCode.UInt32  => ic.ToUInt32(null),
+                            TypeCode.UInt64  => ic.ToUInt64(null),
+                            TypeCode.DateTime => ic.ToDateTime(null),
+                            _                => value,
+                        };
+                    }
+                    if (converted != null)
+                        field.Setter(instance, converted);
                 }
                 catch (Exception) { /* skip invalid values */ }
             }

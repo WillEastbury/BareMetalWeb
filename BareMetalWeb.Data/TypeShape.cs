@@ -21,6 +21,8 @@ namespace BareMetalWeb.Data;
         public bool IsNullable { get; set; }
         public Type? NullableUnderlying { get; set; }
         public Type? EnumUnderlying { get; set; }
+        /// <summary>Cached <see cref="TypeCode"/> of <see cref="EnumUnderlying"/> — avoids per-call Type.GetTypeCode.</summary>
+        public TypeCode EnumUnderlyingTypeCode { get; set; }
         public Type? ElementType { get; set; }
         public Type? KeyType { get; set; }
         public Type? ValueType { get; set; }

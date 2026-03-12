@@ -297,8 +297,8 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             {
                 var enumUnderlying = shape.EnumUnderlying!;
                 var rawValue = value == null
-                    ? Convert.ChangeType(0, enumUnderlying)
-                    : Convert.ChangeType(value, enumUnderlying);
+                    ? EnumHelper.GetZeroUnderlying(shape.EnumUnderlyingTypeCode)
+                    : EnumHelper.ToUnderlyingValue(value, shape.EnumUnderlyingTypeCode);
                 WriteValue(writer, enumUnderlying, rawValue, depth + 1);
                 return;
             }
@@ -480,8 +480,8 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             {
                 var enumUnderlying = shape.EnumUnderlying!;
                 var rawValue = value == null
-                    ? Convert.ChangeType(0, enumUnderlying)
-                    : Convert.ChangeType(value, enumUnderlying);
+                    ? EnumHelper.GetZeroUnderlying(shape.EnumUnderlyingTypeCode)
+                    : EnumHelper.ToUnderlyingValue(value, shape.EnumUnderlyingTypeCode);
                 WriteValue(ref writer, enumUnderlying, rawValue, depth + 1);
                 return;
             }
@@ -660,7 +660,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             {
                 var enumUnderlying = shape.EnumUnderlying!;
                 var rawValue = ReadValue(reader, enumUnderlying, null, depth + 1);
-                return rawValue == null ? Enum.ToObject(type, 0) : Enum.ToObject(type, rawValue);
+                return rawValue == null
+                    ? EnumHelper.FromLong(type, 0L)
+                    : EnumHelper.FromLong(type, ((IConvertible)rawValue).ToInt64(null));
             }
             case TypeKind.String:
                 return ReadString(reader);
@@ -832,7 +834,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             {
                 var enumUnderlying = shape.EnumUnderlying!;
                 var rawValue = ReadValue(ref reader, enumUnderlying, null, depth + 1);
-                return rawValue == null ? Enum.ToObject(type, 0) : Enum.ToObject(type, rawValue);
+                return rawValue == null
+                    ? EnumHelper.FromLong(type, 0L)
+                    : EnumHelper.FromLong(type, ((IConvertible)rawValue).ToInt64(null));
             }
             case TypeKind.String:
                 return ReadString(ref reader);
@@ -1321,7 +1325,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     private static object CreateInstance([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
     {
         if (type.IsEnum)
-            return Enum.ToObject(type, 0);
+            return EnumHelper.FromLong(type, 0L);
 
         if (type == typeof(DataRecord))
             return new DataRecord();
@@ -1364,11 +1368,14 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             return;
         }
 
-        if (value is IConvertible)
+        if (value is IConvertible ic)
         {
             try
             {
-                var converted = Convert.ChangeType(value, member.MemberType);
+                var memberType = Nullable.GetUnderlyingType(member.MemberType) ?? member.MemberType;
+                object converted = memberType.IsEnum
+                    ? EnumHelper.FromLong(memberType, ic.ToInt64(null))
+                    : ConvertPrimitive(ic, Type.GetTypeCode(memberType));
                 member.Setter(instance, converted);
                 return;
             }
@@ -1377,6 +1384,26 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             }
         }
     }
+
+    private static object ConvertPrimitive(IConvertible ic, TypeCode code) => code switch
+    {
+        TypeCode.Int32   => ic.ToInt32(null),
+        TypeCode.Int64   => ic.ToInt64(null),
+        TypeCode.Double  => ic.ToDouble(null),
+        TypeCode.Single  => ic.ToSingle(null),
+        TypeCode.Decimal => ic.ToDecimal(null),
+        TypeCode.Boolean => ic.ToBoolean(null),
+        TypeCode.String  => ic.ToString(null),
+        TypeCode.Byte    => ic.ToByte(null),
+        TypeCode.SByte   => ic.ToSByte(null),
+        TypeCode.Int16   => ic.ToInt16(null),
+        TypeCode.UInt16  => ic.ToUInt16(null),
+        TypeCode.UInt32  => ic.ToUInt32(null),
+        TypeCode.UInt64  => ic.ToUInt64(null),
+        TypeCode.DateTime => ic.ToDateTime(null),
+        TypeCode.Char    => ic.ToChar(null),
+        _                => ic.ToInt32(null),
+    };
 
     /// <summary>
     /// Returns a pre-built ordinal array that maps each index in <paramref name="schema"/>.Members
@@ -1467,7 +1494,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (type.IsEnum)
         {
             shape.Kind = TypeKind.Enum;
-            shape.EnumUnderlying = AssumePublicMembers(Enum.GetUnderlyingType(type));
+            var underlying = AssumePublicMembers(Enum.GetUnderlyingType(type));
+            shape.EnumUnderlying = underlying;
+            shape.EnumUnderlyingTypeCode = Type.GetTypeCode(underlying);
             return shape;
         }
 
