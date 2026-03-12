@@ -2054,6 +2054,7 @@ public static class DataScaffold
         return fields;
     }
 
+    [RequiresDynamicCode("Creating List<T> instances for child types requires dynamic code generation.")]
     [RequiresUnreferencedCode("Child list parsing requires compiled entity types to be preserved.")]
     private static bool TryParseChildList(string rawValue, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type childType, out object? list)
     {
@@ -2143,6 +2144,7 @@ public static class DataScaffold
         return false;
     }
 
+    [RequiresDynamicCode("Creating Dictionary<string,T> instances for value types requires dynamic code generation.")]
     [RequiresUnreferencedCode("Dictionary parsing requires compiled entity types to be preserved.")]
     private static bool TryParseDictionary(string rawValue, Type valueType, out object? dictionary)
     {
@@ -2515,6 +2517,7 @@ public static class DataScaffold
     /// Deserialises a JSON array of objects into a <c>List&lt;T&gt;</c> where T is a child entity type.
     /// Uses cached child field metadata with pre-compiled setter delegates (no per-call reflection).
     /// </summary>
+    [RequiresDynamicCode("Creating List<T> instances for child types requires dynamic code generation.")]
     [RequiresUnreferencedCode("JSON child list deserialization requires compiled entity types to be preserved.")]
     private static bool TryConvertJsonChildList(JsonElement element, Type childType, out object? list)
     {
@@ -2800,7 +2803,9 @@ public static class DataScaffold
             CountTypedAsync<T>
         );
 
-        // Discover [RemoteCommand] methods
+        // Discover [RemoteCommand] methods and pre-compile typed invoker delegates.
+        // Using Delegate.CreateDelegate at startup avoids per-request MethodInfo.Invoke overhead
+        // and is NativeAOT-safe because T is a concrete type with [DynamicallyAccessedMembers].
         var commands = new List<RemoteCommandMetadata>();
         var methods = type.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly);
         foreach (var method in methods)
@@ -2808,12 +2813,30 @@ public static class DataScaffold
             var cmdAttr = method.GetCustomAttribute<RemoteCommandAttribute>();
             if (cmdAttr == null) continue;
             var returnType = method.ReturnType;
-            if (returnType != typeof(RemoteCommandResult)
-                && returnType != typeof(Task<RemoteCommandResult>)
-                && returnType != typeof(ValueTask<RemoteCommandResult>))
+
+            Func<object, ValueTask<RemoteCommandResult>> invoker;
+            if (returnType == typeof(RemoteCommandResult))
+            {
+                var d = (Func<T, RemoteCommandResult>)Delegate.CreateDelegate(typeof(Func<T, RemoteCommandResult>), method);
+                invoker = obj => new ValueTask<RemoteCommandResult>(d((T)obj));
+            }
+            else if (returnType == typeof(Task<RemoteCommandResult>))
+            {
+                var d = (Func<T, Task<RemoteCommandResult>>)Delegate.CreateDelegate(typeof(Func<T, Task<RemoteCommandResult>>), method);
+                invoker = obj => new ValueTask<RemoteCommandResult>(d((T)obj));
+            }
+            else if (returnType == typeof(ValueTask<RemoteCommandResult>))
+            {
+                var d = (Func<T, ValueTask<RemoteCommandResult>>)Delegate.CreateDelegate(typeof(Func<T, ValueTask<RemoteCommandResult>>), method);
+                invoker = obj => d((T)obj);
+            }
+            else
+            {
                 continue;
+            }
+
             commands.Add(new RemoteCommandMetadata(
-                method,
+                invoker,
                 method.Name,
                 cmdAttr.Label ?? DeCamelcaseWithId(method.Name),
                 cmdAttr.Icon,
