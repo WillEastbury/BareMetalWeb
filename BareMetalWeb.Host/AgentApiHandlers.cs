@@ -23,6 +23,15 @@ public static class AgentApiHandlers
 
     private static IntelligenceOrchestrator GetOrchestrator()
     {
+        return GetOrCreateOrchestrator();
+    }
+
+    /// <summary>
+    /// Get or create the shared IntelligenceOrchestrator instance.
+    /// Used by chat API routes and the agent panel.
+    /// </summary>
+    public static IntelligenceOrchestrator GetOrCreateOrchestrator()
+    {
         if (_orchestrator is not null)
             return _orchestrator;
 

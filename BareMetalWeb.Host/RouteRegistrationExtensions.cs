@@ -2663,6 +2663,359 @@ public static class RouteRegistrationExtensions
             }));
     }
 
+    // ── Chat API Routes ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Registers JSON API routes for the Chat feature.
+    /// <list type="bullet">
+    ///   <item><c>GET  /api/chat/sessions</c> — list sessions for current user</item>
+    ///   <item><c>POST /api/chat/sessions</c> — create a new session</item>
+    ///   <item><c>GET  /api/chat/sessions/{id}</c> — session detail with messages</item>
+    ///   <item><c>DELETE /api/chat/sessions/{id}</c> — delete a session</item>
+    ///   <item><c>POST /api/chat/sessions/{id}/messages</c> — send message, get AI response</item>
+    ///   <item><c>GET  /api/chat/sessions/{id}/messages</c> — paginated message history</item>
+    /// </list>
+    /// </summary>
+    public static void RegisterChatRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        var raw = pageInfoFactory.RawPage("", false);
+
+        // ── GET /api/chat/sessions — list user's sessions ────────────────────
+        host.RegisterRoute("GET /api/chat/sessions", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            var query = new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "UserName", Operator = QueryOperator.Equals, Value = user.UserName }
+                },
+                Sorts = new List<SortClause>
+                {
+                    new() { Field = "UpdatedAtUtc", Direction = SortDirection.Desc }
+                },
+                Top = 50
+            };
+            var sessions = DataStoreProvider.Current.Query<Runtime.ChatSession>(query).ToList();
+
+            context.Response.ContentType = "application/json";
+            var payload = new Dictionary<string, object?>[sessions.Count];
+            for (int i = 0; i < sessions.Count; i++)
+            {
+                var s = sessions[i];
+                payload[i] = new Dictionary<string, object?>
+                {
+                    ["id"] = s.Key,
+                    ["title"] = s.Title,
+                    ["createdAtUtc"] = s.CreatedAtUtc,
+                    ["updatedAtUtc"] = s.UpdatedAtUtc,
+                    ["messageCount"] = s.MessageCount,
+                    ["status"] = s.Status
+                };
+            }
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                JsonWriterHelper.WriteValue(w, payload);
+            }
+        }));
+
+        // ── POST /api/chat/sessions — create a new session ───────────────────
+        host.RegisterRoute("POST /api/chat/sessions", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            if (!CsrfProtection.ValidateApiToken(context))
+            { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"CSRF validation failed\"}"); return; }
+
+            string title = "New Chat";
+            if (context.HttpRequest.ContentLength > 0)
+            {
+                using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, default, context.RequestAborted).ConfigureAwait(false);
+                if (doc.RootElement.TryGetProperty("title", out var titleProp))
+                    title = titleProp.GetString() ?? title;
+            }
+
+            var session = new Runtime.ChatSession
+            {
+                UserName = user.UserName,
+                Title = title,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                MessageCount = 0,
+                Status = "active"
+            };
+            await DataStoreProvider.Current.SaveAsync(session, context.RequestAborted).ConfigureAwait(false);
+
+            context.Response.StatusCode = 201;
+            context.Response.ContentType = "application/json";
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                w.WriteStartObject();
+                w.WriteNumber("id", session.Key);
+                w.WriteString("title", session.Title);
+                w.WriteString("createdAtUtc", session.CreatedAtUtc);
+                w.WriteEndObject();
+            }
+        }));
+
+        // ── GET /api/chat/sessions/{id} — session detail with messages ───────
+        host.RegisterRoute("GET /api/chat/sessions/{id}", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            var idStr = GetRouteParam(context, "id");
+            if (!uint.TryParse(idStr, out var sessionId))
+            { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Invalid session id\"}"); return; }
+
+            var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            if (session == null || !string.Equals(session.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Session not found\"}"); return; }
+
+            var msgQuery = new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "SessionId", Operator = QueryOperator.Equals, Value = sessionId }
+                },
+                Sorts = new List<SortClause>
+                {
+                    new() { Field = "TimestampUtc", Direction = SortDirection.Asc }
+                },
+                Top = 200
+            };
+            var messages = DataStoreProvider.Current.Query<Runtime.ChatMessage>(msgQuery).ToList();
+
+            context.Response.ContentType = "application/json";
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                w.WriteStartObject();
+                w.WriteNumber("id", session.Key);
+                w.WriteString("title", session.Title);
+                w.WriteString("status", session.Status);
+                w.WriteString("createdAtUtc", session.CreatedAtUtc);
+                w.WriteString("updatedAtUtc", session.UpdatedAtUtc);
+                w.WriteNumber("messageCount", session.MessageCount);
+
+                w.WritePropertyName("messages");
+                w.WriteStartArray();
+                foreach (var m in messages)
+                {
+                    w.WriteStartObject();
+                    w.WriteNumber("id", m.Key);
+                    w.WriteString("role", m.Role);
+                    w.WriteString("content", m.Content);
+                    w.WriteString("timestampUtc", m.TimestampUtc);
+                    w.WriteNumber("tokenCount", m.TokenCount);
+                    w.WriteNumber("latencyMs", m.LatencyMs);
+                    w.WriteString("resolvedIntent", m.ResolvedIntent);
+                    w.WriteNumber("confidence", m.Confidence);
+                    w.WriteEndObject();
+                }
+                w.WriteEndArray();
+                w.WriteEndObject();
+            }
+        }));
+
+        // ── DELETE /api/chat/sessions/{id} — delete a session ────────────────
+        host.RegisterRoute("DELETE /api/chat/sessions/{id}", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            if (!CsrfProtection.ValidateApiToken(context))
+            { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"CSRF validation failed\"}"); return; }
+
+            var idStr = GetRouteParam(context, "id");
+            if (!uint.TryParse(idStr, out var sessionId))
+            { context.Response.StatusCode = 400; return; }
+
+            var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            if (session == null || !string.Equals(session.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            { context.Response.StatusCode = 404; return; }
+
+            // Delete all messages in the session
+            var msgQuery = new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "SessionId", Operator = QueryOperator.Equals, Value = sessionId }
+                }
+            };
+            var messages = DataStoreProvider.Current.Query<Runtime.ChatMessage>(msgQuery).ToList();
+            foreach (var msg in messages)
+                await DataStoreProvider.Current.DeleteAsync<Runtime.ChatMessage>(msg.Key, context.RequestAborted).ConfigureAwait(false);
+
+            await DataStoreProvider.Current.DeleteAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"ok\":true}");
+        }));
+
+        // ── POST /api/chat/sessions/{id}/messages — send message, get AI reply ─
+        host.RegisterRoute("POST /api/chat/sessions/{id}/messages", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            if (!CsrfProtection.ValidateApiToken(context))
+            { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"CSRF validation failed\"}"); return; }
+
+            var idStr = GetRouteParam(context, "id");
+            if (!uint.TryParse(idStr, out var sessionId))
+            { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Invalid session id\"}"); return; }
+
+            var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            if (session == null || !string.Equals(session.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Session not found\"}"); return; }
+
+            using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, default, context.RequestAborted).ConfigureAwait(false);
+            var content = doc.RootElement.TryGetProperty("content", out var cp)
+                ? cp.GetString() ?? ""
+                : doc.RootElement.TryGetProperty("message", out var mp)
+                    ? mp.GetString() ?? ""
+                    : "";
+
+            if (string.IsNullOrWhiteSpace(content))
+            { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Missing message content\"}"); return; }
+
+            // Save user message
+            var userMsg = new Runtime.ChatMessage
+            {
+                SessionId = sessionId,
+                Role = "user",
+                Content = content,
+                TimestampUtc = DateTime.UtcNow,
+                TokenCount = EstimateTokens(content)
+            };
+            await DataStoreProvider.Current.SaveAsync(userMsg, context.RequestAborted).ConfigureAwait(false);
+
+            // Invoke the IntelligenceOrchestrator
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Intelligence.ChatResponse aiResponse;
+            try
+            {
+                var orchestrator = AgentApiHandlers.GetOrCreateOrchestrator();
+                aiResponse = await orchestrator.ProcessAsync(content, context.RequestAborted).ConfigureAwait(false);
+            }
+            catch
+            {
+                aiResponse = new Intelligence.ChatResponse("Sorry, an error occurred processing your request.", "error", 0f);
+            }
+            sw.Stop();
+
+            // Save assistant message
+            var assistantMsg = new Runtime.ChatMessage
+            {
+                SessionId = sessionId,
+                Role = "assistant",
+                Content = aiResponse.Message,
+                TimestampUtc = DateTime.UtcNow,
+                TokenCount = EstimateTokens(aiResponse.Message),
+                LatencyMs = (int)sw.ElapsedMilliseconds,
+                ResolvedIntent = aiResponse.ResolvedIntent,
+                Confidence = (decimal)aiResponse.Confidence
+            };
+            await DataStoreProvider.Current.SaveAsync(assistantMsg, context.RequestAborted).ConfigureAwait(false);
+
+            // Update session
+            session.MessageCount += 2;
+            session.UpdatedAtUtc = DateTime.UtcNow;
+            if (session.MessageCount == 2 && session.Title == "New Chat")
+                session.Title = content.Length > 60 ? content[..57] + "..." : content;
+            await DataStoreProvider.Current.SaveAsync(session, context.RequestAborted).ConfigureAwait(false);
+
+            // Return the assistant response
+            context.Response.ContentType = "application/json";
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                w.WriteStartObject();
+                w.WriteStartObject("userMessage");
+                w.WriteNumber("id", userMsg.Key);
+                w.WriteString("role", "user");
+                w.WriteString("content", content);
+                w.WriteString("timestampUtc", userMsg.TimestampUtc);
+                w.WriteEndObject();
+
+                w.WriteStartObject("assistantMessage");
+                w.WriteNumber("id", assistantMsg.Key);
+                w.WriteString("role", "assistant");
+                w.WriteString("content", aiResponse.Message);
+                w.WriteString("timestampUtc", assistantMsg.TimestampUtc);
+                w.WriteNumber("latencyMs", assistantMsg.LatencyMs);
+                w.WriteString("resolvedIntent", aiResponse.ResolvedIntent);
+                w.WriteNumber("confidence", assistantMsg.Confidence);
+                w.WriteEndObject();
+                w.WriteEndObject();
+            }
+        }));
+
+        // ── GET /api/chat/sessions/{id}/messages — paginated history ─────────
+        host.RegisterRoute("GET /api/chat/sessions/{id}/messages", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            var idStr = GetRouteParam(context, "id");
+            if (!uint.TryParse(idStr, out var sessionId))
+            { context.Response.StatusCode = 400; return; }
+
+            var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            if (session == null || !string.Equals(session.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            { context.Response.StatusCode = 404; return; }
+
+            int skip = 0, top = 50;
+            if (context.HttpRequest.Query.TryGetValue("skip", out var skipVal) && int.TryParse(skipVal.FirstOrDefault(), out var s)) skip = s;
+            if (context.HttpRequest.Query.TryGetValue("top", out var topVal) && int.TryParse(topVal.FirstOrDefault(), out var t)) top = Math.Min(t, 200);
+
+            var msgQuery = new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "SessionId", Operator = QueryOperator.Equals, Value = sessionId }
+                },
+                Sorts = new List<SortClause>
+                {
+                    new() { Field = "TimestampUtc", Direction = SortDirection.Asc }
+                },
+                Skip = skip,
+                Top = top
+            };
+            var messages = DataStoreProvider.Current.Query<Runtime.ChatMessage>(msgQuery).ToList();
+
+            context.Response.ContentType = "application/json";
+            var payload = new Dictionary<string, object?>[messages.Count];
+            for (int i = 0; i < messages.Count; i++)
+            {
+                var m = messages[i];
+                payload[i] = new Dictionary<string, object?>
+                {
+                    ["id"] = m.Key,
+                    ["role"] = m.Role,
+                    ["content"] = m.Content,
+                    ["timestampUtc"] = m.TimestampUtc,
+                    ["tokenCount"] = m.TokenCount,
+                    ["latencyMs"] = m.LatencyMs,
+                    ["resolvedIntent"] = m.ResolvedIntent,
+                    ["confidence"] = m.Confidence
+                };
+            }
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                JsonWriterHelper.WriteValue(w, payload);
+            }
+        }));
+    }
+
+    /// <summary>Rough token estimate: ~4 chars per token.</summary>
+    private static int EstimateTokens(string text) => (text.Length + 3) / 4;
+
     // ── View Engine Routes ────────────────────────────────────────────────────
 
     /// <summary>
