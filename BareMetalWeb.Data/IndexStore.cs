@@ -33,7 +33,7 @@ public sealed class IndexStore
     private const int IndexChecksumOffset = 36;
     private const string RegistryFileName = "index.registry";
     private readonly IDataProvider _provider;
-    private readonly IBufferedLogger _logger;
+    private readonly IBufferedLogger? _logger;
 
     // In-memory index caches — invalidated on AppendEntry/AppendEntries
     private readonly ConcurrentDictionary<(string Entity, string Field), Dictionary<string, HashSet<uint>>> _invertedCache = new();
@@ -42,7 +42,7 @@ public sealed class IndexStore
     // Per-field lock for AppendPagedLine to prevent concurrent read-modify-write corruption (#1173)
     private readonly ConcurrentDictionary<(string, string), object> _appendLocks = new();
 
-    public IndexStore(IDataProvider provider, IBufferedLogger logger = null!)
+    public IndexStore(IDataProvider provider, IBufferedLogger? logger = null)
     {
         _provider = provider ?? throw new ArgumentNullException(nameof(provider));
         _logger = logger;
