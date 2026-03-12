@@ -1,0 +1,72 @@
+# ── BMW Bootstrap Deployment Agent ──────────────────────────────────────────
+#
+# This image contains ONLY the lightweight polling agent (bmw-agent).
+# The BMW runtime binary is NOT baked in; instead, the agent downloads the
+# correct version from the BMW control plane at startup and on each poll cycle.
+#
+# ── Node identity ────────────────────────────────────────────────────────────
+# Provision /var/lib/bmw/node.json before starting the container:
+#
+#   {
+#     "nodeId": "...",
+#     "servicePrincipal": "...",
+#     "secret": "...",
+#     "clusterEndpoint": "https://cluster.bmw.mesh",
+#     "certFingerprint": "...",
+#     "ring": "Main"
+#   }
+#
+# Mount it as a secret volume:
+#   docker run -v /host/node.json:/var/lib/bmw/node.json bmw-agent
+#
+# ── Optional environment overrides ───────────────────────────────────────────
+#   BMW_STATE_FILE           — path to node.json (default: /var/lib/bmw/node.json)
+#   BMW_RUNTIME_DIR          — versioned binary store (default: /opt/bmw)
+#   BMW_RUNTIME_LINK         — symlink to active binary (default: /opt/bmw/bmw)
+#   BMW_POLL_INTERVAL_SECONDS — fallback poll base interval (default: 60)
+#   BMW_MAX_JITTER_SECONDS   — max random jitter per poll (default: 30)
+#
+# ── Stage 1: Build the agent ─────────────────────────────────────────────────
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+RUN apt-get update && apt-get install -y --no-install-recommends clang zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy project files for layer caching
+COPY BareMetalWeb.sln ./
+COPY BareMetalWeb.Core/BareMetalWeb.Core.csproj             BareMetalWeb.Core/
+COPY BareMetalWeb.Data/BareMetalWeb.Data.csproj             BareMetalWeb.Data/
+COPY BareMetalWeb.ControlPlane/BareMetalWeb.ControlPlane.csproj  BareMetalWeb.ControlPlane/
+COPY BareMetalWeb.Agent/BareMetalWeb.Agent.csproj           BareMetalWeb.Agent/
+
+RUN dotnet restore BareMetalWeb.Agent/BareMetalWeb.Agent.csproj
+
+COPY . .
+
+ARG VERSION=0.0.0+local
+RUN dotnet publish BareMetalWeb.Agent/BareMetalWeb.Agent.csproj \
+    --configuration Release \
+    --self-contained \
+    --output /agent \
+    -p:InformationalVersion="${VERSION}"
+
+RUN mkdir -p /agent/opt/bmw /agent/var/lib/bmw
+
+# ── Stage 2: Minimal runtime image ──────────────────────────────────────────
+# runtime-deps only — AOT binary has no JIT dependency.
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble-chiseled
+
+WORKDIR /app
+
+COPY --from=build /agent .
+
+# /opt/bmw holds versioned runtime binaries + the active symlink.
+# /var/lib/bmw holds the provisioned node.json identity file.
+# Mount both as volumes (node.json as a secret, /opt/bmw for persistence).
+VOLUME ["/opt/bmw", "/var/lib/bmw"]
+
+# Non-root user (chiseled images default to 'app' UID 1654)
+USER app
+
+ENTRYPOINT ["./bmw-agent"]
