@@ -286,9 +286,7 @@ internal static class Program
             var url = $"{verifyUrl}?code={Uri.EscapeDataString(userCode)}";
             try
             {
-                if (OperatingSystem.IsWindows())
-                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true });
-                else if (OperatingSystem.IsMacOS())
+                if (OperatingSystem.IsMacOS())
                     System.Diagnostics.Process.Start("open", url);
                 else
                     System.Diagnostics.Process.Start("xdg-open", url);

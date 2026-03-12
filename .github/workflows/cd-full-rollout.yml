@@ -106,7 +106,6 @@ jobs:
         run: |
           TAG="${{ inputs.image_tag }}"
           VERSION="${TAG%-linux-*}"
-          VERSION="${VERSION%-windows-*}"
           echo "version_number=${VERSION}" >> $GITHUB_OUTPUT
           echo "Version number: ${VERSION}"
 
@@ -211,7 +210,6 @@ jobs:
         run: |
           TAG="${{ inputs.image_tag }}"
           TARGET_VERSION="${TAG%-linux-*}"
-          TARGET_VERSION="${TARGET_VERSION%-windows-*}"
 
           INSTANCE_ID=$(kubectl get pod -n baremetalweb \
             -l app.kubernetes.io/name=baremetalweb \

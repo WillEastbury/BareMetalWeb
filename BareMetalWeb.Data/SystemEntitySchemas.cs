@@ -236,6 +236,30 @@ public static class SystemEntitySchemas
         .AddField("Confidence", FieldType.Decimal, typeof(decimal))
         .Build();
 
+    public static EntitySchema RuntimeRelease { get; } = new EntitySchema.Builder("RuntimeRelease", "runtime-releases")
+        .AddField("Version", FieldType.StringUtf8, typeof(string), required: true, indexed: true)
+        .AddField("Architecture", FieldType.StringUtf8, typeof(string), required: true, indexed: true)
+        .AddField("Sha256", FieldType.StringUtf8, typeof(string), required: true)
+        .AddField("FileSizeBytes", FieldType.Int64, typeof(long))
+        .AddField("PublishedAtUtc", FieldType.DateTime, typeof(DateTime))
+        .AddField("TargetRing", FieldType.StringUtf8, typeof(string), required: true, indexed: true)
+        .AddField("IsActive", FieldType.Bool, typeof(bool))
+        .AddField("Notes", FieldType.StringUtf8, typeof(string))
+        .Build();
+
+    public static EntitySchema DeploymentNode { get; } = new EntitySchema.Builder("DeploymentNode", "deployment-nodes")
+        .AddField("NodeId", FieldType.StringUtf8, typeof(string), required: true, indexed: true)
+        .AddField("SecretHash", FieldType.StringUtf8, typeof(string), required: true)
+        .AddField("Ring", FieldType.StringUtf8, typeof(string), required: true, indexed: true)
+        .AddField("Architecture", FieldType.StringUtf8, typeof(string))
+        .AddField("CurrentVersion", FieldType.StringUtf8, typeof(string))
+        .AddField("LastHeartbeatUtc", FieldType.DateTime, typeof(DateTime))
+        .AddField("PollIntervalSeconds", FieldType.Int32, typeof(int))
+        .AddField("IsEnabled", FieldType.Bool, typeof(bool))
+        .AddField("DisplayName", FieldType.StringUtf8, typeof(string))
+        .AddField("ClusterEndpoint", FieldType.StringUtf8, typeof(string))
+        .Build();
+
     /// <summary>All system entity schemas, for bulk registration.</summary>
     public static IReadOnlyList<EntitySchema> All { get; } = new[]
     {
@@ -248,6 +272,8 @@ public static class SystemEntitySchemas
         RecordComment,
         Module,
         ChatSession,
-        ChatMessage
+        ChatMessage,
+        RuntimeRelease,
+        DeploymentNode
     };
 }

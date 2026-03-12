@@ -3434,4 +3434,374 @@ public static class RouteRegistrationExtensions
 
         return def;
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    //  Runtime Management Routes — Bootstrap agent + admin management
+    // ═══════════════════════════════════════════════════════════════════════
+
+    public static void RegisterRuntimeRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory,
+        string dataRoot)
+    {
+        var raw = pageInfoFactory.RawPage("", false);
+        var runtimeDir = Path.Combine(dataRoot, "Runtimes");
+        Directory.CreateDirectory(runtimeDir);
+
+        // ── GET /api/runtime/desired/{nodeId} — agent polls for desired version ──
+        host.RegisterRoute("GET /api/runtime/desired/{id}", new RouteHandlerData(raw, async context =>
+        {
+            var nodeId = GetRouteParam(context, "id");
+            if (string.IsNullOrEmpty(nodeId)) { context.Response.StatusCode = 400; return; }
+
+            // Authenticate node via Bearer token
+            var authHeader = context.HttpRequest.Headers["Authorization"].ToString();
+            if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = 401; return;
+            }
+            var secret = authHeader.AsSpan(7).ToString();
+
+            // Find the node
+            var nodes = DataStoreProvider.Current.Query<DeploymentNode>(new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "NodeId", Operator = QueryOperator.Equals, Value = nodeId }
+                },
+                Top = 1
+            }).ToList();
+
+            if (nodes.Count == 0) { context.Response.StatusCode = 404; return; }
+            var node = nodes[0];
+
+            // Verify secret (compare SHA256 hash)
+            var secretHash = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(secret))).ToLowerInvariant();
+            if (!string.Equals(node.SecretHash, secretHash, StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = 401; return;
+            }
+
+            if (!node.IsEnabled) { context.Response.StatusCode = 403; return; }
+
+            // Update last heartbeat + current version from header
+            node.LastHeartbeatUtc = DateTime.UtcNow;
+            var reportedVersion = context.HttpRequest.Headers["X-BMW-Current-Version"].ToString();
+            if (!string.IsNullOrEmpty(reportedVersion))
+                node.CurrentVersion = reportedVersion;
+            var reportedArch = context.HttpRequest.Headers["X-BMW-Architecture"].ToString();
+            if (!string.IsNullOrEmpty(reportedArch))
+                node.Architecture = reportedArch;
+            await DataStoreProvider.Current.SaveAsync(node, context.RequestAborted).ConfigureAwait(false);
+
+            // Find the desired release for this node's ring + architecture
+            var arch = string.IsNullOrEmpty(node.Architecture) ? "Arm64" : node.Architecture;
+            var releases = DataStoreProvider.Current.Query<RuntimeRelease>(new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "IsActive", Operator = QueryOperator.Equals, Value = true },
+                    new() { Field = "Architecture", Operator = QueryOperator.Equals, Value = arch }
+                },
+                Sorts = new List<SortClause>
+                {
+                    new() { Field = "PublishedAtUtc", Direction = SortDirection.Desc }
+                },
+                Top = 20
+            }).ToList();
+
+            // Match: release targets this node's ring or "all"
+            var release = releases.FirstOrDefault(r =>
+                string.Equals(r.TargetRing, node.Ring, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(r.TargetRing, "all", StringComparison.OrdinalIgnoreCase));
+
+            context.Response.ContentType = "application/json";
+            await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
+            w.WriteStartObject();
+            if (release != null)
+            {
+                w.WriteString("desiredVersion", release.Version);
+                w.WriteString("sha256", release.Sha256);
+                w.WriteString("downloadUrl", $"/api/runtime/download/{release.Version}?arch={arch}");
+            }
+            else
+            {
+                w.WriteNull("desiredVersion");
+                w.WriteNull("sha256");
+                w.WriteNull("downloadUrl");
+            }
+            w.WriteNumber("pollSeconds", node.PollIntervalSeconds > 0 ? node.PollIntervalSeconds : 60);
+            w.WriteEndObject();
+        }));
+
+        // ── GET /api/runtime/download/{version} — serve runtime binary ──────────
+        host.RegisterRoute("GET /api/runtime/download/{id}", new RouteHandlerData(raw, async context =>
+        {
+            var version = GetRouteParam(context, "id");
+            if (string.IsNullOrEmpty(version)) { context.Response.StatusCode = 400; return; }
+
+            // Authenticate via Bearer token (same as desired endpoint)
+            var authHeader = context.HttpRequest.Headers["Authorization"].ToString();
+            if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = 401; return;
+            }
+
+            var arch = context.HttpRequest.Query["arch"].ToString();
+            if (string.IsNullOrEmpty(arch)) arch = "Arm64";
+
+            // Find the release
+            var releases = DataStoreProvider.Current.Query<RuntimeRelease>(new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "Version", Operator = QueryOperator.Equals, Value = version },
+                    new() { Field = "Architecture", Operator = QueryOperator.Equals, Value = arch },
+                    new() { Field = "IsActive", Operator = QueryOperator.Equals, Value = true }
+                },
+                Top = 1
+            }).ToList();
+
+            if (releases.Count == 0) { context.Response.StatusCode = 404; return; }
+            var release = releases[0];
+
+            // Verify the caller's secret maps to a valid enabled node
+            var secret = authHeader.AsSpan(7).ToString();
+            var secretHash = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(secret))).ToLowerInvariant();
+            var validNode = DataStoreProvider.Current.Query<DeploymentNode>(new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "SecretHash", Operator = QueryOperator.Equals, Value = secretHash },
+                    new() { Field = "IsEnabled", Operator = QueryOperator.Equals, Value = true }
+                },
+                Top = 1
+            }).Any();
+            if (!validNode) { context.Response.StatusCode = 401; return; }
+
+            // Serve the binary file
+            var binaryPath = Path.Combine(runtimeDir, $"bmw-{version}-{arch}");
+            if (!File.Exists(binaryPath)) { context.Response.StatusCode = 404; return; }
+
+            context.Response.ContentType = "application/octet-stream";
+            context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"bmw-{version}\"";
+            context.Response.Headers["X-BMW-SHA256"] = release.Sha256;
+            await using var fs = new FileStream(binaryPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, true);
+            context.Response.ContentLength = fs.Length;
+            await fs.CopyToAsync(context.Response.Body, context.RequestAborted).ConfigureAwait(false);
+        }));
+
+        // ── POST /api/runtime/publish — upload a new runtime binary (admin) ─────
+        host.RegisterRoute("POST /api/runtime/publish", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+            CsrfProtection.ValidateApiToken(context);
+
+            var version = context.HttpRequest.Query["version"].ToString();
+            var arch = context.HttpRequest.Query["arch"].ToString();
+            var ring = context.HttpRequest.Query["ring"].ToString();
+
+            if (string.IsNullOrEmpty(version) || string.IsNullOrEmpty(arch))
+            {
+                context.Response.StatusCode = 400;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"error\":\"version and arch query params required\"}");
+                return;
+            }
+            if (string.IsNullOrEmpty(ring)) ring = "canary";
+
+            // Read binary from request body and save to disk
+            var binaryPath = Path.Combine(runtimeDir, $"bmw-{version}-{arch}");
+            using var ms = new MemoryStream();
+            await context.HttpRequest.Body.CopyToAsync(ms, context.RequestAborted).ConfigureAwait(false);
+            var data = ms.ToArray();
+
+            var sha256 = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(data)).ToLowerInvariant();
+
+            await File.WriteAllBytesAsync(binaryPath, data, context.RequestAborted).ConfigureAwait(false);
+
+            // Create or update release entity
+            var existing = DataStoreProvider.Current.Query<RuntimeRelease>(new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "Version", Operator = QueryOperator.Equals, Value = version },
+                    new() { Field = "Architecture", Operator = QueryOperator.Equals, Value = arch }
+                },
+                Top = 1
+            }).FirstOrDefault();
+
+            var release = existing ?? new RuntimeRelease();
+            release.Version = version;
+            release.Architecture = arch;
+            release.Sha256 = sha256;
+            release.FileSizeBytes = data.Length;
+            release.PublishedAtUtc = DateTime.UtcNow;
+            release.TargetRing = ring;
+            release.IsActive = true;
+            await DataStoreProvider.Current.SaveAsync(release, context.RequestAborted).ConfigureAwait(false);
+
+            context.Response.ContentType = "application/json";
+            await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
+            w.WriteStartObject();
+            w.WriteNumber("id", release.Key);
+            w.WriteString("version", release.Version);
+            w.WriteString("architecture", release.Architecture);
+            w.WriteString("sha256", release.Sha256);
+            w.WriteNumber("fileSizeBytes", release.FileSizeBytes);
+            w.WriteString("targetRing", release.TargetRing);
+            w.WriteEndObject();
+        }));
+
+        // ── GET /api/runtime/releases — list published releases (admin) ─────────
+        host.RegisterRoute("GET /api/runtime/releases", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            var releases = DataStoreProvider.Current.Query<RuntimeRelease>(new QueryDefinition
+            {
+                Sorts = new List<SortClause>
+                {
+                    new() { Field = "PublishedAtUtc", Direction = SortDirection.Desc }
+                },
+                Top = 100
+            }).ToList();
+
+            context.Response.ContentType = "application/json";
+            await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
+            w.WriteStartArray();
+            foreach (var r in releases)
+            {
+                w.WriteStartObject();
+                w.WriteNumber("id", r.Key);
+                w.WriteString("version", r.Version);
+                w.WriteString("architecture", r.Architecture);
+                w.WriteString("sha256", r.Sha256);
+                w.WriteNumber("fileSizeBytes", r.FileSizeBytes);
+                w.WriteString("publishedAtUtc", r.PublishedAtUtc.ToString("O"));
+                w.WriteString("targetRing", r.TargetRing);
+                w.WriteBoolean("isActive", r.IsActive);
+                w.WriteString("notes", r.Notes);
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
+        }));
+
+        // ── POST /api/runtime/nodes — register/update a deployment node (admin) ──
+        host.RegisterRoute("POST /api/runtime/nodes", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+            CsrfProtection.ValidateApiToken(context);
+
+            using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body,
+                default, context.RequestAborted).ConfigureAwait(false);
+            var root = doc.RootElement;
+
+            var nodeId = root.TryGetProperty("nodeId", out var nid) ? nid.GetString() ?? "" : "";
+            if (string.IsNullOrEmpty(nodeId))
+            {
+                context.Response.StatusCode = 400;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"error\":\"nodeId required\"}");
+                return;
+            }
+
+            // Find existing or create new
+            var existing = DataStoreProvider.Current.Query<DeploymentNode>(new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "NodeId", Operator = QueryOperator.Equals, Value = nodeId }
+                },
+                Top = 1
+            }).FirstOrDefault();
+
+            var node = existing ?? new DeploymentNode { NodeId = nodeId };
+
+            if (root.TryGetProperty("secret", out var sec) && sec.ValueKind == JsonValueKind.String)
+            {
+                var plainSecret = sec.GetString() ?? "";
+                node.SecretHash = Convert.ToHexString(
+                    System.Security.Cryptography.SHA256.HashData(
+                        System.Text.Encoding.UTF8.GetBytes(plainSecret))).ToLowerInvariant();
+            }
+            if (root.TryGetProperty("ring", out var rng)) node.Ring = rng.GetString() ?? "production";
+            if (root.TryGetProperty("architecture", out var ar)) node.Architecture = ar.GetString() ?? "Arm64";
+            if (root.TryGetProperty("pollIntervalSeconds", out var pi)) node.PollIntervalSeconds = pi.GetInt32();
+            if (root.TryGetProperty("isEnabled", out var ie)) node.IsEnabled = ie.GetBoolean();
+            if (root.TryGetProperty("displayName", out var dn)) node.DisplayName = dn.GetString() ?? "";
+            if (root.TryGetProperty("clusterEndpoint", out var ce)) node.ClusterEndpoint = ce.GetString() ?? "";
+
+            await DataStoreProvider.Current.SaveAsync(node, context.RequestAborted).ConfigureAwait(false);
+
+            context.Response.ContentType = "application/json";
+            await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
+            w.WriteStartObject();
+            w.WriteNumber("id", node.Key);
+            w.WriteString("nodeId", node.NodeId);
+            w.WriteString("ring", node.Ring);
+            w.WriteString("architecture", node.Architecture);
+            w.WriteBoolean("isEnabled", node.IsEnabled);
+            w.WriteNumber("pollIntervalSeconds", node.PollIntervalSeconds);
+            w.WriteEndObject();
+        }));
+
+        // ── GET /api/runtime/nodes — list deployment nodes (admin) ───────────────
+        host.RegisterRoute("GET /api/runtime/nodes", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            var nodes = DataStoreProvider.Current.Query<DeploymentNode>(new QueryDefinition
+            {
+                Sorts = new List<SortClause>
+                {
+                    new() { Field = "NodeId", Direction = SortDirection.Asc }
+                },
+                Top = 500
+            }).ToList();
+
+            context.Response.ContentType = "application/json";
+            await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
+            w.WriteStartArray();
+            foreach (var n in nodes)
+            {
+                w.WriteStartObject();
+                w.WriteNumber("id", n.Key);
+                w.WriteString("nodeId", n.NodeId);
+                w.WriteString("ring", n.Ring);
+                w.WriteString("architecture", n.Architecture);
+                w.WriteString("currentVersion", n.CurrentVersion);
+                w.WriteString("lastHeartbeatUtc", n.LastHeartbeatUtc.ToString("O"));
+                w.WriteNumber("pollIntervalSeconds", n.PollIntervalSeconds);
+                w.WriteBoolean("isEnabled", n.IsEnabled);
+                w.WriteString("displayName", n.DisplayName);
+                w.WriteString("clusterEndpoint", n.ClusterEndpoint);
+                w.WriteEndObject();
+            }
+            w.WriteEndArray();
+        }));
+
+        // ── DELETE /api/runtime/nodes/{id} — remove a deployment node (admin) ────
+        host.RegisterRoute("DELETE /api/runtime/nodes/{id}", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+            CsrfProtection.ValidateApiToken(context);
+
+            var idStr = GetRouteParam(context, "id");
+            if (!uint.TryParse(idStr, out var key)) { context.Response.StatusCode = 400; return; }
+
+            await DataStoreProvider.Current.DeleteAsync<DeploymentNode>(key, context.RequestAborted).ConfigureAwait(false);
+            context.Response.StatusCode = 204;
+        }));
+    }
 }

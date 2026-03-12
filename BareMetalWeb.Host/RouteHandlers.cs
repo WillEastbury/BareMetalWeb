@@ -6653,20 +6653,6 @@ public sealed class RouteHandlers : IRouteHandlers
                 if (!string.IsNullOrEmpty(modelName)) return modelName;
                 if (!string.IsNullOrEmpty(model)) return model;
             }
-            else if (OperatingSystem.IsWindows())
-            {
-                var psi = new System.Diagnostics.ProcessStartInfo("powershell", "-NoProfile -Command \"(Get-CimInstance Win32_Processor).Name\"")
-                { RedirectStandardOutput = true, UseShellExecute = false, CreateNoWindow = true };
-                using var proc = System.Diagnostics.Process.Start(psi);
-                if (proc != null)
-                {
-                    var result = proc.StandardOutput.ReadToEnd().Trim();
-                    proc.WaitForExit(2000);
-                    if (!string.IsNullOrEmpty(result)) return result;
-                }
-                var cpu = Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER");
-                if (!string.IsNullOrEmpty(cpu)) return cpu;
-            }
         }
         catch { }
         return RuntimeInformation.ProcessArchitecture.ToString();

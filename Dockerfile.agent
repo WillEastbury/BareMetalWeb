@@ -1,0 +1,29 @@
+# ── Bootstrap Agent: Multi-stage AOT build ────────────────────────────
+# Produces a minimal (~3-5MB) native binary for the deployment bootstrap agent.
+# Stage 1: Build with .NET SDK
+FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
+WORKDIR /src
+
+RUN apt-get update && apt-get install -y --no-install-recommends clang zlib1g-dev && rm -rf /var/lib/apt/lists/*
+
+COPY BareMetalWeb.BootstrapAgent/BareMetalWeb.BootstrapAgent.csproj BareMetalWeb.BootstrapAgent/
+RUN dotnet restore BareMetalWeb.BootstrapAgent/BareMetalWeb.BootstrapAgent.csproj
+
+COPY BareMetalWeb.BootstrapAgent/ BareMetalWeb.BootstrapAgent/
+
+RUN dotnet publish BareMetalWeb.BootstrapAgent/BareMetalWeb.BootstrapAgent.csproj \
+    --configuration Release \
+    --self-contained \
+    --output /app
+
+# ── Stage 2: Minimal runtime image ───────────────────────────────────
+FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-noble-chiseled
+
+WORKDIR /app
+COPY --from=build /app .
+
+# Node identity and runtime binary directories — mount volumes in production
+VOLUME /var/lib/bmw
+VOLUME /opt/bmw
+
+ENTRYPOINT ["./BareMetalWeb.BootstrapAgent"]

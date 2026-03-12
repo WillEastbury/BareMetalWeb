@@ -179,7 +179,6 @@ jobs:
           # Derive version number (strip architecture suffix)
           TAG="${{ needs.version.outputs.image_tag }}"
           TARGET_VERSION="${TAG%-linux-*}"
-          TARGET_VERSION="${TARGET_VERSION%-windows-*}"
 
           # Resolve pod name
           INSTANCE_ID=$(kubectl get pod -n ${{ env.NAMESPACE }} \
