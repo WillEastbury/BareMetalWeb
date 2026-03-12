@@ -297,7 +297,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             {
                 var enumUnderlying = shape.EnumUnderlying!;
                 var rawValue = value == null
-                    ? EnumHelper.ToUnderlyingValue(Enum.ToObject(enumUnderlying, 0), shape.EnumUnderlyingTypeCode)
+                    ? EnumHelper.GetZeroUnderlying(shape.EnumUnderlyingTypeCode)
                     : EnumHelper.ToUnderlyingValue(value, shape.EnumUnderlyingTypeCode);
                 WriteValue(writer, enumUnderlying, rawValue, depth + 1);
                 return;
@@ -480,7 +480,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             {
                 var enumUnderlying = shape.EnumUnderlying!;
                 var rawValue = value == null
-                    ? EnumHelper.ToUnderlyingValue(Enum.ToObject(enumUnderlying, 0), shape.EnumUnderlyingTypeCode)
+                    ? EnumHelper.GetZeroUnderlying(shape.EnumUnderlyingTypeCode)
                     : EnumHelper.ToUnderlyingValue(value, shape.EnumUnderlyingTypeCode);
                 WriteValue(ref writer, enumUnderlying, rawValue, depth + 1);
                 return;
@@ -1325,7 +1325,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     private static object CreateInstance([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
     {
         if (type.IsEnum)
-            return Enum.ToObject(type, 0);
+            return EnumHelper.FromLong(type, 0L);
 
         if (type == typeof(DataRecord))
             return new DataRecord();

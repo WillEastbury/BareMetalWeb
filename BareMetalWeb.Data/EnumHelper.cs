@@ -9,7 +9,7 @@ namespace BareMetalWeb.Data;
 /// Replaces <c>Enum.ToObject</c> and <c>Convert.ChangeType</c> on hot paths by using
 /// per-type caches built once at startup.
 /// </summary>
-internal static class EnumHelper
+public static class EnumHelper
 {
     // Maps enum Type → (long → boxed enum value) built once per type.
     private static readonly ConcurrentDictionary<Type, Dictionary<long, object>> IntToEnumCache = new();
@@ -73,6 +73,25 @@ internal static class EnumHelper
     }
 
     // ── Private helpers ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns a boxed zero value of the underlying integer type.
+    /// Used during enum serialization when the enum value is <c>null</c>.
+    /// Avoids <c>Enum.ToObject</c> on the write path.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    internal static object GetZeroUnderlying(TypeCode underlyingTypeCode) => underlyingTypeCode switch
+    {
+        TypeCode.Int32  => (object)0,
+        TypeCode.Byte   => (byte)0,
+        TypeCode.SByte  => (sbyte)0,
+        TypeCode.Int16  => (short)0,
+        TypeCode.UInt16 => (ushort)0,
+        TypeCode.UInt32 => 0u,
+        TypeCode.Int64  => 0L,
+        TypeCode.UInt64 => 0UL,
+        _               => (object)0,
+    };
 
     private static Dictionary<long, object> BuildIntCache(Type enumType)
     {

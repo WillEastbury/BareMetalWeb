@@ -147,7 +147,7 @@ public static class CrudTools
             {
                 try
                 {
-                    object? converted;
+                    object? converted = null;
                     var clrType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
                     if (clrType.IsEnum && value is string es)
                     {
@@ -163,17 +163,7 @@ public static class CrudTools
                         if (converted == null) continue;
                     }
                     else if (clrType.IsEnum && value is IConvertible eic)
-                    {
-                        var intVal = eic.ToInt32(null);
-                        var enumValues = Enum.GetValues(clrType);
-                        converted = null;
-                        foreach (var ev in enumValues)
-                        {
-                            if (((IConvertible)ev!).ToInt32(null) == intVal)
-                            { converted = ev; break; }
-                        }
-                        if (converted == null) continue;
-                    }
+                        converted = EnumHelper.FromInt32(clrType, eic.ToInt32(null));
                     else if (value is IConvertible ic)
                     {
                         var code = Type.GetTypeCode(clrType);
@@ -196,7 +186,8 @@ public static class CrudTools
                             _                => value,
                         };
                     }
-                    field.Setter(instance, converted);
+                    if (converted != null)
+                        field.Setter(instance, converted);
                 }
                 catch (Exception) { /* skip invalid values */ }
             }
