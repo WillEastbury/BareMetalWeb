@@ -437,9 +437,24 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
         try
         {
             if (effectiveType.IsEnum && value is IConvertible ic)
-                return Enum.ToObject(effectiveType, ic.ToInt32(null));
+                return EnumHelper.FromInt32(effectiveType, ic.ToInt32(null));
 
-            return Convert.ChangeType(value, effectiveType);
+            // Specific type conversions — AOT-safe, no Convert.ChangeType overhead.
+            if (effectiveType == typeof(int))      return Convert.ToInt32(value);
+            if (effectiveType == typeof(long))     return Convert.ToInt64(value);
+            if (effectiveType == typeof(double))   return Convert.ToDouble(value);
+            if (effectiveType == typeof(float))    return Convert.ToSingle(value);
+            if (effectiveType == typeof(decimal))  return Convert.ToDecimal(value);
+            if (effectiveType == typeof(bool))     return Convert.ToBoolean(value);
+            if (effectiveType == typeof(string))   return value.ToString();
+            if (effectiveType == typeof(uint))     return Convert.ToUInt32(value);
+            if (effectiveType == typeof(short))    return Convert.ToInt16(value);
+            if (effectiveType == typeof(ushort))   return Convert.ToUInt16(value);
+            if (effectiveType == typeof(byte))     return Convert.ToByte(value);
+            if (effectiveType == typeof(sbyte))    return Convert.ToSByte(value);
+            if (effectiveType == typeof(ulong))    return Convert.ToUInt64(value);
+            if (effectiveType == typeof(DateTime)) return Convert.ToDateTime(value);
+            return value;
         }
         catch
         {

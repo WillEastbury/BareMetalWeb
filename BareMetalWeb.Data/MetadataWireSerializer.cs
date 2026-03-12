@@ -648,7 +648,7 @@ public sealed class MetadataWireSerializer
             WireFieldType.UInt64 => reader.ReadUInt64(),
             _ => reader.ReadInt32(),
         };
-        return Enum.ToObject(fp.ClrType, raw);
+        return EnumHelper.FromLong(fp.ClrType, ((IConvertible)raw).ToInt64(null));
     }
 
     private static string? ReadString(ref SpanReader reader)
@@ -990,14 +990,14 @@ public sealed class MetadataWireSerializer
             case WireFieldType.Enum:
             {
                 if (element.ValueKind == System.Text.Json.JsonValueKind.Number && element.TryGetInt32(out var enumInt))
-                    return Enum.ToObject(fp.ClrType, enumInt);
+                    return EnumHelper.FromInt32(fp.ClrType, enumInt);
                 if (element.ValueKind == System.Text.Json.JsonValueKind.String)
                 {
                     var s = element.GetString();
                     if (s != null && DataScaffold.GetEnumLookup(fp.ClrType).TryGetValue(s, out var enumVal))
                         return enumVal;
                 }
-                return Enum.ToObject(fp.ClrType, 0);
+                return EnumHelper.FromLong(fp.ClrType, 0L);
             }
             default:
                 return element.GetString();

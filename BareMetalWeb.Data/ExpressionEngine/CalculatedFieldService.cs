@@ -409,9 +409,19 @@ public static class CalculatedFieldService
             if (value is string es && DataScaffold.GetEnumLookup(underlyingType).TryGetValue(es, out var ev))
                 return ev;
             if (value is IConvertible eic)
-                return Enum.ToObject(underlyingType, eic.ToInt32(null));
+                return EnumHelper.FromInt32(underlyingType, eic.ToInt32(null));
         }
 
-        return Convert.ChangeType(value, underlyingType);
+        // Specific type conversions — AOT-safe, avoids Convert.ChangeType overhead.
+        if (underlyingType == typeof(uint))      return Convert.ToUInt32(value);
+        if (underlyingType == typeof(short))     return Convert.ToInt16(value);
+        if (underlyingType == typeof(ushort))    return Convert.ToUInt16(value);
+        if (underlyingType == typeof(byte))      return Convert.ToByte(value);
+        if (underlyingType == typeof(sbyte))     return Convert.ToSByte(value);
+        if (underlyingType == typeof(ulong))     return Convert.ToUInt64(value);
+        if (underlyingType == typeof(DateOnly) && value is string dos && DateOnly.TryParse(dos, out var d)) return d;
+        if (underlyingType == typeof(TimeOnly) && value is string tos && TimeOnly.TryParse(tos, out var t)) return t;
+        if (underlyingType == typeof(Guid) && value is string gs && Guid.TryParse(gs, out var g)) return g;
+        return value;
     }
 }
