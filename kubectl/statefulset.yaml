@@ -27,6 +27,20 @@ spec:
         fsGroup: 1654
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        - name: prepare-logs
+          image: busybox:1.36.1
+          command:
+            - /bin/sh
+            - -c
+            - mkdir -p /mnt/data/Logs && chown 1654:1654 /mnt/data/Logs
+          volumeMounts:
+            - name: data
+              mountPath: /mnt/data
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            allowPrivilegeEscalation: false
       containers:
         - name: baremetalweb
           image: metalclusterregistry.azurecr.io/baremetalweb:1.20260308.1-linux-arm64
@@ -78,6 +92,9 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /app/Data
+            - name: data
+              mountPath: /app/Logs
+              subPath: Logs
             - name: config
               mountPath: /app/Metal.config
               subPath: Metal.config

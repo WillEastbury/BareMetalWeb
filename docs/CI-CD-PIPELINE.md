@@ -112,11 +112,11 @@ The container image is tagged `{version}-linux-arm64` and pushed to:
 
 | Property    | Value |
 |-------------|-------|
-| **Trigger** | CI2 success on main, workflow_dispatch (optional image_tag) |
+| **Trigger** | CI2 success on main, workflow_dispatch (explicit `image_tag`) |
 | **Environment** | AKS canary (same namespace) |
 | **Duration** | ~15–30 minutes |
 
-Deploys the newly built container to the AKS StatefulSet using `kubectl set image`, then runs three extended test stages:
+When triggered automatically by CI2, CD1 derives the container tag from the triggering CI2 run metadata, so it deploys the exact image CI2 just built and pushed. When run manually, `image_tag` must be supplied explicitly. After deployment it runs three extended test stages:
 
 | Test | Purpose | Method |
 |------|---------|--------|
