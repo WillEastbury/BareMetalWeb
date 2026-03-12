@@ -39,7 +39,7 @@ public class Product : BaseDataObject
 }
 ```
 
-Place the file in `BareMetalWeb.UserClasses/DataObjects/`. It will be auto-discovered at startup.
+Entity classes decorated with `[DataEntity]` are auto-discovered at startup from all loaded assemblies. Alternatively, define entities entirely via metadata (no C# class required) using `DataEntityMetadata` and `DataFieldMetadata` registries.
 
 ---
 

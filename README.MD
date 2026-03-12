@@ -76,7 +76,6 @@ The first run triggers the **Out-of-Box Experience (OOBE)** setup wizard at `htt
 | `BareMetalWeb.Intelligence` | BitNet b1.58 ternary inference engine (zero-dependency, AOT-safe) |
 | `BareMetalWeb.Intelligence.CLI` | Interactive REPL for testing the inference engine |
 | `BareMetalWeb.CLI` | Native AOT `metal` command-line tool |
-| `BareMetalWeb.UserClasses` | User-defined entity model classes |
 
 ---
 

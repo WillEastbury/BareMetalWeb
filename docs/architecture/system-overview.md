@@ -83,10 +83,6 @@ graph TD
         ApiHandlers["API route handlers"]
     end
 
-    subgraph UserClasses["BareMetalWeb.UserClasses"]
-        DataObjects["Customer, Order, Product, …<br/>[DataEntity] decorated"]
-    end
-
     Program --> Extensions
     Extensions --> Server
     Extensions --> RouteReg
@@ -137,7 +133,6 @@ graph TD
     RouteHandlers --> ExprEngine
     RouteHandlers --> ReportExec
 
-    UserClasses --> EntityReg
     API --> DataStoreProvider
 ```
 
@@ -154,7 +149,6 @@ graph TD
 | `BareMetalWeb.Runtime` | Core, Data |
 | `BareMetalWeb.API` | Core, Data |
 | `BareMetalWeb.AI` | Core, Data, Microsoft.Extensions.AI |
-| `BareMetalWeb.UserClasses` | Data |
 | `BareMetalWeb.CLI` | *(standalone — uses HTTP only)* |
 | `BareMetalWeb.DataBrowser` | Data *(CLI tool — server must be stopped for write ops)* |
 
