@@ -56,8 +56,55 @@ public sealed class ControlPlaneClient
 
     public void SendBackupRecord(BackupRecord record)
         => PostFireAndForget("BackupRecord", record);
+
     public void SendUpgradeVerification(UpgradeVerificationRecord record)
         => PostFireAndForget("UpgradeVerificationRecord", record);
+
+    // ── Retry-capable async sends ─────────────────────────────────────────────
+
+    /// <summary>
+    /// Attempt to POST a pre-serialised JSON record to the control plane.
+    /// Returns <c>true</c> on HTTP 2xx; <c>false</c> on network error or non-success status.
+    /// Never throws — the caller (ControlPlaneService) decides how to buffer/retry.
+    /// </summary>
+    public async Task<bool> TrySendRawAsync(string entityType, string json)
+    {
+        if (!IsConfigured) return false;
+        try
+        {
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var request = new HttpRequestMessage(HttpMethod.Post,
+                $"{_baseUrl}/api/data/{entityType}");
+            request.Headers.TryAddWithoutValidation("ApiKey", _apiKey);
+            request.Content = content;
+            using var response = await Http.SendAsync(request,
+                HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger?.Log(BmwLogLevel.Debug,
+                    $"[BMW ControlPlane] POST {entityType} returned {(int)response.StatusCode}");
+                return false;
+            }
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger?.Log(BmwLogLevel.Debug,
+                $"[BMW ControlPlane] POST {entityType} failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>Serialise <paramref name="payload"/> and attempt to POST it; returns success.</summary>
+    public Task<bool> TrySendAsync<T>(string entityType, T payload)
+    {
+        if (!IsConfigured) return Task.FromResult(false);
+        var json = JsonSerializer.Serialize(payload, JsonOpts);
+        return TrySendRawAsync(entityType, json);
+    }
+
+    /// <summary>Serialise <paramref name="payload"/> to a JSON string without sending it.</summary>
+    public string Serialize<T>(T payload) => JsonSerializer.Serialize(payload, JsonOpts);
 
     /// <summary>
     /// Query the control plane for the upgrade status of a specific instance.

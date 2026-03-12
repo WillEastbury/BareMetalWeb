@@ -9,11 +9,19 @@ namespace BareMetalWeb.ControlPlane;
 /// Background service that periodically streams heartbeats, telemetry snapshots,
 /// and error events to a central BMW control-plane instance.
 ///
+/// Offline behaviour: when the endpoint is unreachable, outbound records are
+/// written to a local disk buffer (<see cref="TelemetryBuffer"/>) and retried
+/// with exponential back-off + jitter.  The buffer is bounded; when it is full
+/// the oldest record is evicted (oldest-first drop policy).  All operations are
+/// non-blocking and never impact the request-handling path.
+///
 /// Configuration (Metal.config):
 ///   ControlPlane.Url                    — base URL of the control plane
 ///   ControlPlane.ApiKey                 — API key for authentication
 ///   ControlPlane.HeartbeatIntervalSeconds — heartbeat frequency (default 60)
 ///   ControlPlane.InstanceId             — identifier for this instance (default: machine name)
+///   ControlPlane.BufferDir              — directory for the pending-record buffer (default: {dataRoot}/cpbuffer)
+///   ControlPlane.BufferMaxRecords       — max buffered records before oldest is dropped (default: 10000)
 /// </summary>
 public sealed class ControlPlaneService
 {
@@ -23,6 +31,7 @@ public sealed class ControlPlaneService
     private readonly string _instanceId;
     private readonly string _version;
     private readonly int _heartbeatIntervalSeconds;
+    private readonly TelemetryBuffer _buffer;
 
     // Snapshot baselines for computing deltas in telemetry windows
     private long _prevTotalRequests;
@@ -38,6 +47,17 @@ public sealed class ControlPlaneService
     private readonly ConcurrentQueue<ErrorEvent> _errorBuffer = new();
     private const int MaxBufferedErrors = 100;
 
+    // Health tracking
+    private long _retryCount;
+    private long _drainSuccessCount;
+    private volatile bool _isOnline;
+    private DateTime? _lastSuccessfulSendUtc;
+
+    // Retry back-off state
+    private int _consecutiveFailures;
+    private static readonly TimeSpan MinBackoff = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan MaxBackoff = TimeSpan.FromMinutes(5);
+
     // Optional delegates for data the service can't access directly
     private Func<long>? _getRecordCount;
     private Func<int>? _getWalSegmentCount;
@@ -50,13 +70,23 @@ public sealed class ControlPlaneService
         ControlPlaneClient client,
         IMetricsTracker metrics,
         BmwConfig config,
-        IBufferedLogger? logger = null)
+        IBufferedLogger? logger = null,
+        string? bufferDir = null)
     {
         _client = client;
         _metrics = metrics;
         _logger = logger;
         _instanceId = config.GetValue("ControlPlane.InstanceId", Environment.MachineName);
         _heartbeatIntervalSeconds = config.GetValue("ControlPlane.HeartbeatIntervalSeconds", 60);
+
+        var resolvedBufferDir = bufferDir
+            ?? config.GetValue("ControlPlane.BufferDir", "")
+            .Let(d => string.IsNullOrEmpty(d)
+                ? Path.Combine(AppContext.BaseDirectory, "cpbuffer")
+                : d);
+
+        var maxRecords = config.GetValue("ControlPlane.BufferMaxRecords", TelemetryBuffer.DefaultMaxRecords);
+        _buffer = new TelemetryBuffer(resolvedBufferDir, maxRecords);
 
         _version = Assembly.GetEntryAssembly()
             ?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
@@ -83,7 +113,10 @@ public sealed class ControlPlaneService
     }
 
     /// <summary>
-    /// Call this from the logger or error handler to buffer errors for streaming.
+    /// Buffer an error event for streaming to the control plane.
+    /// Safe to call from any thread (including the logging hot path).
+    /// When the control plane is online the event will be delivered on the next tick;
+    /// when offline it is held in the offline disk buffer.
     /// </summary>
     public void BufferError(string level, string message, string? exceptionType = null,
         string? stackTrace = null, string? path = null, string? method = null,
@@ -124,6 +157,19 @@ public sealed class ControlPlaneService
         });
     }
 
+    /// <summary>
+    /// Returns a point-in-time health snapshot of the telemetry pipeline:
+    /// queue depth, last successful send, dropped and retry counters, online status.
+    /// </summary>
+    public ObservabilityHealth GetHealth() => new()
+    {
+        PendingQueueDepth = _buffer.QueueDepth,
+        DroppedCount = _buffer.DroppedCount,
+        RetryCount = Interlocked.Read(ref _retryCount),
+        LastSuccessfulSendUtc = _lastSuccessfulSendUtc,
+        IsOnline = _isOnline,
+    };
+
     /// <summary>Main loop — runs until cancellation.</summary>
     public async Task RunAsync(CancellationToken ct)
     {
@@ -137,23 +183,56 @@ public sealed class ControlPlaneService
         _logger?.Log(BmwLogLevel.Info,
             $"[BMW ControlPlane] Streaming to control plane every {_heartbeatIntervalSeconds}s as '{_instanceId}'.");
 
+        if (_buffer.QueueDepth > 0)
+            _logger?.Log(BmwLogLevel.Info,
+                $"[BMW ControlPlane] Loaded {_buffer.QueueDepth} pending record(s) from offline buffer.");
+
         // Seed baselines
         SeedBaselines();
 
         while (!ct.IsCancellationRequested)
         {
+            // Wait for the next heartbeat interval, or the current back-off delay
+            var delay = _consecutiveFailures == 0
+                ? TimeSpan.FromSeconds(_heartbeatIntervalSeconds)
+                : ComputeBackoff(_consecutiveFailures);
+
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(_heartbeatIntervalSeconds), ct)
-                    .ConfigureAwait(false);
+                await Task.Delay(delay, ct).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { break; }
 
             try
             {
-                SendHeartbeat();
-                SendTelemetryWindow();
-                FlushErrors();
+                bool anyFailed = false;
+
+                anyFailed |= !await SendHeartbeatAsync(ct).ConfigureAwait(false);
+                anyFailed |= !await SendTelemetryWindowAsync(ct).ConfigureAwait(false);
+                anyFailed |= !await FlushErrorsAsync(ct).ConfigureAwait(false);
+
+                if (anyFailed)
+                {
+                    _consecutiveFailures++;
+                    _isOnline = false;
+                    _logger?.Log(BmwLogLevel.Debug,
+                        $"[BMW ControlPlane] Endpoint unreachable — back-off #{_consecutiveFailures}, " +
+                        $"buffer depth={_buffer.QueueDepth}, dropped={_buffer.DroppedCount}");
+                }
+                else
+                {
+                    if (_consecutiveFailures > 0)
+                        _logger?.Log(BmwLogLevel.Info,
+                            $"[BMW ControlPlane] Connectivity restored after {_consecutiveFailures} failure(s). " +
+                            $"Draining {_buffer.QueueDepth} buffered record(s).");
+
+                    _consecutiveFailures = 0;
+                    _isOnline = true;
+                    _lastSuccessfulSendUtc = DateTime.UtcNow;
+
+                    // Drain any offline-buffered records now that we are online
+                    await DrainBufferAsync(ct).ConfigureAwait(false);
+                }
             }
             catch (Exception ex)
             {
@@ -162,6 +241,8 @@ public sealed class ControlPlaneService
             }
         }
     }
+
+    // ── Internal helpers ─────────────────────────────────────────────────────
 
     private void SeedBaselines()
     {
@@ -178,14 +259,14 @@ public sealed class ControlPlaneService
         _prevWalCompactions = engine.CompactionCount;
     }
 
-    private void SendHeartbeat()
+    private async Task<bool> SendHeartbeatAsync(CancellationToken ct)
     {
         var snap = _metrics.GetSnapshot();
         double errorRate = snap.TotalRequests > 0
             ? (double)snap.Requests5xx / snap.TotalRequests
             : 0;
 
-        _client.SendHeartbeat(new InstanceHeartbeat
+        var heartbeat = new InstanceHeartbeat
         {
             InstanceId = _instanceId,
             Url = _getInstanceUrl?.Invoke(),
@@ -202,16 +283,21 @@ public sealed class ControlPlaneService
             IsLeader = _getIsLeader?.Invoke() ?? true,
             Epoch = _getEpoch?.Invoke() ?? 0,
             Timestamp = DateTime.UtcNow.ToString("O"),
-        });
+        };
+
+        var ok = await _client.TrySendAsync("InstanceHeartbeat", heartbeat).ConfigureAwait(false);
+        if (!ok)
+            _buffer.TryEnqueue(_client.Serialize(heartbeat).PrependEntityType("InstanceHeartbeat"));
+        return ok;
     }
 
-    private void SendTelemetryWindow()
+    private async Task<bool> SendTelemetryWindowAsync(CancellationToken ct)
     {
         var snap = _metrics.GetSnapshot();
         var engine = BareMetalWeb.Data.EngineMetrics.GetSnapshot();
         var now = DateTime.UtcNow;
 
-        _client.SendTelemetry(new TelemetrySnapshot
+        var telemetry = new TelemetrySnapshot
         {
             InstanceId = _instanceId,
             PeriodStart = now.AddSeconds(-_heartbeatIntervalSeconds).ToString("O"),
@@ -232,9 +318,9 @@ public sealed class ControlPlaneService
             GcGen2 = snap.GcGen2Collections,
             GcAllocatedBytes = snap.GcTotalAllocatedBytes,
             Timestamp = now.ToString("O"),
-        });
+        };
 
-        // Update baselines
+        // Update baselines regardless of send success so deltas stay accurate
         _prevTotalRequests = snap.TotalRequests;
         _prev2xx = snap.Requests2xx;
         _prev4xx = snap.Requests4xx;
@@ -243,11 +329,110 @@ public sealed class ControlPlaneService
         _prevWalReads = engine.WalAppendCount;
         _prevWalCommits = engine.CommitCount;
         _prevWalCompactions = engine.CompactionCount;
+
+        var ok = await _client.TrySendAsync("TelemetrySnapshot", telemetry).ConfigureAwait(false);
+        if (!ok)
+            _buffer.TryEnqueue(_client.Serialize(telemetry).PrependEntityType("TelemetrySnapshot"));
+        return ok;
     }
 
-    private void FlushErrors()
+    private async Task<bool> FlushErrorsAsync(CancellationToken ct)
     {
+        bool allOk = true;
         while (_errorBuffer.TryDequeue(out var error))
-            _client.SendError(error);
+        {
+            var ok = await _client.TrySendAsync("ErrorEvent", error).ConfigureAwait(false);
+            if (!ok)
+            {
+                _buffer.TryEnqueue(_client.Serialize(error).PrependEntityType("ErrorEvent"));
+                allOk = false;
+            }
+        }
+        return allOk;
     }
+
+    /// <summary>
+    /// Drain the offline buffer by replaying each pending record.
+    /// Stops on first failure to preserve ordering; re-persists any remaining records.
+    /// </summary>
+    private async Task DrainBufferAsync(CancellationToken ct)
+    {
+        int sent = 0;
+        while (!ct.IsCancellationRequested && _buffer.TryDequeue(out var raw))
+        {
+            if (!raw.TryParseEntityRecord(out var entityType, out var json))
+                continue; // malformed — skip
+
+            Interlocked.Increment(ref _retryCount);
+            var ok = await _client.TrySendRawAsync(entityType, json).ConfigureAwait(false);
+            if (!ok)
+            {
+                // Re-queue the failed record and stop — we'll retry next cycle
+                _buffer.TryEnqueue(raw);
+                break;
+            }
+            sent++;
+            Interlocked.Increment(ref _drainSuccessCount);
+        }
+
+        if (sent > 0)
+        {
+            _lastSuccessfulSendUtc = DateTime.UtcNow;
+            _buffer.PersistCurrentState();
+            _logger?.Log(BmwLogLevel.Debug,
+                $"[BMW ControlPlane] Drained {sent} buffered record(s), " +
+                $"{_buffer.QueueDepth} remaining.");
+        }
+    }
+
+    /// <summary>
+    /// Compute back-off delay for the given number of consecutive failures.
+    /// Uses exponential back-off with ±20 % jitter, capped at <see cref="MaxBackoff"/>.
+    /// </summary>
+    internal static TimeSpan ComputeBackoff(int consecutiveFailures)
+    {
+        // 2^n * MinBackoff, capped at MaxBackoff
+        var exp = Math.Min(consecutiveFailures - 1, 10); // cap exponent at 2^10 = 1024
+        var baseTicks = (long)(MinBackoff.Ticks * Math.Pow(2, exp));
+        var capped = Math.Min(baseTicks, MaxBackoff.Ticks);
+
+        // ±20 % jitter to spread retries across instances
+        var jitter = (long)(capped * 0.2 * (Random.Shared.NextDouble() * 2.0 - 1.0));
+        var final = Math.Max(MinBackoff.Ticks, capped + jitter);
+        return TimeSpan.FromTicks(final);
+    }
+}
+
+// ── String helpers (internal, allocation-minimal) ────────────────────────────
+
+internal static class RecordEnvelopeExtensions
+{
+    private const char Sep = '\x1F'; // ASCII unit-separator — not valid in JSON
+
+    /// <summary>Prefix a JSON payload with the entity type so it can be stored as a single string.</summary>
+    internal static string PrependEntityType(this string json, string entityType)
+        => string.Concat(entityType, Sep, json);
+
+    /// <summary>Split a stored record back into entity type and JSON payload.</summary>
+    internal static bool TryParseEntityRecord(this string raw,
+        out string entityType, out string json)
+    {
+        var idx = raw.IndexOf(Sep);
+        if (idx <= 0)
+        {
+            entityType = string.Empty;
+            json = string.Empty;
+            return false;
+        }
+        entityType = raw[..idx];
+        json = raw[(idx + 1)..];
+        return true;
+    }
+}
+
+// ── Tiny helper to avoid 'Let' extension call on strings inline ───────────────
+file static class StringLetExtension
+{
+    internal static TResult Let<T, TResult>(this T value, Func<T, TResult> selector)
+        => selector(value);
 }
