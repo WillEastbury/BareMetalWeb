@@ -4,21 +4,18 @@ name: Deploy to Tenant
 # Reusable workflow: deploy a pre-built publish package to a single Azure Web
 # App tenant and run a health-check loop to verify the deployment succeeded.
 #
-# Called from ci-cd-pipeline.yml for both L2.2 (early access) and L2.3 (full
-# rollout) matrix jobs.
-#
 # Inputs
 # ──────
 #   app-name       – Azure Web App name (e.g. baremetalweb-tenant-acme)
-#   artifact-name  – Name of the Actions artifact that contains the publish
-#                    directory (uploaded by l2-0-release-candidate)
+#   artifact-name  – Name of the Actions artifact containing the publish directory
+#   version-number – Version number without architecture suffix (e.g. 1.20260309.42)
+#                    Used for upgrade verification against the control plane.
 #
 # Secrets
 # ───────
-#   azure-credentials – Service principal JSON with Contributor access to the
-#                       target Web App.  All tenants share AZURE_CREDENTIALS_TENANTS
-#                       if they are in the same subscription; pass a different
-#                       secret per tenant group if needed.
+#   azure-credentials      – Service principal JSON for the target Web App
+#   control-plane-url      – Base URL of the BMW control plane (optional)
+#   control-plane-api-key  – API key for the control plane (optional)
 # ─────────────────────────────────────────────────────────────────────────────
 
 on:
@@ -41,10 +38,21 @@ on:
         required: false
         type: string
         default: ''
+      version-number:
+        description: 'Version number without architecture suffix (e.g. 1.20260309.42). Used for upgrade verification.'
+        required: false
+        type: string
+        default: ''
     secrets:
       azure-credentials:
         description: 'Azure service principal credentials JSON'
         required: true
+      control-plane-url:
+        description: 'Base URL of the BMW control plane for upgrade verification. Leave empty to skip.'
+        required: false
+      control-plane-api-key:
+        description: 'API key for the BMW control plane upgrade-status endpoint.'
+        required: false
 
 permissions:
   contents: read
@@ -74,7 +82,10 @@ jobs:
             --settings WEBSITE_RUN_FROM_PACKAGE=0 --output none
           az webapp config set --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }} \
             --startup-file "dotnet BareMetalWeb.Host.dll" --output none
-          echo "✓ App stopped, WEBSITE_RUN_FROM_PACKAGE=0, startup-file set"
+          # Stamp ControlPlane.InstanceId so heartbeats are identifiable by app name (#1394)
+          az webapp config appsettings set --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }} \
+            --settings ControlPlane__InstanceId=${{ inputs.app-name }} --output none
+          echo "✓ App stopped, WEBSITE_RUN_FROM_PACKAGE=0, startup-file set, ControlPlane.InstanceId=${{ inputs.app-name }}"
 
       - name: Deploy to ${{ inputs.app-name }}
         run: |
@@ -103,4 +114,46 @@ jobs:
             sleep 10
           done
           echo "::error::Health check failed for ${{ inputs.app-name }} after 6 attempts – deployment may be broken"
+          exit 1
+
+      - name: Verify upgrade version via control plane
+        if: ${{ inputs.version-number != '' && secrets.control-plane-url != '' }}
+        env:
+          CP_URL: ${{ secrets.control-plane-url }}
+          CP_API_KEY: ${{ secrets.control-plane-api-key }}
+          INSTANCE_ID: ${{ inputs.app-name }}
+          TARGET_VERSION: ${{ inputs.version-number }}
+        run: |
+          echo "Verifying pod upgrade: instanceId=${INSTANCE_ID}, targetVersion=${TARGET_VERSION}"
+          for i in $(seq 1 30); do
+            RESPONSE=$(curl -s --max-time 10 \
+              -H "ApiKey: ${CP_API_KEY}" \
+              "${CP_URL}/api/_cluster/upgrade-status?instanceId=${INSTANCE_ID}&targetVersion=${TARGET_VERSION}" \
+              2>/dev/null || echo "")
+
+            if [ -z "$RESPONSE" ]; then
+              echo "Attempt ${i}/30 — control plane unreachable, waiting 10s..."
+              sleep 10
+              continue
+            fi
+
+            VERIFIED=$(echo "$RESPONSE" | jq -r '.verified // "false"' 2>/dev/null || echo "false")
+            CURRENT=$(echo "$RESPONSE" | jq -r '.currentVersion // "unknown"' 2>/dev/null || echo "unknown")
+            READY=$(echo "$RESPONSE" | jq -r '.ready // "false"' 2>/dev/null || echo "false")
+            ERROR_RATE=$(echo "$RESPONSE" | jq -r '.errorRate5xx // "?"' 2>/dev/null || echo "?")
+            REASON=$(echo "$RESPONSE" | jq -r '.reason // "unknown"' 2>/dev/null || echo "unknown")
+
+            if [ "$VERIFIED" = "true" ]; then
+              echo "✓ Upgrade verified: instanceId=${INSTANCE_ID}, version=${CURRENT}, ready=${READY}, errorRate5xx=${ERROR_RATE}"
+              echo "### ✅ Upgrade verified: \`${INSTANCE_ID}\` on \`${TARGET_VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+
+            echo "Attempt ${i}/30 — not verified (reason=${REASON}, currentVersion=${CURRENT}, ready=${READY}, errorRate5xx=${ERROR_RATE}), waiting 10s..."
+            sleep 10
+          done
+
+          echo "::error::Upgrade verification failed for ${INSTANCE_ID} after 30 attempts (5 min). Pod did not report version ${TARGET_VERSION} with healthy status."
+          echo "### ❌ Upgrade verification FAILED: \`${INSTANCE_ID}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Expected version: \`${TARGET_VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
           exit 1

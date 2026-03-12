@@ -96,8 +96,18 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       count: ${{ steps.matrix.outputs.count }}
+      version_number: ${{ steps.version.outputs.version_number }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Derive version number (strip architecture suffix)
+        id: version
+        run: |
+          TAG="${{ inputs.image_tag }}"
+          VERSION="${TAG%-linux-*}"
+          VERSION="${VERSION%-windows-*}"
+          echo "version_number=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Version number: ${VERSION}"
 
       - name: Build matrix from deploy-list.json
         id: matrix
@@ -123,8 +133,11 @@ jobs:
       resource-group: ${{ matrix.resource_group }}
       artifact-name: deploy-package
       health-check-url: ${{ matrix.url }}
+      version-number: ${{ needs.prepare-matrix.outputs.version_number }}
     secrets:
       azure-credentials: ${{ secrets.AZURE_CREDENTIALS_TENANTS }}
+      control-plane-url: ${{ secrets.CONTROL_PLANE_URL }}
+      control-plane-api-key: ${{ secrets.CONTROL_PLANE_API_KEY }}
 
   # ── Deploy to AKS (production) ─────────────────────────────────────────
   deploy-aks:
@@ -187,6 +200,58 @@ jobs:
             sleep 10
           done
           echo "::error::AKS health check failed after 6 attempts"
+          exit 1
+
+      - name: Verify upgrade version via control plane
+        if: ${{ secrets.CONTROL_PLANE_URL != '' }}
+        env:
+          CP_URL: ${{ secrets.CONTROL_PLANE_URL }}
+          CP_API_KEY: ${{ secrets.CONTROL_PLANE_API_KEY }}
+        run: |
+          TAG="${{ inputs.image_tag }}"
+          TARGET_VERSION="${TAG%-linux-*}"
+          TARGET_VERSION="${TARGET_VERSION%-windows-*}"
+
+          INSTANCE_ID=$(kubectl get pod -n baremetalweb \
+            -l app.kubernetes.io/name=baremetalweb \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+
+          if [[ -z "${INSTANCE_ID}" ]]; then
+            echo "::warning::Could not resolve AKS pod name for upgrade verification — skipping"
+            exit 0
+          fi
+
+          echo "Verifying AKS upgrade: instanceId=${INSTANCE_ID}, targetVersion=${TARGET_VERSION}"
+          for i in $(seq 1 30); do
+            RESPONSE=$(curl -s --max-time 10 \
+              -H "ApiKey: ${CP_API_KEY}" \
+              "${CP_URL}/api/_cluster/upgrade-status?instanceId=${INSTANCE_ID}&targetVersion=${TARGET_VERSION}" \
+              2>/dev/null || echo "")
+
+            if [ -z "$RESPONSE" ]; then
+              echo "Attempt ${i}/30 — control plane unreachable, waiting 10s..."
+              sleep 10
+              continue
+            fi
+
+            VERIFIED=$(echo "$RESPONSE" | jq -r '.verified // "false"' 2>/dev/null || echo "false")
+            CURRENT=$(echo "$RESPONSE" | jq -r '.currentVersion // "unknown"' 2>/dev/null || echo "unknown")
+            READY=$(echo "$RESPONSE" | jq -r '.ready // "false"' 2>/dev/null || echo "false")
+            ERROR_RATE=$(echo "$RESPONSE" | jq -r '.errorRate5xx // "?"' 2>/dev/null || echo "?")
+            REASON=$(echo "$RESPONSE" | jq -r '.reason // "unknown"' 2>/dev/null || echo "unknown")
+
+            if [ "$VERIFIED" = "true" ]; then
+              echo "✓ AKS upgrade verified: ${INSTANCE_ID} on ${TARGET_VERSION}, errorRate5xx=${ERROR_RATE}"
+              echo "### ✅ AKS upgrade verified: \`${INSTANCE_ID}\` on \`${TARGET_VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+
+            echo "Attempt ${i}/30 — not verified (reason=${REASON}, currentVersion=${CURRENT}, ready=${READY}, errorRate5xx=${ERROR_RATE}), waiting 10s..."
+            sleep 10
+          done
+
+          echo "::error::AKS upgrade verification failed for ${INSTANCE_ID} after 30 attempts."
+          echo "### ❌ AKS upgrade verification FAILED: \`${INSTANCE_ID}\`" >> "$GITHUB_STEP_SUMMARY"
           exit 1
 
   # ── Summary ─────────────────────────────────────────────────────────────
