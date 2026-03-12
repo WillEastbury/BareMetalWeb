@@ -158,16 +158,24 @@ public static class ComputedFieldService
         return null;
     }
 
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2077",
+        Justification = "Fallback for plain POCO child types not registered with DataScaffold. Production entities use the metadata path above which is AOT-safe.")]
     private static Func<object, object?>? GetCachedGetter(Type type, string name)
     {
         return _getterCache.GetOrAdd((type, name), static key =>
         {
-            // Prefer entity metadata compiled getter over raw reflection
+            // Prefer entity metadata compiled getter (AOT-safe, no reflection)
             var meta = DataScaffold.GetEntityByType(key.Item1);
-            var field = meta?.FindField(key.Item2);
-            if (field != null)
-                return field.GetValueFn;
+            if (meta != null)
+            {
+                var field = meta.FindField(key.Item2);
+                if (field != null) return field.GetValueFn;
+                // Covers base class properties (Key etc.) not in meta.Fields
+                return EntityLayoutCompiler.GetOrCompile(meta).FieldByName(key.Item2)?.Getter;
+            }
 
+            // Fallback for POCO types not registered with DataScaffold (e.g. child collection item types).
+            // Result is cached so this only runs once per (type, name) pair.
             var prop = key.Item1.GetProperty(key.Item2);
             return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;
         });

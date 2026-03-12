@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -187,12 +186,17 @@ public sealed class ServerLookupResolver : ILookupResolver
             }
         }
 
-        // Cached compiled delegate fallback
+        // Metadata-driven field access via cached compiled delegate
         var getter = _extractCache.GetOrAdd((entity.GetType(), fieldName), static key =>
         {
-            var p = key.Item1.GetProperty(key.Item2,
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            return p != null ? PropertyAccessorFactory.BuildGetter(p) : null;
+            var meta = DataScaffold.GetEntityByType(key.Item1);
+            if (meta != null)
+            {
+                var field = meta.FindField(key.Item2);
+                if (field != null) return field.GetValueFn;
+                return EntityLayoutCompiler.GetOrCompile(meta).FieldByName(key.Item2)?.Getter;
+            }
+            return null;
         });
         return getter?.Invoke(entity);
     }

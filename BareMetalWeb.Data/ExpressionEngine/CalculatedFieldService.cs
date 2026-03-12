@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using BareMetalWeb.Core;
@@ -18,7 +19,8 @@ public static class CalculatedFieldService
     private static readonly ConcurrentDictionary<Type, Dictionary<string, HashSet<string>>> _dependencyGraph = new();
 
     private sealed record CalculatedFieldInfo(
-        PropertyInfo Property,
+        string Name,
+        Type PropertyType,
         Action<object, object?> SetValue,
         CalculatedFieldAttribute Attribute,
         ExpressionNode Expression,
@@ -73,14 +75,14 @@ public static class CalculatedFieldService
             try
             {
                 var result = fieldInfo.Expression.Evaluate(context);
-                fieldInfo.SetValue(instance, ConvertToPropertyType(result, fieldInfo.Property.PropertyType));
+                fieldInfo.SetValue(instance, ConvertToPropertyType(result, fieldInfo.PropertyType));
 
-                context[fieldInfo.Property.Name] = result;
+                context[fieldInfo.Name] = result;
             }
             catch (Exception ex)
             {
                 throw new InvalidOperationException(
-                    $"Error evaluating calculated field '{fieldInfo.Property.Name}' with expression '{fieldInfo.Attribute.Expression}': {ex.Message}",
+                    $"Error evaluating calculated field '{fieldInfo.Name}' with expression '{fieldInfo.Attribute.Expression}': {ex.Message}",
                     ex);
             }
         }
@@ -132,13 +134,13 @@ public static class CalculatedFieldService
             try
             {
                 var result = await fieldInfo.Expression.EvaluateAsync(context, resolver, cancellationToken);
-                fieldInfo.SetValue(instance, ConvertToPropertyType(result, fieldInfo.Property.PropertyType));
-                context[fieldInfo.Property.Name] = result;
+                fieldInfo.SetValue(instance, ConvertToPropertyType(result, fieldInfo.PropertyType));
+                context[fieldInfo.Name] = result;
             }
             catch (Exception ex)
             {
                 throw new InvalidOperationException(
-                    $"Error evaluating calculated field '{fieldInfo.Property.Name}' with expression '{fieldInfo.Attribute.Expression}': {ex.Message}",
+                    $"Error evaluating calculated field '{fieldInfo.Name}' with expression '{fieldInfo.Attribute.Expression}': {ex.Message}",
                     ex);
             }
         }
@@ -158,7 +160,7 @@ public static class CalculatedFieldService
 
         foreach (var fieldInfo in orderedFields)
         {
-            var fieldName = fieldInfo.Property.Name;
+            var fieldName = fieldInfo.Name;
             var jsExpression = fieldInfo.Expression.ToJavaScript();
             jsLines.Add($"    updateCalculatedField('{fieldName}', {jsExpression});");
         }
@@ -194,26 +196,53 @@ public static class CalculatedFieldService
         }
     }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2067",
+        Justification = "Fallback reflection path for types not registered with DataScaffold. Production entities use the metadata path which is AOT-safe.")]
     private static List<CalculatedFieldInfo> GetCalculatedFields(Type type)
     {
-        return _calculatedFieldsByType.GetOrAdd(type, t =>
+        return _calculatedFieldsByType.GetOrAdd(type, static t =>
         {
             var fields = new List<CalculatedFieldInfo>();
 
-            foreach (var prop in t.GetProperties())
+            // Prefer metadata-driven lookup (no reflection) over CLR attribute scanning.
+            var meta = DataScaffold.GetEntityByType(t);
+            if (meta != null)
             {
-                var attr = prop.GetCustomAttribute<CalculatedFieldAttribute>();
-                if (attr == null || string.IsNullOrWhiteSpace(attr.Expression))
-                    continue;
+                foreach (var f in meta.Fields)
+                {
+                    var attr = f.Calculated;
+                    if (attr == null || string.IsNullOrWhiteSpace(attr.Expression))
+                        continue;
 
-                var expression = GetCompiledExpression(attr.Expression);
-                var dependencies = ExtractDependencies(expression);
-
-                fields.Add(new CalculatedFieldInfo(prop, PropertyAccessorFactory.BuildSetter(prop), attr, expression, dependencies));
+                    var expression = GetCompiledExpression(attr.Expression);
+                    var dependencies = ExtractDependencies(expression);
+                    fields.Add(new CalculatedFieldInfo(f.Name, f.ClrType, f.SetValueFn, attr, expression, dependencies));
+                }
+                return fields;
             }
 
-            return fields;
+            // Fallback for types not registered with DataScaffold (e.g. test helpers or embedded child types).
+            // Scans CLR attributes once and caches the result — not a hot-path concern.
+            return ScanCalculatedFieldsViaReflection(t);
         });
+    }
+
+    [UnconditionalSuppressMessage("Trimming", "IL2070",
+        Justification = "Fallback for types not registered with DataScaffold. Production entities use the metadata path above.")]
+    private static List<CalculatedFieldInfo> ScanCalculatedFieldsViaReflection(Type t)
+    {
+        var fields = new List<CalculatedFieldInfo>();
+        foreach (var prop in t.GetProperties())
+        {
+            var attr = prop.GetCustomAttribute<CalculatedFieldAttribute>();
+            if (attr == null || string.IsNullOrWhiteSpace(attr.Expression))
+                continue;
+
+            var expression = GetCompiledExpression(attr.Expression);
+            var dependencies = ExtractDependencies(expression);
+            fields.Add(new CalculatedFieldInfo(prop.Name, prop.PropertyType, PropertyAccessorFactory.BuildSetter(prop), attr, expression, dependencies));
+        }
+        return fields;
     }
 
     private static List<CalculatedFieldInfo> GetCalculatedFieldsInDependencyOrder(Type type)
@@ -221,7 +250,7 @@ public static class CalculatedFieldService
         var fields = GetCalculatedFields(type);
         var graph = GetDependencyGraph(type);
         var fieldMap = new Dictionary<string, CalculatedFieldInfo>(fields.Count);
-        foreach (var f in fields) fieldMap[f.Property.Name] = f;
+        foreach (var f in fields) fieldMap[f.Name] = f;
 
         var sorted = new List<CalculatedFieldInfo>();
         var visited = new HashSet<string>();
@@ -252,7 +281,7 @@ public static class CalculatedFieldService
 
         foreach (var field in fields)
         {
-            Visit(field.Property.Name);
+            Visit(field.Name);
         }
 
         return sorted;
@@ -267,7 +296,7 @@ public static class CalculatedFieldService
 
             foreach (var field in fields)
             {
-                graph[field.Property.Name] = field.Dependencies;
+                graph[field.Name] = field.Dependencies;
             }
 
             return graph;
