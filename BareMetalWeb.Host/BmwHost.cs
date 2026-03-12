@@ -38,6 +38,7 @@ public sealed class BmwHost : IAsyncDisposable
     public static BmwHost Create(
         BareMetalWebServer server,
         Action<KestrelServerOptions>? configureKestrel = null,
+        Action<SocketTransportOptions>? configureSocketTransport = null,
         ILoggerFactory? loggerFactory = null)
     {
         loggerFactory ??= LoggerFactory.Create(b => b.SetMinimumLevel(LogLevel.Warning));
@@ -45,7 +46,24 @@ public sealed class BmwHost : IAsyncDisposable
         var kestrelOptions = new KestrelServerOptions();
         configureKestrel?.Invoke(kestrelOptions);
 
-        var transportOptions = new SocketTransportOptions { NoDelay = true, Backlog = 8192 };
+        var transportOptions = new SocketTransportOptions
+        {
+            NoDelay = true,
+            Backlog = 8192,
+            CreateBoundListenSocket = endpoint =>
+            {
+                var socket = new System.Net.Sockets.Socket(endpoint.AddressFamily,
+                    System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+                socket.SetSocketOption(System.Net.Sockets.SocketOptionLevel.Socket,
+                    System.Net.Sockets.SocketOptionName.KeepAlive, true);
+                socket.SetSocketOption(System.Net.Sockets.SocketOptionLevel.Socket,
+                    System.Net.Sockets.SocketOptionName.ReuseAddress, true);
+                socket.NoDelay = true;
+                socket.Bind(endpoint);
+                return socket;
+            }
+        };
+        configureSocketTransport?.Invoke(transportOptions);
         var transportFactory = new SocketTransportFactory(
             Options.Create(transportOptions),
             loggerFactory);

@@ -50,6 +50,24 @@ public sealed class RouteHandlers : IRouteHandlers
     private const int RegisterIpMaxAttempts = 3;
     private const int SsoCallbackIpMaxAttempts = 10;
     private static readonly TimeSpan DataQueryTimeout = TimeSpan.FromSeconds(30);
+    private const string ManagementRegistrationEnabledSettingId = "management.registration.enabled";
+    private const string ManagementRegistrationCallbackUrlSettingId = "management.registration.callbackUrl";
+    private const string ManagementRegistrationPrincipalNameSettingId = "management.registration.principalName";
+    private const string ManagementRegistrationTenantIdSettingId = "management.registration.tenantId";
+    private const string ManagementRegistrationClientIdSettingId = "management.registration.clientId";
+    private const string ManagementRegistrationLastStatusSettingId = "management.registration.lastStatus";
+    private const string ManagementRegistrationLastAttemptUtcSettingId = "management.registration.lastAttemptUtc";
+    private const string DefaultManagementPrincipalName = "bmw-deployment-agent";
+    private static readonly HttpClient SetupRegistrationHttp = new(new SocketsHttpHandler
+    {
+        MaxConnectionsPerServer = 2,
+        PooledConnectionLifetime = TimeSpan.FromMinutes(3),
+        PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
+        ConnectTimeout = TimeSpan.FromSeconds(5),
+    })
+    {
+        Timeout = TimeSpan.FromSeconds(10),
+    };
 
     [ThreadStatic] private static StringBuilder? t_cachedSb;
     [ThreadStatic] private static Dictionary<string, string?>? t_formDict;
@@ -143,10 +161,6 @@ public sealed class RouteHandlers : IRouteHandlers
         if (dict != null) { t_objectDict = null; dict.Clear(); return dict; }
         return new Dictionary<string, object?>(capacity, StringComparer.OrdinalIgnoreCase);
     }
-    private static void ReturnObjectDictionary(Dictionary<string, object?> dict)
-    {
-        if (dict.Count < 1024) { dict.Clear(); t_objectDict = dict; }
-    }
 
     private static List<Dictionary<string, object?>> RentDictList(int capacity = 16)
     {
@@ -164,10 +178,6 @@ public sealed class RouteHandlers : IRouteHandlers
         var list = t_queryClauseList;
         if (list != null) { t_queryClauseList = null; list.Clear(); return list; }
         return new List<QueryClause>(capacity);
-    }
-    private static void ReturnQueryClauseList(List<QueryClause> list)
-    {
-        if (list.Count < 256) { list.Clear(); t_queryClauseList = list; }
     }
 
     public RouteHandlers(IHtmlRenderer renderer, ITemplateStore templateStore, bool allowAccountCreation, string mfaKeyRootFolder, AuditService auditService,
@@ -1132,7 +1142,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 return;
             }
 
-            RenderSetupForm(ctx, null, null, null);
+            RenderSetupForm(ctx, null, null, null, new SetupRegistrationInput());
         })(context);
     }
 
@@ -1185,24 +1195,44 @@ public sealed class RouteHandlers : IRouteHandlers
         var userName = form["username"].ToString().Trim();
         var email = form["email"].ToString().Trim();
         var password = form["password"].ToString();
+        var registrationInput = ReadSetupRegistrationInput(form);
 
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
-            RenderSetupForm(context, "Invalid security token. Please try again.", userName, email);
+            RenderSetupForm(context, "Invalid security token. Please try again.", userName, email, registrationInput);
             await _renderer.RenderPage(context);
             return;
         }
 
         if (string.IsNullOrWhiteSpace(userName) || string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(password))
         {
-            RenderSetupForm(context, "Please complete all required fields.", userName, email);
+            RenderSetupForm(context, "Please complete all required fields.", userName, email, registrationInput);
             await _renderer.RenderPage(context);
             return;
         }
 
         if (password.Length > 1024)
         {
-            RenderSetupForm(context, "Password exceeds maximum allowed length.", userName, email);
+            RenderSetupForm(context, "Password exceeds maximum allowed length.", userName, email, registrationInput);
+            await _renderer.RenderPage(context);
+            return;
+        }
+
+        if (registrationInput.Enabled)
+        {
+            var registrationValidationError = ValidateSetupRegistrationInput(registrationInput);
+            if (!string.IsNullOrEmpty(registrationValidationError))
+            {
+                RenderSetupForm(context, registrationValidationError, userName, email, registrationInput);
+                await _renderer.RenderPage(context);
+                return;
+            }
+        }
+
+        if (await RootUserExistsAsync(context.RequestAborted).ConfigureAwait(false))
+        {
+            context.SetStringValue("title", "Setup");
+            context.SetStringValue("html_message", "<p>Root user already exists.</p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1221,8 +1251,31 @@ public sealed class RouteHandlers : IRouteHandlers
         await Users.SaveAsync(user);
         await SettingsService.EnsureDefaultsAsync(DataStoreProvider.Current, _settingDefaults, userName, context.RequestAborted).ConfigureAwait(false);
         await EnsureDefaultReports(userName);
-        // Redirect to gallery so the user can deploy modules
-        context.Response.Redirect("/admin/gallery");
+
+        if (!registrationInput.Enabled)
+        {
+            // Redirect to gallery so the user can deploy modules
+            context.Response.Redirect("/admin/gallery");
+            return;
+        }
+
+        var registrationResult = await RegisterManagementPrincipalAsync(registrationInput, userName, context.RequestAborted).ConfigureAwait(false);
+        if (!registrationResult.Success)
+        {
+            context.SetStringValue("title", "Setup Complete");
+            context.SetStringValue("html_message",
+                $"<div class=\"alert alert-warning\">Admin account created, but management registration failed: {WebUtility.HtmlEncode(registrationResult.Message)}</div>" +
+                "<p>You can still sign in and continue setup. Review settings in <strong>Admin → Settings</strong>.</p>" +
+                "<p><a class=\"btn btn-primary\" href=\"/login\">Go to Login</a></p>");
+            await _renderer.RenderPage(context);
+            return;
+        }
+
+        context.SetStringValue("title", "Setup Complete");
+        context.SetStringValue("html_message",
+            $"<div class=\"alert alert-success\">Admin account created and management registration completed for principal <code>{WebUtility.HtmlEncode(registrationResult.PrincipalName)}</code>.</div>" +
+            "<p><a class=\"btn btn-primary\" href=\"/admin/gallery\">Continue to Gallery</a></p>");
+        await _renderer.RenderPage(context);
     }
 
     private static string[] BuildRootPermissions()
@@ -1247,6 +1300,233 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         return permissions.ToArray();
+    }
+
+    private static SetupRegistrationInput ReadSetupRegistrationInput(IFormCollection form)
+    {
+        var principalName = form["management_principal_name"].ToString().Trim();
+        if (string.IsNullOrWhiteSpace(principalName))
+            principalName = DefaultManagementPrincipalName;
+
+        return new SetupRegistrationInput
+        {
+            Enabled = IsTruthyFormValue(form["management_registration_enabled"]),
+            CallbackUrl = form["management_callback_url"].ToString().Trim(),
+            PrincipalName = principalName,
+            TenantId = form["management_tenant_id"].ToString().Trim(),
+            ClientId = form["management_client_id"].ToString().Trim()
+        };
+    }
+
+    private static bool IsTruthyFormValue(StringValues value)
+    {
+        if (value.Count == 0)
+            return false;
+
+        var raw = value.ToString().Trim();
+        return string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase)
+               || string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase)
+               || raw == "1";
+    }
+
+    private static string? ValidateSetupRegistrationInput(SetupRegistrationInput input)
+    {
+        if (string.IsNullOrWhiteSpace(input.CallbackUrl))
+            return "Management callback URL is required when registration is enabled.";
+
+        if (!Uri.TryCreate(input.CallbackUrl, UriKind.Absolute, out var callbackUri))
+            return "Management callback URL must be an absolute URL.";
+
+        var isHttps = string.Equals(callbackUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase);
+        var isLocalHttp = string.Equals(callbackUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                          && callbackUri.IsLoopback;
+        if (!isHttps && !isLocalHttp)
+            return "Management callback URL must use HTTPS (HTTP allowed only for localhost).";
+
+        if (string.IsNullOrWhiteSpace(input.PrincipalName))
+            return "Management principal name is required when registration is enabled.";
+
+        return null;
+    }
+
+    private async ValueTask<SetupRegistrationResult> RegisterManagementPrincipalAsync(
+        SetupRegistrationInput input,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var principal = await LoadSystemPrincipalByUserNameAsync(input.PrincipalName, cancellationToken).ConfigureAwait(false);
+        var isNewPrincipal = principal is null;
+        if (principal is null)
+        {
+            principal = new SystemPrincipal
+            {
+                UserName = input.PrincipalName,
+                DisplayName = input.PrincipalName,
+                Email = $"{input.PrincipalName}@local.invalid",
+                Permissions = new[] { "deployment-agent", "monitoring" },
+                IsActive = true,
+                CreatedBy = actor,
+                UpdatedBy = actor
+            };
+        }
+
+        var rawApiKey = SystemPrincipal.GenerateRawApiKey();
+        principal.AddApiKey(rawApiKey);
+        principal.UpdatedBy = actor;
+        await DataStoreProvider.Current.SaveAsync(principal, cancellationToken).ConfigureAwait(false);
+
+        await UpsertAppSettingAsync(ManagementRegistrationEnabledSettingId, "true",
+            "Enable setup-based management callback registration.", actor, cancellationToken).ConfigureAwait(false);
+        await UpsertAppSettingAsync(ManagementRegistrationCallbackUrlSettingId, input.CallbackUrl,
+            "Management callback endpoint used by setup registration.", actor, cancellationToken).ConfigureAwait(false);
+        await UpsertAppSettingAsync(ManagementRegistrationPrincipalNameSettingId, input.PrincipalName,
+            "System principal name used for setup registration.", actor, cancellationToken).ConfigureAwait(false);
+        await UpsertAppSettingAsync(ManagementRegistrationTenantIdSettingId, input.TenantId,
+            "Management tenant identifier reference.", actor, cancellationToken).ConfigureAwait(false);
+        await UpsertAppSettingAsync(ManagementRegistrationClientIdSettingId, input.ClientId,
+            "Management client identifier reference.", actor, cancellationToken).ConfigureAwait(false);
+        await UpsertAppSettingAsync(ManagementRegistrationLastAttemptUtcSettingId, DateTime.UtcNow.ToString("O"),
+            "Timestamp of the last setup registration attempt.", actor, cancellationToken).ConfigureAwait(false);
+
+        var registrationRequest = new SetupRegistrationRequest
+        {
+            InstanceId = Environment.MachineName,
+            PrincipalName = input.PrincipalName,
+            PrincipalApiKey = rawApiKey,
+            TenantId = input.TenantId,
+            ClientId = input.ClientId,
+            RegisteredBy = actor,
+            RegisteredAtUtc = DateTime.UtcNow.ToString("O")
+        };
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, input.CallbackUrl)
+        {
+            Content = new StringContent(DataJsonWriter.ToJsonString(registrationRequest), Encoding.UTF8, "application/json")
+        };
+        request.Headers.TryAddWithoutValidation("X-Bmw-Registration-Version", "1");
+        request.Headers.TryAddWithoutValidation("X-Bmw-Principal", input.PrincipalName);
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await SetupRegistrationHttp.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (HttpRequestException ex)
+        {
+            await UpsertAppSettingAsync(ManagementRegistrationLastStatusSettingId, "failed:request-exception",
+                "Result of the most recent setup registration callback.", actor, cancellationToken).ConfigureAwait(false);
+            _logger?.LogError("Setup registration callback request failed.", ex);
+            return new SetupRegistrationResult(false, ex.Message, input.PrincipalName);
+        }
+        catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            await UpsertAppSettingAsync(ManagementRegistrationLastStatusSettingId, "failed:timeout",
+                "Result of the most recent setup registration callback.", actor, cancellationToken).ConfigureAwait(false);
+            _logger?.LogError("Setup registration callback timed out.", ex);
+            return new SetupRegistrationResult(false, "Callback request timed out.", input.PrincipalName);
+        }
+
+        using (response)
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                await UpsertAppSettingAsync(ManagementRegistrationLastStatusSettingId,
+                    $"failed:{(int)response.StatusCode}",
+                    "Result of the most recent setup registration callback.", actor, cancellationToken).ConfigureAwait(false);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                _logger?.Log(BmwLogLevel.Warn, $"Setup registration callback failed ({(int)response.StatusCode}) for principal '{input.PrincipalName}'.");
+                return new SetupRegistrationResult(false,
+                    $"Callback returned {(int)response.StatusCode}. {TrimForDisplay(body, 256)}",
+                    input.PrincipalName);
+            }
+        }
+
+        await UpsertAppSettingAsync(ManagementRegistrationLastStatusSettingId, "success",
+            "Result of the most recent setup registration callback.", actor, cancellationToken).ConfigureAwait(false);
+        _logger?.LogInfo($"Setup registration completed for principal '{input.PrincipalName}' (newPrincipal={isNewPrincipal}).");
+        return new SetupRegistrationResult(true, "Management registration completed.", input.PrincipalName);
+    }
+
+    private static string TrimForDisplay(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var trimmed = value.Trim();
+        if (trimmed.Length <= maxLength)
+            return trimmed;
+        return trimmed[..maxLength] + "...";
+    }
+
+    private static async ValueTask<SystemPrincipal?> LoadSystemPrincipalByUserNameAsync(string userName, CancellationToken cancellationToken)
+    {
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new() { Field = nameof(SystemPrincipal.UserName), Operator = QueryOperator.Equals, Value = userName }
+            },
+            Top = 1
+        };
+
+        var principals = await DataStoreProvider.Current.QueryAsync<SystemPrincipal>(query, cancellationToken).ConfigureAwait(false);
+        foreach (var principal in principals)
+        {
+            if (string.Equals(principal.UserName, userName, StringComparison.OrdinalIgnoreCase))
+                return principal;
+        }
+
+        return null;
+    }
+
+    private static async ValueTask UpsertAppSettingAsync(
+        string settingId,
+        string value,
+        string description,
+        string actor,
+        CancellationToken cancellationToken)
+    {
+        var query = new QueryDefinition
+        {
+            Clauses = new List<QueryClause>
+            {
+                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = settingId }
+            },
+            Top = 1
+        };
+
+        var settings = await DataStoreProvider.Current.QueryAsync<AppSetting>(query, cancellationToken).ConfigureAwait(false);
+        AppSetting? setting = null;
+        foreach (var existing in settings)
+        {
+            if (string.Equals(existing.SettingId, settingId, StringComparison.OrdinalIgnoreCase))
+            {
+                setting = existing;
+                break;
+            }
+        }
+
+        if (setting is null)
+        {
+            setting = new AppSetting
+            {
+                SettingId = settingId,
+                Value = value,
+                Description = description,
+                CreatedBy = actor,
+                UpdatedBy = actor
+            };
+        }
+        else
+        {
+            setting.Value = value;
+            setting.Description = description;
+            setting.UpdatedBy = actor;
+        }
+
+        await DataStoreProvider.Current.SaveAsync(setting, cancellationToken).ConfigureAwait(false);
+        SettingsService.InvalidateCache(settingId);
     }
 
     private async ValueTask EnsureDefaultReports(string createdBy)
@@ -1387,7 +1667,7 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private void RenderSetupForm(BmwContext context, string? message, string? userName, string? email)
+    private void RenderSetupForm(BmwContext context, string? message, string? userName, string? email, SetupRegistrationInput registrationInput)
     {
         var csrfToken = CsrfProtection.EnsureToken(context);
         context.SetStringValue("title", "Initial Setup");
@@ -1403,7 +1683,12 @@ public sealed class RouteHandlers : IRouteHandlers
                 new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken),
                 new FormField(FormFieldType.String, "username", "Username", true, "root", Value: userName),
                 new FormField(FormFieldType.Email, "email", "Email", true, "root@example.com", Value: email),
-                new FormField(FormFieldType.Password, "password", "Password", true, "Enter password")
+                new FormField(FormFieldType.Password, "password", "Password", true, "Enter password"),
+                new FormField(FormFieldType.YesNo, "management_registration_enabled", "Enable management principal registration", false, SelectedValue: registrationInput.Enabled ? "true" : "false"),
+                new FormField(FormFieldType.String, "management_callback_url", "Management callback/home URL", false, "https://controlplane.example/api/setup/register", Value: registrationInput.CallbackUrl),
+                new FormField(FormFieldType.String, "management_principal_name", "Management principal name", false, DefaultManagementPrincipalName, Value: registrationInput.PrincipalName),
+                new FormField(FormFieldType.String, "management_tenant_id", "Management tenant ID (reference)", false, "tenant-001", Value: registrationInput.TenantId),
+                new FormField(FormFieldType.String, "management_client_id", "Management client ID (reference)", false, "client-001", Value: registrationInput.ClientId)
             }
         ));
     }
@@ -2042,7 +2327,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 await DataScaffold.SaveAsync(meta, instance);
                 if (isCreate) created++; else updated++;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 importErrors.Add($"Row {rowNumber}: Import failed.");
                 skipped++;
@@ -3221,6 +3506,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var snapshot = app.Metrics.GetSnapshot();
+        var responseTiming = ResponseTimingMetrics.GetSnapshot();
         var gcInfo = GC.GetGCMemoryInfo();
         var payload = new Dictionary<string, object?>
         {
@@ -3249,6 +3535,21 @@ public sealed class RouteHandlers : IRouteHandlers
             ["uiRenderAvgMs"] = snapshot.UiRenderAverage.TotalMilliseconds,
             ["serializationCount"] = snapshot.SerializationCount,
             ["serializationAvgMs"] = snapshot.SerializationAverage.TotalMilliseconds,
+
+            // ── Response write stage timings (recent 5m window) ──
+            ["responseTimingSampleCount"] = responseTiming.SampleCount,
+            ["responseTimingParseToFirstAvgMs"] = responseTiming.ParseToFirst.Average.TotalMilliseconds,
+            ["responseTimingParseToFirstP95Ms"] = responseTiming.ParseToFirst.P95.TotalMilliseconds,
+            ["responseTimingParseToFirstMaxMs"] = responseTiming.ParseToFirst.Max.TotalMilliseconds,
+            ["responseTimingFirstToFlushStartAvgMs"] = responseTiming.FirstToFlushStart.Average.TotalMilliseconds,
+            ["responseTimingFirstToFlushStartP95Ms"] = responseTiming.FirstToFlushStart.P95.TotalMilliseconds,
+            ["responseTimingFirstToFlushStartMaxMs"] = responseTiming.FirstToFlushStart.Max.TotalMilliseconds,
+            ["responseTimingFlushAwaitAvgMs"] = responseTiming.FlushAwait.Average.TotalMilliseconds,
+            ["responseTimingFlushAwaitP95Ms"] = responseTiming.FlushAwait.P95.TotalMilliseconds,
+            ["responseTimingFlushAwaitMaxMs"] = responseTiming.FlushAwait.Max.TotalMilliseconds,
+            ["responseTimingFirstToFlushAvgMs"] = responseTiming.FirstToFlush.Average.TotalMilliseconds,
+            ["responseTimingFirstToFlushP95Ms"] = responseTiming.FirstToFlush.P95.TotalMilliseconds,
+            ["responseTimingFirstToFlushMaxMs"] = responseTiming.FirstToFlush.Max.TotalMilliseconds,
 
             // ── GC / Heap metrics ──
             ["gcGen0Collections"] = snapshot.GcGen0Collections,
@@ -3651,327 +3952,6 @@ public sealed class RouteHandlers : IRouteHandlers
         }
     }
 
-    public async ValueTask SampleDataHandler(BmwContext context)
-    {
-        var entities = RuntimeEntityRegistry.Current.All;
-        if (entities.Count == 0)
-        {
-            await BuildPageHandler(ctx =>
-            {
-                ctx.SetStringValue("title", "Generate Sample Data");
-                ctx.SetStringValue("html_message", "<div class=\"alert alert-info\">No entity types are registered. " +
-                    "Deploy modules from the <a href=\"/admin/gallery\">Gallery</a> first.</div>");
-            })(context);
-            return;
-        }
-        await BuildPageHandler(ctx =>
-        {
-            RenderSampleDataForm(ctx, "<p>Generate sample data for load and indexing tests.</p>", entities, 10, clearExisting: false);
-        })(context);
-    }
-
-    public async ValueTask SampleDataPostHandler(BmwContext context)
-    {
-        if (!context.HttpRequest.HasFormContentType)
-        {
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            context.SetStringValue("title", "Generate Sample Data");
-            context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
-            await _renderer.RenderPage(context);
-            return;
-        }
-
-        var form = await context.HttpRequest.ReadFormAsync();
-        if (!CsrfProtection.ValidateFormToken(context, form))
-        {
-            var entities = RuntimeEntityRegistry.Current.All;
-            context.SetStringValue("title", "Generate Sample Data");
-            context.SetStringValue("html_message", "<p>Invalid security token. Please try again.</p>");
-            RenderSampleDataForm(context, "<p>Invalid security token. Please try again.</p>", entities, 10, clearExisting: false);
-            await _renderer.RenderPage(context);
-            return;
-        }
-
-        var errors = new List<string>();
-        var registry = RuntimeEntityRegistry.Current;
-        var entityCounts = new Dictionary<string, int>(registry.All.Count, StringComparer.OrdinalIgnoreCase);
-        foreach (var model in registry.All)
-        {
-            var count = ParseSampleCount(form, model.Slug, errors);
-            if (count > 0)
-                entityCounts[model.Slug] = count;
-        }
-        var clearExisting = ParseSampleToggle(form, "clearExisting");
-
-        if (errors.Count > 0)
-        {
-            context.SetStringValue("title", "Generate Sample Data");
-            context.SetStringValue("html_message", $"<div class=\"alert alert-danger\">{JoinEncoded("<br/>", errors)}</div>");
-            RenderSampleDataForm(context, $"<div class=\"alert alert-danger\">{JoinEncoded("<br/>", errors)}</div>", registry.All, 10, clearExisting);
-            await _renderer.RenderPage(context);
-            return;
-        }
-
-        var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
-
-        var capturedCounts = new Dictionary<string, int>(entityCounts, StringComparer.OrdinalIgnoreCase);
-        var capturedClear = clearExisting;
-        var capturedUser = userName;
-
-        var jobId = BackgroundJobService.Instance.StartJob(
-            "Generate Sample Data",
-            "/admin/sample-data",
-            async (progress, ct) =>
-            {
-                progress.Report(0, "Starting sample data generation…");
-                var walProvider = DataStoreProvider.PrimaryProvider as WalDataProvider;
-                if (walProvider == null)
-                {
-                    progress.Report(100, "Error: WalDataProvider is not available.");
-                    return;
-                }
-
-                var slugs = new List<string>(capturedCounts.Keys);
-                int totalEntities = slugs.Count;
-                int entityIndex = 0;
-                int totalRecords = 0;
-                foreach (var v in capturedCounts.Values)
-                    totalRecords += v;
-                int savedRecords = 0;
-
-                foreach (var slug in slugs)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    if (!registry.TryGet(slug, out var model))
-                        continue;
-
-                    var schema = EntitySchemaFactory.FromModel(model);
-                    var count = capturedCounts[slug];
-
-                    if (capturedClear)
-                    {
-                        progress.Report(
-                            (int)(entityIndex * 10.0 / totalEntities),
-                            $"Clearing existing {model.Name} records…");
-                        var existing = await walProvider.QueryRecordsAsync(schema, null, ct).ConfigureAwait(false);
-                        foreach (var rec in existing)
-                        {
-                            ct.ThrowIfCancellationRequested();
-                            if (rec.Key != 0)
-                                await walProvider.DeleteRecordAsync(rec.Key, schema, ct).ConfigureAwait(false);
-                        }
-                    }
-
-                    var rng = new Random();
-                    for (int i = 0; i < count; i++)
-                    {
-                        ct.ThrowIfCancellationRequested();
-                        var record = schema.CreateRecord();
-                        record.Key = (uint)rng.Next(1, int.MaxValue);
-                        record.CreatedOnUtc = DateTime.UtcNow;
-                        record.UpdatedOnUtc = DateTime.UtcNow;
-                        record.CreatedBy = capturedUser;
-                        record.UpdatedBy = capturedUser;
-
-                        foreach (var field in model.Fields)
-                        {
-                            if (schema.TryGetOrdinal(field.Name, out var ordinal))
-                                record.SetValue(ordinal, GenerateSampleValue(field, rng));
-                        }
-
-                        await walProvider.SaveRecordAsync(record, schema, ct).ConfigureAwait(false);
-                        savedRecords++;
-                        if (totalRecords > 0)
-                            progress.Report(
-                                10 + (int)(savedRecords * 85.0 / totalRecords),
-                                $"Saving {model.Name}… ({savedRecords}/{totalRecords})");
-                    }
-
-                    entityIndex++;
-                }
-
-                var summaryParts = new List<string>();
-                foreach (var s in slugs)
-                {
-                    if (capturedCounts[s] > 0)
-                        summaryParts.Add($"{capturedCounts[s]} {s}");
-                }
-                var summary = string.Join(", ", summaryParts);
-                progress.Report(100, $"Done. Created {summary}.");
-            });
-
-        var statusUrl = $"/api/jobs/{jobId}";
-        var returnUrl = "/admin/sample-data";
-        await RenderJobProgressPage(context, jobId, statusUrl, returnUrl, "Generate Sample Data");
-    }
-
-    public async ValueTask WipeDataHandler(BmwContext context)
-    {
-        var wipeToken = SettingsService.GetValue(WellKnownSettings.AllowWipeData);
-        if (string.IsNullOrEmpty(wipeToken))
-        {
-            await BuildPageHandler(ctx =>
-            {
-                ctx.SetStringValue("title", "Wipe All Data");
-                ctx.SetStringValue("html_message",
-                    "<div class=\"alert alert-warning\">" +
-                    "<h4 class=\"alert-heading\">Endpoint Disabled</h4>" +
-                    $"<p>The wipe-data endpoint is disabled because the <code>{WellKnownSettings.AllowWipeData}</code> setting is empty or missing.</p>" +
-                    "<p>To enable it, go to <strong>Settings</strong> in the admin UI and set <code>" +
-                    WebUtility.HtmlEncode(WellKnownSettings.AllowWipeData) +
-                    "</code> to a secret token value. You can also set it via config (<code>Admin:AllowWipeData</code>) or environment variable (<code>Admin__AllowWipeData</code>).</p>" +
-                    "</div>");
-            })(context);
-            return;
-        }
-
-        await BuildPageHandler(ctx => RenderWipeDataForm(ctx, null, wipeToken))(context);
-    }
-
-    public async ValueTask WipeDataPostHandler(BmwContext context)
-    {
-        var wipeToken = SettingsService.GetValue(WellKnownSettings.AllowWipeData);
-        if (string.IsNullOrEmpty(wipeToken))
-        {
-            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            context.SetStringValue("title", "Wipe All Data");
-            context.SetStringValue("html_message",
-                "<div class=\"alert alert-warning\">" +
-                "<h4 class=\"alert-heading\">Endpoint Disabled</h4>" +
-                $"<p>The <code>{WebUtility.HtmlEncode(WellKnownSettings.AllowWipeData)}</code> setting is empty or missing.</p></div>");
-            await _renderer.RenderPage(context);
-            return;
-        }
-
-        if (!context.HttpRequest.HasFormContentType)
-        {
-            context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            context.SetStringValue("title", "Wipe All Data");
-            context.SetStringValue("html_message", "<p>Invalid form submission.</p>");
-            await _renderer.RenderPage(context);
-            return;
-        }
-
-        var form = await context.HttpRequest.ReadFormAsync();
-        if (!CsrfProtection.ValidateFormToken(context, form))
-        {
-            RenderWipeDataForm(context, "<div class=\"alert alert-danger\">Invalid security token. Please try again.</div>", wipeToken);
-            await _renderer.RenderPage(context);
-            return;
-        }
-
-        var confirmText = form["confirm_wipe"].ToString().Trim();
-        if (!string.Equals(confirmText, wipeToken, StringComparison.Ordinal))
-        {
-            RenderWipeDataForm(context, "<div class=\"alert alert-danger\">Confirmation text did not match. Enter the configured wipe token exactly to proceed.</div>", wipeToken);
-            await _renderer.RenderPage(context);
-            return;
-        }
-
-        var providers = new List<BareMetalWeb.Data.Interfaces.IDataProvider>(DataStoreProvider.Current.Providers);
-        int totalProviders = providers.Count;
-
-        var jobId = BackgroundJobService.Instance.StartJob(
-            "Wipe All Data",
-            "/admin/wipe-data",
-            async (progress, ct) =>
-            {
-                progress.Report(0, "Starting wipe…");
-                int done = 0;
-                foreach (var provider in providers)
-                {
-                    ct.ThrowIfCancellationRequested();
-                    progress.Report(
-                        totalProviders == 0 ? 0 : (int)(done * 95.0 / totalProviders),
-                        $"Wiping storage ({provider.Name})…");
-                    await provider.WipeStorageAsync(ct).ConfigureAwait(false);
-                    done++;
-                }
-                progress.Report(100, $"Done. Wiped storage for {done} provider{(done == 1 ? "" : "s")}.");
-            });
-
-        var statusUrl = $"/api/jobs/{jobId}";
-        var returnUrl = "/admin/wipe-data";
-        await RenderJobProgressPage(context, jobId, statusUrl, returnUrl, "Wipe All Data");
-    }
-
-    private async ValueTask RenderJobProgressPage(BmwContext context, string jobId, string statusUrl, string returnUrl, string operationName)
-    {
-        var nonce = context.GetCspNonce();
-        var nonceAttr = string.IsNullOrEmpty(nonce) ? string.Empty : $" nonce=\"{WebUtility.HtmlEncode(nonce)}\"";
-
-        var html = new StringBuilder(4096);
-        html.Append("<div class=\"card\">");
-        html.Append("<div class=\"card-body\">");
-        html.Append($"<h5 class=\"card-title\" id=\"job-title\">{WebUtility.HtmlEncode(operationName)}</h5>");
-        html.Append("<div class=\"progress mb-3 bm-progress-xl\">");
-        html.Append("<div class=\"progress-bar progress-bar-striped progress-bar-animated\" id=\"job-progress\" role=\"progressbar\" aria-valuenow=\"0\" aria-valuemin=\"0\" aria-valuemax=\"100\">0%</div>");
-        html.Append("</div>");
-        html.Append("<p id=\"job-description\" class=\"text-muted mb-2\">Starting\u2026</p>");
-        html.Append("<div id=\"job-result\" class=\"d-none\"></div>");
-        html.Append($"<a id=\"job-return\" class=\"btn btn-primary d-none\" href=\"{WebUtility.HtmlEncode(returnUrl)}\"><i class=\"bi bi-arrow-left\" aria-hidden=\"true\"></i> Back</a>");
-        html.Append("</div></div>");
-
-        html.Append($"<script{nonceAttr}>");
-        html.Append("(function(){");
-        html.Append($"var url='{statusUrl.Replace("'", "\\'")}';");
-        html.Append("var bar=document.getElementById('job-progress');");
-        html.Append("bar.style.width='0%';");
-        html.Append("var desc=document.getElementById('job-description');");
-        html.Append("var result=document.getElementById('job-result');");
-        html.Append("var ret=document.getElementById('job-return');");
-        html.Append("function poll(){");
-        html.Append("fetch(url).then(function(r){return r.json();}).then(function(d){");
-        html.Append("var pct=d.percentComplete||0;");
-        html.Append("bar.style.width=pct+'%';bar.textContent=pct+'%';bar.setAttribute('aria-valuenow',pct);");
-        html.Append("desc.textContent=d.description||d.status||'';");
-        html.Append("if(d.status==='succeeded'){");
-        html.Append("bar.classList.remove('progress-bar-animated','progress-bar-striped');bar.classList.add('bg-success');");
-        html.Append("result.className='alert alert-success mt-3';result.textContent=d.description||'Completed successfully.';");
-        html.Append("ret.classList.remove('d-none');");
-        html.Append("}else if(d.status==='failed'){");
-        html.Append("bar.classList.remove('progress-bar-animated','progress-bar-striped');bar.classList.add('bg-danger');");
-        html.Append("result.className='alert alert-danger mt-3';result.textContent=d.error||'Job failed.';");
-        html.Append("ret.classList.remove('d-none');");
-        html.Append("}else{setTimeout(poll,2000);}");
-        html.Append("}).catch(function(){setTimeout(poll,3000);});");
-        html.Append("}");
-        html.Append("poll();");
-        html.Append("})();");
-        html.Append("</script>");
-
-        context.SetStringValue("title", operationName);
-        context.SetStringValue("html_message", html.ToString());
-        await _renderer.RenderPage(context);
-    }
-
-    private void RenderWipeDataForm(BmwContext context, string? message, string wipeToken)
-    {
-        var csrfToken = CsrfProtection.EnsureToken(context);
-        context.SetStringValue("title", "Wipe All Data");
-
-        var warningHtml = new StringBuilder(1024);
-        warningHtml.Append("<div class=\"alert alert-danger\">");
-        warningHtml.Append("<h4 class=\"alert-heading\">&#9888; DANGER ZONE &#9888;</h4>");
-        warningHtml.Append("<p><strong>This action will permanently delete ALL data in every entity store.</strong></p>");
-        warningHtml.Append("<p>This operation is <strong>irreversible</strong>. All records across every entity type will be removed immediately.</p>");
-        warningHtml.Append($"<p>Enter the configured wipe token (the value of <code>{WellKnownSettings.AllowWipeData}</code> in Settings) to confirm.</p>");
-        warningHtml.Append("</div>");
-
-        if (!string.IsNullOrWhiteSpace(message))
-            warningHtml.Append(message);
-
-        context.SetStringValue("html_message", warningHtml.ToString());
-
-        var fields = new List<FormField>
-        {
-            new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken),
-            new FormField(FormFieldType.String, "confirm_wipe", "Enter wipe token to confirm", Required: true, Value: string.Empty)
-        };
-
-        context.AddFormDefinition(new FormDefinition("/admin/wipe-data", "post", "WIPE ALL DATA", fields));
-    }
-
     /// <summary>
     /// JSON API endpoint for the VNext SPA to start a sample-data background job.
     /// Accepts a JSON body: { entities: { "entity-slug": count, ... }, clearExisting: bool }
@@ -4125,10 +4105,9 @@ public sealed class RouteHandlers : IRouteHandlers
                 progress.Report(100, $"Done. Created {summary}.");
             });
 
-        var baseUrl   = $"{context.HttpRequest.Scheme}://{context.HttpRequest.Host}";
-        var statusUrl = $"{baseUrl}/api/jobs/{jobId}";
+        var statusUri = $"/api/jobs/{jobId}";
         context.Response.StatusCode = StatusCodes.Status202Accepted;
-        context.Response.Headers["Location"] = statusUrl;
+        context.Response.Headers["Location"] = statusUri;
         context.Response.Headers["Retry-After"] = "2";
         context.Response.ContentType = "application/json";
         await using (var w = new Utf8JsonWriter(context.Response.Body))
@@ -4137,7 +4116,7 @@ public sealed class RouteHandlers : IRouteHandlers
             w.WriteString("jobId", jobId);
             w.WriteString("status", "queued");
             w.WriteString("operationName", "Generate Sample Data");
-            w.WriteString("statusUrl", statusUrl);
+            w.WriteString("statusUrl", statusUri);
             w.WriteEndObject();
         }
     }
@@ -4215,10 +4194,9 @@ public sealed class RouteHandlers : IRouteHandlers
                 progress.Report(100, $"Done. Wiped storage for {done} provider{(done == 1 ? "" : "s")}.");
             });
 
-        var baseUrl   = $"{context.HttpRequest.Scheme}://{context.HttpRequest.Host}";
-        var statusUrl = $"{baseUrl}/api/jobs/{jobId}";
+        var statusUri = $"/api/jobs/{jobId}";
         context.Response.StatusCode = StatusCodes.Status202Accepted;
-        context.Response.Headers["Location"] = statusUrl;
+        context.Response.Headers["Location"] = statusUri;
         context.Response.Headers["Retry-After"] = "2";
         context.Response.ContentType = "application/json";
         await using (var w = new Utf8JsonWriter(context.Response.Body))
@@ -4227,7 +4205,7 @@ public sealed class RouteHandlers : IRouteHandlers
             w.WriteString("jobId", jobId);
             w.WriteString("status", "queued");
             w.WriteString("operationName", "Wipe All Data");
-            w.WriteString("statusUrl", statusUrl);
+            w.WriteString("statusUrl", statusUri);
             w.WriteEndObject();
         }
     }
@@ -5559,422 +5537,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return safe;
     }
 
-    private static string[][] ViewRowsToArray(IReadOnlyList<(string Label, string Value)> viewRows)
-    {
-        var result = new string[viewRows.Count][];
-        for (int i = 0; i < viewRows.Count; i++)
-            result[i] = new[] { viewRows[i].Label, viewRows[i].Value };
-        return result;
-    }
-
-    private static string[][] PrependIdRow(string recordId, string[][] rows)
-    {
-        var result = new string[rows.Length + 1][];
-        result[0] = new[] { "Id", recordId };
-        Array.Copy(rows, 0, result, 1, rows.Length);
-        return result;
-    }
-
-    private static string[] ConcatArrays(string[] a, string[] b)
-    {
-        var result = new string[a.Length + b.Length];
-        Array.Copy(a, 0, result, 0, a.Length);
-        Array.Copy(b, 0, result, a.Length, b.Length);
-        return result;
-    }
-
-    private static string[] BuildParentValueRow(string parentId, List<(string Label, string Value)> fields)
-    {
-        var result = new string[1 + fields.Count];
-        result[0] = parentId;
-        for (int i = 0; i < fields.Count; i++)
-            result[i + 1] = fields[i].Value;
-        return result;
-    }
-
-    private static string JoinEncoded(string separator, IReadOnlyList<string> items)
-    {
-        var sb = new StringBuilder(256);
-        for (int i = 0; i < items.Count; i++)
-        {
-            if (i > 0) sb.Append(separator);
-            sb.Append(WebUtility.HtmlEncode(items[i]));
-        }
-        return sb.ToString();
-    }
-
     // Export helper methods for nested/embedded components
-
-    private async ValueTask ExportHierarchicalJson(BmwContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
-    {
-        context.Response.ContentType = "application/json";
-        context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_export.json\"";
-        await using var writer = new Utf8JsonWriter(context.Response.Body, new JsonWriterOptions { Indented = true });
-        WriteJsonValue(writer, items);
-        await writer.FlushAsync();
-    }
-
-    private async ValueTask ExportSingleHierarchicalJson(BmwContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
-    {
-        context.Response.ContentType = "application/json";
-        context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_{WebUtility.UrlEncode(id)}.json\"";
-        await using var writer = new Utf8JsonWriter(context.Response.Body, new JsonWriterOptions { Indented = true });
-        WriteJsonValue(writer, instance);
-        await writer.FlushAsync();
-    }
-
-    private async ValueTask ExportFlatCsv(BmwContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
-    {
-        if (!options.IncludeNested || options.MaxDepth < 1)
-        {
-            // No nested data, fall back to simple CSV
-            var rows = BuildListPlainRowsWithId(meta, items, out var headers);
-            var csv = BuildCsv(headers, rows);
-            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_flat.csv");
-            return;
-        }
-
-        var nestedComponents = DataScaffold.GetNestedComponents(meta);
-        if (nestedComponents.Count == 0)
-        {
-            // No nested components, fall back to simple CSV
-            var rows = BuildListPlainRowsWithId(meta, items, out var headers);
-            var csv = BuildCsv(headers, rows);
-            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_flat.csv");
-            return;
-        }
-
-        // Build flat CSV with parent fields repeated for each child row
-        var flatRows = new List<string[]>();
-        var parentHeadersList = new List<string> { "Id" };
-        parentHeadersList.AddRange(DataScaffold.BuildListHeaders(meta, includeActions: false));
-        var allHeaders = new List<string>(parentHeadersList);
-        
-        // Add headers for first nested component (for simplicity, we'll flatten only the first one)
-        var firstNested = nestedComponents[0];
-        object firstItem = new object();
-        foreach (var it in items)
-        {
-            if (it != null) { firstItem = it; break; }
-        }
-        var nestedData = DataScaffold.ExtractNestedData(meta, firstItem);
-        if (nestedData.Count > 0)
-        {
-            foreach (var h in nestedData[0].Headers)
-                allHeaders.Add($"{firstNested.Field.Label}.{h}");
-        }
-
-        foreach (var item in items)
-        {
-            if (item == null)
-                continue;
-
-            var id = item is BaseDataObject dataObject ? DataScaffold.GetIdValue(dataObject) ?? string.Empty : string.Empty;
-            var baseRow = BuildListPlainRows(meta, new[] { item })[0];
-            var parentRow = new string[1 + baseRow.Length];
-            parentRow[0] = id;
-            Array.Copy(baseRow, 0, parentRow, 1, baseRow.Length);
-            
-            var nested = DataScaffold.ExtractNestedData(meta, item);
-            if (nested.Count > 0 && nested[0].Rows.Length > 0)
-            {
-                foreach (var childRow in nested[0].Rows)
-                {
-                    var combined = new string[parentRow.Length + childRow.Length];
-                    Array.Copy(parentRow, 0, combined, 0, parentRow.Length);
-                    Array.Copy(childRow, 0, combined, parentRow.Length, childRow.Length);
-                    flatRows.Add(combined);
-                }
-            }
-            else
-            {
-                var emptyChild = nestedData.Count > 0 ? new string[nestedData[0].Headers.Length] : Array.Empty<string>();
-                var combined = new string[parentRow.Length + emptyChild.Length];
-                Array.Copy(parentRow, 0, combined, 0, parentRow.Length);
-                Array.Copy(emptyChild, 0, combined, parentRow.Length, emptyChild.Length);
-                flatRows.Add(combined);
-            }
-        }
-
-        var flatCsv = BuildCsv(allHeaders.ToArray(), flatRows.ToArray());
-        await WriteTextResponseAsync(context, "text/csv", flatCsv, $"{typeSlug}_flat.csv");
-    }
-
-    private async ValueTask ExportSingleFlatCsv(BmwContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
-    {
-        if (!options.IncludeNested || options.MaxDepth < 1)
-        {
-            var rows = ViewRowsToArray(DataScaffold.BuildViewRows(meta, instance));
-            if (instance is BaseDataObject dataObject)
-                rows = PrependIdRow(DataScaffold.GetIdValue(dataObject) ?? string.Empty, rows);
-            var headers = new[] { "Field", "Value" };
-            var csv = BuildCsv(headers, rows);
-            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_{WebUtility.UrlEncode(id)}_flat.csv");
-            return;
-        }
-
-        var nestedComponents = DataScaffold.GetNestedComponents(meta);
-        if (nestedComponents.Count == 0)
-        {
-            var rows = ViewRowsToArray(DataScaffold.BuildViewRows(meta, instance));
-            if (instance is BaseDataObject dataObject)
-                rows = PrependIdRow(DataScaffold.GetIdValue(dataObject) ?? string.Empty, rows);
-            var headers = new[] { "Field", "Value" };
-            var csv = BuildCsv(headers, rows);
-            await WriteTextResponseAsync(context, "text/csv", csv, $"{typeSlug}_{WebUtility.UrlEncode(id)}_flat.csv");
-            return;
-        }
-
-        // Build flat CSV with parent fields repeated for each child row
-        var flatRows = new List<string[]>();
-        var parentId = instance is BaseDataObject dobj ? DataScaffold.GetIdValue(dobj) ?? string.Empty : string.Empty;
-        var parentFieldsList = new List<(string Label, string Value)>(DataScaffold.BuildViewRows(meta, instance));
-        var parentHeaders = new List<string> { "Id" };
-        foreach (var f in parentFieldsList)
-            parentHeaders.Add(f.Label);
-
-        var allHeaders = new List<string>(parentHeaders);
-        var nested = DataScaffold.ExtractNestedData(meta, instance);
-        
-        if (nested.Count > 0)
-        {
-            foreach (var h in nested[0].Headers)
-                allHeaders.Add($"{nested[0].FieldName}.{h}");
-
-            var parentRow = BuildParentValueRow(parentId, parentFieldsList);
-            
-            if (nested[0].Rows.Length > 0)
-            {
-                foreach (var childRow in nested[0].Rows)
-                    flatRows.Add(ConcatArrays(parentRow, childRow));
-            }
-            else
-            {
-                var emptyChild = new string[nested[0].Headers.Length];
-                flatRows.Add(ConcatArrays(parentRow, emptyChild));
-            }
-        }
-        else
-        {
-            var parentRow = BuildParentValueRow(parentId, parentFieldsList);
-            flatRows.Add(parentRow);
-        }
-
-        var flatCsv = BuildCsv(allHeaders.ToArray(), flatRows.ToArray());
-        await WriteTextResponseAsync(context, "text/csv", flatCsv, $"{typeSlug}_{WebUtility.UrlEncode(id)}_flat.csv");
-    }
-
-    private async ValueTask ExportMultiSheetZip(BmwContext context, DataEntityMetadata meta, string typeSlug, IReadOnlyList<object?> items, ExportOptions options)
-    {
-        using var memoryStream = new MemoryStream();
-        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
-        {
-            // Add parent CSV
-            var parentRows = BuildListPlainRowsWithId(meta, items, out var parentHeaders);
-            var parentCsv = BuildCsv(parentHeaders, parentRows);
-            var parentEntry = archive.CreateEntry($"{typeSlug}.csv");
-            using (var entryStream = parentEntry.Open())
-            using (var writer = new StreamWriter(entryStream))
-            {
-                await writer.WriteAsync(parentCsv);
-            }
-
-            if (options.IncludeNested && options.MaxDepth >= 1)
-            {
-                var nestedComponents = DataScaffold.GetNestedComponents(meta);
-                foreach (var (field, childType) in nestedComponents)
-                {
-                    var childRows = new List<string[]>();
-                    var childHeaders = new List<string> { "ParentId" };
-                    string[]? headers = null;
-
-                    foreach (var item in items)
-                    {
-                        if (item == null)
-                            continue;
-
-                        var parentId = item is BaseDataObject dobj ? DataScaffold.GetIdValue(dobj) ?? string.Empty : string.Empty;
-                        var nested = DataScaffold.ExtractNestedData(meta, item);
-                        (string FieldName, string[] Headers, string[][] Rows) matchingNested = default;
-                        foreach (var n in nested)
-                        {
-                            if (string.Equals(n.FieldName, field.Name, StringComparison.OrdinalIgnoreCase))
-                            {
-                                matchingNested = n;
-                                break;
-                            }
-                        }
-                        
-                        if (headers == null && matchingNested.Headers != null && matchingNested.Headers.Length > 0)
-                        {
-                            headers = matchingNested.Headers;
-                            childHeaders.AddRange(headers);
-                        }
-
-                        if (matchingNested.Rows != null)
-                        {
-                            foreach (var row in matchingNested.Rows)
-                            {
-                                var concatRow = new string[1 + row.Length];
-                                concatRow[0] = parentId;
-                                Array.Copy(row, 0, concatRow, 1, row.Length);
-                                childRows.Add(concatRow);
-                            }
-                        }
-                    }
-
-                    if (childRows.Count > 0 && headers != null)
-                    {
-                        var childCsv = BuildCsv(childHeaders.ToArray(), childRows.ToArray());
-                        var childEntry = archive.CreateEntry($"{typeSlug}_{field.Name}.csv");
-                        using var childStream = childEntry.Open();
-                        using var childWriter = new StreamWriter(childStream);
-                        await childWriter.WriteAsync(childCsv);
-                    }
-                }
-            }
-        }
-
-        memoryStream.Position = 0;
-        context.Response.ContentType = "application/zip";
-        context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_export.zip\"";
-        await memoryStream.CopyToAsync(context.Response.Body);
-    }
-
-    private async ValueTask ExportSingleMultiSheetZip(BmwContext context, DataEntityMetadata meta, string typeSlug, string id, object instance, ExportOptions options)
-    {
-        using var memoryStream = new MemoryStream();
-        using (var archive = new ZipArchive(memoryStream, ZipArchiveMode.Create, leaveOpen: true))
-        {
-            // Add parent CSV
-            var parentRows = ViewRowsToArray(DataScaffold.BuildViewRows(meta, instance));
-            if (instance is BaseDataObject dataObject)
-                parentRows = PrependIdRow(DataScaffold.GetIdValue(dataObject) ?? string.Empty, parentRows);
-            var parentHeaders = new[] { "Field", "Value" };
-            var parentCsv = BuildCsv(parentHeaders, parentRows);
-            var parentEntry = archive.CreateEntry($"{typeSlug}.csv");
-            using (var entryStream = parentEntry.Open())
-            using (var writer = new StreamWriter(entryStream))
-            {
-                await writer.WriteAsync(parentCsv);
-            }
-
-            if (options.IncludeNested && options.MaxDepth >= 1)
-            {
-                var nested = DataScaffold.ExtractNestedData(meta, instance);
-                foreach (var (fieldName, headers, rows) in nested)
-                {
-                    if (rows.Length > 0)
-                    {
-                        var childCsv = BuildCsv(headers, rows);
-                        var childEntry = archive.CreateEntry($"{typeSlug}_{fieldName}.csv");
-                        using var childStream = childEntry.Open();
-                        using var childWriter = new StreamWriter(childStream);
-                        await childWriter.WriteAsync(childCsv);
-                    }
-                }
-            }
-        }
-
-        memoryStream.Position = 0;
-        context.Response.ContentType = "application/zip";
-        context.Response.Headers["Content-Disposition"] = $"attachment; filename=\"{typeSlug}_{WebUtility.UrlEncode(id)}_export.zip\"";
-        await memoryStream.CopyToAsync(context.Response.Body);
-    }
-
-    private static string BuildHtmlTableDocument(string title, string[] headers, string[][] rows)
-    {
-        var sb = RentStringBuilder(4096);
-        try
-        {
-        sb.Append("<!doctype html><html><head><meta charset=\"utf-8\" />");
-        sb.Append($"<title>{WebUtility.HtmlEncode(title)}</title>");
-        sb.Append("<style>body{font-family:Arial,Helvetica,sans-serif;margin:24px;}table{border-collapse:collapse;width:100%;}th,td{border:1px solid #ddd;padding:8px;text-align:left;}th{background:#f2f2f2;}</style>");
-        sb.Append("</head><body>");
-        sb.Append($"<h1>{WebUtility.HtmlEncode(title)}</h1>");
-        sb.Append("<table><thead><tr>");
-        foreach (var header in headers)
-        {
-            sb.Append("<th>");
-            sb.Append(WebUtility.HtmlEncode(header));
-            sb.Append("</th>");
-        }
-        sb.Append("</tr></thead><tbody>");
-        foreach (var row in rows)
-        {
-            sb.Append("<tr>");
-            foreach (var cell in row)
-            {
-                sb.Append("<td>");
-                sb.Append(WebUtility.HtmlEncode(cell));
-                sb.Append("</td>");
-            }
-            sb.Append("</tr>");
-        }
-        sb.Append("</tbody></table></body></html>");
-        return sb.ToString();
-        }
-        finally { ReturnStringBuilder(sb); }
-    }
-
-    private static string BuildRtfDocument(string title, string[][] rows)
-    {
-        var sb = RentStringBuilder(2048);
-        try
-        {
-        sb.Append("{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Arial;}}\\fs20 ");
-        sb.Append("\\b ");
-        sb.Append(EscapeRtf(title));
-        sb.Append("\\b0\\par ");
-        sb.Append("\\par ");
-        foreach (var row in rows)
-        {
-            var label = row.Length > 0 ? row[0] : string.Empty;
-            var value = row.Length > 1 ? row[1] : string.Empty;
-            sb.Append("\\b ");
-            sb.Append(EscapeRtf(label));
-            sb.Append(":\\b0 ");
-            sb.Append(EscapeRtf(value));
-            sb.Append("\\par ");
-        }
-        sb.Append("}");
-        return sb.ToString();
-        }
-        finally { ReturnStringBuilder(sb); }
-    }
-
-    private static string EscapeRtf(string text)
-    {
-        if (string.IsNullOrEmpty(text))
-            return string.Empty;
-
-        var builder = new StringBuilder(text.Length);
-        foreach (var ch in text)
-        {
-            switch (ch)
-            {
-                case '\\':
-                    builder.Append("\\\\");
-                    break;
-                case '{':
-                    builder.Append("\\{");
-                    break;
-                case '}':
-                    builder.Append("\\}");
-                    break;
-                case '\n':
-                    builder.Append("\\par ");
-                    break;
-                case '\r':
-                    break;
-                default:
-                    builder.Append(ch <= 0x7E && ch >= 0x20 ? ch : '?');
-                    break;
-            }
-        }
-
-        return builder.ToString();
-    }
 
     private static string StripHtml(string value)
     {
@@ -6000,56 +5563,6 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         return builder.ToString();
-    }
-
-    private static string BuildExportDropdown(string typeSlug, string queryString, bool includeNested, string? id = null)
-    {
-        var baseUrl = id != null 
-            ? $"/{typeSlug}/{WebUtility.UrlEncode(id)}/export"
-            : $"/{typeSlug}/export";
-        
-        var separator = string.IsNullOrEmpty(queryString) || queryString == "?" ? "?" : "&";
-        var baseQueryString = queryString == "?" ? "" : queryString;
-        
-        var hasNested = includeNested;
-        var nestedLabel = hasNested ? " (with nested)" : "";
-        
-        var dropdownId = id != null ? $"export-dropdown-{WebUtility.UrlEncode(id)}" : "export-dropdown-list";
-        
-        var html = RentStringBuilder(512);
-        try
-        {
-        html.Append("<div class=\"btn-group ms-2\" role=\"group\">");
-        html.Append($"<button type=\"button\" class=\"btn btn-sm btn-outline-success dropdown-toggle\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\" id=\"{dropdownId}\">");
-        html.Append("<i class=\"bi bi-download\" aria-hidden=\"true\"></i> Export");
-        html.Append("</button>");
-        html.Append($"<ul class=\"dropdown-menu\" aria-labelledby=\"{dropdownId}\">");
-        
-        // Simple CSV (no nested)
-        html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=SimpleCSV\">");
-        html.Append("<i class=\"bi bi-file-earmark-spreadsheet\"></i> CSV (simple)</a></li>");
-        
-        if (hasNested)
-        {
-            // Flat CSV (nested denormalized)
-            html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=FlatCSV\">");
-            html.Append("<i class=\"bi bi-file-earmark-spreadsheet\"></i> CSV (flat with nested)</a></li>");
-            
-            // Multi-sheet ZIP
-            html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=MultiSheetZip\">");
-            html.Append("<i class=\"bi bi-file-earmark-zip\"></i> ZIP (multi-sheet)</a></li>");
-        }
-        
-        // Hierarchical JSON
-        html.Append($"<li><a class=\"dropdown-item\" href=\"{baseUrl}{baseQueryString}{separator}format=HierarchicalJSON\">");
-        html.Append("<i class=\"bi bi-filetype-json\"></i> JSON{nestedLabel}</a></li>");
-        
-        html.Append("</ul>");
-        html.Append("</div>");
-        
-        return html.ToString();
-        }
-        finally { ReturnStringBuilder(html); }
     }
 
     private const string ApiCsrfHeaderName = "X-Requested-With";
@@ -6294,26 +5807,6 @@ public sealed class RouteHandlers : IRouteHandlers
         return mapping;
     }
 
-    private static void ApplyUserPasswordForImport(DataEntityMetadata meta, BaseDataObject instance, string[] row, int passwordIndex, bool isCreate, List<string> errors)
-    {
-        if (meta.Type != typeof(User))
-            return;
-
-        var password = passwordIndex >= 0 && passwordIndex < row.Length
-            ? row[passwordIndex]
-            : string.Empty;
-
-        if (string.IsNullOrWhiteSpace(password))
-        {
-            if (isCreate)
-                errors.Add("Password is required.");
-            return;
-        }
-
-        if (instance is User user)
-            user.SetPassword(password);
-    }
-
     private static void ApplyAuditInfo(object instance, string userName, bool isCreate)
     {
         if (instance is not BaseDataObject dataObject)
@@ -6330,84 +5823,6 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             dataObject.Touch(userName);
         }
-    }
-
-    private static void ApplyPrefillFromQuery(DataEntityMetadata meta, object instance, IQueryCollection query)
-    {
-        if (meta == null || instance == null)
-            return;
-
-        var fieldName = query["field"].ToString();
-        var value = query["value"].ToString();
-        if (string.IsNullOrWhiteSpace(fieldName) || string.IsNullOrWhiteSpace(value))
-            return;
-
-        var field = meta.FindField(fieldName);
-        if (field == null)
-            return;
-
-        if (DataScaffold.TryConvertValue(value, field.ClrType, out var converted) && converted != null)
-        {
-            field.SetValueFn(instance, converted);
-            return;
-        }
-
-        var effectiveType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
-        if (effectiveType == typeof(string))
-        {
-            field.SetValueFn(instance, value);
-        }
-    }
-
-    private void RenderSampleDataForm(BmwContext context, string? message, IReadOnlyList<RuntimeEntityModel> entities, int defaultCount, bool clearExisting)
-    {
-        var csrfToken = CsrfProtection.EnsureToken(context);
-        context.SetStringValue("title", "Generate Sample Data");
-        context.SetStringValue("html_message", string.IsNullOrWhiteSpace(message) ? string.Empty : message);
-
-        var fields = new List<FormField>
-        {
-            new FormField(FormFieldType.Hidden, CsrfProtection.FormFieldName, string.Empty, Value: csrfToken)
-        };
-
-        foreach (var entity in entities)
-        {
-            fields.Add(new FormField(FormFieldType.Integer, entity.Slug, entity.Name, Required: true, Value: defaultCount.ToString(CultureInfo.InvariantCulture)));
-        }
-
-        fields.Add(new FormField(FormFieldType.YesNo, "clearExisting", "Clear existing data", false, SelectedValue: clearExisting ? "true" : "false"));
-
-        context.AddFormDefinition(new FormDefinition("/admin/sample-data", "post", "Generate", fields));
-    }
-
-    private static bool ParseSampleToggle(IFormCollection form, string key)
-    {
-        var raw = form[key].ToString();
-        if (string.IsNullOrWhiteSpace(raw))
-            return false;
-
-        return string.Equals(raw, "true", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(raw, "on", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(raw, "yes", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(raw, "1", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static int ParseSampleCount(IFormCollection form, string key, List<string> errors)
-    {
-        var raw = form[key].ToString();
-        if (!int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) || value < 0)
-        {
-            errors.Add($"{key} must be a non-negative number.");
-            return 0;
-        }
-
-        if (value > 100000)
-        {
-            errors.Add($"{key} is too large (max 100000).");
-            return 0;
-        }
-
-        return value;
     }
 
     private static object? GenerateSampleValue(RuntimeFieldModel field, Random rng)
@@ -6548,49 +5963,6 @@ public sealed class RouteHandlers : IRouteHandlers
         if (error != null) w.WriteString("error", error); else w.WriteNull("error");
         if (resultUrl != null) w.WriteString("resultUrl", resultUrl); else w.WriteNull("resultUrl");
         w.WriteEndObject();
-    }
-
-    private static void AppendUserPasswordFieldsIfNeeded(DataEntityMetadata meta, List<FormField> fields, bool isCreate)
-    {
-        if (meta.Type != typeof(User))
-            return;
-
-        var passwordLabel = isCreate ? "Password" : "New Password (leave blank to keep current)";
-        fields.Add(new FormField(FormFieldType.Password, "password", passwordLabel, Required: isCreate, Placeholder: "Enter password"));
-        if (isCreate)
-        {
-            fields.Add(new FormField(FormFieldType.Password, "password_confirm", "Confirm Password", Required: true, Placeholder: "Re-enter password"));
-        }
-    }
-
-    private static void ApplyUserPasswordIfNeeded(DataEntityMetadata meta, object instance, IDictionary<string, string?> values, List<string> errors, bool isCreate)
-    {
-        if (meta.Type != typeof(User))
-            return;
-
-        if (instance is not User user)
-            return;
-
-        values.TryGetValue("password", out var password);
-        values.TryGetValue("password_confirm", out var confirmPassword);
-
-        var hasPassword = !string.IsNullOrWhiteSpace(password);
-        if (isCreate && !hasPassword)
-        {
-            errors.Add("Password is required.");
-            return;
-        }
-
-        if (hasPassword)
-        {
-            if (isCreate && !string.Equals(password, confirmPassword, StringComparison.Ordinal))
-            {
-                errors.Add("Passwords do not match.");
-                return;
-            }
-
-            user.SetPassword(password!);
-        }
     }
 
     private static async ValueTask ValidateUserUniquenessAsync(DataEntityMetadata meta, object instance, string? excludeId, List<string> errors, CancellationToken cancellationToken)
@@ -6764,226 +6136,6 @@ public sealed class RouteHandlers : IRouteHandlers
         return lockedUser;
     }
 
-    private static string BuildViewSwitcher(string typeSlug, ViewType currentView, DataEntityMetadata meta)
-    {
-        var html = RentStringBuilder(512);
-        try
-        {
-        html.Append("<div class=\"btn-group btn-group-sm\" role=\"group\" aria-label=\"View Type\">");
-        
-        var tableActive = currentView == ViewType.Table ? " active" : string.Empty;
-        html.Append($"<a class=\"btn btn-outline-secondary{tableActive}\" href=\"/{typeSlug}?view=table\" title=\"Table View\"><i class=\"bi bi-table\" aria-hidden=\"true\"></i> Table</a>");
-        
-        if (meta.ParentField != null)
-        {
-            var treeActive = currentView == ViewType.TreeView ? " active" : string.Empty;
-            html.Append($"<a class=\"btn btn-outline-secondary{treeActive}\" href=\"/{typeSlug}?view=tree\" title=\"Tree View\"><i class=\"bi bi-diagram-3\" aria-hidden=\"true\"></i> Tree</a>");
-            
-            var orgActive = currentView == ViewType.OrgChart ? " active" : string.Empty;
-            html.Append($"<a class=\"btn btn-outline-secondary{orgActive}\" href=\"/{typeSlug}?view=orgchart\" title=\"Org Chart\"><i class=\"bi bi-diagram-2\" aria-hidden=\"true\"></i> Org Chart</a>");
-        }
-
-        if (DataScaffold.CanShowTimetableView(meta))
-        {
-            var timetableActive = currentView == ViewType.Timetable ? " active" : string.Empty;
-            html.Append($"<a class=\"btn btn-outline-secondary{timetableActive}\" href=\"/{typeSlug}?view=timetable\" title=\"Timetable View\"><i class=\"bi bi-calendar-week\" aria-hidden=\"true\"></i> Timetable</a>");
-        }
-        
-        // Check if entity has any DateOnly or DateTime fields for timeline view
-        if (DataScaffold.CanShowTimelineView(meta))
-        {
-            var timelineActive = currentView == ViewType.Timeline ? " active" : string.Empty;
-            html.Append($"<a class=\"btn btn-outline-secondary{timelineActive}\" href=\"/{typeSlug}?view=timeline\" title=\"Timeline View\"><i class=\"bi bi-clock-history\" aria-hidden=\"true\"></i> Timeline</a>");
-        }
-        
-        html.Append("</div>");
-        return html.ToString();
-        }
-        finally { ReturnStringBuilder(html); }
-    }
-
-    private static string BuildTimelineViewHtml(
-        DataEntityMetadata meta,
-        IEnumerable<BaseDataObject> allItems,
-        string basePath,
-        Func<DataEntityMetadata, bool>? canRenderLookupLink = null,
-        string? cloneToken = null,
-        string? cloneReturnUrl = null)
-    {
-        var html = RentStringBuilder(4096);
-        try
-        {
-
-        // Find the first two DateOnly/DateTime fields: first is start date, second (if any) is end date
-        var dateFields = new List<DataFieldMetadata>();
-        foreach (var f in meta.Fields)
-        {
-            if (f.FieldType == FormFieldType.DateOnly || f.FieldType == FormFieldType.DateTime)
-            {
-                dateFields.Add(f);
-                if (dateFields.Count >= 2) break;
-            }
-        }
-
-        if (dateFields.Count == 0)
-            return "<p class=\"text-warning\">Timeline view requires a DateOnly or DateTime field.</p>";
-
-        var itemsList = new List<BaseDataObject>();
-        foreach (var item in allItems)
-            itemsList.Add(item);
-        if (itemsList.Count == 0)
-            return "<p class=\"text-muted\">No items found.</p>";
-
-        var startField = dateFields[0];
-        var endField = dateFields.Count > 1 ? dateFields[1] : null;
-
-        // Extract start/end dates for each item
-        var ganttItems = new List<(BaseDataObject Item, DateOnly Start, DateOnly End, string Label)>();
-        foreach (var item in itemsList)
-        {
-            var startValue = startField.GetValueFn(item);
-            DateOnly? startDate = startValue switch
-            {
-                DateOnly d => d,
-                DateTime dt => DateOnly.FromDateTime(dt),
-                _ => null
-            };
-            // Skip items with unset/default dates (DateOnly.MinValue = 0001-01-01)
-            if (startDate == null || startDate.Value == DateOnly.MinValue) continue;
-
-            DateOnly endDate;
-            if (endField != null)
-            {
-                var endValue = endField.GetValueFn(item);
-                endDate = endValue switch
-                {
-                    DateOnly d => d,
-                    DateTime dt => DateOnly.FromDateTime(dt),
-                    _ => startDate.Value
-                };
-                if (endDate < startDate.Value) endDate = startDate.Value;
-            }
-            else
-            {
-                endDate = startDate.Value;
-            }
-
-            ganttItems.Add((item, startDate.Value, endDate, GetDisplayValue(meta, item)));
-        }
-
-        if (ganttItems.Count == 0)
-            return "<p class=\"text-muted\">No items with valid dates found.</p>";
-
-        // Sort by start date ascending so the chart renders like a Gantt chart
-        ganttItems.Sort((a, b) => a.Start.CompareTo(b.Start));
-
-        // Expand date range to full month boundaries
-        var minDate = ganttItems[0].Start;
-        var maxDate = ganttItems[0].End;
-        for (int gi = 1; gi < ganttItems.Count; gi++)
-        {
-            if (ganttItems[gi].Start < minDate) minDate = ganttItems[gi].Start;
-            if (ganttItems[gi].End > maxDate) maxDate = ganttItems[gi].End;
-        }
-        var chartStart = new DateOnly(minDate.Year, minDate.Month, 1);
-        var chartEndExclusive = maxDate.Month == 12
-            ? new DateOnly(maxDate.Year + 1, 1, 1)
-            : new DateOnly(maxDate.Year, maxDate.Month + 1, 1);
-        var totalDays = Math.Max(
-            (chartEndExclusive.ToDateTime(TimeOnly.MinValue) - chartStart.ToDateTime(TimeOnly.MinValue)).TotalDays,
-            1.0);
-
-        // Build list of month columns
-        var months = new List<(int Year, int Month, double LeftPct, double WidthPct)>();
-        var cur = chartStart;
-        double runningLeft = 0.0;
-        while (cur < chartEndExclusive)
-        {
-            var daysInMonth = DateTime.DaysInMonth(cur.Year, cur.Month);
-            var widthPct = daysInMonth / totalDays * 100.0;
-            months.Add((cur.Year, cur.Month, runningLeft, widthPct));
-            runningLeft += widthPct;
-            cur = cur.Month == 12 ? new DateOnly(cur.Year + 1, 1, 1) : new DateOnly(cur.Year, cur.Month + 1, 1);
-        }
-
-        // Build year groups (contiguous runs of months sharing the same year)
-        var years = new List<(int Year, double LeftPct, double WidthPct)>();
-        foreach (var (year, _, leftPct, widthPct) in months)
-        {
-            if (years.Count > 0 && years[^1].Year == year)
-            {
-                var last = years[^1];
-                years[^1] = (last.Year, last.LeftPct, last.WidthPct + widthPct);
-            }
-            else
-            {
-                years.Add((year, leftPct, widthPct));
-            }
-        }
-
-        // Bar colours (cycling)
-        string[] barColors = ["#4472c4", "#c0504d", "#9bbb59", "#f79646", "#8064a2"];
-
-        html.Append("<div class=\"bm-gantt-container\">");
-        html.Append("<div class=\"bm-gantt-inner\">");
-
-        // Year header row
-        html.Append("<div class=\"bm-gantt-header-row\">");
-        html.Append("<div class=\"bm-gantt-label-col\"></div>");
-        html.Append("<div class=\"bm-gantt-years-hdr\">");
-        foreach (var (year, leftPct, widthPct) in years)
-            html.Append($"<div class=\"bm-gantt-year-lbl\" data-gantt-left=\"{leftPct:F2}%\" data-gantt-width=\"{widthPct:F2}%\">{year}</div>");
-        html.Append("</div>");
-        html.Append("</div>");
-
-        // Month header row
-        html.Append("<div class=\"bm-gantt-header-row\">");
-        html.Append("<div class=\"bm-gantt-label-col\"></div>");
-        html.Append("<div class=\"bm-gantt-months-hdr\">");
-        foreach (var (year, month, leftPct, widthPct) in months)
-        {
-            var monthName = new DateOnly(year, month, 1).ToString("MMM");
-            html.Append($"<div class=\"bm-gantt-month-lbl\" data-gantt-left=\"{leftPct:F2}%\" data-gantt-width=\"{widthPct:F2}%\">{WebUtility.HtmlEncode(monthName)}</div>");
-        }
-        html.Append("</div>");
-        html.Append("</div>");
-
-        // One row per item
-        for (int i = 0; i < ganttItems.Count; i++)
-        {
-            var (item, start, end, label) = ganttItems[i];
-            var itemId = DataScaffold.GetIdValue(item) ?? string.Empty;
-            var safeId = Uri.EscapeDataString(itemId);
-            var color = barColors[i % barColors.Length];
-
-            var startDays = (start.ToDateTime(TimeOnly.MinValue) - chartStart.ToDateTime(TimeOnly.MinValue)).TotalDays;
-            var endDays = (end.ToDateTime(TimeOnly.MinValue) - chartStart.ToDateTime(TimeOnly.MinValue)).TotalDays + 1;
-            var barLeft = startDays / totalDays * 100.0;
-            var barWidth = Math.Max((endDays - startDays) / totalDays * 100.0, 0.5);
-
-            var tooltip = endField != null
-                ? $"{WebUtility.HtmlEncode(label)}: {start:yyyy-MM-dd} \u2013 {end:yyyy-MM-dd}"
-                : $"{WebUtility.HtmlEncode(label)}: {start:yyyy-MM-dd}";
-
-            html.Append("<div class=\"bm-gantt-row\">");
-            html.Append($"<div class=\"bm-gantt-lbl\" title=\"{WebUtility.HtmlEncode(label)}\"><a href=\"{basePath}/{safeId}\">{WebUtility.HtmlEncode(label)}</a></div>");
-            html.Append("<div class=\"bm-gantt-bar-area\">");
-            foreach (var (_, _, mLeft, _) in months)
-                html.Append($"<div class=\"bm-gantt-sep\" data-gantt-left=\"{mLeft:F2}%\"></div>");
-            html.Append($"<a href=\"{basePath}/{safeId}/edit\" class=\"bm-gantt-bar\" data-gantt-left=\"{barLeft:F2}%\" data-gantt-width=\"{barWidth:F2}%\" data-gantt-bg=\"{WebUtility.HtmlEncode(color)}\" title=\"{tooltip}\">");
-            html.Append($"<span class=\"bm-gantt-bar-text\">{WebUtility.HtmlEncode(label)}</span>");
-            html.Append("</a>");
-            html.Append("</div>");
-            html.Append("</div>");
-        }
-
-        html.Append("</div>"); // bm-gantt-inner
-        html.Append("</div>"); // bm-gantt-container
-        return html.ToString();
-        }
-        finally { ReturnStringBuilder(html); }
-    }
-
     private static string GetDisplayValue(DataEntityMetadata meta, BaseDataObject item)
     {
         // Try common name fields first (same heuristic as DataScaffold.GetDisplayValue)
@@ -7024,318 +6176,6 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // Last resort: ID
         return DataScaffold.GetIdValue(item) ?? "Unknown";
-    }
-
-    private static string GetViewTypeName(ViewType viewType)
-    {
-        return viewType switch
-        {
-            ViewType.TreeView => "Tree View",
-            ViewType.OrgChart => "Org Chart",
-            ViewType.Timeline => "Timeline",
-            ViewType.Timetable => "Timetable",
-            _ => "Table View"
-        };
-    }
-
-    private static string BuildPageSizeSelector(int currentPageSize, string basePath, IDictionary<string, string?> queryParams)
-    {
-        var sizes = new[] { 10, 25, 50, 100 };
-        var html = RentStringBuilder(512);
-        try
-        {
-        html.Append(@"<div class=""d-flex align-items-center gap-2"">
-    <label class=""form-label mb-0 small text-nowrap"">Page size:</label>
-    <select class=""form-select form-select-sm bm-w-auto"" onchange=""window.location.href=this.value;"" aria-label=""Page size"">");
-
-        foreach (var size in sizes)
-        {
-            var selected = size == currentPageSize ? " selected" : string.Empty;
-            var url = BuildUrlWithParam(basePath, queryParams, "size", size.ToString(), excludeParams: new[] { "page" });
-            html.Append($@"<option value=""{WebUtility.HtmlEncode(url)}""{selected}>{size}</option>");
-        }
-
-        html.Append("</select></div>");
-        return html.ToString();
-        }
-        finally { ReturnStringBuilder(html); }
-    }
-
-    private static string BuildEnhancedPagination(int currentPage, int totalRecords, int pageSize, string basePath, IDictionary<string, string?> queryParams)
-    {
-        var maxPage = totalRecords == 0 ? 1 : (int)Math.Ceiling(totalRecords / (double)pageSize);
-        var startRecord = totalRecords == 0 ? 0 : (currentPage - 1) * pageSize + 1;
-        var endRecord = Math.Min(currentPage * pageSize, totalRecords);
-
-        var html = RentStringBuilder(1024);
-        try
-        {
-        html.Append(@"<div class=""d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2"">");
-        
-        // Record count
-        html.Append($@"<div class=""small text-muted"">Records {startRecord} to {endRecord} of {totalRecords} total</div>");
-        
-        // Pagination controls
-        html.Append(@"<nav aria-label=""Page navigation""><ul class=""pagination pagination-sm mb-0"">");
-        
-        // Previous button
-        if (currentPage > 1)
-        {
-            var prevUrl = BuildUrlWithParam(basePath, queryParams, "page", (currentPage - 1).ToString());
-            html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(prevUrl)}"" aria-label=""Previous""><i class=""bi bi-arrow-left"" aria-hidden=""true""></i></a></li>");
-        }
-        else
-        {
-            html.Append(@"<li class=""page-item disabled""><span class=""page-link"" aria-disabled=""true""><i class=""bi bi-arrow-left"" aria-hidden=""true""></i></span></li>");
-        }
-
-        // Page numbers (show current +/- 2 pages)
-        var startPage = Math.Max(1, currentPage - 2);
-        var endPage = Math.Min(maxPage, currentPage + 2);
-        
-        if (startPage > 1)
-        {
-            var firstUrl = BuildUrlWithParam(basePath, queryParams, "page", "1");
-            html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(firstUrl)}"">1</a></li>");
-            if (startPage > 2)
-            {
-                html.Append(@"<li class=""page-item disabled""><span class=""page-link"">...</span></li>");
-            }
-        }
-
-        for (var i = startPage; i <= endPage; i++)
-        {
-            if (i == currentPage)
-            {
-                html.Append($@"<li class=""page-item active"" aria-current=""page""><span class=""page-link"">{i}</span></li>");
-            }
-            else
-            {
-                var pageUrl = BuildUrlWithParam(basePath, queryParams, "page", i.ToString());
-                html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(pageUrl)}"">{i}</a></li>");
-            }
-        }
-
-        if (endPage < maxPage)
-        {
-            if (endPage < maxPage - 1)
-            {
-                html.Append(@"<li class=""page-item disabled""><span class=""page-link"">...</span></li>");
-            }
-            var lastUrl = BuildUrlWithParam(basePath, queryParams, "page", maxPage.ToString());
-            html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(lastUrl)}"">{maxPage}</a></li>");
-        }
-
-        // Next button
-        if (currentPage < maxPage)
-        {
-            var nextUrl = BuildUrlWithParam(basePath, queryParams, "page", (currentPage + 1).ToString());
-            html.Append($@"<li class=""page-item""><a class=""page-link"" href=""{WebUtility.HtmlEncode(nextUrl)}"" aria-label=""Next""><i class=""bi bi-arrow-right"" aria-hidden=""true""></i></a></li>");
-        }
-        else
-        {
-            html.Append(@"<li class=""page-item disabled""><span class=""page-link"" aria-disabled=""true""><i class=""bi bi-arrow-right"" aria-hidden=""true""></i></span></li>");
-        }
-
-        html.Append("</ul></nav></div>");
-        return html.ToString();
-        }
-        finally { ReturnStringBuilder(html); }
-    }
-
-    private static string BuildUrlWithParam(string basePath, IDictionary<string, string?> queryParams, string key, string value, string[]? excludeParams = null)
-    {
-        var parts = new List<string>();
-        var exclude = new HashSet<string>((excludeParams?.Length ?? 0) + 1, StringComparer.OrdinalIgnoreCase);
-        if (excludeParams != null)
-        {
-            foreach (var p in excludeParams)
-                exclude.Add(p);
-        }
-        exclude.Add(key); // Always exclude the key we're setting
-
-        foreach (var pair in queryParams)
-        {
-            if (exclude.Contains(pair.Key))
-                continue;
-
-            var pairValue = pair.Value ?? string.Empty;
-            if (!string.IsNullOrWhiteSpace(pairValue))
-            {
-                parts.Add($"{WebUtility.UrlEncode(pair.Key)}={WebUtility.UrlEncode(pairValue)}");
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            parts.Add($"{WebUtility.UrlEncode(key)}={WebUtility.UrlEncode(value)}");
-        }
-
-        var queryString = parts.Count > 0 ? "?" + string.Join("&", parts) : string.Empty;
-        return $"{basePath}{queryString}";
-    }
-
-    private static string BuildSortableColumnHeaders(DataEntityMetadata metadata, string basePath, IDictionary<string, string?> queryParams, bool includeActions, bool includeBulkSelection = false)
-    {
-        var currentSort = queryParams.TryGetValue("sort", out var sortValue) ? sortValue : null;
-        var currentDir = queryParams.TryGetValue("dir", out var dirValue) ? dirValue : "asc";
-        
-        var html = RentStringBuilder(1024);
-        try
-        {
-        html.Append("<thead><tr>");
-
-        if (includeBulkSelection)
-        {
-            html.Append(@"<th scope=""col"" class=""bm-col-check""><input type=""checkbox"" data-bulk-select-all aria-label=""Select all"" /></th>");
-        }
-
-        if (includeActions)
-        {
-            html.Append(@"<th scope=""col"">Actions</th>");
-        }
-
-        foreach (var field in metadata.ListFields)
-        {
-            var isSorted = string.Equals(field.Name, currentSort, StringComparison.OrdinalIgnoreCase);
-            var nextDir = isSorted && string.Equals(currentDir, "asc", StringComparison.OrdinalIgnoreCase) ? "desc" : "asc";
-            
-            // Build sort URL - need to update both sort and dir parameters
-            var parts = new List<string>();
-            foreach (var pair in queryParams)
-            {
-                if (string.Equals(pair.Key, "sort", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(pair.Key, "dir", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(pair.Key, "page", StringComparison.OrdinalIgnoreCase))
-                    continue;
-
-                var pairValue = pair.Value ?? string.Empty;
-                if (!string.IsNullOrWhiteSpace(pairValue))
-                {
-                    parts.Add($"{WebUtility.UrlEncode(pair.Key)}={WebUtility.UrlEncode(pairValue)}");
-                }
-            }
-            parts.Add($"sort={WebUtility.UrlEncode(field.Name)}");
-            parts.Add($"dir={nextDir}");
-            var queryString = parts.Count > 0 ? "?" + string.Join("&", parts) : string.Empty;
-            var sortUrl = $"{basePath}{queryString}";
-            
-            var sortIcon = string.Empty;
-            if (isSorted)
-            {
-                sortIcon = string.Equals(currentDir, "desc", StringComparison.OrdinalIgnoreCase)
-                    ? @" <i class=""bi bi-arrow-down"" aria-hidden=""true""></i>"
-                    : @" <i class=""bi bi-arrow-up"" aria-hidden=""true""></i>";
-            }
-            else
-            {
-                sortIcon = @" <i class=""bi bi-arrow-down-up text-muted bm-sort-icon-dim"" aria-hidden=""true""></i>";
-            }
-
-            html.Append($@"<th scope=""col""><a href=""{WebUtility.HtmlEncode(sortUrl)}"" class=""text-decoration-none text-reset"" title=""Sort by {WebUtility.HtmlEncode(field.Label)}"">{WebUtility.HtmlEncode(field.Label)}{sortIcon}</a></th>");
-        }
-
-        html.Append("</tr></thead>");
-        return html.ToString();
-        }
-        finally { ReturnStringBuilder(html); }
-    }
-
-    private static string BuildTableWithSortableHeaders(DataEntityMetadata metadata, IReadOnlyList<string[]> rows, string basePath, IDictionary<string, string?> queryParams, bool includeActions, bool includeBulkSelection = false)
-    {
-        var html = RentStringBuilder(4096);
-        try
-        {
-        html.Append(@"<table class=""table table-striped table-sm align-middle mb-0 bm-table"">");
-        
-        // Add sortable headers
-        html.Append(BuildSortableColumnHeaders(metadata, basePath, queryParams, includeActions, includeBulkSelection));
-        
-        // Add body rows
-        html.Append("<tbody>");
-        
-        var columnTitles = new List<string>();
-        if (includeBulkSelection)
-            columnTitles.Add("");
-        if (includeActions)
-            columnTitles.Add("Actions");
-        foreach (var f in metadata.ListFields)
-            columnTitles.Add(f.Label);
-        
-        foreach (var row in rows)
-        {
-            html.Append("<tr>");
-            for (int i = 0; i < row.Length; i++)
-            {
-                var label = i < columnTitles.Count ? columnTitles[i] : string.Empty;
-                html.Append($@"<td data-label=""{WebUtility.HtmlEncode(label)}"">{row[i]}</td>");
-            }
-            html.Append("</tr>");
-        }
-        
-        html.Append("</tbody></table>");
-        return html.ToString();
-        }
-        finally { ReturnStringBuilder(html); }
-    }
-
-    private static string BuildBulkActionsBar(string typeSlug, string returnUrl, long totalCount, string csrfToken)
-    {
-        var sb = new StringBuilder(1024);
-        sb.Append($"<div data-bulk-container data-entity-slug=\"{WebUtility.HtmlEncode(typeSlug)}\" data-return-url=\"{WebUtility.HtmlEncode(returnUrl)}\">");
-        sb.Append("<div data-bulk-actions-bar class=\"alert alert-info d-flex flex-wrap align-items-center justify-content-between gap-2 mb-2 d-none\" role=\"status\">");
-        sb.Append("<div class=\"d-flex align-items-center gap-2\">");
-        sb.Append("<strong><span data-selected-count>0</span> of <span data-total-count>");
-        sb.Append(totalCount);
-        sb.Append("</span> selected</strong>");
-        sb.Append("<button type=\"button\" class=\"btn btn-sm btn-outline-secondary\" data-bulk-clear aria-label=\"Clear selection\"><i class=\"bi bi-x-lg\" aria-hidden=\"true\"></i> Clear</button>");
-        sb.Append("</div>");
-        sb.Append("<div class=\"btn-group btn-group-sm\" role=\"group\" aria-label=\"Bulk actions\">");
-        sb.Append("<button type=\"button\" class=\"btn btn-danger\" data-bulk-action=\"delete\" title=\"Delete selected\" aria-label=\"Delete selected\"><i class=\"bi bi-trash\" aria-hidden=\"true\"></i> Delete</button>");
-        sb.Append("<button type=\"button\" class=\"btn btn-success\" data-bulk-action=\"export-csv\" title=\"Export to CSV\" aria-label=\"Export to CSV\"><i class=\"bi bi-file-earmark-spreadsheet\" aria-hidden=\"true\"></i> CSV</button>");
-        sb.Append("<button type=\"button\" class=\"btn btn-primary\" data-bulk-action=\"export-json\" title=\"Export to JSON\" aria-label=\"Export to JSON\"><i class=\"bi bi-filetype-json\" aria-hidden=\"true\"></i> JSON</button>");
-        sb.Append("<button type=\"button\" class=\"btn btn-info\" data-bulk-action=\"export-html\" title=\"Export to HTML\" aria-label=\"Export to HTML\"><i class=\"bi bi-filetype-html\" aria-hidden=\"true\"></i> HTML</button>");
-        sb.Append("</div>");
-        sb.Append("</div>");
-        sb.Append($"<input type=\"hidden\" name=\"csrf_token\" value=\"{WebUtility.HtmlEncode(csrfToken)}\" />");
-        sb.Append("</div>");
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// Build form fields with per-field validation error messages attached.
-    /// </summary>
-    private static List<FormField> BuildFormFieldsWithErrors(
-        DataEntityMetadata meta, object instance, bool forCreate, ValidationResult validationResult, string? cspNonce = null)
-    {
-        var fields = new List<FormField>(DataScaffold.BuildFormFields(meta, instance, forCreate, cspNonce: cspNonce));
-        if (!validationResult.IsValid)
-        {
-            for (int i = 0; i < fields.Count; i++)
-            {
-                if (validationResult.FieldErrors.TryGetValue(fields[i].Name, out var fieldErrors) && fieldErrors.Count > 0)
-                {
-                    fields[i] = fields[i] with { ValidationError = string.Join("; ", fieldErrors) };
-                }
-            }
-        }
-        return fields;
-    }
-
-    private static string BuildCommandButtonsHtml(DataEntityMetadata meta, string typeSlug, string id, string csrfToken)
-    {
-        if (meta.Commands.Count == 0) return string.Empty;
-        var sb = new StringBuilder(512);
-        var safeId = WebUtility.UrlEncode(id);
-        var safeToken = WebUtility.HtmlEncode(csrfToken);
-        foreach (var cmd in meta.Commands)
-        {
-            var btnClass = cmd.Destructive ? "btn-outline-danger" : "btn-outline-secondary";
-            var icon = string.IsNullOrEmpty(cmd.Icon) ? "" : $"<i class=\"bi {WebUtility.HtmlEncode(cmd.Icon)}\" aria-hidden=\"true\"></i> ";
-            var confirm = string.IsNullOrEmpty(cmd.ConfirmMessage) ? "" : $" data-confirm=\"{WebUtility.HtmlEncode(cmd.ConfirmMessage)}\"";
-            sb.Append($"<button class=\"btn btn-sm {btnClass} ms-2\" data-command-url=\"/api/{typeSlug}/{safeId}/_command/{WebUtility.UrlEncode(cmd.Name)}\" data-csrf-token=\"{safeToken}\"{confirm}>{icon}{WebUtility.HtmlEncode(cmd.Label)}</button>");
-        }
-        return sb.ToString();
     }
 
     public async ValueTask DataCommandHandler(BmwContext context)
@@ -7781,34 +6621,6 @@ public sealed class RouteHandlers : IRouteHandlers
         await context.Response.WriteAsync("{\"status\":\"cancellation requested\"}").ConfigureAwait(false);
     }
 
-    private static bool IsEntityAccessible(DataEntityMetadata entity, User? user, string[] userPermissions)
-    {
-        var perms = entity.Permissions ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(perms) || string.Equals(perms, "Public", StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (string.Equals(perms, "Authenticated", StringComparison.OrdinalIgnoreCase))
-            return user != null;
-
-        var remaining = perms.AsSpan();
-        bool hasMatchingPermission = false;
-        while (remaining.Length > 0)
-        {
-            int idx = remaining.IndexOf(',');
-            ReadOnlySpan<char> segment;
-            if (idx < 0) { segment = remaining; remaining = default; }
-            else { segment = remaining[..idx]; remaining = remaining[(idx + 1)..]; }
-            var trimmed = segment.Trim();
-            if (trimmed.IsEmpty) continue;
-            foreach (var p in userPermissions)
-            {
-                if (trimmed.Equals(p.AsSpan(), StringComparison.OrdinalIgnoreCase))
-                { hasMatchingPermission = true; break; }
-            }
-            if (hasMatchingPermission) break;
-        }
-        return hasMatchingPermission;
-    }
-
     private static string GetCpuModel()
     {
         try
@@ -7863,5 +6675,39 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         try { return new DriveInfo(Path.GetPathRoot(Environment.CurrentDirectory) ?? "/").TotalSize / (1024 * 1024 * 1024); }
         catch { return -1; }
+    }
+
+    private sealed class SetupRegistrationInput
+    {
+        public bool Enabled { get; init; }
+        public string CallbackUrl { get; init; } = string.Empty;
+        public string PrincipalName { get; init; } = DefaultManagementPrincipalName;
+        public string TenantId { get; init; } = string.Empty;
+        public string ClientId { get; init; } = string.Empty;
+    }
+
+    private sealed class SetupRegistrationRequest
+    {
+        public string InstanceId { get; init; } = string.Empty;
+        public string PrincipalName { get; init; } = string.Empty;
+        public string PrincipalApiKey { get; init; } = string.Empty;
+        public string TenantId { get; init; } = string.Empty;
+        public string ClientId { get; init; } = string.Empty;
+        public string RegisteredBy { get; init; } = string.Empty;
+        public string RegisteredAtUtc { get; init; } = string.Empty;
+    }
+
+    private sealed class SetupRegistrationResult
+    {
+        public bool Success { get; }
+        public string Message { get; }
+        public string PrincipalName { get; }
+
+        public SetupRegistrationResult(bool success, string message, string principalName)
+        {
+            Success = success;
+            Message = message;
+            PrincipalName = principalName;
+        }
     }
 }

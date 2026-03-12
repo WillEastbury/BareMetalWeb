@@ -76,45 +76,76 @@ public static class SemanticPruner
 {
     // ── calibration corpus ──────────────────────────────────────────────
 
-    public static SemanticTestCase[] GetDomainCorpus() =>
-    [
-        new("show customers who ordered yesterday",
-            new IntentAst("query-entity", "customers", "ordered yesterday")),
-        new("find inactive customers",
-            new IntentAst("query-entity", "customers", "inactive")),
-        new("list all entities",
-            new IntentAst("list-entities")),
-        new("describe user fields",
-            new IntentAst("describe-entity", "user")),
-        new("system status",
-            new IntentAst("system-status")),
-        new("search index health",
-            new IntentAst("index-status")),
-        new("what can you do",
-            new IntentAst("help")),
-        new("show all data models",
-            new IntentAst("list-entities")),
-        new("find orders created today",
-            new IntentAst("query-entity", "orders", "created today")),
-        new("query records data",
-            new IntentAst("query-entity")),
-        new("rebuild search index",
-            new IntentAst("index-status")),
-        new("describe product properties",
-            new IntentAst("describe-entity", "product")),
-        new("how many customers",
-            new IntentAst("query-entity", "customers")),
-        new("memory diagnostics",
-            new IntentAst("system-status")),
-        new("email them a discount",
-            new IntentAst("query-entity", null, null, "email")),
-        new("schedule follow-up reminders",
-            new IntentAst("query-entity", null, null, "schedule")),
-        new("customers where status active",
-            new IntentAst("query-entity", "customers", "status active")),
-        new("create a campaign",
-            new IntentAst("query-entity", "campaign")),
-    ];
+    public static SemanticTestCase[] GetDomainCorpus()
+    {
+        var corpus = new List<SemanticTestCase>
+        {
+            // Static baseline cases (always present)
+            new("list all entities", new IntentAst("list-entities")),
+            new("show all data models", new IntentAst("list-entities")),
+            new("system status", new IntentAst("system-status")),
+            new("search index health", new IntentAst("index-status")),
+            new("what can you do", new IntentAst("help")),
+            new("memory diagnostics", new IntentAst("system-status")),
+            new("rebuild search index", new IntentAst("index-status")),
+            new("query records data", new IntentAst("query-entity")),
+            new("describe entity fields", new IntentAst("describe-entity")),
+            new("show customer details", new IntentAst("show-entity", "customer")),
+            new("find active records", new IntentAst("query-entity", null, "active")),
+            new("plan a workflow", new IntentAst("plan-workflow")),
+        };
+
+        // Generate entity-specific test cases from actual metadata
+        try
+        {
+            var entities = BareMetalWeb.Core.DataScaffold.Entities;
+            if (entities is not null)
+            {
+                foreach (var entity in entities)
+                {
+                    var slug = entity.Slug;
+                    var name = entity.Name.ToLowerInvariant();
+
+                    corpus.Add(new($"show {slug}", new IntentAst("show-entity", slug)));
+                    corpus.Add(new($"describe {slug} fields", new IntentAst("describe-entity", slug)));
+                    corpus.Add(new($"query {slug}", new IntentAst("query-entity", slug)));
+                    corpus.Add(new($"how many {slug}", new IntentAst("query-entity", slug)));
+                    corpus.Add(new($"find {slug}", new IntentAst("query-entity", slug)));
+
+                    // Generate query test cases for indexed / searchable fields
+                    if (entity.Fields is not null)
+                    {
+                        foreach (var field in entity.Fields)
+                        {
+                            if (field.IsIndexed)
+                            {
+                                corpus.Add(new(
+                                    $"{slug} where {field.Name.ToLowerInvariant()} equals",
+                                    new IntentAst("query-entity", slug, $"{field.Name.ToLowerInvariant()} equals")));
+                            }
+                        }
+                    }
+
+                    // Generate action test cases from commands
+                    if (entity.Commands is not null)
+                    {
+                        foreach (var cmd in entity.Commands)
+                        {
+                            corpus.Add(new(
+                                $"{cmd.Name.ToLowerInvariant()} {slug}",
+                                new IntentAst("show-entity", slug)));
+                        }
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // DataScaffold may not be initialised yet
+        }
+
+        return corpus.ToArray();
+    }
 
     // ── public entry point ──────────────────────────────────────────────
 

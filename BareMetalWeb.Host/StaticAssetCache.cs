@@ -293,7 +293,6 @@ public static class StaticAssetCache
         if (!string.IsNullOrEmpty(effectiveEncoding))
         {
             context.Response.Headers.ContentEncoding = effectiveEncoding;
-            context.Response.Headers.Append("Vary", "Accept-Encoding");
         }
 
         context.Response.ContentLength = variant.Length;
@@ -317,7 +316,7 @@ public static class StaticAssetCache
         {
             // Zero-copy: write the ReadOnlyMemory<byte> slice directly to the
             // Kestrel PipeWriter — no intermediate buffer or Stream wrapper.
-            await context.ResponseBody.WriteAsync(variant);
+            await context.WriteResponseAsync(variant, context.RequestAborted);
         }
     }
 

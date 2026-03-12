@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 
@@ -267,6 +268,7 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
     public void GetMetricTable(out string[] tableColumns, out string[][] tableRows)
     {
         var snapshot = GetSnapshot();
+        var responseTiming = ResponseTimingMetrics.GetSnapshot();
         tableColumns = ["Metric", "Value"];
         tableRows =
         [
@@ -282,6 +284,12 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             new[] { "P95 (Last 5m)", $"{snapshot.RecentP95ResponseTime.TotalMilliseconds:F2} ms" },
             new[] { "P99 (Last 5m)", $"{snapshot.RecentP99ResponseTime.TotalMilliseconds:F2} ms" },
             new[] { "Average (Last 10s)", $"{snapshot.Recent10sAverageResponseTime.TotalMilliseconds:F2} ms" },
+            new[] { "🔬 RESPONSE WRITE STAGES (Last 5m)", "" },
+            new[] { "Samples", responseTiming.SampleCount.ToString("N0") },
+            new[] { "Parse→First Write (avg/p95/max)", $"{responseTiming.ParseToFirst.Average.TotalMilliseconds:F3} / {responseTiming.ParseToFirst.P95.TotalMilliseconds:F3} / {responseTiming.ParseToFirst.Max.TotalMilliseconds:F3} ms" },
+            new[] { "First Write→Flush Start (avg/p95/max)", $"{responseTiming.FirstToFlushStart.Average.TotalMilliseconds:F3} / {responseTiming.FirstToFlushStart.P95.TotalMilliseconds:F3} / {responseTiming.FirstToFlushStart.Max.TotalMilliseconds:F3} ms" },
+            new[] { "Flush Await (avg/p95/max)", $"{responseTiming.FlushAwait.Average.TotalMilliseconds:F3} / {responseTiming.FlushAwait.P95.TotalMilliseconds:F3} / {responseTiming.FlushAwait.Max.TotalMilliseconds:F3} ms" },
+            new[] { "First Write→Flush Complete (avg/p95/max)", $"{responseTiming.FirstToFlush.Average.TotalMilliseconds:F3} / {responseTiming.FirstToFlush.P95.TotalMilliseconds:F3} / {responseTiming.FirstToFlush.Max.TotalMilliseconds:F3} ms" },
 
             new[] { "📈 STATUS CODES", "" },
             new[] { "2xx Success", snapshot.Requests2xx.ToString("N0") },
@@ -446,5 +454,57 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
                 features.Add(new[] { "⚠ Config mismatch", warning });
         }
         return features.ToArray();
+    }
+
+    /// <summary>
+    /// Renders metrics as grouped Bootstrap cards, each containing a compact sub-table.
+    /// One card per logical group instead of one row per metric.
+    /// </summary>
+    public string GetMetricGroupsHtml()
+    {
+        GetMetricTable(out _, out string[][] allRows);
+
+        var sb = new System.Text.StringBuilder(4096);
+        sb.Append("<div class=\"row g-3\">");
+
+        string? currentGroup = null;
+        var groupRows = new List<string[]>();
+
+        for (int i = 0; i <= allRows.Length; i++)
+        {
+            bool isHeader = i < allRows.Length && allRows[i].Length >= 2 && allRows[i][1] == "";
+            bool isEnd = i == allRows.Length;
+
+            if ((isHeader || isEnd) && currentGroup != null && groupRows.Count > 0)
+            {
+                sb.Append("<div class=\"col-12 col-lg-6\">");
+                sb.Append("<div class=\"card shadow-sm h-100\">");
+                sb.Append("<div class=\"card-header fw-semibold\">");
+                sb.Append(System.Net.WebUtility.HtmlEncode(currentGroup));
+                sb.Append("</div>");
+                sb.Append("<div class=\"card-body p-0\">");
+                sb.Append("<table class=\"table table-sm table-striped align-middle mb-0\">");
+                sb.Append("<tbody>");
+                foreach (var row in groupRows)
+                {
+                    sb.Append("<tr><td class=\"ps-3\">");
+                    sb.Append(System.Net.WebUtility.HtmlEncode(row[0]));
+                    sb.Append("</td><td class=\"text-end pe-3 text-nowrap\">");
+                    sb.Append(System.Net.WebUtility.HtmlEncode(row[1]));
+                    sb.Append("</td></tr>");
+                }
+                sb.Append("</tbody></table>");
+                sb.Append("</div></div></div>");
+                groupRows.Clear();
+            }
+
+            if (isHeader)
+                currentGroup = allRows[i][0];
+            else if (!isEnd)
+                groupRows.Add(allRows[i]);
+        }
+
+        sb.Append("</div>");
+        return sb.ToString();
     }
 }

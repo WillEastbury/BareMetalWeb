@@ -14,12 +14,12 @@ BareMetalWeb uses a 5-workflow pipeline that chains automated CI with gated CD r
                            │ workflow_run (success, main only)
                            ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  CI2 · AOT Build & Container Push (container.yml)                  │
-│  ────────────────────────────────────────────────                   │
-│  AOT publish (linux-amd64, linux-arm64, windows-amd64)             │
-│  → Build thin containers (Dockerfile.prebuilt)                     │
-│  → Push to GHCR + ACR with version tags + OCI labels               │
-│  → Upload AOT artifacts                                            │
+│  CI2 · Build & Container Push (container.yml)                      │
+│  ───────────────────────────────────────────                        │
+│  JIT publish AnyCPU (deploy-package for Web Apps)                  │
+│  AOT publish linux-arm64 → Build thin container (Dockerfile.prebuilt) │
+│  → Push to ACR with version tag + OCI labels                       │
+│  → Upload JIT deploy-package + AOT aot-linux-arm64 artifacts       │
 └──────────────────────────┬──────────────────────────────────────────┘
                            │ workflow_run (success, main only)
                            ▼
@@ -90,25 +90,23 @@ Builds the solution in Debug mode, then fans out to parallel test shards:
 
 All shards must pass for the `tests-passed` gate job to succeed, which triggers CI2.
 
-### CI2 · AOT Build & Container Push (`container.yml`)
+### CI2 · Build & Container Push (`container.yml`)
 
 | Property    | Value |
 |-------------|-------|
 | **Trigger** | CI1 success on main, workflow_dispatch |
-| **Runners** | ubuntu-latest (amd64), ubuntu-24.04-arm (arm64), windows-2022 |
-| **Duration** | ~10–15 minutes |
+| **Runners** | ubuntu-latest (JIT + summary), ubuntu-24.04-arm (arm64 AOT + container) |
+| **Duration** | ~5–8 minutes |
 
-1. **AOT Publish** — Produces native AOT binaries for three platforms:
-   - `linux-x64` on ubuntu-latest
-   - `linux-arm64` on native ARM runner
-   - `win-x64` on Windows Server 2022
-2. **Container Build** — Packages each binary into a thin container using `Dockerfile.prebuilt` (no SDK layer, no `dotnet publish` inside Docker — just copies the pre-built binary into `runtime-deps:10.0-noble-chiseled`).
-3. **Push** — Tags each image with `{version}-{platform}` and pushes to:
-   - GitHub Container Registry (`ghcr.io`)
+Two parallel builds:
+
+1. **JIT AnyCPU Publish** — Produces a framework-dependent Release package (`deploy-package`) for Azure Web App deployments (no runtime, no AOT, runs anywhere .NET 10 is installed).
+2. **AOT Publish (linux-arm64)** — Produces a native self-contained binary on the native ARM runner, then packaged into a thin container using `Dockerfile.prebuilt` (no SDK layer — just copies the pre-built binary into `runtime-deps:10.0-noble-chiseled`).
+
+The container image is tagged `{version}-linux-arm64` and pushed to:
    - Azure Container Registry (`metalclusterregistry.azurecr.io`)
-4. **OCI Labels** — Each image carries standard metadata: title, version, revision, source URL, creation timestamp.
 
-**Artifacts uploaded:** `aot-linux-amd64`, `aot-linux-arm64`, `aot-windows-amd64` (3-day retention).
+**Artifacts uploaded:** `deploy-package` (JIT, 3-day retention), `aot-linux-arm64` (3-day retention).
 
 ### CD1 · Canary Deploy & Extended Tests (`cd-canary.yml`)
 
@@ -203,9 +201,9 @@ Defined in `deploy-list.json` at the repository root:
 | File | Purpose |
 |------|---------|
 | `Dockerfile` | Original multi-stage (SDK → AOT → chiseled). Retained for local development. |
-| `Dockerfile.prebuilt` | Thin single-stage (chiseled only). Used by CI2 for Linux containers. |
+| `Dockerfile.prebuilt` | Thin single-stage (chiseled only). Used by CI2 for the linux-arm64 container. |
 | `Dockerfile.windows` | Original multi-stage for Windows Nano Server. Retained for local development. |
-| `Dockerfile.windows.prebuilt` | Thin single-stage for Windows. Used by CI2 for Windows containers. |
+| `Dockerfile.windows.prebuilt` | Thin single-stage for Windows. Retained for local development. |
 
 ## How to Deploy Manually
 

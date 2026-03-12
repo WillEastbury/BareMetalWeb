@@ -1,3 +1,78 @@
+# AUTONOMOUS AGENT WORKFLOW (MANDATORY)
+
+BareMetalWeb uses a multi-agent development model where autonomous agents resolve GitHub issues via isolated git worktrees and pull requests.
+
+## 1. Issue Discovery
+- Use GitHub CLI to list issues: `gh issue list`
+- Select only OPEN issues that are not assigned and do not have a label starting with `claimed:`
+- Claim the issue using:
+  ```bash
+  gh issue edit <issue-number> --add-label claimed:<agent-name>
+  ```
+
+## 2. Workspace Isolation (Git Worktrees)
+- Every issue must be worked in a dedicated git worktree
+- Never modify the main working tree
+- Create worktree with:
+  ```bash
+  git worktree add ../agent-<issue-number> -b agent/<issue-number>-<slug>
+  ```
+- Then `cd` into `../agent-<issue-number>`
+
+## 3. Development Rules
+- Implement minimal surgical changes
+- Follow BareMetalWeb architectural rules
+- Do not introduce MVC, middleware, DI, reflection on hot paths, or unnecessary allocations
+- Respect AOT, trim, and performance constraints already defined in the instructions
+
+## 4. Mandatory Verification
+Before committing:
+- Run `dotnet build BareMetalWeb.sln`
+- Run `dotnet test BareMetalWeb.sln --no-build -v quiet`
+- ARM64/proot environments must follow the runsettings guidance already present in the instructions
+
+## 5. Commit Format
+Commit messages must follow:
+```
+<short description>
+
+Fixes #<issue-number>
+```
+
+## 6. Push Branch
+Push using:
+```bash
+git push -u origin agent/<issue-number>-<slug>
+```
+
+## 7. Pull Request Creation
+Create PR using:
+```bash
+gh pr create --title "<short description>" --body "Closes #<issue-number>"
+```
+Agents must never merge PRs themselves unless explicitly instructed to do so by the user. Acceptable instructions include "merge it" or "ship it".
+
+## 8. CI Feedback Loop
+- Wait for CI results
+- If CI fails, fix the issue and push to the same branch
+- Do not create additional PRs
+
+## 9. Completion
+- When CI passes, return to issue discovery and select another unclaimed issue
+
+## Multi-Agent Safety Rules
+- Keep changes minimal
+- Avoid broad refactors
+- Avoid formatting-only commits
+- Avoid touching unrelated files
+- Never force push
+- Never rewrite history
+- Never merge PRs unless explicitly instructed by the user (e.g. "merge it", "ship it")
+
+If an issue is unclear, the agent must comment on the GitHub issue asking for clarification instead of guessing.
+
+---
+
 # BareMetalWeb Copilot instructions
 
 ## Project Overview
@@ -17,7 +92,6 @@ BareMetalWeb is a minimalistic, high-performance web server built on bare-metal 
 - **BareMetalWeb.Data** - Binary serialization, data storage, and search indexing
 - **BareMetalWeb.Rendering** - HTML template rendering and CSRF protection
 - **BareMetalWeb.API** - API route handlers
-- **BareMetalWeb.UserClasses** - User data models
 - **\*.Tests** - xUnit test projects for each library
 - **BareMetalWeb.PerformanceTests** - Performance benchmarking console app
 
@@ -250,14 +324,34 @@ Any change to the following areas **MUST** update the corresponding `docs/archit
 2. Correct outdated descriptions — do not append "also" or "alternatively" to preserve stale text.
 3. Append or update the `_Status_` line at the bottom of the affected doc(s) with the current commit hash.
 
+## Issue Pickup & Labeling (MANDATORY)
+
+When you pick up a GitHub issue to work on, you **MUST** label it immediately so others know it is claimed:
+
+1. **Add the `claimed:copilot-cli` label** to mark the issue as taken by an agent:
+   ```bash
+   gh issue edit <number> --add-label "claimed:copilot-cli" --repo WillEastbury/BareMetalWeb
+   ```
+2. **Add the `in-progress` label** once you begin implementation:
+   ```bash
+   gh issue edit <number> --add-label "in-progress" --repo WillEastbury/BareMetalWeb
+   ```
+3. **Remove `in-progress`** when your PR is opened or the work is complete:
+   ```bash
+   gh issue edit <number> --remove-label "in-progress" --repo WillEastbury/BareMetalWeb
+   ```
+
+**Do NOT start coding on an issue without labeling it first.** This prevents duplicate work and gives visibility into what is actively being worked on.
+
 ## Development Workflow
 
-1. Make minimal, surgical changes focused on the specific issue
-2. Build and test frequently to catch issues early
-3. Use existing linters/build tools (do not add new ones unless required)
-4. For data entity changes, update all registries (see Data and Storage section)
-5. Store useful codebase facts using the memory tool for future reference
-6. When architecture changes, update the relevant `docs/architecture/` file(s) immediately (see Documentation Invariants above)
+1. Label the issue (`claimed:copilot-cli`, `in-progress`) — see above
+2. Make minimal, surgical changes focused on the specific issue
+3. Build and test frequently to catch issues early
+4. Use existing linters/build tools (do not add new ones unless required)
+5. For data entity changes, update all registries (see Data and Storage section)
+6. Store useful codebase facts using the memory tool for future reference
+7. When architecture changes, update the relevant `docs/architecture/` file(s) immediately (see Documentation Invariants above)
 
 ## Documentation Requirements (MANDATORY)
 

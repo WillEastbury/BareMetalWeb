@@ -1,11 +1,11 @@
 # ────────────────────────────────────────────────────────────────────────────────
-# CI2 — AOT Build + Container Build + Push
+# CI2 — Build + Container Build + Push
 #
 # Triggered automatically when CI1 (Unit Tests) passes on main.
-# 1. AOT-publishes per-arch native binaries (linux-amd64, linux-arm64, win-amd64)
-# 2. Packages each into a thin container (Dockerfile.prebuilt — no SDK layer)
-# 3. Pushes labeled images to GHCR + ACR
-# 4. Uploads AOT artifacts for downstream CD workflows
+# 1. JIT-publishes an AnyCPU Release package (deploy-package) for Azure Web Apps
+# 2. AOT-publishes a native linux-arm64 binary for the container
+# 3. Packages the arm64 binary into a thin container (Dockerfile.prebuilt)
+# 4. Pushes the linux-arm64 image to ACR
 #
 # Downstream: CD1 (cd-canary.yml) triggers on this workflow's success.
 # ────────────────────────────────────────────────────────────────────────────────
@@ -21,17 +21,14 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-pipeline-${{ github.ref }}
+  group: ci2-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
-  packages: write
   id-token: write
 
 env:
-  GHCR_REGISTRY: ghcr.io
-  GHCR_IMAGE: ${{ github.repository }}
   ACR_NAME: metalclusterregistry
   ACR_LOGIN_SERVER: metalclusterregistry.azurecr.io
   ACR_IMAGE: baremetalweb
@@ -68,9 +65,9 @@ jobs:
           echo "info_version=${MAJOR}.${DATE}.${BUILD}+${SHA}" >> $GITHUB_OUTPUT
           echo "assembly_version=${MAJOR}.0.0.${BUILD}" >> $GITHUB_OUTPUT
 
-  # ── AOT Publish: Linux amd64 ───────────────────────────────────────────
-  aot-linux-amd64:
-    name: "AOT · linux-amd64"
+  # ── JIT Publish: AnyCPU (for Azure Web App deployments) ───────────────
+  jit-anycpu:
+    name: "JIT · AnyCPU"
     needs: version
     runs-on: ubuntu-latest
     steps:
@@ -88,21 +85,19 @@ jobs:
           key: nuget-${{ hashFiles('**/*.csproj') }}
           restore-keys: nuget-
 
-      - name: AOT publish (linux-amd64)
+      - name: JIT publish (AnyCPU)
         run: |
           dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
             --configuration Release \
-            --runtime linux-x64 \
-            --self-contained \
             --output ./publish \
             -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
             -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
             -p:InformationalVersion=${{ needs.version.outputs.info_version }}
 
-      - name: Upload AOT artifact
+      - name: Upload deploy package
         uses: actions/upload-artifact@v4
         with:
-          name: aot-linux-amd64
+          name: deploy-package
           path: ./publish
           retention-days: 3
 
@@ -144,96 +139,6 @@ jobs:
           path: ./publish
           retention-days: 3
 
-  # ── AOT Publish: Windows amd64 ─────────────────────────────────────────
-  aot-windows-amd64:
-    name: "AOT · windows-amd64"
-    needs: version
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Cache NuGet packages
-        uses: actions/cache@v5
-        with:
-          path: ~/.nuget/packages
-          key: nuget-${{ hashFiles('**/*.csproj') }}
-          restore-keys: nuget-
-
-      - name: AOT publish (windows-amd64)
-        run: |
-          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj `
-            --configuration Release `
-            --runtime win-x64 `
-            --self-contained `
-            --output ./publish `
-            -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} `
-            -p:FileVersion=${{ needs.version.outputs.assembly_version }} `
-            -p:InformationalVersion=${{ needs.version.outputs.info_version }}
-
-      - name: Upload AOT artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: aot-windows-amd64
-          path: ./publish
-          retention-days: 3
-
-  # ── Container: Linux amd64 ─────────────────────────────────────────────
-  container-linux-amd64:
-    name: "Container · linux-amd64"
-    needs: [version, aot-linux-amd64]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download AOT artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: aot-linux-amd64
-          path: ./publish
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Log in to ACR
-        run: az acr login --name ${{ env.ACR_NAME }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.prebuilt
-          platforms: linux/amd64
-          push: true
-          build-args: PUBLISH_DIR=./publish
-          tags: |
-            ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-amd64
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-amd64
-          labels: |
-            org.opencontainers.image.title=BareMetalWeb
-            org.opencontainers.image.version=${{ needs.version.outputs.tag }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp || github.event.workflow_run.created_at }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-
   # ── Container: Linux arm64 ─────────────────────────────────────────────
   container-linux-arm64:
     name: "Container · linux-arm64"
@@ -247,13 +152,6 @@ jobs:
         with:
           name: aot-linux-arm64
           path: ./publish
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Azure Login
         uses: azure/login@v2
@@ -277,7 +175,6 @@ jobs:
           push: true
           build-args: PUBLISH_DIR=./publish
           tags: |
-            ${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-arm64
             ${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-arm64
           labels: |
             org.opencontainers.image.title=BareMetalWeb
@@ -286,70 +183,32 @@ jobs:
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp || github.event.workflow_run.created_at }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
-  # ── Container: Windows amd64 ───────────────────────────────────────────
-  container-windows-amd64:
-    name: "Container · windows-amd64"
-    needs: [version, aot-windows-amd64]
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download AOT artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: aot-windows-amd64
-          path: ./publish
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.GHCR_REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Log in to ACR
-        run: az acr login --name ${{ env.ACR_NAME }}
-
-      - name: Build and push
-        shell: bash
-        run: |
-          TAG="${{ needs.version.outputs.tag }}"
-          for registry in "${{ env.GHCR_REGISTRY }}/${{ env.GHCR_IMAGE }}" "${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}"; do
-            docker build \
-              -f Dockerfile.windows.prebuilt \
-              -t "${registry}:${TAG}-windows-amd64" \
-              --build-arg "PUBLISH_DIR=./publish" \
-              --label "org.opencontainers.image.title=BareMetalWeb" \
-              --label "org.opencontainers.image.version=${TAG}" \
-              --label "org.opencontainers.image.revision=${{ github.sha }}" \
-              --label "org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}" \
-              .
-            docker push "${registry}:${TAG}-windows-amd64"
-          done
-
   # ── Summary ────────────────────────────────────────────────────────────
   summary:
     name: Build summary
-    needs: [version, container-linux-amd64, container-linux-arm64, container-windows-amd64]
+    needs: [version, jit-anycpu, container-linux-arm64]
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Fail if gate was skipped
+        if: needs.version.result == 'skipped'
+        run: |
+          echo "::error::CI1 did not pass — CI2 skipped."
+          exit 1
+
       - name: Summary
+        if: needs.version.result != 'skipped'
         run: |
           TAG="${{ needs.version.outputs.tag }}"
-          echo "### 🐳 Container Images Built" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏗️ CI2 Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Platform | Tag | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|----------|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Linux amd64 | \`${TAG}-linux-amd64\` | ${{ needs.container-linux-amd64.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| JIT AnyCPU (\`deploy-package\`) | ${{ needs.jit-anycpu.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AOT linux-arm64 | ${{ needs.aot-linux-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Container | Tag | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-----|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Linux arm64 | \`${TAG}-linux-arm64\` | ${{ needs.container-linux-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Windows amd64 | \`${TAG}-windows-amd64\` | ${{ needs.container-windows-amd64.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Next:** CD1 (cd-canary.yml) will deploy to canary and run extended tests." >> $GITHUB_STEP_SUMMARY

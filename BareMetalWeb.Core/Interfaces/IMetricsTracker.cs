@@ -16,5 +16,6 @@ public interface IMetricsTracker
     void EnterRequest();
     void LeaveRequest();
     void GetMetricTable(out string[] tableColumns, out string[][] tableRows);
+    string GetMetricGroupsHtml();
     MetricsSnapshot GetSnapshot();
 }

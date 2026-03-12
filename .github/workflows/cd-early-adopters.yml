@@ -58,6 +58,40 @@ jobs:
             || { echo "::error::Tag '${{ inputs.image_tag }}' not found in ACR"; exit 1; }
           echo "✓ Image tag verified: ${{ inputs.image_tag }}"
 
+  # ── Build JIT deploy package ─────────────────────────────────────────────
+  build-deploy-package:
+    name: Build JIT deploy package
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: JIT publish (AnyCPU)
+        run: |
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release \
+            --output ./publish \
+            -p:InformationalVersion=${{ inputs.image_tag }}
+
+      - name: Upload deploy package
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-package
+          path: ./publish
+          retention-days: 3
+
   # ── Release Notes + GitHub Release ──────────────────────────────────────
   release:
     name: Build release notes
@@ -195,7 +229,7 @@ jobs:
   # ── Deploy to early-access tenants ──────────────────────────────────────
   deploy-early-access:
     name: "Deploy · ${{ matrix.name }}"
-    needs: [prepare-matrix, release]
+    needs: [prepare-matrix, release, build-deploy-package]
     if: needs.prepare-matrix.outputs.count != '0'
     runs-on: ubuntu-latest
     strategy:
@@ -220,7 +254,14 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     steps:
+      - name: Fail if upstream was skipped
+        if: needs.release.result == 'skipped'
+        run: |
+          echo "::error::Upstream jobs skipped — CD2 did not run."
+          exit 1
+
       - name: Summary
+        if: needs.release.result != 'skipped'
         run: |
           echo "### 🚀 CD2 Early Adopter Rollout" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY

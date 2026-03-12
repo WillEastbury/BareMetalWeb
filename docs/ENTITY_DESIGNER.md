@@ -3,8 +3,8 @@
 The Entity Designer is a visual tool for creating **virtual entity** definitions without writing code.
 Navigate to **System → Entity Designer** in the admin nav (or go to `/admin/entity-designer`) to open it.
 
-Virtual entities are fully functioning CRUD entities backed by JSON files on disk.
-The designer produces a JSON snippet ready to drop into your `virtualEntities.json` configuration file.
+Virtual entities are fully functioning CRUD entities backed by WAL storage.
+The rebuilt designer now uses a **single integrated module object** (entity + properties + reports + permission rules) and saves it **in place**.
 
 ---
 
@@ -12,9 +12,11 @@ The designer produces a JSON snippet ready to drop into your `virtualEntities.js
 
 1. Fill in the **Entity Properties** section (at minimum, the **Name**).
 2. Click **Add Field** to add fields to the entity.
-3. The **JSON Preview** on the right updates live as you type.
-4. When done, click **Download JSON** to save the file, or **Copy JSON** to paste it elsewhere.
-5. Place the downloaded JSON block inside the `virtualEntities` array in your `virtualEntities.json` file and restart the server.
+3. Add optional **Reports** and **Permission Rules** in the same editor screen.
+4. Click **Save In Place** to persist directly to WAL-backed settings.
+5. Mark **Module Complete** when ready.
+6. Use **Export Binary** only for complete modules.
+7. Use **Import Binary** (`.bmwmod`) to load a module package into the editor.
 
 ---
 
@@ -58,6 +60,32 @@ Click **Add Field** to add a field row. Each field row has the following columns
 | **List** | When checked, this field appears as a column in the entity list/table view. |
 | 🗑️ | Removes the field from the entity. |
 
+---
+
+## Reports
+
+The single-screen editor includes a **Reports** section. Reports are stored as sub-records on the same module object.
+
+| Field | Description |
+|-------|-------------|
+| **Name** | Report identifier shown in the editor. |
+| **Type** | Report style (for example `table`, `summary`, `timeline`, `kanban`). |
+| **Source Field** | Optional source field used by the report. |
+| **Aggregation** | Optional aggregation expression (for example `count`, `sum`). |
+| **Visible** | Whether the report is enabled by default. |
+
+---
+
+## Permission Rules
+
+The single-screen editor also includes **Permission Rules** sub-records.
+
+| Field | Description |
+|-------|-------------|
+| **Principal** | Role/agent/service principal token. |
+| **Level** | Access level (`read`, `write`, `admin`). |
+| **Constraint** | Optional scope hint, such as `OwnRecordOnly`. |
+
 ### Field Types
 
 | Type | Description |
@@ -95,42 +123,44 @@ When a field type is **Lookup (FK)**, two extra inputs appear:
 
 | Button | Description |
 |--------|-------------|
-| **Download JSON** | Downloads the entity definition as a `.json` file ready to place in `virtualEntities.json`. |
-| **Copy JSON** | Copies the JSON to the clipboard. |
-| **Import JSON** | Loads an existing entity definition JSON file for editing. Accepts `.json` files in the same format as the output. |
+| **Save In Place** | Persists the module directly in WAL-backed settings using a deterministic module key. |
+| **Load Saved** | Loads the existing persisted module for the current slug/key. |
+| **Export Binary** | Downloads a binary module package (`.bmwmod`) only when the module is marked complete and passes validation. |
+| **Import Binary** | Loads a binary module package (`.bmwmod`) into the editor. This is the primary module import format. |
 | **Reset** | Clears all fields and starts a new entity definition (asks for confirmation first). |
 
 ---
 
 ## Deploying a Virtual Entity
 
-1. Open `virtualEntities.json` at the root of your data store (or create it if it does not exist).
-2. Ensure the file has the structure below. If the file already has entities, add the new object to the array.
-3. Restart the server; the entity will be compiled and appear in the admin UI automatically.
+1. Open **System → Entity Designer**.
+2. Edit the module on one screen and click **Save In Place**.
+3. Restart the server when you want runtime metadata recompiled and visible across admin routes.
 
 ```json
 {
-  "virtualEntities": [
-    {
-      "entityId": "...",
-      "name": "Ticket",
-      "slug": "tickets",
-      "showOnNav": true,
-      "idStrategy": "guid",
-      "navGroup": "Support",
-      "navOrder": 10,
-      "fields": [
-        { "fieldId": "...", "name": "Title",    "type": "string",   "order": 1, "required": true,  "list": true  },
-        { "fieldId": "...", "name": "Status",   "type": "enum",     "order": 2, "required": true,  "list": true,  "values": ["Open", "In Progress", "Closed"] },
-        { "fieldId": "...", "name": "AssignedTo","type": "lookup",   "order": 3, "required": false, "list": true,  "lookupEntity": "users", "lookupDisplayField": "UserName" },
-        { "fieldId": "...", "name": "Body",     "type": "multiline","order": 4, "required": false, "list": false }
-      ]
-    }
+  "entityId": "...",
+  "name": "TelemetryModule",
+  "slug": "telemetry-module",
+  "showOnNav": true,
+  "idStrategy": "guid",
+  "navGroup": "System",
+  "navOrder": 10,
+  "permissions": "admin deploy-agent",
+  "fields": [
+    { "fieldId": "...", "name": "HostName", "type": "string", "order": 1, "required": true, "list": true },
+    { "fieldId": "...", "name": "Status", "type": "enum", "order": 2, "values": ["Healthy", "Degraded", "Offline"] }
+  ],
+  "reports": [
+    { "id": "...", "name": "ErrorsByType", "type": "summary", "sourceField": "ErrorType", "aggregation": "count", "visible": true }
+  ],
+  "permissionRules": [
+    { "id": "...", "principal": "deploy-agent", "level": "write", "constraint": "OwnRecordOnly" }
   ]
 }
 ```
 
-> **Tip:** Use **Import JSON** to reload any existing `virtualEntities.json` entry back into the designer for editing. The designer reads the first item in the `virtualEntities` array.
+> **Tip:** Keep `slug` stable over time so the same in-place module key is reused.
 
 ---
 
@@ -142,4 +172,4 @@ When a field type is **Lookup (FK)**, two extra inputs appear:
 - **Order** controls the field's position in forms. The designer assigns order by field position (top to bottom).
 - To **reorder fields**, remove and re-add them in the desired order. (Drag handles are visual only in this version.)
 - The **Entity ID (`entityId`)** is a stable GUID for the entity. Do not change it once data has been stored.
-- Adding the entity to `virtualEntities.json` requires a **server restart** to take effect.
+- Saving in place updates the WAL-backed module payload immediately; a **server restart** applies runtime metadata compilation changes.

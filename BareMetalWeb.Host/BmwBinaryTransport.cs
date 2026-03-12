@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.Buffers.Binary;
+using System.IO.Pipelines;
 using System.Net.WebSockets;
 using System.Runtime.CompilerServices;
 using BareMetalWeb.Core;
@@ -160,14 +162,25 @@ public sealed class BmwBinaryTransport
     /// <summary>
     /// Process incoming BMW binary frames from a WebSocket connection.
     /// Runs until the client disconnects or sends a close frame.
+    /// For each incoming frame the handler's output is captured via a per-frame
+    /// MemoryStream and sent back as a binary WebSocket message with the same
+    /// frame header so the client can correlate responses to requests.
+    ///
+    /// Response wire format (mirrors the request frame layout):
+    /// <code>
+    /// [opcode:14 | reserved:2 : uint16 BE] [entityId : uint32 LE]   ← 6-byte frame header
+    /// [payloadLen : 3 bytes LE]                                       ← payload length prefix
+    /// [payload bytes …]                                               ← handler output (JSON)
+    /// </code>
     /// </summary>
     public async ValueTask ProcessAsync(WebSocket webSocket, BmwContext ctx, CancellationToken ct)
     {
-        var buffer = new byte[16 * 1024]; // 16KB receive buffer
+        var receiveBuffer  = new byte[16 * 1024]; // 16 KB receive buffer (reused per loop iteration)
+        var responseBuffer = new MemoryStream(4096); // capture buffer for handler output (reused per frame)
 
         while (webSocket.State == WebSocketState.Open && !ct.IsCancellationRequested)
         {
-            var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(buffer), ct);
+            var result = await webSocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), ct);
 
             if (result.MessageType == WebSocketMessageType.Close)
             {
@@ -179,12 +192,12 @@ public sealed class BmwBinaryTransport
                 continue;
 
             // Process all complete frames in the receive buffer
-            int offset = 0;
+            int offset   = 0;
             int received = result.Count;
 
             while (offset + FrameSize <= received)
             {
-                var frameSpan = buffer.AsSpan(offset, FrameSize);
+                var frameSpan = receiveBuffer.AsSpan(offset, FrameSize);
                 DecodeFrame(frameSpan, out int opcode, out uint entityId);
                 offset += FrameSize;
 
@@ -197,7 +210,7 @@ public sealed class BmwBinaryTransport
                     if (offset + PayloadLengthSize > received)
                         break; // Incomplete frame — wait for more data
 
-                    int payloadLen = DecodePayloadLength(buffer.AsSpan(offset, PayloadLengthSize));
+                    int payloadLen = DecodePayloadLength(receiveBuffer.AsSpan(offset, PayloadLengthSize));
                     offset += PayloadLengthSize;
 
                     if (payloadLen > 0)
@@ -205,14 +218,72 @@ public sealed class BmwBinaryTransport
                         if (offset + payloadLen > received)
                             break; // Incomplete payload — wait for more data
 
-                        payload = new MemoryStream(buffer, offset, payloadLen, writable: false);
+                        payload = new MemoryStream(receiveBuffer, offset, payloadLen, writable: false);
                         offset += payloadLen;
                     }
                 }
 
-                // Branch-free dispatch: single array access
-                var handler = _jumpTable[opcode];
-                await handler(ctx, entityId, payload);
+                // ── Dispatch & capture response ──────────────────────────────────
+                // Reset the capture buffer and create a fresh PipeWriter over it.
+                // If the buffer has grown too large from a previous response, replace it
+                // to avoid holding onto excessive memory for the lifetime of the connection.
+                if (responseBuffer.Capacity > 65536)
+                {
+                    responseBuffer.Dispose();
+                    responseBuffer = new MemoryStream(4096);
+                }
+                else
+                {
+                    responseBuffer.SetLength(0);
+                }
+                var captureWriter = PipeWriter.Create(responseBuffer, new StreamPipeWriterOptions(leaveOpen: true));
+                var requestCtx    = ctx.CloneWithResponseBody(captureWriter);
+
+                try
+                {
+                    var handler = _jumpTable[opcode];
+                    await handler(requestCtx, entityId, payload);
+                    await captureWriter.FlushAsync(ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    throw; // Propagate cancellation to exit the outer loop
+                }
+                catch
+                {
+                    // Handler threw — clear any partial output; client receives empty payload
+                    responseBuffer.SetLength(0);
+                }
+                finally
+                {
+                    captureWriter.Complete();
+                }
+
+                // ── Build and send response frame ────────────────────────────────
+                // Layout: [6-byte frame header] [3-byte payload length] [payload bytes]
+                int responseLen = (int)responseBuffer.Length;
+                int totalLen    = FrameSize + PayloadLengthSize + responseLen;
+
+                var responseBuf = ArrayPool<byte>.Shared.Rent(totalLen);
+                try
+                {
+                    // Echo the same opcode and entityId so the client can correlate
+                    EncodeFrame(responseBuf, method, GetRoute(opcode), entityId);
+                    EncodePayloadLength(responseBuf.AsSpan(FrameSize), responseLen);
+                    if (responseLen > 0 && responseBuffer.TryGetBuffer(out var segment))
+                        segment.Array!.AsSpan(segment.Offset, responseLen)
+                            .CopyTo(responseBuf.AsSpan(FrameSize + PayloadLengthSize));
+
+                    await webSocket.SendAsync(
+                        responseBuf.AsMemory(0, totalLen),
+                        WebSocketMessageType.Binary,
+                        endOfMessage: true,
+                        ct);
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(responseBuf);
+                }
             }
         }
     }

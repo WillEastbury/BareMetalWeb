@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
@@ -436,37 +436,10 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
 
         try
         {
-            if (effectiveType.IsEnum)
-            {
-                if (value is IConvertible ic)
-                    return Enum.ToObject(effectiveType, ic.ToInt32(null));
-                return value;
-            }
+            if (effectiveType.IsEnum && value is IConvertible ic)
+                return Enum.ToObject(effectiveType, ic.ToInt32(null));
 
-            if (value is IConvertible conv)
-            {
-                return Type.GetTypeCode(effectiveType) switch
-                {
-                    TypeCode.Int32 => conv.ToInt32(null),
-                    TypeCode.Int64 => conv.ToInt64(null),
-                    TypeCode.Double => conv.ToDouble(null),
-                    TypeCode.Single => conv.ToSingle(null),
-                    TypeCode.Decimal => conv.ToDecimal(null),
-                    TypeCode.Boolean => conv.ToBoolean(null),
-                    TypeCode.String => conv.ToString(null),
-                    TypeCode.Byte => conv.ToByte(null),
-                    TypeCode.Int16 => conv.ToInt16(null),
-                    TypeCode.DateTime => conv.ToDateTime(null),
-                    TypeCode.UInt32 => conv.ToUInt32(null),
-                    TypeCode.UInt64 => conv.ToUInt64(null),
-                    TypeCode.SByte => conv.ToSByte(null),
-                    TypeCode.UInt16 => conv.ToUInt16(null),
-                    TypeCode.Char => conv.ToChar(null),
-                    _ => value
-                };
-            }
-
-            return value;
+            return Convert.ChangeType(value, effectiveType);
         }
         catch
         {

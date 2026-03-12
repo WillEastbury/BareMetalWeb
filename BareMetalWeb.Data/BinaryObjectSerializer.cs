@@ -1,4 +1,4 @@
-﻿using System.Buffers;
+using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
@@ -296,7 +296,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             case TypeKind.Enum:
             {
                 var enumUnderlying = shape.EnumUnderlying!;
-                var rawValue = ConvertEnumToUnderlying(value, Type.GetTypeCode(enumUnderlying));
+                var rawValue = value == null
+                    ? Convert.ChangeType(0, enumUnderlying)
+                    : Convert.ChangeType(value, enumUnderlying);
                 WriteValue(writer, enumUnderlying, rawValue, depth + 1);
                 return;
             }
@@ -477,7 +479,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             case TypeKind.Enum:
             {
                 var enumUnderlying = shape.EnumUnderlying!;
-                var rawValue = ConvertEnumToUnderlying(value, Type.GetTypeCode(enumUnderlying));
+                var rawValue = value == null
+                    ? Convert.ChangeType(0, enumUnderlying)
+                    : Convert.ChangeType(value, enumUnderlying);
                 WriteValue(ref writer, enumUnderlying, rawValue, depth + 1);
                 return;
             }
@@ -1187,82 +1191,16 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return PropertyAccessorFactory.BuildSetter(property);
     }
 
-    // AOT-safe: use FieldInfo directly instead of Expression.Compile (incompatible with NativeAOT).
-    // Cached per-type via TypeCache so FieldInfo.GetValue overhead is acceptable.
     private static Func<object, object?> CreateFieldGetter(FieldInfo field)
     {
-        return instance => field.GetValue(instance);
+        // AOT-safe: closure over FieldInfo instead of Expression.Compile()
+        return obj => field.GetValue(obj);
     }
 
     private static Action<object, object?> CreateFieldSetter(FieldInfo field)
     {
-        return (instance, value) => field.SetValue(instance, value);
-    }
-
-    /// <summary>
-    /// AOT-safe enum-to-underlying-type conversion. Replaces Convert.ChangeType(value, enumUnderlying).
-    /// </summary>
-    private static object ConvertEnumToUnderlying(object? value, TypeCode underlyingTypeCode)
-    {
-        if (value is IConvertible ic)
-        {
-            return underlyingTypeCode switch
-            {
-                TypeCode.Int32  => ic.ToInt32(null),
-                TypeCode.Int64  => ic.ToInt64(null),
-                TypeCode.Byte   => ic.ToByte(null),
-                TypeCode.Int16  => ic.ToInt16(null),
-                TypeCode.UInt32 => ic.ToUInt32(null),
-                TypeCode.UInt64 => ic.ToUInt64(null),
-                TypeCode.SByte  => ic.ToSByte(null),
-                TypeCode.UInt16 => ic.ToUInt16(null),
-                _ => ic.ToInt32(null)
-            };
-        }
-
-        return underlyingTypeCode switch
-        {
-            TypeCode.Int32  => 0,
-            TypeCode.Int64  => 0L,
-            TypeCode.Byte   => (byte)0,
-            TypeCode.Int16  => (short)0,
-            TypeCode.UInt32 => 0u,
-            TypeCode.UInt64 => 0uL,
-            TypeCode.SByte  => (sbyte)0,
-            TypeCode.UInt16 => (ushort)0,
-            _ => 0
-        };
-    }
-
-    /// <summary>
-    /// AOT-safe type conversion via IConvertible. Replaces Convert.ChangeType(value, targetType).
-    /// </summary>
-    private static object ConvertByTypeCode(IConvertible value, Type targetType)
-    {
-        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
-
-        if (underlying.IsEnum)
-            return Enum.ToObject(underlying, ConvertEnumToUnderlying(value, Type.GetTypeCode(Enum.GetUnderlyingType(underlying))));
-
-        return Type.GetTypeCode(underlying) switch
-        {
-            TypeCode.Int32    => value.ToInt32(null),
-            TypeCode.Int64    => value.ToInt64(null),
-            TypeCode.Double   => value.ToDouble(null),
-            TypeCode.Single   => value.ToSingle(null),
-            TypeCode.Decimal  => value.ToDecimal(null),
-            TypeCode.Boolean  => value.ToBoolean(null),
-            TypeCode.String   => value.ToString(null),
-            TypeCode.Byte     => value.ToByte(null),
-            TypeCode.Int16    => value.ToInt16(null),
-            TypeCode.DateTime => value.ToDateTime(null),
-            TypeCode.UInt32   => value.ToUInt32(null),
-            TypeCode.UInt64   => value.ToUInt64(null),
-            TypeCode.SByte    => value.ToSByte(null),
-            TypeCode.UInt16   => value.ToUInt16(null),
-            TypeCode.Char     => value.ToChar(null),
-            _ => value
-        };
+        // AOT-safe: closure over FieldInfo instead of Expression.Compile()
+        return (obj, val) => field.SetValue(obj, val);
     }
 
     private static uint GetSignatureHash(MemberSignature[] members)
@@ -1426,11 +1364,11 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             return;
         }
 
-        if (value is IConvertible ic)
+        if (value is IConvertible)
         {
             try
             {
-                var converted = ConvertByTypeCode(ic, member.MemberType);
+                var converted = Convert.ChangeType(value, member.MemberType);
                 member.Setter(instance, converted);
                 return;
             }

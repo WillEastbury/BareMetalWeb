@@ -1,7 +1,6 @@
-﻿using System;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.CompilerServices;
 using BareMetalWeb.Core;
@@ -306,34 +305,21 @@ public static class CalculatedFieldService
         return dependencies;
     }
 
-    // Cached PropertyInfo[] per type for BuildContext fallback (unregistered types).
-    private static readonly ConcurrentDictionary<Type, System.Reflection.PropertyInfo[]> _propertyCache = new();
-
-    private static Dictionary<string, object?> BuildContext(BaseDataObject instance, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
+    private static Dictionary<string, object?> BuildContext(BaseDataObject instance, Type type)
     {
-        // Use compiled layout for efficient field access when available
         var meta = DataScaffold.GetEntityByType(type);
-        if (meta != null)
-        {
-            var layout = EntityLayoutCompiler.GetOrCompile(meta);
-            var context = new Dictionary<string, object?>(layout.Fields.Length + 4);
-            context["Key"] = instance.Key;
-            foreach (var field in layout.Fields)
-            {
-                try { context[field.Name] = field.Getter(instance); }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"CalculatedFieldService: field '{field.Name}' getter failed: {ex.Message}"); context[field.Name] = null; }
-            }
-            return context;
-        }
+        if (meta == null)
+            return new Dictionary<string, object?> { ["Key"] = instance.Key };
 
-        // Fallback for unregistered types — cache PropertyInfo[] per type
-        var ctx = new Dictionary<string, object?>();
-        var props = _propertyCache.GetOrAdd(type, static t => t.GetProperties());
-        foreach (var prop in props)
+        var layout = EntityLayoutCompiler.GetOrCompile(meta);
+        var context = new Dictionary<string, object?>(layout.Fields.Length + 4);
+        context["Key"] = instance.Key;
+        foreach (var field in layout.Fields)
         {
-            ctx[prop.Name] = prop.GetValue(instance);
+            try { context[field.Name] = field.Getter(instance); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"CalculatedFieldService: field '{field.Name}' getter failed: {ex.Message}"); context[field.Name] = null; }
         }
-        return ctx;
+        return context;
     }
 
     private static bool HasCycle(
@@ -415,31 +401,17 @@ public static class CalculatedFieldService
         if (underlyingType == typeof(bool))
             return Convert.ToBoolean(value);
 
+        if (underlyingType == typeof(DateTime))
+            return Convert.ToDateTime(value);
+
         if (underlyingType.IsEnum)
         {
-            if (value is string s && DataScaffold.GetEnumLookup(underlyingType).TryGetValue(s, out var enumVal))
-                return enumVal;
-            if (value is IConvertible ic)
-                return Enum.ToObject(underlyingType, ic.ToInt32(null));
-            return value;
+            if (value is string es && DataScaffold.GetEnumLookup(underlyingType).TryGetValue(es, out var ev))
+                return ev;
+            if (value is IConvertible eic)
+                return Enum.ToObject(underlyingType, eic.ToInt32(null));
         }
 
-        if (value is IConvertible conv)
-        {
-            return Type.GetTypeCode(underlyingType) switch
-            {
-                TypeCode.Byte => conv.ToByte(null),
-                TypeCode.Int16 => conv.ToInt16(null),
-                TypeCode.UInt32 => conv.ToUInt32(null),
-                TypeCode.UInt64 => conv.ToUInt64(null),
-                TypeCode.SByte => conv.ToSByte(null),
-                TypeCode.UInt16 => conv.ToUInt16(null),
-                TypeCode.DateTime => conv.ToDateTime(null),
-                TypeCode.Char => conv.ToChar(null),
-                _ => value
-            };
-        }
-
-        return value;
+        return Convert.ChangeType(value, underlyingType);
     }
 }

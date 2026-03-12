@@ -215,9 +215,8 @@ public static class RouteRegistrationExtensions
             routeHandlers.BuildPageHandler(context =>
             {
                 var app = context.GetApp()!;
-                app.Metrics.GetMetricTable(out string[] tableColumns, out string[][] tableRows);
                 context.SetStringValue("title", "Metric Viewer");
-                context.AddTable(tableColumns, tableRows);
+                context.SetStringValue("message", app.Metrics.GetMetricGroupsHtml());
             })));
 
         host.RegisterRoute("GET /metrics/json", new RouteHandlerData(
@@ -275,26 +274,12 @@ public static class RouteRegistrationExtensions
             routeHandlers.LogsDownloadHandler));
 
         // Sample data generation
-        host.RegisterRoute("GET /admin/sample-data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Generate Sample Data", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
-            routeHandlers.SampleDataHandler));
-        host.RegisterRoute("POST /admin/sample-data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Generate Sample Data", "" }, "admin", false, 1),
-            routeHandlers.SampleDataPostHandler));
-
         // Template management
         host.RegisterRoute("GET /admin/reload-templates", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.ReloadTemplatesHandler));
 
         // Wipe all data — always registered; returns 419 if admin.allowWipeData setting is not configured
-        host.RegisterRoute("GET /admin/wipe-data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", true, 0, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "⚠️ Danger"),
-            routeHandlers.WipeDataHandler));
-        host.RegisterRoute("POST /admin/wipe-data", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Wipe All Data", "" }, "admin", false, 0),
-            routeHandlers.WipeDataPostHandler));
-
         // Entity designer — visual editor for creating virtual entity JSON definitions
         host.RegisterRoute("GET /admin/entity-designer", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Entity Designer", "" }, "admin", true, 2, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
@@ -1061,7 +1046,7 @@ public static class RouteRegistrationExtensions
                     entitySlug = root.TryGetProperty("entity", out var ep) ? ep.GetString() ?? string.Empty : string.Empty;
                     query = BuildQueryFromJson(root);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     context.Response.StatusCode = 400;
                     context.Response.ContentType = "application/json";
@@ -1118,7 +1103,7 @@ public static class RouteRegistrationExtensions
                             intent.Fields[prop.Name] = prop.Value.ValueKind == JsonValueKind.Null ? null : prop.Value.ToString();
                     }
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     context.Response.StatusCode = 400;
                     context.Response.ContentType = "application/json";
@@ -1320,7 +1305,9 @@ public static class RouteRegistrationExtensions
             {
                 ["name"] = f.Name,
                 ["label"] = f.Label,
-                ["type"] = f.Lookup != null ? FormFieldType.LookupList.ToString() : f.FieldType.ToString(),
+                ["type"] = f.Lookup != null ? FormFieldType.LookupList.ToString() :
+                           f.FieldType == FormFieldType.ChildList ? FormFieldType.CustomHtml.ToString() :
+                           f.FieldType.ToString(),
                 ["order"] = f.Order,
                 ["required"] = f.Required,
                 ["list"] = f.List,
@@ -1449,7 +1436,7 @@ public static class RouteRegistrationExtensions
             fd["subFields"] = DataScaffold.BuildSubFieldSchemas(f);
             if (f.FieldType == FormFieldType.Enum)
             {
-                var enumOptions = DataScaffold.BuildEnumOptions(f.ClrType);
+                var enumOptions = DataScaffold.BuildEnumOptions(f);
                 var enumArr = new object[enumOptions.Count];
                 for (int ei = 0; ei < enumOptions.Count; ei++)
                     enumArr[ei] = new { value = enumOptions[ei].Key, label = enumOptions[ei].Value };
@@ -1570,135 +1557,59 @@ public static class RouteRegistrationExtensions
         IPageInfoFactory pageInfoFactory)
     {
         // List all reports
-        host.RegisterRoute("GET /reports", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right, navLabel: "Reports", navSubGroup: "🔧 Tools"),
-            async context =>
-            {
-                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                if (user == null) { context.Response.Redirect("/login"); return; }
-                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
-
-                var reports = new List<ReportDefinition>(DataStoreProvider.Current.Query<ReportDefinition>(null));
-                reports.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
-                var csrfToken = CsrfProtection.EnsureToken(context);
-                var safeToken = WebUtility.HtmlEncode(csrfToken);
-                var nonce = context.GetCspNonce();
-                var safeNonce = WebUtility.HtmlEncode(nonce);
-
-                var sb = new StringBuilder(4096);
-                ReportHtmlRenderer.AppendChromeHead(sb, "Reports", safeNonce, safeToken);
-                ReportHtmlRenderer.AppendChromeNavbar(sb, host, safeNonce);
-                sb.Append("<div class=\"container-fluid py-4 px-4 bm-content\">");
-                sb.Append("<div class=\"card shadow-sm bm-page-card\">");
-                sb.Append("<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
-                sb.Append("<h1 class=\"h5 mb-0\"><i class=\"bi bi-bar-chart-fill\"></i> Reports</h1>");
-                sb.Append("<a href=\"/report-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New Report</a>");
-                sb.Append("</div><div class=\"card-body\">");
-
-                if (reports.Count == 0)
-                {
-                    sb.Append("<div class=\"text-center py-5 text-muted\">No reports defined yet. Create one via <a href=\"/report-definitions/create\">Report Definitions</a>.</div>");
-                }
-                else
-                {
-                    sb.Append("<div class=\"table-responsive\"><table class=\"table table-hover table-bordered align-middle mb-0\">");
-                    sb.Append("<thead class=\"table-light\"><tr><th>Name</th><th>Description</th><th>Root Entity</th><th></th></tr></thead><tbody>");
-                    foreach (var r in reports)
-                    {
-                        sb.Append("<tr><td><strong>");
-                        sb.Append(WebUtility.HtmlEncode(r.Name));
-                        sb.Append("</strong></td><td>");
-                        sb.Append(WebUtility.HtmlEncode(r.Description));
-                        sb.Append("</td><td><code>");
-                        sb.Append(WebUtility.HtmlEncode(r.RootEntity));
-                        sb.Append("</code></td><td><a class=\"btn btn-sm btn-primary\" href=\"/reports/");
-                        sb.Append(WebUtility.UrlEncode(r.Key.ToString()));
-                        sb.Append("\"><i class=\"bi bi-play-fill\"></i> Run</a></td></tr>");
-                    }
-                    sb.Append("</tbody></table></div>");
-                }
-
-                sb.Append("</div></div></div>");
-                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context);
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await context.Response.WriteAsync(sb.ToString());
-            }));
-
         // Run a report → HTML
-        host.RegisterRoute("GET /reports/{id}", new RouteHandlerData(
+        // ── GET /api/reports — JSON list of all report definitions ────────
+        host.RegisterRoute("GET /api/reports", new RouteHandlerData(
             pageInfoFactory.RawPage("admin", false),
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                if (user == null) { context.Response.Redirect("/login"); return; }
-                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
-                var id = GetRouteParam(context, "id");
-                if (string.IsNullOrWhiteSpace(id))
-                {
-                    context.Response.StatusCode = 400;
-                    await context.Response.WriteAsync("Missing report id.");
-                    return;
-                }
+                var reports = new List<ReportDefinition>(DataStoreProvider.Current.Query<ReportDefinition>(null));
+                reports.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
 
-                if (!uint.TryParse(id, out var parsedId))
+                context.Response.ContentType = "application/json";
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
                 {
-                    context.Response.StatusCode = 400;
-                    await context.Response.WriteAsync("Invalid report id.");
-                    return;
-                }
-
-                var def = await DataStoreProvider.Current.LoadAsync<ReportDefinition>(parsedId, context.RequestAborted).ConfigureAwait(false);
-                if (def == null)
-                {
-                    context.Response.StatusCode = 404;
-                    await context.Response.WriteAsync("Report not found.");
-                    return;
-                }
-
-                var parameters = def.Parameters;
-                Dictionary<string, string>? runtimeParams = null;
-                if (parameters.Count > 0)
-                {
-                    runtimeParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                    foreach (var p in parameters)
+                    w.WriteStartArray();
+                    foreach (var r in reports)
                     {
-                        var val = context.HttpRequest.Query.TryGetValue(p.Name, out var qv) ? qv.ToString() : p.DefaultValue;
-                        runtimeParams[p.Name] = val;
+                        w.WriteStartObject();
+                        w.WriteNumber("id", r.Key);
+                        w.WriteString("name", r.Name);
+                        w.WriteString("description", r.Description);
+                        w.WriteString("rootEntity", r.RootEntity);
+                        w.WriteNumber("parameterCount", r.Parameters.Count);
+
+                        w.WritePropertyName("parameters");
+                        w.WriteStartArray();
+                        foreach (var p in r.Parameters)
+                        {
+                            w.WriteStartObject();
+                            w.WriteString("name", p.Name);
+                            w.WriteString("label", p.Label);
+                            w.WriteString("type", p.Type);
+                            w.WriteString("defaultValue", p.DefaultValue);
+                            if (p.Options != null && p.Options.Count > 0)
+                            {
+                                w.WritePropertyName("options");
+                                w.WriteStartArray();
+                                foreach (var o in p.Options) w.WriteStringValue(o);
+                                w.WriteEndArray();
+                            }
+                            if (!string.IsNullOrEmpty(p.FieldSource))
+                                w.WriteString("fieldSource", p.FieldSource);
+                            w.WriteEndObject();
+                        }
+                        w.WriteEndArray();
+
+                        w.WriteEndObject();
                     }
+                    w.WriteEndArray();
                 }
-
-                var executor = new ReportExecutor(DataStoreProvider.Current);
-                ReportResult result;
-                try
-                {
-                    result = await executor.ExecuteAsync(def, runtimeParams, context.RequestAborted).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    context.Response.StatusCode = 500;
-                    context.Response.ContentType = "text/plain";
-                    await context.Response.WriteAsync($"Error executing report: {WebUtility.HtmlEncode(ex.Message)}");
-                    return;
-                }
-
-                context.Response.ContentType = "text/html; charset=utf-8";
-                var pipeWriter = System.IO.Pipelines.PipeWriter.Create(context.Response.Body);
-                await ReportHtmlRenderer.RenderAsync(
-                    pipeWriter,
-                    result,
-                    def.Name,
-                    def.Description,
-                    parameters.Count > 0 ? parameters : null,
-                    runtimeParams,
-                    id,
-                    host,
-                    context.GetCspNonce(),
-                    CsrfProtection.EnsureToken(context),
-                    context);
-                await pipeWriter.CompleteAsync();
             }));
 
         // JSON results via API
@@ -1755,7 +1666,7 @@ public static class RouteRegistrationExtensions
                 {
                     result = await executor.ExecuteAsync(def, runtimeParams, context.RequestAborted).ConfigureAwait(false);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     context.Response.StatusCode = 500;
                     context.Response.ContentType = "application/json";
@@ -2288,49 +2199,6 @@ public static class RouteRegistrationExtensions
             sb.Append("</ul></li>");
         }
     }
-
-    internal static void AppendVNextLeftNavItems(StringBuilder sb, List<IMenuOption> options)
-    {
-        var leftAligned = new List<IMenuOption>();
-        foreach (var o in options)
-        {
-            if (!o.RightAligned && o.ShowOnNavBar)
-                leftAligned.Add(o);
-        }
-        var renderedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var option in leftAligned)
-        {
-            if (string.IsNullOrWhiteSpace(option.Group))
-            {
-                var cssClass = option.HighlightAsButton
-                    ? $"btn {(string.IsNullOrWhiteSpace(option.ColorClass) ? "btn-outline-light" : option.ColorClass)} btn-sm ms-2"
-                    : string.IsNullOrWhiteSpace(option.ColorClass) ? "nav-link" : $"nav-link {option.ColorClass}";
-                sb.Append($"<li class=\"nav-item\"><a class=\"{WebUtility.HtmlEncode(cssClass)}\" href=\"{WebUtility.HtmlEncode(option.Href)}\">{WebUtility.HtmlEncode(option.Label)}</a></li>");
-                continue;
-            }
-
-            if (renderedGroups.Contains(option.Group))
-                continue;
-
-            renderedGroups.Add(option.Group);
-            var groupItems = new List<IMenuOption>();
-            foreach (var o in leftAligned)
-            {
-                if (string.Equals(o.Group, option.Group, StringComparison.OrdinalIgnoreCase))
-                    groupItems.Add(o);
-            }
-
-            sb.Append($"<li class=\"nav-item dropdown\"><a class=\"nav-link dropdown-toggle\" href=\"#\" role=\"button\" data-bs-toggle=\"dropdown\" aria-expanded=\"false\">{WebUtility.HtmlEncode(option.Group)}</a>");
-            sb.Append("<ul class=\"dropdown-menu\">");
-            foreach (var item in groupItems)
-            {
-                sb.Append($"<li><a class=\"dropdown-item\" href=\"{WebUtility.HtmlEncode(item.Href)}\">{WebUtility.HtmlEncode(item.Label)}</a></li>");
-            }
-            sb.Append("</ul></li>");
-        }
-    }
-
     /// <summary>Parses a POST /query JSON body into a <see cref="QueryDefinition"/>.</summary>
     private static QueryDefinition? BuildQueryFromJson(JsonElement root)
     {
@@ -2452,102 +2320,7 @@ public static class RouteRegistrationExtensions
         IPageInfoFactory pageInfoFactory)
     {
         // ── GET /dashboards — HTML listing ───────────────────────────────────
-        host.RegisterRoute("GET /dashboards", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right,
-                navLabel: "Dashboards", navSubGroup: "🔧 Tools"),
-            async context =>
-            {
-                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                if (user == null) { context.Response.Redirect("/login"); return; }
-                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
-                { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
-
-                var dashboards = new List<DashboardDefinition>(DataStoreProvider.Current.Query<DashboardDefinition>(null));
-                dashboards.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.Ordinal));
-                var nonce = context.GetCspNonce();
-                var safeNonce = WebUtility.HtmlEncode(nonce);
-                var safeToken = WebUtility.HtmlEncode(CsrfProtection.EnsureToken(context));
-
-                var sb = new StringBuilder(4096);
-                ReportHtmlRenderer.AppendChromeHead(sb, "Dashboards", safeNonce, safeToken);
-                ReportHtmlRenderer.AppendChromeNavbar(sb, host, safeNonce);
-                sb.Append("<div class=\"container-fluid py-4 px-4 bm-content\">");
-                sb.Append("<div class=\"card shadow-sm bm-page-card\">");
-                sb.Append("<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
-                sb.Append("<h1 class=\"h5 mb-0\"><i class=\"bi bi-speedometer2\"></i> Dashboards</h1>");
-                sb.Append("<a href=\"/dashboard-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New Dashboard</a>");
-                sb.Append("</div><div class=\"card-body\">");
-
-                if (dashboards.Count == 0)
-                {
-                    sb.Append("<div class=\"text-center py-5 text-muted\">No dashboards defined yet. Create one via <a href=\"/dashboard-definitions/create\">Dashboard Definitions</a>.</div>");
-                }
-                else
-                {
-                    sb.Append("<div class=\"row g-3\">");
-                    foreach (var d in dashboards)
-                    {
-                        var tiles = d.Tiles;
-                        sb.Append("<div class=\"col-sm-6 col-md-4 col-lg-3\">");
-                        sb.Append("<div class=\"card h-100\">");
-                        sb.Append("<div class=\"card-body\">");
-                        sb.Append("<h5 class=\"card-title\"><i class=\"bi bi-speedometer2 me-2\"></i>");
-                        sb.Append(WebUtility.HtmlEncode(d.Name));
-                        sb.Append("</h5>");
-                        if (!string.IsNullOrWhiteSpace(d.Description))
-                        {
-                            sb.Append("<p class=\"card-text text-muted small\">");
-                            sb.Append(WebUtility.HtmlEncode(d.Description));
-                            sb.Append("</p>");
-                        }
-                        sb.Append("<p class=\"card-text\"><small class=\"text-muted\">");
-                        sb.Append(tiles.Count);
-                        sb.Append(" KPI tile");
-                        if (tiles.Count != 1) sb.Append('s');
-                        sb.Append("</small></p>");
-                        sb.Append("</div><div class=\"card-footer\">");
-                        sb.Append("<a href=\"/dashboards/");
-                        sb.Append(WebUtility.UrlEncode(d.Key.ToString()));
-                        sb.Append("\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-eye\"></i> View</a>");
-                        sb.Append("</div></div></div>");
-                    }
-                    sb.Append("</div>");
-                }
-
-                sb.Append("</div></div></div>");
-                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context);
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await context.Response.WriteAsync(sb.ToString());
-            }));
-
         // ── GET /dashboards/{id} — HTML dashboard render ─────────────────────
-        host.RegisterRoute("GET /dashboards/{id}", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", false),
-            async context =>
-            {
-                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                if (user == null) { context.Response.Redirect("/login"); return; }
-                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
-                { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
-
-                var id = GetRouteParam(context, "id");
-                if (string.IsNullOrWhiteSpace(id) || !uint.TryParse(id, out var dashId))
-                { context.Response.StatusCode = 400; await context.Response.WriteAsync("Invalid dashboard id."); return; }
-
-                var def = await DataStoreProvider.Current.LoadAsync<DashboardDefinition>(dashId, context.RequestAborted).ConfigureAwait(false);
-                if (def == null)
-                { context.Response.StatusCode = 404; await context.Response.WriteAsync("Dashboard not found."); return; }
-
-                var nonce = context.GetCspNonce();
-                var safeNonce = WebUtility.HtmlEncode(nonce);
-                var safeToken = WebUtility.HtmlEncode(CsrfProtection.EnsureToken(context));
-
-                var pipeWriter = System.IO.Pipelines.PipeWriter.Create(context.Response.Body);
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await DashboardHtmlRenderer.RenderAsync(pipeWriter, def, host, safeNonce, safeToken, context, context.RequestAborted);
-                await pipeWriter.CompleteAsync();
-            }));
-
         // ── GET /api/dashboards — JSON list ──────────────────────────────────
         host.RegisterRoute("GET /api/dashboards", new RouteHandlerData(
             pageInfoFactory.RawPage("admin", false),
@@ -2630,6 +2403,620 @@ public static class RouteRegistrationExtensions
             }));
     }
 
+    // ── Module Editor Routes ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Registers JSON API routes for the Module Editor.
+    /// <list type="bullet">
+    ///   <item><c>GET /api/modules</c>  — list all modules</item>
+    ///   <item><c>GET /api/modules/{id}</c>  — module detail with resolved owned artifacts</item>
+    ///   <item><c>PUT /api/modules/{id}</c>  — update module owned-slug CSVs</item>
+    /// </list>
+    /// </summary>
+    public static void RegisterModuleRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        // ── GET /api/modules — JSON list of all modules ──────────────────────
+        host.RegisterRoute("GET /api/modules", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
+
+                var modules = await ModuleRegistry.GetModulesAsync(context.RequestAborted).ConfigureAwait(false);
+                var list = new List<Dictionary<string, object?>>(modules.Count);
+                foreach (var m in modules)
+                {
+                    list.Add(new Dictionary<string, object?>
+                    {
+                        ["moduleId"] = m.ModuleId,
+                        ["name"] = m.Name,
+                        ["version"] = m.Version,
+                        ["navGroup"] = m.NavGroup,
+                        ["isolation"] = m.Isolation,
+                        ["enabled"] = m.Enabled,
+                        ["entityCount"] = m.EntitySlugs.Count,
+                        ["reportCount"] = m.ReportSlugs.Count,
+                        ["actionCount"] = m.ActionKeys.Count,
+                        ["permissionCount"] = m.RequiredPermissions.Count
+                    });
+                }
+                context.Response.ContentType = "application/json";
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, list);
+                }
+            }));
+
+        // ── GET /api/modules/{id} — module detail with owned artifacts ───────
+        host.RegisterRoute("GET /api/modules/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
+
+                var moduleId = GetRouteParam(context, "id") ?? string.Empty;
+                var modules = await ModuleRegistry.GetModulesAsync(context.RequestAborted).ConfigureAwait(false);
+                ModuleInfo? target = null;
+                foreach (var m in modules)
+                {
+                    if (string.Equals(m.ModuleId, moduleId, StringComparison.OrdinalIgnoreCase))
+                    { target = m; break; }
+                }
+                if (target == null)
+                { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Module not found\"}"); return; }
+
+                // Resolve owned entity definitions with their field schemas
+                var entities = new List<Dictionary<string, object?>>();
+                foreach (var slug in target.EntitySlugs)
+                {
+                    if (!DataScaffold.TryGetEntity(slug, out var meta)) continue;
+                    var fields = new List<Dictionary<string, object?>>();
+                    foreach (var f in meta.Fields)
+                    {
+                        fields.Add(new Dictionary<string, object?>
+                        {
+                            ["name"] = f.Name,
+                            ["label"] = f.Label,
+                            ["fieldType"] = f.FieldType.ToString(),
+                            ["required"] = f.Required,
+                            ["indexed"] = f.IsIndexed,
+                            ["order"] = f.Order
+                        });
+                    }
+                    entities.Add(new Dictionary<string, object?>
+                    {
+                        ["slug"] = slug,
+                        ["name"] = meta.Name,
+                        ["showOnNav"] = meta.ShowOnNav,
+                        ["navGroup"] = meta.NavGroup,
+                        ["navOrder"] = meta.NavOrder,
+                        ["permissions"] = meta.Permissions,
+                        ["fieldCount"] = meta.Fields.Count,
+                        ["fields"] = fields
+                    });
+                }
+
+                // Resolve owned reports
+                var reports = new List<Dictionary<string, object?>>();
+                foreach (var slug in target.ReportSlugs)
+                {
+                    if (!DataScaffold.TryGetEntity("report-definitions", out var reportMeta)) break;
+                    var reportItems = await reportMeta.Handlers.QueryAsync(null, context.RequestAborted).ConfigureAwait(false);
+                    foreach (var item in reportItems)
+                    {
+                        var name = reportMeta.FieldsByName.TryGetValue("Name", out var nf) ? nf.GetValueFn?.Invoke(item)?.ToString() : null;
+                        var rootEntity = reportMeta.FieldsByName.TryGetValue("RootEntity", out var rf) ? rf.GetValueFn?.Invoke(item)?.ToString() : null;
+                        if (string.Equals(name, slug, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(item.Key.ToString(), slug, StringComparison.OrdinalIgnoreCase))
+                        {
+                            reports.Add(new Dictionary<string, object?>
+                            {
+                                ["id"] = item.Key,
+                                ["name"] = name,
+                                ["rootEntity"] = rootEntity
+                            });
+                        }
+                    }
+                }
+
+                // Resolve owned actions
+                var actions = new List<Dictionary<string, object?>>();
+                foreach (var key in target.ActionKeys)
+                {
+                    if (!DataScaffold.TryGetEntity("action-definitions", out var actionMeta)) break;
+                    var actionItems = await actionMeta.Handlers.QueryAsync(null, context.RequestAborted).ConfigureAwait(false);
+                    foreach (var item in actionItems)
+                    {
+                        var name = actionMeta.FieldsByName.TryGetValue("Name", out var nf) ? nf.GetValueFn?.Invoke(item)?.ToString() : null;
+                        if (string.Equals(name, key, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(item.Key.ToString(), key, StringComparison.OrdinalIgnoreCase))
+                        {
+                            actions.Add(new Dictionary<string, object?>
+                            {
+                                ["id"] = item.Key,
+                                ["name"] = name,
+                                ["entityId"] = actionMeta.FieldsByName.TryGetValue("EntityId", out var ef) ? ef.GetValueFn?.Invoke(item)?.ToString() : null
+                            });
+                        }
+                    }
+                }
+
+                // Build response
+                context.Response.ContentType = "application/json";
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_indentedWriterOptions))
+                {
+                    w.WriteStartObject();
+                    w.WriteString("moduleId", target.ModuleId);
+                    w.WriteString("name", target.Name);
+                    w.WriteString("version", target.Version);
+                    w.WriteString("navGroup", target.NavGroup);
+                    w.WriteString("isolation", target.Isolation);
+                    w.WriteBoolean("enabled", target.Enabled);
+
+                    w.WritePropertyName("entitySlugs");
+                    JsonWriterHelper.WriteValue(w, target.EntitySlugs);
+                    w.WritePropertyName("actionKeys");
+                    JsonWriterHelper.WriteValue(w, target.ActionKeys);
+                    w.WritePropertyName("reportSlugs");
+                    JsonWriterHelper.WriteValue(w, target.ReportSlugs);
+                    w.WritePropertyName("requiredPermissions");
+                    JsonWriterHelper.WriteValue(w, target.RequiredPermissions);
+                    w.WritePropertyName("dependencies");
+                    JsonWriterHelper.WriteValue(w, target.Dependencies);
+
+                    w.WritePropertyName("entities");
+                    JsonWriterHelper.WriteValue(w, entities);
+                    w.WritePropertyName("reports");
+                    JsonWriterHelper.WriteValue(w, reports);
+                    w.WritePropertyName("actions");
+                    JsonWriterHelper.WriteValue(w, actions);
+
+                    w.WriteEndObject();
+                }
+            }));
+
+        // ── PUT /api/modules/{id} — update module ────────────────────────────
+        host.RegisterRoute("PUT /api/modules/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
+
+                if (!CsrfProtection.ValidateApiToken(context))
+                { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"CSRF validation failed\"}"); return; }
+
+                var moduleId = GetRouteParam(context, "id") ?? string.Empty;
+                if (!DataScaffold.TryGetEntity("modules", out var meta))
+                { context.Response.StatusCode = 500; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Module entity not registered\"}"); return; }
+
+                // Find the existing module record
+                var items = await meta.Handlers.QueryAsync(null, context.RequestAborted).ConfigureAwait(false);
+                BaseDataObject? existing = null;
+                foreach (var item in items)
+                {
+                    if (meta.FieldsByName.TryGetValue("ModuleId", out var idField))
+                    {
+                        var val = idField.GetValueFn?.Invoke(item)?.ToString();
+                        if (string.Equals(val, moduleId, StringComparison.OrdinalIgnoreCase))
+                        { existing = item; break; }
+                    }
+                }
+                if (existing == null)
+                { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Module not found\"}"); return; }
+
+                // Parse JSON body and apply field updates
+                using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, default, context.RequestAborted).ConfigureAwait(false);
+                var root = doc.RootElement;
+
+                void TrySetField(string fieldName, JsonElement parent)
+                {
+                    if (!parent.TryGetProperty(fieldName, out var prop) &&
+                        !parent.TryGetProperty(char.ToLowerInvariant(fieldName[0]) + fieldName[1..], out prop))
+                        return;
+                    if (!meta.FieldsByName.TryGetValue(fieldName, out var field)) return;
+                    if (field.SetValueFn == null) return;
+
+                    if (prop.ValueKind == JsonValueKind.True || prop.ValueKind == JsonValueKind.False)
+                        field.SetValueFn(existing, prop.GetBoolean());
+                    else if (prop.ValueKind == JsonValueKind.String)
+                        field.SetValueFn(existing, prop.GetString());
+                    else if (prop.ValueKind == JsonValueKind.Array)
+                    {
+                        // Convert JSON array to CSV
+                        var parts = new List<string>();
+                        foreach (var el in prop.EnumerateArray())
+                        {
+                            var s = el.GetString();
+                            if (!string.IsNullOrWhiteSpace(s)) parts.Add(s);
+                        }
+                        field.SetValueFn(existing, string.Join(",", parts));
+                    }
+                }
+
+                TrySetField("Name", root);
+                TrySetField("Version", root);
+                TrySetField("NavGroup", root);
+                TrySetField("Isolation", root);
+                TrySetField("Enabled", root);
+                TrySetField("EntitySlugs", root);
+                TrySetField("ActionKeys", root);
+                TrySetField("ReportSlugs", root);
+                TrySetField("RequiredPermissions", root);
+                TrySetField("Dependencies", root);
+
+                await meta.Handlers.SaveAsync(existing, context.RequestAborted).ConfigureAwait(false);
+                ModuleRegistry.Invalidate();
+
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"ok\":true}");
+            }));
+    }
+
+    // ── Chat API Routes ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Registers JSON API routes for the Chat feature.
+    /// <list type="bullet">
+    ///   <item><c>GET  /api/chat/sessions</c> — list sessions for current user</item>
+    ///   <item><c>POST /api/chat/sessions</c> — create a new session</item>
+    ///   <item><c>GET  /api/chat/sessions/{id}</c> — session detail with messages</item>
+    ///   <item><c>DELETE /api/chat/sessions/{id}</c> — delete a session</item>
+    ///   <item><c>POST /api/chat/sessions/{id}/messages</c> — send message, get AI response</item>
+    ///   <item><c>GET  /api/chat/sessions/{id}/messages</c> — paginated message history</item>
+    /// </list>
+    /// </summary>
+    public static void RegisterChatRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        var raw = pageInfoFactory.RawPage("", false);
+
+        // ── GET /api/chat/sessions — list user's sessions ────────────────────
+        host.RegisterRoute("GET /api/chat/sessions", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            var query = new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "UserName", Operator = QueryOperator.Equals, Value = user.UserName }
+                },
+                Sorts = new List<SortClause>
+                {
+                    new() { Field = "UpdatedAtUtc", Direction = SortDirection.Desc }
+                },
+                Top = 50
+            };
+            var sessions = DataStoreProvider.Current.Query<Runtime.ChatSession>(query).ToList();
+
+            context.Response.ContentType = "application/json";
+            var payload = new Dictionary<string, object?>[sessions.Count];
+            for (int i = 0; i < sessions.Count; i++)
+            {
+                var s = sessions[i];
+                payload[i] = new Dictionary<string, object?>
+                {
+                    ["id"] = s.Key,
+                    ["title"] = s.Title,
+                    ["createdAtUtc"] = s.CreatedAtUtc,
+                    ["updatedAtUtc"] = s.UpdatedAtUtc,
+                    ["messageCount"] = s.MessageCount,
+                    ["status"] = s.Status
+                };
+            }
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                JsonWriterHelper.WriteValue(w, payload);
+            }
+        }));
+
+        // ── POST /api/chat/sessions — create a new session ───────────────────
+        host.RegisterRoute("POST /api/chat/sessions", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            if (!CsrfProtection.ValidateApiToken(context))
+            { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"CSRF validation failed\"}"); return; }
+
+            string title = "New Chat";
+            if (context.HttpRequest.ContentLength > 0)
+            {
+                using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, default, context.RequestAborted).ConfigureAwait(false);
+                if (doc.RootElement.TryGetProperty("title", out var titleProp))
+                    title = titleProp.GetString() ?? title;
+            }
+
+            var session = new Runtime.ChatSession
+            {
+                UserName = user.UserName,
+                Title = title,
+                CreatedAtUtc = DateTime.UtcNow,
+                UpdatedAtUtc = DateTime.UtcNow,
+                MessageCount = 0,
+                Status = "active"
+            };
+            await DataStoreProvider.Current.SaveAsync(session, context.RequestAborted).ConfigureAwait(false);
+
+            context.Response.StatusCode = 201;
+            context.Response.ContentType = "application/json";
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                w.WriteStartObject();
+                w.WriteNumber("id", session.Key);
+                w.WriteString("title", session.Title);
+                w.WriteString("createdAtUtc", session.CreatedAtUtc);
+                w.WriteEndObject();
+            }
+        }));
+
+        // ── GET /api/chat/sessions/{id} — session detail with messages ───────
+        host.RegisterRoute("GET /api/chat/sessions/{id}", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            var idStr = GetRouteParam(context, "id");
+            if (!uint.TryParse(idStr, out var sessionId))
+            { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Invalid session id\"}"); return; }
+
+            var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            if (session == null || !string.Equals(session.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Session not found\"}"); return; }
+
+            var msgQuery = new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "SessionId", Operator = QueryOperator.Equals, Value = sessionId }
+                },
+                Sorts = new List<SortClause>
+                {
+                    new() { Field = "TimestampUtc", Direction = SortDirection.Asc }
+                },
+                Top = 200
+            };
+            var messages = DataStoreProvider.Current.Query<Runtime.ChatMessage>(msgQuery).ToList();
+
+            context.Response.ContentType = "application/json";
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                w.WriteStartObject();
+                w.WriteNumber("id", session.Key);
+                w.WriteString("title", session.Title);
+                w.WriteString("status", session.Status);
+                w.WriteString("createdAtUtc", session.CreatedAtUtc);
+                w.WriteString("updatedAtUtc", session.UpdatedAtUtc);
+                w.WriteNumber("messageCount", session.MessageCount);
+
+                w.WritePropertyName("messages");
+                w.WriteStartArray();
+                foreach (var m in messages)
+                {
+                    w.WriteStartObject();
+                    w.WriteNumber("id", m.Key);
+                    w.WriteString("role", m.Role);
+                    w.WriteString("content", m.Content);
+                    w.WriteString("timestampUtc", m.TimestampUtc);
+                    w.WriteNumber("tokenCount", m.TokenCount);
+                    w.WriteNumber("latencyMs", m.LatencyMs);
+                    w.WriteString("resolvedIntent", m.ResolvedIntent);
+                    w.WriteNumber("confidence", m.Confidence);
+                    w.WriteEndObject();
+                }
+                w.WriteEndArray();
+                w.WriteEndObject();
+            }
+        }));
+
+        // ── DELETE /api/chat/sessions/{id} — delete a session ────────────────
+        host.RegisterRoute("DELETE /api/chat/sessions/{id}", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            if (!CsrfProtection.ValidateApiToken(context))
+            { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"CSRF validation failed\"}"); return; }
+
+            var idStr = GetRouteParam(context, "id");
+            if (!uint.TryParse(idStr, out var sessionId))
+            { context.Response.StatusCode = 400; return; }
+
+            var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            if (session == null || !string.Equals(session.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            { context.Response.StatusCode = 404; return; }
+
+            // Delete all messages in the session
+            var msgQuery = new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "SessionId", Operator = QueryOperator.Equals, Value = sessionId }
+                }
+            };
+            var messages = DataStoreProvider.Current.Query<Runtime.ChatMessage>(msgQuery).ToList();
+            foreach (var msg in messages)
+                await DataStoreProvider.Current.DeleteAsync<Runtime.ChatMessage>(msg.Key, context.RequestAborted).ConfigureAwait(false);
+
+            await DataStoreProvider.Current.DeleteAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync("{\"ok\":true}");
+        }));
+
+        // ── POST /api/chat/sessions/{id}/messages — send message, get AI reply ─
+        host.RegisterRoute("POST /api/chat/sessions/{id}/messages", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            if (!CsrfProtection.ValidateApiToken(context))
+            { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"CSRF validation failed\"}"); return; }
+
+            var idStr = GetRouteParam(context, "id");
+            if (!uint.TryParse(idStr, out var sessionId))
+            { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Invalid session id\"}"); return; }
+
+            var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            if (session == null || !string.Equals(session.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Session not found\"}"); return; }
+
+            using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, default, context.RequestAborted).ConfigureAwait(false);
+            var content = doc.RootElement.TryGetProperty("content", out var cp)
+                ? cp.GetString() ?? ""
+                : doc.RootElement.TryGetProperty("message", out var mp)
+                    ? mp.GetString() ?? ""
+                    : "";
+
+            if (string.IsNullOrWhiteSpace(content))
+            { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Missing message content\"}"); return; }
+
+            // Save user message
+            var userMsg = new Runtime.ChatMessage
+            {
+                SessionId = sessionId,
+                Role = "user",
+                Content = content,
+                TimestampUtc = DateTime.UtcNow,
+                TokenCount = EstimateTokens(content)
+            };
+            await DataStoreProvider.Current.SaveAsync(userMsg, context.RequestAborted).ConfigureAwait(false);
+
+            // Invoke the IntelligenceOrchestrator
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            Intelligence.ChatResponse aiResponse;
+            try
+            {
+                var orchestrator = AgentApiHandlers.GetOrCreateOrchestrator();
+                aiResponse = await orchestrator.ProcessAsync(content, context.RequestAborted).ConfigureAwait(false);
+            }
+            catch
+            {
+                aiResponse = new Intelligence.ChatResponse("Sorry, an error occurred processing your request.", "error", 0f);
+            }
+            sw.Stop();
+
+            // Save assistant message
+            var assistantMsg = new Runtime.ChatMessage
+            {
+                SessionId = sessionId,
+                Role = "assistant",
+                Content = aiResponse.Message,
+                TimestampUtc = DateTime.UtcNow,
+                TokenCount = EstimateTokens(aiResponse.Message),
+                LatencyMs = (int)sw.ElapsedMilliseconds,
+                ResolvedIntent = aiResponse.ResolvedIntent,
+                Confidence = (decimal)aiResponse.Confidence
+            };
+            await DataStoreProvider.Current.SaveAsync(assistantMsg, context.RequestAborted).ConfigureAwait(false);
+
+            // Update session
+            session.MessageCount += 2;
+            session.UpdatedAtUtc = DateTime.UtcNow;
+            if (session.MessageCount == 2 && session.Title == "New Chat")
+                session.Title = content.Length > 60 ? content[..57] + "..." : content;
+            await DataStoreProvider.Current.SaveAsync(session, context.RequestAborted).ConfigureAwait(false);
+
+            // Return the assistant response
+            context.Response.ContentType = "application/json";
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                w.WriteStartObject();
+                w.WriteStartObject("userMessage");
+                w.WriteNumber("id", userMsg.Key);
+                w.WriteString("role", "user");
+                w.WriteString("content", content);
+                w.WriteString("timestampUtc", userMsg.TimestampUtc);
+                w.WriteEndObject();
+
+                w.WriteStartObject("assistantMessage");
+                w.WriteNumber("id", assistantMsg.Key);
+                w.WriteString("role", "assistant");
+                w.WriteString("content", aiResponse.Message);
+                w.WriteString("timestampUtc", assistantMsg.TimestampUtc);
+                w.WriteNumber("latencyMs", assistantMsg.LatencyMs);
+                w.WriteString("resolvedIntent", aiResponse.ResolvedIntent);
+                w.WriteNumber("confidence", assistantMsg.Confidence);
+                w.WriteEndObject();
+                w.WriteEndObject();
+            }
+        }));
+
+        // ── GET /api/chat/sessions/{id}/messages — paginated history ─────────
+        host.RegisterRoute("GET /api/chat/sessions/{id}/messages", new RouteHandlerData(raw, async context =>
+        {
+            var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+            if (user == null) { context.Response.StatusCode = 401; return; }
+
+            var idStr = GetRouteParam(context, "id");
+            if (!uint.TryParse(idStr, out var sessionId))
+            { context.Response.StatusCode = 400; return; }
+
+            var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
+            if (session == null || !string.Equals(session.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            { context.Response.StatusCode = 404; return; }
+
+            int skip = 0, top = 50;
+            if (context.HttpRequest.Query.TryGetValue("skip", out var skipVal) && int.TryParse(skipVal.FirstOrDefault(), out var s)) skip = s;
+            if (context.HttpRequest.Query.TryGetValue("top", out var topVal) && int.TryParse(topVal.FirstOrDefault(), out var t)) top = Math.Min(t, 200);
+
+            var msgQuery = new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "SessionId", Operator = QueryOperator.Equals, Value = sessionId }
+                },
+                Sorts = new List<SortClause>
+                {
+                    new() { Field = "TimestampUtc", Direction = SortDirection.Asc }
+                },
+                Skip = skip,
+                Top = top
+            };
+            var messages = DataStoreProvider.Current.Query<Runtime.ChatMessage>(msgQuery).ToList();
+
+            context.Response.ContentType = "application/json";
+            var payload = new Dictionary<string, object?>[messages.Count];
+            for (int i = 0; i < messages.Count; i++)
+            {
+                var m = messages[i];
+                payload[i] = new Dictionary<string, object?>
+                {
+                    ["id"] = m.Key,
+                    ["role"] = m.Role,
+                    ["content"] = m.Content,
+                    ["timestampUtc"] = m.TimestampUtc,
+                    ["tokenCount"] = m.TokenCount,
+                    ["latencyMs"] = m.LatencyMs,
+                    ["resolvedIntent"] = m.ResolvedIntent,
+                    ["confidence"] = m.Confidence
+                };
+            }
+            await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+            {
+                JsonWriterHelper.WriteValue(w, payload);
+            }
+        }));
+    }
+
+    /// <summary>Rough token estimate: ~4 chars per token.</summary>
+    private static int EstimateTokens(string text) => (text.Length + 3) / 4;
+
     // ── View Engine Routes ────────────────────────────────────────────────────
 
     /// <summary>
@@ -2650,118 +3037,7 @@ public static class RouteRegistrationExtensions
         var _engine = new ViewEngine();
 
         // ── GET /views ── list all view definitions ───────────────────────────
-        host.RegisterRoute("GET /views", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", true, navGroup: "Admin", navAlignment: NavAlignment.Right,
-                navLabel: "Views", navSubGroup: "🔧 Tools"),
-            async context =>
-            {
-                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                if (user == null) { context.Response.Redirect("/login"); return; }
-                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
-
-                var views = new List<ViewDefinition>(DataStoreProvider.Current.Query<ViewDefinition>(null));
-                views.Sort((a, b) => string.Compare(a.ViewName, b.ViewName, StringComparison.Ordinal));
-                var csrfToken = CsrfProtection.EnsureToken(context);
-                var safeToken = WebUtility.HtmlEncode(csrfToken);
-                var nonce = context.GetCspNonce();
-                var safeNonce = WebUtility.HtmlEncode(nonce);
-
-                var sb = new StringBuilder(4096);
-                ReportHtmlRenderer.AppendChromeHead(sb, "Views", safeNonce, safeToken);
-                ReportHtmlRenderer.AppendChromeNavbar(sb, host, safeNonce);
-                sb.Append("<div class=\"container-fluid py-4 px-4 bm-content\">");
-                sb.Append("<div class=\"card shadow-sm bm-page-card\">");
-                sb.Append("<div class=\"card-header d-flex align-items-center justify-content-between flex-wrap gap-2\">");
-                sb.Append("<h1 class=\"h5 mb-0\"><i class=\"bi bi-table\"></i> Views</h1>");
-                sb.Append("<a href=\"/view-definitions/create\" class=\"btn btn-sm btn-primary\"><i class=\"bi bi-plus-lg\"></i> New View</a>");
-                sb.Append("</div><div class=\"card-body\">");
-
-                if (views.Count == 0)
-                {
-                    sb.Append("<div class=\"text-center py-5 text-muted\">No views defined yet. Create one via <a href=\"/view-definitions/create\">View Definitions</a>.</div>");
-                }
-                else
-                {
-                    sb.Append("<div class=\"table-responsive\"><table class=\"table table-hover table-bordered align-middle mb-0\">");
-                    sb.Append("<thead class=\"table-light\"><tr><th>Name</th><th>Root Entity</th><th>Materialised</th><th></th></tr></thead><tbody>");
-                    foreach (var v in views)
-                    {
-                        sb.Append("<tr><td><strong>");
-                        sb.Append(WebUtility.HtmlEncode(v.ViewName));
-                        sb.Append("</strong></td><td><code>");
-                        sb.Append(WebUtility.HtmlEncode(v.RootEntity));
-                        sb.Append("</code></td><td>");
-                        sb.Append(v.Materialised ? "<span class=\"badge bg-success\">Yes</span>" : "<span class=\"badge bg-secondary\">No</span>");
-                        sb.Append("</td><td><a class=\"btn btn-sm btn-primary\" href=\"/views/");
-                        sb.Append(WebUtility.UrlEncode(v.Key.ToString()));
-                        sb.Append("\"><i class=\"bi bi-play-fill\"></i> Run</a></td></tr>");
-                    }
-                    sb.Append("</tbody></table></div>");
-                }
-
-                sb.Append("</div></div></div>");
-                ReportHtmlRenderer.AppendChromeFooter(sb, safeNonce, host, context);
-                context.Response.ContentType = "text/html; charset=utf-8";
-                await context.Response.WriteAsync(sb.ToString());
-            }));
-
         // ── GET /views/{id} ── execute view → HTML ────────────────────────────
-        host.RegisterRoute("GET /views/{id}", new RouteHandlerData(
-            pageInfoFactory.RawPage("admin", false),
-            async context =>
-            {
-                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                if (user == null) { context.Response.Redirect("/login"); return; }
-                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
-                if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; await context.Response.WriteAsync("Access denied."); return; }
-
-                var id = GetRouteParam(context, "id");
-                if (string.IsNullOrWhiteSpace(id) || !uint.TryParse(id, out var viewKey))
-                {
-                    context.Response.StatusCode = 400;
-                    await context.Response.WriteAsync("Missing or invalid view id.");
-                    return;
-                }
-
-                var def = await DataStoreProvider.Current.LoadAsync<ViewDefinition>(viewKey, context.RequestAborted).ConfigureAwait(false);
-                if (def == null)
-                {
-                    context.Response.StatusCode = 404;
-                    await context.Response.WriteAsync("View not found.");
-                    return;
-                }
-
-                ReportResult result;
-                try
-                {
-                    result = await _engine.ExecuteAsync(def, context.RequestAborted).ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    context.Response.StatusCode = 500;
-                    context.Response.ContentType = "text/plain";
-                    await context.Response.WriteAsync($"Error executing view: {WebUtility.HtmlEncode(ex.Message)}");
-                    return;
-                }
-
-                context.Response.ContentType = "text/html; charset=utf-8";
-                var pipeWriter = System.IO.Pipelines.PipeWriter.Create(context.Response.Body);
-                await ReportHtmlRenderer.RenderAsync(
-                    pipeWriter,
-                    result,
-                    def.ViewName,
-                    $"Root: {def.RootEntity}",
-                    null,
-                    null,
-                    id,
-                    host,
-                    context.GetCspNonce(),
-                    CsrfProtection.EnsureToken(context),
-                    context);
-                await pipeWriter.CompleteAsync();
-            }));
-
         // ── GET /api/views ── list view definitions as JSON ───────────────────
         host.RegisterRoute("GET /api/views", new RouteHandlerData(
             pageInfoFactory.RawPage("admin", false),
@@ -2839,7 +3115,7 @@ public static class RouteRegistrationExtensions
                         result = await _engine.ExecuteAsync(def, context.RequestAborted).ConfigureAwait(false);
                     }
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     context.Response.StatusCode = 500;
                     context.Response.ContentType = "application/json";
@@ -2935,7 +3211,7 @@ public static class RouteRegistrationExtensions
                 {
                     result = await _engine.ExecuteAsync(def, context.RequestAborted).ConfigureAwait(false);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
                     context.Response.StatusCode = 500;
                     context.Response.ContentType = "application/json";

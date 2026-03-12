@@ -40,7 +40,11 @@ public static class AdminToolCatalogue
 
         new("query-entity",
             "Query records from a data entity",
-            ["query", "find", "search", "get", "records", "rows", "data", "fetch", "count", "how", "many"]),
+            ["query", "find", "search", "get", "records", "rows", "data", "fetch", "where", "filter"]),
+
+        new("count-entity",
+            "Count records in a data entity",
+            ["count", "how", "many", "total", "number"]),
 
         new("system-status",
             "Show system status and diagnostics",
@@ -106,9 +110,23 @@ public static class AdminToolCatalogue
             [
                 new ToolParameter("entity", "Entity name or slug", true),
                 new ToolParameter("query", "Optional search text to filter results", false),
+                new ToolParameter("filterField", "Field name for structured filter", false),
+                new ToolParameter("filterOp", "Filter operator (Equals, Contains, etc.)", false),
+                new ToolParameter("filterValue", "Filter value", false),
                 new ToolParameter("limit", "Max records to return", false),
             ],
             QueryEntityHandler);
+
+        registry.Register(
+            "count-entity",
+            "Count records in a data entity",
+            [
+                new ToolParameter("entity", "Entity name or slug", true),
+                new ToolParameter("filterField", "Field name for structured filter", false),
+                new ToolParameter("filterOp", "Filter operator (Equals, Contains, etc.)", false),
+                new ToolParameter("filterValue", "Filter value", false),
+            ],
+            CountEntityHandler);
 
         registry.Register(
             "system-status",
@@ -281,6 +299,9 @@ public static class AdminToolCatalogue
             if (entity is null)
                 return ToolResult.Fail($"Entity '{entityName}' not found. Use 'list entities' to see available types.");
 
+            // Build a structured filter if filterField/filterOp/filterValue are provided
+            QueryDefinition? query = BuildFilterQuery(parameters);
+
             // If a search query is provided, search by text
             parameters.TryGetValue("query", out var searchText);
             if (!string.IsNullOrWhiteSpace(searchText))
@@ -297,12 +318,13 @@ public static class AdminToolCatalogue
                 return ToolResult.Ok(sb.ToString());
             }
 
-            var count = await entity.Handlers.CountAsync(null, ct).ConfigureAwait(false);
-            var items = await entity.Handlers.QueryAsync(null, ct).ConfigureAwait(false);
+            var count = await entity.Handlers.CountAsync(query, ct).ConfigureAwait(false);
+            var items = await entity.Handlers.QueryAsync(query, ct).ConfigureAwait(false);
             var list = items.Take(limit).ToList();
 
+            var filterDesc = query != null ? " (filtered)" : "";
             var output = new System.Text.StringBuilder(256);
-            output.AppendLine($"{entity.Name}: {count} total records (showing {list.Count})");
+            output.AppendLine($"{entity.Name}{filterDesc}: {count} total records (showing {list.Count})");
             output.AppendLine();
 
             foreach (var item in list)
@@ -314,6 +336,50 @@ public static class AdminToolCatalogue
         {
             return ToolResult.Fail($"Query failed: {ex.GetType().Name}");
         }
+    }
+
+    private static async ValueTask<ToolResult> CountEntityHandler(
+        IReadOnlyDictionary<string, string> parameters, CancellationToken ct)
+    {
+        if (!parameters.TryGetValue("entity", out var entityName) || string.IsNullOrEmpty(entityName))
+            return ToolResult.Fail("Please specify an entity name.");
+
+        try
+        {
+            var entity = ResolveEntity(entityName);
+            if (entity is null)
+                return ToolResult.Fail($"Entity '{entityName}' not found. Use 'list entities' to see available types.");
+
+            QueryDefinition? query = BuildFilterQuery(parameters);
+            var count = await entity.Handlers.CountAsync(query, ct).ConfigureAwait(false);
+
+            var filterDesc = query != null ? " matching filter" : " total";
+            return ToolResult.Ok($"{entity.Name}: {count} record(s){filterDesc}.");
+        }
+        catch (Exception ex)
+        {
+            return ToolResult.Fail($"Count failed: {ex.GetType().Name}");
+        }
+    }
+
+    /// <summary>
+    /// Builds a QueryDefinition from structured filter parameters, if present.
+    /// </summary>
+    private static QueryDefinition? BuildFilterQuery(IReadOnlyDictionary<string, string> parameters)
+    {
+        if (!parameters.TryGetValue("filterField", out var field) || string.IsNullOrWhiteSpace(field))
+            return null;
+        if (!parameters.TryGetValue("filterValue", out var value) || string.IsNullOrWhiteSpace(value))
+            return null;
+
+        parameters.TryGetValue("filterOp", out var opStr);
+        if (!Enum.TryParse<QueryOperator>(opStr ?? "Equals", true, out var op))
+            op = QueryOperator.Equals;
+
+        return new QueryDefinition
+        {
+            Clauses = [new QueryClause { Field = field, Operator = op, Value = value }]
+        };
     }
 
     private static ValueTask<ToolResult> SystemStatusHandler(
@@ -508,7 +574,7 @@ public static class AdminToolCatalogue
     {
         var layout = EntityLayoutCompiler.GetOrCompile(entity);
         var sb = new System.Text.StringBuilder(512);
-        sb.AppendLine($"{entity.Name} #{item.Key}");
+        sb.AppendLine($"{entity.Name} #{item.Key}  → /{entity.Slug}/{item.Key}");
         sb.AppendLine();
 
         foreach (var field in layout.Fields)
@@ -552,6 +618,6 @@ public static class AdminToolCatalogue
             catch { }
         }
 
-        return $"  [{item.Key}] {string.Join(", ", parts)}";
+        return $"  [{item.Key}] {string.Join(", ", parts)}  → /{entity.Slug}/{item.Key}";
     }
 }

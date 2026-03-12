@@ -124,8 +124,8 @@ public class RouteRegistrationExtensionsTests : IDisposable
         // Arrange & Act
         _server.RegisterStaticRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
-        // Assert — /, /status, /statusRaw, /health, /healthz, /readyz
-        Assert.Equal(6, _server.routes.Count);
+        // Assert — /, /favicon.ico, /status, /statusRaw, /health, /healthz, /readyz
+        Assert.Equal(7, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -413,17 +413,6 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void RegisterAdminRoutes_RegistersSampleDataRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        Assert.True(_server.routes.ContainsKey("GET /admin/sample-data"));
-        Assert.True(_server.routes.ContainsKey("POST /admin/sample-data"));
-    }
-
-    [Fact]
     public void RegisterAdminRoutes_RegistersReloadTemplatesRoute()
     {
         // Arrange & Act
@@ -445,17 +434,6 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void RegisterAdminRoutes_SampleDataRoute_HasAdminPermission()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        var route = _server.routes["GET /admin/sample-data"];
-        Assert.Equal("admin", route.PageInfo!.PageMetaData.PermissionsNeeded);
-    }
-
-    [Fact]
     public void RegisterAdminRoutes_ReloadTemplatesRoute_HasAdminPermission()
     {
         // Arrange & Act
@@ -473,29 +451,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.Equal(13, _server.routes.Count);
-    }
-
-    [Fact]
-    public void RegisterAdminRoutes_AlwaysRegistersWipeRoutes()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert — routes are always registered; 419 gating is done at runtime via the settings store
-        Assert.True(_server.routes.ContainsKey("GET /admin/wipe-data"));
-        Assert.True(_server.routes.ContainsKey("POST /admin/wipe-data"));
-    }
-
-    [Fact]
-    public void RegisterAdminRoutes_WipeDataRoute_HasAdminPermission()
-    {
-        // Arrange & Act
-        _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
-
-        // Assert
-        var route = _server.routes["GET /admin/wipe-data"];
-        Assert.Equal("admin", route.PageInfo!.PageMetaData.PermissionsNeeded);
+        Assert.Equal(11, _server.routes.Count);
     }
 
     [Fact]
@@ -922,6 +878,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
             tableColumns = Array.Empty<string>();
             tableRows = Array.Empty<string[]>();
         }
+        public string GetMetricGroupsHtml() => string.Empty;
         public MetricsSnapshot GetSnapshot() => new MetricsSnapshot(
             0, 0, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero,
             TimeSpan.Zero, TimeSpan.Zero, TimeSpan.Zero, 0, 0, 0, 0, 0,
@@ -1116,7 +1073,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
     [Fact]
     public void BuildEntitySchema_ChildListField_ReturnsCustomHtmlTypeWithSubFields()
     {
-        // Arrange — register Order (has List<OrderRow> child collection) and dependencies
+        // Arrange — register Order (virtual/gallery entity with ChildList OrderRows) and dependencies
         _ = HostGalleryTestFixture.State;
         Assert.True(DataScaffold.TryGetEntity("orders", out var meta));
 
@@ -1131,14 +1088,16 @@ public class RouteRegistrationExtensionsTests : IDisposable
             .Cast<Dictionary<string, object?>>()
             .FirstOrDefault(f => string.Equals((string?)f["name"], "OrderRows", StringComparison.Ordinal));
 
-        // Assert — metadata-driven child list field type is "ChildList" with ChildEntitySlug set.
-        // Note: metadata-driven child lists may not have subFields populated via BuildSubFieldSchemas
-        // since they don't use CLR List<T> properties. The VNext SPA resolves sub-fields via the
-        // child entity's schema endpoint instead.
+        // Assert — metadata-driven child list field must use "CustomHtml" type so the VNext SPA
+        // calls renderSubListEditor instead of falling through to a plain text input.
         Assert.NotNull(orderRowsField);
-        var fieldType = (string?)orderRowsField["type"];
-        Assert.True(fieldType == "CustomHtml" || fieldType == "ChildList",
-            $"Expected 'CustomHtml' or 'ChildList' but got '{fieldType}'");
+        Assert.Equal("CustomHtml", (string?)orderRowsField["type"]);
+
+        // subFields must be populated so the SPA's renderSubListEditor has column definitions.
+        var subFields = orderRowsField!["subFields"] as System.Collections.IEnumerable;
+        Assert.NotNull(subFields);
+        var subFieldList = subFields!.Cast<object>().ToList();
+        Assert.NotEmpty(subFieldList);
     }
 
     /// <summary>

@@ -75,13 +75,13 @@ jobs:
         with:
           creds: ${{ secrets.azure-credentials }}
 
-      - name: Stop app and configure for AOT binary
+      - name: Stop app and configure for JIT package
         run: |
           az webapp stop --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }}
           az webapp config appsettings set --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }} \
             --settings WEBSITE_RUN_FROM_PACKAGE=0 --output none
           az webapp config set --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }} \
-            --startup-file "./BareMetalWeb.Host" --output none
+            --startup-file "dotnet BareMetalWeb.Host.dll" --output none
           # Stamp ControlPlane.InstanceId so heartbeats are identifiable by app name (#1394)
           az webapp config appsettings set --name ${{ inputs.app-name }} --resource-group ${{ inputs.resource-group }} \
             --settings ControlPlane__InstanceId=${{ inputs.app-name }} --output none
