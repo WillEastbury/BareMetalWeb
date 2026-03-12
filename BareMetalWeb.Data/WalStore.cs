@@ -1049,7 +1049,6 @@ public sealed class WalStore : IDisposable
     /// </summary>
     private static void FsyncDirectory(string directory)
     {
-        if (OperatingSystem.IsWindows()) return;
         try
         {
             using var d = new FileStream(directory, FileMode.Open,

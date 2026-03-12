@@ -110,7 +110,6 @@ jobs:
         run: |
           TAG="${{ inputs.image_tag }}"
           VERSION_TAG="${TAG%-linux-*}"
-          VERSION_TAG="${VERSION_TAG%-windows-*}"
           echo "version_tag=${VERSION_TAG}" >> $GITHUB_OUTPUT
 
       - name: Collect merged PR titles since last release

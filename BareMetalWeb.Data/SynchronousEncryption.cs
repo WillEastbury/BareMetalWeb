@@ -133,38 +133,27 @@ public sealed class SynchronousEncryption : ISynchronousEncryption
     }
 
     /// <summary>
-    /// Wraps raw key bytes in a platform-specific protection envelope (DPAPI on Windows,
-    /// AES-256-GCM keyed from machine-id on Linux). Prefixed with the "KPRT" magic header.
-    /// Legacy key files without this header are handled transparently by <see cref="UnprotectKeyBytes"/>.
+    /// Wraps raw key bytes in an AES-256-GCM envelope keyed from machine identity.
+    /// Prefixed with the "KPRT" magic header so legacy plaintext key files are
+    /// handled transparently by <see cref="UnprotectKeyBytes"/>.
     /// </summary>
     internal static byte[] ProtectKeyBytes(byte[] key)
     {
-        if (OperatingSystem.IsWindows())
-        {
-            var blob = System.Security.Cryptography.ProtectedData.Protect(key, null, System.Security.Cryptography.DataProtectionScope.LocalMachine);
-            var result = new byte[KeyFileMagic.Length + blob.Length];
-            KeyFileMagic.CopyTo(result, 0);
-            blob.CopyTo(result, KeyFileMagic.Length);
-            return result;
-        }
-        else
-        {
-            var machineKey = DeriveLinuxMachineKey();
-            var nonce = new byte[12];
-            RandomNumberGenerator.Fill(nonce);
-            var ciphertext = new byte[key.Length];
-            var tag = new byte[16];
-            using var aes = new AesGcm(machineKey, 16);
-            aes.Encrypt(nonce, key, ciphertext, tag);
-            // Layout: magic(4) + nonce(12) + tag(16) + ciphertext
-            var result = new byte[KeyFileMagic.Length + nonce.Length + tag.Length + ciphertext.Length];
-            int pos = 0;
-            KeyFileMagic.CopyTo(result, pos); pos += KeyFileMagic.Length;
-            nonce.CopyTo(result, pos); pos += nonce.Length;
-            tag.CopyTo(result, pos); pos += tag.Length;
-            ciphertext.CopyTo(result, pos);
-            return result;
-        }
+        var machineKey = DeriveMachineKey();
+        var nonce = new byte[12];
+        RandomNumberGenerator.Fill(nonce);
+        var ciphertext = new byte[key.Length];
+        var tag = new byte[16];
+        using var aes = new AesGcm(machineKey, 16);
+        aes.Encrypt(nonce, key, ciphertext, tag);
+        // Layout: magic(4) + nonce(12) + tag(16) + ciphertext
+        var result = new byte[KeyFileMagic.Length + nonce.Length + tag.Length + ciphertext.Length];
+        int pos = 0;
+        KeyFileMagic.CopyTo(result, pos); pos += KeyFileMagic.Length;
+        nonce.CopyTo(result, pos); pos += nonce.Length;
+        tag.CopyTo(result, pos); pos += tag.Length;
+        ciphertext.CopyTo(result, pos);
+        return result;
     }
 
     /// <summary>
@@ -177,23 +166,18 @@ public sealed class SynchronousEncryption : ISynchronousEncryption
         if (stored.Length < KeyFileMagic.Length || !stored.AsSpan(0, KeyFileMagic.Length).SequenceEqual(KeyFileMagic))
             return stored; // Legacy plaintext — return as-is for backward compat
         var blob = stored[KeyFileMagic.Length..];
-        if (OperatingSystem.IsWindows())
-            return System.Security.Cryptography.ProtectedData.Unprotect(blob, null, System.Security.Cryptography.DataProtectionScope.LocalMachine);
-        else
-        {
-            var machineKey = DeriveLinuxMachineKey();
-            const int nonceLen = 12, tagLen = 16;
-            var nonce = blob.AsSpan(0, nonceLen);
-            var tag = blob.AsSpan(nonceLen, tagLen);
-            var ciphertext = blob.AsSpan(nonceLen + tagLen);
-            var plaintext = new byte[ciphertext.Length];
-            using var aes = new AesGcm(machineKey, tagLen);
-            aes.Decrypt(nonce, ciphertext, tag, plaintext);
-            return plaintext;
-        }
+        var machineKey = DeriveMachineKey();
+        const int nonceLen = 12, tagLen = 16;
+        var nonce = blob.AsSpan(0, nonceLen);
+        var tag = blob.AsSpan(nonceLen, tagLen);
+        var ciphertext = blob.AsSpan(nonceLen + tagLen);
+        var plaintext = new byte[ciphertext.Length];
+        using var aes = new AesGcm(machineKey, tagLen);
+        aes.Decrypt(nonce, ciphertext, tag, plaintext);
+        return plaintext;
     }
 
-    private static byte[] DeriveLinuxMachineKey()
+    private static byte[] DeriveMachineKey()
     {
         string machineId = "baremetalweb-default";
         try { machineId = File.Exists("/etc/machine-id") ? File.ReadAllText("/etc/machine-id").Trim() : Environment.MachineName; } catch { }
