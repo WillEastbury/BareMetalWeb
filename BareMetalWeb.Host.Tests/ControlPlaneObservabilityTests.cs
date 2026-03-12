@@ -144,16 +144,43 @@ public class ControlPlaneObservabilityTests : IDisposable
         const string json = "{\"instanceId\":\"host1\"}";
 
         var envelope = json.PrependEntityType(entityType);
-        Assert.True(envelope.TryParseEntityRecord(out var parsedType, out var parsedJson));
+        Assert.True(envelope.TryParseEntityRecord(out var parsedType, out var parsedJson, out var attempt));
         Assert.Equal(entityType, parsedType);
         Assert.Equal(json, parsedJson);
+        Assert.Equal(0, attempt);
+    }
+
+    [Fact]
+    public void RecordEnvelope_IncrementAttempt_IncrementsCounter()
+    {
+        const string json = "{\"x\":1}";
+        var envelope = json.PrependEntityType("ErrorEvent");
+        envelope.TryParseEntityRecord(out _, out _, out var attempt0);
+        Assert.Equal(0, attempt0);
+
+        var envelope2 = envelope.IncrementAttempt(0);
+        envelope2.TryParseEntityRecord(out _, out var sameJson, out var attempt1);
+        Assert.Equal(1, attempt1);
+        Assert.Equal(json, sameJson);
     }
 
     [Fact]
     public void RecordEnvelope_TryParse_ReturnsFalseForMalformedRecord()
     {
-        Assert.False("notypejustjson".TryParseEntityRecord(out _, out _));
-        Assert.False(string.Empty.TryParseEntityRecord(out _, out _));
+        Assert.False("notypejustjson".TryParseEntityRecord(out _, out _, out _));
+        Assert.False(string.Empty.TryParseEntityRecord(out _, out _, out _));
+    }
+
+    [Fact]
+    public void RecordEnvelope_TryParse_LegacyFormatWithoutAttemptField()
+    {
+        // Legacy format written by old code: entityType\x1Fjson (no attempt field)
+        const char sep = '\x1F';
+        var legacy = string.Concat("InstanceHeartbeat", sep, "{\"id\":\"x\"}");
+        Assert.True(legacy.TryParseEntityRecord(out var et, out var js, out var att));
+        Assert.Equal("InstanceHeartbeat", et);
+        Assert.Equal("{\"id\":\"x\"}", js);
+        Assert.Equal(0, att); // defaults to 0
     }
 
     // ── ControlPlaneService.ComputeBackoff ───────────────────────────────────

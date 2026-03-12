@@ -353,22 +353,33 @@ public sealed class ControlPlaneService
 
     /// <summary>
     /// Drain the offline buffer by replaying each pending record.
-    /// Stops on first failure to preserve ordering; re-persists any remaining records.
+    /// Stops on first transient failure to preserve ordering; re-persists remaining records.
+    /// Records that have exceeded <see cref="MaxDrainRetries"/> attempts are dropped
+    /// (dead-letter policy) and counted in <see cref="_retryCount"/>.
     /// </summary>
     private async Task DrainBufferAsync(CancellationToken ct)
     {
         int sent = 0;
         while (!ct.IsCancellationRequested && _buffer.TryDequeue(out var raw))
         {
-            if (!raw.TryParseEntityRecord(out var entityType, out var json))
+            if (!raw.TryParseEntityRecord(out var entityType, out var json, out var attempt))
                 continue; // malformed — skip
 
             Interlocked.Increment(ref _retryCount);
             var ok = await _client.TrySendRawAsync(entityType, json).ConfigureAwait(false);
             if (!ok)
             {
-                // Re-queue the failed record and stop — we'll retry next cycle
-                _buffer.TryEnqueue(raw);
+                if (attempt < MaxDrainRetries)
+                {
+                    // Re-queue at the back with incremented retry count; stop this cycle
+                    _buffer.TryEnqueue(raw.IncrementAttempt(attempt));
+                }
+                else
+                {
+                    // Exceeded retry limit — dead-letter drop
+                    _logger?.Log(BmwLogLevel.Debug,
+                        $"[BMW ControlPlane] Dropping buffered {entityType} record after {attempt} retries.");
+                }
                 break;
             }
             sent++;
@@ -385,14 +396,16 @@ public sealed class ControlPlaneService
         }
     }
 
+    private const int MaxDrainRetries = 10;
+
     /// <summary>
     /// Compute back-off delay for the given number of consecutive failures.
     /// Uses exponential back-off with ±20 % jitter, capped at <see cref="MaxBackoff"/>.
     /// </summary>
     internal static TimeSpan ComputeBackoff(int consecutiveFailures)
     {
-        // 2^n * MinBackoff, capped at MaxBackoff
-        var exp = Math.Min(consecutiveFailures - 1, 10); // cap exponent at 2^10 = 1024
+        // 2^n * MinBackoff: exponent is capped at 10 (multiplier 2^10 = 1024), then MaxBackoff clamps the result
+        var exp = Math.Min(consecutiveFailures - 1, 10);
         var baseTicks = (long)(MinBackoff.Ticks * Math.Pow(2, exp));
         var capped = Math.Min(baseTicks, MaxBackoff.Ticks);
 
@@ -409,23 +422,48 @@ internal static class RecordEnvelopeExtensions
 {
     private const char Sep = '\x1F'; // ASCII unit-separator — not valid in JSON
 
-    /// <summary>Prefix a JSON payload with the entity type so it can be stored as a single string.</summary>
+    /// <summary>
+    /// Encode a JSON payload into a stored envelope: <c>{entityType}\x1F{attempt}\x1F{json}</c>.
+    /// The attempt counter starts at 0 and is incremented each time the record is re-queued.
+    /// </summary>
     internal static string PrependEntityType(this string json, string entityType)
-        => string.Concat(entityType, Sep, json);
+        => string.Concat(entityType, Sep, "0", Sep, json);
 
-    /// <summary>Split a stored record back into entity type and JSON payload.</summary>
-    internal static bool TryParseEntityRecord(this string raw,
-        out string entityType, out string json)
+    /// <summary>Return a copy of the envelope with the attempt counter incremented by one.</summary>
+    internal static string IncrementAttempt(this string envelope, int currentAttempt)
     {
-        var idx = raw.IndexOf(Sep);
-        if (idx <= 0)
+        if (!envelope.TryParseEntityRecord(out var entityType, out var json, out _))
+            return envelope;
+        return string.Concat(entityType, Sep, (currentAttempt + 1).ToString(), Sep, json);
+    }
+
+    /// <summary>Split a stored envelope back into entity type, attempt count, and JSON payload.</summary>
+    internal static bool TryParseEntityRecord(this string raw,
+        out string entityType, out string json, out int attempt)
+    {
+        attempt = 0;
+        var first = raw.IndexOf(Sep);
+        if (first <= 0)
         {
             entityType = string.Empty;
             json = string.Empty;
             return false;
         }
-        entityType = raw[..idx];
-        json = raw[(idx + 1)..];
+        entityType = raw[..first];
+        var rest = raw[(first + 1)..];
+
+        // Support legacy format (no attempt field) for backward compat with existing buffer files
+        var second = rest.IndexOf(Sep);
+        if (second < 0)
+        {
+            // Legacy: entityType\x1Fjson
+            json = rest;
+            return true;
+        }
+
+        if (!int.TryParse(rest[..second], out attempt))
+            attempt = 0;
+        json = rest[(second + 1)..];
         return true;
     }
 }
