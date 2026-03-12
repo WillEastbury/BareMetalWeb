@@ -6,10 +6,13 @@ No MVC. No middleware pipeline. No DI containers. No Razor. No magic.
 
 Just Kestrel, explicit routing, streaming HTML templates, a custom binary serializer, and total control.
 
-[![Build and Deploy](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/deploy.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/deploy.yml)
+[![1 · CI1 — Tests & JIT Build](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/unit-tests.yml)
+[![2 · CI2 — AOT & Containers](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/container.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/container.yml)
+[![3 · CD1 — Canary & Extended Tests](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/cd-canary.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/cd-canary.yml)
+[![4 · CD2 — Early Adopters](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/cd-early-adopters.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/cd-early-adopters.yml)
+[![5 · CD3 — Full Rollout](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/cd-full-rollout.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/cd-full-rollout.yml)
 [![Build CLI](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/build-cli.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/build-cli.yml)
-[![Unit Tests](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/unit-tests.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/unit-tests.yml)
-[![Performance Tests](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/performance-tests.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/performance-tests.yml)
+[![Large Performance Stress Tests](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/perf-large.yml/badge.svg)](https://github.com/WillEastbury/BareMetalWeb/actions/workflows/perf-large.yml)
 
 📚 **[Full Documentation Index →](docs/index.md)** | 🗺️ **[Architecture Diagrams →](docs/architecture/system-overview.md)**
 
