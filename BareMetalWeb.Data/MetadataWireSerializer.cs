@@ -5,6 +5,7 @@ using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
+using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Data;
 
@@ -993,7 +994,7 @@ public sealed class MetadataWireSerializer
                 if (element.ValueKind == System.Text.Json.JsonValueKind.String)
                 {
                     var s = element.GetString();
-                    if (s != null && Enum.TryParse(fp.ClrType, s, true, out var enumVal))
+                    if (s != null && DataScaffold.GetEnumLookup(fp.ClrType).TryGetValue(s, out var enumVal))
                         return enumVal;
                 }
                 return Enum.ToObject(fp.ClrType, 0);

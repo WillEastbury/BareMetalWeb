@@ -1,4 +1,4 @@
-using System.Buffers;
+﻿using System.Buffers;
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
@@ -296,9 +296,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             case TypeKind.Enum:
             {
                 var enumUnderlying = shape.EnumUnderlying!;
-                var rawValue = value == null
-                    ? Convert.ChangeType(0, enumUnderlying)
-                    : Convert.ChangeType(value, enumUnderlying);
+                var rawValue = ConvertEnumToUnderlying(value, Type.GetTypeCode(enumUnderlying));
                 WriteValue(writer, enumUnderlying, rawValue, depth + 1);
                 return;
             }
@@ -479,9 +477,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             case TypeKind.Enum:
             {
                 var enumUnderlying = shape.EnumUnderlying!;
-                var rawValue = value == null
-                    ? Convert.ChangeType(0, enumUnderlying)
-                    : Convert.ChangeType(value, enumUnderlying);
+                var rawValue = ConvertEnumToUnderlying(value, Type.GetTypeCode(enumUnderlying));
                 WriteValue(ref writer, enumUnderlying, rawValue, depth + 1);
                 return;
             }
@@ -1191,24 +1187,82 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return PropertyAccessorFactory.BuildSetter(property);
     }
 
+    // AOT-safe: use FieldInfo directly instead of Expression.Compile (incompatible with NativeAOT).
+    // Cached per-type via TypeCache so FieldInfo.GetValue overhead is acceptable.
     private static Func<object, object?> CreateFieldGetter(FieldInfo field)
     {
-        var instanceParam = System.Linq.Expressions.Expression.Parameter(typeof(object), "instance");
-        var cast = System.Linq.Expressions.Expression.Convert(instanceParam, field.DeclaringType!);
-        var fieldAccess = System.Linq.Expressions.Expression.Field(cast, field);
-        var boxed = System.Linq.Expressions.Expression.Convert(fieldAccess, typeof(object));
-        return System.Linq.Expressions.Expression.Lambda<Func<object, object?>>(boxed, instanceParam).Compile();
+        return instance => field.GetValue(instance);
     }
 
     private static Action<object, object?> CreateFieldSetter(FieldInfo field)
     {
-        var instanceParam = System.Linq.Expressions.Expression.Parameter(typeof(object), "instance");
-        var valueParam = System.Linq.Expressions.Expression.Parameter(typeof(object), "value");
-        var cast = System.Linq.Expressions.Expression.Convert(instanceParam, field.DeclaringType!);
-        var fieldAccess = System.Linq.Expressions.Expression.Field(cast, field);
-        var convertedValue = System.Linq.Expressions.Expression.Convert(valueParam, field.FieldType);
-        var assign = System.Linq.Expressions.Expression.Assign(fieldAccess, convertedValue);
-        return System.Linq.Expressions.Expression.Lambda<Action<object, object?>>(assign, instanceParam, valueParam).Compile();
+        return (instance, value) => field.SetValue(instance, value);
+    }
+
+    /// <summary>
+    /// AOT-safe enum-to-underlying-type conversion. Replaces Convert.ChangeType(value, enumUnderlying).
+    /// </summary>
+    private static object ConvertEnumToUnderlying(object? value, TypeCode underlyingTypeCode)
+    {
+        if (value is IConvertible ic)
+        {
+            return underlyingTypeCode switch
+            {
+                TypeCode.Int32  => ic.ToInt32(null),
+                TypeCode.Int64  => ic.ToInt64(null),
+                TypeCode.Byte   => ic.ToByte(null),
+                TypeCode.Int16  => ic.ToInt16(null),
+                TypeCode.UInt32 => ic.ToUInt32(null),
+                TypeCode.UInt64 => ic.ToUInt64(null),
+                TypeCode.SByte  => ic.ToSByte(null),
+                TypeCode.UInt16 => ic.ToUInt16(null),
+                _ => ic.ToInt32(null)
+            };
+        }
+
+        return underlyingTypeCode switch
+        {
+            TypeCode.Int32  => 0,
+            TypeCode.Int64  => 0L,
+            TypeCode.Byte   => (byte)0,
+            TypeCode.Int16  => (short)0,
+            TypeCode.UInt32 => 0u,
+            TypeCode.UInt64 => 0uL,
+            TypeCode.SByte  => (sbyte)0,
+            TypeCode.UInt16 => (ushort)0,
+            _ => 0
+        };
+    }
+
+    /// <summary>
+    /// AOT-safe type conversion via IConvertible. Replaces Convert.ChangeType(value, targetType).
+    /// </summary>
+    private static object ConvertByTypeCode(IConvertible value, Type targetType)
+    {
+        var underlying = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+        if (underlying.IsEnum)
+            return Enum.ToObject(underlying, ConvertEnumToUnderlying(value, Type.GetTypeCode(Enum.GetUnderlyingType(underlying))));
+
+        return Type.GetTypeCode(underlying) switch
+        {
+            TypeCode.Int32    => value.ToInt32(null),
+            TypeCode.Int64    => value.ToInt64(null),
+            TypeCode.Double   => value.ToDouble(null),
+            TypeCode.Single   => value.ToSingle(null),
+            TypeCode.Decimal  => value.ToDecimal(null),
+            TypeCode.Boolean  => value.ToBoolean(null),
+            TypeCode.String   => value.ToString(null),
+            TypeCode.Byte     => value.ToByte(null),
+            TypeCode.Int16    => value.ToInt16(null),
+            TypeCode.DateTime => value.ToDateTime(null),
+            TypeCode.UInt32   => value.ToUInt32(null),
+            TypeCode.UInt64   => value.ToUInt64(null),
+            TypeCode.SByte    => value.ToSByte(null),
+            TypeCode.UInt16   => value.ToUInt16(null),
+            TypeCode.Char     => value.ToChar(null),
+            _ => value
+        };
     }
 
     private static uint GetSignatureHash(MemberSignature[] members)
@@ -1372,11 +1426,11 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             return;
         }
 
-        if (value is IConvertible)
+        if (value is IConvertible ic)
         {
             try
             {
-                var converted = Convert.ChangeType(value, member.MemberType);
+                var converted = ConvertByTypeCode(ic, member.MemberType);
                 member.Setter(instance, converted);
                 return;
             }

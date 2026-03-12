@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
@@ -415,6 +415,31 @@ public static class CalculatedFieldService
         if (underlyingType == typeof(bool))
             return Convert.ToBoolean(value);
 
-        return Convert.ChangeType(value, underlyingType);
+        if (underlyingType.IsEnum)
+        {
+            if (value is string s && DataScaffold.GetEnumLookup(underlyingType).TryGetValue(s, out var enumVal))
+                return enumVal;
+            if (value is IConvertible ic)
+                return Enum.ToObject(underlyingType, ic.ToInt32(null));
+            return value;
+        }
+
+        if (value is IConvertible conv)
+        {
+            return Type.GetTypeCode(underlyingType) switch
+            {
+                TypeCode.Byte => conv.ToByte(null),
+                TypeCode.Int16 => conv.ToInt16(null),
+                TypeCode.UInt32 => conv.ToUInt32(null),
+                TypeCode.UInt64 => conv.ToUInt64(null),
+                TypeCode.SByte => conv.ToSByte(null),
+                TypeCode.UInt16 => conv.ToUInt16(null),
+                TypeCode.DateTime => conv.ToDateTime(null),
+                TypeCode.Char => conv.ToChar(null),
+                _ => value
+            };
+        }
+
+        return value;
     }
 }

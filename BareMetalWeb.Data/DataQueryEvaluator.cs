@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
@@ -430,16 +430,43 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
                 return d;
             if (effectiveType == typeof(TimeOnly) && TimeOnly.TryParse(s, out var t))
                 return t;
-            if (effectiveType.IsEnum && Enum.TryParse(effectiveType, s, ignoreCase: true, out var enumValue))
+            if (effectiveType.IsEnum && DataScaffold.GetEnumLookup(effectiveType).TryGetValue(s, out var enumValue))
                 return enumValue;
         }
 
         try
         {
             if (effectiveType.IsEnum)
-                return Enum.ToObject(effectiveType, Convert.ChangeType(value, Enum.GetUnderlyingType(effectiveType))!);
+            {
+                if (value is IConvertible ic)
+                    return Enum.ToObject(effectiveType, ic.ToInt32(null));
+                return value;
+            }
 
-            return Convert.ChangeType(value, effectiveType);
+            if (value is IConvertible conv)
+            {
+                return Type.GetTypeCode(effectiveType) switch
+                {
+                    TypeCode.Int32 => conv.ToInt32(null),
+                    TypeCode.Int64 => conv.ToInt64(null),
+                    TypeCode.Double => conv.ToDouble(null),
+                    TypeCode.Single => conv.ToSingle(null),
+                    TypeCode.Decimal => conv.ToDecimal(null),
+                    TypeCode.Boolean => conv.ToBoolean(null),
+                    TypeCode.String => conv.ToString(null),
+                    TypeCode.Byte => conv.ToByte(null),
+                    TypeCode.Int16 => conv.ToInt16(null),
+                    TypeCode.DateTime => conv.ToDateTime(null),
+                    TypeCode.UInt32 => conv.ToUInt32(null),
+                    TypeCode.UInt64 => conv.ToUInt64(null),
+                    TypeCode.SByte => conv.ToSByte(null),
+                    TypeCode.UInt16 => conv.ToUInt16(null),
+                    TypeCode.Char => conv.ToChar(null),
+                    _ => value
+                };
+            }
+
+            return value;
         }
         catch
         {
