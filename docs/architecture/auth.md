@@ -161,6 +161,62 @@ API keys are issued via `/account/apikey` (admin only) and stored as PBKDF2 hash
 
 ---
 
+## Principal Role Model (Least-Privilege)
+
+Each `SystemPrincipal` has a `Role` field that restricts what operations the principal can perform. This enforces least-privilege access for machine-to-machine scenarios such as deployment automation and tenant callbacks.
+
+### Roles
+
+| Role | Enum value | Read | Create | Update | Delete | Manage SP Keys |
+|------|-----------|------|--------|--------|--------|----------------|
+| **FullAccess** | 0 (default) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| **DeploymentProcess** | 1 | ✅ | ✅ | ✅ | ❌ | ❌ |
+| **DeploymentAgent** | 2 | ✅ | ✅ | ❌ | ❌ | ❌ |
+| **TenantCallback** | 3 | own | ❌ | own | ❌ | ❌ |
+
+- **FullAccess**: Backward-compatible default — no additional restrictions beyond entity-level permissions.
+- **DeploymentProcess**: Intended for CI/CD pipelines. Can create registry records and assign metadata but cannot delete records or manage API keys on other principals.
+- **DeploymentAgent**: Intended for bootstrap/registration agents. Can query and create records but cannot update, delete, or manage API keys.
+- **TenantCallback**: Scoped to records owned by the principal. Can only read and update records where `CreatedBy` matches the principal's `UserName`. Cannot create, delete, or manage API keys.
+
+### Ownership Scoping (TenantCallback)
+
+`TenantCallback` principals include two optional scope fields:
+
+- `OwnerTenantId` — the tenant this principal is scoped to
+- `OwnerInstanceId` — the specific instance within the tenant
+
+Record ownership is determined by matching `BaseDataObject.CreatedBy` against the principal's `UserName`. For `SystemPrincipal` records, access is limited to the principal's own record (key match).
+
+### Enforcement Points
+
+Principal role checks are enforced in all data API handlers (`DataApiListHandler`, `DataApiGetHandler`, `DataApiPostHandler`, `DataApiPutHandler`, `DataApiPatchHandler`, `DataApiDeleteHandler`, `DataApiImportHandler`) immediately after the entity-level permission check (`HasEntityPermissionAsync`).
+
+```
+Request → HasEntityPermissionAsync → CheckPrincipalRolePolicyAsync → CSRF → Handler logic
+```
+
+### Denied Operation Auditing
+
+When a principal role policy denies an operation, an `AuditEntry` is created with:
+
+- `Operation = AccessDenied`
+- `EntityType` — the target entity slug
+- `UserName` — the denied principal's identity
+- `Notes` — includes the attempted action and denial reason
+
+### Key Files
+
+| File | Description |
+|------|-------------|
+| `BareMetalWeb.Data/PrincipalRole.cs` | `PrincipalRole` enum definition |
+| `BareMetalWeb.Data/PrincipalAuthorizationPolicy.cs` | Static policy enforcement methods |
+| `BareMetalWeb.Data/SystemPrincipal.cs` | `Role`, `OwnerTenantId`, `OwnerInstanceId` fields |
+| `BareMetalWeb.Data/AuditOperation.cs` | `AccessDenied` enum value |
+| `BareMetalWeb.Host/RouteHandlers.cs` | `CheckPrincipalRolePolicyAsync` helper and handler hooks |
+
+---
+
 ## Security Headers
 
 Every response includes the following security headers:

@@ -359,6 +359,37 @@ public sealed class AuditService
         }
     }
 
+    /// <summary>
+    /// Captures an audit record for a denied operation (authorization failure).
+    /// </summary>
+    public async ValueTask AuditDeniedAsync(
+        string entityType,
+        uint entityKey,
+        string attemptedAction,
+        string userName,
+        string reason,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var auditEntry = new AuditEntry(userName)
+            {
+                EntityType = entityType,
+                EntityKey = entityKey,
+                Operation = AuditOperation.AccessDenied,
+                TimestampUtc = DateTime.UtcNow,
+                UserName = userName,
+                Notes = $"Denied {attemptedAction}: {reason}",
+            };
+
+            await SaveAuditEntryAsync(auditEntry, "access denied", cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError($"Failed to create audit entry for denied operation: {ex.Message}", ex);
+        }
+    }
+
     private async ValueTask SaveAuditEntryAsync(AuditEntry entry, string operationName, CancellationToken cancellationToken)
     {
         // Auto-assign a sequential key if not already set
