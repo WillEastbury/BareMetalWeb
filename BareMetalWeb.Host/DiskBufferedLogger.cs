@@ -40,6 +40,14 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         RedactPII = redactPII;
     }
 
+    /// <summary>
+    /// Optional hook invoked whenever an ERROR or FATAL entry is logged.
+    /// Wire this up at startup to forward error events to the control-plane
+    /// telemetry pipeline without coupling the logger to that subsystem.
+    /// Signature: (level, message, exceptionType?, stackTrace?, path?, method?, statusCode, correlationId?)
+    /// </summary>
+    public Action<string, string, string?, string?, string?, string?, int, string?>? ErrorHook { get; set; }
+
     /// <summary>Returns true if the given level would be logged. Use as a guard to avoid allocations.</summary>
     public bool IsEnabled(BmwLogLevel level) => level >= MinimumLevel;
 
@@ -66,6 +74,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         if (level >= BmwLogLevel.Error)
         {
             _ = LogErrorRawAsync(entry, level);
+            ErrorHook?.Invoke(s_levelLabels[(int)level], message, null, null, null, null, 0, correlationId);
             return;
         }
 
@@ -82,6 +91,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         if (BmwLogLevel.Error < MinimumLevel) return;
         var entry = FormatJsonEntry(BmwLogLevel.Error, message, correlationId, fields: null, ex);
         _ = LogErrorRawAsync(entry, BmwLogLevel.Error);
+        ErrorHook?.Invoke("ERROR", message, ex.GetType().Name, ex.ToString(), null, null, 0, correlationId);
     }
 
     public void Log(BmwLogLevel level, string message, string? correlationId, LogFields? fields)
@@ -93,6 +103,8 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         if (level >= BmwLogLevel.Error)
         {
             _ = LogErrorRawAsync(entry, level);
+            ErrorHook?.Invoke(s_levelLabels[(int)level], message, null, null,
+                fields?.Path, fields?.Method, fields?.StatusCode ?? 0, correlationId);
             return;
         }
 

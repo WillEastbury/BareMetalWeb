@@ -613,7 +613,8 @@ public static class BareMetalWebExtensions
         if (!string.IsNullOrEmpty(cpUrl) && !string.IsNullOrEmpty(cpApiKey))
         {
             var cpClient = new ControlPlaneClient(cpUrl, cpApiKey, logger);
-            var cpService = new ControlPlaneService(cpClient, metricsTracker, config, logger);
+            var cpBufferDir = Path.Combine(dataRoot, "cpbuffer");
+            var cpService = new ControlPlaneService(cpClient, metricsTracker, config, logger, cpBufferDir);
 
             // Wire optional data sources from WAL layer
             if (DataStoreProvider.PrimaryProvider is WalDataProvider cpWalProvider)
@@ -633,9 +634,13 @@ public static class BareMetalWebExtensions
                 );
             }
 
+            // Forward error/fatal log events to the control-plane error stream
+            if (logger is DiskBufferedLogger diskLogger)
+                diskLogger.ErrorHook = cpService.BufferError;
+
             appInfo.ControlPlane = cpService;
             RouteHandlers.WebStoreClient = cpClient;
-            Console.WriteLine($"[BMW Startup] Control plane telemetry: streaming to {cpUrl}");
+            Console.WriteLine($"[BMW Startup] Control plane telemetry: streaming to {cpUrl} (offline buffer: {cpBufferDir})");
             Console.WriteLine($"[BMW Startup] Template webstore: enabled at /admin/webstore");
         }
         else
