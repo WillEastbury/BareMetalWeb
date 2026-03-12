@@ -10,6 +10,15 @@ public sealed class SystemPrincipal : User
     [DataField(Label = "API Keys", Order = 10, Required = false, List = false, View = false, Edit = true, Create = true, Placeholder = "one key per line")]
     public List<string> ApiKeyHashes { get; set; } = new();
 
+    [DataField(Label = "Principal Role", Order = 11, Required = false, List = true, View = true, Edit = true, Create = true)]
+    public PrincipalRole Role { get; set; } = PrincipalRole.FullAccess;
+
+    [DataField(Label = "Owner Tenant ID", Order = 12, Required = false, List = true, View = true, Edit = true, Create = true, Placeholder = "tenant scope (TenantCallback only)")]
+    public string OwnerTenantId { get; set; } = string.Empty;
+
+    [DataField(Label = "Owner Instance ID", Order = 13, Required = false, List = true, View = true, Edit = true, Create = true, Placeholder = "instance scope (TenantCallback only)")]
+    public string OwnerInstanceId { get; set; } = string.Empty;
+
     public static async ValueTask<SystemPrincipal?> FindByApiKeyAsync(string apiKey, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(apiKey))
