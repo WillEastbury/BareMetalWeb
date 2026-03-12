@@ -216,6 +216,26 @@ public static class SystemEntitySchemas
         .AddField("Enabled", FieldType.Bool, typeof(bool))
         .Build();
 
+    public static EntitySchema ChatSession { get; } = new EntitySchema.Builder("ChatSession", "chat-sessions")
+        .AddField("UserName", FieldType.StringUtf8, typeof(string), required: true, indexed: true)
+        .AddField("Title", FieldType.StringUtf8, typeof(string), required: true)
+        .AddField("CreatedAtUtc", FieldType.DateTime, typeof(DateTime))
+        .AddField("UpdatedAtUtc", FieldType.DateTime, typeof(DateTime))
+        .AddField("MessageCount", FieldType.Int32, typeof(int))
+        .AddField("Status", FieldType.StringUtf8, typeof(string))
+        .Build();
+
+    public static EntitySchema ChatMessage { get; } = new EntitySchema.Builder("ChatMessage", "chat-messages")
+        .AddField("SessionId", FieldType.UInt32, typeof(uint), required: true, indexed: true)
+        .AddField("Role", FieldType.StringUtf8, typeof(string), required: true)
+        .AddField("Content", FieldType.StringUtf8, typeof(string), required: true)
+        .AddField("TimestampUtc", FieldType.DateTime, typeof(DateTime))
+        .AddField("TokenCount", FieldType.Int32, typeof(int))
+        .AddField("LatencyMs", FieldType.Int32, typeof(int))
+        .AddField("ResolvedIntent", FieldType.StringUtf8, typeof(string))
+        .AddField("Confidence", FieldType.Decimal, typeof(decimal))
+        .Build();
+
     /// <summary>All system entity schemas, for bulk registration.</summary>
     public static IReadOnlyList<EntitySchema> All { get; } = new[]
     {
@@ -226,6 +246,8 @@ public static class SystemEntitySchemas
         ActionDefinition, ActionCommandDefinition,
         SessionLog,
         RecordComment,
-        Module
+        Module,
+        ChatSession,
+        ChatMessage
     };
 }

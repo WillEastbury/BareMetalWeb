@@ -378,6 +378,7 @@ public static class BareMetalWebExtensions
         appInfo.RegisterReportRoutes(pageInfoFactory);
         appInfo.RegisterDashboardRoutes(pageInfoFactory);
         appInfo.RegisterModuleRoutes(pageInfoFactory);
+        appInfo.RegisterChatRoutes(pageInfoFactory);
         appInfo.RegisterViewRoutes(pageInfoFactory);
         appInfo.RegisterMcpRoutes(pageInfoFactory);
         appInfo.RegisterOpenApiRoute(pageInfoFactory);

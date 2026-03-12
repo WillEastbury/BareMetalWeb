@@ -5143,6 +5143,18 @@
     toolsLi.appendChild(toolsMenu);
     rightUl.appendChild(toolsLi);
 
+    // Chat icon linking to chat page
+    const chatLi  = el('li', { className: 'nav-item' });
+    const chatA   = el('a', {
+      className: 'nav-link' + (activeSlug === '_chat' ? ' active' : ''),
+      href: BASE + '/_chat',
+      title: 'AI Chat'
+    });
+    chatA.setAttribute('data-go', '');
+    chatA.innerHTML = '<i class="bi bi-chat-dots"></i>';
+    chatLi.appendChild(chatA);
+    rightUl.appendChild(chatLi);
+
     // Bell icon linking to inbox page
     const jobsLi  = el('li', { className: 'nav-item' });
     const jobsA   = el('a', {
@@ -6445,6 +6457,204 @@
     }
   }
 
+  // ── Chat Interface ────────────────────────────────────────────────────────
+
+  function renderChatPage(container) {
+    var row = el('div', { className: 'row g-0 h-100' });
+
+    // Left sidebar — session list
+    var sidebar = el('div', { className: 'col-md-3 col-lg-2 border-end d-flex flex-column h-100' });
+    var sidebarHeader = el('div', { className: 'p-3 border-bottom d-flex align-items-center gap-2' });
+    sidebarHeader.appendChild(el('h6', { className: 'mb-0 flex-grow-1', textContent: '\uD83D\uDCAC Chat' }));
+    var newChatBtn = el('button', { className: 'btn btn-sm btn-primary', innerHTML: '<i class="bi bi-plus-lg"></i>' });
+    sidebarHeader.appendChild(newChatBtn);
+    sidebar.appendChild(sidebarHeader);
+    var sessionList = el('div', { className: 'flex-grow-1 overflow-auto', id: 'chat-session-list' });
+    sidebar.appendChild(sessionList);
+    row.appendChild(sidebar);
+
+    // Right panel — message thread
+    var mainPanel = el('div', { className: 'col-md-9 col-lg-10 d-flex flex-column h-100' });
+    var chatHeader = el('div', { className: 'p-3 border-bottom d-flex align-items-center gap-2', id: 'chat-header' });
+    chatHeader.appendChild(el('h5', { className: 'mb-0', id: 'chat-title', textContent: 'Select or start a conversation' }));
+    mainPanel.appendChild(chatHeader);
+    var messageArea = el('div', { className: 'flex-grow-1 overflow-auto p-3', id: 'chat-messages', style: 'background: var(--bs-body-bg)' });
+    messageArea.innerHTML = '<div class="d-flex flex-column align-items-center justify-content-center h-100 text-muted"><i class="bi bi-chat-dots" style="font-size:3rem"></i><p class="mt-2">Start a new conversation or select one from the sidebar</p></div>';
+    mainPanel.appendChild(messageArea);
+
+    // Input bar
+    var inputBar = el('div', { className: 'p-3 border-top', id: 'chat-input-bar' });
+    inputBar.innerHTML =
+      '<div class="input-group">' +
+        '<textarea class="form-control" id="chat-input" placeholder="Type a message\u2026" rows="1" style="resize:none;max-height:120px"></textarea>' +
+        '<button class="btn btn-primary" id="chat-send-btn" disabled><i class="bi bi-send"></i></button>' +
+      '</div>';
+    mainPanel.appendChild(inputBar);
+    row.appendChild(mainPanel);
+    container.appendChild(row);
+
+    var activeSessionId = null;
+
+    // Load sessions
+    function loadSessions() {
+      apiFetch('/api/chat/sessions').then(function (sessions) {
+        sessionList.innerHTML = '';
+        if (!Array.isArray(sessions) || sessions.length === 0) {
+          sessionList.innerHTML = '<div class="p-3 text-muted small fst-italic">No conversations yet</div>';
+          return;
+        }
+        sessions.forEach(function (s) {
+          var item = el('a', {
+            href: '#',
+            className: 'list-group-item list-group-item-action border-0 py-2 px-3' + (s.id === activeSessionId ? ' active' : '')
+          });
+          item.innerHTML =
+            '<div class="d-flex justify-content-between align-items-start">' +
+              '<div class="text-truncate me-2"><strong class="small">' + escHtml(s.title) + '</strong>' +
+              '<br><small class="text-muted">' + s.messageCount + ' message' + (s.messageCount !== 1 ? 's' : '') + '</small></div>' +
+              '<button class="btn btn-sm btn-link text-danger p-0 chat-delete-btn" data-id="' + s.id + '" title="Delete"><i class="bi bi-trash"></i></button>' +
+            '</div>';
+          item.addEventListener('click', function (e) {
+            if (e.target.closest('.chat-delete-btn')) return;
+            e.preventDefault();
+            activeSessionId = s.id;
+            loadSession(s.id);
+            loadSessions();
+          });
+          var deleteBtn = item.querySelector('.chat-delete-btn');
+          deleteBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (!confirm('Delete this conversation?')) return;
+            apiFetch('/api/chat/sessions/' + s.id, {
+              method: 'DELETE',
+              headers: { 'X-CSRF-Token': getCsrfToken() }
+            }).then(function () {
+              if (activeSessionId === s.id) {
+                activeSessionId = null;
+                messageArea.innerHTML = '<div class="d-flex flex-column align-items-center justify-content-center h-100 text-muted"><i class="bi bi-chat-dots" style="font-size:3rem"></i><p class="mt-2">Start a new conversation</p></div>';
+                document.getElementById('chat-title').textContent = 'Select or start a conversation';
+              }
+              loadSessions();
+            });
+          });
+          sessionList.appendChild(item);
+        });
+      });
+    }
+
+    // Load a specific session
+    function loadSession(sessionId) {
+      apiFetch('/api/chat/sessions/' + sessionId).then(function (data) {
+        document.getElementById('chat-title').textContent = data.title;
+        renderMessages(data.messages || []);
+        activeSessionId = sessionId;
+      });
+    }
+
+    // Render messages
+    function renderMessages(messages) {
+      messageArea.innerHTML = '';
+      if (messages.length === 0) {
+        messageArea.innerHTML = '<div class="text-muted text-center mt-4">No messages yet. Say hello!</div>';
+        return;
+      }
+      messages.forEach(function (m) { appendMessage(m); });
+      messageArea.scrollTop = messageArea.scrollHeight;
+    }
+
+    function appendMessage(m) {
+      var isUser = m.role === 'user';
+      var wrap = el('div', { className: 'd-flex mb-3 ' + (isUser ? 'justify-content-end' : 'justify-content-start') });
+      var bubble = el('div', {
+        className: 'p-2 px-3 rounded-3 ' + (isUser ? 'bg-primary text-white' : 'bg-body-secondary'),
+        style: 'max-width:75%;white-space:pre-wrap;word-break:break-word'
+      });
+      bubble.textContent = m.content;
+      if (!isUser && m.latencyMs > 0) {
+        var meta = el('div', { className: 'mt-1 small ' + (isUser ? 'text-white-50' : 'text-muted') });
+        meta.textContent = m.latencyMs + 'ms';
+        if (m.resolvedIntent && m.resolvedIntent !== 'unknown') meta.textContent += ' \u00B7 ' + m.resolvedIntent;
+        if (m.confidence > 0) meta.textContent += ' (' + (m.confidence * 100).toFixed(0) + '%)';
+        bubble.appendChild(meta);
+      }
+      wrap.appendChild(bubble);
+      messageArea.appendChild(wrap);
+    }
+
+    // New chat button
+    newChatBtn.addEventListener('click', function () {
+      apiFetch('/api/chat/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+        body: JSON.stringify({ title: 'New Chat' })
+      }).then(function (data) {
+        activeSessionId = data.id;
+        loadSessions();
+        loadSession(data.id);
+      });
+    });
+
+    // Input handling
+    var inputEl = document.getElementById('chat-input');
+    var sendBtn = document.getElementById('chat-send-btn');
+
+    inputEl.addEventListener('input', function () {
+      sendBtn.disabled = !inputEl.value.trim() || !activeSessionId;
+      inputEl.style.height = 'auto';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
+    });
+
+    inputEl.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (!sendBtn.disabled) sendBtn.click();
+      }
+    });
+
+    sendBtn.addEventListener('click', function () {
+      var content = inputEl.value.trim();
+      if (!content || !activeSessionId) return;
+
+      // Optimistically show user message
+      appendMessage({ role: 'user', content: content });
+      messageArea.scrollTop = messageArea.scrollHeight;
+      inputEl.value = '';
+      inputEl.style.height = 'auto';
+      sendBtn.disabled = true;
+
+      // Show typing indicator
+      var typingEl = el('div', { className: 'd-flex mb-3 justify-content-start', id: 'chat-typing' });
+      var typingBubble = el('div', { className: 'p-2 px-3 rounded-3 bg-body-secondary' });
+      typingBubble.innerHTML = '<span class="spinner-grow spinner-grow-sm me-1"></span><span class="spinner-grow spinner-grow-sm me-1" style="animation-delay:.15s"></span><span class="spinner-grow spinner-grow-sm" style="animation-delay:.3s"></span>';
+      typingEl.appendChild(typingBubble);
+      messageArea.appendChild(typingEl);
+      messageArea.scrollTop = messageArea.scrollHeight;
+
+      apiFetch('/api/chat/sessions/' + activeSessionId + '/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+        body: JSON.stringify({ content: content })
+      }).then(function (data) {
+        var typing = document.getElementById('chat-typing');
+        if (typing) typing.remove();
+        appendMessage(data.assistantMessage);
+        messageArea.scrollTop = messageArea.scrollHeight;
+        sendBtn.disabled = false;
+        // Update session title in sidebar if it changed
+        loadSessions();
+      }).catch(function (err) {
+        var typing = document.getElementById('chat-typing');
+        if (typing) typing.remove();
+        appendMessage({ role: 'assistant', content: 'Error: ' + err.message, latencyMs: 0 });
+        messageArea.scrollTop = messageArea.scrollHeight;
+        sendBtn.disabled = false;
+      });
+    });
+
+    loadSessions();
+  }
+
   async function route() {
     // Cancel any in-flight navigation fetches from the previous route
     cancelNavigation();
@@ -6601,6 +6811,15 @@
         const main = el('div', { className: 'container-fluid mt-3' });
         R.appendChild(main);
         renderModuleEditorPage(main, rawId);
+        wire(); return;
+      }
+
+      // ── Chat page ─────────────────────────────────────────────────────────
+      if (slug === '_chat') {
+        R.replaceChildren(navbar('_chat'));
+        const main = el('div', { className: 'container-fluid mt-3', style: 'height: calc(100vh - 80px)' });
+        R.appendChild(main);
+        renderChatPage(main);
         wire(); return;
       }
 
