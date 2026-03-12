@@ -23,8 +23,8 @@ on:
   workflow_dispatch:
     inputs:
       image_tag:
-        description: 'Image tag to deploy (e.g. 1.20260309.42-linux-arm64). Leave empty to use latest CI2 build.'
-        required: false
+        description: 'Image tag to deploy manually (e.g. 1.20260309.42-linux-arm64). Required for workflow_dispatch.'
+        required: true
         type: string
 
 concurrency:
@@ -37,6 +37,7 @@ permissions:
   actions: read
 
 env:
+  ACR_NAME: metalclusterregistry
   ACR_LOGIN_SERVER: metalclusterregistry.azurecr.io
   ACR_IMAGE: baremetalweb
   AKS_CLUSTER: metalcluster
@@ -68,14 +69,39 @@ jobs:
         run: |
           if [[ -n "${{ inputs.image_tag }}" ]]; then
             TAG="${{ inputs.image_tag }}"
-          else
+            IMAGE="${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${TAG}"
+          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
             MAJOR="${{ vars.MAJOR_VERSION || '1' }}"
-            DATE="$(date +%Y%m%d)"
-            BUILD="${{ github.run_number }}"
+            BUILD="${{ github.event.workflow_run.run_number }}"
+            CREATED_AT="${{ github.event.workflow_run.created_at }}"
+            DATE="${CREATED_AT%%T*}"
+            DATE="${DATE//-/}"
             TAG="${MAJOR}.${DATE}.${BUILD}-linux-arm64"
+            IMAGE="${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${TAG}"
+          else
+            echo "::error::workflow_dispatch requires inputs.image_tag"
+            exit 1
           fi
           echo "image_tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "image=${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${TAG}" >> $GITHUB_OUTPUT
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Verify resolved image exists in ACR
+        env:
+          RESOLVED_TAG: ${{ steps.resolve.outputs.image_tag }}
+        run: |
+          az acr repository show-tags \
+            --name ${{ env.ACR_NAME }} \
+            --repository ${{ env.ACR_IMAGE }} \
+            --query "[?@=='${RESOLVED_TAG}']" \
+            -o tsv | grep -q "${RESOLVED_TAG}" \
+            || { echo "::error::Resolved tag '${RESOLVED_TAG}' not found in ACR"; exit 1; }
 
   # ── Deploy to AKS ──────────────────────────────────────────────────────
   deploy:
