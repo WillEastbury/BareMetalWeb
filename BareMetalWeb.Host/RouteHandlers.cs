@@ -1780,6 +1780,9 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        if (!await CheckPrincipalRolePolicyAsync(context, meta, "Read", context.RequestAborted).ConfigureAwait(false))
+            return;
+
         var queryDict = ToQueryDictionary(context.HttpRequest.Query);
         var query = DataScaffold.BuildQueryDefinition(queryDict, meta);
 
@@ -1890,6 +1893,9 @@ public sealed class RouteHandlers : IRouteHandlers
             await context.Response.WriteAsync("{\"error\":\"Access denied.\"}");
             return;
         }
+
+        if (!await CheckPrincipalRolePolicyAsync(context, meta, "Create", context.RequestAborted).ConfigureAwait(false))
+            return;
 
         if (!await UserAuth.HasValidApiKeyAsync(context, context.RequestAborted).ConfigureAwait(false) &&
             (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context)))
@@ -2077,6 +2083,9 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        if (!await CheckPrincipalRolePolicyAsync(context, meta, "Read", context.RequestAborted).ConfigureAwait(false))
+            return;
+
         if (!uint.TryParse(id, out var parsedId))
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -2089,6 +2098,20 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Item not found.");
+            return;
+        }
+
+        // TenantCallback principals can only read their own records
+        var getUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        var getRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(getUser);
+        if (getRestricted is { Role: PrincipalRole.TenantCallback } && instance is BaseDataObject getBdo &&
+            !PrincipalAuthorizationPolicy.IsRecordOwner(getRestricted, getBdo))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied: record not owned by this principal.");
+            await _auditService.AuditDeniedAsync(
+                meta.Slug, parsedId, "Read", getRestricted.UserName ?? getRestricted.Key.ToString(),
+                "TenantCallback principal attempted to read non-owned record", context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -2111,6 +2134,9 @@ public sealed class RouteHandlers : IRouteHandlers
             await context.Response.WriteAsync("Access denied.");
             return;
         }
+
+        if (!await CheckPrincipalRolePolicyAsync(context, meta, "Create", context.RequestAborted).ConfigureAwait(false))
+            return;
 
         if (!await UserAuth.HasValidApiKeyAsync(context, context.RequestAborted).ConfigureAwait(false) &&
             (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context)))
@@ -2202,6 +2228,9 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        if (!await CheckPrincipalRolePolicyAsync(context, meta, "Update", context.RequestAborted).ConfigureAwait(false))
+            return;
+
         if (!await UserAuth.HasValidApiKeyAsync(context, context.RequestAborted).ConfigureAwait(false) &&
             (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context)))
         {
@@ -2222,6 +2251,20 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Item not found.");
+            return;
+        }
+
+        // TenantCallback principals can only update their own records
+        var putUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        var putRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(putUser);
+        if (putRestricted is { Role: PrincipalRole.TenantCallback } && instance is BaseDataObject putBdo &&
+            !PrincipalAuthorizationPolicy.IsRecordOwner(putRestricted, putBdo))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied: record not owned by this principal.");
+            await _auditService.AuditDeniedAsync(
+                meta.Slug, parsedId, "Update", putRestricted.UserName ?? putRestricted.Key.ToString(),
+                "TenantCallback principal attempted to update non-owned record", context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -2301,6 +2344,9 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
+        if (!await CheckPrincipalRolePolicyAsync(context, meta, "Update", context.RequestAborted).ConfigureAwait(false))
+            return;
+
         if (!await UserAuth.HasValidApiKeyAsync(context, context.RequestAborted).ConfigureAwait(false) &&
             (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context)))
         {
@@ -2321,6 +2367,20 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Item not found.");
+            return;
+        }
+
+        // TenantCallback principals can only update their own records
+        var patchUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+        var patchRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(patchUser);
+        if (patchRestricted is { Role: PrincipalRole.TenantCallback } && instance is BaseDataObject patchBdo &&
+            !PrincipalAuthorizationPolicy.IsRecordOwner(patchRestricted, patchBdo))
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            await context.Response.WriteAsync("Access denied: record not owned by this principal.");
+            await _auditService.AuditDeniedAsync(
+                meta.Slug, parsedId, "Update", patchRestricted.UserName ?? patchRestricted.Key.ToString(),
+                "TenantCallback principal attempted to update non-owned record", context.RequestAborted).ConfigureAwait(false);
             return;
         }
 
@@ -2387,6 +2447,9 @@ public sealed class RouteHandlers : IRouteHandlers
             await context.Response.WriteAsync("Access denied.");
             return;
         }
+
+        if (!await CheckPrincipalRolePolicyAsync(context, meta, "Delete", context.RequestAborted).ConfigureAwait(false))
+            return;
 
         if (!await UserAuth.HasValidApiKeyAsync(context, context.RequestAborted).ConfigureAwait(false) &&
             (!ValidateApiCsrfHeader(context) || !CsrfProtection.ValidateApiToken(context)))
@@ -6033,6 +6096,32 @@ public sealed class RouteHandlers : IRouteHandlers
         return true;
         }
         finally { ReturnPermissionSet(userPermissions); }
+    }
+
+    /// <summary>
+    /// Checks whether the current user (if a role-restricted <see cref="SystemPrincipal"/>)
+    /// is allowed to perform <paramref name="action"/> on the entity identified by <paramref name="meta"/>.
+    /// Returns true when the action is permitted (or the user is not a restricted principal).
+    /// On denial, sets 403 status, writes the reason, and fires an audit entry.
+    /// </summary>
+    private async ValueTask<bool> CheckPrincipalRolePolicyAsync(
+        BmwContext context, DataEntityMetadata meta, string action, CancellationToken cancellationToken)
+    {
+        var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
+        var restricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(user);
+        if (restricted == null)
+            return true; // not a restricted principal
+
+        var denial = PrincipalAuthorizationPolicy.CheckEntityAction(restricted, meta.Slug, action);
+        if (denial == null)
+            return true;
+
+        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+        await context.Response.WriteAsync(denial);
+        await _auditService.AuditDeniedAsync(
+            meta.Slug, 0, action, restricted.UserName ?? restricted.Key.ToString(),
+            denial, cancellationToken).ConfigureAwait(false);
+        return false;
     }
 
     private static List<string[]> ParseCsvRows(string content)

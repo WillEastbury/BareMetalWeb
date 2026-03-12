@@ -8,5 +8,8 @@ public enum AuditOperation
     Create,
     Update,
     Delete,
-    RemoteCommand
+    RemoteCommand,
+
+    /// <summary>An operation was denied by the authorization policy.</summary>
+    AccessDenied,
 }

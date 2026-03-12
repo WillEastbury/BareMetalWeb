@@ -43,5 +43,6 @@ namespace BareMetalWeb.Data;
 [JsonSerializable(typeof(long))]
 [JsonSerializable(typeof(bool))]
 [JsonSerializable(typeof(double))]
+[JsonSerializable(typeof(PrincipalRole))]
 [JsonSourceGenerationOptions(DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 internal partial class BmwDataJsonContext : JsonSerializerContext { }
