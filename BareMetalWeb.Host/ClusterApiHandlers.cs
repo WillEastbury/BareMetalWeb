@@ -188,14 +188,14 @@ public static class ClusterApiHandlers
                 if (r is InstanceHeartbeat hb) { latest = hb; break; }
                 if (r != null)
                 {
-                    var t = r.GetType();
+                    // Use metadata-driven field access for DataRecord or other BaseDataObject subtypes
                     latest = new InstanceHeartbeat
                     {
-                        InstanceId   = t.GetProperty("InstanceId")?.GetValue(r) as string,
-                        Version      = t.GetProperty("Version")?.GetValue(r) as string,
-                        Ready        = t.GetProperty("Ready")?.GetValue(r) is bool rd && rd,
-                        ErrorRate5xx = t.GetProperty("ErrorRate5xx")?.GetValue(r) is double er ? er : 0,
-                        Timestamp    = t.GetProperty("Timestamp")?.GetValue(r) as string,
+                        InstanceId   = GetFieldString(r, "InstanceId"),
+                        Version      = GetFieldString(r, "Version"),
+                        Ready        = GetFieldValue(r, "Ready") is bool rd && rd,
+                        ErrorRate5xx = GetFieldValue(r, "ErrorRate5xx") is double er ? er : 0,
+                        Timestamp    = GetFieldString(r, "Timestamp"),
                     };
                     break;
                 }
@@ -250,4 +250,27 @@ public static class ClusterApiHandlers
         w.WriteEndObject();
         await w.FlushAsync(context.RequestAborted);
     }
+
+    /// <summary>Reads a field value from a query result using metadata (no reflection).</summary>
+    private static object? GetFieldValue(object obj, string fieldName)
+    {
+        if (obj is DataRecord rec && rec.Schema != null)
+            return rec.GetField(rec.Schema, fieldName);
+
+        if (obj is BaseDataObject bdo)
+        {
+            var meta = DataScaffold.GetEntityByType(bdo.GetType());
+            if (meta != null)
+            {
+                var field = meta.FindField(fieldName);
+                if (field != null) return field.GetValueFn(bdo);
+                return EntityLayoutCompiler.GetOrCompile(meta).FieldByName(fieldName)?.Getter(bdo);
+            }
+        }
+
+        return null;
+    }
+
+    private static string? GetFieldString(object obj, string fieldName)
+        => GetFieldValue(obj, fieldName) as string;
 }

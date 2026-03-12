@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using BareMetalWeb.Core;
 using BareMetalWeb.Rendering;
 
@@ -9,8 +10,6 @@ public static class DataEntityRegistry
     /// Registers a single entity type without reflection or assembly scanning.
     /// AOT-safe alternative to reflection-based registration.
     /// </summary>
-    public static bool RegisterEntity<T>() where T : BaseDataObject, new()
+    public static bool RegisterEntity<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>() where T : BaseDataObject, new()
         => DataScaffold.RegisterEntity<T>();
-
-
 }

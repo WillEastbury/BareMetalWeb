@@ -1,7 +1,5 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
-using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data.Interfaces;
 
@@ -323,8 +321,8 @@ public sealed class ReportExecutor
                 return f.GetValueFn;
         }
 
-        // Fall back to base properties via cached compiled delegate
-        return FindAccessorOnObject(meta.Type, fieldName);
+        // Fall back to EntityLayout which covers all properties including base class ones (Key, etc.)
+        return EntityLayoutCompiler.GetOrCompile(meta).FieldByName(fieldName)?.Getter;
     }
 
     private static string GetStringValue(Func<object, object?> getter, object obj)
@@ -332,7 +330,7 @@ public sealed class ReportExecutor
 
     // ── Row projection ───────────────────────────────────────────────────────
 
-    // Cached compiled property accessors — avoids per-cell reflection in report projection.
+    // Cached compiled property accessors — avoids per-cell metadata lookup in report projection.
     private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> AccessorCache = new();
 
     private static string?[] ProjectRow(Dictionary<string, BaseDataObject> row, IReadOnlyList<ReportColumn> columns)
@@ -347,7 +345,23 @@ public sealed class ReportExecutor
                 continue;
             }
 
-            var getter = FindAccessorOnObject(obj.GetType(), col.Field);
+            var objType = obj.GetType();
+            Func<object, object?>? getter;
+            if (!AccessorCache.TryGetValue((objType, col.Field), out getter))
+            {
+                // Try metadata-driven lookup (covers DataField-annotated properties)
+                var meta = DataScaffold.GetEntityByType(objType);
+                getter = meta?.FindField(col.Field)?.GetValueFn;
+
+                // Fall back to EntityLayout (covers all properties including inherited Key etc.)
+                if (getter == null && meta != null)
+                    getter = EntityLayoutCompiler.GetOrCompile(meta).FieldByName(col.Field)?.Getter;
+
+                // Only cache successful lookups; don't cache null to allow retry if not yet registered
+                if (getter != null)
+                    AccessorCache.TryAdd((objType, col.Field), getter);
+            }
+
             if (getter == null)
             {
                 cells[i] = null;
@@ -358,16 +372,6 @@ public sealed class ReportExecutor
             cells[i] = FormatValue(raw, col.Format);
         }
         return cells;
-    }
-
-    private static Func<object, object?>? FindAccessorOnObject([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type, string fieldName)
-    {
-        return AccessorCache.GetOrAdd((type, fieldName), static key =>
-        {
-            var prop = key.Item1.GetProperty(key.Item2,
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-            return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;
-        });
     }
 
     private static string? FormatValue(object? value, string format)
@@ -401,7 +405,17 @@ public sealed class ReportExecutor
             if (!row.TryGetValue(filter.Entity, out var obj))
                 return false;
 
-            var getter = FindAccessorOnObject(obj.GetType(), filter.Field);
+            var objType = obj.GetType();
+            if (!AccessorCache.TryGetValue((objType, filter.Field), out var getter))
+            {
+                var meta = DataScaffold.GetEntityByType(objType);
+                getter = meta?.FindField(filter.Field)?.GetValueFn;
+                if (getter == null && meta != null)
+                    getter = EntityLayoutCompiler.GetOrCompile(meta).FieldByName(filter.Field)?.Getter;
+                if (getter != null)
+                    AccessorCache.TryAdd((objType, filter.Field), getter);
+            }
+
             var rawValue = getter?.Invoke(obj)?.ToString() ?? string.Empty;
 
             if (!EvaluateFilter(rawValue, filter.Operator, filter.Value))

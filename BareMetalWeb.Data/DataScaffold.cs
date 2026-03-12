@@ -75,7 +75,7 @@ public sealed record DataFieldMetadata(
 }
 
 public sealed record DataEntityMetadata(
-    Type Type,
+    [property: DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicMethods | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type Type,
     string Name,
     string Slug,
     string Permissions,

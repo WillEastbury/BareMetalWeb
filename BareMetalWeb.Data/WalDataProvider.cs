@@ -2046,7 +2046,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
     // ── Singleton-flag enforcement ────────────────────────────────────────────
 
-    private void ClearSingletonFlagsOnOtherRecords<T>(T obj) where T : BaseDataObject
+    private void ClearSingletonFlagsOnOtherRecords<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)] T>(T obj) where T : BaseDataObject
     {
         var type = typeof(T);
         // Use DataScaffold metadata (compiled delegates) instead of raw reflection
