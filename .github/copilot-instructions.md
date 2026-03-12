@@ -41,6 +41,17 @@ dotnet run --project BareMetalWeb.Host
 dotnet run --project BareMetalWeb.PerformanceTests
 ```
 
+## Git Push Instructions
+
+The default `gh` CLI and credential helper are authenticated as `wieastbu_microsoft` (work account), which does **not** have push access to `WillEastbury/BareMetalWeb`. To push, override the credential helper to use Windows Credential Manager, which has the `WillEastbury` PAT stored:
+
+```powershell
+# Push to remote (bypasses gh CLI credential helper, uses Windows Credential Manager)
+git -c "credential.https://github.com.helper=" -c "credential.https://WillEastbury@github.com.helper=" -c "credential.helper=manager" push origin <local-branch>:<remote-branch>
+```
+
+Always use this pattern when pushing to this repository.
+
 ## Architecture and Flow
 
 - **Single-handler architecture**: One request handler does everything (no middleware chain)
