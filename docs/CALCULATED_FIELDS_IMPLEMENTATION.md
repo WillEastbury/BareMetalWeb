@@ -203,7 +203,6 @@ public class OrderRow : BaseDataObject
 - `BareMetalWeb.Host/RouteHandlers.cs` - Modified (7 save operations updated)
 
 ### Examples and Tests
-- `BareMetalWeb.UserClasses/DataObjects/OrderLine.cs` - Modified
 - `BareMetalWeb.Data.Tests/ExpressionParserTests.cs` - New
 - `BareMetalWeb.Data.Tests/CalculatedFieldServiceTests.cs` - New
 

@@ -92,7 +92,6 @@ BareMetalWeb is a minimalistic, high-performance web server built on bare-metal 
 - **BareMetalWeb.Data** - Binary serialization, data storage, and search indexing
 - **BareMetalWeb.Rendering** - HTML template rendering and CSRF protection
 - **BareMetalWeb.API** - API route handlers
-- **BareMetalWeb.UserClasses** - User data models
 - **\*.Tests** - xUnit test projects for each library
 - **BareMetalWeb.PerformanceTests** - Performance benchmarking console app
 
