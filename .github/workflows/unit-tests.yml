@@ -16,6 +16,9 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   # ── Stage 1a: Build Debug (for tests) ──────────────────────────────────
   build-debug:
