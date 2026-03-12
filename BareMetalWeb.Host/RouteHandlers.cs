@@ -6286,8 +6286,8 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
 
-            // Runtime-defined actions have Method == null; delegate to CommandService
-            if (cmd.Method == null)
+            // Runtime-defined actions have Invoker == null; delegate to CommandService
+            if (cmd.Invoker == null)
             {
                 var svc = new CommandService();
                 var intent = new CommandIntent
@@ -6317,19 +6317,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             RemoteCommandResult result;
-            var returnType = cmd.Method.ReturnType;
-            if (returnType == typeof(RemoteCommandResult))
-            {
-                result = (RemoteCommandResult)cmd.Method.Invoke(instance, null)!;
-            }
-            else if (returnType == typeof(Task<RemoteCommandResult>))
-            {
-                result = await (Task<RemoteCommandResult>)cmd.Method.Invoke(instance, null)!;
-            }
-            else
-            {
-                result = await (ValueTask<RemoteCommandResult>)cmd.Method.Invoke(instance, null)!;
-            }
+            result = await cmd.Invoker(instance).ConfigureAwait(false);
 
             // Save the entity in case the command modified it
             await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);

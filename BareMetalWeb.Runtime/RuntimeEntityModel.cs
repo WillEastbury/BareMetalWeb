@@ -175,7 +175,7 @@ public sealed class RuntimeEntityModel
         {
             var a = Actions[i];
             commands.Add(new RemoteCommandMetadata(
-                Method: null!,
+                Invoker: null,
                 Name: a.Name,
                 Label: a.Label,
                 Icon: a.Icon,

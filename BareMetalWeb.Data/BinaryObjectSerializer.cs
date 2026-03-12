@@ -1345,10 +1345,10 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             return RuntimeHelpers.GetUninitializedObject(type);
         }
 
-        var factory = InstanceFactory.GetOrAdd(type, static t =>
-        {
-            return () => Activator.CreateInstance(t)!;
-        });
+        // Capture the annotated 'type' local so the trimmer can track the
+        // [DynamicallyAccessedMembers(PublicParameterlessConstructor)] annotation
+        // through the factory closure (static lambdas lose the annotation).
+        var factory = InstanceFactory.GetOrAdd(type, _ => { var t = type; return () => Activator.CreateInstance(t)!; });
         return factory();
     }
 
@@ -1582,10 +1582,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             shape.Kind = TypeKind.List;
             shape.ElementType = AssumePublicMembers(listElementType);
             var listType = type;
-            var listFactory = InstanceFactory.GetOrAdd(listType, static t =>
-            {
-                return () => Activator.CreateInstance(t)!;
-            });
+            // Capture the annotated 'listType' local so the trimmer tracks the
+            // [DynamicallyAccessedMembers(PublicParameterlessConstructor)] annotation.
+            var listFactory = InstanceFactory.GetOrAdd(listType, _ => { var t = listType; return () => Activator.CreateInstance(t)!; });
             shape.ListFactory = _ => (System.Collections.IList)listFactory();
             return shape;
         }
@@ -1596,10 +1595,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             shape.KeyType = AssumePublicMembers(keyType);
             shape.ValueType = AssumePublicMembers(valueType);
             var dictType = type;
-            var dictFactory = InstanceFactory.GetOrAdd(dictType, static t =>
-            {
-                return () => Activator.CreateInstance(t)!;
-            });
+            // Capture the annotated 'dictType' local so the trimmer tracks the
+            // [DynamicallyAccessedMembers(PublicParameterlessConstructor)] annotation.
+            var dictFactory = InstanceFactory.GetOrAdd(dictType, _ => { var t = dictType; return () => Activator.CreateInstance(t)!; });
             shape.DictionaryFactory = _ => (System.Collections.IDictionary)dictFactory();
             return shape;
         }
