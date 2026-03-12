@@ -135,12 +135,21 @@ public static class CookieProtection
         return output.ToArray();
     }
 
+    private const int MaxDecompressedCookieBytes = 1024 * 64; // 64 KB max cookie payload
+
     private static byte[] DeflateDecompress(byte[] data, int offset, int count)
     {
         using var input = new MemoryStream(data, offset, count, writable: false);
         using var deflate = new DeflateStream(input, CompressionMode.Decompress);
-        using var output = new MemoryStream();
-        deflate.CopyTo(output);
+        using var output = new MemoryStream(count);
+        var buffer = new byte[4096];
+        int read;
+        while ((read = deflate.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            if (output.Length + read > MaxDecompressedCookieBytes)
+                throw new InvalidDataException("Decompressed cookie payload exceeds maximum allowed size.");
+            output.Write(buffer, 0, read);
+        }
         return output.ToArray();
     }
 
@@ -168,12 +177,13 @@ public static class CookieProtection
         {
             var key = new byte[size];
             RandomNumberGenerator.Fill(key);
-            File.WriteAllText(keyFilePath, Convert.ToBase64String(key));
+            File.WriteAllText(keyFilePath, Convert.ToBase64String(SynchronousEncryption.ProtectKeyBytes(key)));
             return key;
         }
 
         var base64 = File.ReadAllText(keyFilePath).Trim();
-        var bytes = Convert.FromBase64String(base64);
+        var stored = Convert.FromBase64String(base64);
+        var bytes = SynchronousEncryption.UnprotectKeyBytes(stored);
         if (bytes.Length != size)
             throw new InvalidOperationException($"Key must be {size} bytes.");
 

@@ -33,7 +33,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
 
     private static readonly string[] s_levelLabels = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL", "OFF" };
 
-    public DiskBufferedLogger(string logFolder, BmwLogLevel minimumLevel = BmwLogLevel.Info, bool redactPII = false)
+    public DiskBufferedLogger(string logFolder, BmwLogLevel minimumLevel = BmwLogLevel.Info, bool redactPII = true)
     {
         _logFolder = logFolder;
         MinimumLevel = minimumLevel;
@@ -134,7 +134,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
             if (ex != null)
             {
                 w.WriteString("error", ex.GetType().Name);
-                w.WriteString("stack", redact ? LogRedactor.RedactFreeText(ex.ToString()) : ex.ToString());
+                w.WriteString("stack", LogRedactor.RedactStackTrace(ex.ToString()));
             }
 
             w.WriteEndObject();

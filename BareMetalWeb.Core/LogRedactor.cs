@@ -109,4 +109,39 @@ public static class LogRedactor
         (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
         (c >= '0' && c <= '9') || c == '.' || c == '_' ||
         c == '%' || c == '+' || c == '-';
+
+    /// <summary>
+    /// Strips file paths and line numbers from .NET stack trace frames (` in /path/file.cs:line N`),
+    /// keeping only type and method names. Always applied to exception stacks regardless of RedactPII.
+    /// </summary>
+    public static string RedactStackTrace(string stackTrace)
+    {
+        if (string.IsNullOrEmpty(stackTrace))
+            return stackTrace;
+
+        var lines = stackTrace.Split('\n');
+        var sb = new System.Text.StringBuilder(stackTrace.Length);
+        foreach (var line in lines)
+        {
+            var trimmed = line.TrimEnd('\r');
+            // Stack frame lines contain " in <path>:line N" — strip that portion
+            int inIdx = trimmed.IndexOf(" in ", StringComparison.Ordinal);
+            if (inIdx > 0 && trimmed.IndexOf(":line ", inIdx, StringComparison.Ordinal) > inIdx)
+            {
+                sb.Append(trimmed, 0, inIdx);
+                sb.Append('\n');
+            }
+            else
+            {
+                sb.Append(trimmed);
+                sb.Append('\n');
+            }
+        }
+
+        var result = sb.ToString();
+        // Preserve original trailing-newline behaviour
+        if (!stackTrace.EndsWith('\n') && result.EndsWith('\n'))
+            result = result[..^1];
+        return result;
+    }
 }

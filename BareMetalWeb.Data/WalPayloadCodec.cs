@@ -15,11 +15,17 @@ internal static class WalPayloadCodec
     /// <summary>Minimum uncompressed size (bytes) before compression is attempted.</summary>
     private const int MinCompressThreshold = 64;
 
+    /// <summary>Hard cap on decompressed WAL record size to prevent decompression bombs.</summary>
+    private const uint MaxDecompressedWalBytes = 256 * 1024 * 1024; // 256 MB
+
     /// <summary>Brotli quality level (0–11). 1 prioritises throughput over ratio — comparable to LZ4.</summary>
     private const int BrotliQuality = 1;
 
     /// <summary>Brotli window size (10–24). 22 ≈ 4 MiB, good for typical record sizes.</summary>
     private const int BrotliWindow = 22;
+
+    /// <summary>Maximum allowed uncompressed payload size (128 MiB). Prevents decompression bomb DoS.</summary>
+    internal const uint MaxUncompressedSize = 128 * 1024 * 1024;
 
     /// <summary>Shared encryption instance, lazily initialised from environment.</summary>
     private static WalEnvelopeEncryption? _defaultEncryption;
@@ -122,7 +128,8 @@ internal static class WalPayloadCodec
     /// Decrypts (if needed) and decompresses <paramref name="payload"/> based on <paramref name="codec"/>.
     /// </summary>
     /// <exception cref="System.IO.InvalidDataException">
-    /// Thrown if decompression or decryption fails.
+    /// Thrown if decompression or decryption fails, or if <paramref name="uncompressedLen"/>
+    /// exceeds <see cref="MaxUncompressedSize"/>.
     /// </exception>
     public static ReadOnlyMemory<byte> Decompress(
         ReadOnlyMemory<byte> payload,
@@ -130,11 +137,18 @@ internal static class WalPayloadCodec
         uint uncompressedLen,
         WalEnvelopeEncryption? encryption = null)
     {
+        // Guard: reject allocations that could exhaust memory (decompression bomb)
+        if (uncompressedLen > MaxUncompressedSize)
+            throw new System.IO.InvalidDataException(
+                $"Uncompressed payload size ({uncompressedLen}) exceeds maximum ({MaxUncompressedSize}).");
+
         // Encrypted + Brotli: decrypt envelope → decompress Brotli
         if (codec == WalConstants.CodecEncryptedBrotli)
         {
             var enc = encryption ?? GetDefaultEncryption();
             var decrypted = enc.Decrypt(payload.Span);
+            if (uncompressedLen > MaxDecompressedWalBytes)
+                throw new System.IO.InvalidDataException($"WAL record claims uncompressed size {uncompressedLen} exceeds {MaxDecompressedWalBytes} byte limit.");
             byte[] result = new byte[uncompressedLen];
             bool ok = BrotliDecoder.TryDecompress(decrypted, result, out int bytesWritten);
             if (!ok || bytesWritten != (int)uncompressedLen)
@@ -153,6 +167,8 @@ internal static class WalPayloadCodec
         // Brotli only (no encryption)
         if (codec == WalConstants.CodecBrotli)
         {
+            if (uncompressedLen > MaxDecompressedWalBytes)
+                throw new System.IO.InvalidDataException($"WAL record claims uncompressed size {uncompressedLen} exceeds {MaxDecompressedWalBytes} byte limit.");
             byte[] result = new byte[uncompressedLen];
             bool ok = BrotliDecoder.TryDecompress(payload.Span, result, out int bytesWritten);
             if (!ok || bytesWritten != (int)uncompressedLen)
