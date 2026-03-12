@@ -11,6 +11,7 @@ public static class UserAuth
     public const string SessionCookieName = "session_id";
     private static readonly TimeSpan DefaultSessionLifetime = TimeSpan.FromHours(8);
     private static readonly TimeSpan RememberMeLifetime = TimeSpan.FromDays(30);
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _sessionLocks = new();
 
     // Session expiration uses a sliding window model.
     // Sessions extend their expiration time with each access, keeping active users
@@ -67,10 +68,22 @@ public static class UserAuth
         session.LastSeenUtc = now;
         if (newExpiry - session.ExpiresUtc > TimeSpan.FromMinutes(1))
         {
-            session.ExpiresUtc = newExpiry;
-            DataStoreProvider.Current.Save(session);
-            if (session.RememberMe)
-                ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
+            var sem = _sessionLocks.GetOrAdd(protectedSessionId, _ => new SemaphoreSlim(1, 1));
+            if (sem.Wait(0))
+            {
+                try
+                {
+                    session.ExpiresUtc = newExpiry;
+                    DataStoreProvider.Current.Save(session);
+                    if (session.RememberMe)
+                        ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
+                }
+                finally
+                {
+                    sem.Release();
+                    _sessionLocks.TryRemove(protectedSessionId, out _);
+                }
+            }
         }
 
         return session;
@@ -127,10 +140,22 @@ public static class UserAuth
         session.LastSeenUtc = now;
         if (newExpiry - session.ExpiresUtc > TimeSpan.FromMinutes(1))
         {
-            session.ExpiresUtc = newExpiry;
-            await DataStoreProvider.Current.SaveAsync(session, cancellationToken).ConfigureAwait(false);
-            if (session.RememberMe)
-                ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
+            var sem = _sessionLocks.GetOrAdd(protectedSessionId, _ => new SemaphoreSlim(1, 1));
+            if (await sem.WaitAsync(0, cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    session.ExpiresUtc = newExpiry;
+                    await DataStoreProvider.Current.SaveAsync(session, cancellationToken).ConfigureAwait(false);
+                    if (session.RememberMe)
+                        ReissueCookie(context, protectedSessionId, session.ExpiresUtc);
+                }
+                finally
+                {
+                    sem.Release();
+                    _sessionLocks.TryRemove(protectedSessionId, out _);
+                }
+            }
         }
 
         return session;
@@ -255,7 +280,7 @@ public static class UserAuth
         if (context.HttpRequest.Headers.TryGetValue("ApiKey", out var apiKeyHeader))
         {
             var raw = apiKeyHeader.ToString().Trim();
-            if (!string.IsNullOrWhiteSpace(raw))
+            if (!string.IsNullOrWhiteSpace(raw) && raw.Length <= 512)
             {
                 apiKey = raw;
                 return true;
@@ -270,7 +295,7 @@ public static class UserAuth
             if (!string.IsNullOrWhiteSpace(header) && header.StartsWith(apiKeyPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 apiKey = header[apiKeyPrefix.Length..].Trim();
-                return !string.IsNullOrWhiteSpace(apiKey);
+                return !string.IsNullOrWhiteSpace(apiKey) && apiKey.Length <= 512;
             }
 
             // Option 3: Authorization header with "Bearer <value>" prefix (standard OAuth2/OpenAPI)
@@ -278,7 +303,7 @@ public static class UserAuth
             if (!string.IsNullOrWhiteSpace(header) && header.StartsWith(bearerPrefix, StringComparison.OrdinalIgnoreCase))
             {
                 apiKey = header[bearerPrefix.Length..].Trim();
-                return !string.IsNullOrWhiteSpace(apiKey);
+                return !string.IsNullOrWhiteSpace(apiKey) && apiKey.Length <= 512;
             }
         }
 

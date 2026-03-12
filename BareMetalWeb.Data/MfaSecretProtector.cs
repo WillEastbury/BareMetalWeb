@@ -167,10 +167,10 @@ public sealed class MfaSecretProtector
             Directory.CreateDirectory(directory);
 
         if (File.Exists(keyFilePath))
-            return File.ReadAllBytes(keyFilePath);
+            return SynchronousEncryption.UnprotectKeyBytes(File.ReadAllBytes(keyFilePath));
 
         var key = RandomNumberGenerator.GetBytes(KeySize);
-        File.WriteAllBytes(keyFilePath, key);
+        File.WriteAllBytes(keyFilePath, SynchronousEncryption.ProtectKeyBytes(key));
         return key;
     }
 }

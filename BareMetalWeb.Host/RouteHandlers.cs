@@ -46,6 +46,7 @@ public sealed class RouteHandlers : IRouteHandlers
     private static readonly ConcurrentDictionary<string, AttemptTracker> MfaAttempts = new(StringComparer.Ordinal);
     private static DateTime _lastMfaScavenge = DateTime.UtcNow;
     private const int LoginIpMaxAttempts = 10;
+    private const int MfaMaxTrackedKeys = 100_000;
     private const int LoginUserMaxAttempts = 5;
     private const int RegisterIpMaxAttempts = 3;
     private const int SsoCallbackIpMaxAttempts = 10;
@@ -1417,7 +1418,7 @@ public sealed class RouteHandlers : IRouteHandlers
             await UpsertAppSettingAsync(ManagementRegistrationLastStatusSettingId, "failed:request-exception",
                 "Result of the most recent setup registration callback.", actor, cancellationToken).ConfigureAwait(false);
             _logger?.LogError("Setup registration callback request failed.", ex);
-            return new SetupRegistrationResult(false, ex.Message, input.PrincipalName);
+            return new SetupRegistrationResult(false, "Callback request failed.", input.PrincipalName);
         }
         catch (TaskCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
@@ -1932,7 +1933,8 @@ public sealed class RouteHandlers : IRouteHandlers
     private static void ScavengeMfaAttempts()
     {
         var now = DateTime.UtcNow;
-        if ((now - _lastMfaScavenge).TotalSeconds < 60) return;
+        bool overCap = MfaAttempts.Count > MfaMaxTrackedKeys;
+        if (!overCap && (now - _lastMfaScavenge).TotalSeconds < 60) return;
         _lastMfaScavenge = now;
 
         var cutoff = now - MfaAttemptWindow - MfaAttemptWindow; // 2x window = 10 min stale
@@ -1940,6 +1942,16 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             if (kvp.Value.LastActivityUtc < cutoff)
                 MfaAttempts.TryRemove(kvp.Key, out _);
+        }
+
+        // Hard cap: if still over limit after time-based eviction, drop oldest entries
+        if (MfaAttempts.Count > MfaMaxTrackedKeys)
+        {
+            foreach (var kvp in MfaAttempts.OrderBy(x => x.Value.LastActivityUtc))
+            {
+                MfaAttempts.TryRemove(kvp.Key, out _);
+                if (MfaAttempts.Count <= MfaMaxTrackedKeys) break;
+            }
         }
     }
 
@@ -4067,7 +4079,7 @@ public sealed class RouteHandlers : IRouteHandlers
                         }
                     }
 
-                    var rng = new Random();
+                    var rng = Random.Shared;
                     for (int i = 0; i < count; i++)
                     {
                         ct.ThrowIfCancellationRequested();
@@ -4969,28 +4981,35 @@ public sealed class RouteHandlers : IRouteHandlers
         var headerClass = isError ? "bm-log-viewer-header bm-log-error" : "bm-log-viewer-header";
         html.Append($"<div class=\"{headerClass}\">{WebUtility.HtmlEncode(fileName)}</div>");
 
-        if (!File.Exists(path))
-        {
-            html.Append("<p class=\"text-danger mb-0\">Log file not found.</p>");
-            return html.ToString();
-        }
-
         const int maxLines = 2000;
         var truncated = false;
         var lines = RentStringBuilder(4096);
         try
         {
         var count = 0;
-        foreach (var line in File.ReadLines(path))
+        try
         {
-            count++;
-            if (count > maxLines)
+            foreach (var line in File.ReadLines(path))
             {
-                truncated = true;
-                break;
+                count++;
+                if (count > maxLines)
+                {
+                    truncated = true;
+                    break;
+                }
+                lines.Append(WebUtility.HtmlEncode(line));
+                lines.Append('\n');
             }
-            lines.Append(WebUtility.HtmlEncode(line));
-            lines.Append('\n');
+        }
+        catch (FileNotFoundException)
+        {
+            html.Append("<p class=\"text-danger mb-0\">Log file not found.</p>");
+            return html.ToString();
+        }
+        catch (DirectoryNotFoundException)
+        {
+            html.Append("<p class=\"text-danger mb-0\">Log file not found.</p>");
+            return html.ToString();
         }
 
         html.Append("<pre class=\"bm-log-viewer-content\">");

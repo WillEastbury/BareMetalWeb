@@ -1320,7 +1320,7 @@ public sealed class SearchIndexManager
     }
 
     // ===== Treap Index Methods =====
-    private static readonly Random _random = new Random();
+    private static readonly Random _random = Random.Shared;
 
     private void InitializeTreapIndex(IndexData index)
     {

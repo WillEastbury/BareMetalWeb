@@ -12,6 +12,9 @@ public sealed class SynchronousEncryption : ISynchronousEncryption
     private const int TagSize = 16;
     private const byte FormatVersion = 1;
 
+    // Magic header prefix for key files protected with ProtectKeyBytes.
+    internal static readonly byte[] KeyFileMagic = { 0x4B, 0x50, 0x52, 0x54 }; // "KPRT"
+
     private readonly byte[] _key;
 
     private SynchronousEncryption(byte[] key)
@@ -57,8 +60,7 @@ public sealed class SynchronousEncryption : ISynchronousEncryption
 
         var key = new byte[KeySize];
         RandomNumberGenerator.Fill(key);
-        var base64 = Convert.ToBase64String(key);
-        File.WriteAllText(keyFilePath, base64);
+        File.WriteAllText(keyFilePath, Convert.ToBase64String(ProtectKeyBytes(key)));
     }
 
     public byte[] Encrypt(byte[] plaintext, byte[]? associatedData = null)
@@ -123,9 +125,83 @@ public sealed class SynchronousEncryption : ISynchronousEncryption
     private static byte[] LoadKey(string keyFilePath)
     {
         var base64 = File.ReadAllText(keyFilePath).Trim();
-        var key = Convert.FromBase64String(base64);
+        var stored = Convert.FromBase64String(base64);
+        var key = UnprotectKeyBytes(stored);
         if (key.Length != KeySize)
             throw new InvalidOperationException($"Key must be {KeySize} bytes.");
         return key;
+    }
+
+    /// <summary>
+    /// Wraps raw key bytes in a platform-specific protection envelope (DPAPI on Windows,
+    /// AES-256-GCM keyed from machine-id on Linux). Prefixed with the "KPRT" magic header.
+    /// Legacy key files without this header are handled transparently by <see cref="UnprotectKeyBytes"/>.
+    /// </summary>
+    internal static byte[] ProtectKeyBytes(byte[] key)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            var blob = System.Security.Cryptography.ProtectedData.Protect(key, null, System.Security.Cryptography.DataProtectionScope.LocalMachine);
+            var result = new byte[KeyFileMagic.Length + blob.Length];
+            KeyFileMagic.CopyTo(result, 0);
+            blob.CopyTo(result, KeyFileMagic.Length);
+            return result;
+        }
+        else
+        {
+            var machineKey = DeriveLinuxMachineKey();
+            var nonce = new byte[12];
+            RandomNumberGenerator.Fill(nonce);
+            var ciphertext = new byte[key.Length];
+            var tag = new byte[16];
+            using var aes = new AesGcm(machineKey, 16);
+            aes.Encrypt(nonce, key, ciphertext, tag);
+            // Layout: magic(4) + nonce(12) + tag(16) + ciphertext
+            var result = new byte[KeyFileMagic.Length + nonce.Length + tag.Length + ciphertext.Length];
+            int pos = 0;
+            KeyFileMagic.CopyTo(result, pos); pos += KeyFileMagic.Length;
+            nonce.CopyTo(result, pos); pos += nonce.Length;
+            tag.CopyTo(result, pos); pos += tag.Length;
+            ciphertext.CopyTo(result, pos);
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Unwraps a key file blob produced by <see cref="ProtectKeyBytes"/>.
+    /// If the blob does not start with the "KPRT" magic header, it is assumed to be a
+    /// legacy plaintext key and returned unchanged for backward compatibility.
+    /// </summary>
+    internal static byte[] UnprotectKeyBytes(byte[] stored)
+    {
+        if (stored.Length < KeyFileMagic.Length || !stored.AsSpan(0, KeyFileMagic.Length).SequenceEqual(KeyFileMagic))
+            return stored; // Legacy plaintext — return as-is for backward compat
+        var blob = stored[KeyFileMagic.Length..];
+        if (OperatingSystem.IsWindows())
+            return System.Security.Cryptography.ProtectedData.Unprotect(blob, null, System.Security.Cryptography.DataProtectionScope.LocalMachine);
+        else
+        {
+            var machineKey = DeriveLinuxMachineKey();
+            const int nonceLen = 12, tagLen = 16;
+            var nonce = blob.AsSpan(0, nonceLen);
+            var tag = blob.AsSpan(nonceLen, tagLen);
+            var ciphertext = blob.AsSpan(nonceLen + tagLen);
+            var plaintext = new byte[ciphertext.Length];
+            using var aes = new AesGcm(machineKey, tagLen);
+            aes.Decrypt(nonce, ciphertext, tag, plaintext);
+            return plaintext;
+        }
+    }
+
+    private static byte[] DeriveLinuxMachineKey()
+    {
+        string machineId = "baremetalweb-default";
+        try { machineId = File.Exists("/etc/machine-id") ? File.ReadAllText("/etc/machine-id").Trim() : Environment.MachineName; } catch { }
+        return HKDF.DeriveKey(
+            HashAlgorithmName.SHA256,
+            Encoding.UTF8.GetBytes(machineId),
+            32,
+            Encoding.UTF8.GetBytes("BareMetalWeb.KeyFile.v1"),
+            Encoding.UTF8.GetBytes("key-protection"));
     }
 }
