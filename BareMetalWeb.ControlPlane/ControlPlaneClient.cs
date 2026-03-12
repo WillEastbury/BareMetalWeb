@@ -56,6 +56,16 @@ public sealed class ControlPlaneClient
 
     public void SendBackupRecord(BackupRecord record)
         => PostFireAndForget("BackupRecord", record);
+    public void SendUpgradeVerification(UpgradeVerificationRecord record)
+        => PostFireAndForget("UpgradeVerificationRecord", record);
+
+    /// <summary>
+    /// Query the control plane for the upgrade status of a specific instance.
+    /// Returns null if the control plane is unreachable or not configured.
+    /// </summary>
+    public Task<UpgradeStatus?> GetUpgradeStatusAsync(string instanceId, string targetVersion)
+        => GetAsync<UpgradeStatus>(
+            $"/api/_cluster/upgrade-status?instanceId={Uri.EscapeDataString(instanceId)}&targetVersion={Uri.EscapeDataString(targetVersion)}");
 
     private void PostFireAndForget<T>(string entityType, T payload)
     {

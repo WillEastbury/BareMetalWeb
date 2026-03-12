@@ -195,7 +195,7 @@ jobs:
   # ── Deploy to early-access tenants ──────────────────────────────────────
   deploy-early-access:
     name: "Deploy · ${{ matrix.name }}"
-    needs: prepare-matrix
+    needs: [prepare-matrix, release]
     if: needs.prepare-matrix.outputs.count != '0'
     runs-on: ubuntu-latest
     strategy:
@@ -207,8 +207,11 @@ jobs:
       resource-group: ${{ matrix.resource_group }}
       artifact-name: deploy-package
       health-check-url: ${{ matrix.url }}
+      version-number: ${{ needs.release.outputs.version_tag }}
     secrets:
       azure-credentials: ${{ secrets.AZURE_CREDENTIALS_TENANTS }}
+      control-plane-url: ${{ secrets.CONTROL_PLANE_URL }}
+      control-plane-api-key: ${{ secrets.CONTROL_PLANE_API_KEY }}
 
   # ── Summary ─────────────────────────────────────────────────────────────
   summary:

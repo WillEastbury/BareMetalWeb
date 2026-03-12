@@ -12,3 +12,5 @@ BareMetalWeb.Host/Data/
 */TestResults/
 node_modules/
 Data/
+
+publish/

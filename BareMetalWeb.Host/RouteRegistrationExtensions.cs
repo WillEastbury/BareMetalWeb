@@ -505,6 +505,7 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/_cluster", new RouteHandlerData(adminOnly, ClusterApiHandlers.ClusterStatusHandler));
         host.RegisterRoute("GET /api/_cluster/replicate", new RouteHandlerData(adminOnly, ClusterApiHandlers.ReplicationHandler));
         host.RegisterRoute("POST /api/_cluster/stepdown", new RouteHandlerData(adminOnly, ClusterApiHandlers.StepDownHandler));
+        host.RegisterRoute("GET /api/_cluster/upgrade-status", new RouteHandlerData(adminOnly, ClusterApiHandlers.UpgradeStatusHandler));
         host.RegisterRoute("GET /api/tenants", new RouteHandlerData(adminOnly, TenantApiHandlers.ListTenantsHandler));
         host.RegisterRoute("GET /api/tenants/{id}", new RouteHandlerData(adminOnly, TenantApiHandlers.GetTenantHandler));
         host.RegisterRoute("POST /api/tenants", new RouteHandlerData(adminOnly, TenantApiHandlers.ProvisionTenantHandler));

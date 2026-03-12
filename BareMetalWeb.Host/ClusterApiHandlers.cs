@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using BareMetalWeb.ControlPlane;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using Microsoft.AspNetCore.Http;
@@ -128,5 +129,125 @@ public static class ClusterApiHandlers
             return false;
         }
         return true;
+    }
+
+    /// <summary>
+    /// GET /api/_cluster/upgrade-status?instanceId=X&amp;targetVersion=Y
+    /// Returns whether the named instance has self-reported the target version with healthy status.
+    /// Deployment agents poll this endpoint to gate rollout success on pod version + error-rate data.
+    /// Requires admin or monitoring permission.
+    /// </summary>
+    public static async ValueTask UpgradeStatusHandler(BmwContext context)
+    {
+        if (!await RequireAdminAsync(context)) return;
+
+        var instanceId = context.HttpRequest.Query.TryGetValue("instanceId", out var iid)
+            ? iid.ToString() : null;
+        var targetVersion = context.HttpRequest.Query.TryGetValue("targetVersion", out var tv)
+            ? tv.ToString() : null;
+
+        if (string.IsNullOrWhiteSpace(instanceId) || string.IsNullOrWhiteSpace(targetVersion))
+        {
+            context.Response.StatusCode = 400;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(
+                """{"error":"instanceId and targetVersion query parameters are required."}""");
+            return;
+        }
+
+        if (!DataScaffold.TryGetEntity("InstanceHeartbeat", out var meta))
+        {
+            context.Response.StatusCode = 503;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(
+                """{"error":"InstanceHeartbeat entity not registered on this instance."}""");
+            return;
+        }
+
+        InstanceHeartbeat? latest = null;
+        try
+        {
+            var query = new QueryDefinition
+            {
+                Clauses =
+                [
+                    new QueryClause
+                    {
+                        Field = "InstanceId",
+                        Operator = QueryOperator.Equals,
+                        Value = instanceId,
+                    }
+                ],
+                Sorts = [new SortClause { Field = "Timestamp", Direction = SortDirection.Desc }],
+                Top = 1,
+            };
+            var results = await DataScaffold.QueryAsync(meta, query, context.RequestAborted)
+                .ConfigureAwait(false);
+            foreach (var r in results)
+            {
+                if (r is InstanceHeartbeat hb) { latest = hb; break; }
+                if (r != null)
+                {
+                    var t = r.GetType();
+                    latest = new InstanceHeartbeat
+                    {
+                        InstanceId   = t.GetProperty("InstanceId")?.GetValue(r) as string,
+                        Version      = t.GetProperty("Version")?.GetValue(r) as string,
+                        Ready        = t.GetProperty("Ready")?.GetValue(r) is bool rd && rd,
+                        ErrorRate5xx = t.GetProperty("ErrorRate5xx")?.GetValue(r) is double er ? er : 0,
+                        Timestamp    = t.GetProperty("Timestamp")?.GetValue(r) as string,
+                    };
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            context.Response.StatusCode = 500;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(
+                $"{{\"error\":\"Query failed: {System.Text.Json.JsonEncodedText.Encode(ex.Message)}\"}}");
+            return;
+        }
+
+        context.Response.StatusCode = 200;
+        context.Response.ContentType = "application/json";
+        await using var w = new System.Text.Json.Utf8JsonWriter(context.Response.Body);
+        w.WriteStartObject();
+        w.WriteString("instanceId", instanceId);
+        w.WriteString("targetVersion", targetVersion);
+
+        if (latest == null)
+        {
+            w.WriteBoolean("verified", false);
+            w.WriteBoolean("ready", false);
+            w.WriteNumber("errorRate5xx", 0);
+            w.WriteNull("currentVersion");
+            w.WriteNull("timestamp");
+            w.WriteString("reason", "no_heartbeat_found");
+        }
+        else
+        {
+            const double BlockingErrorThreshold = 0.05;
+            bool versionMatch = string.Equals(latest.Version, targetVersion, StringComparison.OrdinalIgnoreCase);
+            bool ready = latest.Ready;
+            bool errorRateOk = latest.ErrorRate5xx < BlockingErrorThreshold;
+            bool verified = versionMatch && ready && errorRateOk;
+
+            string reason = verified ? "ok"
+                : !versionMatch ? $"version_mismatch:reported={latest.Version}"
+                : !ready        ? "not_ready"
+                : $"error_rate_too_high:{latest.ErrorRate5xx:F4}";
+
+            w.WriteBoolean("verified", verified);
+            w.WriteBoolean("ready", ready);
+            w.WriteNumber("errorRate5xx", latest.ErrorRate5xx);
+            w.WriteString("currentVersion", latest.Version);
+            w.WriteString("timestamp", latest.Timestamp);
+            w.WriteString("reason", reason);
+        }
+
+        w.WriteEndObject();
+        await w.FlushAsync(context.RequestAborted);
     }
 }

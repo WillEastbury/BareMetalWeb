@@ -99,3 +99,33 @@ public sealed class BackupRecord
     public long SizeBytes { get; set; }
     public bool Validated { get; set; }
 }
+
+// ── Upgrade verification models ─────────────────────────────────────────────
+
+/// <summary>
+/// Response from GET /api/_cluster/upgrade-status.
+/// Indicates whether a pod has self-reported the target version with healthy status.
+/// </summary>
+public sealed class UpgradeStatus
+{
+    public string? InstanceId { get; set; }
+    public string? TargetVersion { get; set; }
+    public string? CurrentVersion { get; set; }
+    public bool Verified { get; set; }
+    public bool Ready { get; set; }
+    public double ErrorRate5xx { get; set; }
+    public string? Timestamp { get; set; }
+    public string? Reason { get; set; }
+}
+
+/// <summary>
+/// Audit record of an upgrade verification decision, streamed to the control plane.
+/// </summary>
+public sealed class UpgradeVerificationRecord
+{
+    public string? InstanceId { get; set; }
+    public string? TargetVersion { get; set; }
+    public bool Success { get; set; }
+    public string? Reason { get; set; }
+    public string? Timestamp { get; set; }
+}
