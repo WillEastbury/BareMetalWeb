@@ -34,6 +34,7 @@ env:
   ACR_LOGIN_SERVER: metalclusterregistry.azurecr.io
   ACR_NAME: metalclusterregistry
   ACR_IMAGE: baremetalweb
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   # ── Verify image exists ─────────────────────────────────────────────────
