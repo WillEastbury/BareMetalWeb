@@ -330,8 +330,32 @@ public sealed class ReportExecutor
 
     // ── Row projection ───────────────────────────────────────────────────────
 
+    // Sentinel used to cache "field not found" so we don't re-scan metadata on every row.
+    private static readonly Func<object, object?> _missingFieldSentinel = static _ => null;
+
     // Cached compiled property accessors — avoids per-cell metadata lookup in report projection.
-    private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> AccessorCache = new();
+    private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>> AccessorCache = new();
+
+    /// <summary>
+    /// Returns a compiled accessor for <paramref name="fieldName"/> on <paramref name="objType"/>,
+    /// or <see langword="null"/> if the field is not found. Result is cached per (type, field) pair.
+    /// </summary>
+    private static Func<object, object?>? GetOrCreateAccessor(Type objType, string fieldName)
+    {
+        var cached = AccessorCache.GetOrAdd((objType, fieldName), static key =>
+        {
+            var meta = DataScaffold.GetEntityByType(key.Item1);
+            if (meta != null)
+            {
+                var f = meta.FindField(key.Item2);
+                if (f != null) return f.GetValueFn;
+                var layout = EntityLayoutCompiler.GetOrCompile(meta).FieldByName(key.Item2);
+                if (layout != null) return layout.Getter;
+            }
+            return _missingFieldSentinel;
+        });
+        return ReferenceEquals(cached, _missingFieldSentinel) ? null : cached;
+    }
 
     private static string?[] ProjectRow(Dictionary<string, BaseDataObject> row, IReadOnlyList<ReportColumn> columns)
     {
@@ -345,31 +369,8 @@ public sealed class ReportExecutor
                 continue;
             }
 
-            var objType = obj.GetType();
-            Func<object, object?>? getter;
-            if (!AccessorCache.TryGetValue((objType, col.Field), out getter))
-            {
-                // Try metadata-driven lookup (covers DataField-annotated properties)
-                var meta = DataScaffold.GetEntityByType(objType);
-                getter = meta?.FindField(col.Field)?.GetValueFn;
-
-                // Fall back to EntityLayout (covers all properties including inherited Key etc.)
-                if (getter == null && meta != null)
-                    getter = EntityLayoutCompiler.GetOrCompile(meta).FieldByName(col.Field)?.Getter;
-
-                // Only cache successful lookups; don't cache null to allow retry if not yet registered
-                if (getter != null)
-                    AccessorCache.TryAdd((objType, col.Field), getter);
-            }
-
-            if (getter == null)
-            {
-                cells[i] = null;
-                continue;
-            }
-
-            var raw = getter(obj);
-            cells[i] = FormatValue(raw, col.Format);
+            var getter = GetOrCreateAccessor(obj.GetType(), col.Field);
+            cells[i] = getter != null ? FormatValue(getter(obj), col.Format) : null;
         }
         return cells;
     }
