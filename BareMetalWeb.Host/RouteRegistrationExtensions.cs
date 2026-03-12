@@ -2402,6 +2402,267 @@ public static class RouteRegistrationExtensions
             }));
     }
 
+    // ── Module Editor Routes ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Registers JSON API routes for the Module Editor.
+    /// <list type="bullet">
+    ///   <item><c>GET /api/modules</c>  — list all modules</item>
+    ///   <item><c>GET /api/modules/{id}</c>  — module detail with resolved owned artifacts</item>
+    ///   <item><c>PUT /api/modules/{id}</c>  — update module owned-slug CSVs</item>
+    /// </list>
+    /// </summary>
+    public static void RegisterModuleRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        // ── GET /api/modules — JSON list of all modules ──────────────────────
+        host.RegisterRoute("GET /api/modules", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
+
+                var modules = await ModuleRegistry.GetModulesAsync(context.RequestAborted).ConfigureAwait(false);
+                var list = new List<Dictionary<string, object?>>(modules.Count);
+                foreach (var m in modules)
+                {
+                    list.Add(new Dictionary<string, object?>
+                    {
+                        ["moduleId"] = m.ModuleId,
+                        ["name"] = m.Name,
+                        ["version"] = m.Version,
+                        ["navGroup"] = m.NavGroup,
+                        ["isolation"] = m.Isolation,
+                        ["enabled"] = m.Enabled,
+                        ["entityCount"] = m.EntitySlugs.Count,
+                        ["reportCount"] = m.ReportSlugs.Count,
+                        ["actionCount"] = m.ActionKeys.Count,
+                        ["permissionCount"] = m.RequiredPermissions.Count
+                    });
+                }
+                context.Response.ContentType = "application/json";
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
+                {
+                    JsonWriterHelper.WriteValue(w, list);
+                }
+            }));
+
+        // ── GET /api/modules/{id} — module detail with owned artifacts ───────
+        host.RegisterRoute("GET /api/modules/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
+
+                var moduleId = GetRouteParam(context, "id") ?? string.Empty;
+                var modules = await ModuleRegistry.GetModulesAsync(context.RequestAborted).ConfigureAwait(false);
+                ModuleInfo? target = null;
+                foreach (var m in modules)
+                {
+                    if (string.Equals(m.ModuleId, moduleId, StringComparison.OrdinalIgnoreCase))
+                    { target = m; break; }
+                }
+                if (target == null)
+                { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Module not found\"}"); return; }
+
+                // Resolve owned entity definitions with their field schemas
+                var entities = new List<Dictionary<string, object?>>();
+                foreach (var slug in target.EntitySlugs)
+                {
+                    if (!DataScaffold.TryGetEntity(slug, out var meta)) continue;
+                    var fields = new List<Dictionary<string, object?>>();
+                    foreach (var f in meta.Fields)
+                    {
+                        fields.Add(new Dictionary<string, object?>
+                        {
+                            ["name"] = f.Name,
+                            ["label"] = f.Label,
+                            ["fieldType"] = f.FieldType.ToString(),
+                            ["required"] = f.Required,
+                            ["indexed"] = f.IsIndexed,
+                            ["order"] = f.Order
+                        });
+                    }
+                    entities.Add(new Dictionary<string, object?>
+                    {
+                        ["slug"] = slug,
+                        ["name"] = meta.Name,
+                        ["showOnNav"] = meta.ShowOnNav,
+                        ["navGroup"] = meta.NavGroup,
+                        ["navOrder"] = meta.NavOrder,
+                        ["permissions"] = meta.Permissions,
+                        ["fieldCount"] = meta.Fields.Count,
+                        ["fields"] = fields
+                    });
+                }
+
+                // Resolve owned reports
+                var reports = new List<Dictionary<string, object?>>();
+                foreach (var slug in target.ReportSlugs)
+                {
+                    if (!DataScaffold.TryGetEntity("report-definitions", out var reportMeta)) break;
+                    var reportItems = await reportMeta.Handlers.QueryAsync(null, context.RequestAborted).ConfigureAwait(false);
+                    foreach (var item in reportItems)
+                    {
+                        var name = reportMeta.FieldsByName.TryGetValue("Name", out var nf) ? nf.GetValueFn?.Invoke(item)?.ToString() : null;
+                        var rootEntity = reportMeta.FieldsByName.TryGetValue("RootEntity", out var rf) ? rf.GetValueFn?.Invoke(item)?.ToString() : null;
+                        if (string.Equals(name, slug, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(item.Key.ToString(), slug, StringComparison.OrdinalIgnoreCase))
+                        {
+                            reports.Add(new Dictionary<string, object?>
+                            {
+                                ["id"] = item.Key,
+                                ["name"] = name,
+                                ["rootEntity"] = rootEntity
+                            });
+                        }
+                    }
+                }
+
+                // Resolve owned actions
+                var actions = new List<Dictionary<string, object?>>();
+                foreach (var key in target.ActionKeys)
+                {
+                    if (!DataScaffold.TryGetEntity("action-definitions", out var actionMeta)) break;
+                    var actionItems = await actionMeta.Handlers.QueryAsync(null, context.RequestAborted).ConfigureAwait(false);
+                    foreach (var item in actionItems)
+                    {
+                        var name = actionMeta.FieldsByName.TryGetValue("Name", out var nf) ? nf.GetValueFn?.Invoke(item)?.ToString() : null;
+                        if (string.Equals(name, key, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(item.Key.ToString(), key, StringComparison.OrdinalIgnoreCase))
+                        {
+                            actions.Add(new Dictionary<string, object?>
+                            {
+                                ["id"] = item.Key,
+                                ["name"] = name,
+                                ["entityId"] = actionMeta.FieldsByName.TryGetValue("EntityId", out var ef) ? ef.GetValueFn?.Invoke(item)?.ToString() : null
+                            });
+                        }
+                    }
+                }
+
+                // Build response
+                context.Response.ContentType = "application/json";
+                await using (var w = new Utf8JsonWriter(context.Response.Body, s_indentedWriterOptions))
+                {
+                    w.WriteStartObject();
+                    w.WriteString("moduleId", target.ModuleId);
+                    w.WriteString("name", target.Name);
+                    w.WriteString("version", target.Version);
+                    w.WriteString("navGroup", target.NavGroup);
+                    w.WriteString("isolation", target.Isolation);
+                    w.WriteBoolean("enabled", target.Enabled);
+
+                    w.WritePropertyName("entitySlugs");
+                    JsonWriterHelper.WriteValue(w, target.EntitySlugs);
+                    w.WritePropertyName("actionKeys");
+                    JsonWriterHelper.WriteValue(w, target.ActionKeys);
+                    w.WritePropertyName("reportSlugs");
+                    JsonWriterHelper.WriteValue(w, target.ReportSlugs);
+                    w.WritePropertyName("requiredPermissions");
+                    JsonWriterHelper.WriteValue(w, target.RequiredPermissions);
+                    w.WritePropertyName("dependencies");
+                    JsonWriterHelper.WriteValue(w, target.Dependencies);
+
+                    w.WritePropertyName("entities");
+                    JsonWriterHelper.WriteValue(w, entities);
+                    w.WritePropertyName("reports");
+                    JsonWriterHelper.WriteValue(w, reports);
+                    w.WritePropertyName("actions");
+                    JsonWriterHelper.WriteValue(w, actions);
+
+                    w.WriteEndObject();
+                }
+            }));
+
+        // ── PUT /api/modules/{id} — update module ────────────────────────────
+        host.RegisterRoute("PUT /api/modules/{id}", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
+                if (user == null) { context.Response.StatusCode = 401; return; }
+                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
+
+                if (!CsrfProtection.ValidateApiToken(context))
+                { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"CSRF validation failed\"}"); return; }
+
+                var moduleId = GetRouteParam(context, "id") ?? string.Empty;
+                if (!DataScaffold.TryGetEntity("modules", out var meta))
+                { context.Response.StatusCode = 500; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Module entity not registered\"}"); return; }
+
+                // Find the existing module record
+                var items = await meta.Handlers.QueryAsync(null, context.RequestAborted).ConfigureAwait(false);
+                BaseDataObject? existing = null;
+                foreach (var item in items)
+                {
+                    if (meta.FieldsByName.TryGetValue("ModuleId", out var idField))
+                    {
+                        var val = idField.GetValueFn?.Invoke(item)?.ToString();
+                        if (string.Equals(val, moduleId, StringComparison.OrdinalIgnoreCase))
+                        { existing = item; break; }
+                    }
+                }
+                if (existing == null)
+                { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Module not found\"}"); return; }
+
+                // Parse JSON body and apply field updates
+                using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, default, context.RequestAborted).ConfigureAwait(false);
+                var root = doc.RootElement;
+
+                void TrySetField(string fieldName, JsonElement parent)
+                {
+                    if (!parent.TryGetProperty(fieldName, out var prop) &&
+                        !parent.TryGetProperty(char.ToLowerInvariant(fieldName[0]) + fieldName[1..], out prop))
+                        return;
+                    if (!meta.FieldsByName.TryGetValue(fieldName, out var field)) return;
+                    if (field.SetValueFn == null) return;
+
+                    if (prop.ValueKind == JsonValueKind.True || prop.ValueKind == JsonValueKind.False)
+                        field.SetValueFn(existing, prop.GetBoolean());
+                    else if (prop.ValueKind == JsonValueKind.String)
+                        field.SetValueFn(existing, prop.GetString());
+                    else if (prop.ValueKind == JsonValueKind.Array)
+                    {
+                        // Convert JSON array to CSV
+                        var parts = new List<string>();
+                        foreach (var el in prop.EnumerateArray())
+                        {
+                            var s = el.GetString();
+                            if (!string.IsNullOrWhiteSpace(s)) parts.Add(s);
+                        }
+                        field.SetValueFn(existing, string.Join(",", parts));
+                    }
+                }
+
+                TrySetField("Name", root);
+                TrySetField("Version", root);
+                TrySetField("NavGroup", root);
+                TrySetField("Isolation", root);
+                TrySetField("Enabled", root);
+                TrySetField("EntitySlugs", root);
+                TrySetField("ActionKeys", root);
+                TrySetField("ReportSlugs", root);
+                TrySetField("RequiredPermissions", root);
+                TrySetField("Dependencies", root);
+
+                await meta.Handlers.SaveAsync(existing, context.RequestAborted).ConfigureAwait(false);
+                ModuleRegistry.Invalidate();
+
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"ok\":true}");
+            }));
+    }
+
     // ── View Engine Routes ────────────────────────────────────────────────────
 
     /// <summary>

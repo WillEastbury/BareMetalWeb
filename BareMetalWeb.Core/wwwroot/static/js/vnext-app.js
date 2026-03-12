@@ -5117,7 +5117,7 @@
     // Tools dropdown (sample data, wipe data)
     const toolsLi = el('li', { className: 'nav-item dropdown' });
     const toolsToggle = el('a', {
-      className: 'nav-link dropdown-toggle' + (['_sample-data', '_wipe-data', '_query-plans', '_dashboards', '_reports', '_views'].includes(activeSlug) ? ' active' : ''),
+      className: 'nav-link dropdown-toggle' + (['_sample-data', '_wipe-data', '_query-plans', '_dashboards', '_reports', '_views', '_modules'].includes(activeSlug) ? ' active' : ''),
       href: '#', role: 'button', title: 'Admin Tools'
     });
     toolsToggle.setAttribute('data-bs-toggle', 'dropdown');
@@ -5131,7 +5131,8 @@
       { slug: '_query-plans', label: '\uD83D\uDCCA Query Plan History' },
       { slug: '_dashboards',  label: '\uD83D\uDCCA Dashboards' },
       { slug: '_reports',     label: '\uD83D\uDCCA Reports' },
-      { slug: '_views',       label: '\uD83D\uDD0D Views' }
+      { slug: '_views',       label: '\uD83D\uDD0D Views' },
+      { slug: '_modules',     label: '\uD83D\uDCE6 Module Editor' }
     ].forEach(function (t) {
       const mli = el('li');
       const ma  = el('a', { className: 'dropdown-item' + (activeSlug === t.slug ? ' active' : ''), href: BASE + '/' + t.slug, textContent: t.label });
@@ -6144,6 +6145,306 @@
     loadView();
   }
 
+  // ── Module Editor ────────────────────────────────────────────────────────
+
+  function renderModulesListPage(container) {
+    container.appendChild(el('h2', { className: 'mb-3', textContent: '\uD83D\uDCE6 Modules' }));
+    container.appendChild(el('p', { className: 'text-muted', textContent: 'Manage application modules — each module owns entities, reports, actions, and permissions.' }));
+
+    var addLink = el('a', { href: BASE + '/modules/create', className: 'btn btn-sm btn-primary mb-3', textContent: '+ New Module' });
+    addLink.setAttribute('data-go', '');
+    container.appendChild(addLink);
+
+    var listWrap = el('div');
+    container.appendChild(listWrap);
+
+    apiFetch('/api/modules')
+      .then(function (modules) {
+        listWrap.innerHTML = '';
+        if (!Array.isArray(modules) || modules.length === 0) {
+          listWrap.innerHTML = '<div class="bm-empty-state"><i class="bi bi-box-seam"></i><p>No modules defined yet</p><small>Create one via <a href="' + BASE + '/modules/create" data-go>Modules</a></small></div>';
+          wire();
+          return;
+        }
+        var row = el('div', { className: 'row g-3' });
+        modules.forEach(function (m) {
+          var card = el('div', { className: 'col-sm-6 col-md-4 col-lg-3' });
+          var inner = el('div', { className: 'card h-100' + (m.enabled ? '' : ' opacity-50') });
+          var body = el('div', { className: 'card-body' });
+          body.appendChild(el('h5', { className: 'card-title', innerHTML: '<i class="bi bi-box-seam me-2"></i>' + escHtml(m.name || m.moduleId) }));
+          if (m.version) body.appendChild(el('p', { className: 'card-text text-muted small mb-1', textContent: 'v' + m.version }));
+          var badges = el('div', { className: 'd-flex gap-1 flex-wrap mb-2' });
+          if (m.entityCount > 0) badges.appendChild(el('span', { className: 'badge bg-primary', textContent: m.entityCount + ' entit' + (m.entityCount === 1 ? 'y' : 'ies') }));
+          if (m.reportCount > 0) badges.appendChild(el('span', { className: 'badge bg-info', textContent: m.reportCount + ' report' + (m.reportCount === 1 ? '' : 's') }));
+          if (m.actionCount > 0) badges.appendChild(el('span', { className: 'badge bg-warning text-dark', textContent: m.actionCount + ' action' + (m.actionCount === 1 ? '' : 's') }));
+          if (m.permissionCount > 0) badges.appendChild(el('span', { className: 'badge bg-secondary', textContent: m.permissionCount + ' perm' + (m.permissionCount === 1 ? '' : 's') }));
+          body.appendChild(badges);
+          if (m.isolation) body.appendChild(el('p', { className: 'card-text', innerHTML: '<small class="text-muted"><i class="bi bi-shield-lock me-1"></i>' + escHtml(m.isolation) + '</small>' }));
+          if (!m.enabled) body.appendChild(el('span', { className: 'badge bg-danger', textContent: 'Disabled' }));
+          var footer = el('div', { className: 'card-footer d-flex gap-2' });
+          var editBtn = el('a', { href: BASE + '/_modules/' + encodeURIComponent(m.moduleId), className: 'btn btn-sm btn-primary', innerHTML: '<i class="bi bi-pencil-square"></i> Edit' });
+          editBtn.setAttribute('data-go', '');
+          footer.appendChild(editBtn);
+          inner.appendChild(body);
+          inner.appendChild(footer);
+          card.appendChild(inner);
+          row.appendChild(card);
+        });
+        listWrap.appendChild(row);
+        wire();
+      })
+      .catch(function (err) {
+        listWrap.innerHTML = '<div class="alert alert-danger">' + escHtml(err.message) + '</div>';
+      });
+  }
+
+  function renderModuleEditorPage(container, moduleId) {
+    var hdr = el('div', { className: 'd-flex align-items-center gap-3 mb-3 flex-wrap' });
+    hdr.appendChild(el('h2', { className: 'mb-0', textContent: '\uD83D\uDCE6 Module Editor' }));
+    var backLink = el('a', { href: BASE + '/_modules', className: 'btn btn-outline-secondary btn-sm', innerHTML: '<i class="bi bi-arrow-left"></i> All Modules' });
+    backLink.setAttribute('data-go', '');
+    hdr.appendChild(backLink);
+    container.appendChild(hdr);
+
+    var loadingEl = el('div', { className: 'd-flex justify-content-center mt-4', innerHTML: '<div class="spinner-border" role="status"><span class="visually-hidden">Loading\u2026</span></div>' });
+    container.appendChild(loadingEl);
+
+    apiFetch('/api/modules/' + encodeURIComponent(moduleId))
+      .then(function (mod) {
+        loadingEl.remove();
+        renderModuleEditorLayout(container, mod);
+      })
+      .catch(function (err) {
+        loadingEl.remove();
+        container.appendChild(el('div', { className: 'alert alert-danger', textContent: err.message }));
+      });
+  }
+
+  function renderModuleEditorLayout(container, mod) {
+    // Module header with inline-editable properties
+    var propsCard = el('div', { className: 'card mb-3' });
+    var propsBody = el('div', { className: 'card-body' });
+    propsBody.innerHTML =
+      '<div class="row g-2 align-items-end">' +
+        '<div class="col-md-3"><label class="form-label fw-bold">Name</label><input type="text" class="form-control form-control-sm" id="mod-name" value="' + escHtml(mod.name || '') + '"></div>' +
+        '<div class="col-md-2"><label class="form-label fw-bold">Version</label><input type="text" class="form-control form-control-sm" id="mod-version" value="' + escHtml(mod.version || '') + '"></div>' +
+        '<div class="col-md-2"><label class="form-label fw-bold">Nav Group</label><input type="text" class="form-control form-control-sm" id="mod-navgroup" value="' + escHtml(mod.navGroup || '') + '"></div>' +
+        '<div class="col-md-2"><label class="form-label fw-bold">Isolation</label>' +
+          '<select class="form-select form-select-sm" id="mod-isolation"><option value="open"' + (mod.isolation !== 'isolated' ? ' selected' : '') + '>Open</option><option value="isolated"' + (mod.isolation === 'isolated' ? ' selected' : '') + '>Isolated</option></select></div>' +
+        '<div class="col-md-1"><label class="form-label fw-bold">Enabled</label><div class="form-check form-switch mt-1"><input class="form-check-input" type="checkbox" id="mod-enabled"' + (mod.enabled ? ' checked' : '') + '></div></div>' +
+        '<div class="col-md-2"><button class="btn btn-success btn-sm w-100" id="mod-save-btn"><i class="bi bi-save me-1"></i>Save Module</button></div>' +
+      '</div>';
+    propsCard.appendChild(propsBody);
+    container.appendChild(propsCard);
+
+    // Master-detail layout
+    var row = el('div', { className: 'row g-3', style: 'min-height: 60vh' });
+
+    // Left panel — categorized tree
+    var leftCol = el('div', { className: 'col-md-4 col-lg-3' });
+    var leftCard = el('div', { className: 'card h-100' });
+    var leftBody = el('div', { className: 'card-body p-0' });
+
+    var categories = [
+      { key: 'entities',    icon: 'bi-table',       label: 'Entities',    items: mod.entities || [],    slugField: 'slug', nameField: 'name' },
+      { key: 'reports',     icon: 'bi-file-earmark-bar-graph', label: 'Reports', items: mod.reports || [],  slugField: 'id', nameField: 'name' },
+      { key: 'actions',     icon: 'bi-lightning',   label: 'Actions',     items: mod.actions || [],     slugField: 'id', nameField: 'name' },
+      { key: 'permissions', icon: 'bi-shield-check', label: 'Permissions', items: (mod.requiredPermissions || []).map(function(p) { return { code: p, name: p }; }), slugField: 'code', nameField: 'name' },
+      { key: 'dependencies', icon: 'bi-diagram-3', label: 'Dependencies', items: (mod.dependencies || []).map(function(d) { return { depId: d, name: d }; }), slugField: 'depId', nameField: 'name' }
+    ];
+
+    var accordion = el('div', { className: 'accordion accordion-flush', id: 'mod-accordion' });
+    var selectedItem = { category: null, item: null };
+
+    categories.forEach(function (cat, idx) {
+      var accItem = el('div', { className: 'accordion-item' });
+      var accHeader = el('h2', { className: 'accordion-header' });
+      var accBtn = el('button', {
+        className: 'accordion-button' + (idx > 0 ? ' collapsed' : ''),
+        type: 'button',
+        innerHTML: '<i class="bi ' + cat.icon + ' me-2"></i>' + cat.label + ' <span class="badge bg-secondary ms-auto">' + cat.items.length + '</span>'
+      });
+      accBtn.setAttribute('data-bs-toggle', 'collapse');
+      accBtn.setAttribute('data-bs-target', '#mod-acc-' + cat.key);
+      accHeader.appendChild(accBtn);
+      accItem.appendChild(accHeader);
+
+      var accCollapse = el('div', { id: 'mod-acc-' + cat.key, className: 'accordion-collapse collapse' + (idx === 0 ? ' show' : '') });
+      accCollapse.setAttribute('data-bs-parent', '#mod-accordion');
+      var accBody = el('div', { className: 'accordion-body p-0' });
+
+      var listGroup = el('div', { className: 'list-group list-group-flush' });
+      if (cat.items.length === 0) {
+        listGroup.appendChild(el('div', { className: 'list-group-item text-muted small fst-italic', textContent: 'No ' + cat.label.toLowerCase() + ' in this module' }));
+      }
+      cat.items.forEach(function (item) {
+        var li = el('a', {
+          href: '#',
+          className: 'list-group-item list-group-item-action d-flex align-items-center py-2',
+          innerHTML: '<i class="bi ' + cat.icon + ' me-2 text-muted"></i><span class="text-truncate">' + escHtml(item[cat.nameField] || item[cat.slugField] || '?') + '</span>'
+        });
+        li.addEventListener('click', function (e) {
+          e.preventDefault();
+          // Remove active from all
+          leftBody.querySelectorAll('.list-group-item-action').forEach(function (el) { el.classList.remove('active'); });
+          li.classList.add('active');
+          selectedItem.category = cat.key;
+          selectedItem.item = item;
+          renderModuleDetailPanel(rightBody, cat, item, mod);
+        });
+        listGroup.appendChild(li);
+      });
+      accBody.appendChild(listGroup);
+      accCollapse.appendChild(accBody);
+      accItem.appendChild(accCollapse);
+      accordion.appendChild(accItem);
+    });
+
+    leftBody.appendChild(accordion);
+    leftCard.appendChild(leftBody);
+    leftCol.appendChild(leftCard);
+    row.appendChild(leftCol);
+
+    // Right panel — detail editor
+    var rightCol = el('div', { className: 'col-md-8 col-lg-9' });
+    var rightCard = el('div', { className: 'card h-100' });
+    var rightBody = el('div', { className: 'card-body' });
+    rightBody.innerHTML =
+      '<div class="d-flex flex-column align-items-center justify-content-center h-100 text-muted">' +
+        '<i class="bi bi-arrow-left-circle" style="font-size:3rem"></i>' +
+        '<p class="mt-2">Select an item from the left panel to view or edit</p>' +
+      '</div>';
+    rightCard.appendChild(rightBody);
+    rightCol.appendChild(rightCard);
+    row.appendChild(rightCol);
+
+    container.appendChild(row);
+
+    // Save button handler
+    var saveBtn = container.querySelector('#mod-save-btn');
+    saveBtn.addEventListener('click', function () {
+      var payload = {
+        name: container.querySelector('#mod-name').value,
+        version: container.querySelector('#mod-version').value,
+        navGroup: container.querySelector('#mod-navgroup').value,
+        isolation: container.querySelector('#mod-isolation').value,
+        enabled: container.querySelector('#mod-enabled').checked
+      };
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving\u2026';
+      apiFetch('/api/modules/' + encodeURIComponent(mod.moduleId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+        body: JSON.stringify(payload)
+      })
+        .then(function () {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<i class="bi bi-check-circle me-1"></i>Saved!';
+          saveBtn.classList.replace('btn-success', 'btn-outline-success');
+          setTimeout(function () {
+            saveBtn.innerHTML = '<i class="bi bi-save me-1"></i>Save Module';
+            saveBtn.classList.replace('btn-outline-success', 'btn-success');
+          }, 2000);
+        })
+        .catch(function (err) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = '<i class="bi bi-save me-1"></i>Save Module';
+          alert('Save failed: ' + err.message);
+        });
+    });
+
+    wire();
+  }
+
+  function renderModuleDetailPanel(container, cat, item, mod) {
+    container.innerHTML = '';
+
+    if (cat.key === 'entities') {
+      // Entity detail: show fields table and link to full editor
+      var hdr = el('div', { className: 'd-flex align-items-center gap-2 mb-3' });
+      hdr.appendChild(el('h4', { className: 'mb-0', innerHTML: '<i class="bi bi-table me-2"></i>' + escHtml(item.name || item.slug) }));
+      var editLink = el('a', { href: BASE + '/' + item.slug, className: 'btn btn-sm btn-outline-primary', innerHTML: '<i class="bi bi-pencil"></i> Open Entity' });
+      editLink.setAttribute('data-go', '');
+      hdr.appendChild(editLink);
+      container.appendChild(hdr);
+
+      // Entity metadata summary
+      var metaInfo = el('div', { className: 'mb-3' });
+      metaInfo.innerHTML =
+        '<div class="row g-2 text-muted small">' +
+          '<div class="col-auto"><strong>Slug:</strong> ' + escHtml(item.slug) + '</div>' +
+          '<div class="col-auto"><strong>Nav Group:</strong> ' + escHtml(item.navGroup || '\u2014') + '</div>' +
+          '<div class="col-auto"><strong>Nav Order:</strong> ' + (item.navOrder || 0) + '</div>' +
+          '<div class="col-auto"><strong>Show on Nav:</strong> ' + (item.showOnNav ? '\u2705' : '\u274C') + '</div>' +
+          '<div class="col-auto"><strong>Permissions:</strong> ' + escHtml(item.permissions || 'none') + '</div>' +
+        '</div>';
+      container.appendChild(metaInfo);
+
+      // Fields table
+      var fields = item.fields || [];
+      if (fields.length === 0) {
+        container.appendChild(el('div', { className: 'text-muted fst-italic', textContent: 'No field metadata available' }));
+        return;
+      }
+
+      var table = el('table', { className: 'table table-sm table-striped table-hover mb-0' });
+      table.innerHTML =
+        '<thead class="table-light"><tr>' +
+          '<th>#</th><th>Name</th><th>Label</th><th>Type</th><th>Required</th><th>Indexed</th>' +
+        '</tr></thead>';
+      var tbody = el('tbody');
+      fields.sort(function (a, b) { return (a.order || 0) - (b.order || 0); });
+      fields.forEach(function (f, i) {
+        var tr = el('tr');
+        tr.innerHTML =
+          '<td class="text-muted">' + (i + 1) + '</td>' +
+          '<td><code>' + escHtml(f.name) + '</code></td>' +
+          '<td>' + escHtml(f.label || '') + '</td>' +
+          '<td><span class="badge bg-light text-dark">' + escHtml(f.fieldType) + '</span></td>' +
+          '<td>' + (f.required ? '<i class="bi bi-check-circle-fill text-success"></i>' : '') + '</td>' +
+          '<td>' + (f.indexed ? '<i class="bi bi-lightning-fill text-warning"></i>' : '') + '</td>';
+        tbody.appendChild(tr);
+      });
+      table.appendChild(tbody);
+      var tableWrap = el('div', { className: 'table-responsive' });
+      tableWrap.appendChild(table);
+      container.appendChild(tableWrap);
+
+    } else if (cat.key === 'reports') {
+      container.appendChild(el('h4', { className: 'mb-3', innerHTML: '<i class="bi bi-file-earmark-bar-graph me-2"></i>' + escHtml(item.name || 'Report') }));
+      var info = el('div', { className: 'mb-3' });
+      info.innerHTML = '<p class="text-muted">Root Entity: <strong>' + escHtml(item.rootEntity || '\u2014') + '</strong></p>';
+      container.appendChild(info);
+      if (item.id) {
+        var runLink = el('a', { href: BASE + '/_reports/' + encodeURIComponent(String(item.id)), className: 'btn btn-sm btn-primary me-2', innerHTML: '<i class="bi bi-play-fill"></i> Run Report' });
+        runLink.setAttribute('data-go', '');
+        container.appendChild(runLink);
+        var editLink2 = el('a', { href: BASE + '/report-definitions/' + encodeURIComponent(String(item.id)) + '/edit', className: 'btn btn-sm btn-outline-secondary', innerHTML: '<i class="bi bi-pencil"></i> Edit Definition' });
+        editLink2.setAttribute('data-go', '');
+        container.appendChild(editLink2);
+      }
+
+    } else if (cat.key === 'actions') {
+      container.appendChild(el('h4', { className: 'mb-3', innerHTML: '<i class="bi bi-lightning me-2"></i>' + escHtml(item.name || 'Action') }));
+      var info2 = el('div', { className: 'mb-3' });
+      info2.innerHTML = '<p class="text-muted">Entity ID: <strong>' + escHtml(item.entityId || '\u2014') + '</strong></p>';
+      container.appendChild(info2);
+      if (item.id) {
+        var editLink3 = el('a', { href: BASE + '/action-definitions/' + encodeURIComponent(String(item.id)) + '/edit', className: 'btn btn-sm btn-outline-secondary', innerHTML: '<i class="bi bi-pencil"></i> Edit Action' });
+        editLink3.setAttribute('data-go', '');
+        container.appendChild(editLink3);
+      }
+
+    } else if (cat.key === 'permissions') {
+      container.appendChild(el('h4', { className: 'mb-3', innerHTML: '<i class="bi bi-shield-check me-2"></i>' + escHtml(item.name || item.code) }));
+      container.appendChild(el('p', { className: 'text-muted', textContent: 'Required permission code for this module.' }));
+
+    } else if (cat.key === 'dependencies') {
+      container.appendChild(el('h4', { className: 'mb-3', innerHTML: '<i class="bi bi-diagram-3 me-2"></i>' + escHtml(item.name || item.depId) }));
+      container.appendChild(el('p', { className: 'text-muted', textContent: 'This module depends on module: ' + escHtml(item.depId || item.name) }));
+    }
+  }
+
   async function route() {
     // Cancel any in-flight navigation fetches from the previous route
     cancelNavigation();
@@ -6282,6 +6583,24 @@
         const main = el('div', { className: 'container mt-3' });
         R.appendChild(main);
         renderViewExecutePage(main, rawId);
+        wire(); return;
+      }
+
+      // ── Module list page ──────────────────────────────────────────────────
+      if (slug === '_modules' && !rawId) {
+        R.replaceChildren(navbar('_modules'));
+        const main = el('div', { className: 'container mt-3' });
+        R.appendChild(main);
+        renderModulesListPage(main);
+        wire(); return;
+      }
+
+      // ── Module editor page ────────────────────────────────────────────────
+      if (slug === '_modules' && rawId) {
+        R.replaceChildren(navbar('_modules'));
+        const main = el('div', { className: 'container-fluid mt-3' });
+        R.appendChild(main);
+        renderModuleEditorPage(main, rawId);
         wire(); return;
       }
 

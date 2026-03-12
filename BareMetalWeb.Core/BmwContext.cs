@@ -198,7 +198,7 @@ public sealed class BmwContext
     public BmwContext CloneWithResponseBody(PipeWriter responseBody)
         => new(_features, _requestFeature, _responseFeature, _responseBodyFeature,
                _connectionFeature, Request, RequestBody, responseBody, App,
-               SourceIp, CorrelationId, RequestAborted);
+               SourceIp, CorrelationId, _requestParsedTimestamp, RequestAborted);
 
     // ── Factory methods ─────────────────────────────────────────────────
 

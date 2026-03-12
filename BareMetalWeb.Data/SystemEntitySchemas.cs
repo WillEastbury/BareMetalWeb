@@ -202,6 +202,20 @@ public static class SystemEntitySchemas
         .AddField("Text", FieldType.StringUtf8, typeof(string), required: true)
         .Build();
 
+    public static EntitySchema Module { get; } = new EntitySchema.Builder("Module", "modules")
+        .AddField("ModuleId", FieldType.StringUtf8, typeof(string), required: true, indexed: true)
+        .AddField("Name", FieldType.StringUtf8, typeof(string), required: true)
+        .AddField("Version", FieldType.StringUtf8, typeof(string))
+        .AddField("EntitySlugs", FieldType.StringUtf8, typeof(string))
+        .AddField("ActionKeys", FieldType.StringUtf8, typeof(string))
+        .AddField("ReportSlugs", FieldType.StringUtf8, typeof(string))
+        .AddField("RequiredPermissions", FieldType.StringUtf8, typeof(string))
+        .AddField("NavGroup", FieldType.StringUtf8, typeof(string))
+        .AddField("Dependencies", FieldType.StringUtf8, typeof(string))
+        .AddField("Isolation", FieldType.StringUtf8, typeof(string))
+        .AddField("Enabled", FieldType.Bool, typeof(bool))
+        .Build();
+
     /// <summary>All system entity schemas, for bulk registration.</summary>
     public static IReadOnlyList<EntitySchema> All { get; } = new[]
     {
@@ -211,6 +225,7 @@ public static class SystemEntitySchemas
         EntityDefinition, FieldDefinition, IndexDefinition,
         ActionDefinition, ActionCommandDefinition,
         SessionLog,
-        RecordComment
+        RecordComment,
+        Module
     };
 }
