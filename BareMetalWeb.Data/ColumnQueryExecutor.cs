@@ -488,7 +488,7 @@ internal static class ColumnQueryExecutor
                     && DataScaffold.GetEnumLookup(targetType).TryGetValue(s, out var cached)
                     ? cached
                     : value;
-                result = (int)Convert.ChangeType(enumVal, typeof(int));
+                result = ((IConvertible)enumVal).ToInt32(null);
                 return true;
             }
             if (value is bool b) { result = b ? 1 : 0; return true; }

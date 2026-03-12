@@ -266,6 +266,12 @@ public static class ModelSnapshot
             if (matrixCount != layerCount * 2 + 2)
                 throw new InvalidDataException("Matrix count mismatch");
 
+            // Bounds: ensure descriptor region fits within file
+            long descEnd = HeaderSize + (long)matrixCount * DescriptorSize;
+            if (descEnd < HeaderSize || descEnd > fileSize)
+                throw new InvalidDataException(
+                    $"Descriptor region out of bounds (need {descEnd}, file is {fileSize})");
+
             // ── Descriptors ─────────────────────────────────────────
             var descSpan = new ReadOnlySpan<byte>(
                 basePtr + HeaderSize, matrixCount * DescriptorSize);
@@ -284,10 +290,19 @@ public static class ModelSnapshot
             }
 
             // ── Token table ─────────────────────────────────────────
+            // Bounds: validate tokenTableOffset and token table region
+            if (tokenTableOffset < 0 || tokenTableOffset > fileSize)
+                throw new InvalidDataException(
+                    $"Token table offset out of bounds ({tokenTableOffset}, file is {fileSize})");
+            long tokenTableEnd = descriptors[0].Offset;
+            if (tokenTableEnd < tokenTableOffset || tokenTableEnd > fileSize)
+                throw new InvalidDataException(
+                    $"Token table region out of bounds (offset={tokenTableOffset}, end={tokenTableEnd}, file={fileSize})");
+
             string[] tokens;
             using (var tokenStream = new UnmanagedMemoryStream(
                 basePtr + tokenTableOffset,
-                descriptors[0].Offset - tokenTableOffset))
+                tokenTableEnd - tokenTableOffset))
             using (var tbr = new BinaryReader(tokenStream, Encoding.UTF8))
             {
                 tokens = DecodeTokenTable(tbr, tokenCount);
@@ -298,6 +313,10 @@ public static class ModelSnapshot
             for (int i = 0; i < matrixCount; i++)
             {
                 var (rows, cols, _, offset, length) = descriptors[i];
+                if (offset < 0 || length < 0 || length > int.MaxValue ||
+                    offset + length < offset || offset + length > fileSize)
+                    throw new InvalidDataException(
+                        $"Matrix descriptor {i} out of bounds (offset={offset}, length={length}, file={fileSize})");
                 var dataSpan = new ReadOnlySpan<byte>(
                     basePtr + offset, (int)length);
                 matrices[i] = NativeTernaryMatrix.FromPackedData(dataSpan, rows, cols);
@@ -394,16 +413,34 @@ public static class ModelSnapshot
             }
 
             // ── Token table ─────────────────────────────────────────────
+            // Bounds: validate tokenTableOffset and token table region
+            if (tokenTableOffset < 0 || tokenTableOffset > fs.Length)
+                throw new InvalidDataException(
+                    $"Token table offset out of bounds ({tokenTableOffset}, file is {fs.Length})");
+            long lazyTokenEnd = descriptors[0].Offset;
+            if (lazyTokenEnd < tokenTableOffset || lazyTokenEnd > fs.Length)
+                throw new InvalidDataException(
+                    $"Token table region out of bounds (offset={tokenTableOffset}, end={lazyTokenEnd}, file={fs.Length})");
+
             string[] tokens;
             using (var tokenStream = new UnmanagedMemoryStream(
                 basePtr + tokenTableOffset,
-                descriptors[0].Offset - tokenTableOffset))
+                lazyTokenEnd - tokenTableOffset))
             using (var tbr = new BinaryReader(tokenStream, Encoding.UTF8))
             {
                 tokens = DecodeTokenTable(tbr, tokenCount);
             }
 
             // ── Zero-copy matrices from mapped memory ───────────────────
+            // Bounds: validate all descriptor offsets/lengths against file size
+            for (int i = 0; i < matrixCount; i++)
+            {
+                var (_, _, _, doff, dlen) = descriptors[i];
+                if (doff < 0 || dlen < 0 || doff + dlen < doff || doff + dlen > fs.Length)
+                    throw new InvalidDataException(
+                        $"Matrix descriptor {i} out of bounds (offset={doff}, length={dlen}, file={fs.Length})");
+            }
+
             var attn = new NativeTernaryMatrix[layerCount];
             var ffn = new NativeTernaryMatrix[layerCount];
             for (int i = 0; i < layerCount; i++)
