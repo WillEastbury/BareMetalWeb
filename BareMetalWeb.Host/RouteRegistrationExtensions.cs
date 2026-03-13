@@ -216,7 +216,7 @@ public static class RouteRegistrationExtensions
             {
                 var app = context.GetApp()!;
                 context.SetStringValue("title", "Metric Viewer");
-                context.SetStringValue("message", app.Metrics.GetMetricGroupsHtml());
+                context.SetStringValue("html_message", app.Metrics.GetMetricGroupsHtml());
             })));
 
         host.RegisterRoute("GET /metrics/json", new RouteHandlerData(
