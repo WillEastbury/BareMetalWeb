@@ -27,8 +27,6 @@ var config = new BitNetModelConfig(
     VocabSize: 32000,
     MaxSeqLen: 2048);
 
-var intents = AdminToolCatalogue.GetIntentDefinitions();
-var classifier = new KeywordIntentClassifier(intents);
 var executor = AdminToolCatalogue.CreateRegistry();
 using var engine = new BitNetEngine(config);
 engine.LoadTestModel(ModelLoadOptions.Aggressive);
@@ -36,7 +34,7 @@ engine.LoadTestModel(ModelLoadOptions.Aggressive);
 // Force GC to reclaim the temporary sbyte[] arrays used during construction
 GC.Collect(2, GCCollectionMode.Aggressive, true, true);
 
-var orchestrator = new IntelligenceOrchestrator(classifier, executor, engine);
+var orchestrator = new IntelligenceOrchestrator(engine);
 sw.Stop();
 
 Console.ForegroundColor = ConsoleColor.Green;
@@ -113,12 +111,12 @@ while (true)
             if (input.StartsWith("load ", StringComparison.OrdinalIgnoreCase)
                 && !input.StartsWith("loadlazy ", StringComparison.OrdinalIgnoreCase))
             {
-                LoadSnapshot(engine, input[5..].Trim(), config, ref orchestrator, classifier, executor);
+                LoadSnapshot(engine, input[5..].Trim(), config, ref orchestrator);
                 continue;
             }
             if (input.StartsWith("loadlazy ", StringComparison.OrdinalIgnoreCase))
             {
-                LoadSnapshotLazy(engine, input[9..].Trim(), config, ref orchestrator, classifier, executor);
+                LoadSnapshotLazy(engine, input[9..].Trim(), config, ref orchestrator);
                 continue;
             }
             await RunQuery(orchestrator, input);
@@ -501,9 +499,7 @@ static void SaveSnapshot(BitNetEngine engine, string path)
 static void LoadSnapshot(
     BitNetEngine engine, string path,
     BitNetModelConfig config,
-    ref IntelligenceOrchestrator orchestrator,
-    KeywordIntentClassifier classifier,
-    IToolExecutor executor)
+    ref IntelligenceOrchestrator orchestrator)
 {
     if (string.IsNullOrWhiteSpace(path))
     {
@@ -527,7 +523,7 @@ static void LoadSnapshot(
         GC.Collect(2, GCCollectionMode.Aggressive, true, true);
         sw.Stop();
 
-        orchestrator = new IntelligenceOrchestrator(classifier, executor, engine);
+        orchestrator = new IntelligenceOrchestrator(engine);
 
         Console.ForegroundColor = ConsoleColor.Green;
         Console.Write($"  ✓ Loaded ");
@@ -547,9 +543,7 @@ static void LoadSnapshot(
 static void LoadSnapshotLazy(
     BitNetEngine engine, string path,
     BitNetModelConfig config,
-    ref IntelligenceOrchestrator orchestrator,
-    KeywordIntentClassifier classifier,
-    IToolExecutor executor)
+    ref IntelligenceOrchestrator orchestrator)
 {
     if (string.IsNullOrWhiteSpace(path))
     {
@@ -572,7 +566,7 @@ static void LoadSnapshotLazy(
         engine.LoadSnapshotLazy(path);
         sw.Stop();
 
-        orchestrator = new IntelligenceOrchestrator(classifier, executor, engine);
+        orchestrator = new IntelligenceOrchestrator(engine);
 
         Console.ForegroundColor = ConsoleColor.Green;
         Console.Write($"  ✓ Lazy-loaded ");

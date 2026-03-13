@@ -7,9 +7,8 @@ namespace BareMetalWeb.Host;
 
 /// <summary>
 /// Backend handler for the Agent Panel chat interface.
-/// Routes all messages through the IntelligenceOrchestrator.
-/// When the micro SLM (BitNet engine) is loaded it is the sole processing stage.
-/// When no model is loaded, the TF-IDF keyword classifier handles queries instead.
+/// Routes all messages through the IntelligenceOrchestrator via the single-stage
+/// BitNet SLM pipeline.
 /// </summary>
 public static class AgentApiHandlers
 {
@@ -35,14 +34,10 @@ public static class AgentApiHandlers
         if (_orchestrator is not null)
             return _orchestrator;
 
-        var intents = AdminToolCatalogue.GetIntentDefinitions();
-        var classifier = new KeywordIntentClassifier(intents);
-        var executor = AdminToolCatalogue.CreateRegistry();
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(ModelLoadOptions.Aggressive);
 
-        // BitNet engine is not loaded here — the host can call
-        // IntelligenceExtensions.CreateIntelligenceRoutes(enableBitNet: true)
-        // to warm it up separately.  The orchestrator degrades gracefully when null.
-        _orchestrator = new IntelligenceOrchestrator(classifier, executor, engine: null);
+        _orchestrator = new IntelligenceOrchestrator(engine);
         return _orchestrator;
     }
 
