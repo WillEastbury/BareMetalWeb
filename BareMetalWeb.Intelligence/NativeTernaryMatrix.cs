@@ -407,7 +407,8 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
 
     /// <summary>
     /// ARM NEON path: processes 8 weights (2 packed bytes) per iteration.
-    /// Uses Vector128 multiply-accumulate with LUT decode and 8-weight zero-skip.
+    /// Uses AdvSimd.Multiply / AdvSimd.Add with LUT decode and 8-weight zero-skip.
+    /// Horizontal reduction via AdvSimd.Arm64.AddPairwise when available.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     private static int DotProductNeon(
@@ -429,14 +430,24 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
 
             Vector128<int> w0 = Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b] << 2));
             Vector128<int> x0 = Vector128.LoadUnsafe(in Unsafe.AsRef(in inputRef), (nuint)col);
-            acc = Vector128.Add(acc, Vector128.Multiply(w0, x0));
+            acc = AdvSimd.Add(acc, AdvSimd.Multiply(w0, x0));
 
             Vector128<int> w1 = Vector128.LoadUnsafe(ref Unsafe.Add(ref lutRef, rowPtr[b + 1] << 2));
             Vector128<int> x1 = Vector128.LoadUnsafe(in Unsafe.AsRef(in inputRef), (nuint)(col + 4));
-            acc = Vector128.Add(acc, Vector128.Multiply(w1, x1));
+            acc = AdvSimd.Add(acc, AdvSimd.Multiply(w1, x1));
         }
 
-        int sum = acc.GetElement(0) + acc.GetElement(1) + acc.GetElement(2) + acc.GetElement(3);
+        int sum;
+        if (AdvSimd.Arm64.IsSupported)
+        {
+            var pair = AdvSimd.Arm64.AddPairwise(acc, acc);
+            var total = AdvSimd.Arm64.AddPairwise(pair, pair);
+            sum = total.GetElement(0);
+        }
+        else
+        {
+            sum = acc.GetElement(0) + acc.GetElement(1) + acc.GetElement(2) + acc.GetElement(3);
+        }
 
         // Scalar remainder (0-1 packed bytes)
         for (; b < fullBytes; b++, col += 4)

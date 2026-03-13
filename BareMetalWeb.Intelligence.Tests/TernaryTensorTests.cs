@@ -151,6 +151,109 @@ public class TernaryTensorTests
     }
 
     [Fact]
+    public void DotProduct_MatchesScalar()
+    {
+        var a = new int[] { 1, 2, 3, 4, 5, 6, 7, 8 };
+        var b = new int[] { 10, 20, 30, 40, 50, 60, 70, 80 };
+
+        int result = TernaryTensor.DotProduct(a, b);
+
+        // 1*10 + 2*20 + 3*30 + 4*40 + 5*50 + 6*60 + 7*70 + 8*80
+        // = 10 + 40 + 90 + 160 + 250 + 360 + 490 + 640 = 2040
+        Assert.Equal(2040, result);
+    }
+
+    [Fact]
+    public void DotProduct_LargeVector_MatchesScalar()
+    {
+        int size = 256;
+        var a = new int[size];
+        var b = new int[size];
+        var rng = new Random(42);
+
+        int expected = 0;
+        for (int i = 0; i < size; i++)
+        {
+            a[i] = rng.Next(-100, 100);
+            b[i] = rng.Next(-100, 100);
+            expected += a[i] * b[i];
+        }
+
+        int result = TernaryTensor.DotProduct(a, b);
+
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void DotProduct_SmallVector_MatchesScalar()
+    {
+        var a = new int[] { 3, -5 };
+        var b = new int[] { 7, 2 };
+
+        int result = TernaryTensor.DotProduct(a, b);
+
+        Assert.Equal(3 * 7 + (-5) * 2, result); // 21 - 10 = 11
+    }
+
+    [Fact]
+    public void WeightedAccumulate_MatchesScalar()
+    {
+        var values = new int[] { 10, 20, 30, 40 };
+        var output = new int[4];
+        long weight = 3;
+        long totalWeight = 6;
+
+        TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
+
+        // output[d] += (int)(3 * values[d] / 6)
+        Assert.Equal(5, output[0]);   // 3*10/6 = 5
+        Assert.Equal(10, output[1]);  // 3*20/6 = 10
+        Assert.Equal(15, output[2]);  // 3*30/6 = 15
+        Assert.Equal(20, output[3]);  // 3*40/6 = 20
+    }
+
+    [Fact]
+    public void WeightedAccumulate_LargeVector_MatchesScalar()
+    {
+        int size = 64;
+        var values = new int[size];
+        var output = new int[size];
+        var expected = new int[size];
+        var rng = new Random(99);
+
+        for (int i = 0; i < size; i++)
+            values[i] = rng.Next(-200, 200);
+
+        long weight = 7;
+        long totalWeight = 10;
+
+        // Compute expected scalar result
+        for (int i = 0; i < size; i++)
+            expected[i] = (int)(weight * values[i] / totalWeight);
+
+        TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
+
+        Assert.Equal(expected, output);
+    }
+
+    [Fact]
+    public void WeightedAccumulate_AccumulatesIntoExistingOutput()
+    {
+        var values = new int[] { 100, 200, 300, 400 };
+        var output = new int[] { 1, 2, 3, 4 };
+        long weight = 1;
+        long totalWeight = 2;
+
+        TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
+
+        // output[d] += (int)(1 * values[d] / 2) = 50, 100, 150, 200
+        Assert.Equal(51, output[0]);
+        Assert.Equal(102, output[1]);
+        Assert.Equal(153, output[2]);
+        Assert.Equal(204, output[3]);
+    }
+
+    [Fact]
     public void IntegerSqrt_KnownValues_ReturnsCorrectResult()
     {
         Assert.Equal(0, TernaryTensor.IntegerSqrt(0));

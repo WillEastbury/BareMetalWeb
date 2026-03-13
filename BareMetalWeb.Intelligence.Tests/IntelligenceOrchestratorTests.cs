@@ -16,10 +16,9 @@ public class IntelligenceOrchestratorTests
         var engine = new BitNetEngine();
         engine.LoadTestModel(ModelLoadOptions.NoPruning);
 
-        var classifier = new KeywordIntentClassifier(AdminToolCatalogue.GetIntentDefinitions());
         var tools = AdminToolCatalogue.CreateRegistry();
 
-        return new IntelligenceOrchestrator(engine, classifier, tools);
+        return new IntelligenceOrchestrator(engine, tools);
     }
 
     [Fact]
