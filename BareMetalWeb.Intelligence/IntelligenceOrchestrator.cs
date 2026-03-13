@@ -31,11 +31,11 @@ public sealed class IntelligenceOrchestrator
 
     public IntelligenceOrchestrator(
         IBitNetEngine engine,
-        IIntentClassifier? classifier = null,
+       // IIntentClassifier? classifier = null,
         IToolExecutor? tools = null)
     {
         _engine = engine;
-        _classifier = classifier;
+       // _classifier = classifier;
         _tools = tools;
     }
 
