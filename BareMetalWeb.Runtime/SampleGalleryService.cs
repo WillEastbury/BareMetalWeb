@@ -293,6 +293,7 @@ public static class SampleGalleryService
                     schedMeta.FindField("Schedule")?.SetValueFn(newSched, srcSched.Schedule);
                     schedMeta.FindField("FilterExpression")?.SetValueFn(newSched, srcSched.FilterExpression);
                     schedMeta.FindField("Enabled")?.SetValueFn(newSched, srcSched.Enabled);
+                    await DataScaffold.ApplyAutoIdAsync(schedMeta, newSched, cancellationToken).ConfigureAwait(false);
                     await schedMeta.Handlers.SaveAsync(newSched, cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -313,6 +314,7 @@ public static class SampleGalleryService
                     ruleMeta.FindField("TargetResolution")?.SetValueFn(newRule, srcRule.TargetResolution);
                     ruleMeta.FindField("Priority")?.SetValueFn(newRule, srcRule.Priority);
                     ruleMeta.FindField("Enabled")?.SetValueFn(newRule, srcRule.Enabled);
+                    await DataScaffold.ApplyAutoIdAsync(ruleMeta, newRule, cancellationToken).ConfigureAwait(false);
                     await ruleMeta.Handlers.SaveAsync(newRule, cancellationToken).ConfigureAwait(false);
                 }
             }
@@ -368,6 +370,7 @@ public static class SampleGalleryService
                     dr.SetField(dr.Schema, "TargetEntity", srcPerm.TargetEntity);
                     dr.SetField(dr.Schema, "Actions", srcPerm.Actions);
                     dr.SetField(dr.Schema, "RequiresElevation", srcPerm.RequiresElevation);
+                    await DataScaffold.ApplyAutoIdAsync(permMeta, rec, ct).ConfigureAwait(false);
                     await DataScaffold.SaveAsync(permMeta, rec, ct).ConfigureAwait(false);
                 }
                 if (!string.IsNullOrEmpty(srcPerm.TargetEntity) && srcPerm.TargetEntity != "*")
@@ -388,6 +391,7 @@ public static class SampleGalleryService
                     dr.SetField(dr.Schema, "RoleName", srcRole.RoleName);
                     dr.SetField(dr.Schema, "Description", srcRole.Description);
                     dr.SetField(dr.Schema, "PermissionCodes", srcRole.PermissionCodes);
+                    await DataScaffold.ApplyAutoIdAsync(roleMeta, rec, ct).ConfigureAwait(false);
                     await DataScaffold.SaveAsync(roleMeta, rec, ct).ConfigureAwait(false);
                 }
             }
@@ -418,6 +422,7 @@ public static class SampleGalleryService
                     dr.SetField(dr.Schema, "TargetEntity", slug);
                     dr.SetField(dr.Schema, "Actions", action);
                     dr.SetField(dr.Schema, "RequiresElevation", false);
+                    await DataScaffold.ApplyAutoIdAsync(permMeta, rec, ct).ConfigureAwait(false);
                     await DataScaffold.SaveAsync(permMeta, rec, ct).ConfigureAwait(false);
                 }
             }
@@ -432,6 +437,7 @@ public static class SampleGalleryService
                     dr.SetField(dr.Schema, "RoleName", $"{slug}-admin");
                     dr.SetField(dr.Schema, "Description", $"Full access to {slug}");
                     dr.SetField(dr.Schema, "PermissionCodes", string.Join(",", entityPermCodes));
+                    await DataScaffold.ApplyAutoIdAsync(roleMeta, roleRec, ct).ConfigureAwait(false);
                     await DataScaffold.SaveAsync(roleMeta, roleRec, ct).ConfigureAwait(false);
                 }
             }

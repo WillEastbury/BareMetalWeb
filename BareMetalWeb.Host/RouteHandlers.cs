@@ -1534,6 +1534,8 @@ public sealed class RouteHandlers : IRouteHandlers
         settingMeta.FindField("Value")?.SetValueFn(setting, value);
         settingMeta.FindField("Description")?.SetValueFn(setting, description);
 
+        if (setting.Key == 0)
+            await DataScaffold.ApplyAutoIdAsync(settingMeta, setting, cancellationToken).ConfigureAwait(false);
         await DataScaffold.SaveAsync(settingMeta, setting, cancellationToken).ConfigureAwait(false);
         SettingsService.InvalidateCache(settingId);
     }

@@ -146,6 +146,7 @@ public static class SettingsService
             meta.FindField("SettingId")?.SetValueFn(setting, settingId);
             meta.FindField("Value")?.SetValueFn(setting, value);
             meta.FindField("Description")?.SetValueFn(setting, description);
+            await DataScaffold.ApplyAutoIdAsync(meta, setting, cancellationToken).ConfigureAwait(false);
             await meta.Handlers.SaveAsync(setting, cancellationToken).ConfigureAwait(false);
         }
 
