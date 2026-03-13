@@ -136,7 +136,7 @@ jobs:
       - name: Upload AOT artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aot-linux-arm64
+          name: aot-linux-arm64-glibc2.38
           path: ./publish
           retention-days: 3
 
@@ -174,7 +174,7 @@ jobs:
       - name: Upload AOT artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aot-linux-arm64-bookworm
+          name: aot-linux-arm64-glibc2.36
           path: ./publish
           retention-days: 3
 
@@ -189,7 +189,7 @@ jobs:
       - name: Download AOT artifact
         uses: actions/download-artifact@v4
         with:
-          name: aot-linux-arm64
+          name: aot-linux-arm64-glibc2.38
           path: ./publish
 
       - name: Azure Login
@@ -244,8 +244,8 @@ jobs:
           echo "| Build | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| JIT AnyCPU (\`deploy-package\`) | ${{ needs.jit-anycpu.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| AOT linux-arm64 glibc 2.38 (\`aot-linux-arm64\`) | ${{ needs.aot-linux-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| AOT linux-arm64 glibc 2.36 (\`aot-linux-arm64-bookworm\`) | ${{ needs.aot-linux-arm64-bookworm.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AOT linux-arm64 glibc 2.38 (\`aot-linux-arm64-glibc2.38\`) | ${{ needs.aot-linux-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AOT linux-arm64 glibc 2.36 (\`aot-linux-arm64-glibc2.36\`) | ${{ needs.aot-linux-arm64-bookworm.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Container | Tag | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|-----|--------|" >> $GITHUB_STEP_SUMMARY
