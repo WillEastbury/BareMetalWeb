@@ -26,12 +26,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - rid: win-x64
-            os: windows-latest
-            ext: .exe
-          - rid: win-arm64
-            os: windows-latest
-            ext: .exe
           - rid: linux-x64
             os: ubuntu-latest
             ext: ""

@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <PublishAot>true</PublishAot>
-    <IlcInstructionSet>avx2,fma,bmi2,lzcnt</IlcInstructionSet>
+    <IlcInstructionSet Condition="!$(RuntimeIdentifier.Contains('arm'))">x86-64-v3</IlcInstructionSet>
     <PublishTrimmed>true</PublishTrimmed>
     <TrimMode>full</TrimMode>
     <SelfContained>true</SelfContained>

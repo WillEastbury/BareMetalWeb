@@ -86,17 +86,14 @@ public static class WalSnapshot
         File.Move(tmpPath, path, overwrite: true);
 
         // #1170: fsync the directory so the rename (directory entry) is durable
-        if (!OperatingSystem.IsWindows())
+        try
         {
-            try
-            {
-                using var d = new FileStream(directory, FileMode.Open,
-                    FileAccess.Read, FileShare.ReadWrite);
-                d.Flush(flushToDisk: true);
-            }
-            catch (IOException)                { /* best-effort */ }
-            catch (UnauthorizedAccessException) { /* best-effort */ }
+            using var d = new FileStream(directory, FileMode.Open,
+                FileAccess.Read, FileShare.ReadWrite);
+            d.Flush(flushToDisk: true);
         }
+        catch (IOException)                { /* best-effort */ }
+        catch (UnauthorizedAccessException) { /* best-effort */ }
     }
 
     // ── Load ──────────────────────────────────────────────────────────────────

@@ -105,6 +105,100 @@ public static class MetadataExtractor
         prop.DeclaringType == typeof(BaseDataObject) || CorePropertyNames.Contains(prop.Name);
 
     /// <summary>
+    /// Extracts persisted metadata records directly from a compiled CLR type by scanning
+    /// its <see cref="DataEntityAttribute"/>, <see cref="DataFieldAttribute"/> and
+    /// <see cref="DataIndexAttribute"/> annotations.
+    /// </summary>
+    internal static (
+        EntityDefinition Entity,
+        IReadOnlyList<FieldDefinition> Fields,
+        IReadOnlyList<IndexDefinition> Indexes)
+        ExtractFromType(Type type)
+    {
+        var entityAttr = type.GetCustomAttribute<DataEntityAttribute>();
+
+        string name = !string.IsNullOrWhiteSpace(entityAttr?.Name)
+            ? entityAttr!.Name
+            : DataScaffold.Pluralize(DataScaffold.DeCamelcase(type.Name));
+
+        string slug = !string.IsNullOrWhiteSpace(entityAttr?.Slug)
+            ? entityAttr!.Slug!.Trim().ToLowerInvariant()
+            : DataScaffold.ToSlug(name);
+
+        var entity = new EntityDefinition
+        {
+            EntityId = Guid.NewGuid().ToString("D"),
+            Name = name,
+            Slug = slug,
+            IdStrategy = MapIdStrategyString(entityAttr?.IdGeneration ?? AutoIdStrategy.Sequential),
+            ShowOnNav = entityAttr?.ShowOnNav ?? false,
+            NavGroup = entityAttr?.NavGroup ?? "Admin",
+            NavOrder = entityAttr?.NavOrder ?? 0,
+            Permissions = !string.IsNullOrWhiteSpace(entityAttr?.Permissions)
+                ? entityAttr!.Permissions
+                : name,
+            Version = 1
+        };
+
+        var fields = new List<FieldDefinition>();
+        var indexes = new List<IndexDefinition>();
+
+        var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(p => !IsCoreProperty(p))
+            .Select(p => (Prop: p, Attr: p.GetCustomAttribute<DataFieldAttribute>()))
+            .Where(x => x.Attr != null)
+            .OrderBy(x => x.Attr!.Order);
+
+        foreach (var (prop, attr) in properties)
+        {
+            var dataIndex = prop.GetCustomAttribute<DataIndexAttribute>();
+            FormFieldType? explicitType = attr!.FieldType != FormFieldType.Unknown
+                ? attr.FieldType
+                : null;
+            string fieldTypeStr = MapFieldTypeString(prop.PropertyType, explicitType, hasLookup: false);
+
+            string? enumValues = null;
+            var effectivePropType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
+            if (effectivePropType.IsEnum)
+                enumValues = string.Join("|", Enum.GetNames(effectivePropType));
+
+            bool isNullable = Nullable.GetUnderlyingType(prop.PropertyType) != null
+                || (!prop.PropertyType.IsValueType && IsNullableProperty(prop, _nullabilityCtx));
+
+            fields.Add(new FieldDefinition
+            {
+                FieldId = Guid.NewGuid().ToString("D"),
+                EntityId = entity.EntityId,
+                Name = prop.Name,
+                Label = !string.IsNullOrWhiteSpace(attr.Label) ? attr.Label : prop.Name,
+                Ordinal = attr.Order,
+                Type = fieldTypeStr,
+                IsNullable = isNullable,
+                Required = attr.Required,
+                List = attr.List,
+                View = attr.View,
+                Edit = attr.Edit,
+                Create = attr.Create,
+                ReadOnly = attr.ReadOnly,
+                Placeholder = attr.Placeholder,
+                EnumValues = enumValues
+            });
+
+            if (dataIndex != null)
+            {
+                indexes.Add(new IndexDefinition
+                {
+                    EntityId = entity.EntityId,
+                    FieldNames = prop.Name,
+                    Type = dataIndex.Kind == IndexKind.BTree ? "btree" : "secondary"
+                });
+            }
+        }
+
+        return (entity, fields, indexes);
+    }
+
+    /// <summary>
     /// Builds persisted metadata records from an already-loaded <see cref="DataEntityMetadata"/>,
     /// avoiding the full reflection scan that <see cref="ExtractFromType"/> performs.
     /// </summary>

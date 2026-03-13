@@ -95,12 +95,13 @@ public static class EnumHelper
 
     private static Dictionary<long, object> BuildIntCache(Type enumType)
     {
-        var values = Enum.GetValues(enumType);
+        var values = Enum.GetValuesAsUnderlyingType(enumType);
         var dict = new Dictionary<long, object>(values.Length);
         foreach (var v in values)
         {
             var key = ((IConvertible)v!).ToInt64(null);
-            dict.TryAdd(key, v!);
+            var enumVal = Enum.ToObject(enumType, v!);
+            dict.TryAdd(key, enumVal);
         }
         return dict;
     }

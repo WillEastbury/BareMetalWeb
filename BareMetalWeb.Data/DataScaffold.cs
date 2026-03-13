@@ -190,15 +190,15 @@ public static class DataScaffold
     /// Returns a cached case-insensitive name→value lookup for the given enum type.
     /// Avoids Enum.Parse() reflection on every call.
     /// </summary>
-    internal static Dictionary<string, object> GetEnumLookup(Type enumType)
+    public static Dictionary<string, object> GetEnumLookup(Type enumType)
     {
         return EnumLookupCache.GetOrAdd(enumType, static t =>
         {
             var names = Enum.GetNames(t);
-            var values = Enum.GetValues(t);
+            var underlyingValues = Enum.GetValuesAsUnderlyingType(t);
             var dict = new Dictionary<string, object>(names.Length, StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < names.Length; i++)
-                dict[names[i]] = values.GetValue(i)!;
+                dict[names[i]] = Enum.ToObject(t, underlyingValues.GetValue(i)!);
             return dict;
         });
     }
