@@ -149,6 +149,26 @@ If any test fails, the pipeline stops and CD2 is not available.
 | **Gate** | `production-rollout` GitHub Environment (requires manual approval) |
 | **Duration** | ~10–15 minutes |
 
+## Local script equivalents
+
+For Linux/ARM local development, the GitHub Actions pipeline now maps cleanly to bash scripts under `infra/`:
+
+| Workflow | Local script | Purpose |
+|----------|--------------|---------|
+| `unit-tests.yml` (CI1) | `./infra/local-ci.sh` | Restore, Debug build, run .NET test shards, run Jest |
+| `container.yml` (CI2) | `./infra/local-ci2.sh` | Compute version, JIT publish, AOT publish (`linux-arm64`), optional Docker build/push |
+| `cd-canary.yml` (CD1) | `./infra/local-cd.sh --mode canary --image-tag <tag>` | Verify ACR tag, deploy to AKS, optionally run setup/upgrade/perf checks |
+| `deploy-tenant.yml` | `./infra/local-deploy-tenant.sh ...` | Deploy one local publish package to one Azure Web App |
+| `cd-early-adopters.yml` (CD2) | `./infra/local-cd.sh --mode early-access --image-tag <tag>` | Roll out to `early-access` targets from `deploy-list.json` |
+| `cd-full-rollout.yml` (CD3) | `./infra/local-cd.sh --mode production --image-tag <tag>` | Roll out to `production` targets and AKS |
+
+These scripts are intentionally simpler than the Actions workflows:
+
+- no artifact upload/download between jobs
+- no GitHub release creation or tagging
+- sequential execution instead of matrix fan-out
+- local environment variables replace GitHub secrets/contexts
+
 1. Verifies the image tag exists in ACR (gated by environment approval).
 2. Reads `deploy-list.json` for tenants with `"ring": "production"` and deploys in parallel.
 3. Deploys the same image to the AKS production StatefulSet.
