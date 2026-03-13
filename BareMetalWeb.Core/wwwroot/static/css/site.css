@@ -1,6 +1,13 @@
 :root {
     --bm-nav-height: 56px;
     --bm-footer-height: 56px;
+    /* BMW skin defaults — Light theme. Overridden by the per-theme CSS file. */
+    --bmw-bg: #f7f7f9;
+    --bmw-fg: #222;
+    --bmw-p: #fff;
+    --bmw-b: #e3e3e3;
+    --bmw-a: #2a6df4;
+    --bmw-g: 12px;
 }
 
 body {
@@ -1056,12 +1063,12 @@ body {
     letter-spacing: 0.02em;
 }
 
-/* ── Skin: Sidebar ──────────────────────────────────────────────────────── */
-body[data-bm-skin="sidebar"] {
+/* ── Layout: Sidebar (left navbar) ─────────────────────────────────────── */
+body[data-bm-layout="sidebar"] {
     padding-top: 0;
     padding-left: 240px;
 }
-body[data-bm-skin="sidebar"] .bm-navbar {
+body[data-bm-layout="sidebar"] .bm-navbar {
     position: fixed;
     top: 0;
     left: 0;
@@ -1074,27 +1081,27 @@ body[data-bm-skin="sidebar"] .bm-navbar {
     padding: 1rem 0.5rem;
     z-index: 1030;
 }
-body[data-bm-skin="sidebar"] .bm-navbar .container-fluid {
+body[data-bm-layout="sidebar"] .bm-navbar .container-fluid {
     flex-direction: column;
     align-items: flex-start;
     width: 100%;
 }
-body[data-bm-skin="sidebar"] .bm-navbar .navbar-collapse {
+body[data-bm-layout="sidebar"] .bm-navbar .navbar-collapse {
     flex-direction: column;
     width: 100%;
 }
-body[data-bm-skin="sidebar"] .bm-navbar .navbar-nav {
+body[data-bm-layout="sidebar"] .bm-navbar .navbar-nav {
     flex-direction: column !important;
     width: 100%;
 }
-body[data-bm-skin="sidebar"] .bm-navbar .nav-item {
+body[data-bm-layout="sidebar"] .bm-navbar .nav-item {
     width: 100%;
 }
-body[data-bm-skin="sidebar"] .bm-navbar .nav-link {
+body[data-bm-layout="sidebar"] .bm-navbar .nav-link {
     border-radius: 0.5rem;
     padding: 0.5rem 0.75rem;
 }
-body[data-bm-skin="sidebar"] .bm-navbar .dropdown-menu {
+body[data-bm-layout="sidebar"] .bm-navbar .dropdown-menu {
     position: static !important;
     transform: none !important;
     width: 100%;
@@ -1103,37 +1110,29 @@ body[data-bm-skin="sidebar"] .bm-navbar .dropdown-menu {
     box-shadow: none;
     padding-left: 1rem;
 }
-body[data-bm-skin="sidebar"] .bm-navbar .navbar-toggler { display: none; }
-body[data-bm-skin="sidebar"] .bm-navbar .navbar-collapse { display: flex !important; }
-body[data-bm-skin="sidebar"] .bm-footer { left: 240px; }
+body[data-bm-layout="sidebar"] .bm-navbar .navbar-toggler { display: none; }
+body[data-bm-layout="sidebar"] .bm-navbar .navbar-collapse { display: flex !important; }
+body[data-bm-layout="sidebar"] .bm-footer { left: 240px; }
 
-/* ── Skin: Compact ──────────────────────────────────────────────────────── */
-body[data-bm-skin="compact"] {
+/* ── Layout: Top (compact top navbar) ──────────────────────────────────── */
+body[data-bm-layout="top"] {
     --bm-nav-height: 40px;
     --bm-footer-height: 32px;
 }
-body[data-bm-skin="compact"] .bm-navbar {
+body[data-bm-layout="top"] .bm-navbar {
     min-height: 40px;
     padding: 0 0.5rem;
 }
-body[data-bm-skin="compact"] .bm-navbar .navbar-brand { font-size: 0.9rem; }
-body[data-bm-skin="compact"] .bm-navbar .nav-link { font-size: 0.8rem; padding: 0.25rem 0.5rem; }
-body[data-bm-skin="compact"] .bm-content { padding: 0.5rem !important; }
-body[data-bm-skin="compact"] .bm-page-card { box-shadow: none; border: none; }
-body[data-bm-skin="compact"] .bm-page-card .card-header { display: none; }
-body[data-bm-skin="compact"] .bm-footer { min-height: 32px; padding: 0.25rem 0.5rem; font-size: 0.75rem; }
+body[data-bm-layout="top"] .bm-navbar .navbar-brand { font-size: 0.9rem; }
+body[data-bm-layout="top"] .bm-navbar .nav-link { font-size: 0.8rem; padding: 0.25rem 0.5rem; }
+body[data-bm-layout="top"] .bm-content { padding: 0.5rem !important; }
+body[data-bm-layout="top"] .bm-page-card { box-shadow: none; border: none; }
+body[data-bm-layout="top"] .bm-page-card .card-header { display: none; }
+body[data-bm-layout="top"] .bm-footer { min-height: 32px; padding: 0.25rem 0.5rem; font-size: 0.75rem; }
 
-/* ── Skin: Focus ────────────────────────────────────────────────────────── */
-body[data-bm-skin="focus"] .bm-navbar { background: transparent !important; box-shadow: none; }
-body[data-bm-skin="focus"] .bm-navbar .navbar-brand { color: var(--bs-body-color); }
-body[data-bm-skin="focus"] .bm-navbar .nav-link { color: var(--bs-body-color); opacity: 0.7; }
-body[data-bm-skin="focus"] .bm-navbar .nav-link:hover { opacity: 1; }
-body[data-bm-skin="focus"] .bm-footer { background: transparent !important; color: var(--bs-body-color); opacity: 0.5; }
-
-/* ── Skin: BMW (micro-css aesthetic) ───────────────────────────────────── */
+/* ── BMW skin (permanent — always active via data-bm-skin="bmw" on body) ── */
 body[data-bm-skin="bmw"] {
-    --bmw-bg: #f7f7f9; --bmw-fg: #222; --bmw-p: #fff;
-    --bmw-b: #e3e3e3; --bmw-a: #2a6df4; --bmw-g: 12px;
+    /* Variables are defined in :root (defaults) and overridden by the theme CSS file */
     font: 14px system-ui, sans-serif !important;
     background: var(--bmw-bg) !important; color: var(--bmw-fg) !important;
 }
