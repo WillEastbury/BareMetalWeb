@@ -5011,7 +5011,7 @@
     // Tools dropdown (sample data, wipe data)
     const toolsLi = el('li', { className: 'nav-item dropdown' });
     const toolsToggle = el('a', {
-      className: 'nav-link dropdown-toggle' + (['_sample-data', '_wipe-data', '_query-plans', '_dashboards'].includes(activeSlug) ? ' active' : ''),
+      className: 'nav-link dropdown-toggle' + (['_sample-data', '_wipe-data', '_query-plans', '_dashboards', '_jobs'].includes(activeSlug) ? ' active' : ''),
       href: '#', role: 'button', title: 'Admin Tools'
     });
     toolsToggle.setAttribute('data-bs-toggle', 'dropdown');
@@ -5023,6 +5023,7 @@
       { slug: '_sample-data', label: '\uD83E\uDDEA Generate Sample Data' },
       { slug: '_wipe-data',   label: '\uD83D\uDDD1\uFE0F Wipe All Data' },
       { slug: '_query-plans', label: '\uD83D\uDCCA Query Plan History' },
+      { slug: '_jobs',        label: '\uD83D\uDD14 Background Jobs' },
       { slug: '_dashboards',  label: '\uD83D\uDCCA Dashboards' }
     ].forEach(function (t) {
       const mli = el('li');
@@ -5398,12 +5399,14 @@
     });
   }
 
-  function renderJobsPage(container) {
+    function renderJobsPage(container) {
     var hdr = el('div', { className: 'd-flex align-items-center gap-3 mb-3 flex-wrap' });
     hdr.appendChild(el('h2', { className: 'mb-0', textContent: '\uD83D\uDD14 Background Jobs' }));
     var refreshBtn = el('button', { className: 'btn btn-outline-secondary btn-sm', textContent: '\u21BB Refresh' });
     hdr.appendChild(refreshBtn);
     container.appendChild(hdr);
+    container.appendChild(el('p', { className: 'text-muted small mb-3',
+      textContent: 'Shows all running and recently-completed background jobs across all server instances. Refresh to get the latest status.' }));
 
     var tableWrap = el('div');
     container.appendChild(tableWrap);
@@ -5421,6 +5424,26 @@
       return '<div class="progress bm-job-progress"><div class="progress-bar" role="progressbar" data-progress-pct="' + pct + '" aria-valuenow="' + pct + '" aria-valuemin="0" aria-valuemax="100">' + pct + '%</div></div>';
     }
 
+    function formatDuration(startedAt, completedAt) {
+      if (!startedAt) return '';
+      var start = new Date(startedAt).getTime();
+      var end = completedAt ? new Date(completedAt).getTime() : Date.now();
+      var ms = end - start;
+      if (ms < 0) ms = 0;
+      var s = Math.floor(ms / 1000);
+      if (s < 60) return s + 's';
+      var m = Math.floor(s / 60); s = s % 60;
+      if (m < 60) return m + 'm ' + s + 's';
+      var h = Math.floor(m / 60); m = m % 60;
+      return h + 'h ' + m + 'm';
+    }
+
+    function formatDateTime(iso) {
+      if (!iso) return '';
+      var d = new Date(iso);
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
+    }
+
     function loadJobs() {
       apiFetch(API + '/jobs').then(function (jobs) {
         if (!Array.isArray(jobs) || jobs.length === 0) {
@@ -5430,13 +5453,14 @@
         var html = '<div class="table-responsive"><table class="table table-sm table-hover align-middle">';
         html += '<thead class="table-dark"><tr>' +
           '<th>Operation</th><th>Status</th><th>Progress</th>' +
-          '<th>Started</th><th>Completed</th><th>Details</th><th></th></tr></thead><tbody>';
+          '<th>Instance</th><th>Started</th><th>Duration</th><th>Details</th><th></th></tr></thead><tbody>';
         jobs.forEach(function (j) {
-          var started   = j.startedAt   ? new Date(j.startedAt).toLocaleTimeString()   : '';
-          var completed = j.completedAt ? new Date(j.completedAt).toLocaleTimeString() : '';
+          var started   = formatDateTime(j.startedAt);
+          var duration  = formatDuration(j.startedAt, j.completedAt);
           var details   = j.error
             ? '<span class="text-danger">' + escHtml(j.error) + '</span>'
             : escHtml(j.description || '');
+          var instance  = j.instanceId ? escHtml(j.instanceId) : '<span class="text-muted">-</span>';
           var canCancel = j.status === 'running' || j.status === 'queued';
           var cancelBtn = canCancel
             ? '<button class="btn btn-danger btn-sm" data-cancel-job="' + escHtml(j.jobId) + '" title="Cancel job">\u26D4 Cancel</button>'
@@ -5444,9 +5468,10 @@
           html += '<tr>' +
             '<td>' + escHtml(j.operationName) + '</td>' +
             '<td>' + statusBadge(j.status) + '</td>' +
-            '<td>' + progressBar(j) + '</td>' +
-            '<td class="text-nowrap">' + escHtml(started) + '</td>' +
-            '<td class="text-nowrap">' + escHtml(completed) + '</td>' +
+            '<td style="min-width:120px">' + progressBar(j) + '</td>' +
+            '<td class="text-nowrap small text-muted">' + instance + '</td>' +
+            '<td class="text-nowrap small">' + escHtml(started) + '</td>' +
+            '<td class="text-nowrap small">' + escHtml(duration) + '</td>' +
             '<td>' + details + '</td>' +
             '<td>' + cancelBtn + '</td>' +
             '</tr>';

@@ -613,8 +613,8 @@ entire document-chain topology.
 
 | Route | Handler | Auth | Description |
 |---|---|---|---|
-| `GET /api/jobs` | `JobsListHandler` | Authenticated | Lists all running and recently completed background jobs. |
-| `GET /api/jobs/{jobId}` | `JobStatusHandler` | Authenticated | Returns status of a specific job (`{ jobId, status, progress, result }`).  202 while running, 200 on completion. |
+| `GET /api/jobs` | `JobsListHandler` | Authenticated | Lists all running and recently completed background jobs across all instances (merges in-memory + WAL). Each entry includes `instanceId` showing which server is running the job. |
+| `GET /api/jobs/{jobId}` | `JobStatusHandler` | Authenticated | Returns status of a specific job (`{ jobId, status, progress, instanceId, result }`).  202 while running, 200 on completion. |
 | `DELETE /api/jobs/{jobId}` | `CancelJobHandler` | Admin | Requests cancellation of a running job. |
 | `POST /api/admin/sample-data` | `AdminSampleDataJsonHandler` | Admin | JSON API version of sample-data generation (for VNext SPA; validates `X-CSRF-Token` header). |
 | `POST /api/admin/wipe-data` | `AdminWipeDataJsonHandler` | Admin | JSON API version of data wipe (for VNext SPA; validates `X-CSRF-Token` header). |
