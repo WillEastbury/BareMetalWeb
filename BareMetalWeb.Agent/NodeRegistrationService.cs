@@ -59,7 +59,7 @@ internal sealed class NodeRegistrationService
             BootstrapPrincipal = principal,
             Architecture       = _config.Architecture,
             OsDescription      = GetOsDescription(),
-            GlibcVersion       = DeviceIdentity.GetGlibcVersion(),
+            GlibcVersion       = DeviceIdentity.GetGlibcVersionCrossPlatform(),
             MacHash            = DeviceIdentity.GetFirstNicMacHash(),
         };
 
@@ -93,7 +93,7 @@ internal sealed class NodeRegistrationService
                 NodeId        = node.NodeId,
                 Architecture  = _config.Architecture,
                 OsDescription = GetOsDescription(),
-                GlibcVersion  = DeviceIdentity.GetGlibcVersion(),
+                GlibcVersion  = DeviceIdentity.GetGlibcVersionCrossPlatform(),
                 MacHash       = DeviceIdentity.GetFirstNicMacHash(),
                 Timestamp     = DateTime.UtcNow.ToString("O"),
             };
@@ -161,19 +161,24 @@ internal sealed class NodeRegistrationService
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
 
-            var json = JsonSerializer.Serialize(identity, AgentJsonContext.Default.NodeIdentity);
-            File.WriteAllText(_config.StateFile, json);
+            var json    = JsonSerializer.Serialize(identity, AgentJsonContext.Default.NodeIdentity);
+            var tmpPath = _config.StateFile + ".tmp";
 
-            // Restrict to owner read/write on Linux — the state file contains the node secret
+            // Atomic write: write to temp file then rename to avoid partial-write corruption
+            File.WriteAllText(tmpPath, json);
+
+            // Restrict to owner read/write on Linux before making visible
             if (!OperatingSystem.IsWindows())
             {
                 try
                 {
-                    File.SetUnixFileMode(_config.StateFile,
+                    File.SetUnixFileMode(tmpPath,
                         UnixFileMode.UserRead | UnixFileMode.UserWrite);
                 }
                 catch { /* best-effort */ }
             }
+
+            File.Move(tmpPath, _config.StateFile, overwrite: true);
 
             Log($"Node identity written to {_config.StateFile}");
         }

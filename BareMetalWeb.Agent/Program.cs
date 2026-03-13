@@ -26,8 +26,10 @@ if (!config.IsValid)
             return 1;
         }
 
-        // Reload config now that the state file has been written
-        config = AgentConfig.Load(config.StateFile);
+        // Load the newly-written state file into the existing config so that all
+        // env-var-derived settings (RuntimeDir, poll intervals, etc.) are preserved.
+        var freshConfig = AgentConfig.Load(config.StateFile);
+        config.Node = freshConfig.Node;
     }
     else
     {

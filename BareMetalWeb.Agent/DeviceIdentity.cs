@@ -1,5 +1,6 @@
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using System.Security.Cryptography;
 using System.Text;
 
@@ -16,6 +17,9 @@ namespace BareMetalWeb.Agent;
 /// </summary>
 internal static class DeviceIdentity
 {
+    // Maximum length accepted for the CPU serial (guards against injected garbage)
+    private const int MaxSerialLength = 256;
+
     // ── Public API ────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -37,6 +41,8 @@ internal static class DeviceIdentity
     /// <summary>
     /// Read the CPU serial from /proc/cpuinfo on Linux (Raspberry Pi and similar ARM
     /// SBCs expose it there).  Falls back to the machine name if not available.
+    /// The value is sanitised to contain only ASCII alphanumeric characters before
+    /// being used as cryptographic key material.
     /// </summary>
     public static string GetCpuSerial()
     {
@@ -51,9 +57,10 @@ internal static class DeviceIdentity
                         var idx = line.IndexOf(':');
                         if (idx >= 0)
                         {
-                            var serial = line[(idx + 1)..].Trim();
-                            if (!string.IsNullOrEmpty(serial))
-                                return serial;
+                            var raw = line[(idx + 1)..].Trim();
+                            var sanitised = SanitiseSerial(raw);
+                            if (!string.IsNullOrEmpty(sanitised))
+                                return sanitised;
                         }
                     }
                 }
@@ -62,12 +69,11 @@ internal static class DeviceIdentity
         }
 
         // Non-Linux or no serial in /proc/cpuinfo — use the machine name as a stable fallback.
-        // This is not hardware-bound but is deterministic per host.
-        return Environment.MachineName;
+        return SanitiseSerial(Environment.MachineName) is { Length: > 0 } s ? s : "baremetalweb-node";
     }
 
     /// <summary>
-    /// SHA-256 hash of the raw MAC address of the first physical (non-loopback) NIC.
+    /// SHA-256 hash of the raw MAC address of the first physical NIC.
     /// Returns a 64-character lowercase hex string.
     /// </summary>
     public static string GetFirstNicMacHash()
@@ -80,9 +86,9 @@ internal static class DeviceIdentity
     /// <summary>
     /// Glibc version string (e.g. "2.38"), or "n/a" on non-Linux, "unknown" on any error.
     /// </summary>
+    [SupportedOSPlatform("linux")]
     public static string GetGlibcVersion()
     {
-        if (!OperatingSystem.IsLinux()) return "n/a";
         try
         {
             // gnu_get_libc_version() returns a null-terminated ASCII string such as "2.38"
@@ -97,33 +103,85 @@ internal static class DeviceIdentity
         return "unknown";
     }
 
+    /// <summary>
+    /// Returns the glibc version on Linux, or "n/a" on other platforms.
+    /// </summary>
+    public static string GetGlibcVersionCrossPlatform()
+    {
+        if (!OperatingSystem.IsLinux()) return "n/a";
+        return GetGlibcVersion();
+    }
+
     // ── Internal helpers ──────────────────────────────────────────────────────
 
     /// <summary>
     /// Raw MAC address string (12 hex digits, no separators) of the first physical NIC.
+    /// Prefers Ethernet and Wi-Fi NICs over virtual/software-defined interfaces.
     /// Returns "000000000000" if no suitable NIC is found.
     /// </summary>
     internal static string GetFirstNicMac()
     {
-        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces()
-                     .OrderBy(n => n.Name, StringComparer.Ordinal))
+        // Ordered preference: physical Ethernet, Wi-Fi, then any other non-virtual type
+        static int NicPriority(NetworkInterfaceType t) => t switch
         {
-            if (nic.NetworkInterfaceType is NetworkInterfaceType.Loopback
-                                        or NetworkInterfaceType.Tunnel)
-                continue;
+            NetworkInterfaceType.Ethernet         => 0,
+            NetworkInterfaceType.Wireless80211     => 1,
+            NetworkInterfaceType.FastEthernetT    => 0,
+            NetworkInterfaceType.GigabitEthernet  => 0,
+            NetworkInterfaceType.FastEthernetFx   => 0,
+            _                                     => 2,
+        };
 
-            var addr = nic.GetPhysicalAddress();
-            if (addr is null || addr.Equals(PhysicalAddress.None))
-                continue;
+        static bool IsVirtual(NetworkInterfaceType t) => t is
+            NetworkInterfaceType.Loopback or
+            NetworkInterfaceType.Tunnel   or
+            NetworkInterfaceType.Ppp      or
+            NetworkInterfaceType.Slip     or
+            NetworkInterfaceType.GenericModem;
 
-            var mac = addr.ToString(); // e.g. "AABBCCDDEEFF"
-            if (mac.Length >= 12)
-                return mac;
+        var candidate = NetworkInterface.GetAllNetworkInterfaces()
+            .Where(n => !IsVirtual(n.NetworkInterfaceType))
+            .OrderBy(n => NicPriority(n.NetworkInterfaceType))
+            .ThenBy(n => n.Name, StringComparer.Ordinal)
+            .FirstOrDefault(n =>
+            {
+                var addr = n.GetPhysicalAddress();
+                return addr is not null && !addr.Equals(PhysicalAddress.None)
+                    && addr.ToString().Length >= 12;
+            });
+
+        if (candidate is not null)
+        {
+            var mac = candidate.GetPhysicalAddress().ToString();
+            if (mac.Length >= 12) return mac;
         }
 
         return "000000000000";
     }
 
-    [DllImport("libc", EntryPoint = "gnu_get_libc_version")]
+    /// <summary>
+    /// Sanitise a serial / name string for use as cryptographic key material.
+    /// Keeps only ASCII letters, digits, hyphens, and underscores; truncates to
+    /// <see cref="MaxSerialLength"/> characters.
+    /// </summary>
+    private static string SanitiseSerial(string raw)
+    {
+        if (string.IsNullOrEmpty(raw)) return "";
+
+        Span<char> buf = stackalloc char[Math.Min(raw.Length, MaxSerialLength)];
+        int idx = 0;
+        foreach (var ch in raw.AsSpan())
+        {
+            if (idx >= MaxSerialLength) break;
+            if (char.IsAsciiLetterOrDigit(ch) || ch == '-' || ch == '_')
+                buf[idx++] = ch;
+        }
+        return idx > 0 ? new string(buf[..idx]) : "";
+    }
+
+    [DllImport("libc", EntryPoint = "gnu_get_libc_version",
+               ExactSpelling = true, CharSet = CharSet.Ansi)]
+    [SupportedOSPlatform("linux")]
     private static extern IntPtr GnuGetLibcVersion();
 }
+

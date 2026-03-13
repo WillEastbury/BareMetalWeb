@@ -25,6 +25,16 @@ internal sealed class AgentPollingService
     private readonly AgentConfig _config;
     private readonly RuntimeProcessManager _pm;
 
+    // Reuse a single HttpClient instance for pre-upgrade snapshot requests
+    private static readonly System.Net.Http.HttpClient SnapshotHttp =
+        new(new System.Net.Http.SocketsHttpHandler
+        {
+            ConnectTimeout = TimeSpan.FromSeconds(5),
+        })
+        {
+            Timeout = TimeSpan.FromSeconds(10),
+        };
+
     public AgentPollingService(AgentConfig config, RuntimeProcessManager pm)
     {
         _config = config;
@@ -207,9 +217,8 @@ internal sealed class AgentPollingService
         try
         {
             var port = _config.LocalBmwPort;
-            using var http   = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             var url  = $"http://localhost:{port}/api/_cluster/snapshot";
-            using var resp   = await http.PostAsync(url, content: null, ct).ConfigureAwait(false);
+            using var resp = await SnapshotHttp.PostAsync(url, content: null, ct).ConfigureAwait(false);
             if (resp.IsSuccessStatusCode)
                 Log("Pre-upgrade WAL snapshot accepted.");
             else
