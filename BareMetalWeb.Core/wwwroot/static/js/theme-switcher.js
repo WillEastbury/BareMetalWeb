@@ -14,7 +14,8 @@
     const DEFAULT_LAYOUT     = 'top';
 
     // Allowed BMW theme names
-    const ALLOWED_THEMES = new Set(['light', 'dark', 'colourful', 'muted', 'highviz']);
+    const ALLOWED_THEMES = new Set(['light', 'dark', 'colourful', 'muted', 'highviz',
+        'ocean', 'forest', 'sunset', 'midnight', 'rose']);
 
     // Allowed layout names: top (horizontal navbar) or sidebar (left vertical navbar)
     const ALLOWED_LAYOUTS = new Set(['top', 'sidebar']);
