@@ -313,9 +313,6 @@ public sealed class BmwContext
         if (Interlocked.CompareExchange(ref _firstFlushLogged, 1, 0) != 0)
             return;
 
-        if (!App.BufferedLogger.IsEnabled(BmwLogLevel.Debug))
-            return;
-
         var now = Stopwatch.GetTimestamp();
         var parseToFirstMs = (_firstByteWriteTimestamp - _requestParsedTimestamp) * 1000d / Stopwatch.Frequency;
         var flushStartTimestamp = _firstFlushStartTimestamp != 0 ? _firstFlushStartTimestamp : _firstByteWriteTimestamp;
@@ -323,6 +320,9 @@ public sealed class BmwContext
         var flushAwaitMs = (now - flushStartTimestamp) * 1000d / Stopwatch.Frequency;
         var firstToFlushMs = (now - _firstByteWriteTimestamp) * 1000d / Stopwatch.Frequency;
         ResponseTimingMetrics.Record(parseToFirstMs, firstToFlushStartMs, flushAwaitMs, firstToFlushMs);
+
+        if (!App.BufferedLogger.IsEnabled(BmwLogLevel.Debug))
+            return;
 
         App.BufferedLogger.Log(
             BmwLogLevel.Debug,
