@@ -902,6 +902,47 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         return matrix;
     }
 
+    /// <summary>
+    /// Decode a single packed row into ternary integer values {-1, 0, +1}.
+    /// Used for embedding table lookup: the token ID is the row index, and
+    /// the decoded values become the initial hidden state.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public void DecodeRow(int row, Span<int> output)
+    {
+        if ((uint)row >= (uint)_rows)
+            ThrowRowOutOfRange(row);
+        if (output.Length < _cols)
+            ThrowInputTooShort(output.Length, _cols);
+
+        byte* ptr = _data;
+        if (ptr == null)
+            ThrowObjectDisposed();
+
+        byte* rowPtr = ptr + (long)row * _rowStrideBytes;
+        int fullBytes = _cols >> 2;
+        int tailWeights = _cols & 3;
+        int col = 0;
+
+        ref int lutRef = ref MemoryMarshal.GetArrayDataReference(s_decodeLut);
+
+        for (int b = 0; b < fullBytes; b++, col += 4)
+        {
+            int lutBase = rowPtr[b] << 2;
+            output[col]     = Unsafe.Add(ref lutRef, lutBase);
+            output[col + 1] = Unsafe.Add(ref lutRef, lutBase + 1);
+            output[col + 2] = Unsafe.Add(ref lutRef, lutBase + 2);
+            output[col + 3] = Unsafe.Add(ref lutRef, lutBase + 3);
+        }
+
+        if (tailWeights > 0)
+        {
+            int lutBase = rowPtr[fullBytes] << 2;
+            for (int k = 0; k < tailWeights; k++)
+                output[col + k] = Unsafe.Add(ref lutRef, lutBase + k);
+        }
+    }
+
     private static void ThrowRowOutOfRange(int row) =>
         throw new ArgumentOutOfRangeException(nameof(row), $"Row index {row} out of range");
 

@@ -541,7 +541,7 @@ public static class AdminToolCatalogue
                     var word = span[wordStart..i];
                     if (word.Length >= 3)
                     {
-                        var entity = ResolveEntity(word.ToString());
+                        var entity = ResolveEntity(word);
                         if (entity is not null) return entity.Slug;
                     }
                     wordStart = -1;
@@ -554,6 +554,37 @@ public static class AdminToolCatalogue
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Span-based overload: resolves an entity by slug or name prefix match
+    /// without allocating a new string for the input word.
+    /// Falls through to the string overload only for pluralisation guesses
+    /// where we need to construct a new string (rare path).
+    /// </summary>
+    private static DataEntityMetadata? ResolveEntity(ReadOnlySpan<char> input)
+    {
+        var entities = DataScaffold.Entities;
+        if (entities is null || entities.Count == 0) return null;
+
+        // Exact slug or name match — no allocation
+        foreach (var e in entities)
+        {
+            if (input.Equals(e.Slug, StringComparison.OrdinalIgnoreCase) ||
+                input.Equals(e.Name, StringComparison.OrdinalIgnoreCase))
+                return e;
+        }
+
+        // Contains match: e.g. "todo" matches slug "todo-items"
+        foreach (var e in entities)
+        {
+            if (e.Slug.AsSpan().Contains(input, StringComparison.OrdinalIgnoreCase) ||
+                e.Name.AsSpan().Contains(input, StringComparison.OrdinalIgnoreCase))
+                return e;
+        }
+
+        // Fall through to the string overload for pluralisation guesses
+        return ResolveEntity(input.ToString());
     }
 
     /// <summary>

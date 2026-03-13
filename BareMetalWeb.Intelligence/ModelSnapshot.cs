@@ -20,7 +20,7 @@ namespace BareMetalWeb.Intelligence;
 public static class ModelSnapshot
 {
     private static ReadOnlySpan<byte> Magic => "BMWM"u8;
-    private const int FormatVersion = 1;
+    private const int FormatVersion = 2;
 
     // Header: magic(4) + version(4) + hiddenDim(4) + numLayers(4) +
     //         numHeads(4) + vocabSize(4) + activeVocab(4) + maxSeqLen(4) +
@@ -31,8 +31,8 @@ public static class ModelSnapshot
     // Per-matrix descriptor: rows(4) + cols(4) + rowStride(4) + dataOffset(8) + dataLength(8) = 28 bytes
     private const int DescriptorSize = 28;
 
-    // Matrix ordering: attn[0], ffn[0], attn[1], ffn[1], ..., embeddings, outputHead
-    // So matrixCount = numLayers * 2 + 2
+    // Matrix ordering per layer: Wq, Wk, Wv, Wo, Ffn
+    // Total: numLayers * 5 + 2 (embeddings + outputHead)
 
     /// <summary>
     /// Save the current engine state to a binary snapshot file.
@@ -41,21 +41,27 @@ public static class ModelSnapshot
         string path,
         BitNetModelConfig config,
         int activeVocab,
-        NativeTernaryMatrix[] compressedAttn,
-        NativeTernaryMatrix[] compressedFfn,
+        NativeTernaryMatrix[] wq,
+        NativeTernaryMatrix[] wk,
+        NativeTernaryMatrix[] wv,
+        NativeTernaryMatrix[] wo,
+        NativeTernaryMatrix[] ffn,
         NativeTernaryMatrix compressedEmbeddings,
         NativeTernaryMatrix compressedOutputHead,
         IReadOnlyList<string>? tokenTable = null)
     {
-        int layerCount = compressedAttn.Length;
-        int matrixCount = layerCount * 2 + 2;
+        int layerCount = wq.Length;
+        int matrixCount = layerCount * 5 + 2;
 
-        // Gather all matrices in order
+        // Gather all matrices in order: Wq, Wk, Wv, Wo, Ffn per layer, then embeddings, outputHead
         var matrices = new NativeTernaryMatrix[matrixCount];
         for (int i = 0; i < layerCount; i++)
         {
-            matrices[i * 2] = compressedAttn[i];
-            matrices[i * 2 + 1] = compressedFfn[i];
+            matrices[i * 5]     = wq[i];
+            matrices[i * 5 + 1] = wk[i];
+            matrices[i * 5 + 2] = wv[i];
+            matrices[i * 5 + 3] = wo[i];
+            matrices[i * 5 + 4] = ffn[i];
         }
         matrices[matrixCount - 2] = compressedEmbeddings;
         matrices[matrixCount - 1] = compressedOutputHead;
@@ -159,9 +165,9 @@ public static class ModelSnapshot
         long tokenTableOffset = br.ReadInt64();
         long packedDataOffset = br.ReadInt64();
 
-        if (matrixCount != layerCount * 2 + 2)
+        if (matrixCount != layerCount * 5 + 2)
             throw new InvalidDataException(
-                $"Matrix count {matrixCount} != expected {layerCount * 2 + 2}");
+                $"Matrix count {matrixCount} != expected {layerCount * 5 + 2}");
 
         // ── Matrix descriptors ──────────────────────────────────────
         var descriptors = new (int Rows, int Cols, int Stride, long Offset, long Length)[matrixCount];
@@ -199,12 +205,18 @@ public static class ModelSnapshot
         }
 
         // Unpack into named arrays
-        var attn = new NativeTernaryMatrix[layerCount];
+        var wq  = new NativeTernaryMatrix[layerCount];
+        var wk  = new NativeTernaryMatrix[layerCount];
+        var wv  = new NativeTernaryMatrix[layerCount];
+        var wo  = new NativeTernaryMatrix[layerCount];
         var ffn = new NativeTernaryMatrix[layerCount];
         for (int i = 0; i < layerCount; i++)
         {
-            attn[i] = matrices[i * 2];
-            ffn[i] = matrices[i * 2 + 1];
+            wq[i]  = matrices[i * 5];
+            wk[i]  = matrices[i * 5 + 1];
+            wv[i]  = matrices[i * 5 + 2];
+            wo[i]  = matrices[i * 5 + 3];
+            ffn[i] = matrices[i * 5 + 4];
         }
 
         var config = new BitNetModelConfig(hiddenDim, layerCount, numHeads, vocabSize, maxSeqLen);
@@ -212,7 +224,7 @@ public static class ModelSnapshot
         return new SnapshotData(
             Config: config,
             ActiveVocab: activeVocab,
-            Attn: attn,
+            Wq: wq, Wk: wk, Wv: wv, Wo: wo,
             Ffn: ffn,
             Embeddings: matrices[matrixCount - 2],
             OutputHead: matrices[matrixCount - 1],
@@ -263,7 +275,7 @@ public static class ModelSnapshot
             int tokenCount = MemoryMarshal.Read<int>(headerSpan[36..]);
             long tokenTableOffset = MemoryMarshal.Read<long>(headerSpan[40..]);
 
-            if (matrixCount != layerCount * 2 + 2)
+            if (matrixCount != layerCount * 5 + 2)
                 throw new InvalidDataException("Matrix count mismatch");
 
             // Bounds: ensure descriptor region fits within file
@@ -322,18 +334,24 @@ public static class ModelSnapshot
                 matrices[i] = NativeTernaryMatrix.FromPackedData(dataSpan, rows, cols);
             }
 
-            var attn = new NativeTernaryMatrix[layerCount];
-            var ffn = new NativeTernaryMatrix[layerCount];
+            var wqA  = new NativeTernaryMatrix[layerCount];
+            var wkA  = new NativeTernaryMatrix[layerCount];
+            var wvA  = new NativeTernaryMatrix[layerCount];
+            var woA  = new NativeTernaryMatrix[layerCount];
+            var ffnA = new NativeTernaryMatrix[layerCount];
             for (int i = 0; i < layerCount; i++)
             {
-                attn[i] = matrices[i * 2];
-                ffn[i] = matrices[i * 2 + 1];
+                wqA[i]  = matrices[i * 5];
+                wkA[i]  = matrices[i * 5 + 1];
+                wvA[i]  = matrices[i * 5 + 2];
+                woA[i]  = matrices[i * 5 + 3];
+                ffnA[i] = matrices[i * 5 + 4];
             }
 
             var config = new BitNetModelConfig(
                 hiddenDim, layerCount, numHeads, vocabSize, maxSeqLen);
 
-            return new SnapshotData(config, activeVocab, attn, ffn,
+            return new SnapshotData(config, activeVocab, wqA, wkA, wvA, woA, ffnA,
                 matrices[matrixCount - 2], matrices[matrixCount - 1], tokens);
         }
         finally
@@ -387,7 +405,7 @@ public static class ModelSnapshot
             int tokenCount = MemoryMarshal.Read<int>(headerSpan[36..]);
             long tokenTableOffset = MemoryMarshal.Read<long>(headerSpan[40..]);
 
-            if (matrixCount != layerCount * 2 + 2)
+            if (matrixCount != layerCount * 5 + 2)
                 throw new InvalidDataException("Matrix count mismatch");
 
             long minSize = HeaderSize + (long)matrixCount * DescriptorSize;
@@ -441,15 +459,23 @@ public static class ModelSnapshot
                         $"Matrix descriptor {i} out of bounds (offset={doff}, length={dlen}, file={fs.Length})");
             }
 
-            var attn = new NativeTernaryMatrix[layerCount];
-            var ffn = new NativeTernaryMatrix[layerCount];
+            var wqL  = new NativeTernaryMatrix[layerCount];
+            var wkL  = new NativeTernaryMatrix[layerCount];
+            var wvL  = new NativeTernaryMatrix[layerCount];
+            var woL  = new NativeTernaryMatrix[layerCount];
+            var ffnL = new NativeTernaryMatrix[layerCount];
             for (int i = 0; i < layerCount; i++)
             {
-                var (rows, cols, _, offset, _) = descriptors[i * 2];
-                attn[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
-
-                (rows, cols, _, offset, _) = descriptors[i * 2 + 1];
-                ffn[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                var (rows, cols, _, offset, _) = descriptors[i * 5];
+                wqL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                (rows, cols, _, offset, _) = descriptors[i * 5 + 1];
+                wkL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                (rows, cols, _, offset, _) = descriptors[i * 5 + 2];
+                wvL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                (rows, cols, _, offset, _) = descriptors[i * 5 + 3];
+                woL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                (rows, cols, _, offset, _) = descriptors[i * 5 + 4];
+                ffnL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
             }
 
             var (eRows, eCols, _, eOff, _) = descriptors[matrixCount - 2];
@@ -459,7 +485,7 @@ public static class ModelSnapshot
             var outputHead = NativeTernaryMatrix.FromMappedMemory(basePtr + oOff, oRows, oCols);
 
             var config = new BitNetModelConfig(hiddenDim, layerCount, numHeads, vocabSize, maxSeqLen);
-            var data = new SnapshotData(config, activeVocab, attn, ffn, embeddings, outputHead, tokens);
+            var data = new SnapshotData(config, activeVocab, wqL, wkL, wvL, woL, ffnL, embeddings, outputHead, tokens);
 
             return new LazySnapshot(fs, mmf, accessor, basePtr, data);
         }
@@ -506,7 +532,10 @@ public static class ModelSnapshot
 public sealed record SnapshotData(
     BitNetModelConfig Config,
     int ActiveVocab,
-    NativeTernaryMatrix[] Attn,
+    NativeTernaryMatrix[] Wq,
+    NativeTernaryMatrix[] Wk,
+    NativeTernaryMatrix[] Wv,
+    NativeTernaryMatrix[] Wo,
     NativeTernaryMatrix[] Ffn,
     NativeTernaryMatrix Embeddings,
     NativeTernaryMatrix OutputHead,
@@ -514,7 +543,10 @@ public sealed record SnapshotData(
 {
     public void Dispose()
     {
-        foreach (var m in Attn) m?.Dispose();
+        foreach (var m in Wq)  m?.Dispose();
+        foreach (var m in Wk)  m?.Dispose();
+        foreach (var m in Wv)  m?.Dispose();
+        foreach (var m in Wo)  m?.Dispose();
         foreach (var m in Ffn) m?.Dispose();
         Embeddings?.Dispose();
         OutputHead?.Dispose();

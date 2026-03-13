@@ -155,14 +155,15 @@ public class IntelligenceOrchestratorTests
     [Fact]
     public async Task ProcessAsync_WithoutRouting_NoBitNetFallbackUnaffected()
     {
-        // Without classifier/tools the engine is always used
+        // Without classifier/tools the engine is always used.
+        // The engine now produces real generated tokens (not the old spike diagnostic).
         var orch = CreateOrchestrator();
 
         var response = await orch.ProcessAsync("create a todo");
 
-        // Falls through to BitNet spike output
         Assert.Equal("bitnet-generate", response.ResolvedIntent);
-        Assert.Contains("[BitNet spike]", response.Message);
+        Assert.NotEmpty(response.Message);
+        Assert.DoesNotContain("[BitNet spike]", response.Message);
     }
 
     [Fact]
