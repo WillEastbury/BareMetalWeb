@@ -94,7 +94,6 @@ public static class BareMetalWebExtensions
         // Migrated to system catalog: AppSetting, FileAttachment, RecordComment, InboxMessage, DomainEventSubscription, ScheduledActionDefinition, NotificationDefinition, AuditEntry, User, SystemPrincipal
         DataScaffold.RegisterEntity<DashboardDefinition>();
         DataScaffold.RegisterEntity<ViewDefinition>();
-        DataScaffold.RegisterEntity<TodoItem>();
         Console.WriteLine($"[BMW Startup] Registered {DataScaffold.Entities.Count} code-first entities + system catalog provides the rest");
 
         phaseSw.Restart();
