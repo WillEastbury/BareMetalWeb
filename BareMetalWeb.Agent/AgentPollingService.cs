@@ -10,9 +10,11 @@ namespace BareMetalWeb.Agent;
 ///   1. Poll <c>GET /api/runtime/desired/{nodeId}</c> with Bearer auth.
 ///   2. Compare the desired version with the symlink-detected current version.
 ///   3. If they differ, download the new binary (if not already cached), verify
-///      the SHA-256 checksum, install it (symlink swap), then restart BMW.
+///      the SHA-256 checksum, request a WAL snapshot from the running BMW instance
+///      (best-effort), install the binary (symlink swap), then restart BMW.
 ///   4. If BMW is not running for any reason, start it.
-///   5. Sleep for <c>PollSeconds + random jitter</c> before the next iteration.
+///   5. Sleep for <c>PollSeconds + random jitter</c> before the next iteration
+///      (default: 1 hour + up to 5 minutes jitter).
 ///
 /// An initial random delay (0 – <see cref="AgentConfig.MaxJitterSeconds"/> seconds)
 /// is inserted before the very first poll to spread container/host reboots across
@@ -22,6 +24,16 @@ internal sealed class AgentPollingService
 {
     private readonly AgentConfig _config;
     private readonly RuntimeProcessManager _pm;
+
+    // Reuse a single HttpClient instance for pre-upgrade snapshot requests
+    private static readonly System.Net.Http.HttpClient SnapshotHttp =
+        new(new System.Net.Http.SocketsHttpHandler
+        {
+            ConnectTimeout = TimeSpan.FromSeconds(5),
+        })
+        {
+            Timeout = TimeSpan.FromSeconds(10),
+        };
 
     public AgentPollingService(AgentConfig config, RuntimeProcessManager pm)
     {
@@ -66,6 +78,8 @@ internal sealed class AgentPollingService
                     {
                         Log($"Upgrade required → {runtime.DesiredVersion}");
                         await DownloadRuntimeAsync(runtime, ct).ConfigureAwait(false);
+                        // Best-effort: ask BMW to flush a WAL snapshot before we restart it
+                        await TryRequestSnapshotAsync(ct).ConfigureAwait(false);
                         InstallRuntime(runtime);
                         _pm.Restart();
                     }
@@ -190,6 +204,31 @@ internal sealed class AgentPollingService
 
     private static void TryDelete(string path)
     { try { File.Delete(path); } catch { /* best-effort */ } }
+
+    // ── Pre-upgrade snapshot ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Ask the locally-running BMW instance to flush a WAL snapshot before we
+    /// restart it for an upgrade.  Best-effort — a failure here does not block
+    /// the upgrade.
+    /// </summary>
+    private async Task TryRequestSnapshotAsync(CancellationToken ct)
+    {
+        try
+        {
+            var port = _config.LocalBmwPort;
+            var url  = $"http://localhost:{port}/api/_cluster/snapshot";
+            using var resp = await SnapshotHttp.PostAsync(url, content: null, ct).ConfigureAwait(false);
+            if (resp.IsSuccessStatusCode)
+                Log("Pre-upgrade WAL snapshot accepted.");
+            else
+                Log($"Pre-upgrade snapshot returned {(int)resp.StatusCode} — proceeding anyway.");
+        }
+        catch (Exception ex)
+        {
+            Log($"Pre-upgrade snapshot request failed (non-fatal): {ex.Message}");
+        }
+    }
 
     private static void Log(string msg) =>
         Console.WriteLine($"{DateTime.UtcNow:O} | {msg}");

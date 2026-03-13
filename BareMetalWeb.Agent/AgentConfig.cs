@@ -8,8 +8,7 @@ namespace BareMetalWeb.Agent;
 /// <summary>
 /// Configuration for the bootstrap deployment agent.
 ///
-/// The agent's identity is stored in a JSON file (default: /var/lib/bmw/node.json on Linux,
-/// %PROGRAMDATA%\bmw\node.json on Windows).  This file is provisioned once by the control
+/// The agent's identity is stored in a JSON file (default: /var/lib/bmw/node.json on Linux).  This file is provisioned once by the control
 /// plane at enrolment time and must not be checked into source control.
 ///
 /// Override the file path with the BMW_STATE_FILE environment variable.
@@ -34,8 +33,31 @@ internal sealed class AgentConfig
     public string RuntimeExeName { get; set; } = "BareMetalWeb.Host";
 
     // ── Polling ──────────────────────────────────────────────────────────────
-    public int FallbackPollSeconds { get; set; } = 60;
-    public int MaxJitterSeconds    { get; set; } = 30;
+    public int FallbackPollSeconds { get; set; } = 3600;
+    public int MaxJitterSeconds    { get; set; } = 300;
+
+    // ── Bootstrap (first-boot registration) ─────────────────────────────────
+    /// <summary>
+    /// Base URL of the bootstrap endpoint used for first-boot registration.
+    /// Set with the <c>BMW_BOOTSTRAP_ENDPOINT</c> environment variable.
+    /// If empty the agent will not attempt self-registration and will fail
+    /// if no state file is found.
+    /// </summary>
+    public string BootstrapEndpoint  { get; set; } = "";
+
+    /// <summary>
+    /// Bootstrap principal name used when registering a new node.
+    /// Set with the <c>BMW_BOOTSTRAP_PRINCIPAL</c> environment variable.
+    /// </summary>
+    public string BootstrapPrincipal { get; set; } = "";
+
+    // ── Local BMW port (for pre-upgrade snapshot) ────────────────────────────
+    /// <summary>
+    /// Port BMW listens on locally.  Used by the agent to request a WAL snapshot
+    /// before restarting BMW for an upgrade.
+    /// Set with the <c>BMW_LOCAL_PORT</c> environment variable (default: 80).
+    /// </summary>
+    public int LocalBmwPort { get; set; } = 80;
 
     // ── Identity (loaded from StateFile) ─────────────────────────────────────
     public NodeIdentity? Node { get; set; }
@@ -65,6 +87,12 @@ internal sealed class AgentConfig
             cfg.FallbackPollSeconds = pi;
         if (int.TryParse(Environment.GetEnvironmentVariable("BMW_MAX_JITTER_SECONDS"), out var jitter))
             cfg.MaxJitterSeconds = jitter;
+        if (int.TryParse(Environment.GetEnvironmentVariable("BMW_LOCAL_PORT"), out var port))
+            cfg.LocalBmwPort = port;
+
+        // Bootstrap config (first-boot registration)
+        cfg.BootstrapEndpoint  = Env("BMW_BOOTSTRAP_ENDPOINT",  cfg.BootstrapEndpoint);
+        cfg.BootstrapPrincipal = Env("BMW_BOOTSTRAP_PRINCIPAL", cfg.BootstrapPrincipal);
 
         // Resolve RuntimeLink after RuntimeDir is finalised
         var linkDefault = OperatingSystem.IsWindows()
@@ -112,6 +140,8 @@ internal sealed class AgentConfig
 }
 
 [JsonSerializable(typeof(NodeIdentity))]
+[JsonSerializable(typeof(NodeRegistrationRequest))]
+[JsonSerializable(typeof(NodeAttestationRequest))]
 [JsonSourceGenerationOptions(
     WriteIndented = true,
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]

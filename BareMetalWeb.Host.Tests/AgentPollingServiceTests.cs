@@ -250,4 +250,47 @@ public class AgentPollingServiceTests : IDisposable
         Assert.Contains("3.0.1", path);
         Assert.StartsWith(_tempDir, path);
     }
+
+    // ── DeviceIdentity ────────────────────────────────────────────────────────
+
+    [Fact]
+    public void DeviceIdentity_ComputeHardwareKey_Returns64HexChars()
+    {
+        var key = DeviceIdentity.ComputeHardwareKey();
+        Assert.Equal(64, key.Length);
+        Assert.Matches("^[0-9a-f]{64}$", key);
+    }
+
+    [Fact]
+    public void DeviceIdentity_ComputeHardwareKey_IsDeterministic()
+    {
+        // The key must be the same on repeated calls on the same machine
+        var k1 = DeviceIdentity.ComputeHardwareKey();
+        var k2 = DeviceIdentity.ComputeHardwareKey();
+        Assert.Equal(k1, k2);
+    }
+
+    [Fact]
+    public void DeviceIdentity_GetFirstNicMac_Returns12HexCharsOrFallback()
+    {
+        var mac = DeviceIdentity.GetFirstNicMac();
+        // Either a real MAC (12+ uppercase hex) or the fallback "000000000000"
+        Assert.True(mac.Length >= 12, $"MAC '{mac}' is shorter than 12 chars");
+        Assert.Matches("^[0-9A-Fa-f]+$", mac);
+    }
+
+    [Fact]
+    public void DeviceIdentity_GetFirstNicMacHash_Returns64HexChars()
+    {
+        var hash = DeviceIdentity.GetFirstNicMacHash();
+        Assert.Equal(64, hash.Length);
+        Assert.Matches("^[0-9a-f]{64}$", hash);
+    }
+
+    [Fact]
+    public void DeviceIdentity_GetCpuSerial_ReturnsNonEmpty()
+    {
+        var serial = DeviceIdentity.GetCpuSerial();
+        Assert.False(string.IsNullOrWhiteSpace(serial));
+    }
 }
