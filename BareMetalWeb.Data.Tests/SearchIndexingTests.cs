@@ -3,8 +3,8 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using BareMetalWeb.Core.Interfaces;
-using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Data;
+using BareMetalWeb.Data.Interfaces;
 using Xunit;
 
 namespace BareMetalWeb.Data.Tests;

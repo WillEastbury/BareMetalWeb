@@ -6,8 +6,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
-using BareMetalWeb.Data.Interfaces;
 using BareMetalWeb.Core.Interfaces;
+using BareMetalWeb.Data.Interfaces;
 
 namespace BareMetalWeb.Data;
 

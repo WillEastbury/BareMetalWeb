@@ -1,10 +1,10 @@
-using BareMetalWeb.Core;
-using BareMetalWeb.Core.Host;
 using System;
 using System.IO;
 using System.IO.Compression;
 using System.Text;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
+using BareMetalWeb.Core.Host;
 using Microsoft.AspNetCore.Http;
 using Xunit;
 

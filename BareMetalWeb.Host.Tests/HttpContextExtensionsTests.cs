@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Core;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Models;
+using Microsoft.AspNetCore.Http;
 using Xunit;
 
 namespace BareMetalWeb.Host.Tests;

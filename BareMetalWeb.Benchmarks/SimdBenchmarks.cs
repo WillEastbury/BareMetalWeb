@@ -1,6 +1,6 @@
+using BareMetalWeb.Benchmarks.Simd;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Diagnosers;
-using BareMetalWeb.Benchmarks.Simd;
 
 namespace BareMetalWeb.Benchmarks;
 

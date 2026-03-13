@@ -1,11 +1,11 @@
 using System.IO.Pipelines;
-using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Core;
-using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Core.Host;
+using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Interfaces;
-using BareMetalWeb.Rendering.Models;
 using BareMetalWeb.Rendering;
+using BareMetalWeb.Rendering.Models;
+using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Core.Interfaces;
 

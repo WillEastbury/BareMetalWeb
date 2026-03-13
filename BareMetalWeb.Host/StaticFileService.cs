@@ -1,15 +1,14 @@
-using BareMetalWeb.Core;
 using System;
 using System.Buffers;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.IO.Compression;
-
 using System.Net;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.StaticFiles;

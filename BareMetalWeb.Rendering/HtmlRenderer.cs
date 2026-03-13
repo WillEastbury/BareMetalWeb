@@ -5,14 +5,14 @@ using System.IO.Pipelines;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text;
-using BareMetalWeb.Interfaces;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
-using BareMetalWeb.Host;
-using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Core.Interfaces;
+using BareMetalWeb.Host;
+using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering.Interfaces;
 using BareMetalWeb.Rendering.Models;
+using Microsoft.AspNetCore.Http;
 namespace BareMetalWeb.Rendering;
 
 public class HtmlRenderer : IHtmlRenderer

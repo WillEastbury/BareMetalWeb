@@ -1,13 +1,12 @@
 using System;
 using System.Buffers;
-using System.Text;
-
 using System.Collections.Generic;
 using System.Net;
+using System.Text;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Interfaces;
-using BareMetalWeb.Rendering.Models;
 using BareMetalWeb.Rendering.Interfaces;
+using BareMetalWeb.Rendering.Models;
 // Contains standardised static HTML fragments used across the application for templating
 namespace BareMetalWeb.Rendering;
 

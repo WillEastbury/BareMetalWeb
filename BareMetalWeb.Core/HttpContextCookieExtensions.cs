@@ -1,5 +1,5 @@
-using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Core;
+using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Host;
 

@@ -1,10 +1,10 @@
-using Microsoft.AspNetCore.Http;
 using System;
 using System.Collections.Generic;
-using BareMetalWeb.Rendering;
 using BareMetalWeb.Core;
-using BareMetalWeb.Rendering.Models;
 using BareMetalWeb.Core.Host;
+using BareMetalWeb.Rendering;
+using BareMetalWeb.Rendering.Models;
+using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Host;
 

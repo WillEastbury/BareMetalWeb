@@ -1,9 +1,9 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
-using System.Globalization;
-using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Core;
+using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Host;
 

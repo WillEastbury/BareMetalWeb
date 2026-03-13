@@ -1,7 +1,7 @@
-using BareMetalWeb.Core;
 using System;
 using System.IO;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using Microsoft.AspNetCore.Http;
 using Xunit;

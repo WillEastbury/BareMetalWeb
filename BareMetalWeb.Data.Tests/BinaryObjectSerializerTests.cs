@@ -1,5 +1,5 @@
-using BareMetalWeb.Data;
 using BareMetalWeb.Core;
+using BareMetalWeb.Data;
 
 namespace BareMetalWeb.Data.Tests;
 

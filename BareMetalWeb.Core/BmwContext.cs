@@ -1,11 +1,11 @@
+using System.Diagnostics;
 using System.IO.Pipelines;
 using System.Text;
-using System.Diagnostics;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Features;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Rendering;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace BareMetalWeb.Core;
 

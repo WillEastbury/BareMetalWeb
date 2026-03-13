@@ -1,7 +1,7 @@
 using System.Text;
+using BareMetalWeb.Data;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
-using BareMetalWeb.Data;
 
 namespace BareMetalWeb.Benchmarks;
 

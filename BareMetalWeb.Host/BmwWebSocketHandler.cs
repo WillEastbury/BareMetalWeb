@@ -1,8 +1,8 @@
 using System.Net.WebSockets;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Features;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 
 namespace BareMetalWeb.Host;
 

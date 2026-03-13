@@ -1,9 +1,8 @@
 using System;
-
 using System.Threading;
 using System.Threading.Tasks;
-using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Core;
+using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
 

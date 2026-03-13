@@ -1,8 +1,8 @@
 using System;
 using System.Security.Cryptography;
 using System.Text;
-using Microsoft.AspNetCore.Http;
 using BareMetalWeb.Host;
+using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Rendering;
 

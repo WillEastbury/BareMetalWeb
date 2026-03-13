@@ -1,8 +1,8 @@
 using System.Buffers;
 using System.Text;
 using BareMetalWeb.Data;
-using WireFieldType = BareMetalWeb.Data.MetadataWireSerializer.WireFieldType;
 using FieldPlan = BareMetalWeb.Data.MetadataWireSerializer.FieldPlan;
+using WireFieldType = BareMetalWeb.Data.MetadataWireSerializer.WireFieldType;
 
 namespace BareMetalWeb.Data.Tests;
 

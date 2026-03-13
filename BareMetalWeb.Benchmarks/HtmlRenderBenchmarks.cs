@@ -3,9 +3,9 @@ using System.Buffers;
 using System.IO;
 using System.IO.Pipelines;
 using System.Text;
+using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
 using BareMetalWeb.Rendering.Interfaces;
-using BareMetalWeb.Interfaces;
 using BenchmarkDotNet.Attributes;
 
 namespace BareMetalWeb.Benchmarks;

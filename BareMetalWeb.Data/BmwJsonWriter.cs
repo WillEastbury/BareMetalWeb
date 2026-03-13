@@ -4,8 +4,8 @@ using System.Collections;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
-using WireFieldType = BareMetalWeb.Data.MetadataWireSerializer.WireFieldType;
 using FieldPlan = BareMetalWeb.Data.MetadataWireSerializer.FieldPlan;
+using WireFieldType = BareMetalWeb.Data.MetadataWireSerializer.WireFieldType;
 
 namespace BareMetalWeb.Data;
 

@@ -1,8 +1,8 @@
 using System;
 using System.Net.Http;
 using System.Threading.Tasks;
-using BareMetalWeb.Core.Delegates;
 using BareMetalWeb.Core;
+using BareMetalWeb.Core.Delegates;
 namespace BareMetalWeb.Core.Interfaces;
 
 public interface IRouteHandlers

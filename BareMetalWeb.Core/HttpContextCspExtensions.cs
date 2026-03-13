@@ -1,7 +1,7 @@
-using Microsoft.AspNetCore.Http;
 using System;
 using System.Security.Cryptography;
 using BareMetalWeb.Core;
+using Microsoft.AspNetCore.Http;
 
 namespace BareMetalWeb.Host;
 

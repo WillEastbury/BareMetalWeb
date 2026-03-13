@@ -1,9 +1,9 @@
+using BareMetalWeb.Core;
+using BareMetalWeb.Core.Interfaces;
+using BareMetalWeb.Host;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
-using BareMetalWeb.Core.Interfaces;
 using Microsoft.AspNetCore.Http;
-using BareMetalWeb.Host;
-using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Core.Host;
 
