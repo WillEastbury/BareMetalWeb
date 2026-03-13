@@ -113,7 +113,7 @@ public static class IntelligenceExtensions
         bool loaded = _orchestrator is not null;
         var json = $"{{\"initialized\":{(loaded ? "true" : "false")}," +
                    $"\"bitnet_loaded\":{(_orchestrator is not null ? "true" : "false")}," +
-                   $"\"architecture\":\"hybrid-embeddings-bitnet\"}}";
+                   $"\"architecture\":\"single-stage-slm\"}}";
         await context.Response.WriteAsync(json, context.RequestAborted);
     }
 

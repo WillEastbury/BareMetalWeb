@@ -6,7 +6,9 @@ namespace BareMetalWeb.Intelligence;
 
 /// <summary>
 /// Orchestrates intent classification and tool execution for admin chat.
-/// Two-tier architecture: fast keyword match → optional BitNet fallback.
+/// Single-stage architecture: when the micro SLM (BitNet engine) is loaded it is the
+/// sole processing path — no TF-IDF pre-screen overhead.  When no model is loaded the
+/// orchestrator degrades gracefully to the TF-IDF keyword classifier.
 /// Maintains single-slot entity context across turns for follow-up queries.
 /// </summary>
 public sealed class IntelligenceOrchestrator
@@ -29,7 +31,10 @@ public sealed class IntelligenceOrchestrator
     }
 
     /// <summary>
-    /// Process a user query through the two-tier pipeline.
+    /// Process a user query through the pipeline.
+    /// When the micro SLM is loaded it is the sole stage — queries are routed directly
+    /// through the model without the TF-IDF pre-screen.  When no model is loaded the
+    /// TF-IDF keyword classifier handles everything instead.
     /// </summary>
     public async ValueTask<ChatResponse> ProcessAsync(
         string query,
@@ -41,7 +46,19 @@ public sealed class IntelligenceOrchestrator
         // Sanitise input (prevent injection)
         string sanitised = SanitiseInput(query);
 
-        // Tier 1: Intent classification
+        // Single-stage SLM path — skip TF-IDF overhead when the model is ready.
+        // The engine is the sole stage: it handles intent recognition and response
+        // generation in one forward pass.  Confidence is 0f because the SLM
+        // produces a generated response rather than a classified intent score.
+        if (_engine is not null && _engine.IsLoaded)
+        {
+            var generated = await _engine.GenerateAsync(sanitised.AsMemory(), 256, ct)
+                .ConfigureAwait(false);
+            return new ChatResponse(generated, "bitnet-generate", 0f);
+        }
+
+        // --- SLM not loaded: TF-IDF-only fallback ---
+
         var intent = _classifier.Classify(sanitised.AsSpan());
 
         if (intent.IsHighConfidence)
@@ -73,15 +90,7 @@ public sealed class IntelligenceOrchestrator
                 intent.Confidence);
         }
 
-        // Tier 2: Fall through to BitNet engine if available
-        if (_engine is not null && _engine.IsLoaded)
-        {
-            var generated = await _engine.GenerateAsync(sanitised.AsMemory(), 256, ct)
-                .ConfigureAwait(false);
-            return new ChatResponse(generated, "bitnet-generate", 0f);
-        }
-
-        // No match, no engine
+        // No match and no engine
         return new ChatResponse(
             $"I didn't understand that query (best match: '{intent.IntentName}' at {intent.Confidence:P0}).\n" +
             "Try 'help' to see available commands.",
