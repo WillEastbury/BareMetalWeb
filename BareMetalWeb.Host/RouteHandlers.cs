@@ -598,7 +598,7 @@ public sealed class RouteHandlers : IRouteHandlers
         user.SetPassword(password);
         await Users.SaveAsync(user);
         await UserAuth.SignInAsync(context, user, rememberMe: true);
-        context.Response.Redirect("/account");
+        context.Response.Redirect("/system/me");
     }
 
     public async ValueTask LogoutHandler(BmwContext context)
@@ -793,6 +793,12 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             context.Response.Redirect("/login");
         }
+    }
+
+    public ValueTask AccountRedirectHandler(BmwContext context)
+    {
+        context.Response.Redirect("/system/me");
+        return ValueTask.CompletedTask;
     }
 
     public async ValueTask AccountHandler(BmwContext context)
@@ -1021,7 +1027,7 @@ public sealed class RouteHandlers : IRouteHandlers
             var backupHtml = string.IsNullOrWhiteSpace(backupList)
                 ? string.Empty
                 : $"<div class=\"mt-3\"><p><strong>Backup codes (save these now):</strong></p><ul>{backupList}</ul><p class=\"text-warning\">These codes are shown once.</p></div>";
-            context.SetStringValue("html_message", "<p>MFA enabled successfully.</p>" + backupHtml + "<p><a href=\"/account\">Back to account</a></p>");
+            context.SetStringValue("html_message", "<p>MFA enabled successfully.</p>" + backupHtml + "<p><a href=\"/system/me\">Back to account</a></p>");
             await _renderer.RenderPage(context);
             return;
         }
@@ -1046,7 +1052,7 @@ public sealed class RouteHandlers : IRouteHandlers
             ctx.SetStringValue("title", "Reset MFA");
             if (!user.MfaEnabled)
             {
-                ctx.SetStringValue("html_message", "<p>MFA is not enabled for your account.</p><p><a href=\"/account\">Back to account</a></p>");
+                ctx.SetStringValue("html_message", "<p>MFA is not enabled for your account.</p><p><a href=\"/system/me\">Back to account</a></p>");
                 return true;
             }
 
@@ -1092,7 +1098,7 @@ public sealed class RouteHandlers : IRouteHandlers
         await Users.SaveAsync(user);
 
         context.SetStringValue("title", "Reset MFA");
-        context.SetStringValue("html_message", "<p>MFA has been reset.</p><p><a href=\"/account\">Back to account</a></p>");
+        context.SetStringValue("html_message", "<p>MFA has been reset.</p><p><a href=\"/system/me\">Back to account</a></p>");
         await _renderer.RenderPage(context);
     }
 

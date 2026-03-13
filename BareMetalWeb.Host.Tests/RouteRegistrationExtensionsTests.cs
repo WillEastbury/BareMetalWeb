@@ -195,6 +195,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
 
         // Assert
         Assert.True(_server.routes.ContainsKey("GET /account"));
+        Assert.True(_server.routes.ContainsKey("GET /system/me"));
     }
 
     [Fact]
@@ -295,7 +296,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAuthRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, allowAccountCreation: false);
 
         // Assert — 14 routes without register
-        Assert.Equal(17, _server.routes.Count);
+        Assert.Equal(18, _server.routes.Count);
     }
 
     [Fact]
@@ -305,7 +306,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAuthRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, allowAccountCreation: true);
 
         // Assert — 16 routes with register
-        Assert.Equal(19, _server.routes.Count);
+        Assert.Equal(20, _server.routes.Count);
     }
 
     // ──────────────────────────────────────────────────────────────
@@ -682,7 +683,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAuthRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, allowAccountCreation: false);
 
         // Assert
-        var route = _server.routes["GET /account"];
+        var route = _server.routes["GET /system/me"];
         Assert.Equal("Authenticated", route.PageInfo!.PageMetaData.PermissionsNeeded);
     }
 
@@ -708,7 +709,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAuthRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, allowAccountCreation: false);
 
         // Assert
-        var route = _server.routes["GET /account"];
+        var route = _server.routes["GET /system/me"];
         Assert.True(route.PageInfo!.PageMetaData.ShowOnNavBar);
     }
 
@@ -719,7 +720,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAuthRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate, allowAccountCreation: false);
 
         // Assert
-        var route = _server.routes["GET /account"];
+        var route = _server.routes["GET /system/me"];
         Assert.Equal(NavAlignment.Right, route.PageInfo!.PageContext.NavAlignment);
     }
 
@@ -796,7 +797,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterAdmin > afterMonitoring);
         Assert.True(afterLookup > afterAdmin);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 20 + 4 + 13 + 5 + 26, total);
+        Assert.Equal(staticCount + 21 + 4 + 13 + 5 + 26, total);
     }
 
     [Fact]
@@ -930,6 +931,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         public ValueTask SsoLoginHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask SsoCallbackHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask SsoLogoutHandler(BmwContext context) => ValueTask.CompletedTask;
+        public ValueTask AccountRedirectHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask AccountHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask MfaStatusHandler(BmwContext context) => ValueTask.CompletedTask;
         public ValueTask MfaSetupHandler(BmwContext context) => ValueTask.CompletedTask;
@@ -1141,13 +1143,13 @@ public class RouteRegistrationExtensionsTests : IDisposable
     // ──────────────────────────────────────────────────────────────
 
     [Fact]
-    public void TryBuildMetaObjectsScript_WithAccessibleEntity_ReturnsScriptWithSlug()
+    public async Task TryBuildMetaObjectsScript_WithAccessibleEntity_ReturnsScriptWithSlug()
     {
         // Arrange
         _ = HostGalleryTestFixture.State;
 
         var method = typeof(RouteRegistrationExtensions).GetMethod(
-            "TryBuildMetaObjectsScript",
+            "TryBuildMetaObjectsScriptAsync",
             BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
 
@@ -1155,7 +1157,9 @@ public class RouteRegistrationExtensionsTests : IDisposable
         var user = new User { Key = 1, UserName = "test", IsActive = true, Permissions = new[] { "Customers" } };
 
         // Act
-        var script = (string?)method.Invoke(null, new object?[] { user, user.Permissions, "testnonce" });
+        var task = (Task<string?>?)method.Invoke(null, new object?[] { user, user.Permissions, "testnonce" });
+        Assert.NotNull(task);
+        var script = await task.ConfigureAwait(false);
 
         // Assert
         Assert.NotNull(script);
@@ -1165,18 +1169,20 @@ public class RouteRegistrationExtensionsTests : IDisposable
     }
 
     [Fact]
-    public void TryBuildMetaObjectsScript_NullUser_ReturnsScriptExcludingPermissionedEntities()
+    public async Task TryBuildMetaObjectsScript_NullUser_ReturnsScriptExcludingPermissionedEntities()
     {
         // Arrange — register a permission-restricted entity
         _ = HostGalleryTestFixture.State;
 
         var method = typeof(RouteRegistrationExtensions).GetMethod(
-            "TryBuildMetaObjectsScript",
+            "TryBuildMetaObjectsScriptAsync",
             BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(method);
 
         // Act — null user, no permissions
-        var script = (string?)method.Invoke(null, new object?[] { null, Array.Empty<string>(), "nonce" });
+        var task = (Task<string?>?)method.Invoke(null, new object?[] { null, Array.Empty<string>(), "nonce" });
+        Assert.NotNull(task);
+        var script = await task.ConfigureAwait(false);
 
         // Assert — script is still returned (may be empty list), but Customer is filtered out
         Assert.NotNull(script);

@@ -22,6 +22,7 @@ public interface IRouteHandlers
     ValueTask SsoLoginHandler(BmwContext context);
     ValueTask SsoCallbackHandler(BmwContext context);
     ValueTask SsoLogoutHandler(BmwContext context);
+    ValueTask AccountRedirectHandler(BmwContext context);
     ValueTask AccountHandler(BmwContext context);
     ValueTask MfaStatusHandler(BmwContext context);
     ValueTask MfaSetupHandler(BmwContext context);
