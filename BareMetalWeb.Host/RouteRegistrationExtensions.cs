@@ -3899,4 +3899,201 @@ public static class RouteRegistrationExtensions
             context.Response.StatusCode = 204;
         }));
     }
+
+    /// <summary>
+    /// Register admin API routes for the automated WAL backup service.
+    /// Only call this when the backup service is enabled and a <see cref="WalBackupService"/>
+    /// instance has been created.
+    /// Registers:
+    /// <list type="bullet">
+    ///   <item><description>POST /api/admin/backup — trigger an on-demand backup</description></item>
+    ///   <item><description>GET  /api/admin/backups — list available backups</description></item>
+    /// </list>
+    /// </summary>
+    public static void RegisterBackupRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory,
+        WalBackupService backupService)
+    {
+        // Admin endpoint: POST /api/admin/backup — trigger on-demand backup
+        host.RegisterRoute("POST /api/admin/backup", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", true),
+            async context =>
+            {
+                try
+                {
+                    var backupPath = backupService.CreateBackup();
+                    context.Response.StatusCode = 200;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync($"{{\"status\":\"ok\",\"path\":\"{backupPath.Replace("\\", "\\\\")}\"}}")
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    context.Response.StatusCode = 500;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync($"{{\"status\":\"error\",\"message\":\"{ex.Message}\"}}")
+                        .ConfigureAwait(false);
+                }
+            }));
+
+        // Admin endpoint: GET /api/admin/backups — list available backups
+        host.RegisterRoute("GET /api/admin/backups", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", true),
+            async context =>
+            {
+                var backups = backupService.ListBackups();
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "application/json";
+                var sb = new System.Text.StringBuilder();
+                sb.Append('[');
+                for (int i = 0; i < backups.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    var b = backups[i];
+                    sb.Append($"{{\"name\":\"{b.Name}\",\"timestamp\":\"{b.Timestamp:O}\",\"commitPtr\":\"{b.CommitPtr}\",\"files\":{b.FileCount},\"size\":\"{b.SizeDisplay}\"}}");
+                }
+                sb.Append(']');
+                await context.Response.WriteAsync(sb.ToString()).ConfigureAwait(false);
+            }));
+    }
+
+    /// <summary>
+    /// Register admin API routes for the capability graph and workflow planner.
+    /// Registers:
+    /// <list type="bullet">
+    ///   <item><description>GET  /api/admin/capabilities — returns the full capability graph as JSON</description></item>
+    ///   <item><description>POST /api/admin/workflow-plan — generate a workflow plan from a natural-language intent string</description></item>
+    /// </list>
+    /// </summary>
+    public static void RegisterCapabilityRoutes(
+        this IBareWebHost host,
+        IPageInfoFactory pageInfoFactory)
+    {
+        // Admin endpoint: GET /api/admin/capabilities — capability graph summary
+        host.RegisterRoute("GET /api/admin/capabilities", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var graph = BareMetalWeb.Runtime.CapabilityGraph.CapabilityGraphRegistry.Current;
+                if (graph == null)
+                {
+                    context.Response.StatusCode = 503;
+                    await context.Response.WriteAsync("{\"error\":\"Capability graph not yet built\"}").ConfigureAwait(false);
+                    return;
+                }
+                context.Response.ContentType = "application/json";
+                var (nodes, edges, entities) = graph.Stats;
+                using var ms = new System.IO.MemoryStream(1024);
+                using (var w = new System.Text.Json.Utf8JsonWriter(ms))
+                {
+                    w.WriteStartObject();
+                    w.WriteString("builtUtc", graph.BuiltUtc.ToString("O"));
+                    w.WriteNumber("nodeCount", nodes);
+                    w.WriteNumber("edgeCount", edges);
+                    w.WriteNumber("entityCount", entities);
+                    w.WriteStartArray("nodes");
+                    foreach (var n in graph.Nodes)
+                    {
+                        w.WriteStartObject();
+                        w.WriteNumber("id", n.Id);
+                        w.WriteString("type", n.Type.ToString());
+                        w.WriteNumber("entityIndex", n.EntityIndex);
+                        w.WriteString("label", n.Label);
+                        if (n.Detail != null) w.WriteString("detail", n.Detail);
+                        w.WriteEndObject();
+                    }
+                    w.WriteEndArray();
+                    w.WriteStartArray("edges");
+                    foreach (var e in graph.Edges)
+                    {
+                        w.WriteStartObject();
+                        w.WriteNumber("from", e.FromNode);
+                        w.WriteNumber("to", e.ToNode);
+                        w.WriteEndObject();
+                    }
+                    w.WriteEndArray();
+                    w.WriteStartArray("entities");
+                    foreach (var ent in graph.Entities)
+                    {
+                        w.WriteStartObject();
+                        w.WriteString("entityId", ent.EntityId);
+                        w.WriteString("name", ent.Name);
+                        w.WriteString("slug", ent.Slug);
+                        w.WriteEndObject();
+                    }
+                    w.WriteEndArray();
+                    w.WriteEndObject();
+                }
+                await context.Response.Body.WriteAsync(ms.ToArray()).ConfigureAwait(false);
+            }));
+
+        // Admin endpoint: POST /api/admin/workflow-plan — generate a workflow plan from NL intent
+        host.RegisterRoute("POST /api/admin/workflow-plan", new RouteHandlerData(
+            pageInfoFactory.RawPage("admin", false),
+            async context =>
+            {
+                var graph = BareMetalWeb.Runtime.CapabilityGraph.CapabilityGraphRegistry.Current;
+                if (graph == null)
+                {
+                    context.Response.StatusCode = 503;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Capability graph not yet built\"}").ConfigureAwait(false);
+                    return;
+                }
+
+                string intent;
+                using (var reader = new System.IO.StreamReader(context.HttpRequest.Body, System.Text.Encoding.UTF8))
+                    intent = await reader.ReadToEndAsync(context.RequestAborted).ConfigureAwait(false);
+
+                if (string.IsNullOrWhiteSpace(intent))
+                {
+                    context.Response.StatusCode = 400;
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync("{\"error\":\"Request body must contain the workflow intent text\"}").ConfigureAwait(false);
+                    return;
+                }
+
+                var planner = new BareMetalWeb.Runtime.CapabilityGraph.WorkflowPlanner(graph);
+                var plan = planner.GeneratePlan(intent);
+
+                context.Response.ContentType = "application/json";
+                context.Response.StatusCode = 200;
+                using var ms = new System.IO.MemoryStream(512);
+                using (var w = new System.Text.Json.Utf8JsonWriter(ms))
+                {
+                    w.WriteStartObject();
+                    w.WriteBoolean("isValid", plan.IsValid);
+                    w.WriteString("createdUtc", plan.CreatedUtc.ToString("O"));
+                    w.WriteString("originalInput", plan.OriginalInput);
+
+                    w.WriteStartArray("steps");
+                    foreach (var step in plan.Steps)
+                    {
+                        w.WriteStartObject();
+                        w.WriteNumber("order", step.Order);
+                        w.WriteString("type", step.Type.ToString());
+                        w.WriteString("entity", step.EntitySlug);
+                        w.WriteString("output", step.OutputVariable);
+                        if (step.InputVariable != null) w.WriteString("input", step.InputVariable);
+                        if (step.Condition != null) w.WriteString("condition", step.Condition);
+                        if (step.ActionName != null) w.WriteString("action", step.ActionName);
+                        w.WriteNumber("capabilityNodeId", step.CapabilityNodeId);
+                        w.WriteEndObject();
+                    }
+                    w.WriteEndArray();
+
+                    if (plan.ValidationErrors.Length > 0)
+                    {
+                        w.WriteStartArray("errors");
+                        foreach (var err in plan.ValidationErrors)
+                            w.WriteStringValue(err);
+                        w.WriteEndArray();
+                    }
+
+                    w.WriteEndObject();
+                }
+                await context.Response.Body.WriteAsync(ms.ToArray()).ConfigureAwait(false);
+            }));
+    }
 }
