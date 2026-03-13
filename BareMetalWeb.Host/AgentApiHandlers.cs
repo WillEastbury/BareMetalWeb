@@ -64,4 +64,49 @@ public static class AgentApiHandlers
 
         await JsonWriterHelper.WriteResponseAsync(context.Response, new Dictionary<string, object?> { ["reply"] = reply });
     }
-}
+
+    /// <summary>GET /api/agent/metrics — returns BitNet pipeline memory and throughput metrics.</summary>
+    public static async ValueTask MetricsHandler(BmwContext context)
+    {
+        var orchestrator = GetOrCreateOrchestrator();
+        var m = orchestrator.GetMetrics();
+
+        if (m is null)
+        {
+            context.Response.StatusCode = 503;
+            await JsonWriterHelper.WriteResponseAsync(context.Response,
+                new Dictionary<string, object?> { ["error"] = "Model not loaded" });
+            return;
+        }
+
+        var payload = new Dictionary<string, object?>
+        {
+            // ── Weight memory ────────────────────────────────────────────────
+            ["original_weight_bytes"]  = m.Value.OriginalWeightBytes,
+            ["trimmed_weight_bytes"]   = m.Value.TrimmedWeightBytes,
+            ["compression_savings"]    = m.Value.CompressionSavings,
+            // ── Model shape ─────────────────────────────────────────────────
+            ["total_weights"]          = m.Value.TotalWeights,
+            ["zero_weights"]           = m.Value.ZeroWeights,
+            ["sparsity"]               = m.Value.Sparsity,
+            ["layer_count"]            = m.Value.LayerCount,
+            ["embedding_weights"]      = m.Value.EmbeddingWeights,
+            // ── Token throughput ─────────────────────────────────────────────
+            ["total_tokens_in"]        = m.Value.TotalTokensIn,
+            ["total_tokens_out"]       = m.Value.TotalTokensOut,
+            ["total_requests"]         = m.Value.TotalRequests,
+            ["total_inference_ms"]     = m.Value.TotalInferenceMs,
+            // ── Vocabulary ──────────────────────────────────────────────────
+            ["original_vocab_size"]    = m.Value.OriginalVocabSize,
+            ["pruned_vocab_size"]      = m.Value.PrunedVocabSize,
+            // ── Accuracy / pruning ───────────────────────────────────────────
+            ["pre_prune_accuracy"]     = m.Value.PrePruneAccuracy,
+            ["post_prune_accuracy"]    = m.Value.PostPruneAccuracy,
+            ["semantic_test_cases"]    = m.Value.SemanticTestCaseCount,
+            // ── Summary ─────────────────────────────────────────────────────
+            ["summary"]                = m.Value.Summary,
+        };
+
+        await JsonWriterHelper.WriteResponseAsync(context.Response, payload,
+            ct: context.RequestAborted);
+    }

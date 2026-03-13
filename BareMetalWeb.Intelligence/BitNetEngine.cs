@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Threading;
 using BareMetalWeb.Intelligence.Interfaces;
 
 namespace BareMetalWeb.Intelligence;
@@ -29,6 +30,12 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private int _layerCount;
     private bool _isLoaded;
 
+    // Lifetime token / throughput counters — updated atomically on each inference
+    private long _totalTokensIn;
+    private long _totalTokensOut;
+    private long _totalRequests;
+    private long _totalInferenceMs;
+
     public bool IsLoaded => _isLoaded;
 
     /// <summary>Vocabulary pruning stats, available after load with pruning enabled.</summary>
@@ -48,6 +55,42 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
     /// <summary>Per-layer sparsity statistics (attention + FFN), available after load.</summary>
     public IReadOnlyList<(MatrixStats Attn, MatrixStats Ffn)>? LayerStats { get; private set; }
+
+    /// <summary>
+    /// Return aggregated memory, token throughput, and accuracy metrics for
+    /// the pipeline. Returns <see langword="null"/> if no model is loaded yet.
+    /// </summary>
+    public BitNetPipelineMetrics? GetMetrics()
+    {
+        if (!_isLoaded || _modelStats is null)
+            return null;
+
+        var ms = _modelStats.Value;
+        var sp = _semanticPruneStats;
+
+        int origVocab = _pruner?.OriginalVocabSize ?? _config.VocabSize;
+        int prunedVocab = _pruner?.PrunedVocabSize ?? _config.VocabSize;
+
+        return new BitNetPipelineMetrics(
+            OriginalWeightBytes: ms.StoredBytes,
+            TrimmedWeightBytes: ms.PackedBytes,
+            CompressionSavings: ms.CompressionSavings,
+            TotalWeights: ms.TotalWeights,
+            ZeroWeights: ms.ZeroWeights,
+            Sparsity: ms.Sparsity,
+            LayerCount: ms.LayerCount,
+            EmbeddingWeights: ms.EmbeddingWeights,
+            TotalTokensIn: Interlocked.Read(ref _totalTokensIn),
+            TotalTokensOut: Interlocked.Read(ref _totalTokensOut),
+            TotalRequests: Interlocked.Read(ref _totalRequests),
+            TotalInferenceMs: Interlocked.Read(ref _totalInferenceMs),
+            PrePruneAccuracy: sp.HasValue ? sp.Value.PrePruneAccuracy : null,
+            PostPruneAccuracy: sp.HasValue ? sp.Value.PostPruneAccuracy : null,
+            SemanticTestCaseCount: sp.HasValue ? sp.Value.TestCaseCount : null,
+            OriginalVocabSize: origVocab,
+            PrunedVocabSize: prunedVocab
+        );
+    }
 
     public BitNetEngine(BitNetModelConfig? config = null)
     {
@@ -315,7 +358,16 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         if (!_isLoaded)
             return ValueTask.FromResult("[Engine not loaded — no model file available]");
 
+        long startMs = System.Diagnostics.Stopwatch.GetTimestamp();
         var result = RunInference(prompt.Span, maxTokens, ct);
+        long elapsedMs = (System.Diagnostics.Stopwatch.GetTimestamp() - startMs)
+                         * 1000L / System.Diagnostics.Stopwatch.Frequency;
+
+        Interlocked.Add(ref _totalTokensIn, prompt.Length);
+        Interlocked.Add(ref _totalTokensOut, result.Length);
+        Interlocked.Increment(ref _totalRequests);
+        Interlocked.Add(ref _totalInferenceMs, elapsedMs);
+
         return ValueTask.FromResult(result);
     }
 

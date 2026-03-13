@@ -131,4 +131,136 @@ public class BitNetEngineTests
         Assert.NotNull(engine.ModelStats);
         Assert.Equal(256, engine.ModelStats.Value.EmbeddingWeights / 128 / 2);
     }
+
+    // ── GetMetrics tests ─────────────────────────────────────────────────────
+
+    [Fact]
+    public void GetMetrics_NotLoaded_ReturnsNull()
+    {
+        var engine = new BitNetEngine();
+
+        Assert.Null(engine.GetMetrics());
+    }
+
+    [Fact]
+    public void GetMetrics_AfterLoad_ReturnsMemoryStats()
+    {
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(ModelLoadOptions.NoPruning);
+
+        var metrics = engine.GetMetrics();
+
+        Assert.NotNull(metrics);
+        Assert.True(metrics!.Value.OriginalWeightBytes > 0, "OriginalWeightBytes should be positive");
+        Assert.True(metrics.Value.TrimmedWeightBytes > 0, "TrimmedWeightBytes should be positive");
+        Assert.True(metrics.Value.TrimmedWeightBytes < metrics.Value.OriginalWeightBytes,
+            "Packed 2-bit weights should be smaller than original sbyte[] weights");
+        Assert.True(metrics.Value.CompressionSavings > 0f && metrics.Value.CompressionSavings < 1f,
+            "CompressionSavings should be between 0 and 1");
+    }
+
+    [Fact]
+    public void GetMetrics_AfterLoad_ReturnsModelShape()
+    {
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(ModelLoadOptions.NoPruning);
+
+        var metrics = engine.GetMetrics()!.Value;
+
+        Assert.True(metrics.TotalWeights > 0);
+        Assert.True(metrics.LayerCount > 0);
+        Assert.True(metrics.EmbeddingWeights > 0);
+        Assert.True(metrics.Sparsity >= 0f && metrics.Sparsity <= 1f);
+    }
+
+    [Fact]
+    public async Task GetMetrics_AfterGenerate_TracksTokenCounters()
+    {
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(ModelLoadOptions.NoPruning);
+
+        const string prompt = "hello world";
+        await engine.GenerateAsync(prompt.AsMemory());
+
+        var metrics = engine.GetMetrics()!.Value;
+
+        Assert.Equal(1, metrics.TotalRequests);
+        Assert.Equal(prompt.Length, metrics.TotalTokensIn);
+        Assert.True(metrics.TotalTokensOut > 0, "Should have output tokens after generate");
+        Assert.True(metrics.TotalInferenceMs >= 0, "Inference time should be non-negative");
+    }
+
+    [Fact]
+    public async Task GetMetrics_MultipleGenerates_AccumulatesCounters()
+    {
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(ModelLoadOptions.NoPruning);
+
+        await engine.GenerateAsync("first prompt".AsMemory());
+        await engine.GenerateAsync("second prompt".AsMemory());
+
+        var metrics = engine.GetMetrics()!.Value;
+
+        Assert.Equal(2, metrics.TotalRequests);
+        Assert.Equal("first prompt".Length + "second prompt".Length, metrics.TotalTokensIn);
+    }
+
+    [Fact]
+    public void GetMetrics_WithVocabPruning_ReportsVocabSizes()
+    {
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(); // Default includes vocab pruning
+
+        var metrics = engine.GetMetrics()!.Value;
+
+        Assert.True(metrics.OriginalVocabSize > 0);
+        Assert.True(metrics.PrunedVocabSize > 0);
+        Assert.True(metrics.PrunedVocabSize <= metrics.OriginalVocabSize,
+            "Pruned vocab should be no larger than original");
+    }
+
+    [Fact]
+    public void GetMetrics_WithSemanticPruning_ReportsAccuracy()
+    {
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(new ModelLoadOptions
+        {
+            PruneVocabulary = false,
+            SemanticPruning = true,
+        });
+
+        var metrics = engine.GetMetrics()!.Value;
+
+        Assert.NotNull(metrics.PrePruneAccuracy);
+        Assert.NotNull(metrics.PostPruneAccuracy);
+        Assert.NotNull(metrics.SemanticTestCaseCount);
+        Assert.True(metrics.PrePruneAccuracy >= 0f && metrics.PrePruneAccuracy <= 1f);
+        Assert.True(metrics.PostPruneAccuracy >= 0f && metrics.PostPruneAccuracy <= 1f);
+    }
+
+    [Fact]
+    public void GetMetrics_WithoutSemanticPruning_AccuracyFieldsAreNull()
+    {
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(ModelLoadOptions.NoPruning);
+
+        var metrics = engine.GetMetrics()!.Value;
+
+        Assert.Null(metrics.PrePruneAccuracy);
+        Assert.Null(metrics.PostPruneAccuracy);
+        Assert.Null(metrics.SemanticTestCaseCount);
+    }
+
+    [Fact]
+    public void GetMetrics_Summary_IsNonEmpty()
+    {
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(ModelLoadOptions.NoPruning);
+
+        var metrics = engine.GetMetrics()!.Value;
+
+        Assert.False(string.IsNullOrWhiteSpace(metrics.Summary));
+        Assert.Contains("Memory:", metrics.Summary);
+        Assert.Contains("Tokens:", metrics.Summary);
+    }
 }
