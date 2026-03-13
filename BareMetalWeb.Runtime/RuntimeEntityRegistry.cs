@@ -232,10 +232,19 @@ public sealed class RuntimeEntityRegistry
 
             registry.Register(model);
 
-            // Register with DataScaffold so existing admin-UI/API routes work
-            var schema = EntitySchemaFactory.FromModel(model);
-            var entityMetadata = model.ToEntityMetadata(walProvider, schema);
-            DataScaffold.RegisterVirtualEntity(entityMetadata);
+            // Skip DataScaffold override if a code-first (typed) entity already occupies this slug.
+            // This allows system catalog entries to coexist with C# entity classes during migration.
+            if (DataScaffold.TryGetEntity(model.Slug, out var existingMeta) && existingMeta.Type != typeof(DataRecord))
+            {
+                logger?.Invoke($"Skipping DataScaffold override for '{entityDef.Name}' — code-first type {existingMeta.Type.Name} already registered.");
+            }
+            else
+            {
+                // Register with DataScaffold so existing admin-UI/API routes work
+                var schema = EntitySchemaFactory.FromModel(model);
+                var entityMetadata = model.ToEntityMetadata(walProvider, schema);
+                DataScaffold.RegisterVirtualEntity(entityMetadata);
+            }
 
             // Persist schema hash + version back to EntityDefinition if changed
             if (!string.Equals(entityDef.SchemaHash, model.SchemaHash, StringComparison.Ordinal))

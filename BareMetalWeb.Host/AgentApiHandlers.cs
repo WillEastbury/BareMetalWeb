@@ -110,3 +110,4 @@ public static class AgentApiHandlers
         await JsonWriterHelper.WriteResponseAsync(context.Response, payload,
             ct: context.RequestAborted);
     }
+}

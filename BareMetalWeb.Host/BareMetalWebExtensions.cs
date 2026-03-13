@@ -150,6 +150,17 @@ public static class BareMetalWebExtensions
         // Configure high-cardinality lookup threshold
         DataScaffold.LargeListThreshold = config.GetValue("LookupSearch.LargeListThreshold", 20);
 
+        // System metadata catalog — seed built-in entity definitions on first startup
+        phaseSw.Restart();
+        var catalogSeeded = await SystemCatalog.SeedIfNeededAsync(
+            dataStore,
+            msg => logger.LogInfo($"[SystemCatalog] {msg}"),
+            CancellationToken.None).ConfigureAwait(false);
+        if (catalogSeeded > 0)
+            Console.WriteLine($"[BMW Startup] System catalog: seeded {catalogSeeded} entities ({phaseSw.ElapsedMilliseconds}ms)");
+        else
+            Console.WriteLine($"[BMW Startup] System catalog: already present ({phaseSw.ElapsedMilliseconds}ms)");
+
         // Runtime entity registry — load persisted EntityDefinitions from storage and compile
         phaseSw.Restart();
         await RuntimeEntityRegistry.BuildAsync(
