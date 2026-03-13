@@ -536,6 +536,8 @@ public static class UserAuth
     public static async ValueTask SaveUserAsync(BaseDataObject user, CancellationToken ct = default)
     {
         var meta = ResolveAuthMeta(user) ?? throw new InvalidOperationException("Cannot resolve entity metadata for user.");
+        if (user.Key == 0)
+            await DataScaffold.ApplyAutoIdAsync(meta, user, ct).ConfigureAwait(false);
         await meta.Handlers.SaveAsync(user, ct).ConfigureAwait(false);
     }
 
