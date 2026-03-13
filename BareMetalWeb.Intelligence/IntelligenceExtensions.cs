@@ -22,7 +22,6 @@ public static class IntelligenceExtensions
         var engine = new BitNetEngine();
         engine.LoadTestModel(ModelLoadOptions.Default);
 
-        //var classifier = new KeywordIntentClassifier(AdminToolCatalogue.GetIntentDefinitions());
         var tools = AdminToolCatalogue.CreateRegistry();
 
         _orchestrator = new IntelligenceOrchestrator(engine, tools);

@@ -58,15 +58,38 @@ public readonly record struct BitNetPipelineMetrics(
     int OriginalVocabSize,
 
     /// <summary>Vocabulary reduction: pruned vocab size after pruning (equals original if pruning was not applied).</summary>
-    int PrunedVocabSize
+    int PrunedVocabSize,
+
+    // ── Performance counters ─────────────────────────────────────────────────
+    /// <summary>Tokens generated per second (output tokens / total inference seconds). 0 if no inference yet.</summary>
+    float TokensPerSec,
+
+    /// <summary>Number of KV-cache positions that were read (re-used across decode steps).</summary>
+    long KvCacheHits,
+
+    /// <summary>Number of KV-cache positions that were written (new encode steps).</summary>
+    long KvCacheMisses,
+
+    // ── Per-layer timing ─────────────────────────────────────────────────────
+    /// <summary>Average wall-clock time in microseconds spent in ForwardAllLayers per request.</summary>
+    long AvgLayerTimeMicros
 )
 {
+    /// <summary>KV cache hit ratio (0–1), or NaN if no KV activity yet.</summary>
+    public float KvCacheHitRatio =>
+        (KvCacheHits + KvCacheMisses) == 0
+            ? float.NaN
+            : (float)KvCacheHits / (KvCacheHits + KvCacheMisses);
+
     /// <summary>
     /// Human-readable single-line summary of the key pipeline metrics.
     /// </summary>
     public string Summary =>
         $"Memory: {OriginalWeightBytes / 1024:N0} KB original → {TrimmedWeightBytes / 1024:N0} KB packed ({CompressionSavings:P0} saving), " +
         $"Tokens: {TotalTokensIn:N0} in / {TotalTokensOut:N0} out over {TotalRequests:N0} requests ({TotalInferenceMs:N0} ms total), " +
+        $"Throughput: {TokensPerSec:F1} tok/s, " +
+        $"KV cache: {KvCacheHitRatio:P0} hit ratio, " +
+        $"Avg layer: {AvgLayerTimeMicros} µs, " +
         $"Weights: {TotalWeights:N0} ({Sparsity:P1} sparse), " +
         $"Vocab: {PrunedVocabSize}/{OriginalVocabSize}" +
         (PrePruneAccuracy.HasValue
