@@ -1495,45 +1495,46 @@ public sealed class RouteHandlers : IRouteHandlers
         string actor,
         CancellationToken cancellationToken)
     {
+        if (!TryGetAppSettingMeta(out var settingMeta))
+            return;
+
         var query = new QueryDefinition
         {
             Clauses = new List<QueryClause>
             {
-                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = settingId }
+                new() { Field = "SettingId", Operator = QueryOperator.Equals, Value = settingId }
             },
             Top = 1
         };
 
-        var settings = await DataStoreProvider.Current.QueryAsync<AppSetting>(query, cancellationToken).ConfigureAwait(false);
-        AppSetting? setting = null;
+        var settings = await DataScaffold.QueryAsync(settingMeta, query, cancellationToken).ConfigureAwait(false);
+        BaseDataObject? setting = null;
         foreach (var existing in settings)
         {
-            if (string.Equals(existing.SettingId, settingId, StringComparison.OrdinalIgnoreCase))
+            if (existing is BaseDataObject obj
+                && string.Equals(GetMetaString(obj, settingMeta, "SettingId"), settingId, StringComparison.OrdinalIgnoreCase))
             {
-                setting = existing;
+                setting = obj;
                 break;
             }
         }
 
         if (setting is null)
         {
-            setting = new AppSetting
-            {
-                SettingId = settingId,
-                Value = value,
-                Description = description,
-                CreatedBy = actor,
-                UpdatedBy = actor
-            };
+            setting = settingMeta.Handlers.Create();
+            setting.CreatedBy = actor;
+            setting.UpdatedBy = actor;
+            settingMeta.FindField("SettingId")?.SetValueFn(setting, settingId);
         }
         else
         {
-            setting.Value = value;
-            setting.Description = description;
             setting.UpdatedBy = actor;
         }
 
-        await DataStoreProvider.Current.SaveAsync(setting, cancellationToken).ConfigureAwait(false);
+        settingMeta.FindField("Value")?.SetValueFn(setting, value);
+        settingMeta.FindField("Description")?.SetValueFn(setting, description);
+
+        await DataScaffold.SaveAsync(settingMeta, setting, cancellationToken).ConfigureAwait(false);
         SettingsService.InvalidateCache(settingId);
     }
 
@@ -2843,23 +2844,55 @@ public sealed class RouteHandlers : IRouteHandlers
 
     // ── Generic attachment endpoints ─────────────────────────────────────────────
 
-    private static bool TryGetAttachmentMeta(out DataEntityMetadata attachMeta)
-        => DataScaffold.TryGetEntity("fileattachment", out attachMeta);
+    private static bool TryGetAppSettingMeta(out DataEntityMetadata settingMeta)
+        => DataScaffold.TryGetEntity("app-settings", out settingMeta)
+            || DataScaffold.TryGetEntity("settings", out settingMeta);
 
-    private static Dictionary<string, object?> BuildAttachmentApiModel(FileAttachment a) =>
+    private static bool TryGetAttachmentMeta(out DataEntityMetadata attachMeta)
+        => DataScaffold.TryGetEntity("file-attachments", out attachMeta)
+            || DataScaffold.TryGetEntity("fileattachment", out attachMeta);
+
+    private static bool TryGetCommentMeta(out DataEntityMetadata commentMeta)
+        => DataScaffold.TryGetEntity("record-comments", out commentMeta)
+            || DataScaffold.TryGetEntity("recordcomment", out commentMeta);
+
+    private static string GetMetaString(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+        => meta.FindField(fieldName)?.GetValueFn(obj)?.ToString() ?? string.Empty;
+
+    private static uint GetMetaUInt(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+        => Convert.ToUInt32(meta.FindField(fieldName)?.GetValueFn(obj) ?? 0);
+
+    private static long GetMetaLong(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+        => Convert.ToInt64(meta.FindField(fieldName)?.GetValueFn(obj) ?? 0L);
+
+    private static int GetMetaInt(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+        => Convert.ToInt32(meta.FindField(fieldName)?.GetValueFn(obj) ?? 0);
+
+    private static bool GetMetaBool(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    {
+        var value = meta.FindField(fieldName)?.GetValueFn(obj);
+        return value switch
+        {
+            bool flag => flag,
+            string text when bool.TryParse(text, out var parsed) => parsed,
+            _ => false
+        };
+    }
+
+    private static Dictionary<string, object?> BuildAttachmentApiModel(BaseDataObject a, DataEntityMetadata meta) =>
         new()
         {
-            ["id"]               = a.Key,
-            ["fileName"]         = a.FileName,
-            ["contentType"]      = a.ContentType,
-            ["sizeBytes"]        = a.SizeBytes,
-            ["description"]      = a.Description,
-            ["versionNumber"]    = a.VersionNumber,
-            ["attachmentGroupId"] = a.AttachmentGroupId,
-            ["isCurrentVersion"] = a.IsCurrentVersion,
-            ["uploadedAt"]       = a.CreatedOnUtc,
-            ["uploadedBy"]       = a.CreatedBy,
-            ["downloadUrl"]      = $"/api/_attachments/{a.Key}/download"
+            ["id"] = a.Key,
+            ["fileName"] = GetMetaString(a, meta, "FileName"),
+            ["contentType"] = GetMetaString(a, meta, "ContentType"),
+            ["sizeBytes"] = GetMetaLong(a, meta, "SizeBytes"),
+            ["description"] = meta.FindField("Description")?.GetValueFn(a)?.ToString(),
+            ["versionNumber"] = GetMetaInt(a, meta, "VersionNumber"),
+            ["attachmentGroupId"] = GetMetaUInt(a, meta, "AttachmentGroupId"),
+            ["isCurrentVersion"] = GetMetaBool(a, meta, "IsCurrentVersion"),
+            ["uploadedAt"] = a.CreatedOnUtc,
+            ["uploadedBy"] = a.CreatedBy,
+            ["downloadUrl"] = $"/api/_attachments/{a.Key}/download"
         };
 
     /// <summary>GET /api/{type}/{id}/_attachments — list current-version attachments for a record.</summary>
@@ -2892,9 +2925,9 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             Clauses = new List<QueryClause>
             {
-                new QueryClause { Field = nameof(FileAttachment.RecordType),        Operator = QueryOperator.Equals, Value = meta.Slug },
-                new QueryClause { Field = nameof(FileAttachment.RecordKey),         Operator = QueryOperator.Equals, Value = recordKey.ToString() },
-                new QueryClause { Field = nameof(FileAttachment.IsCurrentVersion),  Operator = QueryOperator.Equals, Value = "true" }
+                new QueryClause { Field = "RecordType", Operator = QueryOperator.Equals, Value = meta.Slug },
+                new QueryClause { Field = "RecordKey", Operator = QueryOperator.Equals, Value = recordKey.ToString() },
+                new QueryClause { Field = "IsCurrentVersion", Operator = QueryOperator.Equals, Value = "true" }
             }
         };
 
@@ -2902,8 +2935,8 @@ public sealed class RouteHandlers : IRouteHandlers
         var result = RentDictList();
         foreach (var item in rawItems)
         {
-            if (item is FileAttachment a)
-                result.Add(BuildAttachmentApiModel(a));
+            if (item is BaseDataObject a)
+                result.Add(BuildAttachmentApiModel(a, attachMeta));
         }
 
         await WriteJsonResponseAsync(context, result);
@@ -2983,25 +3016,28 @@ public sealed class RouteHandlers : IRouteHandlers
         if (replacesKey > 0)
         {
             var previousRaw = await DataScaffold.LoadAsync(attachMeta, replacesKey, context.RequestAborted).ConfigureAwait(false);
-            if (previousRaw is FileAttachment previous)
+            if (previousRaw is BaseDataObject previous)
             {
-                groupId = previous.AttachmentGroupId == 0 ? previous.Key : previous.AttachmentGroupId;
+                groupId = GetMetaUInt(previous, attachMeta, "AttachmentGroupId");
+                if (groupId == 0)
+                    groupId = previous.Key;
 
                 var groupQuery = new QueryDefinition
                 {
                     Clauses = new List<QueryClause>
                     {
-                        new QueryClause { Field = nameof(FileAttachment.AttachmentGroupId), Operator = QueryOperator.Equals, Value = groupId.ToString() }
+                        new QueryClause { Field = "AttachmentGroupId", Operator = QueryOperator.Equals, Value = groupId.ToString() }
                     }
                 };
                 var groupRaw = await DataScaffold.QueryAsync(attachMeta, groupQuery, context.RequestAborted).ConfigureAwait(false);
                 foreach (var raw in groupRaw)
                 {
-                    if (raw is not FileAttachment gi) continue;
-                    if (gi.VersionNumber >= nextVersion) nextVersion = gi.VersionNumber + 1;
-                    if (gi.IsCurrentVersion)
+                    if (raw is not BaseDataObject gi) continue;
+                    var versionNumber = GetMetaInt(gi, attachMeta, "VersionNumber");
+                    if (versionNumber >= nextVersion) nextVersion = versionNumber + 1;
+                    if (GetMetaBool(gi, attachMeta, "IsCurrentVersion"))
                     {
-                        gi.IsCurrentVersion = false;
+                        attachMeta.FindField("IsCurrentVersion")?.SetValueFn(gi, false);
                         gi.Touch(userName);
                         await DataScaffold.SaveAsync(attachMeta, gi, context.RequestAborted).ConfigureAwait(false);
                     }
@@ -3011,19 +3047,19 @@ public sealed class RouteHandlers : IRouteHandlers
             }
         }
 
-        var attachment = new FileAttachment(userName)
-        {
-            RecordType        = meta.Slug,
-            RecordKey         = recordKey,
-            FileName          = safeName,
-            ContentType       = string.IsNullOrWhiteSpace(uploadedFile.ContentType) ? "application/octet-stream" : uploadedFile.ContentType,
-            SizeBytes         = uploadedFile.Length,
-            StorageKey        = storageKey,
-            Description       = description,
-            AttachmentGroupId = groupId,
-            VersionNumber     = nextVersion,
-            IsCurrentVersion  = true
-        };
+        var attachment = attachMeta.Handlers.Create();
+        attachment.CreatedBy = userName;
+        attachment.UpdatedBy = userName;
+        attachMeta.FindField("RecordType")?.SetValueFn(attachment, meta.Slug);
+        attachMeta.FindField("RecordKey")?.SetValueFn(attachment, recordKey);
+        attachMeta.FindField("FileName")?.SetValueFn(attachment, safeName);
+        attachMeta.FindField("ContentType")?.SetValueFn(attachment, string.IsNullOrWhiteSpace(uploadedFile.ContentType) ? "application/octet-stream" : uploadedFile.ContentType);
+        attachMeta.FindField("SizeBytes")?.SetValueFn(attachment, uploadedFile.Length);
+        attachMeta.FindField("StorageKey")?.SetValueFn(attachment, storageKey);
+        attachMeta.FindField("Description")?.SetValueFn(attachment, description);
+        attachMeta.FindField("AttachmentGroupId")?.SetValueFn(attachment, groupId);
+        attachMeta.FindField("VersionNumber")?.SetValueFn(attachment, nextVersion);
+        attachMeta.FindField("IsCurrentVersion")?.SetValueFn(attachment, true);
 
         await DataScaffold.ApplyAutoIdAsync(attachMeta, attachment, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.SaveAsync(attachMeta, attachment, context.RequestAborted).ConfigureAwait(false);
@@ -3031,12 +3067,12 @@ public sealed class RouteHandlers : IRouteHandlers
         // If this is the root version (no group yet), set groupId = its own Key
         if (groupId == 0)
         {
-            attachment.AttachmentGroupId = attachment.Key;
+            attachMeta.FindField("AttachmentGroupId")?.SetValueFn(attachment, attachment.Key);
             await DataScaffold.SaveAsync(attachMeta, attachment, context.RequestAborted).ConfigureAwait(false);
         }
 
         context.Response.StatusCode = StatusCodes.Status201Created;
-        await WriteJsonResponseAsync(context, BuildAttachmentApiModel(attachment));
+        await WriteJsonResponseAsync(context, BuildAttachmentApiModel(attachment, attachMeta));
     }
 
     /// <summary>GET /api/_attachments/{id}/download — stream an attachment file to the client.</summary>
@@ -3052,7 +3088,15 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var raw = await DataScaffold.LoadAsync(attachMeta, attachmentKey, context.RequestAborted).ConfigureAwait(false);
-        if (raw is not FileAttachment attachment || string.IsNullOrWhiteSpace(attachment.StorageKey))
+        if (raw is not BaseDataObject attachment)
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            await context.Response.WriteAsync("Attachment not found.").ConfigureAwait(false);
+            return;
+        }
+
+        var storageKey = GetMetaString(attachment, attachMeta, "StorageKey");
+        if (string.IsNullOrWhiteSpace(storageKey))
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Attachment not found.").ConfigureAwait(false);
@@ -3060,8 +3104,9 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         // Check permission against the owning entity
-        if (!string.IsNullOrWhiteSpace(attachment.RecordType)
-            && DataScaffold.TryGetEntity(attachment.RecordType, out var ownerMeta)
+        var recordType = GetMetaString(attachment, attachMeta, "RecordType");
+        if (!string.IsNullOrWhiteSpace(recordType)
+            && DataScaffold.TryGetEntity(recordType, out var ownerMeta)
             && !await HasEntityPermissionAsync(context, ownerMeta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -3069,7 +3114,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var fullPath = ResolveUploadPath(context, attachment.StorageKey);
+        var fullPath = ResolveUploadPath(context, storageKey);
         if (!File.Exists(fullPath))
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
@@ -3078,7 +3123,9 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         // Serve inline for previewable types; force download otherwise
-        var ct = string.IsNullOrWhiteSpace(attachment.ContentType) ? "application/octet-stream" : attachment.ContentType;
+        var ct = GetMetaString(attachment, attachMeta, "ContentType");
+        if (string.IsNullOrWhiteSpace(ct))
+            ct = "application/octet-stream";
         var disposition = "attachment";
         if (ct.StartsWith("image/", StringComparison.OrdinalIgnoreCase)
             || ct.StartsWith("text/plain", StringComparison.OrdinalIgnoreCase)
@@ -3087,8 +3134,9 @@ public sealed class RouteHandlers : IRouteHandlers
             disposition = "inline";
         }
 
+        var fileName = GetMetaString(attachment, attachMeta, "FileName");
         context.Response.ContentType = ct;
-        context.Response.Headers.ContentDisposition = $"{disposition}; filename=\"{SanitizeFileName(attachment.FileName)}\"";
+        context.Response.Headers.ContentDisposition = $"{disposition}; filename=\"{SanitizeFileName(fileName)}\"";
         await using var src = File.OpenRead(fullPath);
         await src.CopyToAsync(context.Response.Body, context.RequestAborted).ConfigureAwait(false);
     }
@@ -3106,7 +3154,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var raw = await DataScaffold.LoadAsync(attachMeta, attachmentKey, context.RequestAborted).ConfigureAwait(false);
-        if (raw is not FileAttachment attachment)
+        if (raw is not BaseDataObject attachment)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Attachment not found.").ConfigureAwait(false);
@@ -3114,8 +3162,9 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         // Check permission against the owning entity
-        if (!string.IsNullOrWhiteSpace(attachment.RecordType)
-            && DataScaffold.TryGetEntity(attachment.RecordType, out var ownerMeta)
+        var recordType = GetMetaString(attachment, attachMeta, "RecordType");
+        if (!string.IsNullOrWhiteSpace(recordType)
+            && DataScaffold.TryGetEntity(recordType, out var ownerMeta)
             && !await HasEntityPermissionAsync(context, ownerMeta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -3124,9 +3173,10 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         // Delete physical file
-        if (!string.IsNullOrWhiteSpace(attachment.StorageKey))
+        var storageKey = GetMetaString(attachment, attachMeta, "StorageKey");
+        if (!string.IsNullOrWhiteSpace(storageKey))
         {
-            var fullPath = ResolveUploadPath(context, attachment.StorageKey);
+            var fullPath = ResolveUploadPath(context, storageKey);
             if (File.Exists(fullPath))
                 File.Delete(fullPath);
         }
@@ -3151,7 +3201,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var rootRaw = await DataScaffold.LoadAsync(attachMeta, attachmentKey, context.RequestAborted).ConfigureAwait(false);
-        if (rootRaw is not FileAttachment root)
+        if (rootRaw is not BaseDataObject root)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Attachment not found.").ConfigureAwait(false);
@@ -3159,8 +3209,9 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         // Check permission against the owning entity
-        if (!string.IsNullOrWhiteSpace(root.RecordType)
-            && DataScaffold.TryGetEntity(root.RecordType, out var ownerMeta)
+        var recordType = GetMetaString(root, attachMeta, "RecordType");
+        if (!string.IsNullOrWhiteSpace(recordType)
+            && DataScaffold.TryGetEntity(recordType, out var ownerMeta)
             && !await HasEntityPermissionAsync(context, ownerMeta, context.RequestAborted).ConfigureAwait(false))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -3168,43 +3219,42 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var groupId = root.AttachmentGroupId == 0 ? root.Key : root.AttachmentGroupId;
+        var groupId = GetMetaUInt(root, attachMeta, "AttachmentGroupId");
+        if (groupId == 0)
+            groupId = root.Key;
         var groupQuery = new QueryDefinition
         {
             Clauses = new List<QueryClause>
             {
-                new QueryClause { Field = nameof(FileAttachment.AttachmentGroupId), Operator = QueryOperator.Equals, Value = groupId.ToString() }
+                new QueryClause { Field = "AttachmentGroupId", Operator = QueryOperator.Equals, Value = groupId.ToString() }
             }
         };
 
         var rawVersions = await DataScaffold.QueryAsync(attachMeta, groupQuery, context.RequestAborted).ConfigureAwait(false);
 
         // Collect and sort by VersionNumber ascending
-        var versionList = new List<FileAttachment>();
+        var versionList = new List<BaseDataObject>();
         foreach (var rv in rawVersions)
         {
-            if (rv is FileAttachment fa) versionList.Add(fa);
+            if (rv is BaseDataObject fa) versionList.Add(fa);
         }
-        versionList.Sort(static (a, b) => a.VersionNumber.CompareTo(b.VersionNumber));
+        versionList.Sort((a, b) => GetMetaInt(a, attachMeta, "VersionNumber").CompareTo(GetMetaInt(b, attachMeta, "VersionNumber")));
 
         var result = new List<Dictionary<string, object?>>(versionList.Count);
         foreach (var v in versionList)
-            result.Add(BuildAttachmentApiModel(v));
+            result.Add(BuildAttachmentApiModel(v, attachMeta));
 
         await WriteJsonResponseAsync(context, result);
     }
 
     // ── Record comment endpoints ────────────────────────────────────────────────
 
-    private static bool TryGetCommentMeta(out DataEntityMetadata commentMeta)
-        => DataScaffold.TryGetEntity("recordcomment", out commentMeta);
-
-    private static Dictionary<string, object?> BuildCommentApiModel(RecordComment c) =>
+    private static Dictionary<string, object?> BuildCommentApiModel(BaseDataObject c, DataEntityMetadata meta) =>
         new()
         {
-            ["id"]        = c.Key,
-            ["text"]      = c.Text,
-            ["author"]    = c.CreatedBy,
+            ["id"] = c.Key,
+            ["text"] = GetMetaString(c, meta, "Text"),
+            ["author"] = c.CreatedBy,
             ["createdAt"] = c.CreatedOnUtc,
             ["updatedAt"] = c.UpdatedOnUtc,
             ["updatedBy"] = c.UpdatedBy
@@ -3238,8 +3288,8 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             Clauses = new List<QueryClause>
             {
-                new QueryClause { Field = nameof(RecordComment.RecordType), Operator = QueryOperator.Equals, Value = meta.Slug },
-                new QueryClause { Field = nameof(RecordComment.RecordKey),  Operator = QueryOperator.Equals, Value = recordKey.ToString() }
+                new QueryClause { Field = "RecordType", Operator = QueryOperator.Equals, Value = meta.Slug },
+                new QueryClause { Field = "RecordKey", Operator = QueryOperator.Equals, Value = recordKey.ToString() }
             }
         };
 
@@ -3247,8 +3297,8 @@ public sealed class RouteHandlers : IRouteHandlers
         var result = RentDictList();
         foreach (var item in rawItems)
         {
-            if (item is RecordComment c)
-                result.Add(BuildCommentApiModel(c));
+            if (item is BaseDataObject c)
+                result.Add(BuildCommentApiModel(c, commentMeta));
         }
         // Sort by creation time ascending (oldest first, chat-style)
         result.Sort((a, b) => ((DateTime)a["createdAt"]!).CompareTo((DateTime)b["createdAt"]!));
@@ -3310,18 +3360,18 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
         var userName = UserAuth.GetUserName(user) ?? "anonymous";
-        var comment = new RecordComment(userName)
-        {
-            RecordType = meta.Slug,
-            RecordKey  = recordKey,
-            Text       = text.Trim()
-        };
+        var comment = commentMeta.Handlers.Create();
+        comment.CreatedBy = userName;
+        comment.UpdatedBy = userName;
+        commentMeta.FindField("RecordType")?.SetValueFn(comment, meta.Slug);
+        commentMeta.FindField("RecordKey")?.SetValueFn(comment, recordKey);
+        commentMeta.FindField("Text")?.SetValueFn(comment, text.Trim());
 
         await DataScaffold.ApplyAutoIdAsync(commentMeta, comment, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.SaveAsync(commentMeta, comment, context.RequestAborted).ConfigureAwait(false);
 
         context.Response.StatusCode = StatusCodes.Status201Created;
-        await WriteJsonResponseAsync(context, BuildCommentApiModel(comment));
+        await WriteJsonResponseAsync(context, BuildCommentApiModel(comment, commentMeta));
     }
 
     /// <summary>PATCH /api/_comments/{id} — edit a comment (own comments only).</summary>
@@ -3342,7 +3392,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var existing = await DataScaffold.LoadAsync(commentMeta, commentId, context.RequestAborted).ConfigureAwait(false);
-        if (existing is not RecordComment comment)
+        if (existing is not BaseDataObject comment)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Comment not found.").ConfigureAwait(false);
@@ -3380,11 +3430,11 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        comment.Text = text.Trim();
+        commentMeta.FindField("Text")?.SetValueFn(comment, text.Trim());
         comment.Touch(userName);
         await DataScaffold.SaveAsync(commentMeta, comment, context.RequestAborted).ConfigureAwait(false);
 
-        await WriteJsonResponseAsync(context, BuildCommentApiModel(comment));
+        await WriteJsonResponseAsync(context, BuildCommentApiModel(comment, commentMeta));
     }
 
     /// <summary>DELETE /api/_comments/{id} — delete a comment (own comments only).</summary>
@@ -3405,7 +3455,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var existing = await DataScaffold.LoadAsync(commentMeta, commentId, context.RequestAborted).ConfigureAwait(false);
-        if (existing is not RecordComment comment)
+        if (existing is not BaseDataObject comment)
         {
             context.Response.StatusCode = StatusCodes.Status404NotFound;
             await context.Response.WriteAsync("Comment not found.").ConfigureAwait(false);
@@ -6015,27 +6065,35 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static async ValueTask ValidateUserUniquenessAsync(DataEntityMetadata meta, object instance, string? excludeId, List<string> errors, CancellationToken cancellationToken)
     {
-        if (meta.Type == typeof(AppSetting))
+        if (string.Equals(meta.Slug, "app-settings", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(meta.Slug, "settings", StringComparison.OrdinalIgnoreCase))
         {
-            if (instance is AppSetting appSetting && !string.IsNullOrWhiteSpace(appSetting.SettingId))
+            if (instance is BaseDataObject setting)
             {
-                var query = new QueryDefinition
+                var settingId = meta.FindField("SettingId")?.GetValueFn(setting)?.ToString();
+                if (!string.IsNullOrWhiteSpace(settingId))
                 {
-                    Clauses = new List<QueryClause>
+                    var query = new QueryDefinition
                     {
-                        new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = appSetting.SettingId }
-                    },
-                    Top = 1
-                };
-                var existingResults = await DataStoreProvider.Current.QueryAsync<AppSetting>(query, cancellationToken).ConfigureAwait(false);
-                AppSetting? existing = null;
-                foreach (var e in existingResults)
-                {
-                    existing = e;
-                    break;
+                        Clauses = new List<QueryClause>
+                        {
+                            new() { Field = "SettingId", Operator = QueryOperator.Equals, Value = settingId }
+                        },
+                        Top = 1
+                    };
+                    var existingResults = await DataScaffold.QueryAsync(meta, query, cancellationToken).ConfigureAwait(false);
+                    BaseDataObject? existing = null;
+                    foreach (var e in existingResults)
+                    {
+                        if (e is BaseDataObject existingSetting)
+                        {
+                            existing = existingSetting;
+                            break;
+                        }
+                    }
+                    if (existing != null && !string.Equals(existing.Key.ToString(), excludeId, StringComparison.OrdinalIgnoreCase))
+                        errors.Add("A setting with this Setting ID already exists.");
                 }
-                if (existing != null && !string.Equals(existing.Key.ToString(), excludeId, StringComparison.OrdinalIgnoreCase))
-                    errors.Add("A setting with this Setting ID already exists.");
             }
             return;
         }

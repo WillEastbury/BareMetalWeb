@@ -85,19 +85,15 @@ public static class BareMetalWebExtensions
         // Register system entities explicitly (AOT-safe, no assembly scanning).
         // Code-first registrations for entities that still have typed handler logic.
         // Entities migrated to system catalog are loaded via RuntimeEntityRegistry.
-        DataScaffold.RegisterEntity<AppSetting>();
         DataScaffold.RegisterEntity<ReportDefinition>();
         DataScaffold.RegisterEntity<EntityDefinition>();
         DataScaffold.RegisterEntity<FieldDefinition>();
         DataScaffold.RegisterEntity<IndexDefinition>();
         DataScaffold.RegisterEntity<ActionDefinition>();
         DataScaffold.RegisterEntity<ActionCommandDefinition>();
-        // Migrated to system catalog: DomainEventSubscription, ScheduledActionDefinition, NotificationDefinition, AuditEntry, User, SystemPrincipal
+        // Migrated to system catalog: AppSetting, FileAttachment, RecordComment, InboxMessage, DomainEventSubscription, ScheduledActionDefinition, NotificationDefinition, AuditEntry, User, SystemPrincipal
         DataScaffold.RegisterEntity<DashboardDefinition>();
         DataScaffold.RegisterEntity<ViewDefinition>();
-        DataScaffold.RegisterEntity<FileAttachment>();
-        DataScaffold.RegisterEntity<RecordComment>();
-        DataScaffold.RegisterEntity<InboxMessage>();
         DataScaffold.RegisterEntity<TodoItem>();
         Console.WriteLine($"[BMW Startup] Registered {DataScaffold.Entities.Count} code-first entities + system catalog provides the rest");
 

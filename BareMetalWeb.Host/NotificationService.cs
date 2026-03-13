@@ -166,16 +166,17 @@ public sealed class InAppNotificationChannel : INotificationChannel
 
     public async ValueTask SendAsync(string recipient, string subject, string body, CancellationToken ct)
     {
-        var msg = new InboxMessage
-        {
-            RecipientUserName = recipient,
-            Subject           = subject,
-            Body              = body,
-            Category          = _category,
-            IsRead            = false,
-            CreatedAtUtc      = DateTime.UtcNow
-        };
-        await DataStoreProvider.Current.SaveAsync(msg, ct).ConfigureAwait(false);
+        if (!DataScaffold.TryGetEntity("inbox-messages", out var meta))
+            return;
+
+        var msg = meta.Handlers.Create();
+        meta.FindField("RecipientUserName")?.SetValueFn(msg, recipient);
+        meta.FindField("Subject")?.SetValueFn(msg, subject);
+        meta.FindField("Body")?.SetValueFn(msg, body);
+        meta.FindField("Category")?.SetValueFn(msg, _category);
+        meta.FindField("IsRead")?.SetValueFn(msg, false);
+        meta.FindField("CreatedAtUtc")?.SetValueFn(msg, DateTime.UtcNow);
+        await meta.Handlers.SaveAsync(msg, ct).ConfigureAwait(false);
     }
 }
 
