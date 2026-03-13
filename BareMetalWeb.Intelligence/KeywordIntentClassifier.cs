@@ -33,9 +33,14 @@ public sealed class KeywordIntentClassifier : IIntentClassifier
             }
             if (hits == 0) continue;
 
-            // Precision: fraction of query words that matched an intent keyword.
-            // This scores single-word queries ("help", "create") at 100% if the
-            // word is a keyword, and naturally penalises false-positive noise words.
+            // Precision-based confidence: fraction of query words matching intent keywords.
+            // This approach favours specificity: a single-word query like "help" scores 100%
+            // when "help" is a keyword, while a multi-word query like "describe the fields
+            // of this entity" scores 3/6=50% (3 keywords hit, 6 query words).
+            //
+            // Intentional design choice over recall-based (hits/totalKeywords):
+            // recall would score "help"→1/7=14% (below IsMatch threshold),
+            // making single-word disambiguation impossible.
             float confidence = (float)hits / queryWordCount;
             if (confidence > best.Confidence)
                 best = new IntentResult(intent.Name, confidence, query.ToString().AsMemory());

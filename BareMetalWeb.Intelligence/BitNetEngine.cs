@@ -252,7 +252,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         int activeVocab,
         int dim)
     {
-        // Dispose any previous compressed data
+        // Dispose any previous compressed data.
+        // NOTE: DisposeNative also nulls _tokenTable/_tokenizer.
+        // Callers must re-assign _tokenTable/_tokenizer AFTER this call.
         DisposeNative();
 
         _layerCount = layers.Length;
@@ -693,17 +695,17 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             // Maps scores to approximate softmax weights using the identity:
             //   exp(x - max) ≈ 2^((x - max) / scale)
             // We use scale=8 (right-shift by 3) to convert the score delta
-            // into a bit-shift exponent, then clamp to [1, 1<<24] to avoid overflow.
+            // into a bit-shift exponent.
+            //   shift = |delta| >> 3  →  weight = 256 >> shift
+            //   When shift > 8: 256 >> shift = 0, clamped to 1 (minimum).
             // This replaces the previous linear clamp which was over-simplistic.
             long totalWeight = 0;
             for (int p = 0; p < posCount; p++)
             {
                 int delta = scores[p] - maxScore; // ≤ 0
-                // Approximate: weight ≈ 2^(delta/8) shifted to integer range.
-                // delta/8 is in [-~16, 0] → weight in [1, 256]
-                int shift = (-delta) >> 3; // positive shift amount
-                int w = shift >= 24 ? 1 : (256 >> shift); // 2^(delta/8) scaled to [1,256]
-                if (w < 1) w = 1;
+                int shift = (-delta) >> 3;         // non-negative right-shift amount
+                // 2^(delta/8) in range [1, 256]: when shift > 8, result < 1 → clamp to 1
+                int w = shift > 8 ? 1 : (256 >> shift);
                 scores[p]   = w;
                 totalWeight += w;
             }

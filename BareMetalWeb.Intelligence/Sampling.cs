@@ -104,7 +104,9 @@ public static class Sampling
                 minTop = top[kBuf - 1];
             }
         }
-        int threshold = filled < kBuf ? MinOf(top.Slice(0, filled)) : minTop;
+        // When n < kBuf (fewer logits than K), include all elements.
+        // Use int.MinValue so every element passes `scaled[i] > threshold`.
+        int threshold = filled < kBuf ? int.MinValue : minTop;
 
         // ── 3. Build weight vector (values above threshold) ──────────────────
         long totalWeight = 0;
@@ -132,15 +134,6 @@ public static class Sampling
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
-
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private static int MinOf(ReadOnlySpan<int> s)
-    {
-        int m = s[0];
-        for (int i = 1; i < s.Length; i++)
-            if (s[i] < m) m = s[i];
-        return m;
-    }
 
     /// <summary>Insertion sort (descending) — fast for tiny spans (K ≤ 32).</summary>
     private static void SortDescending(Span<int> s)
