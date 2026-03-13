@@ -36,8 +36,24 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
     private long _gcPauseTicks;
     private long _gcPauseCount;
 
+    // ── Last-observed (this call) ticks — written with Volatile ──
+    private long _routeDispatchLastTicks;
+    private long _walReadLastTicks;
+    private long _uiRenderLastTicks;
+    private long _serializationLastTicks;
+
     private readonly object _recentLock = new();
     private readonly Queue<ResponseSample> _recentSamples = new();
+    // ── Rolling 5-minute windows per subsystem (guarded by _recentLock) ──
+    // Running totals kept alongside each queue so ComputeSubsystemRecent is O(1) with no iteration.
+    private readonly Queue<SubsystemSample> _recentRouteDispatch = new();
+    private long _recentRouteDispatchTotalTicks;
+    private readonly Queue<SubsystemSample> _recentWalRead = new();
+    private long _recentWalReadTotalTicks;
+    private readonly Queue<SubsystemSample> _recentUiRender = new();
+    private long _recentUiRenderTotalTicks;
+    private readonly Queue<SubsystemSample> _recentSerialization = new();
+    private long _recentSerializationTotalTicks;
     private readonly Process _currentProcess = Process.GetCurrentProcess();
 
     public void RecordRequest(int statusCode, TimeSpan elapsed)
@@ -76,24 +92,56 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
     {
         Interlocked.Increment(ref _routeDispatchCount);
         Interlocked.Add(ref _routeDispatchTicks, elapsed.Ticks);
+        Volatile.Write(ref _routeDispatchLastTicks, elapsed.Ticks);
+        var now = DateTime.UtcNow;
+        lock (_recentLock)
+        {
+            _recentRouteDispatch.Enqueue(new SubsystemSample(now, elapsed.Ticks));
+            _recentRouteDispatchTotalTicks += elapsed.Ticks;
+            PruneQueue(_recentRouteDispatch, ref _recentRouteDispatchTotalTicks, now - RecentWindow);
+        }
     }
 
     public void RecordWalRead(TimeSpan elapsed)
     {
         Interlocked.Increment(ref _walReadCount);
         Interlocked.Add(ref _walReadTicks, elapsed.Ticks);
+        Volatile.Write(ref _walReadLastTicks, elapsed.Ticks);
+        var now = DateTime.UtcNow;
+        lock (_recentLock)
+        {
+            _recentWalRead.Enqueue(new SubsystemSample(now, elapsed.Ticks));
+            _recentWalReadTotalTicks += elapsed.Ticks;
+            PruneQueue(_recentWalRead, ref _recentWalReadTotalTicks, now - RecentWindow);
+        }
     }
 
     public void RecordUiRender(TimeSpan elapsed)
     {
         Interlocked.Increment(ref _uiRenderCount);
         Interlocked.Add(ref _uiRenderTicks, elapsed.Ticks);
+        Volatile.Write(ref _uiRenderLastTicks, elapsed.Ticks);
+        var now = DateTime.UtcNow;
+        lock (_recentLock)
+        {
+            _recentUiRender.Enqueue(new SubsystemSample(now, elapsed.Ticks));
+            _recentUiRenderTotalTicks += elapsed.Ticks;
+            PruneQueue(_recentUiRender, ref _recentUiRenderTotalTicks, now - RecentWindow);
+        }
     }
 
     public void RecordSerialization(TimeSpan elapsed)
     {
         Interlocked.Increment(ref _serializationCount);
         Interlocked.Add(ref _serializationTicks, elapsed.Ticks);
+        Volatile.Write(ref _serializationLastTicks, elapsed.Ticks);
+        var now = DateTime.UtcNow;
+        lock (_recentLock)
+        {
+            _recentSerialization.Enqueue(new SubsystemSample(now, elapsed.Ticks));
+            _recentSerializationTotalTicks += elapsed.Ticks;
+            PruneQueue(_recentSerialization, ref _recentSerializationTotalTicks, now - RecentWindow);
+        }
     }
 
     public void RecordGcPause(TimeSpan elapsed)
@@ -120,10 +168,20 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
 
         ResponseSample[] recentSamples;
         DateTime nowUtc = DateTime.UtcNow;
+        long rdRecentCount, wrRecentCount, uiRecentCount, serRecentCount;
+        TimeSpan rdRecentAvg, wrRecentAvg, uiRecentAvg, serRecentAvg;
         lock (_recentLock)
         {
             PruneOldSamples(nowUtc);
             recentSamples = _recentSamples.ToArray();
+            rdRecentCount = _recentRouteDispatch.Count;
+            rdRecentAvg = rdRecentCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(_recentRouteDispatchTotalTicks / rdRecentCount);
+            wrRecentCount = _recentWalRead.Count;
+            wrRecentAvg = wrRecentCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(_recentWalReadTotalTicks / wrRecentCount);
+            uiRecentCount = _recentUiRender.Count;
+            uiRecentAvg = uiRecentCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(_recentUiRenderTotalTicks / uiRecentCount);
+            serRecentCount = _recentSerialization.Count;
+            serRecentAvg = serRecentCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(_recentSerializationTotalTicks / serRecentCount);
         }
 
         var recentMetrics = ComputeRecentMetrics(recentSamples);
@@ -137,6 +195,10 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
         var uiRenderAvg = uiRenderCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(Interlocked.Read(ref _uiRenderTicks) / uiRenderCount);
         var serializationCount = Interlocked.Read(ref _serializationCount);
         var serializationAvg = serializationCount == 0 ? TimeSpan.Zero : TimeSpan.FromTicks(Interlocked.Read(ref _serializationTicks) / serializationCount);
+        var rdLast = TimeSpan.FromTicks(Volatile.Read(ref _routeDispatchLastTicks));
+        var wrLast = TimeSpan.FromTicks(Volatile.Read(ref _walReadLastTicks));
+        var uiLast = TimeSpan.FromTicks(Volatile.Read(ref _uiRenderLastTicks));
+        var serLast = TimeSpan.FromTicks(Volatile.Read(ref _serializationLastTicks));
         var gcGen0 = GC.CollectionCount(0);
         var gcGen1 = GC.CollectionCount(1);
         var gcGen2 = GC.CollectionCount(2);
@@ -168,6 +230,11 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             walReadCount, walReadAvg,
             uiRenderCount, uiRenderAvg,
             serializationCount, serializationAvg,
+            rdRecentCount, rdRecentAvg,
+            wrRecentCount, wrRecentAvg,
+            uiRecentCount, uiRecentAvg,
+            serRecentCount, serRecentAvg,
+            rdLast, wrLast, uiLast, serLast,
             gcGen0, gcGen1, gcGen2, gcAllocated
         );
     }
@@ -176,9 +243,17 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
     {
         var cutoff = nowUtc - RecentWindow;
         while (_recentSamples.Count > 0 && _recentSamples.Peek().TimestampUtc < cutoff)
-        {
             _recentSamples.Dequeue();
-        }
+        PruneQueue(_recentRouteDispatch, ref _recentRouteDispatchTotalTicks, cutoff);
+        PruneQueue(_recentWalRead, ref _recentWalReadTotalTicks, cutoff);
+        PruneQueue(_recentUiRender, ref _recentUiRenderTotalTicks, cutoff);
+        PruneQueue(_recentSerialization, ref _recentSerializationTotalTicks, cutoff);
+    }
+
+    private static void PruneQueue(Queue<SubsystemSample> queue, ref long runningTotal, DateTime cutoff)
+    {
+        while (queue.Count > 0 && queue.Peek().TimestampUtc < cutoff)
+            runningTotal -= queue.Dequeue().ElapsedTicks;
     }
 
     private static RecentMetrics ComputeRecentMetrics(ResponseSample[] samples)
@@ -264,6 +339,7 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
     public void Dispose() => _currentProcess.Dispose();
 
     private readonly record struct ResponseSample(DateTime TimestampUtc, long ElapsedTicks);
+    private readonly record struct SubsystemSample(DateTime TimestampUtc, long ElapsedTicks);
     private readonly record struct RecentMetrics(TimeSpan Minimum, TimeSpan Maximum, TimeSpan Average, TimeSpan P95, TimeSpan P99);
     public void GetMetricTable(out string[] tableColumns, out string[][] tableRows)
     {
@@ -299,10 +375,18 @@ public sealed class MetricsTracker : IMetricsTracker, IDisposable
             new[] { "429 Throttled", snapshot.ThrottledRequests.ToString("N0") },
 
             new[] { "⏰ SUBSYSTEM TIMERS", "" },
-            new[] { "Route Dispatch (avg)", $"{snapshot.RouteDispatchAverage.TotalMicroseconds:F1} µs ({snapshot.RouteDispatchCount:N0} calls)" },
-            new[] { "WAL Read (avg)", $"{snapshot.WalReadAverage.TotalMicroseconds:F1} µs ({snapshot.WalReadCount:N0} calls)" },
-            new[] { "UI Render (avg)", $"{snapshot.UiRenderAverage.TotalMilliseconds:F2} ms ({snapshot.UiRenderCount:N0} calls)" },
-            new[] { "Serialization (avg)", $"{snapshot.SerializationAverage.TotalMicroseconds:F1} µs ({snapshot.SerializationCount:N0} calls)" },
+            new[] { "Route Dispatch (since start)", $"{snapshot.RouteDispatchAverage.TotalMicroseconds:F1} µs ({snapshot.RouteDispatchCount:N0} calls)" },
+            new[] { "Route Dispatch (last 5m)", $"{snapshot.RouteDispatchRecentAverage.TotalMicroseconds:F1} µs ({snapshot.RouteDispatchRecentCount:N0} calls)" },
+            new[] { "Route Dispatch (last call)", $"{snapshot.RouteDispatchLast.TotalMicroseconds:F1} µs" },
+            new[] { "WAL Read (since start)", $"{snapshot.WalReadAverage.TotalMicroseconds:F1} µs ({snapshot.WalReadCount:N0} calls)" },
+            new[] { "WAL Read (last 5m)", $"{snapshot.WalReadRecentAverage.TotalMicroseconds:F1} µs ({snapshot.WalReadRecentCount:N0} calls)" },
+            new[] { "WAL Read (last call)", $"{snapshot.WalReadLast.TotalMicroseconds:F1} µs" },
+            new[] { "UI Render (since start)", $"{snapshot.UiRenderAverage.TotalMilliseconds:F2} ms ({snapshot.UiRenderCount:N0} calls)" },
+            new[] { "UI Render (last 5m)", $"{snapshot.UiRenderRecentAverage.TotalMilliseconds:F2} ms ({snapshot.UiRenderRecentCount:N0} calls)" },
+            new[] { "UI Render (last call)", $"{snapshot.UiRenderLast.TotalMilliseconds:F2} ms" },
+            new[] { "Serialization (since start)", $"{snapshot.SerializationAverage.TotalMicroseconds:F1} µs ({snapshot.SerializationCount:N0} calls)" },
+            new[] { "Serialization (last 5m)", $"{snapshot.SerializationRecentAverage.TotalMicroseconds:F1} µs ({snapshot.SerializationRecentCount:N0} calls)" },
+            new[] { "Serialization (last call)", $"{snapshot.SerializationLast.TotalMicroseconds:F1} µs" },
 
             new[] { "🗑️ GC STATISTICS", "" },
             new[] { "Gen0 Collections", snapshot.GcGen0Collections.ToString("N0") },
