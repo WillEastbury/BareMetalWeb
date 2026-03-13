@@ -108,4 +108,48 @@ public class KeywordIntentClassifierTests
 
         Assert.False(result.IsHighConfidence);
     }
+
+    [Fact]
+    public void Classify_SingleWordHelp_ReturnsHighConfidence()
+    {
+        var classifier = CreateClassifier();
+
+        var result = classifier.Classify("help");
+
+        Assert.Equal("help", result.IntentName);
+        Assert.True(result.IsHighConfidence);
+    }
+
+    [Fact]
+    public void Classify_SingleWordGreeting_ReturnsGreetingIntent()
+    {
+        var classifier = CreateClassifier();
+
+        var result = classifier.Classify("greeting");
+
+        Assert.Equal("greeting", result.IntentName);
+        Assert.True(result.IsHighConfidence);
+    }
+
+    [Fact]
+    public void Classify_Create_ReturnsCreateEntityIntent()
+    {
+        var classifier = CreateClassifier();
+
+        var result = classifier.Classify("create");
+
+        Assert.Equal("create-entity", result.IntentName);
+        Assert.True(result.IsHighConfidence);
+    }
+
+    [Fact]
+    public void Classify_CreateNewUser_ReturnsCreateEntityIntent()
+    {
+        var classifier = CreateClassifier();
+
+        var result = classifier.Classify("create a new user");
+
+        Assert.Equal("create-entity", result.IntentName);
+        Assert.True(result.IsMatch);
+    }
 }

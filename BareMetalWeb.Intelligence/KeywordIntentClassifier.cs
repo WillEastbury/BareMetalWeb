@@ -45,7 +45,7 @@ public sealed class KeywordIntentClassifier : IIntentClassifier
         {
             float[] vec = ComputeVector(intents[i].Keywords);
             Normalize(vec);
-            _intents[i] = new IntentEntry(intents[i].Name, intents[i].Description, vec);
+            _intents[i] = new IntentEntry(intents[i].Name, intents[i].Description, vec, intents[i].Keywords);
         }
     }
 
@@ -55,6 +55,44 @@ public sealed class KeywordIntentClassifier : IIntentClassifier
         var queryTokens = TokenizeQuery(query);
         if (queryTokens.Count == 0)
             return new IntentResult("unknown", 0f, ReadOnlyMemory<char>.Empty);
+
+        // Fast path: if ALL query tokens exactly match keywords in exactly one intent,
+        // return that intent with full confidence. This avoids TF-IDF cosine dilution
+        // for short precise queries like "help" or "hi" where the intent has many keywords.
+        {
+            int bestMatchIdx = -1;
+            bool ambiguous = false;
+
+            for (int i = 0; i < _intents.Length; i++)
+            {
+                bool allMatch = true;
+                for (int t = 0; t < queryTokens.Count; t++)
+                {
+                    if (!ContainsKeyword(_intents[i].Keywords, queryTokens[t]))
+                    {
+                        allMatch = false;
+                        break;
+                    }
+                }
+
+                if (allMatch)
+                {
+                    if (bestMatchIdx < 0)
+                    {
+                        bestMatchIdx = i;
+                    }
+                    else
+                    {
+                        // Multiple intents contain all query tokens — fall through to TF-IDF
+                        ambiguous = true;
+                        break;
+                    }
+                }
+            }
+
+            if (bestMatchIdx >= 0 && !ambiguous)
+                return new IntentResult(_intents[bestMatchIdx].Name, 1.0f, query.ToString().AsMemory());
+        }
 
         // Compute query TF-IDF vector
         float[] queryVec = ComputeVector(queryTokens);
@@ -163,12 +201,14 @@ public sealed class KeywordIntentClassifier : IIntentClassifier
         public readonly string Name;
         public readonly string Description;
         public readonly float[] Vector;
+        public readonly IReadOnlyList<string> Keywords;
 
-        public IntentEntry(string name, string description, float[] vector)
+        public IntentEntry(string name, string description, float[] vector, IReadOnlyList<string> keywords)
         {
             Name = name;
             Description = description;
             Vector = vector;
+            Keywords = keywords;
         }
     }
 }
