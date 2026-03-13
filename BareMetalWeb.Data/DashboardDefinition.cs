@@ -8,7 +8,7 @@ namespace BareMetalWeb.Data;
 /// Each tile queries an entity aggregate (count/sum/avg/min/max) and renders as a
 /// Bootstrap card in the dashboard view at <c>GET /dashboards/{id}</c>.
 /// </summary>
-[DataEntity("Dashboard Definitions", Slug = "dashboard-definitions", ShowOnNav = true,
+[DataEntity("Dashboard Definitions", Slug = "dashboard-definitions", ShowOnNav = false,
     Permissions = "admin", NavGroup = "Admin", NavOrder = 95)]
 public sealed class DashboardDefinition : BaseDataObject
 {

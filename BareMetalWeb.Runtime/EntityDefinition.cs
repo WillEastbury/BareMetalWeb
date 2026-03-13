@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// Stored via the standard storage subsystem; loaded at startup and compiled
 /// into an immutable <see cref="RuntimeEntityModel"/>.
 /// </summary>
-[DataEntity("Entity Definitions", ShowOnNav = true, NavGroup = "Admin", NavOrder = 1000)]
+[DataEntity("Entity Definitions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1000)]
 public class EntityDefinition : BaseDataObject
 {
     /// <summary>Stable GUID identity that survives renames. Defaults to Id.</summary>

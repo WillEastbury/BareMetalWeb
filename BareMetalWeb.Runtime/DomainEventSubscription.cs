@@ -22,7 +22,7 @@ namespace BareMetalWeb.Runtime;
 [DataEntity(
     "Workflow Rules",
     Slug = "domain-event-subscriptions",
-    ShowOnNav = true,
+    ShowOnNav = false,
     NavGroup = "Admin",
     NavOrder = 1005,
     IdGeneration = AutoIdStrategy.Sequential)]

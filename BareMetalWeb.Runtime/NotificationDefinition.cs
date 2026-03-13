@@ -8,7 +8,7 @@ namespace BareMetalWeb.Runtime;
 /// channel (Email or SMS) with connection details and template settings.
 /// Notifications can be triggered by scheduled actions or long-running processes.
 /// </summary>
-[DataEntity("Notification Channels", ShowOnNav = true, NavGroup = "Admin", NavOrder = 1007)]
+[DataEntity("Notification Channels", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1007)]
 public class NotificationDefinition : BaseDataObject
 {
     [DataField(Label = "Name", Order = 1, Required = true)]
