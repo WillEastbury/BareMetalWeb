@@ -17,20 +17,12 @@ public static class IntelligenceExtensions
     /// Initialise the Intelligence module and return route handler delegates.
     /// The caller is responsible for registering these with the host's route table.
     /// </summary>
-    public static IntelligenceRoutes CreateIntelligenceRoutes(bool enableBitNet = false)
+    public static IntelligenceRoutes CreateIntelligenceRoutes()
     {
-        var intents = AdminToolCatalogue.GetIntentDefinitions();
-        var classifier = new KeywordIntentClassifier(intents);
-        var executor = AdminToolCatalogue.CreateRegistry();
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(ModelLoadOptions.Aggressive);
 
-        BitNetEngine? engine = null;
-        if (enableBitNet)
-        {
-            engine = new BitNetEngine();
-            engine.LoadTestModel(ModelLoadOptions.Aggressive);
-        }
-
-        _orchestrator = new IntelligenceOrchestrator(classifier, executor, engine);
+        _orchestrator = new IntelligenceOrchestrator(engine);
 
         return new IntelligenceRoutes(
             ChatHandler,
