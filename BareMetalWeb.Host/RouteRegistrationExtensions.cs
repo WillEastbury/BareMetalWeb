@@ -305,6 +305,96 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /admin/data-sizes", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Data & Index Sizing", "" }, "admin", true, 4, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.DataSizingHandler));
+
+        // Loaded Metadata — view all registered entities, fields, and record counts
+        host.RegisterRoute("GET /admin/metadata", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Loaded Metadata", "" }, "admin", true, 5, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
+            routeHandlers.BuildPageHandler(async context =>
+            {
+                context.SetStringValue("title", "Loaded Metadata");
+                var entities = DataScaffold.Entities;
+                var columns = new[] { "Name", "Slug", "Fields", "Records", "Nav", "Nav Group", "Permissions", "ID Strategy", "Runtime" };
+                var rows = new List<string[]>();
+                foreach (var meta in entities.OrderBy(e => e.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    int recordCount = 0;
+                    try { recordCount = await meta.Handlers.CountAsync(null, context.RequestAborted).ConfigureAwait(false); }
+                    catch { /* entity may not support count */ }
+
+                    bool isRuntime = RuntimeEntityRegistry.Current?.TryGet(meta.Slug, out _) == true;
+                    rows.Add(new[]
+                    {
+                        meta.Name,
+                        meta.Slug,
+                        meta.Fields.Count.ToString(),
+                        recordCount.ToString(),
+                        meta.ShowOnNav ? "✓" : "",
+                        meta.NavGroup ?? "",
+                        meta.Permissions,
+                        meta.IdGeneration.ToString(),
+                        isRuntime ? "✓" : ""
+                    });
+                }
+                context.SetStringValue("html_message",
+                    $"<p>{entities.Count} entities registered. <strong>{rows.Count(r => r[8] == "✓")}</strong> runtime-defined.</p>"
+                    + "<form method=\"post\" action=\"/admin/metadata/refresh\" style=\"display:inline\">"
+                    + $"<input type=\"hidden\" name=\"csrf_token\" value=\"{CsrfProtection.EnsureToken(context)}\">"
+                    + "<button type=\"submit\" class=\"btn btn-warning btn-sm\">⟳ Refresh All Metadata Caches</button></form>");
+                context.AddTable(columns, rows.ToArray());
+            })));
+
+        // Refresh metadata caches — rebuild runtime entities, snapshot, menus, capability graph
+        host.RegisterRoute("POST /admin/metadata/refresh", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Refresh Metadata", "" }, "admin", false, 0),
+            routeHandlers.BuildPageHandler(async context =>
+            {
+                var form = await context.HttpRequest.ReadFormAsync(context.RequestAborted).ConfigureAwait(false);
+                if (!CsrfProtection.ValidateFormToken(context, form)) { context.Response.StatusCode = 403; return; }
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                var steps = new List<string>();
+
+                // 1. Rebuild runtime entity registry (re-reads persisted EntityDefinition/FieldDefinition from WAL)
+                await RuntimeEntityRegistry.RebuildAsync().ConfigureAwait(false);
+                steps.Add("Runtime entity registry rebuilt");
+
+                // 2. Recompile metadata snapshot
+                MetadataCompiler.CompileAndSwap(DataScaffold.Entities);
+                steps.Add($"Metadata snapshot compiled ({DataScaffold.Entities.Count} entities)");
+
+                // 3. Invalidate permission resolver caches
+                PermissionResolver.Invalidate();
+                steps.Add("Permission resolver invalidated");
+
+                // 4. Invalidate lookup caches
+                DataScaffold.InvalidateLookupCache();
+                steps.Add("Lookup cache invalidated");
+
+                // 5. Rebuild capability graph
+                try
+                {
+                    var graphBuilder = new BareMetalWeb.Runtime.CapabilityGraph.CapabilityGraphBuilder(RuntimeEntityRegistry.Current);
+                    var graph = await graphBuilder.BuildAsync(context.GetApp() as BareMetalWeb.Data.Interfaces.IDataObjectStore).ConfigureAwait(false);
+                    BareMetalWeb.Runtime.CapabilityGraph.CapabilityGraphRegistry.Current = graph;
+                    steps.Add("Capability graph rebuilt");
+                }
+                catch { steps.Add("Capability graph rebuild skipped (no data store)"); }
+
+                // 6. Rebuild menus
+                var app = context.GetApp();
+                if (app != null)
+                {
+                    await app.BuildAppInfoMenuOptionsAsync(context, context.RequestAborted).ConfigureAwait(false);
+                    steps.Add("Menu options rebuilt");
+                }
+
+                sw.Stop();
+                context.SetStringValue("title", "Metadata Refreshed");
+                context.SetStringValue("html_message",
+                    $"<div class=\"alert alert-success\">All metadata caches refreshed in {sw.ElapsedMilliseconds}ms.</div>"
+                    + "<ul>" + string.Join("", steps.Select(s => $"<li>{System.Net.WebUtility.HtmlEncode(s)}</li>")) + "</ul>"
+                    + "<p><a href=\"/admin/metadata\" class=\"btn btn-primary\">← Back to Metadata</a></p>");
+            })));
     }
 
     /// <summary>
