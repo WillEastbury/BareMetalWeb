@@ -15,16 +15,28 @@ public sealed record IntentDefinition(
 
 /// <summary>
 /// Orchestrates query processing for admin chat via the BitNet b1.58 ternary SLM
-/// (weights quantised to {-1, 0, +1}). Single-stage architecture: all queries are
-/// routed directly through the engine in one forward pass — no TF-IDF pre-screen overhead.
+/// (weights quantised to {-1, 0, +1}).
+///
+/// When an <see cref="IIntentClassifier"/> and <see cref="IToolExecutor"/> are
+/// supplied the orchestrator uses a two-stage pipeline: keyword intent classification
+/// followed by tool dispatch. The BitNet engine is used as a fallback when no
+/// high-confidence intent is found, preserving the fast single-stage path for
+/// open-ended queries.
 /// </summary>
 public sealed class IntelligenceOrchestrator
 {
     private readonly IBitNetEngine _engine;
+    private readonly IIntentClassifier? _classifier;
+    private readonly IToolExecutor? _tools;
 
-    public IntelligenceOrchestrator(IBitNetEngine engine)
+    public IntelligenceOrchestrator(
+        IBitNetEngine engine,
+        IIntentClassifier? classifier = null,
+        IToolExecutor? tools = null)
     {
         _engine = engine;
+        _classifier = classifier;
+        _tools = tools;
     }
 
     /// <summary>
@@ -34,7 +46,9 @@ public sealed class IntelligenceOrchestrator
     public BitNetPipelineMetrics? GetMetrics() => _engine.GetMetrics();
 
     /// <summary>
-    /// Process a user query through the single-stage BitNet pipeline.
+    /// Process a user query. When a classifier and tool executor are available,
+    /// high-confidence intents are dispatched to the matching tool first.
+    /// Unmatched or low-confidence queries fall through to the BitNet engine.
     /// </summary>
     public async ValueTask<ChatResponse> ProcessAsync(
         string query,
@@ -46,6 +60,26 @@ public sealed class IntelligenceOrchestrator
         // Sanitise input (prevent injection)
         string sanitised = SanitiseInput(query);
 
+        // Fast path: intent classification → tool dispatch
+        if (_classifier is not null && _tools is not null)
+        {
+            var intent = _classifier.Classify(sanitised.AsSpan());
+            if (intent.Confidence > 0.25f)
+            {
+                var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["query"] = sanitised
+                };
+
+                var toolResult = await _tools.ExecuteAsync(intent.IntentName, parameters, ct)
+                    .ConfigureAwait(false);
+
+                if (toolResult.Success)
+                    return new ChatResponse(toolResult.Output, intent.IntentName, intent.Confidence);
+            }
+        }
+
+        // Fallback: BitNet engine single-stage inference
         var generated = await _engine.GenerateAsync(sanitised.AsMemory(), 256, ct)
             .ConfigureAwait(false);
         return new ChatResponse(generated, "bitnet-generate", 0f);

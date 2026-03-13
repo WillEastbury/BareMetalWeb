@@ -65,6 +65,10 @@ public static class AdminToolCatalogue
         new("plan-workflow",
             "Generate a multi-step workflow plan from natural language",
             ["plan", "workflow", "automate", "steps", "pipeline", "sequence", "batch", "multi", "chain"]),
+
+        new("create-todo",
+            "Create a new todo item, task, or reminder",
+            ["todo", "task", "reminder", "checklist", "action", "note"]),
     ];
 
     /// <summary>
@@ -162,6 +166,12 @@ public static class AdminToolCatalogue
             [new ToolParameter("intent", "Natural language description of the workflow", true)],
             PlanWorkflowHandler);
 
+        registry.Register(
+            "create-todo",
+            "Create a new todo item, task, or reminder",
+            [new ToolParameter("title", "Title or description for the todo item", false)],
+            CreateTodoHandler);
+
         return registry;
     }
 
@@ -183,6 +193,10 @@ public static class AdminToolCatalogue
         IReadOnlyDictionary<string, string> parameters, CancellationToken ct)
     {
         parameters.TryGetValue("entity", out var entityName);
+
+        // If no explicit entity param, try to extract an entity name from the raw query
+        if (string.IsNullOrWhiteSpace(entityName) && parameters.TryGetValue("query", out var rawQuery))
+            entityName = ExtractEntityNameFromQuery(rawQuery);
 
         if (!string.IsNullOrWhiteSpace(entityName))
         {
@@ -497,6 +511,81 @@ public static class AdminToolCatalogue
     }
 
     // ── Entity resolution helpers ──────────────────────────────────────────────
+
+    private static ValueTask<ToolResult> CreateTodoHandler(
+        IReadOnlyDictionary<string, string> parameters, CancellationToken ct)
+    {
+        const string slug = "todo-items";
+        return ValueTask.FromResult(ToolResult.Ok(
+            $"To create a new todo item, navigate to /{slug}/new"));
+    }
+
+    /// <summary>
+    /// Scans each word of a natural-language query through <see cref="ResolveEntity"/>
+    /// to find an entity name embedded in a phrase such as "create a todo" or "add new user".
+    /// Returns the matched entity slug, or <see langword="null"/> if nothing is found.
+    /// </summary>
+    private static string? ExtractEntityNameFromQuery(string query)
+    {
+        // Walk the query span word by word to avoid allocating a string array.
+        var span = query.AsSpan();
+        int wordStart = -1;
+
+        for (int i = 0; i <= span.Length; i++)
+        {
+            bool isBoundary = i == span.Length || span[i] == ' ';
+            if (isBoundary)
+            {
+                if (wordStart >= 0)
+                {
+                    var word = span[wordStart..i];
+                    if (word.Length >= 3)
+                    {
+                        var entity = ResolveEntity(word);
+                        if (entity is not null) return entity.Slug;
+                    }
+                    wordStart = -1;
+                }
+            }
+            else if (wordStart < 0)
+            {
+                wordStart = i;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Span-based overload: resolves an entity by slug or name prefix match
+    /// without allocating a new string for the input word.
+    /// Falls through to the string overload only for pluralisation guesses
+    /// where we need to construct a new string (rare path).
+    /// </summary>
+    private static DataEntityMetadata? ResolveEntity(ReadOnlySpan<char> input)
+    {
+        var entities = DataScaffold.Entities;
+        if (entities is null || entities.Count == 0) return null;
+
+        // Exact slug or name match — no allocation
+        foreach (var e in entities)
+        {
+            if (input.Equals(e.Slug, StringComparison.OrdinalIgnoreCase) ||
+                input.Equals(e.Name, StringComparison.OrdinalIgnoreCase))
+                return e;
+        }
+
+        // Contains match: e.g. "todo" matches slug "todo-items"
+        foreach (var e in entities)
+        {
+            if (e.Slug.AsSpan().Contains(input, StringComparison.OrdinalIgnoreCase) ||
+                e.Name.AsSpan().Contains(input, StringComparison.OrdinalIgnoreCase))
+                return e;
+        }
+
+        // Fall through to the string overload for pluralisation guesses
+        return ResolveEntity(input.ToString());
+    }
 
     /// <summary>
     /// Resolves an entity by exact slug, exact name, singular form (strips trailing 's'),

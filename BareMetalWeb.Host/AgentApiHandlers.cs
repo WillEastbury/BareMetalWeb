@@ -37,7 +37,10 @@ public static class AgentApiHandlers
         var engine = new BitNetEngine();
         engine.LoadTestModel(ModelLoadOptions.Aggressive);
 
-        _orchestrator = new IntelligenceOrchestrator(engine);
+        var classifier = new KeywordIntentClassifier(AdminToolCatalogue.GetIntentDefinitions());
+        var tools = AdminToolCatalogue.CreateRegistry();
+
+        _orchestrator = new IntelligenceOrchestrator(engine, classifier, tools);
         return _orchestrator;
     }
 

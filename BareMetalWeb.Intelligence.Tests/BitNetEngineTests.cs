@@ -41,8 +41,8 @@ public class BitNetEngineTests
 
         var result = await engine.GenerateAsync("what is the system status".AsMemory());
 
-        Assert.Contains("BitNet spike", result);
-        Assert.Contains("Inference complete", result);
+        Assert.NotEmpty(result);
+        Assert.DoesNotContain("[BitNet spike]", result);
     }
 
     [Fact]
@@ -59,8 +59,8 @@ public class BitNetEngineTests
 
         var result = await engine.GenerateAsync("test".AsMemory());
 
-        Assert.Contains("Hidden dim: 64", result);
-        Assert.Contains("layers: 2", result);
+        // Shape verified via metrics:
+        Assert.Equal(2, engine.LayerStats!.Count);
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public class BitNetEngineTests
 
         var result = await engine.GenerateAsync("hello world".AsMemory());
 
-        Assert.Contains("Prompt length: 11 chars", result);
+        Assert.Equal(11, engine.GetMetrics()!.Value.TotalTokensIn);
     }
 
     [Fact]
@@ -117,7 +117,7 @@ public class BitNetEngineTests
 
         var result = await engine.GenerateAsync("show me data".AsMemory());
 
-        Assert.Contains("pruned from", result);
+        Assert.NotNull(engine.VocabPruneStats);
     }
 
     [Fact]

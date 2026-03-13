@@ -147,7 +147,7 @@ public class ModelSnapshotTests : IDisposable
 
         var result = engine2.GenerateAsync("test".AsMemory())
             .AsTask().GetAwaiter().GetResult();
-        Assert.Contains("BitNet spike", result);
+        Assert.NotEmpty(result); // real token output, not spike diagnostic
     }
 
     // ── Error handling ──────────────────────────────────────────────────

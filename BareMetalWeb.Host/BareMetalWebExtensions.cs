@@ -98,6 +98,7 @@ public static class BareMetalWebExtensions
         DataScaffold.RegisterEntity<FileAttachment>();
         DataScaffold.RegisterEntity<RecordComment>();
         DataScaffold.RegisterEntity<InboxMessage>();
+        DataScaffold.RegisterEntity<TodoItem>();
         Console.WriteLine($"[BMW Startup] Registered {DataScaffold.Entities.Count} code-first entities + system catalog provides the rest");
 
         phaseSw.Restart();
