@@ -151,6 +151,137 @@ public class TernaryTensorTests
     }
 
     [Fact]
+    public void DotProduct_MatchesScalar()
+    {
+        var a = new int[] { 1, 2, 3, 4, 5, 6, 7, 8 };
+        var b = new int[] { 10, 20, 30, 40, 50, 60, 70, 80 };
+
+        int result = TernaryTensor.DotProduct(a, b);
+
+        // 1*10 + 2*20 + 3*30 + 4*40 + 5*50 + 6*60 + 7*70 + 8*80
+        // = 10 + 40 + 90 + 160 + 250 + 360 + 490 + 640 = 2040
+        Assert.Equal(2040, result);
+    }
+
+    [Fact]
+    public void DotProduct_LargeVector_MatchesScalar()
+    {
+        int size = 256;
+        var a = new int[size];
+        var b = new int[size];
+        var rng = new Random(42);
+
+        int expected = 0;
+        for (int i = 0; i < size; i++)
+        {
+            a[i] = rng.Next(-100, 100);
+            b[i] = rng.Next(-100, 100);
+            expected += a[i] * b[i];
+        }
+
+        int result = TernaryTensor.DotProduct(a, b);
+
+        Assert.Equal(expected, result);
+    }
+
+    [Fact]
+    public void DotProduct_SmallVector_MatchesScalar()
+    {
+        var a = new int[] { 3, -5 };
+        var b = new int[] { 7, 2 };
+
+        int result = TernaryTensor.DotProduct(a, b);
+
+        Assert.Equal(3 * 7 + (-5) * 2, result); // 21 - 10 = 11
+    }
+
+    [Fact]
+    public void WeightedAccumulate_MatchesScalar()
+    {
+        var values = new int[] { 10, 20, 30, 40 };
+        var output = new int[4];
+        long weight = 3;
+        long totalWeight = 6; // not used in SIMD path; division is deferred
+
+        TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
+
+        // output[d] += weight * values[d] (no division — deferred to DivideInPlace)
+        Assert.Equal(30, output[0]);   // 3*10 = 30
+        Assert.Equal(60, output[1]);   // 3*20 = 60
+        Assert.Equal(90, output[2]);   // 3*30 = 90
+        Assert.Equal(120, output[3]);  // 3*40 = 120
+    }
+
+    [Fact]
+    public void WeightedAccumulate_LargeVector_MatchesScalar()
+    {
+        int size = 64;
+        var values = new int[size];
+        var output = new int[size];
+        var expected = new int[size];
+        var rng = new Random(99);
+
+        for (int i = 0; i < size; i++)
+            values[i] = rng.Next(-200, 200);
+
+        long weight = 7;
+        long totalWeight = 10; // not used — division deferred
+
+        // Compute expected scalar result (just weight * values[d])
+        for (int i = 0; i < size; i++)
+            expected[i] = (int)weight * values[i];
+
+        TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
+
+        Assert.Equal(expected, output);
+    }
+
+    [Fact]
+    public void WeightedAccumulate_AccumulatesIntoExistingOutput()
+    {
+        var values = new int[] { 100, 200, 300, 400 };
+        var output = new int[] { 1, 2, 3, 4 };
+        long weight = 2;
+        long totalWeight = 1; // not used — division deferred
+
+        TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
+
+        // output[d] += weight * values[d]
+        Assert.Equal(201, output[0]);  // 1 + 2*100
+        Assert.Equal(402, output[1]);  // 2 + 2*200
+        Assert.Equal(603, output[2]);  // 3 + 2*300
+        Assert.Equal(804, output[3]);  // 4 + 2*400
+    }
+
+    [Fact]
+    public void DivideInPlace_DividesAllElements()
+    {
+        var output = new int[] { 30, 60, 90, 120 };
+
+        TernaryTensor.DivideInPlace(output, 6);
+
+        Assert.Equal(new int[] { 5, 10, 15, 20 }, output);
+    }
+
+    [Fact]
+    public void WeightedAccumulate_ThenDivide_MatchesOriginalSemantics()
+    {
+        // Simulate the two-phase pattern used in MultiHeadAttention
+        var values = new int[] { 10, 20, 30, 40 };
+        var output = new int[4];
+        int weight = 3;
+        int totalWeight = 6;
+
+        // Phase 1: accumulate
+        TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
+        // Phase 2: normalize
+        TernaryTensor.DivideInPlace(output, totalWeight);
+
+        // 3*10/6=5, 3*20/6=10, 3*30/6=15, 3*40/6=20
+        Assert.Equal(new int[] { 5, 10, 15, 20 }, output);
+    }
+
+    [Fact]
     public void IntegerSqrt_KnownValues_ReturnsCorrectResult()
     {
         Assert.Equal(0, TernaryTensor.IntegerSqrt(0));

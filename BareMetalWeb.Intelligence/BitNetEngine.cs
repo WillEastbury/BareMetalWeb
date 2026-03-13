@@ -605,11 +605,10 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             for (int p = 0; p < posCount; p++)
             {
                 int kBase = p * dim + hOff;
-                int score = 0;
                 var kCache = _kvCacheK[layer].AsSpan(kBase, headDim);
                 var qSlice = bufQ.Slice(hOff, headDim);
-                for (int d = 0; d < headDim; d++)
-                    score += qSlice[d] * kCache[d];
+                // SIMD-accelerated dot product (NEON / AVX2 / scalar)
+                int score = TernaryTensor.DotProduct(qSlice, kCache);
                 // Scale to prevent overflow: divide by √headDim using bit-shift
                 score >>= scaleShift;
                 scores[p] = score;
@@ -626,16 +625,18 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             }
             if (totalWeight == 0) totalWeight = 1;
 
-            // Weighted sum of V values for this head
+            // Weighted sum of V values for this head (SIMD-accelerated two-phase):
+            // Phase 1: accumulate weight * V using SIMD multiply+add (no division)
+            var outSlice = output.Slice(hOff, headDim);
             for (int p = 0; p < posCount; p++)
             {
                 long w = scores[p];
                 int vBase = p * dim + hOff;
                 var vSlice = _kvCacheV![layer].AsSpan(vBase, headDim);
-                var outSlice = output.Slice(hOff, headDim);
-                for (int d = 0; d < headDim; d++)
-                    outSlice[d] += (int)(w * vSlice[d] / totalWeight);
+                TernaryTensor.WeightedAccumulate(outSlice, w, vSlice, totalWeight);
             }
+            // Phase 2: normalize by totalWeight (scalar division)
+            TernaryTensor.DivideInPlace(outSlice, (int)totalWeight);
         }
 
         // Output projection: Wo × attention_output

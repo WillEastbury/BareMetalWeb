@@ -55,6 +55,10 @@ public static class TernaryTensor
         {
             sum = DotProductVector256(weights, input, length, ref i);
         }
+        else if (AdvSimd.IsSupported && length >= 4)
+        {
+            sum = DotProductNeon(weights, input, length, ref i);
+        }
         else if (Vector128.IsHardwareAccelerated && length >= 4)
         {
             sum = DotProductVector128(weights, input, length, ref i);
@@ -106,6 +110,186 @@ public static class TernaryTensor
         }
 
         return Vector128.Sum(acc);
+    }
+
+    /// <summary>
+    /// ARM NEON path for ternary dot product: uses AdvSimd.Multiply / AdvSimd.Add
+    /// and AdvSimd.Arm64.AddPairwise for efficient horizontal reduction.
+    /// Processes 4 int32 elements per Vector128 lane.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int DotProductNeon(
+        ReadOnlySpan<sbyte> weights, ReadOnlySpan<int> input, int length, ref int i)
+    {
+        Vector128<int> acc = Vector128<int>.Zero;
+        ref readonly int inputRef = ref MemoryMarshal.GetReference(input);
+
+        for (; i + 4 <= length; i += 4)
+        {
+            Vector128<int> w = WidenToInt32_128(weights, i);
+            Vector128<int> x = Vector128.LoadUnsafe(in inputRef, (nuint)i);
+
+            acc = AdvSimd.Add(acc, AdvSimd.Multiply(w, x));
+        }
+
+        return HorizontalSumNeon(acc);
+    }
+
+    /// <summary>
+    /// SIMD-accelerated dot product of two int32 spans.
+    /// Used for attention Q · K score computation.
+    /// Dispatches: AdvSimd → AVX2 → scalar.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static int DotProduct(ReadOnlySpan<int> a, ReadOnlySpan<int> b)
+    {
+        int length = Math.Min(a.Length, b.Length);
+        int sum = 0;
+        int i = 0;
+
+        if (AdvSimd.IsSupported && length >= 4)
+        {
+            Vector128<int> acc = Vector128<int>.Zero;
+            ref readonly int aRef = ref MemoryMarshal.GetReference(a);
+            ref readonly int bRef = ref MemoryMarshal.GetReference(b);
+
+            for (; i + 4 <= length; i += 4)
+            {
+                var va = Vector128.LoadUnsafe(in aRef, (nuint)i);
+                var vb = Vector128.LoadUnsafe(in bRef, (nuint)i);
+                acc = AdvSimd.Add(acc, AdvSimd.Multiply(va, vb));
+            }
+
+            sum = HorizontalSumNeon(acc);
+        }
+        else if (Vector256.IsHardwareAccelerated && length >= 8)
+        {
+            Vector256<int> acc = Vector256<int>.Zero;
+            ref readonly int aRef = ref MemoryMarshal.GetReference(a);
+            ref readonly int bRef = ref MemoryMarshal.GetReference(b);
+
+            for (; i + 8 <= length; i += 8)
+            {
+                var va = Vector256.LoadUnsafe(in aRef, (nuint)i);
+                var vb = Vector256.LoadUnsafe(in bRef, (nuint)i);
+                acc = Vector256.Add(acc, Vector256.Multiply(va, vb));
+            }
+
+            sum = Vector256.Sum(acc);
+        }
+        else if (Vector128.IsHardwareAccelerated && length >= 4)
+        {
+            Vector128<int> acc = Vector128<int>.Zero;
+            ref readonly int aRef = ref MemoryMarshal.GetReference(a);
+            ref readonly int bRef = ref MemoryMarshal.GetReference(b);
+
+            for (; i + 4 <= length; i += 4)
+            {
+                var va = Vector128.LoadUnsafe(in aRef, (nuint)i);
+                var vb = Vector128.LoadUnsafe(in bRef, (nuint)i);
+                acc = Vector128.Add(acc, Vector128.Multiply(va, vb));
+            }
+
+            sum = Vector128.Sum(acc);
+        }
+
+        // Scalar tail
+        for (; i < length; i++)
+            sum += a[i] * b[i];
+
+        return sum;
+    }
+
+    /// <summary>
+    /// SIMD-accelerated scaled accumulation: output[d] += weight * values[d].
+    /// Used for attention value aggregation phase 1 (accumulate without division).
+    /// Broadcasts weight across vector lanes. Division by totalWeight is deferred.
+    /// Dispatches: AdvSimd → AVX2 → scalar.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void WeightedAccumulate(
+        Span<int> output, long weight, ReadOnlySpan<int> values, long totalWeight)
+    {
+        int length = Math.Min(output.Length, values.Length);
+        int i = 0;
+        int w = (int)weight;
+
+        if (AdvSimd.IsSupported && length >= 4)
+        {
+            Vector128<int> wVec = Vector128.Create(w);
+            ref int oRef = ref MemoryMarshal.GetReference(output);
+            ref readonly int vRef = ref MemoryMarshal.GetReference(values);
+
+            for (; i + 4 <= length; i += 4)
+            {
+                var v = Vector128.LoadUnsafe(in vRef, (nuint)i);
+                var o = Vector128.LoadUnsafe(in oRef, (nuint)i);
+                // Multiply values by broadcast weight, then add to output
+                AdvSimd.Add(o, AdvSimd.Multiply(v, wVec)).StoreUnsafe(ref oRef, (nuint)i);
+            }
+        }
+        else if (Vector256.IsHardwareAccelerated && length >= 8)
+        {
+            Vector256<int> wVec = Vector256.Create(w);
+            ref int oRef = ref MemoryMarshal.GetReference(output);
+            ref readonly int vRef = ref MemoryMarshal.GetReference(values);
+
+            for (; i + 8 <= length; i += 8)
+            {
+                var v = Vector256.LoadUnsafe(in vRef, (nuint)i);
+                var o = Vector256.LoadUnsafe(in oRef, (nuint)i);
+                Vector256.Add(o, Vector256.Multiply(v, wVec)).StoreUnsafe(ref oRef, (nuint)i);
+            }
+        }
+        else if (Vector128.IsHardwareAccelerated && length >= 4)
+        {
+            Vector128<int> wVec = Vector128.Create(w);
+            ref int oRef = ref MemoryMarshal.GetReference(output);
+            ref readonly int vRef = ref MemoryMarshal.GetReference(values);
+
+            for (; i + 4 <= length; i += 4)
+            {
+                var v = Vector128.LoadUnsafe(in vRef, (nuint)i);
+                var o = Vector128.LoadUnsafe(in oRef, (nuint)i);
+                Vector128.Add(o, Vector128.Multiply(v, wVec)).StoreUnsafe(ref oRef, (nuint)i);
+            }
+        }
+
+        // Scalar tail
+        for (; i < length; i++)
+            output[i] += w * values[i];
+    }
+
+    /// <summary>
+    /// SIMD-accelerated in-place division: output[d] /= divisor.
+    /// Used for attention value aggregation phase 2 (normalize accumulated values).
+    /// Dispatches: AdvSimd → AVX2 → scalar.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void DivideInPlace(Span<int> output, int divisor)
+    {
+        int length = output.Length;
+        for (int i = 0; i < length; i++)
+            output[i] /= divisor;
+    }
+
+    /// <summary>
+    /// ARM NEON horizontal sum of a Vector128&lt;int&gt; using AdvSimd.Arm64.AddPairwise.
+    /// Reduces 4 lanes to a scalar in 2 pairwise-add steps.
+    /// Falls back to element extraction when Arm64 is not available.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static int HorizontalSumNeon(Vector128<int> vec)
+    {
+        if (AdvSimd.Arm64.IsSupported)
+        {
+            // Pairwise add: [a,b,c,d] → [a+b, c+d, a+b, c+d]
+            var pair = AdvSimd.Arm64.AddPairwise(vec, vec);
+            // Second pairwise: [s0+s1, s0+s1, s0+s1, s0+s1]
+            var total = AdvSimd.Arm64.AddPairwise(pair, pair);
+            return total.GetElement(0);
+        }
+        return vec.GetElement(0) + vec.GetElement(1) + vec.GetElement(2) + vec.GetElement(3);
     }
 
     /// <summary>
@@ -175,7 +359,20 @@ public static class TernaryTensor
         int len = Math.Min(a.Length, Math.Min(b.Length, output.Length));
         int i = 0;
 
-        if (Vector256.IsHardwareAccelerated)
+        if (AdvSimd.IsSupported)
+        {
+            ref readonly int aRef = ref MemoryMarshal.GetReference(a);
+            ref readonly int bRef = ref MemoryMarshal.GetReference(b);
+            ref int oRef = ref MemoryMarshal.GetReference(output);
+
+            for (; i + 4 <= len; i += 4)
+            {
+                var va = Vector128.LoadUnsafe(in aRef, (nuint)i);
+                var vb = Vector128.LoadUnsafe(in bRef, (nuint)i);
+                AdvSimd.Add(va, vb).StoreUnsafe(ref oRef, (nuint)i);
+            }
+        }
+        else if (Vector256.IsHardwareAccelerated)
         {
             ref readonly int aRef = ref MemoryMarshal.GetReference(a);
             ref readonly int bRef = ref MemoryMarshal.GetReference(b);
