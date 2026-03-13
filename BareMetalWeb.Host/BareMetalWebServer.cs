@@ -157,8 +157,9 @@ public class BareMetalWebServer : IBareWebHost
     public async ValueTask BuildAppInfoMenuOptionsAsync(BmwContext? context = null, CancellationToken cancellationToken = default)
     {
         var user = context != null ? await UserAuth.GetUserAsync(context, cancellationToken).ConfigureAwait(false) : null;
+        var typedUser = user as User;
         bool isAnonymous = user == null;
-        var userPermissions = new HashSet<string>(user?.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
 
         if (context != null)
         {
@@ -187,7 +188,7 @@ public class BareMetalWebServer : IBareWebHost
                 !verb.Equals("ALL", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            if (user != null && user.MfaEnabled && path.Equals("/account/mfa", StringComparison.OrdinalIgnoreCase))
+            if (typedUser?.MfaEnabled == true && path.Equals("/account/mfa", StringComparison.OrdinalIgnoreCase))
                 continue;
 
             // Build menu options here
@@ -1092,7 +1093,7 @@ public class BareMetalWebServer : IBareWebHost
             return !hasAnyPerm;
         }
 
-        var userPermissions = new HashSet<string>(user!.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
         var altLookup = userPermissions.GetAlternateLookup<ReadOnlySpan<char>>();
 
         var remaining = permissionsNeeded.AsSpan();
@@ -1163,7 +1164,7 @@ public class BareMetalWebServer : IBareWebHost
     private async ValueTask LogAccessDeniedAsync(string path, string sourceIp, BmwContext context, PageInfo? pageInfo, CancellationToken cancellationToken = default)
     {
         var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
-        var userName = user?.UserName ?? "anonymous";
+        var userName = UserAuth.GetUserName(user) ?? "anonymous";
         var required = pageInfo?.PageMetaData.PermissionsNeeded ?? string.Empty;
         BufferedLogger.LogInfo($"{path}|403|{sourceIp}|user={userName}|required={required}");
     }
@@ -1332,15 +1333,17 @@ public class BareMetalWebServer : IBareWebHost
         return builder.Uri.ToString();
     }
 
-    private static string BuildMenuCacheKey(BareMetalWeb.Data.User? user, int routesVersion)
+    private static string BuildMenuCacheKey(BaseDataObject? user, int routesVersion)
     {
         if (user == null)
             return $"anon|routes:{routesVersion}";
 
-        var perms = user.Permissions is null || user.Permissions.Length == 0
+        var typedUser = user as User;
+        var perms = UserAuth.GetPermissions(user);
+        var permString = perms.Length == 0
             ? string.Empty
-            : string.Join(',', user.Permissions);
-        return $"user:{user.Key}|mfa:{user.MfaEnabled}|perms:{perms}|routes:{routesVersion}";
+            : string.Join(',', perms);
+        return $"user:{user.Key}|mfa:{typedUser?.MfaEnabled ?? false}|perms:{permString}|routes:{routesVersion}";
     }
 
     private static string ComputePrivacyPolicyLink(string url) =>

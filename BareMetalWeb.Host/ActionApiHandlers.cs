@@ -80,7 +80,7 @@ public static class ActionApiHandlers
             await WriteError(context, 401, "Authentication required.");
             return;
         }
-        var userName = user.UserName ?? "anonymous";
+        var userName = UserAuth.GetUserName(user) ?? "anonymous";
 
         // Parse request body
         uint aggregateId;

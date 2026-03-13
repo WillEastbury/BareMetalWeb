@@ -161,7 +161,7 @@ public static class UserAuth
         return session;
     }
 
-    public static async ValueTask<User?> GetUserAsync(BmwContext context, CancellationToken cancellationToken = default)
+    public static async ValueTask<BaseDataObject?> GetUserAsync(BmwContext context, CancellationToken cancellationToken = default)
     {
         var session = await GetSessionAsync(context, cancellationToken).ConfigureAwait(false);
         if (session == null)
@@ -170,14 +170,18 @@ public static class UserAuth
         if (!uint.TryParse(session.UserId, out var userId))
             return null;
 
-        var user = await Users.GetByIdAsync(userId, cancellationToken).ConfigureAwait(false);
-        if (user == null || !user.IsActive)
+        var meta = UserAuthHelper.GetUserMeta();
+        if (meta == null)
+            return null;
+
+        var user = await UserAuthHelper.GetUserByIdAsync(userId, cancellationToken).ConfigureAwait(false);
+        if (user == null || !UserAuthHelper.GetIsActive(user, meta))
             return null;
 
         return user;
     }
 
-    public static async ValueTask<User?> GetRequestUserAsync(BmwContext context, CancellationToken cancellationToken = default)
+    public static async ValueTask<BaseDataObject?> GetRequestUserAsync(BmwContext context, CancellationToken cancellationToken = default)
     {
         var sessionUser = await GetUserAsync(context, cancellationToken).ConfigureAwait(false);
         if (sessionUser != null)
@@ -189,27 +193,46 @@ public static class UserAuth
         if (!TryGetApiKey(context, out var apiKey))
             return null;
 
-        return await SystemPrincipal.FindByApiKeyAsync(apiKey, cancellationToken).ConfigureAwait(false);
+        return await UserAuthHelper.FindByApiKeyAsync(apiKey, cancellationToken).ConfigureAwait(false);
     }
 
-    public static async ValueTask SignInAsync(BmwContext context, User user, bool rememberMe, CancellationToken cancellationToken = default)
+    public static ValueTask SignInAsync(BmwContext context, BaseDataObject user, bool rememberMe, CancellationToken cancellationToken = default)
+    {
+        var meta = UserAuthHelper.GetUserMeta() ?? throw new InvalidOperationException("User metadata is not registered.");
+        return SignInAsync(context, user, meta, rememberMe, cancellationToken);
+    }
+
+    public static async ValueTask SignInAsync(BmwContext context, BaseDataObject user, DataEntityMetadata meta, bool rememberMe, CancellationToken cancellationToken = default)
     {
         if (context == null) throw new ArgumentNullException(nameof(context));
         if (user == null) throw new ArgumentNullException(nameof(user));
+        if (meta == null) throw new ArgumentNullException(nameof(meta));
+
+        var userName = GetUserName(user);
+        if (string.IsNullOrWhiteSpace(userName))
+            userName = UserAuthHelper.GetUserName(user, meta);
+        if (string.IsNullOrWhiteSpace(userName))
+            userName = user.Key.ToString();
+
+        var displayName = GetDisplayName(user);
+        if (string.IsNullOrWhiteSpace(displayName))
+            displayName = UserAuthHelper.GetDisplayName(user, meta);
+        if (string.IsNullOrWhiteSpace(displayName))
+            displayName = userName;
 
         var now = DateTime.UtcNow;
         var session = new UserSession
         {
             UserId = user.Key.ToString(),
-            UserName = user.UserName,
-            DisplayName = user.DisplayName,
-            Permissions = user.Permissions ?? Array.Empty<string>(),
+            UserName = userName,
+            DisplayName = displayName,
+            Permissions = UserAuthHelper.GetPermissions(user, meta),
             IssuedUtc = now,
             LastSeenUtc = now,
             ExpiresUtc = now.Add(rememberMe ? RememberMeLifetime : DefaultSessionLifetime),
             RememberMe = rememberMe,
-            CreatedBy = user.UserName,
-            UpdatedBy = user.UserName
+            CreatedBy = userName,
+            UpdatedBy = userName
         };
 
         await DataStoreProvider.Current.SaveAsync(session, cancellationToken).ConfigureAwait(false);
@@ -244,6 +267,96 @@ public static class UserAuth
         context.DeleteCookie("csrf_token");
         context.DeleteCookie("mfa_challenge_id");
         context.DeleteCookie("bm-anon-id");
+    }
+
+    public static string? GetUserName(BaseDataObject? user)
+    {
+        if (user == null)
+            return null;
+
+        var meta = ResolveAuthMeta(user);
+        if (meta == null)
+            return null;
+
+        var value = UserAuthHelper.GetUserName(user, meta);
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    public static string? GetDisplayName(BaseDataObject? user)
+    {
+        if (user == null)
+            return null;
+
+        var meta = ResolveAuthMeta(user);
+        if (meta == null)
+            return null;
+
+        var value = UserAuthHelper.GetDisplayName(user, meta);
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    public static string? GetEmail(BaseDataObject? user)
+    {
+        if (user == null)
+            return null;
+
+        var meta = ResolveAuthMeta(user);
+        if (meta == null)
+            return null;
+
+        var value = UserAuthHelper.GetEmail(user, meta);
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    public static string[] GetPermissions(BaseDataObject? user)
+    {
+        if (user == null)
+            return Array.Empty<string>();
+
+        var meta = ResolveAuthMeta(user);
+        return meta == null ? Array.Empty<string>() : UserAuthHelper.GetPermissions(user, meta);
+    }
+
+    public static bool IsActive(BaseDataObject? user)
+    {
+        if (user == null)
+            return false;
+
+        var meta = ResolveAuthMeta(user);
+        return meta != null && UserAuthHelper.GetIsActive(user, meta);
+    }
+
+    private static DataEntityMetadata? ResolveAuthMeta(BaseDataObject? user)
+    {
+        if (user == null)
+            return null;
+
+        var meta = DataScaffold.GetEntityByType(user.GetType());
+        if (meta != null)
+            return meta;
+
+        if (user is DataRecord record)
+        {
+            var userMeta = UserAuthHelper.GetUserMeta();
+            if (MatchesEntity(record.EntityTypeName, userMeta))
+                return userMeta;
+
+            var principalMeta = UserAuthHelper.GetPrincipalMeta();
+            if (MatchesEntity(record.EntityTypeName, principalMeta))
+                return principalMeta;
+        }
+
+        return null;
+    }
+
+    private static bool MatchesEntity(string entityTypeName, DataEntityMetadata? meta)
+    {
+        if (string.IsNullOrWhiteSpace(entityTypeName) || meta == null)
+            return false;
+
+        return string.Equals(entityTypeName, meta.Name, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityTypeName, meta.Slug, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityTypeName, meta.Type.Name, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ReissueCookie(BmwContext context, string protectedSessionId, DateTime expiresUtc)
@@ -319,7 +432,7 @@ public static class UserAuth
         if (!TryGetApiKey(context, out var apiKey))
             return false;
 
-        var principal = await SystemPrincipal.FindByApiKeyAsync(apiKey, cancellationToken).ConfigureAwait(false);
+        var principal = await UserAuthHelper.FindByApiKeyAsync(apiKey, cancellationToken).ConfigureAwait(false);
         return principal != null;
     }
 }

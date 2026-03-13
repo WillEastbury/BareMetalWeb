@@ -189,7 +189,7 @@ public static class VectorApiHandlers
         if (string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var userPerms = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        var userPerms = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
         var altLookup = userPerms.GetAlternateLookup<ReadOnlySpan<char>>();
         var remaining = permissionsNeeded.AsSpan();
         while (remaining.Length > 0)

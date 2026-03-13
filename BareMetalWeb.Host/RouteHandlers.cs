@@ -805,7 +805,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         await BuildPageHandler(async ctx =>
         {
-            var user = await UserAuth.GetUserAsync(ctx);
+            var user = (await UserAuth.GetUserAsync(ctx)) as User;
             if (user == null)
             {
                 ctx.Response.Redirect("/login");
@@ -833,7 +833,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         await BuildPageHandler(async ctx =>
         {
-            var user = await UserAuth.GetUserAsync(ctx);
+            var user = (await UserAuth.GetUserAsync(ctx)) as User;
             if (user == null)
             {
                 ctx.Response.Redirect("/login");
@@ -854,7 +854,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         await BuildPageHandler(async ctx =>
         {
-            var user = await UserAuth.GetUserAsync(ctx);
+            var user = (await UserAuth.GetUserAsync(ctx)) as User;
             if (user == null)
             {
                 ctx.Response.Redirect("/login");
@@ -883,7 +883,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask MfaSetupPostHandler(BmwContext context)
     {
-        var user = await UserAuth.GetUserAsync(context);
+        var user = (await UserAuth.GetUserAsync(context)) as User;
         if (user == null)
         {
             context.Response.Redirect("/login");
@@ -1042,7 +1042,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         await BuildPageHandler(async ctx =>
         {
-            var user = await UserAuth.GetUserAsync(ctx);
+            var user = (await UserAuth.GetUserAsync(ctx)) as User;
             if (user == null)
             {
                 ctx.Response.Redirect("/login");
@@ -1063,7 +1063,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask MfaResetPostHandler(BmwContext context)
     {
-        var user = await UserAuth.GetUserAsync(context);
+        var user = (await UserAuth.GetUserAsync(context)) as User;
         if (user == null)
         {
             context.Response.Redirect("/login");
@@ -2406,7 +2406,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // TenantCallback principals can only read their own records
         var getUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var getRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(getUser);
+        var getRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(getUser as User);
         if (getRestricted is { Role: PrincipalRole.TenantCallback } && instance is BaseDataObject getBdo &&
             !PrincipalAuthorizationPolicy.IsRecordOwner(getRestricted, getBdo))
         {
@@ -2504,7 +2504,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
         ReturnStringList(apiCreateErrors);
 
-        ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: true);
+        ApplyAuditInfo(instance, UserAuth.GetUserName(await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false)) ?? "system", isCreate: true);
         await DataScaffold.ApplyAutoIdAsync(meta, instance, context.RequestAborted).ConfigureAwait(false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, instance, ComputedTrigger.OnCreate, context.RequestAborted).ConfigureAwait(false);
         DataScaffold.ApplyCalculatedFields(meta, instance);
@@ -2559,7 +2559,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // TenantCallback principals can only update their own records
         var putUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var putRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(putUser);
+        var putRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(putUser as User);
         if (putRestricted is { Role: PrincipalRole.TenantCallback } && instance is BaseDataObject putBdo &&
             !PrincipalAuthorizationPolicy.IsRecordOwner(putRestricted, putBdo))
         {
@@ -2622,7 +2622,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
         ReturnStringList(apiPutErrors);
 
-        ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
+        ApplyAuditInfo(instance, UserAuth.GetUserName(await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false)) ?? "system", isCreate: false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
         DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
         await DataScaffold.SaveAsync(meta, instance);
@@ -2675,7 +2675,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // TenantCallback principals can only update their own records
         var patchUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var patchRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(patchUser);
+        var patchRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(patchUser as User);
         if (patchRestricted is { Role: PrincipalRole.TenantCallback } && instance is BaseDataObject patchBdo &&
             !PrincipalAuthorizationPolicy.IsRecordOwner(patchRestricted, patchBdo))
         {
@@ -2726,7 +2726,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        ApplyAuditInfo(instance, (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system", isCreate: false);
+        ApplyAuditInfo(instance, UserAuth.GetUserName(await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false)) ?? "system", isCreate: false);
         await DataScaffold.ApplyComputedFieldsAsync(meta, (BaseDataObject)instance, ComputedTrigger.OnUpdate, context.RequestAborted).ConfigureAwait(false);
         DataScaffold.ApplyCalculatedFields(meta, (BaseDataObject)instance);
         await DataScaffold.SaveAsync(meta, instance);
@@ -2932,7 +2932,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var userName = user?.UserName ?? "anonymous";
+        var userName = UserAuth.GetUserName(user) ?? "anonymous";
 
         if (!context.HttpRequest.HasFormContentType)
         {
@@ -3304,7 +3304,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var userName = user?.UserName ?? "anonymous";
+        var userName = UserAuth.GetUserName(user) ?? "anonymous";
         var comment = new RecordComment(userName)
         {
             RecordType = meta.Slug,
@@ -3345,7 +3345,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var userName = user?.UserName ?? "anonymous";
+        var userName = UserAuth.GetUserName(user) ?? "anonymous";
         if (!string.Equals(comment.CreatedBy, userName, StringComparison.OrdinalIgnoreCase))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -3408,7 +3408,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var userName = user?.UserName ?? "anonymous";
+        var userName = UserAuth.GetUserName(user) ?? "anonymous";
         if (!string.Equals(comment.CreatedBy, userName, StringComparison.OrdinalIgnoreCase))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
@@ -3433,7 +3433,7 @@ public sealed class RouteHandlers : IRouteHandlers
         const int maxPerGroup = 5;
 
         var user            = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var userPermissions = user?.Permissions ?? Array.Empty<string>();
+        var userPermissions = UserAuth.GetPermissions(user);
 
         var groups = new List<Dictionary<string, object?>>();
 
@@ -4051,7 +4051,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
+        var userName = UserAuth.GetUserName(await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false)) ?? "system";
 
         var capturedCounts = new Dictionary<string, int>(entityCounts, StringComparer.OrdinalIgnoreCase);
         var capturedClear = clearExisting;
@@ -5631,7 +5631,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var userPermissions = RentPermissionSet(user.Permissions ?? Array.Empty<string>());
+        var userPermissions = RentPermissionSet(UserAuth.GetPermissions(user));
         try
         {
         var altLookup = userPermissions.GetAlternateLookup<ReadOnlySpan<char>>();
@@ -5662,7 +5662,7 @@ public sealed class RouteHandlers : IRouteHandlers
         BmwContext context, DataEntityMetadata meta, string action, CancellationToken cancellationToken)
     {
         var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
-        var restricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(user);
+        var restricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(user as User);
         if (restricted == null)
             return true; // not a restricted principal
 
@@ -6272,7 +6272,7 @@ public sealed class RouteHandlers : IRouteHandlers
             bool hasPermission = false;
             if (user != null)
             {
-                foreach (var perm in user.Permissions)
+                foreach (var perm in UserAuth.GetPermissions(user))
                 {
                     if (string.Equals(perm, cmd.Permission, StringComparison.OrdinalIgnoreCase))
                     {
@@ -6306,7 +6306,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
         try
         {
-            var userName = (await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false))?.UserName ?? "system";
+            var userName = UserAuth.GetUserName(await UserAuth.GetUserAsync(context, context.RequestAborted).ConfigureAwait(false)) ?? "system";
 
             // Runtime-defined actions have Invoker == null; delegate to CommandService
             if (cmd.Invoker == null)

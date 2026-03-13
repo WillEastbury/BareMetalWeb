@@ -120,7 +120,7 @@ public static class ClusterApiHandlers
             await context.Response.WriteAsync("""{"error":"Authentication required."}""");
             return false;
         }
-        var perms = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        var perms = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
         if (!perms.Contains("admin") && !perms.Contains("monitoring"))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;

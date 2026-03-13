@@ -938,7 +938,7 @@ public static class RouteRegistrationExtensions
             async context =>
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-                var userPermissions = user?.Permissions ?? Array.Empty<string>();
+                var userPermissions = UserAuth.GetPermissions(user);
 
                 var entitiesList = new List<object>();
                 foreach (var e in DataScaffold.Entities)
@@ -1331,7 +1331,7 @@ public static class RouteRegistrationExtensions
 
     // ─── Private helpers ────────────────────────────────────────────────────────
 
-    private static async ValueTask<bool> IsEntityAccessibleAsync(DataEntityMetadata entity, User? user, string[] userPermissions)
+    private static async ValueTask<bool> IsEntityAccessibleAsync(DataEntityMetadata entity, BaseDataObject? user, string[] userPermissions)
     {
         var perms = entity.Permissions ?? string.Empty;
         if (string.IsNullOrWhiteSpace(perms) || string.Equals(perms, "Public", StringComparison.OrdinalIgnoreCase))
@@ -1660,7 +1660,7 @@ public static class RouteRegistrationExtensions
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.StatusCode = 401; return; }
-                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                if (!new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase).Contains("admin"))
                 { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
                 var reports = new List<ReportDefinition>(DataStoreProvider.Current.Query<ReportDefinition>(null));
@@ -1714,7 +1714,7 @@ public static class RouteRegistrationExtensions
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.StatusCode = 401; return; }
-                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
                 if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
                 var id = GetRouteParam(context, "id");
@@ -1901,7 +1901,7 @@ public static class RouteRegistrationExtensions
 
         // Fetch user once — used by both meta-objects and initial-data inline scripts
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var userPermissions = user?.Permissions ?? Array.Empty<string>();
+        var userPermissions = UserAuth.GetPermissions(user);
 
         // Inline /meta/objects (and optionally /meta/{slug}) to eliminate client-side round-trips
         var metaObjectsScript = await TryBuildMetaObjectsScriptAsync(user, userPermissions, safeNonce).ConfigureAwait(false);
@@ -1981,7 +1981,7 @@ public static class RouteRegistrationExtensions
     /// list of entities accessible to the current user.
     /// Returns <c>null</c> on any error so the client falls back to normal API calls.
     /// </summary>
-    private static async Task<string?> TryBuildMetaObjectsScriptAsync(User? user, string[] userPermissions, string safeNonce)
+    private static async Task<string?> TryBuildMetaObjectsScriptAsync(BaseDataObject? user, string[] userPermissions, string safeNonce)
     {
         try
         {
@@ -2004,9 +2004,9 @@ public static class RouteRegistrationExtensions
 
             // Check if user has any elevated permissions
             bool hasElevated = false;
-            if (user != null)
+            if (user is User typedUser)
             {
-                var resolved = await PermissionResolver.ResolveAsync(user, CancellationToken.None)
+                var resolved = await PermissionResolver.ResolveAsync(typedUser, CancellationToken.None)
                     .ConfigureAwait(false);
                 hasElevated = resolved.HasElevatedPermissions;
             }
@@ -2060,7 +2060,7 @@ public static class RouteRegistrationExtensions
     /// (the client will fall back to the normal API call).
     /// </summary>
     private static async ValueTask<string?> TryBuildInitialDataScriptAsync(
-        BmwContext context, string slug, string safeNonce, User? user, CancellationToken cancellationToken)
+        BmwContext context, string slug, string safeNonce, BaseDataObject? user, CancellationToken cancellationToken)
     {
         try
         {
@@ -2076,7 +2076,7 @@ public static class RouteRegistrationExtensions
                     return null;
                 if (!string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
                 {
-                    var userPerms = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                    var userPerms = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
                     var altLookup = userPerms.GetAlternateLookup<ReadOnlySpan<char>>();
                     var remaining = permissionsNeeded.AsSpan();
                     bool hasRequired = false;
@@ -2423,7 +2423,7 @@ public static class RouteRegistrationExtensions
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.StatusCode = 401; return; }
-                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                if (!new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase).Contains("admin"))
                 { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
                 var dashboards = new List<DashboardDefinition>(DataStoreProvider.Current.Query<DashboardDefinition>(null));
@@ -2449,7 +2449,7 @@ public static class RouteRegistrationExtensions
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.StatusCode = 401; return; }
-                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                if (!new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase).Contains("admin"))
                 { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
                 var id = GetRouteParam(context, "id");
@@ -2519,7 +2519,7 @@ public static class RouteRegistrationExtensions
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.StatusCode = 401; return; }
-                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                if (!new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase).Contains("admin"))
                 { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
                 var modules = await ModuleRegistry.GetModulesAsync(context.RequestAborted).ConfigureAwait(false);
@@ -2554,7 +2554,7 @@ public static class RouteRegistrationExtensions
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.StatusCode = 401; return; }
-                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                if (!new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase).Contains("admin"))
                 { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
                 var moduleId = GetRouteParam(context, "id") ?? string.Empty;
@@ -2685,7 +2685,7 @@ public static class RouteRegistrationExtensions
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.StatusCode = 401; return; }
-                if (!new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase).Contains("admin"))
+                if (!new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase).Contains("admin"))
                 { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
                 if (!CsrfProtection.ValidateApiToken(context))
@@ -2788,7 +2788,7 @@ public static class RouteRegistrationExtensions
             {
                 Clauses = new List<QueryClause>
                 {
-                    new() { Field = "UserName", Operator = QueryOperator.Equals, Value = user.UserName }
+                    new() { Field = "UserName", Operator = QueryOperator.Equals, Value = (UserAuth.GetUserName(user) ?? user.Key.ToString()) }
                 },
                 Sorts = new List<SortClause>
                 {
@@ -2838,7 +2838,7 @@ public static class RouteRegistrationExtensions
 
             var session = new Runtime.ChatSession
             {
-                UserName = user.UserName,
+                UserName = (UserAuth.GetUserName(user) ?? user.Key.ToString()),
                 Title = title,
                 CreatedAtUtc = DateTime.UtcNow,
                 UpdatedAtUtc = DateTime.UtcNow,
@@ -2870,7 +2870,7 @@ public static class RouteRegistrationExtensions
             { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Invalid session id\"}"); return; }
 
             var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
-            if (session == null || !string.Equals(session.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            if (session == null || !string.Equals(session.UserName, (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
             { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Session not found\"}"); return; }
 
             var msgQuery = new QueryDefinition
@@ -2932,7 +2932,7 @@ public static class RouteRegistrationExtensions
             { context.Response.StatusCode = 400; return; }
 
             var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
-            if (session == null || !string.Equals(session.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            if (session == null || !string.Equals(session.UserName, (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
             { context.Response.StatusCode = 404; return; }
 
             // Delete all messages in the session
@@ -2968,7 +2968,7 @@ public static class RouteRegistrationExtensions
             { context.Response.StatusCode = 400; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Invalid session id\"}"); return; }
 
             var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
-            if (session == null || !string.Equals(session.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            if (session == null || !string.Equals(session.UserName, (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
             { context.Response.StatusCode = 404; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Session not found\"}"); return; }
 
             using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body, default, context.RequestAborted).ConfigureAwait(false);
@@ -3063,7 +3063,7 @@ public static class RouteRegistrationExtensions
             { context.Response.StatusCode = 400; return; }
 
             var session = await DataStoreProvider.Current.LoadAsync<Runtime.ChatSession>(sessionId, context.RequestAborted).ConfigureAwait(false);
-            if (session == null || !string.Equals(session.UserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            if (session == null || !string.Equals(session.UserName, (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
             { context.Response.StatusCode = 404; return; }
 
             int skip = 0, top = 50;
@@ -3140,7 +3140,7 @@ public static class RouteRegistrationExtensions
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.StatusCode = 401; return; }
-                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
                 if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
                 var views = new List<ViewDefinition>(DataStoreProvider.Current.Query<ViewDefinition>(null));
@@ -3175,7 +3175,7 @@ public static class RouteRegistrationExtensions
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.StatusCode = 401; return; }
-                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
                 if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
                 var id = GetRouteParam(context, "id");
@@ -3267,7 +3267,7 @@ public static class RouteRegistrationExtensions
             {
                 var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
                 if (user == null) { context.Response.StatusCode = 401; return; }
-                var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
                 if (!userPermissions.Contains("admin")) { context.Response.StatusCode = 403; context.Response.ContentType = "application/json"; await context.Response.WriteAsync("{\"error\":\"Access denied\"}"); return; }
 
                 if (!CsrfProtection.ValidateApiToken(context))
@@ -3361,7 +3361,7 @@ public static class RouteRegistrationExtensions
             {
                 Clauses = new List<QueryClause>
                 {
-                    new() { Field = "RecipientUserName", Operator = QueryOperator.Equals, Value = user.UserName }
+                    new() { Field = "RecipientUserName", Operator = QueryOperator.Equals, Value = (UserAuth.GetUserName(user) ?? user.Key.ToString()) }
                 },
                 Sorts = new List<SortClause>
                 {
@@ -3404,7 +3404,7 @@ public static class RouteRegistrationExtensions
             {
                 Clauses = new List<QueryClause>
                 {
-                    new() { Field = "RecipientUserName", Operator = QueryOperator.Equals, Value = user.UserName },
+                    new() { Field = "RecipientUserName", Operator = QueryOperator.Equals, Value = (UserAuth.GetUserName(user) ?? user.Key.ToString()) },
                     new() { Field = "IsRead",            Operator = QueryOperator.Equals, Value = false }
                 }
             };
@@ -3430,7 +3430,7 @@ public static class RouteRegistrationExtensions
             { context.Response.StatusCode = 400; await context.Response.WriteAsync("{\"error\":\"Invalid id\"}"); return; }
 
             var msg = await DataStoreProvider.Current.LoadAsync<InboxMessage>(msgKey, context.RequestAborted).ConfigureAwait(false);
-            if (msg == null || !string.Equals(msg.RecipientUserName, user.UserName, StringComparison.OrdinalIgnoreCase))
+            if (msg == null || !string.Equals(msg.RecipientUserName, (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
             { context.Response.StatusCode = 404; await context.Response.WriteAsync("{\"error\":\"Not found\"}"); return; }
 
             if (!msg.IsRead)
@@ -3452,7 +3452,7 @@ public static class RouteRegistrationExtensions
             {
                 Clauses = new List<QueryClause>
                 {
-                    new() { Field = "RecipientUserName", Operator = QueryOperator.Equals, Value = user.UserName },
+                    new() { Field = "RecipientUserName", Operator = QueryOperator.Equals, Value = (UserAuth.GetUserName(user) ?? user.Key.ToString()) },
                     new() { Field = "IsRead",            Operator = QueryOperator.Equals, Value = false }
                 }
             };

@@ -397,7 +397,7 @@ public static class LookupApiHandlers
         if (string.Equals(permissionsNeeded, "AnonymousOnly", StringComparison.OrdinalIgnoreCase))
             return false;
 
-        var userPermissions = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
         var altLookup = userPermissions.GetAlternateLookup<ReadOnlySpan<char>>();
         var remaining = permissionsNeeded.AsSpan();
         while (remaining.Length > 0)

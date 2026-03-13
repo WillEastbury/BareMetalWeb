@@ -759,7 +759,7 @@ public static class BinaryApiHandlers
                     return (null, typeSlug, (403, "Access denied."));
                 if (!string.Equals(permissionsNeeded, "Authenticated", StringComparison.OrdinalIgnoreCase))
                 {
-                    var userPerms = new HashSet<string>(user.Permissions ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+                    var userPerms = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
                     var altLookup = userPerms.GetAlternateLookup<ReadOnlySpan<char>>();
                     var remaining = permissionsNeeded.AsSpan();
                     bool hasRequired = false;

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -11,11 +12,11 @@ using BareMetalWeb.Core.Interfaces;
 namespace BareMetalWeb.Data;
 
 /// <summary>
-/// Service for capturing audit trail records for entity changes and remote commands
+/// Service for capturing audit trail records for entity changes and remote commands.
+/// Uses generic DataScaffold handlers — no dependency on the typed AuditEntry class.
 /// </summary>
 public sealed class AuditService
 {
-    private readonly IDataObjectStore _store;
     private readonly IBufferedLogger? _logger;
 
     // Cache of compiled property accessors per type — avoids per-call GetProperties/GetValue reflection
@@ -44,9 +45,23 @@ public sealed class AuditService
 
     public AuditService(IDataObjectStore store, IBufferedLogger? logger = null)
     {
-        _store = store ?? throw new ArgumentNullException(nameof(store));
+        _ = store ?? throw new ArgumentNullException(nameof(store));
         _logger = logger;
     }
+
+    private DataEntityMetadata? GetAuditMeta()
+        => DataScaffold.TryGetEntity("auditentry", out var meta) ? meta : null;
+
+    private BaseDataObject? CreateAuditRecord(DataEntityMetadata meta, string userName)
+    {
+        var entry = meta.Handlers.Create();
+        entry.CreatedBy = userName;
+        entry.UpdatedBy = userName;
+        return entry;
+    }
+
+    private static void SetField(BaseDataObject record, DataEntityMetadata meta, string fieldName, object? value)
+        => meta.FindField(fieldName)?.SetValueFn(record, value);
 
     /// <summary>
     /// Captures an audit record for entity creation
@@ -56,17 +71,19 @@ public sealed class AuditService
     {
         try
         {
-            var auditEntry = new AuditEntry(userName)
-            {
-                EntityType = typeof(T).Name,
-                EntityKey = entity.Key,
-                Operation = AuditOperation.Create,
-                TimestampUtc = DateTime.UtcNow,
-                UserName = userName,
-                Notes = "Entity created"
-            };
+            var meta = GetAuditMeta();
+            if (meta == null) return;
+            var entry = CreateAuditRecord(meta, userName);
+            if (entry == null) return;
 
-            await SaveAuditEntryAsync(auditEntry, "create", cancellationToken).ConfigureAwait(false);
+            SetField(entry, meta, "EntityType", typeof(T).Name);
+            SetField(entry, meta, "EntityKey", entity.Key);
+            SetField(entry, meta, "Operation", AuditOperation.Create);
+            SetField(entry, meta, "TimestampUtc", DateTime.UtcNow);
+            SetField(entry, meta, "UserName", userName);
+            SetField(entry, meta, "Notes", "Entity created");
+
+            await SaveAuditEntryAsync(meta, entry, "create", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -83,23 +100,25 @@ public sealed class AuditService
         try
         {
             var changes = DetectChanges(oldEntity, newEntity);
-            
+
             // Skip if no meaningful changes (e.g., only UpdatedOnUtc, ETag changed)
             if (changes.Count == 0)
                 return;
 
-            var auditEntry = new AuditEntry(userName)
-            {
-                EntityType = typeof(T).Name,
-                EntityKey = newEntity.Key,
-                Operation = AuditOperation.Update,
-                TimestampUtc = DateTime.UtcNow,
-                UserName = userName,
-                FieldChanges = changes,
-                Notes = $"{changes.Count} field(s) changed"
-            };
+            var meta = GetAuditMeta();
+            if (meta == null) return;
+            var entry = CreateAuditRecord(meta, userName);
+            if (entry == null) return;
 
-            await SaveAuditEntryAsync(auditEntry, "update", cancellationToken).ConfigureAwait(false);
+            SetField(entry, meta, "EntityType", typeof(T).Name);
+            SetField(entry, meta, "EntityKey", newEntity.Key);
+            SetField(entry, meta, "Operation", AuditOperation.Update);
+            SetField(entry, meta, "TimestampUtc", DateTime.UtcNow);
+            SetField(entry, meta, "UserName", userName);
+            SetField(entry, meta, "FieldChangesJson", JsonSerializer.Serialize(changes, BmwDataJsonContext.Default.ListFieldChange));
+            SetField(entry, meta, "Notes", $"{changes.Count} field(s) changed");
+
+            await SaveAuditEntryAsync(meta, entry, "update", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -116,17 +135,19 @@ public sealed class AuditService
     {
         try
         {
-            var auditEntry = new AuditEntry(userName)
-            {
-                EntityType = typeof(T).Name,
-                EntityKey = entityKey,
-                Operation = AuditOperation.Delete,
-                TimestampUtc = DateTime.UtcNow,
-                UserName = userName,
-                Notes = "Entity deleted"
-            };
+            var meta = GetAuditMeta();
+            if (meta == null) return;
+            var entry = CreateAuditRecord(meta, userName);
+            if (entry == null) return;
 
-            await SaveAuditEntryAsync(auditEntry, "delete", cancellationToken).ConfigureAwait(false);
+            SetField(entry, meta, "EntityType", typeof(T).Name);
+            SetField(entry, meta, "EntityKey", entityKey);
+            SetField(entry, meta, "Operation", AuditOperation.Delete);
+            SetField(entry, meta, "TimestampUtc", DateTime.UtcNow);
+            SetField(entry, meta, "UserName", userName);
+            SetField(entry, meta, "Notes", "Entity deleted");
+
+            await SaveAuditEntryAsync(meta, entry, "delete", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -148,20 +169,22 @@ public sealed class AuditService
     {
         try
         {
-            var auditEntry = new AuditEntry(userName)
-            {
-                EntityType = typeof(T).Name,
-                EntityKey = entity.Key,
-                Operation = AuditOperation.RemoteCommand,
-                TimestampUtc = DateTime.UtcNow,
-                UserName = userName,
-                CommandName = commandName,
-                CommandParameters = parameters != null ? DataJsonWriter.ToJsonString(parameters) : null,
-                CommandResult = result != null ? $"Success: {result.Success}, Message: {result.Message}" : null,
-                Notes = $"Remote command '{commandName}' executed"
-            };
+            var meta = GetAuditMeta();
+            if (meta == null) return;
+            var entry = CreateAuditRecord(meta, userName);
+            if (entry == null) return;
 
-            await SaveAuditEntryAsync(auditEntry, "remote command", cancellationToken).ConfigureAwait(false);
+            SetField(entry, meta, "EntityType", typeof(T).Name);
+            SetField(entry, meta, "EntityKey", entity.Key);
+            SetField(entry, meta, "Operation", AuditOperation.RemoteCommand);
+            SetField(entry, meta, "TimestampUtc", DateTime.UtcNow);
+            SetField(entry, meta, "UserName", userName);
+            SetField(entry, meta, "CommandName", commandName);
+            SetField(entry, meta, "CommandParameters", parameters != null ? DataJsonWriter.ToJsonString(parameters) : null);
+            SetField(entry, meta, "CommandResult", result != null ? $"Success: {result.Success}, Message: {result.Message}" : null);
+            SetField(entry, meta, "Notes", $"Remote command '{commandName}' executed");
+
+            await SaveAuditEntryAsync(meta, entry, "remote command", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -172,32 +195,34 @@ public sealed class AuditService
     /// <summary>
     /// Gets audit history for a specific entity
     /// </summary>
-    public async ValueTask<IEnumerable<AuditEntry>> GetEntityHistoryAsync<T>(
+    public async ValueTask<IEnumerable<BaseDataObject>> GetEntityHistoryAsync<T>(
         uint entityKey,
         CancellationToken cancellationToken = default)
         where T : BaseDataObject
     {
-        // Query all audit entries for this entity type and ID
+        var meta = GetAuditMeta();
+        if (meta == null) return Array.Empty<BaseDataObject>();
+
         var query = new QueryDefinition
         {
             Clauses = new List<QueryClause>
             {
-                new() { Field = nameof(AuditEntry.EntityType), Operator = QueryOperator.Equals, Value = typeof(T).Name },
-                new() { Field = nameof(AuditEntry.EntityKey), Operator = QueryOperator.Equals, Value = entityKey }
+                new() { Field = "EntityType", Operator = QueryOperator.Equals, Value = typeof(T).Name },
+                new() { Field = "EntityKey", Operator = QueryOperator.Equals, Value = entityKey }
             },
             Sorts = new List<SortClause>
             {
-                new() { Field = nameof(AuditEntry.TimestampUtc), Direction = SortDirection.Desc }
+                new() { Field = "TimestampUtc", Direction = SortDirection.Desc }
             }
         };
 
-        return await _store.QueryAsync<AuditEntry>(query, cancellationToken).ConfigureAwait(false);
+        return await meta.Handlers.QueryAsync(query, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Gets all audit entries with optional filtering
     /// </summary>
-    public async ValueTask<IEnumerable<AuditEntry>> QueryAuditLogAsync(
+    public async ValueTask<IEnumerable<BaseDataObject>> QueryAuditLogAsync(
         string? entityType = null,
         string? userName = null,
         DateTime? fromDate = null,
@@ -206,34 +231,37 @@ public sealed class AuditService
         int? limit = null,
         CancellationToken cancellationToken = default)
     {
+        var meta = GetAuditMeta();
+        if (meta == null) return Array.Empty<BaseDataObject>();
+
         var clauses = new List<QueryClause>();
 
         if (!string.IsNullOrEmpty(entityType))
-            clauses.Add(new() { Field = nameof(AuditEntry.EntityType), Operator = QueryOperator.Equals, Value = entityType });
+            clauses.Add(new() { Field = "EntityType", Operator = QueryOperator.Equals, Value = entityType });
 
         if (!string.IsNullOrEmpty(userName))
-            clauses.Add(new() { Field = nameof(AuditEntry.UserName), Operator = QueryOperator.Equals, Value = userName });
+            clauses.Add(new() { Field = "UserName", Operator = QueryOperator.Equals, Value = userName });
 
         if (fromDate.HasValue)
-            clauses.Add(new() { Field = nameof(AuditEntry.TimestampUtc), Operator = QueryOperator.GreaterThanOrEqual, Value = fromDate.Value });
+            clauses.Add(new() { Field = "TimestampUtc", Operator = QueryOperator.GreaterThanOrEqual, Value = fromDate.Value });
 
         if (toDate.HasValue)
-            clauses.Add(new() { Field = nameof(AuditEntry.TimestampUtc), Operator = QueryOperator.LessThanOrEqual, Value = toDate.Value });
+            clauses.Add(new() { Field = "TimestampUtc", Operator = QueryOperator.LessThanOrEqual, Value = toDate.Value });
 
         if (operation.HasValue)
-            clauses.Add(new() { Field = nameof(AuditEntry.Operation), Operator = QueryOperator.Equals, Value = operation.Value });
+            clauses.Add(new() { Field = "Operation", Operator = QueryOperator.Equals, Value = operation.Value });
 
         var query = new QueryDefinition
         {
             Clauses = clauses,
             Sorts = new List<SortClause>
             {
-                new() { Field = nameof(AuditEntry.TimestampUtc), Direction = SortDirection.Desc }
+                new() { Field = "TimestampUtc", Direction = SortDirection.Desc }
             },
             Top = limit ?? 100
         };
 
-        return await _store.QueryAsync<AuditEntry>(query, cancellationToken).ConfigureAwait(false);
+        return await meta.Handlers.QueryAsync(query, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -372,17 +400,19 @@ public sealed class AuditService
     {
         try
         {
-            var auditEntry = new AuditEntry(userName)
-            {
-                EntityType = entityType,
-                EntityKey = entityKey,
-                Operation = AuditOperation.AccessDenied,
-                TimestampUtc = DateTime.UtcNow,
-                UserName = userName,
-                Notes = $"Denied {attemptedAction}: {reason}",
-            };
+            var meta = GetAuditMeta();
+            if (meta == null) return;
+            var entry = CreateAuditRecord(meta, userName);
+            if (entry == null) return;
 
-            await SaveAuditEntryAsync(auditEntry, "access denied", cancellationToken).ConfigureAwait(false);
+            SetField(entry, meta, "EntityType", entityType);
+            SetField(entry, meta, "EntityKey", entityKey);
+            SetField(entry, meta, "Operation", AuditOperation.AccessDenied);
+            SetField(entry, meta, "TimestampUtc", DateTime.UtcNow);
+            SetField(entry, meta, "UserName", userName);
+            SetField(entry, meta, "Notes", $"Denied {attemptedAction}: {reason}");
+
+            await SaveAuditEntryAsync(meta, entry, "access denied", cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -390,20 +420,20 @@ public sealed class AuditService
         }
     }
 
-    private async ValueTask SaveAuditEntryAsync(AuditEntry entry, string operationName, CancellationToken cancellationToken)
+    private async ValueTask SaveAuditEntryAsync(DataEntityMetadata meta, BaseDataObject entry, string operationName, CancellationToken cancellationToken)
     {
         // Auto-assign a sequential key if not already set
         if (entry.Key == 0)
         {
             var provider = DataStoreProvider.PrimaryProvider;
             entry.Key = provider != null
-                ? provider.NextSequentialKey(nameof(AuditEntry))
-                : IdSequenceProvider.NextKey(nameof(AuditEntry));
+                ? provider.NextSequentialKey("AuditEntry")
+                : IdSequenceProvider.NextKey("AuditEntry");
         }
 
         if (RunSynchronously)
         {
-            await _store.SaveAsync(entry, cancellationToken).ConfigureAwait(false);
+            await meta.Handlers.SaveAsync(entry, cancellationToken).ConfigureAwait(false);
         }
         else
         {
@@ -411,7 +441,7 @@ public sealed class AuditService
             {
                 try
                 {
-                    await _store.SaveAsync(entry, cancellationToken).ConfigureAwait(false);
+                    await meta.Handlers.SaveAsync(entry, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex)
                 {

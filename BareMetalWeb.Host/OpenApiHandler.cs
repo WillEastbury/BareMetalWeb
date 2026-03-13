@@ -33,7 +33,7 @@ internal static class OpenApiHandler
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted)
             .ConfigureAwait(false);
 
-        var userPermissions = user?.Permissions ?? Array.Empty<string>();
+        var userPermissions = UserAuth.GetPermissions(user);
 
         var filteredEntities = new List<DataEntityMetadata>();
         foreach (var e in DataScaffold.Entities)
@@ -503,7 +503,7 @@ internal static class OpenApiHandler
 
     // ── Permission helpers ────────────────────────────────────────────────────
 
-    private static bool IsEntityAccessible(DataEntityMetadata entity, User? user, string[] userPermissions)
+    private static bool IsEntityAccessible(DataEntityMetadata entity, BaseDataObject? user, string[] userPermissions)
     {
         var perms = entity.Permissions ?? string.Empty;
         if (string.IsNullOrWhiteSpace(perms) || string.Equals(perms, "Public", StringComparison.OrdinalIgnoreCase))

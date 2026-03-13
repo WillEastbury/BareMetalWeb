@@ -78,7 +78,7 @@ public static class DeltaApiHandlers
 
         // Auth check
         var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted);
-        var userName = user?.UserName ?? "anonymous";
+        var userName = UserAuth.GetUserName(user) ?? "anonymous";
         var permissionsNeeded = meta!.Permissions?.Trim();
         if (!string.IsNullOrWhiteSpace(permissionsNeeded)
             && !string.Equals(permissionsNeeded, "Public", StringComparison.OrdinalIgnoreCase))
@@ -106,8 +106,10 @@ public static class DeltaApiHandlers
                 delta = MutationDelta.Deserialize(ms.GetBuffer().AsSpan(0, (int)ms.Length));
             }
 
-            var (entity, result) = await DeltaMutationEngine.ApplyDeltaAsync(
+            var applyResult = await DeltaMutationEngine.ApplyDeltaAsync(
                 meta, layout, delta, userName, context.RequestAborted);
+            var entity = applyResult.Entity;
+            var result = applyResult.Result;
 
             if (result != MutationResult.Success)
             {

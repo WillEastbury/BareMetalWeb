@@ -48,7 +48,7 @@ public class UserAuthTests : IDisposable
 
         // Assert
         Assert.NotNull(user);
-        Assert.Equal("chatgpt", user.UserName);
+        Assert.Equal("chatgpt", UserAuth.GetUserName(user));
     }
 
     [Fact]

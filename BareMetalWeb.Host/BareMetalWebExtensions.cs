@@ -88,14 +88,13 @@ public static class BareMetalWebExtensions
         DataScaffold.RegisterEntity<AppSetting>();
         DataScaffold.RegisterEntity<User>();
         DataScaffold.RegisterEntity<SystemPrincipal>();
-        DataScaffold.RegisterEntity<AuditEntry>();
         DataScaffold.RegisterEntity<ReportDefinition>();
         DataScaffold.RegisterEntity<EntityDefinition>();
         DataScaffold.RegisterEntity<FieldDefinition>();
         DataScaffold.RegisterEntity<IndexDefinition>();
         DataScaffold.RegisterEntity<ActionDefinition>();
         DataScaffold.RegisterEntity<ActionCommandDefinition>();
-        // Migrated to system catalog (Phase 2): DomainEventSubscription, ScheduledActionDefinition, NotificationDefinition
+        // Migrated to system catalog: DomainEventSubscription, ScheduledActionDefinition, NotificationDefinition, AuditEntry
         DataScaffold.RegisterEntity<DashboardDefinition>();
         DataScaffold.RegisterEntity<ViewDefinition>();
         DataScaffold.RegisterEntity<FileAttachment>();
