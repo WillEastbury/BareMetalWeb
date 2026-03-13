@@ -248,7 +248,7 @@
     var content = null;
 
     function getContent() {
-        return content || (content = document.getElementById('vnext-content'));
+        return content || (content = document.getElementById('vnext-content') || document.getElementById('vnext-root'));
     }
 
     function setContent(html) {
@@ -4870,6 +4870,9 @@
 
     // ── App init / routing ────────────────────────────────────────────────────
     function init() {
+        var legacyRoot = document.getElementById('vnext-content');
+        if (!legacyRoot) return;
+
         // Build nav from metadata (async, non-blocking)
         fetchMetaObjects().then(buildNav).catch(function () {});
 
@@ -5015,13 +5018,21 @@
   const R   = document.getElementById('vnext-root') || document.getElementById('vnext-content');
   if (!R) return;
 
+  let _routeAbortController = null;
+
+  function cancelNavigation() {
+    if (_routeAbortController) {
+      _routeAbortController.abort();
+      _routeAbortController = null;
+    }
+  }
+
   // ── SPA Activation: hide server-rendered content, take over navigation ──
   // Use class-based hiding (not display:none) to avoid CLS — the .bm-ssr-hidden
   // class uses visibility:hidden + position:absolute so the element is removed
   // from visual flow without triggering a layout shift.
   const ssrContent = document.querySelector('.bm-ssr-content');
   if (ssrContent) ssrContent.classList.add('bm-ssr-hidden');
-  R.style.display = '';
 
   // Intercept ALL internal link clicks for SPA navigation (not just [data-go])
   document.addEventListener('click', function (e) {
@@ -5035,7 +5046,8 @@
     }
     // Skip non-SPA paths
     if (href.startsWith('/api/') || href.startsWith('/auth/') || href.startsWith('/admin/') ||
-        href.startsWith('/login') || href.startsWith('/logout') || href.startsWith('/meta/') ||
+        href.startsWith('/login') || href.startsWith('/logout') || href.startsWith('/account') ||
+        href === '/system/me' || href.startsWith('/system/me?') || href.startsWith('/meta/') ||
         href.startsWith('/static/') || href.startsWith('/bmw/') ||
         href === '/status' || href === '/metrics') return;
     e.preventDefault();
@@ -5170,6 +5182,16 @@
     chatA.innerHTML = '<i class="bi bi-chat-dots"></i>';
     chatLi.appendChild(chatA);
     rightUl.appendChild(chatLi);
+
+    const accountLi = el('li', { className: 'nav-item' });
+    const accountA = el('a', {
+      className: 'nav-link',
+      href: '/system/me',
+      title: 'My Account'
+    });
+    accountA.innerHTML = '<i class="bi bi-person-circle"></i>';
+    accountLi.appendChild(accountA);
+    rightUl.appendChild(accountLi);
 
     // Bell icon linking to inbox page
     const jobsLi  = el('li', { className: 'nav-item' });

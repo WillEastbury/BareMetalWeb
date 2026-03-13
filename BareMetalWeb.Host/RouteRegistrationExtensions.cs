@@ -167,6 +167,10 @@ public static class RouteRegistrationExtensions
 
         // Account management
         host.RegisterRoute("GET /account", new RouteHandlerData(
+            pageInfoFactory.TemplatedPage(mainTemplate, 302, Array.Empty<string>(), Array.Empty<string>(), "Authenticated", false, 1, navAlignment: NavAlignment.Right),
+            routeHandlers.AccountRedirectHandler));
+
+        host.RegisterRoute("GET /system/me", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Account", "" }, "Authenticated", true, 1, navGroup: "Account", navAlignment: NavAlignment.Right),
             routeHandlers.AccountHandler));
 
