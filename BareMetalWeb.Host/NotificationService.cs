@@ -176,6 +176,7 @@ public sealed class InAppNotificationChannel : INotificationChannel
         meta.FindField("Category")?.SetValueFn(msg, _category);
         meta.FindField("IsRead")?.SetValueFn(msg, false);
         meta.FindField("CreatedAtUtc")?.SetValueFn(msg, DateTime.UtcNow);
+        await DataScaffold.ApplyAutoIdAsync(meta, msg, ct).ConfigureAwait(false);
         await meta.Handlers.SaveAsync(msg, ct).ConfigureAwait(false);
     }
 }

@@ -196,24 +196,24 @@ public class TernaryTensorTests
     }
 
     [Fact]
-    public void WeightedAccumulate_MatchesScalar()
+    public void IntrinsicsMatVec_WeightedAccumulate_MatchesScalar()
     {
         var values = new int[] { 10, 20, 30, 40 };
         var output = new int[4];
         long weight = 3;
-        long totalWeight = 6; // not used in SIMD path; division is deferred
+        long totalWeight = 6;
 
-        TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
+        IntrinsicsMatVec.WeightedAccumulate(weight, values, output, totalWeight);
 
-        // output[d] += weight * values[d] (no division — deferred to DivideInPlace)
-        Assert.Equal(30, output[0]);   // 3*10 = 30
-        Assert.Equal(60, output[1]);   // 3*20 = 60
-        Assert.Equal(90, output[2]);   // 3*30 = 90
-        Assert.Equal(120, output[3]);  // 3*40 = 120
+        // output[d] += (int)(3 * values[d] / 6)
+        Assert.Equal(5, output[0]);   // 3*10/6 = 5
+        Assert.Equal(10, output[1]);  // 3*20/6 = 10
+        Assert.Equal(15, output[2]);  // 3*30/6 = 15
+        Assert.Equal(20, output[3]);  // 3*40/6 = 20
     }
 
     [Fact]
-    public void WeightedAccumulate_LargeVector_MatchesScalar()
+    public void IntrinsicsMatVec_WeightedAccumulate_LargeVector_MatchesScalar()
     {
         int size = 64;
         var values = new int[size];
@@ -225,60 +225,64 @@ public class TernaryTensorTests
             values[i] = rng.Next(-200, 200);
 
         long weight = 7;
-        long totalWeight = 10; // not used — division deferred
+        long totalWeight = 10;
 
-        // Compute expected scalar result (just weight * values[d])
+        // Compute expected scalar result
         for (int i = 0; i < size; i++)
-            expected[i] = (int)weight * values[i];
+            expected[i] = (int)(weight * values[i] / totalWeight);
 
-        TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
+        IntrinsicsMatVec.WeightedAccumulate(weight, values, output, totalWeight);
 
         Assert.Equal(expected, output);
     }
 
     [Fact]
-    public void WeightedAccumulate_AccumulatesIntoExistingOutput()
+    public void IntrinsicsMatVec_WeightedAccumulate_AccumulatesIntoExistingOutput()
     {
         var values = new int[] { 100, 200, 300, 400 };
         var output = new int[] { 1, 2, 3, 4 };
-        long weight = 2;
-        long totalWeight = 1; // not used — division deferred
+        long weight = 1;
+        long totalWeight = 2;
 
-        TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
+        IntrinsicsMatVec.WeightedAccumulate(weight, values, output, totalWeight);
 
-        // output[d] += weight * values[d]
-        Assert.Equal(201, output[0]);  // 1 + 2*100
-        Assert.Equal(402, output[1]);  // 2 + 2*200
-        Assert.Equal(603, output[2]);  // 3 + 2*300
-        Assert.Equal(804, output[3]);  // 4 + 2*400
+        // output[d] += (int)(1 * values[d] / 2)
+        Assert.Equal(51, output[0]);   // 1 + 100/2
+        Assert.Equal(102, output[1]);  // 2 + 200/2
+        Assert.Equal(153, output[2]);  // 3 + 300/2
+        Assert.Equal(204, output[3]);  // 4 + 400/2
     }
 
     [Fact]
-    public void DivideInPlace_DividesAllElements()
+    public void IntrinsicsMatVec_DotProduct_MatchesScalar()
     {
-        var output = new int[] { 30, 60, 90, 120 };
+        var a = new int[] { 1, 2, 3, 4, 5, 6, 7, 8 };
+        var b = new int[] { 10, 20, 30, 40, 50, 60, 70, 80 };
 
-        TernaryTensor.DivideInPlace(output, 6);
+        int result = IntrinsicsMatVec.DotProduct(a, b);
 
-        Assert.Equal(new int[] { 5, 10, 15, 20 }, output);
+        Assert.Equal(2040, result);
     }
 
     [Fact]
-    public void WeightedAccumulate_ThenDivide_MatchesOriginalSemantics()
+    public void IntrinsicsMatVec_DotProduct_LargeVector_MatchesScalar()
     {
-        // Simulate the two-phase pattern used in MultiHeadAttention
-        var values = new int[] { 10, 20, 30, 40 };
-        var output = new int[4];
-        int weight = 3;
-        int totalWeight = 6;
+        int size = 256;
+        var a = new int[size];
+        var b = new int[size];
+        var rng = new Random(42);
 
-        // Phase 1: accumulate
-        TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
-        // Phase 2: normalize
-        TernaryTensor.DivideInPlace(output, totalWeight);
+        long expected = 0;
+        for (int i = 0; i < size; i++)
+        {
+            a[i] = rng.Next(-100, 100);
+            b[i] = rng.Next(-100, 100);
+            expected += (long)a[i] * b[i];
+        }
 
-        // 3*10/6=5, 3*20/6=10, 3*30/6=15, 3*40/6=20
-        Assert.Equal(new int[] { 5, 10, 15, 20 }, output);
+        int result = IntrinsicsMatVec.DotProduct(a, b);
+
+        Assert.Equal((int)expected, result);
     }
 
     [Fact]

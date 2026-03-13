@@ -53,6 +53,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
     // Vocabulary strings for token decoding, set at load time.
     private string[]? _tokenTable;
+    // Tokenizer wraps the token table with encode/decode logic.
+    private Tokenizer? _tokenizer;
 
     // Serialises inference so pre-allocated buffers are not clobbered by concurrent calls.
     private readonly SemaphoreSlim _inferLock = new SemaphoreSlim(1, 1);
@@ -62,6 +64,12 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private long _totalTokensOut;
     private long _totalRequests;
     private long _totalInferenceMs;
+    // KV-cache hit/miss counters (miss = new encode position, hit = decode re-use)
+    private long _kvCacheHits;
+    private long _kvCacheMisses;
+    // Layer timing accumulator (microseconds)
+    private long _totalLayerTimeMicros;
+    private long _totalLayerTimeSamples;
 
     public bool IsLoaded => _isLoaded;
 
@@ -98,6 +106,15 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         int origVocab = _pruner?.OriginalVocabSize ?? _config.VocabSize;
         int prunedVocab = _pruner?.PrunedVocabSize ?? _config.VocabSize;
 
+        long tokOut  = Interlocked.Read(ref _totalTokensOut);
+        long totalMs = Interlocked.Read(ref _totalInferenceMs);
+        float tokPerSec = totalMs > 0 ? tokOut * 1000f / totalMs : 0f;
+
+        long samples = Interlocked.Read(ref _totalLayerTimeSamples);
+        long avgLayerMicros = samples > 0
+            ? Interlocked.Read(ref _totalLayerTimeMicros) / samples
+            : 0;
+
         return new BitNetPipelineMetrics(
             OriginalWeightBytes: ms.StoredBytes,
             TrimmedWeightBytes: ms.PackedBytes,
@@ -108,14 +125,18 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             LayerCount: ms.LayerCount,
             EmbeddingWeights: ms.EmbeddingWeights,
             TotalTokensIn: Interlocked.Read(ref _totalTokensIn),
-            TotalTokensOut: Interlocked.Read(ref _totalTokensOut),
+            TotalTokensOut: tokOut,
             TotalRequests: Interlocked.Read(ref _totalRequests),
-            TotalInferenceMs: Interlocked.Read(ref _totalInferenceMs),
+            TotalInferenceMs: totalMs,
             PrePruneAccuracy: sp.HasValue ? sp.Value.PrePruneAccuracy : null,
             PostPruneAccuracy: sp.HasValue ? sp.Value.PostPruneAccuracy : null,
             SemanticTestCaseCount: sp.HasValue ? sp.Value.TestCaseCount : null,
             OriginalVocabSize: origVocab,
-            PrunedVocabSize: prunedVocab
+            PrunedVocabSize: prunedVocab,
+            TokensPerSec: tokPerSec,
+            KvCacheHits: Interlocked.Read(ref _kvCacheHits),
+            KvCacheMisses: Interlocked.Read(ref _kvCacheMisses),
+            AvgLayerTimeMicros: avgLayerMicros
         );
     }
 
@@ -206,10 +227,15 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         // Use the full synthetic vocabulary directly (pruner reordering is complex; 
         // correct decoding happens through the remaining active vocab indices).
         var vocabTokenList = BuildSyntheticVocabulary(activeVocab);
-        _tokenTable = vocabTokenList is string[] strArr ? strArr : vocabTokenList.ToArray();
+        var tokenTableArray = vocabTokenList is string[] strArr ? strArr : vocabTokenList.ToArray();
 
         // 10. Compress to 2-bit packed native memory
+        // NOTE: CompressToNative calls DisposeNative() which nulls _tokenTable/_tokenizer,
+        //       so we must set them AFTER CompressToNative.
         CompressToNative(layers, embeddings, outputHead, activeVocab, dim);
+
+        _tokenTable = tokenTableArray;
+        _tokenizer  = new Tokenizer(_tokenTable);
 
         _isLoaded = true;
     }
@@ -226,7 +252,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         int activeVocab,
         int dim)
     {
-        // Dispose any previous compressed data
+        // Dispose any previous compressed data.
+        // NOTE: DisposeNative also nulls _tokenTable/_tokenizer.
+        // Callers must re-assign _tokenTable/_tokenizer AFTER this call.
         DisposeNative();
 
         _layerCount = layers.Length;
@@ -312,6 +340,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _compressedEmbeddings = snapshot.Embeddings;
         _compressedOutputHead = snapshot.OutputHead;
         _tokenTable = snapshot.Tokens;
+        _tokenizer  = _tokenTable is not null ? new Tokenizer(_tokenTable) : null;
 
         int dim = _config.HiddenDim;
         int activeVocab = snapshot.ActiveVocab;
@@ -376,6 +405,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _compressedEmbeddings = snap.Embeddings;
         _compressedOutputHead = snap.OutputHead;
         _tokenTable = snap.Tokens;
+        _tokenizer  = _tokenTable is not null ? new Tokenizer(_tokenTable) : null;
 
         int dim = _config.HiddenDim;
         AllocateInferenceBuffers(dim, snap.ActiveVocab);
@@ -466,24 +496,29 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private const int EosTokenId = 2;
     // Maximum tokens to generate per call (prevents runaway generation on random models)
     private const int MaxGenerateTokens = 16;
+    // Top-K sampling parameter (K=8 balances diversity and coherence)
+    private const int DefaultTopK = 8;
+    // Temperature in Q8 fixed-point: 256 = T=1.0 (stochastic), 0 = greedy
+    // Default is greedy (deterministic) — callers may set higher values for diversity.
+    private const int DefaultTempQ8 = 0;
 
     /// <summary>
     /// Full autoregressive token-generation loop.
-    /// 1. Encodes each prompt character as a token ID and runs a forward pass
-    ///    to build the KV cache.
-    /// 2. Greedily samples the next token from the output logits.
-    /// 3. Repeats until EOS or <paramref name="maxTokens"/> generated.
+    /// 1. Encodes the prompt with the Tokenizer (Encode → int[]).
+    /// 2. Runs a forward pass for each prompt token to build the KV cache.
+    /// 3. Samples the next token using Top-K sampling (or greedy if temp=0).
+    /// 4. Repeats until EOS or <paramref name="maxTokens"/> generated.
     /// All intermediate buffers are pre-allocated — zero per-call GC pressure.
     /// </summary>
     private string RunInference(ReadOnlySpan<char> prompt, int maxTokens, CancellationToken ct)
     {
-        int dim = _config.HiddenDim;
+        int dim      = _config.HiddenDim;
         int vocabSize = _compressedOutputHead!.Rows;
 
         // Work with pre-allocated slices
-        var bufHidden  = _bufHidden!.AsSpan(0, dim);
-        var bufNorm    = _bufNorm!.AsSpan(0, dim);
-        var bufLogits  = _bufLogits!.AsSpan(0, vocabSize);
+        var bufHidden = _bufHidden!.AsSpan(0, dim);
+        var bufNorm   = _bufNorm!.AsSpan(0, dim);
+        var bufLogits = _bufLogits!.AsSpan(0, vocabSize);
 
         // Clear KV cache for this inference pass
         for (int L = 0; L < _layerCount; L++)
@@ -492,19 +527,39 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             Array.Clear(_kvCacheV![L], 0, _config.MaxSeqLen * dim);
         }
 
-        int seqLen = 0;
-
-        // ── Prefill: process each prompt character ──────────────────────────
-        for (int p = 0; p < prompt.Length && seqLen < _config.MaxSeqLen; p++, seqLen++)
+        // ── Tokenize prompt ────────────────────────────────────────────────────
+        // Use the tokenizer when available; fall back to char-mod encoding.
+        int[] promptTokens;
+        if (_tokenizer is not null)
         {
-            ct.ThrowIfCancellationRequested();
-            EmbedToken(prompt[p] % vocabSize, bufHidden);
-            ForwardAllLayers(seqLen, bufHidden, bufNorm);
+            promptTokens = _tokenizer.Encode(prompt);
+        }
+        else
+        {
+            promptTokens = new int[prompt.Length + 2];
+            promptTokens[0] = Tokenizer.BosId;
+            for (int i = 0; i < prompt.Length; i++)
+                promptTokens[i + 1] = prompt[i] % vocabSize;
+            promptTokens[prompt.Length + 1] = Tokenizer.EosId;
         }
 
-        // ── Decode: generate tokens ─────────────────────────────────────────
+        int seqLen = 0;
+
+        // ── Prefill: process each prompt token ────────────────────────────────
+        for (int p = 0; p < promptTokens.Length && seqLen < _config.MaxSeqLen; p++, seqLen++)
+        {
+            ct.ThrowIfCancellationRequested();
+            int tid = Math.Clamp(promptTokens[p], 0, vocabSize - 1);
+            EmbedToken(tid, bufHidden);
+            ForwardAllLayers(seqLen, bufHidden, bufNorm, isMiss: true);
+        }
+
+        // ── Decode: generate tokens ────────────────────────────────────────────
         int generateLimit = Math.Min(maxTokens, MaxGenerateTokens);
         var output = new System.Text.StringBuilder(generateLimit * 8);
+
+        // Re-use the logits buffer as sampling scratch (same size, no extra alloc)
+        var samplingBuf = _bufLogits!.AsSpan(0, vocabSize);
 
         for (int gen = 0; gen < generateLimit && seqLen < _config.MaxSeqLen; gen++)
         {
@@ -514,8 +569,14 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             TernaryTensor.RmsNormalize(bufHidden, bufNorm);
             _compressedOutputHead.MatVecMultiply(bufNorm, bufLogits);
 
-            // Greedy argmax — no float allocation
-            int nextToken = ArgMax(bufLogits);
+            // Top-K sampling — stochastic, integer arithmetic
+            int nextToken = Sampling.SampleTopK(
+                bufLogits,
+                topK:   DefaultTopK,
+                tempQ8: DefaultTempQ8,
+                rng:    Random.Shared,
+                scratch: samplingBuf);
+
             if (nextToken == EosTokenId) break;
 
             // Decode token to text and append
@@ -525,20 +586,24 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
             // Feed next token as input for the next step
             EmbedToken(nextToken, bufHidden);
-            ForwardAllLayers(seqLen, bufHidden, bufNorm);
+            ForwardAllLayers(seqLen, bufHidden, bufNorm, isMiss: false);
             seqLen++;
         }
 
-        return output.Length > 0 ? output.ToString() : DecodeToken(ArgMax(bufLogits));
+        return output.Length > 0 ? output.ToString() : DecodeToken(Sampling.ArgMax(bufLogits));
     }
 
     /// <summary>
     /// Runs all transformer layers in order. Modifies <paramref name="hidden"/> in-place.
     /// Uses only pre-allocated buffers — no managed heap allocations.
+    /// <paramref name="isMiss"/> controls KV-cache accounting (true = encode/miss, false = decode/hit).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ForwardAllLayers(int seqPos, Span<int> hidden, Span<int> norm)
+    private void ForwardAllLayers(int seqPos, Span<int> hidden, Span<int> norm, bool isMiss = true)
     {
+        // Layer timing instrumentation
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+
         var attnOut = _bufPreWo!.AsSpan();
         for (int L = 0; L < _layerCount; L++)
         {
@@ -552,6 +617,17 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             _compressedFfn![L].MatVecMultiply(norm, attnOut);
             TernaryTensor.Add(hidden, attnOut, hidden);
         }
+
+        // Instrumentation: record layer time and KV-cache accounting
+        long elapsedTicks = System.Diagnostics.Stopwatch.GetTimestamp() - t0;
+        long elapsedMicros = elapsedTicks * 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
+        Interlocked.Add(ref _totalLayerTimeMicros, elapsedMicros);
+        Interlocked.Increment(ref _totalLayerTimeSamples);
+
+        if (isMiss)
+            Interlocked.Increment(ref _kvCacheMisses);
+        else
+            Interlocked.Increment(ref _kvCacheHits);
     }
 
     /// <summary>
@@ -601,42 +677,49 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             int hOff = h * headDim;
 
             // Compute raw dot-product attention scores for head h over all past positions
+            // Use IntrinsicsMatVec.DotProduct for AVX2/NEON acceleration
             int maxScore = int.MinValue;
             for (int p = 0; p < posCount; p++)
             {
                 int kBase = p * dim + hOff;
                 var kCache = _kvCacheK[layer].AsSpan(kBase, headDim);
                 var qSlice = bufQ.Slice(hOff, headDim);
-                // SIMD-accelerated dot product (NEON / AVX2 / scalar)
-                int score = TernaryTensor.DotProduct(qSlice, kCache);
+                int score = IntrinsicsMatVec.DotProduct(qSlice, kCache);
                 // Scale to prevent overflow: divide by √headDim using bit-shift
                 score >>= scaleShift;
                 scores[p] = score;
                 if (score > maxScore) maxScore = score;
             }
 
-            // Softmax approximation: shift so max = 128, clamp to [1, 128]
+            // Integer softmax approximation via exponential shift.
+            // Maps scores to approximate softmax weights using the identity:
+            //   exp(x - max) ≈ 2^((x - max) / scale)
+            // We use scale=8 (right-shift by 3) to convert the score delta
+            // into a bit-shift exponent.
+            //   shift = |delta| >> 3  →  weight = 256 >> shift
+            //   When shift > 8: 256 >> shift = 0, clamped to 1 (minimum).
+            // This replaces the previous linear clamp which was over-simplistic.
             long totalWeight = 0;
             for (int p = 0; p < posCount; p++)
             {
-                int w = Math.Clamp(128 + (scores[p] - maxScore), 1, 128);
-                scores[p] = w;
+                int delta = scores[p] - maxScore; // ≤ 0
+                int shift = (-delta) >> 3;         // non-negative right-shift amount
+                // 2^(delta/8) in range [1, 256]: when shift > 8, result < 1 → clamp to 1
+                int w = shift > 8 ? 1 : (256 >> shift);
+                scores[p]   = w;
                 totalWeight += w;
             }
             if (totalWeight == 0) totalWeight = 1;
 
-            // Weighted sum of V values for this head (SIMD-accelerated two-phase):
-            // Phase 1: accumulate weight * V using SIMD multiply+add (no division)
-            var outSlice = output.Slice(hOff, headDim);
+            // Weighted sum of V values for this head using IntrinsicsMatVec
             for (int p = 0; p < posCount; p++)
             {
                 long w = scores[p];
                 int vBase = p * dim + hOff;
-                var vSlice = _kvCacheV![layer].AsSpan(vBase, headDim);
-                TernaryTensor.WeightedAccumulate(outSlice, w, vSlice, totalWeight);
+                var vSlice  = _kvCacheV![layer].AsSpan(vBase, headDim);
+                var outSlice = output.Slice(hOff, headDim);
+                IntrinsicsMatVec.WeightedAccumulate(w, vSlice, outSlice, totalWeight);
             }
-            // Phase 2: normalize by totalWeight (scalar division)
-            TernaryTensor.DivideInPlace(outSlice, (int)totalWeight);
         }
 
         // Output projection: Wo × attention_output
@@ -755,6 +838,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _kvCacheK = null;
         _kvCacheV = null;
         _tokenTable = null;
+        _tokenizer  = null;
         NativeBytesAllocated = 0;
         LayerStats = null;
     }
