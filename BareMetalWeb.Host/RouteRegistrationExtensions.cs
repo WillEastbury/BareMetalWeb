@@ -25,6 +25,29 @@ public static class RouteRegistrationExtensions
     private static readonly JsonWriterOptions s_compactWriterOptions = new();
     private static readonly JsonWriterOptions s_indentedWriterOptions = new() { Indented = true };
 
+    private static bool TryGetInboxMessageMeta(out DataEntityMetadata meta)
+        => DataScaffold.TryGetEntity("inbox-messages", out meta);
+
+    private static string GetInboxFieldString(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+        => meta.FindField(fieldName)?.GetValueFn?.Invoke(obj)?.ToString() ?? string.Empty;
+
+    private static bool GetInboxFieldBool(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    {
+        var value = meta.FindField(fieldName)?.GetValueFn?.Invoke(obj);
+        return value switch
+        {
+            bool flag => flag,
+            string text when bool.TryParse(text, out var parsed) => parsed,
+            _ => false
+        };
+    }
+
+    private static DateTime GetInboxCreatedAtUtc(BaseDataObject obj, DataEntityMetadata meta)
+    {
+        var value = meta.FindField("CreatedAtUtc")?.GetValueFn?.Invoke(obj);
+        return value is DateTime dateTime ? dateTime : obj.CreatedOnUtc;
+    }
+
     /// <summary>
     /// Register static/public page routes (home, status).
     /// </summary>
@@ -3356,6 +3379,12 @@ public static class RouteRegistrationExtensions
         {
             var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
             if (user == null) { context.Response.StatusCode = 401; return; }
+            if (!TryGetInboxMessageMeta(out var inboxMeta))
+            {
+                context.Response.StatusCode = 500;
+                await context.Response.WriteAsync("{\"error\":\"Inbox metadata not found\"}");
+                return;
+            }
 
             var query = new QueryDefinition
             {
@@ -3369,7 +3398,8 @@ public static class RouteRegistrationExtensions
                 },
                 Top = 50
             };
-            var messages = DataStoreProvider.Current.Query<InboxMessage>(query).ToList();
+            var rawMessages = await DataScaffold.QueryAsync(inboxMeta, query, context.RequestAborted).ConfigureAwait(false);
+            var messages = rawMessages.OfType<BaseDataObject>().ToList();
 
             context.Response.ContentType = "application/json";
             var payload = new Dictionary<string, object?>[messages.Count];
@@ -3378,14 +3408,14 @@ public static class RouteRegistrationExtensions
                 var m = messages[i];
                 payload[i] = new Dictionary<string, object?>
                 {
-                    ["id"]           = m.Key,
-                    ["subject"]      = m.Subject,
-                    ["body"]         = m.Body,
-                    ["category"]     = m.Category,
-                    ["isRead"]       = m.IsRead,
-                    ["createdAtUtc"] = m.CreatedAtUtc,
-                    ["entitySlug"]   = m.EntitySlug,
-                    ["entityId"]     = m.EntityId
+                    ["id"] = m.Key,
+                    ["subject"] = GetInboxFieldString(m, inboxMeta, "Subject"),
+                    ["body"] = GetInboxFieldString(m, inboxMeta, "Body"),
+                    ["category"] = GetInboxFieldString(m, inboxMeta, "Category"),
+                    ["isRead"] = GetInboxFieldBool(m, inboxMeta, "IsRead"),
+                    ["createdAtUtc"] = GetInboxCreatedAtUtc(m, inboxMeta),
+                    ["entitySlug"] = GetInboxFieldString(m, inboxMeta, "EntitySlug"),
+                    ["entityId"] = GetInboxFieldString(m, inboxMeta, "EntityId")
                 };
             }
             await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
@@ -3399,16 +3429,25 @@ public static class RouteRegistrationExtensions
         {
             var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
             if (user == null) { context.Response.StatusCode = 401; return; }
+            if (!TryGetInboxMessageMeta(out var inboxMeta))
+            {
+                context.Response.StatusCode = 500;
+                await context.Response.WriteAsync("{\"error\":\"Inbox metadata not found\"}");
+                return;
+            }
 
             var query = new QueryDefinition
             {
                 Clauses = new List<QueryClause>
                 {
                     new() { Field = "RecipientUserName", Operator = QueryOperator.Equals, Value = (UserAuth.GetUserName(user) ?? user.Key.ToString()) },
-                    new() { Field = "IsRead",            Operator = QueryOperator.Equals, Value = false }
+                    new() { Field = "IsRead", Operator = QueryOperator.Equals, Value = false }
                 }
             };
-            var count = DataStoreProvider.Current.Query<InboxMessage>(query).Count();
+            var unread = await DataScaffold.QueryAsync(inboxMeta, query, context.RequestAborted).ConfigureAwait(false);
+            var count = 0;
+            foreach (var _ in unread)
+                count++;
 
             context.Response.ContentType = "application/json";
             await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
@@ -3424,19 +3463,25 @@ public static class RouteRegistrationExtensions
         {
             var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
             if (user == null) { context.Response.StatusCode = 401; return; }
+            if (!TryGetInboxMessageMeta(out var inboxMeta))
+            {
+                context.Response.StatusCode = 500;
+                await context.Response.WriteAsync("{\"error\":\"Inbox metadata not found\"}");
+                return;
+            }
 
             var idStr = GetRouteParam(context, "id");
             if (!uint.TryParse(idStr, out var msgKey))
             { context.Response.StatusCode = 400; await context.Response.WriteAsync("{\"error\":\"Invalid id\"}"); return; }
 
-            var msg = await DataStoreProvider.Current.LoadAsync<InboxMessage>(msgKey, context.RequestAborted).ConfigureAwait(false);
-            if (msg == null || !string.Equals(msg.RecipientUserName, (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
+            var msgRaw = await DataScaffold.LoadAsync(inboxMeta, msgKey, context.RequestAborted).ConfigureAwait(false);
+            if (msgRaw is not BaseDataObject msg || !string.Equals(GetInboxFieldString(msg, inboxMeta, "RecipientUserName"), (UserAuth.GetUserName(user) ?? user.Key.ToString()), StringComparison.OrdinalIgnoreCase))
             { context.Response.StatusCode = 404; await context.Response.WriteAsync("{\"error\":\"Not found\"}"); return; }
 
-            if (!msg.IsRead)
+            if (!GetInboxFieldBool(msg, inboxMeta, "IsRead"))
             {
-                msg.IsRead = true;
-                await DataStoreProvider.Current.SaveAsync(msg, context.RequestAborted).ConfigureAwait(false);
+                inboxMeta.FindField("IsRead")?.SetValueFn(msg, true);
+                await inboxMeta.Handlers.SaveAsync(msg, context.RequestAborted).ConfigureAwait(false);
             }
             context.Response.ContentType = "application/json";
             await context.Response.WriteAsync("{\"ok\":true}");
@@ -3447,26 +3492,37 @@ public static class RouteRegistrationExtensions
         {
             var user = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
             if (user == null) { context.Response.StatusCode = 401; return; }
+            if (!TryGetInboxMessageMeta(out var inboxMeta))
+            {
+                context.Response.StatusCode = 500;
+                await context.Response.WriteAsync("{\"error\":\"Inbox metadata not found\"}");
+                return;
+            }
 
             var query = new QueryDefinition
             {
                 Clauses = new List<QueryClause>
                 {
                     new() { Field = "RecipientUserName", Operator = QueryOperator.Equals, Value = (UserAuth.GetUserName(user) ?? user.Key.ToString()) },
-                    new() { Field = "IsRead",            Operator = QueryOperator.Equals, Value = false }
+                    new() { Field = "IsRead", Operator = QueryOperator.Equals, Value = false }
                 }
             };
-            var unread = DataStoreProvider.Current.Query<InboxMessage>(query).ToList();
-            foreach (var msg in unread)
+            var unreadRaw = await DataScaffold.QueryAsync(inboxMeta, query, context.RequestAborted).ConfigureAwait(false);
+            var marked = 0;
+            foreach (var item in unreadRaw)
             {
-                msg.IsRead = true;
-                await DataStoreProvider.Current.SaveAsync(msg, context.RequestAborted).ConfigureAwait(false);
+                if (item is not BaseDataObject msg)
+                    continue;
+
+                inboxMeta.FindField("IsRead")?.SetValueFn(msg, true);
+                await inboxMeta.Handlers.SaveAsync(msg, context.RequestAborted).ConfigureAwait(false);
+                marked++;
             }
             context.Response.ContentType = "application/json";
             await using (var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions))
             {
                 w.WriteStartObject();
-                w.WriteNumber("marked", unread.Count);
+                w.WriteNumber("marked", marked);
                 w.WriteEndObject();
             }
         }));

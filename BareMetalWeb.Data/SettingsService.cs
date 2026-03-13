@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using BareMetalWeb.Core;
 using BareMetalWeb.Data.Interfaces;
 
 namespace BareMetalWeb.Data;
@@ -15,6 +16,13 @@ namespace BareMetalWeb.Data;
 /// </summary>
 public static class SettingsService
 {
+    private static bool TryGetSettingsMeta(out DataEntityMetadata meta)
+        => DataScaffold.TryGetEntity("app-settings", out meta)
+            || DataScaffold.TryGetEntity("settings", out meta);
+
+    private static string GetFieldString(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+        => meta.FindField(fieldName)?.GetValueFn(obj)?.ToString() ?? string.Empty;
+
     // Per-tenant caches: tenantId → (settingId → value)
     private static readonly ConcurrentDictionary<string, ConcurrentDictionary<string, string>> _tenantCaches =
         new(StringComparer.OrdinalIgnoreCase);
@@ -36,29 +44,34 @@ public static class SettingsService
         if (cache.TryGetValue(settingId, out var cached))
             return cached;
 
+        if (!TryGetSettingsMeta(out var meta))
+            return defaultValue;
+
         var query = new QueryDefinition
         {
             Clauses = new List<QueryClause>
             {
-                new() { Field = nameof(AppSetting.SettingId), Operator = QueryOperator.Equals, Value = settingId }
+                new() { Field = "SettingId", Operator = QueryOperator.Equals, Value = settingId }
             },
             Top = 1
         };
 
-        var settings = DataStoreProvider.Current.Query<AppSetting>(query);
-        AppSetting? setting = null;
+        var settings = meta.Handlers.QueryAsync(query, CancellationToken.None).GetAwaiter().GetResult();
+        BaseDataObject? setting = null;
         foreach (var s in settings)
         {
-            if (string.Equals(s.SettingId, settingId, StringComparison.OrdinalIgnoreCase))
+            if (s is BaseDataObject obj
+                && string.Equals(GetFieldString(obj, meta, "SettingId"), settingId, StringComparison.OrdinalIgnoreCase))
             {
-                setting = s;
+                setting = obj;
                 break;
             }
         }
         if (setting != null)
         {
-            cache[settingId] = setting.Value;
-            return setting.Value;
+            var settingValue = GetFieldString(setting, meta, "Value");
+            cache[settingId] = settingValue;
+            return settingValue;
         }
 
         return defaultValue;
@@ -95,12 +108,22 @@ public static class SettingsService
         string createdBy,
         CancellationToken cancellationToken = default)
     {
-        var existing = new Dictionary<string, AppSetting>(StringComparer.OrdinalIgnoreCase);
-        var allSettings = await store.QueryAsync<AppSetting>(null, cancellationToken).ConfigureAwait(false);
+        if (!TryGetSettingsMeta(out var meta))
+        {
+            InvalidateCache();
+            return;
+        }
+
+        var existing = new Dictionary<string, BaseDataObject>(StringComparer.OrdinalIgnoreCase);
+        var allSettings = await meta.Handlers.QueryAsync(null, cancellationToken).ConfigureAwait(false);
         foreach (var s in allSettings)
         {
-            if (!existing.ContainsKey(s.SettingId))
-                existing[s.SettingId] = s;
+            if (s is not BaseDataObject settingObj)
+                continue;
+
+            var existingSettingId = GetFieldString(settingObj, meta, "SettingId");
+            if (!string.IsNullOrWhiteSpace(existingSettingId) && !existing.ContainsKey(existingSettingId))
+                existing[existingSettingId] = settingObj;
         }
 
         foreach (var (settingId, value, description) in defaults)
@@ -108,24 +131,22 @@ public static class SettingsService
             if (existing.TryGetValue(settingId, out var existingSetting))
             {
                 // Promote an existing empty value when the configured default is non-empty
-                if (!string.IsNullOrEmpty(value) && string.IsNullOrEmpty(existingSetting.Value))
+                if (!string.IsNullOrEmpty(value) && string.IsNullOrEmpty(GetFieldString(existingSetting, meta, "Value")))
                 {
-                    existingSetting.Value = value;
+                    meta.FindField("Value")?.SetValueFn(existingSetting, value);
                     existingSetting.UpdatedBy = createdBy;
-                    await store.SaveAsync(existingSetting, cancellationToken).ConfigureAwait(false);
+                    await meta.Handlers.SaveAsync(existingSetting, cancellationToken).ConfigureAwait(false);
                 }
                 continue;
             }
 
-            var setting = new AppSetting
-            {
-                SettingId = settingId,
-                Value = value,
-                Description = description,
-                CreatedBy = createdBy,
-                UpdatedBy = createdBy
-            };
-            await store.SaveAsync(setting, cancellationToken).ConfigureAwait(false);
+            var setting = meta.Handlers.Create();
+            setting.CreatedBy = createdBy;
+            setting.UpdatedBy = createdBy;
+            meta.FindField("SettingId")?.SetValueFn(setting, settingId);
+            meta.FindField("Value")?.SetValueFn(setting, value);
+            meta.FindField("Description")?.SetValueFn(setting, description);
+            await meta.Handlers.SaveAsync(setting, cancellationToken).ConfigureAwait(false);
         }
 
         InvalidateCache();

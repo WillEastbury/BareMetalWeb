@@ -302,11 +302,19 @@ public static class DataScaffold
     public static async ValueTask SaveAsync(DataEntityMetadata metadata, object instance, CancellationToken cancellationToken = default)
     {
         await metadata.Handlers.SaveAsync((BaseDataObject)instance, cancellationToken);
-        if (instance is AppSetting appSetting && !string.IsNullOrWhiteSpace(appSetting.SettingId))
-            SettingsService.InvalidateCache(appSetting.SettingId);
+
+        var slug = metadata.Slug;
+        if ((string.Equals(slug, "app-settings", StringComparison.OrdinalIgnoreCase)
+             || string.Equals(slug, "settings", StringComparison.OrdinalIgnoreCase))
+            && instance is BaseDataObject setting)
+        {
+            var settingIdField = metadata.FindField("SettingId");
+            var settingId = settingIdField?.GetValueFn(setting)?.ToString();
+            if (!string.IsNullOrWhiteSpace(settingId))
+                SettingsService.InvalidateCache(settingId);
+        }
 
         // Invalidate RBAC cache when security entities change
-        var slug = metadata.Slug;
         if (string.Equals(slug, "security-groups", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(slug, "roles", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(slug, "permissions", StringComparison.OrdinalIgnoreCase) ||
