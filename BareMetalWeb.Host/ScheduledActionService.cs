@@ -10,8 +10,9 @@ using BareMetalWeb.Data.Interfaces;
 namespace BareMetalWeb.Host;
 
 /// <summary>
-/// Background service that checks <see cref="BareMetalWeb.Runtime.ScheduledActionDefinition"/>
-/// records every minute and executes due actions against qualifying entity records.
+/// Background service that checks scheduled-actions metadata records
+/// every minute and executes due actions against qualifying entity records.
+/// Works with generic field access — no dependency on typed C# entity classes.
 /// </summary>
 public sealed class ScheduledActionService
 {
@@ -66,19 +67,36 @@ public sealed class ScheduledActionService
 
     private async Task ProcessSchedulesAsync(DateTime nowUtc, CancellationToken ct)
     {
-        var store = DataStoreProvider.Current;
-        var schedulesResult = await store.QueryAsync<BareMetalWeb.Runtime.ScheduledActionDefinition>(null, ct);
-        var schedules = new List<BareMetalWeb.Runtime.ScheduledActionDefinition>();
+        if (!DataScaffold.TryGetEntity("scheduled-actions", out var schedMeta))
+            return;
+
+        var schedulesResult = await schedMeta.Handlers.QueryAsync(null, ct);
+        var schedules = new List<BaseDataObject>();
         foreach (var s in schedulesResult)
             schedules.Add(s);
 
         foreach (var sched in schedules)
         {
-            if (!sched.Enabled) continue;
+            var enabled = schedMeta.FindField("Enabled")?.GetValueFn(sched);
+            if (enabled is false || string.Equals(enabled?.ToString(), "False", StringComparison.OrdinalIgnoreCase))
+                continue;
 
-            if (!IsDue(sched, nowUtc)) continue;
+            var lastRunUtc = schedMeta.FindField("LastRunUtc")?.GetValueFn(sched) as DateTime?;
+            var schedule = schedMeta.FindField("Schedule")?.GetValueFn(sched)?.ToString() ?? "daily";
 
-            var entitySlug = ResolveEntitySlug(sched.EntityId);
+            if (lastRunUtc.HasValue)
+            {
+                var elapsed = nowUtc - lastRunUtc.Value;
+                var interval = ParseInterval(schedule);
+                if (elapsed < interval) continue;
+            }
+
+            var entityIdVal = schedMeta.FindField("EntityId")?.GetValueFn(sched)?.ToString() ?? string.Empty;
+            var actionName = schedMeta.FindField("ActionName")?.GetValueFn(sched)?.ToString() ?? string.Empty;
+            var schedName = schedMeta.FindField("Name")?.GetValueFn(sched)?.ToString() ?? string.Empty;
+            var filterExpr = schedMeta.FindField("FilterExpression")?.GetValueFn(sched)?.ToString();
+
+            var entitySlug = ResolveEntitySlug(entityIdVal);
             if (string.IsNullOrEmpty(entitySlug) || !DataScaffold.TryGetEntity(entitySlug, out var meta))
                 continue;
 
@@ -86,7 +104,7 @@ public sealed class ScheduledActionService
             RemoteCommandMetadata? actionCmd = null;
             foreach (var c in meta.Commands)
             {
-                if (string.Equals(c.Name, sched.ActionName, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(c.Name, actionName, StringComparison.OrdinalIgnoreCase))
                 {
                     actionCmd = c;
                     break;
@@ -96,8 +114,7 @@ public sealed class ScheduledActionService
 
             try
             {
-                // Query all records (optionally filtered)
-                var query = string.IsNullOrWhiteSpace(sched.FilterExpression)
+                var query = string.IsNullOrWhiteSpace(filterExpr)
                     ? null
                     : new QueryDefinition();
 
@@ -109,14 +126,13 @@ public sealed class ScheduledActionService
 
                 foreach (var item in items)
                 {
-                    // Execute the action by building a CommandIntent and routing through the normal pipeline
                     try
                     {
                         var intent = new BareMetalWeb.Runtime.CommandIntent
                         {
                             EntitySlug = entitySlug,
                             EntityId = item.Key.ToString(),
-                            Operation = sched.ActionName
+                            Operation = actionName
                         };
 
                         var svc = new BareMetalWeb.Runtime.CommandService();
@@ -125,32 +141,23 @@ public sealed class ScheduledActionService
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogError($"ScheduledAction '{sched.Name}' failed on item: {ex.Message}", ex);
+                        _logger.LogError($"ScheduledAction '{schedName}' failed on item: {ex.Message}", ex);
                     }
                 }
 
-                sched.LastRunUtc = nowUtc;
-                sched.LastRunCount = count;
-                await store.SaveAsync(sched, ct);
+                // Update last run info
+                schedMeta.FindField("LastRunUtc")?.SetValueFn(sched, nowUtc);
+                schedMeta.FindField("LastRunCount")?.SetValueFn(sched, count);
+                await schedMeta.Handlers.SaveAsync(sched, ct);
 
                 if (count > 0)
-                    _logger.LogInfo($"ScheduledAction '{sched.Name}' executed on {count} record(s).");
+                    _logger.LogInfo($"ScheduledAction '{schedName}' executed on {count} record(s).");
             }
             catch (Exception ex)
             {
-                _logger.LogError($"ScheduledAction '{sched.Name}' error: {ex.Message}", ex);
+                _logger.LogError($"ScheduledAction '{schedName}' error: {ex.Message}", ex);
             }
         }
-    }
-
-    private static bool IsDue(BareMetalWeb.Runtime.ScheduledActionDefinition sched, DateTime nowUtc)
-    {
-        if (!sched.LastRunUtc.HasValue) return true;
-
-        var elapsed = nowUtc - sched.LastRunUtc.Value;
-        var interval = ParseInterval(sched.Schedule);
-
-        return elapsed >= interval;
     }
 
     internal static TimeSpan ParseInterval(string schedule)

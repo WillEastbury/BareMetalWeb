@@ -180,41 +180,65 @@ public sealed class InAppNotificationChannel : INotificationChannel
 }
 
 /// <summary>
-/// Notification service that resolves channels from NotificationDefinition records
+/// Notification service that resolves channels from metadata-defined notification records
 /// and sends templated messages. Integrates with scheduled actions.
+/// Works with any BaseDataObject (typed NotificationDefinition or DataRecord).
 /// </summary>
 public static class NotificationService
 {
     private static IBufferedLogger? _logger;
+    private static DataEntityMetadata? _channelMeta;
 
     public static void Initialize(IBufferedLogger? logger = null) => _logger = logger;
 
+    private static DataEntityMetadata? GetChannelMeta()
+    {
+        if (_channelMeta != null) return _channelMeta;
+        if (DataScaffold.TryGetEntity("notification-channels", out var meta))
+            _channelMeta = meta;
+        return _channelMeta;
+    }
+
+    private static string F(BaseDataObject obj, DataEntityMetadata meta, string fieldName)
+    {
+        var field = meta.FindField(fieldName);
+        return field?.GetValueFn?.Invoke(obj)?.ToString() ?? string.Empty;
+    }
+
     /// <summary>
-    /// Send a notification using the specified channel definition, substituting
+    /// Send a notification using the specified channel record, substituting
     /// field placeholders in subject/body templates.
     /// </summary>
     public static async ValueTask SendAsync(
-        NotificationDefinition channel,
+        BaseDataObject channel,
         string recipient,
         Dictionary<string, string>? fields,
         CancellationToken ct)
     {
-        if (!channel.Enabled) return;
+        var meta = GetChannelMeta();
+        if (meta == null) return;
 
-        var subject = ApplyTemplate(channel.SubjectTemplate, fields);
-        var body = ApplyTemplate(channel.BodyTemplate, fields);
+        if (string.Equals(F(channel, meta, "Enabled"), "False", StringComparison.OrdinalIgnoreCase)) return;
 
-        INotificationChannel transport = channel.ChannelType switch
+        var subject = ApplyTemplate(F(channel, meta, "SubjectTemplate"), fields);
+        var body = ApplyTemplate(F(channel, meta, "BodyTemplate"), fields);
+        var channelType = F(channel, meta, "ChannelType");
+        var name = F(channel, meta, "Name");
+        var host = F(channel, meta, "Host");
+        var portStr = F(channel, meta, "Port");
+        var port = int.TryParse(portStr, out var p) ? p : 587;
+        var useTls = string.Equals(F(channel, meta, "UseTls"), "True", StringComparison.OrdinalIgnoreCase);
+        var username = F(channel, meta, "Username");
+        var password = F(channel, meta, "Password");
+        var fromAddress = F(channel, meta, "FromAddress");
+
+        INotificationChannel transport = channelType.ToLowerInvariant() switch
         {
-            NotificationChannelType.Email => new SmtpNotificationChannel(
-                channel.Host, channel.Port, channel.UseTls,
-                channel.Username, channel.Password, channel.FromAddress),
-            NotificationChannelType.Sms => new WebhookSmsChannel(
-                channel.Host, channel.Username, channel.FromAddress),
-            NotificationChannelType.Webhook => new WebhookNotificationChannel(
-                channel.Host, channel.Password),
-            NotificationChannelType.InApp => new InAppNotificationChannel(channel.Name),
-            _ => throw new InvalidOperationException($"Unknown channel type: {channel.ChannelType}")
+            "email" => new SmtpNotificationChannel(host, port, useTls, username, password, fromAddress),
+            "sms" => new WebhookSmsChannel(host, username, fromAddress),
+            "webhook" => new WebhookNotificationChannel(host, password),
+            "inapp" => new InAppNotificationChannel(name),
+            _ => throw new InvalidOperationException($"Unknown channel type: {channelType}")
         };
 
         // #1247: Retry with exponential backoff (3 attempts)
@@ -235,20 +259,20 @@ public static class NotificationService
                 try
                 {
                     await transport.SendAsync(recipient, subject, body, ct);
-                    _logger?.LogInfo($"Notification sent via {channel.ChannelType}: {channel.Name} → {recipient}");
+                    _logger?.LogInfo($"Notification sent via {channelType}: {name} → {recipient}");
                     return;
                 }
                 catch (OperationCanceledException) { throw; }
                 catch (Exception ex)
                 {
                     lastEx = ex;
-                    _logger?.LogError($"Notification attempt {attempt + 1}/{maxRetries} failed: {channel.Name} → {recipient}", ex);
+                    _logger?.LogError($"Notification attempt {attempt + 1}/{maxRetries} failed: {name} → {recipient}", ex);
                 }
             }
 
             if (lastEx != null)
             {
-                _logger?.LogError($"Notification permanently failed after {maxRetries} attempts: {channel.Name} → {recipient}", lastEx);
+                _logger?.LogError($"Notification permanently failed after {maxRetries} attempts: {name} → {recipient}", lastEx);
             }
         }
         finally
@@ -259,12 +283,16 @@ public static class NotificationService
 
     /// <summary>Send to all default recipients configured on the channel.</summary>
     public static async ValueTask SendToDefaultRecipientsAsync(
-        NotificationDefinition channel,
+        BaseDataObject channel,
         Dictionary<string, string>? fields,
         CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(channel.DefaultRecipients)) return;
-        var recipients = channel.DefaultRecipients.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var meta = GetChannelMeta();
+        if (meta == null) return;
+
+        var defaultRecipients = F(channel, meta, "DefaultRecipients");
+        if (string.IsNullOrWhiteSpace(defaultRecipients)) return;
+        var recipients = defaultRecipients.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         foreach (var r in recipients)
             await SendAsync(channel, r, fields, ct);
     }

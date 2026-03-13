@@ -1,3 +1,4 @@
+using BareMetalWeb.Core;
 using BareMetalWeb.Data.Interfaces;
 
 namespace BareMetalWeb.Runtime.CapabilityGraph;
@@ -105,33 +106,41 @@ public sealed class CapabilityGraphBuilder
             // Phase 5: Scheduled action → workflow nodes
             try
             {
-                var scheduledActions = await store.QueryAsync<ScheduledActionDefinition>().ConfigureAwait(false);
-                foreach (var sa in scheduledActions)
+                if (DataScaffold.TryGetEntity("scheduled-actions", out var schedMeta))
                 {
-                    // Resolve entity by EntityId
-                    int entityIdx = -1;
-                    int? entityQueryId = null;
-                    if (!string.IsNullOrWhiteSpace(sa.EntityId))
+                    var scheduledActions = await schedMeta.Handlers.QueryAsync(null, CancellationToken.None).ConfigureAwait(false);
+                    foreach (var sa in scheduledActions)
                     {
-                        foreach (var entity in _registry.All)
+                        var saEntityId = schedMeta.FindField("EntityId")?.GetValueFn(sa)?.ToString() ?? string.Empty;
+                        var saName = schedMeta.FindField("Name")?.GetValueFn(sa)?.ToString() ?? string.Empty;
+                        var saSchedule = schedMeta.FindField("Schedule")?.GetValueFn(sa)?.ToString() ?? string.Empty;
+                        var saActionName = schedMeta.FindField("ActionName")?.GetValueFn(sa)?.ToString() ?? string.Empty;
+
+                        // Resolve entity by EntityId
+                        int entityIdx = -1;
+                        int? entityQueryId = null;
+                        if (!string.IsNullOrWhiteSpace(saEntityId))
                         {
-                            if (string.Equals(entity.EntityId, sa.EntityId, StringComparison.OrdinalIgnoreCase))
+                            foreach (var entity in _registry.All)
                             {
-                                entityIdx = _slugToEntityIndex.TryGetValue(entity.Slug, out var ei) ? ei : -1;
-                                entityQueryId = _slugToQueryNode.TryGetValue(entity.Slug, out var qid) ? qid : null;
-                                break;
+                                if (string.Equals(entity.EntityId, saEntityId, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    entityIdx = _slugToEntityIndex.TryGetValue(entity.Slug, out var ei) ? ei : -1;
+                                    entityQueryId = _slugToQueryNode.TryGetValue(entity.Slug, out var qid) ? qid : null;
+                                    break;
+                                }
                             }
                         }
-                    }
 
-                    var workflowId = AddNode(CapabilityType.RunWorkflow, entityIdx,
-                        $"RunWorkflow({sa.Name})",
-                        detail: $"schedule={sa.Schedule},action={sa.ActionName}");
+                        var workflowId = AddNode(CapabilityType.RunWorkflow, entityIdx,
+                            $"RunWorkflow({saName})",
+                            detail: $"schedule={saSchedule},action={saActionName}");
 
-                    if (entityQueryId.HasValue)
-                    {
-                        AddEdge(entityQueryId.Value, workflowId);
-                        AddEdge(workflowId, entityQueryId.Value);
+                        if (entityQueryId.HasValue)
+                        {
+                            AddEdge(entityQueryId.Value, workflowId);
+                            AddEdge(workflowId, entityQueryId.Value);
+                        }
                     }
                 }
             }

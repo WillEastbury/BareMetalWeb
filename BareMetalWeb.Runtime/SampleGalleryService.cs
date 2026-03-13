@@ -281,38 +281,40 @@ public static class SampleGalleryService
             }
 
             // Import scheduled action definitions for this entity
-            foreach (var srcSched in package.ScheduledActions)
+            if (DataScaffold.TryGetEntity("scheduled-actions", out var schedMeta))
             {
-                if (srcSched.EntityId != oldEntityId) continue;
-                var newSched = new ScheduledActionDefinition
+                foreach (var srcSched in package.ScheduledActions)
                 {
-                    EntityId = newEntity.EntityId,
-                    Name = srcSched.Name,
-                    ActionName = srcSched.ActionName,
-                    Schedule = srcSched.Schedule,
-                    FilterExpression = srcSched.FilterExpression,
-                    Enabled = srcSched.Enabled
-                };
-                await store.SaveAsync(newSched, cancellationToken).ConfigureAwait(false);
+                    if (srcSched.EntityId != oldEntityId) continue;
+                    var newSched = (BaseDataObject)schedMeta.Handlers.Create();
+                    schedMeta.FindField("EntityId")?.SetValueFn(newSched, newEntity.EntityId);
+                    schedMeta.FindField("Name")?.SetValueFn(newSched, srcSched.Name);
+                    schedMeta.FindField("ActionName")?.SetValueFn(newSched, srcSched.ActionName);
+                    schedMeta.FindField("Schedule")?.SetValueFn(newSched, srcSched.Schedule);
+                    schedMeta.FindField("FilterExpression")?.SetValueFn(newSched, srcSched.FilterExpression);
+                    schedMeta.FindField("Enabled")?.SetValueFn(newSched, srcSched.Enabled);
+                    await schedMeta.Handlers.SaveAsync(newSched, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             // Import workflow rules that watch this entity
-            foreach (var srcRule in package.WorkflowRules)
+            if (DataScaffold.TryGetEntity("domain-event-subscriptions", out var ruleMeta))
             {
-                if (!string.Equals(srcRule.SourceEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) continue;
-                var newRule = new DomainEventSubscription
+                foreach (var srcRule in package.WorkflowRules)
                 {
-                    Name = srcRule.Name,
-                    SourceEntity = newEntity.Slug,
-                    WatchField = srcRule.WatchField,
-                    FromValue = srcRule.FromValue,
-                    TriggerValue = srcRule.TriggerValue,
-                    TargetAction = srcRule.TargetAction,
-                    TargetResolution = srcRule.TargetResolution,
-                    Priority = srcRule.Priority,
-                    Enabled = srcRule.Enabled
-                };
-                await store.SaveAsync(newRule, cancellationToken).ConfigureAwait(false);
+                    if (!string.Equals(srcRule.SourceEntity, srcEntity.Slug, StringComparison.OrdinalIgnoreCase)) continue;
+                    var newRule = (BaseDataObject)ruleMeta.Handlers.Create();
+                    ruleMeta.FindField("Name")?.SetValueFn(newRule, srcRule.Name);
+                    ruleMeta.FindField("SourceEntity")?.SetValueFn(newRule, newEntity.Slug);
+                    ruleMeta.FindField("WatchField")?.SetValueFn(newRule, srcRule.WatchField);
+                    ruleMeta.FindField("FromValue")?.SetValueFn(newRule, srcRule.FromValue);
+                    ruleMeta.FindField("TriggerValue")?.SetValueFn(newRule, srcRule.TriggerValue);
+                    ruleMeta.FindField("TargetAction")?.SetValueFn(newRule, srcRule.TargetAction);
+                    ruleMeta.FindField("TargetResolution")?.SetValueFn(newRule, srcRule.TargetResolution);
+                    ruleMeta.FindField("Priority")?.SetValueFn(newRule, srcRule.Priority);
+                    ruleMeta.FindField("Enabled")?.SetValueFn(newRule, srcRule.Enabled);
+                    await ruleMeta.Handlers.SaveAsync(newRule, cancellationToken).ConfigureAwait(false);
+                }
             }
 
             int fieldCount = 0;
@@ -564,17 +566,23 @@ public static class SampleGalleryService
             await store.DeleteAsync<AggregationDefinition>(agg.Key, ct).ConfigureAwait(false);
 
         // Delete scheduled actions
-        var scheds = new List<ScheduledActionDefinition>(await store.QueryAsync<ScheduledActionDefinition>(entityIdQuery, ct).ConfigureAwait(false));
-        foreach (var sched in scheds)
-            await store.DeleteAsync<ScheduledActionDefinition>(sched.Key, ct).ConfigureAwait(false);
+        if (DataScaffold.TryGetEntity("scheduled-actions", out var schedMeta))
+        {
+            var scheds = new List<BaseDataObject>(await schedMeta.Handlers.QueryAsync(entityIdQuery, ct).ConfigureAwait(false));
+            foreach (var sched in scheds)
+                await schedMeta.Handlers.DeleteAsync(sched.Key, ct).ConfigureAwait(false);
+        }
 
         // Delete workflow rules watching this entity
         var rulesQuery = new QueryDefinition
         {
             Clauses = { new QueryClause { Field = "SourceEntity", Operator = QueryOperator.Equals, Value = entitySlug } }
         };
-        var rules = new List<DomainEventSubscription>(await store.QueryAsync<DomainEventSubscription>(rulesQuery, ct).ConfigureAwait(false));
-        foreach (var rule in rules)
-            await store.DeleteAsync<DomainEventSubscription>(rule.Key, ct).ConfigureAwait(false);
+        if (DataScaffold.TryGetEntity("domain-event-subscriptions", out var ruleMeta))
+        {
+            var rules = new List<BaseDataObject>(await ruleMeta.Handlers.QueryAsync(rulesQuery, ct).ConfigureAwait(false));
+            foreach (var rule in rules)
+                await ruleMeta.Handlers.DeleteAsync(rule.Key, ct).ConfigureAwait(false);
+        }
     }
 }

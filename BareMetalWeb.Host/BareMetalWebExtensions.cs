@@ -83,6 +83,8 @@ public static class BareMetalWebExtensions
         Console.WriteLine($"[BMW Startup] Binary API + Lookup handlers initialized");
 
         // Register system entities explicitly (AOT-safe, no assembly scanning).
+        // Code-first registrations for entities that still have typed handler logic.
+        // Entities migrated to system catalog are loaded via RuntimeEntityRegistry.
         DataScaffold.RegisterEntity<AppSetting>();
         DataScaffold.RegisterEntity<User>();
         DataScaffold.RegisterEntity<SystemPrincipal>();
@@ -93,15 +95,13 @@ public static class BareMetalWebExtensions
         DataScaffold.RegisterEntity<IndexDefinition>();
         DataScaffold.RegisterEntity<ActionDefinition>();
         DataScaffold.RegisterEntity<ActionCommandDefinition>();
-        DataScaffold.RegisterEntity<DomainEventSubscription>();
-        DataScaffold.RegisterEntity<ScheduledActionDefinition>();
-        DataScaffold.RegisterEntity<NotificationDefinition>();
+        // Migrated to system catalog (Phase 2): DomainEventSubscription, ScheduledActionDefinition, NotificationDefinition
         DataScaffold.RegisterEntity<DashboardDefinition>();
         DataScaffold.RegisterEntity<ViewDefinition>();
         DataScaffold.RegisterEntity<FileAttachment>();
         DataScaffold.RegisterEntity<RecordComment>();
         DataScaffold.RegisterEntity<InboxMessage>();
-        Console.WriteLine($"[BMW Startup] Registered {DataScaffold.Entities.Count} system entities (AOT-safe)");
+        Console.WriteLine($"[BMW Startup] Registered {DataScaffold.Entities.Count} code-first entities + system catalog provides the rest");
 
         phaseSw.Restart();
         IDataObjectStore dataStore = ProgramSetup.CreateDataStore(config, contentRoot, serializer, queryEvaluator, logger);
