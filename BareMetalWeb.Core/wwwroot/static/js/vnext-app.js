@@ -5011,6 +5011,9 @@
 
   const R   = document.getElementById('vnext-root') || document.getElementById('vnext-content');
   if (!R) return;
+  const currentPath = location.pathname || '/';
+  const serverOwnedPath = currentPath.startsWith('/account') || currentPath === '/system/me';
+  if (serverOwnedPath) return;
 
   let _routeAbortController = null;
 
