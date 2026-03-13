@@ -3544,7 +3544,7 @@ public sealed class RouteHandlers : IRouteHandlers
             ["requestsOther"] = snapshot.RequestsOther,
             ["throttledRequests"] = snapshot.ThrottledRequests,
 
-            // ── Subsystem timers ──
+            // ── Subsystem timers — since start ──
             ["routeDispatchCount"] = snapshot.RouteDispatchCount,
             ["routeDispatchAvgMs"] = snapshot.RouteDispatchAverage.TotalMilliseconds,
             ["walReadCount"] = snapshot.WalReadCount,
@@ -3553,6 +3553,22 @@ public sealed class RouteHandlers : IRouteHandlers
             ["uiRenderAvgMs"] = snapshot.UiRenderAverage.TotalMilliseconds,
             ["serializationCount"] = snapshot.SerializationCount,
             ["serializationAvgMs"] = snapshot.SerializationAverage.TotalMilliseconds,
+
+            // ── Subsystem timers — last 5 minutes ──
+            ["routeDispatchRecentCount"] = snapshot.RouteDispatchRecentCount,
+            ["routeDispatchRecentAvgMs"] = snapshot.RouteDispatchRecentAverage.TotalMilliseconds,
+            ["walReadRecentCount"] = snapshot.WalReadRecentCount,
+            ["walReadRecentAvgMs"] = snapshot.WalReadRecentAverage.TotalMilliseconds,
+            ["uiRenderRecentCount"] = snapshot.UiRenderRecentCount,
+            ["uiRenderRecentAvgMs"] = snapshot.UiRenderRecentAverage.TotalMilliseconds,
+            ["serializationRecentCount"] = snapshot.SerializationRecentCount,
+            ["serializationRecentAvgMs"] = snapshot.SerializationRecentAverage.TotalMilliseconds,
+
+            // ── Subsystem timers — last observed call ──
+            ["routeDispatchLastMs"] = snapshot.RouteDispatchLast.TotalMilliseconds,
+            ["walReadLastMs"] = snapshot.WalReadLast.TotalMilliseconds,
+            ["uiRenderLastMs"] = snapshot.UiRenderLast.TotalMilliseconds,
+            ["serializationLastMs"] = snapshot.SerializationLast.TotalMilliseconds,
 
             // ── Response write stage timings (recent 5m window) ──
             ["responseTimingSampleCount"] = responseTiming.SampleCount,

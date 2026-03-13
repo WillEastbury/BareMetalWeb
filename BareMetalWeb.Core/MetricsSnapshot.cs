@@ -20,6 +20,7 @@ public readonly record struct MetricsSnapshot(
     long WorkingSet64,
     long VirtualMemorySize64,
     TimeSpan ProcessUptime,
+    // ── Subsystem timers — since start ──
     long RouteDispatchCount,
     TimeSpan RouteDispatchAverage,
     long WalReadCount,
@@ -28,6 +29,20 @@ public readonly record struct MetricsSnapshot(
     TimeSpan UiRenderAverage,
     long SerializationCount,
     TimeSpan SerializationAverage,
+    // ── Subsystem timers — last 5 minutes ──
+    long RouteDispatchRecentCount,
+    TimeSpan RouteDispatchRecentAverage,
+    long WalReadRecentCount,
+    TimeSpan WalReadRecentAverage,
+    long UiRenderRecentCount,
+    TimeSpan UiRenderRecentAverage,
+    long SerializationRecentCount,
+    TimeSpan SerializationRecentAverage,
+    // ── Subsystem timers — last observed call ──
+    TimeSpan RouteDispatchLast,
+    TimeSpan WalReadLast,
+    TimeSpan UiRenderLast,
+    TimeSpan SerializationLast,
     int GcGen0Collections,
     int GcGen1Collections,
     int GcGen2Collections,
