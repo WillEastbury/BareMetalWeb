@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Data;
 
 namespace BareMetalWeb.Host;
 
@@ -40,7 +41,8 @@ public sealed record JobStatusSnapshot(
     DateTime StartedAt,
     DateTime? CompletedAt,
     string? Error,
-    string? ResultUrl);
+    string? ResultUrl,
+    string InstanceId = "");
 
 /// <summary>
 /// In-process registry that starts and tracks background jobs.
@@ -48,6 +50,7 @@ public sealed record JobStatusSnapshot(
 ///   POST → 202 Accepted + Location: /api/jobs/{jobId}
 ///   GET /api/jobs/{jobId} → 202 while running, 200 on completion.
 /// Jobs are retained in memory for <see cref="RetentionPeriod"/> after completion.
+/// Job status is also persisted to the WAL store so all instances can see them.
 /// </summary>
 public sealed class BackgroundJobService
 {
@@ -55,6 +58,13 @@ public sealed class BackgroundJobService
     public static readonly BackgroundJobService Instance = new();
 
     internal static readonly TimeSpan RetentionPeriod = TimeSpan.FromHours(1);
+
+    /// <summary>
+    /// Identifies this server instance in job records.
+    /// Format: <c>MachineName/ProcessId</c>.
+    /// </summary>
+    public static readonly string InstanceId =
+        $"{Environment.MachineName}/{Environment.ProcessId}";
 
     private readonly ConcurrentDictionary<string, JobEntry> _jobs =
         new(StringComparer.OrdinalIgnoreCase);
@@ -93,9 +103,14 @@ public sealed class BackgroundJobService
         };
         _jobs[jobId] = entry;
 
+        // Persist initial state to WAL so other instances can see it immediately.
+        _ = PersistToWalAsync(entry);
+
         _ = Task.Run(async () =>
         {
             entry.Status = BackgroundJobStatus.Running;
+            // Persist running state.
+            _ = PersistToWalAsync(entry);
             var reporter = new ProgressReporter(entry);
             try
             {
@@ -116,6 +131,8 @@ public sealed class BackgroundJobService
             finally
             {
                 entry.CompletedAt = DateTime.UtcNow;
+                // Persist final state.
+                _ = PersistToWalAsync(entry);
             }
         });
 
@@ -164,7 +181,8 @@ public sealed class BackgroundJobService
                 entry.StartedAt,
                 entry.CompletedAt,
                 entry.Error,
-                entry.ResultUrl));
+                entry.ResultUrl,
+                InstanceId));
         }
         return result;
     }
@@ -190,13 +208,53 @@ public sealed class BackgroundJobService
             entry.StartedAt,
             entry.CompletedAt,
             entry.Error,
-            entry.ResultUrl);
+            entry.ResultUrl,
+            InstanceId);
         return true;
     }
 
     // ──────────────────────────────────────────────────────────────
     // Internals
     // ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Upserts a <see cref="WalPersistedJob"/> record to the data store so that
+    /// all instances can see current job status. Failures are silently swallowed
+    /// to prevent WAL errors from affecting job execution.
+    /// </summary>
+    private static async Task PersistToWalAsync(JobEntry entry)
+    {
+        try
+        {
+            var store = DataStoreProvider.Current;
+            var walJob = new WalPersistedJob
+            {
+                Key          = WalPersistedJob.DeriveKey(entry.JobId),
+                JobId        = entry.JobId,
+                OperationName = entry.OperationName,
+                Status       = entry.Status switch
+                {
+                    BackgroundJobStatus.Queued    => "queued",
+                    BackgroundJobStatus.Running   => "running",
+                    BackgroundJobStatus.Succeeded => "succeeded",
+                    BackgroundJobStatus.Failed    => "failed",
+                    _                             => "unknown"
+                },
+                PercentComplete = entry.PercentComplete,
+                Description  = entry.Description,
+                StartedAtUtc = entry.StartedAt,
+                CompletedAtUtc = entry.CompletedAt,
+                Error        = entry.Error,
+                ResultUrl    = entry.ResultUrl,
+                InstanceId   = InstanceId
+            };
+            await store.SaveAsync(walJob).ConfigureAwait(false);
+        }
+        catch
+        {
+            // WAL persistence is best-effort; never let it affect job execution.
+        }
+    }
 
     private void PruneOldJobs()
     {
@@ -232,12 +290,26 @@ public sealed class BackgroundJobService
 
     private sealed class ProgressReporter(JobEntry entry) : IJobProgressReporter
     {
+        private int _lastPersistedPct = -1;
+
         public CancellationToken CancellationToken => entry.Cts.Token;
 
         public void Report(int percentComplete, string description)
         {
             entry.PercentComplete = Math.Clamp(percentComplete, 0, 100);
             entry.Description = description ?? string.Empty;
+
+            // Persist to WAL on every 10% milestone to keep cross-instance view fresh
+            // without excessive writes. Use Interlocked to safely advance the milestone
+            // across concurrent calls.
+            var pct = entry.PercentComplete;
+            var milestone = (pct / 10) * 10;
+            var prev = Volatile.Read(ref _lastPersistedPct);
+            if (milestone > prev &&
+                Interlocked.CompareExchange(ref _lastPersistedPct, milestone, prev) == prev)
+            {
+                _ = PersistToWalAsync(entry);
+            }
         }
     }
 }
