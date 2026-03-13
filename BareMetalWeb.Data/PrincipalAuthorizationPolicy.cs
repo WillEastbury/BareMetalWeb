@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Data;
 
@@ -16,11 +17,12 @@ public static class PrincipalAuthorizationPolicy
     /// Determines whether <paramref name="user"/> is a role-restricted <see cref="SystemPrincipal"/>.
     /// Returns null for regular web users (session-based), which are not subject to principal-role checks.
     /// </summary>
-    public static SystemPrincipal? AsRestrictedPrincipal(User? user)
+    public static BaseDataObject? AsRestrictedPrincipal(BaseDataObject? user)
     {
-        if (user is SystemPrincipal sp && sp.Role != PrincipalRole.FullAccess)
-            return sp;
-        return null;
+        var role = GetPrincipalRole(user);
+        if (string.IsNullOrWhiteSpace(role) || RoleEquals(role, nameof(PrincipalRole.FullAccess)))
+            return null;
+        return user;
     }
 
     /// <summary>
@@ -28,15 +30,20 @@ public static class PrincipalAuthorizationPolicy
     /// the entity identified by <paramref name="entitySlug"/>.
     /// Returns null when the action is permitted, or a denial reason string otherwise.
     /// </summary>
-    public static string? CheckEntityAction(SystemPrincipal principal, string entitySlug, string action)
+    public static string? CheckEntityAction(BaseDataObject principal, string entitySlug, string action)
     {
-        return principal.Role switch
-        {
-            PrincipalRole.DeploymentProcess => CheckDeploymentProcess(entitySlug, action),
-            PrincipalRole.DeploymentAgent => CheckDeploymentAgent(entitySlug, action),
-            PrincipalRole.TenantCallback => CheckTenantCallback(entitySlug, action),
-            _ => null, // FullAccess — unrestricted
-        };
+        var role = GetPrincipalRole(principal);
+        if (string.IsNullOrWhiteSpace(role) || RoleEquals(role, nameof(PrincipalRole.FullAccess)))
+            return null;
+
+        if (RoleEquals(role, nameof(PrincipalRole.DeploymentProcess)))
+            return CheckDeploymentProcess(entitySlug, action);
+        if (RoleEquals(role, nameof(PrincipalRole.DeploymentAgent)))
+            return CheckDeploymentAgent(entitySlug, action);
+        if (RoleEquals(role, nameof(PrincipalRole.TenantCallback)))
+            return CheckTenantCallback(entitySlug, action);
+
+        return null;
     }
 
     /// <summary>
@@ -44,29 +51,26 @@ public static class PrincipalAuthorizationPolicy
     /// (create, rotate, or revoke keys on SystemPrincipal records).
     /// Only FullAccess principals may modify API keys.
     /// </summary>
-    public static bool CanManageApiKeys(User? user)
+    public static bool CanManageApiKeys(BaseDataObject? user)
     {
-        if (user is not SystemPrincipal sp)
-            return true; // regular session user — governed by entity permission, not role policy
-        return sp.Role == PrincipalRole.FullAccess;
+        var role = GetPrincipalRole(user);
+        return string.IsNullOrWhiteSpace(role) || RoleEquals(role, nameof(PrincipalRole.FullAccess));
     }
 
     /// <summary>
     /// Checks whether a <see cref="PrincipalRole.TenantCallback"/> principal owns
     /// the specified record, based on matching <see cref="BaseDataObject.CreatedBy"/>
-    /// against the principal's <see cref="User.UserName"/>, or matching the record's
-    /// owner tenant/instance metadata when available.
+    /// against the principal's user name, or matching the record's principal key when applicable.
     /// </summary>
-    public static bool IsRecordOwner(SystemPrincipal principal, BaseDataObject record)
+    public static bool IsRecordOwner(BaseDataObject principal, BaseDataObject record)
     {
-        // Match by username (CreatedBy is set from the authenticated user's UserName)
-        if (!string.IsNullOrEmpty(principal.UserName) &&
-            string.Equals(record.CreatedBy, principal.UserName, StringComparison.OrdinalIgnoreCase))
+        var principalUserName = GetUserName(principal);
+        if (!string.IsNullOrEmpty(principalUserName) &&
+            string.Equals(record.CreatedBy, principalUserName, StringComparison.OrdinalIgnoreCase))
             return true;
 
-        // If the record itself is a SystemPrincipal, allow only self-access
-        if (record is SystemPrincipal targetSp)
-            return targetSp.Key == principal.Key;
+        if (IsSystemPrincipal(record) && record.Key == principal.Key)
+            return true;
 
         return false;
     }
@@ -75,7 +79,7 @@ public static class PrincipalAuthorizationPolicy
     /// Filters a sequence of records to only those owned by the specified
     /// <see cref="PrincipalRole.TenantCallback"/> principal.
     /// </summary>
-    public static List<T> FilterOwnedRecords<T>(SystemPrincipal principal, IEnumerable<T> records)
+    public static List<T> FilterOwnedRecords<T>(BaseDataObject principal, IEnumerable<T> records)
         where T : BaseDataObject
     {
         var result = new List<T>();
@@ -91,11 +95,9 @@ public static class PrincipalAuthorizationPolicy
 
     private static string? CheckDeploymentProcess(string entitySlug, string action)
     {
-        // Can create records and read, but cannot manage SP keys
         if (IsSpKeyOperation(entitySlug, action))
             return "DeploymentProcess principals cannot manage service principal API keys.";
 
-        // Allow Read, Create, Update for non-SP-key operations
         if (string.Equals(action, "Delete", StringComparison.OrdinalIgnoreCase))
             return "DeploymentProcess principals cannot delete records.";
 
@@ -104,7 +106,6 @@ public static class PrincipalAuthorizationPolicy
 
     private static string? CheckDeploymentAgent(string entitySlug, string action)
     {
-        // Can query (read) and create, but cannot update/delete or manage SP keys
         if (IsSpKeyOperation(entitySlug, action))
             return "DeploymentAgent principals cannot manage service principal API keys.";
 
@@ -119,7 +120,6 @@ public static class PrincipalAuthorizationPolicy
 
     private static string? CheckTenantCallback(string entitySlug, string action)
     {
-        // Can only read and update own records — ownership check is handled separately
         if (IsSpKeyOperation(entitySlug, action))
             return "TenantCallback principals cannot manage service principal API keys.";
 
@@ -143,5 +143,66 @@ public static class PrincipalAuthorizationPolicy
 
         return string.Equals(action, "Create", StringComparison.OrdinalIgnoreCase) ||
                string.Equals(action, "Update", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? GetPrincipalRole(BaseDataObject? principal)
+    {
+        if (principal == null)
+            return null;
+
+        var meta = ResolveAuthMeta(principal);
+        return meta?.FindField("Role")?.GetValueFn(principal)?.ToString();
+    }
+
+    private static string? GetUserName(BaseDataObject principal)
+    {
+        var meta = ResolveAuthMeta(principal);
+        if (meta == null)
+            return null;
+
+        var value = UserAuthHelper.GetUserName(principal, meta);
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static bool IsSystemPrincipal(BaseDataObject record)
+    {
+        var meta = ResolveAuthMeta(record);
+        return meta != null && string.Equals(meta.Slug, SystemPrincipalSlug, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool RoleEquals(string role, string expected)
+        => string.Equals(role, expected, StringComparison.OrdinalIgnoreCase);
+
+    private static DataEntityMetadata? ResolveAuthMeta(BaseDataObject? record)
+    {
+        if (record == null)
+            return null;
+
+        var meta = DataScaffold.GetEntityByType(record.GetType());
+        if (meta != null)
+            return meta;
+
+        if (record is DataRecord dataRecord)
+        {
+            var userMeta = UserAuthHelper.GetUserMeta();
+            if (MatchesEntity(dataRecord.EntityTypeName, userMeta))
+                return userMeta;
+
+            var principalMeta = UserAuthHelper.GetPrincipalMeta();
+            if (MatchesEntity(dataRecord.EntityTypeName, principalMeta))
+                return principalMeta;
+        }
+
+        return null;
+    }
+
+    private static bool MatchesEntity(string entityTypeName, DataEntityMetadata? meta)
+    {
+        if (string.IsNullOrWhiteSpace(entityTypeName) || meta == null)
+            return false;
+
+        return string.Equals(entityTypeName, meta.Name, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityTypeName, meta.Slug, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(entityTypeName, meta.Type.Name, StringComparison.OrdinalIgnoreCase);
     }
 }

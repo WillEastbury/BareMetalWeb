@@ -1,5 +1,6 @@
 using BareMetalWeb.Core;
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Data;
@@ -324,6 +325,266 @@ public static class UserAuth
 
         var meta = ResolveAuthMeta(user);
         return meta != null && UserAuthHelper.GetIsActive(user, meta);
+    }
+
+    // ── Password & Lockout ────────────────────────────────────────────
+    public static bool VerifyPassword(BaseDataObject user, string password)
+    {
+        var meta = ResolveAuthMeta(user);
+        return meta != null && UserAuthHelper.VerifyPassword(user, meta, password);
+    }
+
+    public static void SetPassword(BaseDataObject user, string password)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.SetPassword(user, meta, password);
+    }
+
+    public static bool IsLockedOut(BaseDataObject user)
+    {
+        var meta = ResolveAuthMeta(user);
+        return meta != null && UserAuthHelper.IsLockedOut(user, meta);
+    }
+
+    public static void RegisterFailedLogin(BaseDataObject user)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.RegisterFailedLogin(user, meta);
+    }
+
+    public static void RegisterSuccessfulLogin(BaseDataObject user)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.RegisterSuccessfulLogin(user, meta);
+    }
+
+    // ── MFA ───────────────────────────────────────────────────────────
+    public static bool IsMfaEnabled(BaseDataObject? user)
+    {
+        if (user == null) return false;
+        var meta = ResolveAuthMeta(user);
+        return meta != null && UserAuthHelper.IsMfaEnabled(user, meta);
+    }
+
+    public static void SetMfaEnabled(BaseDataObject user, bool value)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.SetMfaEnabled(user, meta, value);
+    }
+
+    public static string? GetMfaSecret(BaseDataObject user)
+    {
+        var meta = ResolveAuthMeta(user);
+        return meta != null ? UserAuthHelper.GetMfaSecret(user, meta) : null;
+    }
+
+    public static void SetMfaSecret(BaseDataObject user, string? value)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.SetMfaSecret(user, meta, value);
+    }
+
+    public static string? GetMfaSecretEncrypted(BaseDataObject user)
+    {
+        var meta = ResolveAuthMeta(user);
+        return meta != null ? UserAuthHelper.GetMfaSecretEncrypted(user, meta) : null;
+    }
+
+    public static void SetMfaSecretEncrypted(BaseDataObject user, string? value)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.SetMfaSecretEncrypted(user, meta, value);
+    }
+
+    public static long GetMfaLastVerifiedStep(BaseDataObject user)
+    {
+        var meta = ResolveAuthMeta(user);
+        return meta != null ? UserAuthHelper.GetMfaLastVerifiedStep(user, meta) : 0;
+    }
+
+    public static void SetMfaLastVerifiedStep(BaseDataObject user, long step)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.SetMfaLastVerifiedStep(user, meta, step);
+    }
+
+    public static string? GetMfaPendingSecret(BaseDataObject user)
+    {
+        var meta = ResolveAuthMeta(user);
+        return meta != null ? UserAuthHelper.GetMfaPendingSecret(user, meta) : null;
+    }
+
+    public static void SetMfaPendingSecret(BaseDataObject user, string? value)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.SetMfaPendingSecret(user, meta, value);
+    }
+
+    public static string? GetMfaPendingSecretEncrypted(BaseDataObject user)
+    {
+        var meta = ResolveAuthMeta(user);
+        return meta != null ? UserAuthHelper.GetMfaPendingSecretEncrypted(user, meta) : null;
+    }
+
+    public static void SetMfaPendingSecretEncrypted(BaseDataObject user, string? value)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.SetMfaPendingSecretEncrypted(user, meta, value);
+    }
+
+    public static DateTime? GetMfaPendingExpiresUtc(BaseDataObject user)
+    {
+        var meta = ResolveAuthMeta(user);
+        return meta != null ? UserAuthHelper.GetMfaPendingExpiresUtc(user, meta) : null;
+    }
+
+    public static void SetMfaPendingExpiresUtc(BaseDataObject user, DateTime? value)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.SetMfaPendingExpiresUtc(user, meta, value);
+    }
+
+    public static int GetMfaPendingFailedAttempts(BaseDataObject user)
+    {
+        var meta = ResolveAuthMeta(user);
+        return meta != null ? UserAuthHelper.GetMfaPendingFailedAttempts(user, meta) : 0;
+    }
+
+    public static void SetMfaPendingFailedAttempts(BaseDataObject user, int value)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.SetMfaPendingFailedAttempts(user, meta, value);
+    }
+
+    public static string[]? GetMfaBackupCodeHashes(BaseDataObject user)
+    {
+        var meta = ResolveAuthMeta(user);
+        return meta != null ? UserAuthHelper.GetMfaBackupCodeHashes(user, meta) : null;
+    }
+
+    public static void SetMfaBackupCodeHashes(BaseDataObject user, string[] value)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.SetMfaBackupCodeHashes(user, meta, value);
+    }
+
+    public static DateTime? GetMfaBackupCodesGeneratedUtc(BaseDataObject user)
+    {
+        var meta = ResolveAuthMeta(user);
+        return meta != null ? UserAuthHelper.GetMfaBackupCodesGeneratedUtc(user, meta) : null;
+    }
+
+    public static void SetMfaBackupCodesGeneratedUtc(BaseDataObject user, DateTime? value)
+    {
+        var meta = ResolveAuthMeta(user);
+        if (meta != null) UserAuthHelper.SetMfaBackupCodesGeneratedUtc(user, meta, value);
+    }
+
+    // ── User field setters ────────────────────────────────────────────
+    public static void SetUserName(BaseDataObject user, string value)
+    {
+        var meta = ResolveAuthMeta(user);
+        meta?.FindField("UserName")?.SetValueFn(user, value);
+    }
+
+    public static void SetDisplayName(BaseDataObject user, string value)
+    {
+        var meta = ResolveAuthMeta(user);
+        meta?.FindField("DisplayName")?.SetValueFn(user, value);
+    }
+
+    public static void SetEmail(BaseDataObject user, string value)
+    {
+        var meta = ResolveAuthMeta(user);
+        meta?.FindField("Email")?.SetValueFn(user, value);
+    }
+
+    public static void SetIsActive(BaseDataObject user, bool value)
+    {
+        var meta = ResolveAuthMeta(user);
+        meta?.FindField("IsActive")?.SetValueFn(user, value);
+    }
+
+    public static void SetPermissions(BaseDataObject user, string[] value)
+    {
+        var meta = ResolveAuthMeta(user);
+        meta?.FindField("Permissions")?.SetValueFn(user, value);
+    }
+
+    public static DateTime? GetLastLoginUtc(BaseDataObject? user)
+    {
+        if (user == null) return null;
+        var meta = ResolveAuthMeta(user);
+        if (meta == null) return null;
+        var val = meta.FindField("LastLoginUtc")?.GetValueFn(user);
+        return val is DateTime dt ? dt : null;
+    }
+
+    // ── User CRUD via metadata ────────────────────────────────────────
+    public static BaseDataObject CreateUser()
+    {
+        var meta = UserAuthHelper.GetUserMeta();
+        return meta?.Handlers.Create() ?? throw new InvalidOperationException("User entity metadata not found.");
+    }
+
+    public static BaseDataObject CreatePrincipal()
+    {
+        var meta = UserAuthHelper.GetPrincipalMeta();
+        return meta?.Handlers.Create() ?? throw new InvalidOperationException("SystemPrincipal entity metadata not found.");
+    }
+
+    public static async ValueTask SaveUserAsync(BaseDataObject user, CancellationToken ct = default)
+    {
+        var meta = ResolveAuthMeta(user) ?? throw new InvalidOperationException("Cannot resolve entity metadata for user.");
+        await meta.Handlers.SaveAsync(user, ct).ConfigureAwait(false);
+    }
+
+    public static async ValueTask<BaseDataObject?> LoadUserAsync(uint key, CancellationToken ct = default)
+    {
+        var meta = UserAuthHelper.GetUserMeta();
+        return meta != null ? await meta.Handlers.LoadAsync(key, ct).ConfigureAwait(false) : null;
+    }
+
+    public static async ValueTask<IEnumerable<BaseDataObject>> QueryUsersAsync(QueryDefinition? query = null, CancellationToken ct = default)
+    {
+        var meta = UserAuthHelper.GetUserMeta();
+        return meta != null
+            ? await meta.Handlers.QueryAsync(query, ct).ConfigureAwait(false)
+            : Array.Empty<BaseDataObject>();
+    }
+
+    public static async ValueTask<IEnumerable<BaseDataObject>> QueryPrincipalsAsync(QueryDefinition? query = null, CancellationToken ct = default)
+    {
+        var meta = UserAuthHelper.GetPrincipalMeta();
+        return meta != null
+            ? await meta.Handlers.QueryAsync(query, ct).ConfigureAwait(false)
+            : Array.Empty<BaseDataObject>();
+    }
+
+    // ── SystemPrincipal helpers ───────────────────────────────────────
+    public static string? GetPrincipalRole(BaseDataObject? principal)
+    {
+        if (principal == null) return null;
+        var meta = ResolveAuthMeta(principal);
+        return meta?.FindField("Role")?.GetValueFn(principal)?.ToString();
+    }
+
+    public static void SetPrincipalRole(BaseDataObject principal, string value)
+    {
+        var meta = ResolveAuthMeta(principal);
+        meta?.FindField("Role")?.SetValueFn(principal, value);
+    }
+
+    public static void AddApiKey(BaseDataObject principal, string apiKey)
+    {
+        var meta = ResolveAuthMeta(principal);
+        if (meta != null) UserAuthHelper.AddApiKey(principal, meta, apiKey);
+    }
+
+    public static bool HasApiKey(BaseDataObject principal, string apiKey)
+    {
+        var meta = ResolveAuthMeta(principal);
+        return meta != null && UserAuthHelper.HasApiKey(principal, meta, apiKey);
     }
 
     private static DataEntityMetadata? ResolveAuthMeta(BaseDataObject? user)

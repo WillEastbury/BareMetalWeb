@@ -22,7 +22,7 @@ public class ModelPrunerTests
         Assert.Equal(6, pruned.Length);
         // First 6 layers should be identical to original
         for (int i = 0; i < 6; i++)
-            Assert.Same(layers[i].AttentionWeights, pruned[i].AttentionWeights);
+            Assert.Same(layers[i].Wq, pruned[i].Wq);
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public class ModelPrunerTests
         var layers = new TernaryLayer[1];
         layers[0] = new TernaryLayer
         {
-            AttentionWeights = new sbyte[dim * dim],
+            Wq = new sbyte[dim * dim], Wk = new sbyte[dim * dim], Wv = new sbyte[dim * dim], Wo = new sbyte[dim * dim],
             FfnWeights = new sbyte[dim * dim]
         };
 
@@ -61,7 +61,7 @@ public class ModelPrunerTests
         for (int r = 0; r < dim; r++)
         {
             for (int c = 0; c < 2; c++) // head 0 columns (headDim=2)
-                layers[0].AttentionWeights[r * dim + c] = 1;
+                layers[0].Wq[r * dim + c] = 1;
         }
 
         int pruned = ModelPruner.PruneAttentionHeads(layers, numHeads, pruneRatio: 0.50f);
@@ -73,7 +73,7 @@ public class ModelPrunerTests
         bool head0HasValues = false;
         for (int r = 0; r < dim; r++)
         {
-            if (layers[0].AttentionWeights[r * dim] != 0)
+            if (layers[0].Wq[r * dim] != 0)
             {
                 head0HasValues = true;
                 break;
@@ -100,12 +100,12 @@ public class ModelPrunerTests
 
         var stats = ModelPruner.CalculateSize(layers, vocabSize: 100, hiddenDim: dim);
 
-        // Each layer: dim*dim attention + dim*dim ffn = 32*32*2 = 2048 weights
-        // 4 layers = 8192 layer weights
-        Assert.Equal(8192, stats.LayerWeights);
+        // Each layer: 4 attention projections (Wq,Wk,Wv,Wo) + FFN = 5 × dim² weights
+        // 4 layers × 5 × 32 × 32 = 20480 layer weights
+        Assert.Equal(20480, stats.LayerWeights);
         // Embedding: 100 * 32 * 2 (embed + output) = 6400
         Assert.Equal(6400, stats.EmbeddingWeights);
-        Assert.Equal(8192 + 6400, stats.TotalWeights);
+        Assert.Equal(20480 + 6400, stats.TotalWeights);
         Assert.Equal(4, stats.LayerCount);
         Assert.True(stats.PackedBytes < stats.StoredBytes); // 2-bit < 8-bit
     }
@@ -117,15 +117,16 @@ public class ModelPrunerTests
         var layers = new TernaryLayer[1];
         layers[0] = new TernaryLayer
         {
-            AttentionWeights = new sbyte[dim * dim], // all zeros
+            Wq = new sbyte[dim * dim], Wk = new sbyte[dim * dim], Wv = new sbyte[dim * dim], Wo = new sbyte[dim * dim], // all zeros
             FfnWeights = new sbyte[] { 1, -1, 0, 0, 1, -1, 0, 0, 1, -1, 0, 0, 1, -1, 0, 0 }
         };
 
         var stats = ModelPruner.CalculateSize(layers, vocabSize: 0, hiddenDim: dim);
 
-        // 16 zeros in attention + 8 zeros in FFN = 24 zeros out of 32 total
-        Assert.Equal(24, stats.ZeroWeights);
-        Assert.Equal(0.75f, stats.Sparsity, 0.01f);
+        // All 4 attention matrices are zero (4 × 16 = 64 zeros) + 8 FFN zeros = 72
+        // Total layer weights: 4 × 16 (attn) + 16 (FFN) = 80
+        Assert.Equal(72, stats.ZeroWeights);
+        Assert.Equal(0.9f, stats.Sparsity, 0.01f);
     }
 
     [Fact]
@@ -217,13 +218,13 @@ public class ModelPrunerTests
         {
             layers[i] = new TernaryLayer
             {
-                AttentionWeights = new sbyte[dim * dim],
+                Wq = new sbyte[dim * dim], Wk = new sbyte[dim * dim], Wv = new sbyte[dim * dim], Wo = new sbyte[dim * dim],
                 FfnWeights = new sbyte[dim * dim]
             };
             // Fill with low-magnitude groups: every group has L1 = 1
             for (int g = 0; g < dim * dim; g += 4)
             {
-                layers[i].AttentionWeights[g] = 1;
+                layers[i].Wq[g] = 1;
                 layers[i].FfnWeights[g] = 1;
             }
         }
@@ -248,8 +249,9 @@ public class ModelPrunerTests
         var stats = ModelPruner.PruneLayerGroups(layers, dim,
             attnThreshold: 1, ffnThreshold: 2);
 
-        // Total groups = rows * groups_per_row = 8 * (8/4) = 16 per matrix
-        Assert.Equal(16, stats.TotalAttnGroups);
+        // Total groups = rows × groups_per_row = 8 × (8/4) = 16 per matrix
+        // There are 4 attention projection matrices and 1 FFN matrix
+        Assert.Equal(64, stats.TotalAttnGroups);  // 4 × 16
         Assert.Equal(16, stats.TotalFfnGroups);
         Assert.True(stats.TotalWeightsZeroed == stats.TotalGroupsZeroed * 4);
     }

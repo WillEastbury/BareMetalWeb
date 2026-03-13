@@ -146,17 +146,20 @@ public static class ModelPruner
 
         for (int i = 0; i < layers.Length; i++)
         {
-            totalAttnGroups += PruneGroupsOfFour(layers[i].AttentionWeights, cols, attnThreshold);
-            totalFfnGroups += PruneGroupsOfFour(layers[i].FfnWeights, cols, ffnThreshold);
+            totalAttnGroups += PruneGroupsOfFour(layers[i].Wq, cols, attnThreshold);
+            totalAttnGroups += PruneGroupsOfFour(layers[i].Wk, cols, attnThreshold);
+            totalAttnGroups += PruneGroupsOfFour(layers[i].Wv, cols, attnThreshold);
+            totalAttnGroups += PruneGroupsOfFour(layers[i].Wo, cols, attnThreshold);
+            totalFfnGroups  += PruneGroupsOfFour(layers[i].FfnWeights, cols, ffnThreshold);
         }
 
-        int groupsPerMatrix = (layers[0].AttentionWeights.Length / cols) * (cols >> 2);
+        int groupsPerMatrix = (layers[0].Wq.Length / cols) * (cols >> 2);
         int totalMatrices = layers.Length;
 
         return new GroupPruneStats(
             AttnGroupsZeroed: totalAttnGroups,
             FfnGroupsZeroed: totalFfnGroups,
-            TotalAttnGroups: groupsPerMatrix * totalMatrices,
+            TotalAttnGroups: groupsPerMatrix * 4 * totalMatrices,  // 4 attention projections
             TotalFfnGroups: groupsPerMatrix * totalMatrices,
             AttnThreshold: attnThreshold,
             FfnThreshold: ffnThreshold);
@@ -176,11 +179,18 @@ public static class ModelPruner
 
         for (int i = 0; i < layers.Length; i++)
         {
-            layerWeights += layers[i].AttentionWeights.Length;
+            layerWeights += layers[i].Wq.Length + layers[i].Wk.Length
+                          + layers[i].Wv.Length + layers[i].Wo.Length;
             layerWeights += layers[i].FfnWeights.Length;
 
-            for (int j = 0; j < layers[i].AttentionWeights.Length; j++)
-                if (layers[i].AttentionWeights[j] == 0) zeroWeights++;
+            for (int j = 0; j < layers[i].Wq.Length; j++)
+                if (layers[i].Wq[j] == 0) zeroWeights++;
+            for (int j = 0; j < layers[i].Wk.Length; j++)
+                if (layers[i].Wk[j] == 0) zeroWeights++;
+            for (int j = 0; j < layers[i].Wv.Length; j++)
+                if (layers[i].Wv[j] == 0) zeroWeights++;
+            for (int j = 0; j < layers[i].Wo.Length; j++)
+                if (layers[i].Wo[j] == 0) zeroWeights++;
             for (int j = 0; j < layers[i].FfnWeights.Length; j++)
                 if (layers[i].FfnWeights[j] == 0) zeroWeights++;
         }
