@@ -12,6 +12,7 @@ namespace BareMetalWeb.Intelligence;
 /// After load + pruning, weights are compressed to 2-bit packed native memory
 /// (NativeTernaryMatrix) — 4× smaller than sbyte[] and entirely off the GC heap.
 /// </summary>
+/// 
 public sealed class BitNetEngine : IBitNetEngine, IDisposable
 {
     private readonly BitNetModelConfig _config;

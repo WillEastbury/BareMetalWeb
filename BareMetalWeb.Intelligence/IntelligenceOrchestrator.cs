@@ -4,6 +4,16 @@ using BareMetalWeb.Intelligence.Interfaces;
 namespace BareMetalWeb.Intelligence;
 
 /// <summary>
+/// Defines an intent with its matching keywords.
+/// </summary>
+public sealed record IntentDefinition(
+    string Name,
+    string Description,
+    IReadOnlyList<string> Keywords
+);
+
+
+/// <summary>
 /// Orchestrates query processing for admin chat via the BitNet b1.58 ternary SLM
 /// (weights quantised to {-1, 0, +1}). Single-stage architecture: all queries are
 /// routed directly through the engine in one forward pass — no TF-IDF pre-screen overhead.

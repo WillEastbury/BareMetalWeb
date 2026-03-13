@@ -20,7 +20,7 @@ public static class IntelligenceExtensions
     public static IntelligenceRoutes CreateIntelligenceRoutes()
     {
         var engine = new BitNetEngine();
-        engine.LoadTestModel(ModelLoadOptions.Aggressive);
+        engine.LoadTestModel(ModelLoadOptions.Default);
 
         _orchestrator = new IntelligenceOrchestrator(engine);
 
