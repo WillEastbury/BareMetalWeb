@@ -35,7 +35,7 @@ public static class RouteRegistrationExtensions
         IHtmlTemplate mainTemplate)
     {
         host.RegisterRoute("GET /", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Home", "<p></p>" }, "Public", false, 60),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Home", "<p></p>" }, "Public", false, 60),
             routeHandlers.DefaultPageHandler));
 
         // Browsers always request /favicon.ico at the root — redirect to the
@@ -52,7 +52,7 @@ public static class RouteRegistrationExtensions
             }));
 
         host.RegisterRoute("GET /status", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "", "" }, "Public", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "", "" }, "Public", false, 1),
             routeHandlers.BuildPageHandler(context =>
             {
                 context.Response.ContentType = "text/html";
@@ -121,37 +121,37 @@ public static class RouteRegistrationExtensions
     {
         // Login
         host.RegisterRoute("GET /login", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Login", "" }, "AnonymousOnly", true, 1, navAlignment: NavAlignment.Right, navRenderStyle: NavRenderStyle.Button, navColorClass: "btn-success"),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Login", "" }, "AnonymousOnly", true, 1, navAlignment: NavAlignment.Right, navRenderStyle: NavRenderStyle.Button, navColorClass: "btn-success"),
             routeHandlers.LoginHandler));
         host.RegisterRoute("POST /login", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Login", "" }, "AnonymousOnly", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Login", "" }, "AnonymousOnly", false, 1),
             routeHandlers.LoginPostHandler));
 
         // MFA
         host.RegisterRoute("GET /mfa", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Verify MFA", "" }, "AnonymousOnly", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Verify MFA", "" }, "AnonymousOnly", false, 1),
             routeHandlers.MfaChallengeHandler));
         host.RegisterRoute("POST /mfa", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Verify MFA", "" }, "AnonymousOnly", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Verify MFA", "" }, "AnonymousOnly", false, 1),
             routeHandlers.MfaChallengePostHandler));
 
         // Registration (conditional)
         if (allowAccountCreation)
         {
             host.RegisterRoute("GET /register", new RouteHandlerData(
-                pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Create Account", "" }, "AnonymousOnly", false, 1, navAlignment: NavAlignment.Right),
+                pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Create Account", "" }, "AnonymousOnly", false, 1, navAlignment: NavAlignment.Right),
                 routeHandlers.RegisterHandler));
             host.RegisterRoute("POST /register", new RouteHandlerData(
-                pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Create Account", "" }, "AnonymousOnly", false, 1),
+                pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Create Account", "" }, "AnonymousOnly", false, 1),
                 routeHandlers.RegisterPostHandler));
         }
 
         // Logout
         host.RegisterRoute("GET /logout", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Logout", "" }, "Authenticated", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Logout", "" }, "Authenticated", false, 1),
             routeHandlers.LogoutHandler));
         host.RegisterRoute("POST /logout", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Logout", "" }, "Authenticated", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Logout", "" }, "Authenticated", false, 1),
             routeHandlers.LogoutPostHandler));
 
         // SSO (Entra ID)
@@ -159,7 +159,7 @@ public static class RouteRegistrationExtensions
             pageInfoFactory.TemplatedPage(mainTemplate, 302, Array.Empty<string>(), Array.Empty<string>(), "AnonymousOnly", false, 0),
             routeHandlers.SsoLoginHandler));
         host.RegisterRoute("GET /auth/sso/callback", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "SSO Login", "" }, "AnonymousOnly", false, 0),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "SSO Login", "" }, "AnonymousOnly", false, 0),
             routeHandlers.SsoCallbackHandler));
         host.RegisterRoute("GET /auth/sso/logout", new RouteHandlerData(
             pageInfoFactory.TemplatedPage(mainTemplate, 302, Array.Empty<string>(), Array.Empty<string>(), "Authenticated", false, 0),
@@ -167,31 +167,31 @@ public static class RouteRegistrationExtensions
 
         // Account management
         host.RegisterRoute("GET /account", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Account", "" }, "Authenticated", true, 1, navGroup: "Account", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Account", "" }, "Authenticated", true, 1, navGroup: "Account", navAlignment: NavAlignment.Right),
             routeHandlers.AccountHandler));
 
         host.RegisterRoute("GET /account/mfa", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Multi-Factor Authentication", "" }, "Authenticated", true, 1, navGroup: "Account", navAlignment: NavAlignment.Right),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Multi-Factor Authentication", "" }, "Authenticated", true, 1, navGroup: "Account", navAlignment: NavAlignment.Right),
             routeHandlers.MfaStatusHandler));
         host.RegisterRoute("GET /account/mfa/setup", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Enable MFA", "" }, "Authenticated", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Enable MFA", "" }, "Authenticated", false, 1),
             routeHandlers.MfaSetupHandler));
         host.RegisterRoute("POST /account/mfa/setup", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Enable MFA", "" }, "Authenticated", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Enable MFA", "" }, "Authenticated", false, 1),
             routeHandlers.MfaSetupPostHandler));
         host.RegisterRoute("GET /account/mfa/reset", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reset MFA", "" }, "Authenticated", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Reset MFA", "" }, "Authenticated", false, 1),
             routeHandlers.MfaResetHandler));
         host.RegisterRoute("POST /account/mfa/reset", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reset MFA", "" }, "Authenticated", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Reset MFA", "" }, "Authenticated", false, 1),
             routeHandlers.MfaResetPostHandler));
 
         // Initial setup
         host.RegisterRoute("GET /setup", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Setup", "" }, "AnonymousOnly", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Setup", "" }, "AnonymousOnly", false, 1),
             routeHandlers.SetupHandler));
         host.RegisterRoute("POST /setup", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Setup", "" }, "AnonymousOnly", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Setup", "" }, "AnonymousOnly", false, 1),
             routeHandlers.SetupPostHandler));
     }
 
@@ -211,7 +211,7 @@ public static class RouteRegistrationExtensions
 
         // Metrics
         host.RegisterRoute("GET /metrics", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Metric Viewer", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Metric Viewer", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
             routeHandlers.BuildPageHandler(context =>
             {
                 var app = context.GetApp()!;
@@ -225,7 +225,7 @@ public static class RouteRegistrationExtensions
 
         // IP tracking
         host.RegisterRoute("GET /topips", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Top IPs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Top IPs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
             routeHandlers.BuildPageHandler(context =>
             {
                 var app = context.GetApp()!;
@@ -235,7 +235,7 @@ public static class RouteRegistrationExtensions
             })));
 
         host.RegisterRoute("GET /suspiciousips", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Suspicious IPs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Suspicious IPs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
             routeHandlers.BuildPageHandler(context =>
             {
                 var app = context.GetApp()!;
@@ -261,13 +261,13 @@ public static class RouteRegistrationExtensions
     {
         // Log management
         host.RegisterRoute("GET /admin/logs", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Logs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Logs", "" }, "monitoring", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "📊 Monitoring"),
             routeHandlers.LogsViewerHandler));
         host.RegisterRoute("GET /admin/logs/prune", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Prune Logs", "" }, "monitoring", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Prune Logs", "" }, "monitoring", false, 1),
             routeHandlers.LogsPruneHandler));
         host.RegisterRoute("POST /admin/logs/prune", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Prune Logs", "" }, "monitoring", false, 1),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Prune Logs", "" }, "monitoring", false, 1),
             routeHandlers.LogsPrunePostHandler));
         host.RegisterRoute("GET /admin/logs/download", new RouteHandlerData(
             pageInfoFactory.RawPage("monitoring", false),
@@ -276,34 +276,34 @@ public static class RouteRegistrationExtensions
         // Sample data generation
         // Template management
         host.RegisterRoute("GET /admin/reload-templates", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Reload Templates", "" }, "admin", true, 1, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.ReloadTemplatesHandler));
 
         // Wipe all data — always registered; returns 419 if admin.allowWipeData setting is not configured
         // Entity designer — visual editor for creating virtual entity JSON definitions
         host.RegisterRoute("GET /admin/entity-designer", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Entity Designer", "" }, "admin", true, 2, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Entity Designer", "" }, "admin", true, 2, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.EntityDesignerHandler));
 
         // Gallery — browse and deploy pre-built sample entity schema packages
         host.RegisterRoute("GET /admin/gallery", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Sample Gallery", "" }, "admin", true, 3, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Sample Gallery", "" }, "admin", true, 3, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.GalleryHandler));
         host.RegisterRoute("POST /admin/gallery/deploy/{package}", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Sample Gallery", "" }, "admin", false, 0),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Sample Gallery", "" }, "admin", false, 0),
             routeHandlers.GalleryDeployPostHandler));
 
         // Webstore — browse and install shared templates from the control plane
         host.RegisterRoute("GET /admin/webstore", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Template Webstore", "" }, "admin", true, 3, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Template Webstore", "" }, "admin", true, 3, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.WebStoreHandler));
         host.RegisterRoute("POST /admin/webstore/install/{package}", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Template Webstore", "" }, "admin", false, 0),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Template Webstore", "" }, "admin", false, 0),
             routeHandlers.WebStoreInstallHandler));
 
         // Data & Index Sizing — disk and in-memory index footprint per table
         host.RegisterRoute("GET /admin/data-sizes", new RouteHandlerData(
-            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "Data & Index Sizing", "" }, "admin", true, 4, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
+            pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "Data & Index Sizing", "" }, "admin", true, 4, navGroup: "Admin", navAlignment: NavAlignment.Right, navSubGroup: "🔧 Tools"),
             routeHandlers.DataSizingHandler));
     }
 
@@ -503,7 +503,7 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("GET /api/vector/indexes", new RouteHandlerData(raw, VectorApiHandlers.ListIndexesHandler));
         host.RegisterRoute("POST /api/vector/register", new RouteHandlerData(adminOnly, VectorApiHandlers.RegisterHandler));
         host.RegisterRoute("POST /api/agent/chat", new RouteHandlerData(raw, AgentApiHandlers.ChatHandler));
-        var templated = pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "message" }, new[] { "", "" }, "Public", false, 1);
+        var templated = pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "", "" }, "Public", false, 1);
         host.RegisterRoute("GET /page/{slug}", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(PageRenderer.ConfigurePageAsync)));
         host.RegisterRoute("GET /api/pages", new RouteHandlerData(raw, PageRenderer.ListPagesHandler));
         host.RegisterRoute("GET /products", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(ProductRenderer.ConfigureCategoryBrowseAsync)));

@@ -792,8 +792,8 @@ static class ProgramSetup
             contentRoot,
             logger,
             htmlRenderer,
-            pageInfoFactory.TemplatedPage(mainTemplate, 404, new[] { "title", "message" }, new[] { "404 - Not Found", "<p>The requested page was not found.</p>" }, "", true, 6000),
-            pageInfoFactory.TemplatedPage(mainTemplate, 500, new[] { "title", "message" }, new[] { "500 - Internal Server Error", "<p>An unexpected error occurred.</p>" }, "", true, 6000),
+            pageInfoFactory.TemplatedPage(mainTemplate, 404, new[] { "title", "html_message" }, new[] { "404 - Not Found", "<p>The requested page was not found.</p>" }, "", true, 6000),
+            pageInfoFactory.TemplatedPage(mainTemplate, 500, new[] { "title", "html_message" }, new[] { "500 - Internal Server Error", "<p>An unexpected error occurred.</p>" }, "", true, 6000),
             cts,
             metrics: metrics,
             clientRequests: clientRequests);
