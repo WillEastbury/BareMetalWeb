@@ -64,6 +64,11 @@ const BMW_THEMES = {
     colourful: `/* BMW Colourful theme */\n:root{--bmw-bg:#f0f4ff;--bmw-fg:#1a1a2e;--bmw-p:#fff;--bmw-b:#b8c8f8;--bmw-a:#7c3aed;--bmw-g:12px}\n`,
     muted: `/* BMW Muted theme */\n:root{--bmw-bg:#f5f4f2;--bmw-fg:#4a4a4a;--bmw-p:#fafaf8;--bmw-b:#d8d6d0;--bmw-a:#6b7a8d;--bmw-g:12px}\n`,
     highviz: `/* BMW HighViz theme — high contrast accessibility */\n:root{--bmw-bg:#fff;--bmw-fg:#000;--bmw-p:#fff;--bmw-b:#000;--bmw-a:#cc0000;--bmw-g:12px;--bs-body-color:#000;--bs-body-bg:#fff;--bs-border-color:#000}\n`,
+    ocean: `/* BMW Ocean theme */\n:root{--bmw-bg:#eef6fb;--bmw-fg:#1a3a4a;--bmw-p:#ffffff;--bmw-b:#9dc8e0;--bmw-a:#0077aa;--bmw-g:12px}\n`,
+    forest: `/* BMW Forest theme */\n:root{--bmw-bg:#f0f5ee;--bmw-fg:#1e3a1e;--bmw-p:#ffffff;--bmw-b:#a8c9a8;--bmw-a:#2e7d32;--bmw-g:12px}\n`,
+    sunset: `/* BMW Sunset theme */\n:root{--bmw-bg:#fff8f2;--bmw-fg:#3a1a00;--bmw-p:#ffffff;--bmw-b:#f5c4a0;--bmw-a:#d4500a;--bmw-g:12px}\n`,
+    midnight: `/* BMW Midnight theme */\n:root{--bmw-bg:#0d1117;--bmw-fg:#e6edf3;--bmw-p:#161b22;--bmw-b:#30363d;--bmw-a:#58a6ff;--bmw-g:12px;--bs-body-color:#e6edf3;--bs-body-bg:#0d1117;--bs-border-color:#30363d;--bs-secondary-bg:#161b22;--bs-emphasis-color:#fff;--bs-secondary-color:rgba(230,237,243,.75)}body{color-scheme:dark}\n`,
+    rose: `/* BMW Rose theme */\n:root{--bmw-bg:#fef5f8;--bmw-fg:#3a1a2a;--bmw-p:#ffffff;--bmw-b:#f0b8cf;--bmw-a:#c2185b;--bmw-g:12px}\n`,
 };
 
 // ── HTTP helpers ─────────────────────────────────────────────────────────────

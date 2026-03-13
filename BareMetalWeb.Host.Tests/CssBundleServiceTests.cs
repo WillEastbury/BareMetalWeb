@@ -46,9 +46,9 @@ public class CssBundleServiceTests : IDisposable
     // ── DefaultThemes coverage ────────────────────────────────────────────────
 
     [Fact]
-    public void DefaultThemes_Contains5Themes()
+    public void DefaultThemes_Contains10Themes()
     {
-        Assert.Equal(5, CssBundleService.DefaultThemes.Length);
+        Assert.Equal(10, CssBundleService.DefaultThemes.Length);
     }
 
     [Theory]
@@ -57,6 +57,11 @@ public class CssBundleServiceTests : IDisposable
     [InlineData("colourful")]
     [InlineData("muted")]
     [InlineData("highviz")]
+    [InlineData("ocean")]
+    [InlineData("forest")]
+    [InlineData("sunset")]
+    [InlineData("midnight")]
+    [InlineData("rose")]
     public void DefaultThemes_ContainsTheme(string theme)
     {
         Assert.Contains(theme, CssBundleService.DefaultThemes);

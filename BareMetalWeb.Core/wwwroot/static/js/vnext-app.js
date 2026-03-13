@@ -4876,21 +4876,7 @@
         // Build nav from metadata (async, non-blocking)
         fetchMetaObjects().then(buildNav).catch(function () {});
 
-        // Theme restore (matches main app behaviour)
-        try {
-            var m = document.cookie.match(/(?:^|;\s*)bm-selected-theme=([^;]+)/);
-            if (m) {
-                var t = decodeURIComponent(m[1]);
-                var allowed = ['cerulean','cosmo','cyborg','darkly','flatly','journal','litera','lumen','lux',
-                    'materia','minty','morph','pulse','quartz','sandstone','simplex','sketchy','slate',
-                    'solar','spacelab','superhero','united','vapor','yeti','zephyr'];
-                if (allowed.indexOf(t) >= 0) {
-                    var el = document.getElementById('bootswatch-theme');
-                    if (el) el.href = '/static/css/themes/' + encodeURIComponent(t) + '.min.css';
-                }
-            }
-        } catch (e) {}
-
+        // Theme restore — handled by theme-switcher.js via bm-theme link element
         // Skin restore
         try {
             var sm = document.cookie.match(/(?:^|;\s*)bm-selected-skin=([^;]+)/);

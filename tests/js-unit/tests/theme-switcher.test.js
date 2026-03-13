@@ -19,7 +19,8 @@ const THEME_PREFIX       = '/static/css/themes/';
 const THEME_SUFFIX       = '.min.css';
 
 // Allowed BMW theme names (must match the set in theme-switcher.js)
-const VALID_THEMES = ['light', 'dark', 'colourful', 'muted', 'highviz'];
+const VALID_THEMES = ['light', 'dark', 'colourful', 'muted', 'highviz',
+    'ocean', 'forest', 'sunset', 'midnight', 'rose'];
 
 // Load the theme-switcher IIFE into the current jsdom window.
 function loadSwitcher() {
