@@ -102,9 +102,9 @@ jobs:
           path: ./publish
           retention-days: 3
 
-  # ── AOT Publish: Linux arm64 ───────────────────────────────────────────
+  # ── AOT Publish: Linux arm64 (GLIBC 2.38+, Ubuntu 24.04) ──────────────
   aot-linux-arm64:
-    name: "AOT · linux-arm64"
+    name: "AOT · linux-arm64 (glibc 2.38)"
     needs: version
     runs-on: ubuntu-24.04-arm
     steps:
@@ -137,6 +137,44 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: aot-linux-arm64
+          path: ./publish
+          retention-days: 3
+
+  # ── AOT Publish: Linux arm64 (GLIBC 2.36, Debian 12 bookworm) ────────
+  aot-linux-arm64-bookworm:
+    name: "AOT · linux-arm64 (glibc 2.36)"
+    needs: version
+    runs-on: ubuntu-24.04-arm
+    container:
+      image: debian:bookworm
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update && apt-get install -y --no-install-recommends \
+            curl git ca-certificates clang zlib1g-dev
+
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: AOT publish (linux-arm64, bookworm)
+        run: |
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release \
+            --runtime linux-arm64 \
+            --self-contained \
+            --output ./publish \
+            -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:InformationalVersion=${{ needs.version.outputs.info_version }}
+
+      - name: Upload AOT artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aot-linux-arm64-bookworm
           path: ./publish
           retention-days: 3
 
@@ -187,7 +225,7 @@ jobs:
   # ── Summary ────────────────────────────────────────────────────────────
   summary:
     name: Build summary
-    needs: [version, jit-anycpu, container-linux-arm64]
+    needs: [version, jit-anycpu, aot-linux-arm64-bookworm, container-linux-arm64]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -206,7 +244,8 @@ jobs:
           echo "| Build | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| JIT AnyCPU (\`deploy-package\`) | ${{ needs.jit-anycpu.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| AOT linux-arm64 | ${{ needs.aot-linux-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AOT linux-arm64 glibc 2.38 (\`aot-linux-arm64\`) | ${{ needs.aot-linux-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AOT linux-arm64 glibc 2.36 (\`aot-linux-arm64-bookworm\`) | ${{ needs.aot-linux-arm64-bookworm.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Container | Tag | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|-----|--------|" >> $GITHUB_STEP_SUMMARY
