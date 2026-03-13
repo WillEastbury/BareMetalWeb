@@ -9,7 +9,7 @@ namespace BareMetalWeb.Data;
 /// Views compile into deterministic <see cref="ViewExecutionPlan"/> objects that are cached and
 /// executed directly over BMW's in-memory arrays using vectorised selection vectors.
 /// </summary>
-[DataEntity("View Definitions", Slug = "view-definitions", ShowOnNav = true,
+[DataEntity("View Definitions", Slug = "view-definitions", ShowOnNav = false,
     Permissions = "admin", NavGroup = "Admin", NavOrder = 95)]
 public sealed class ViewDefinition : BaseDataObject
 {

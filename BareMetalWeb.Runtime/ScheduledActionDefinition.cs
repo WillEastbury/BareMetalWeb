@@ -7,7 +7,7 @@ namespace BareMetalWeb.Runtime;
 /// The <see cref="ScheduledActionService"/> evaluates active schedules each tick
 /// and executes matching actions against qualifying records.
 /// </summary>
-[DataEntity("Scheduled Actions", ShowOnNav = true, NavGroup = "Admin", NavOrder = 1006)]
+[DataEntity("Scheduled Actions", ShowOnNav = false, NavGroup = "Admin", NavOrder = 1006)]
 public class ScheduledActionDefinition : BaseDataObject
 {
     /// <summary>Foreign key to <see cref="EntityDefinition.EntityId"/>.</summary>
