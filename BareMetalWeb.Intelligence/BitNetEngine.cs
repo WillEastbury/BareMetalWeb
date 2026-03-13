@@ -625,15 +625,18 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             }
             if (totalWeight == 0) totalWeight = 1;
 
-            // Weighted sum of V values for this head (SIMD-accelerated)
+            // Weighted sum of V values for this head (SIMD-accelerated two-phase):
+            // Phase 1: accumulate weight * V using SIMD multiply+add (no division)
+            var outSlice = output.Slice(hOff, headDim);
             for (int p = 0; p < posCount; p++)
             {
                 long w = scores[p];
                 int vBase = p * dim + hOff;
                 var vSlice = _kvCacheV![layer].AsSpan(vBase, headDim);
-                var outSlice = output.Slice(hOff, headDim);
                 TernaryTensor.WeightedAccumulate(outSlice, w, vSlice, totalWeight);
             }
+            // Phase 2: normalize by totalWeight (scalar division)
+            TernaryTensor.DivideInPlace(outSlice, (int)totalWeight);
         }
 
         // Output projection: Wo × attention_output

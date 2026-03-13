@@ -201,8 +201,9 @@ public static class TernaryTensor
     }
 
     /// <summary>
-    /// SIMD-accelerated weighted accumulation: output[d] += (weight * values[d]) / totalWeight.
-    /// Used for attention value aggregation. Broadcasts weight across vector lanes.
+    /// SIMD-accelerated scaled accumulation: output[d] += weight * values[d].
+    /// Used for attention value aggregation phase 1 (accumulate without division).
+    /// Broadcasts weight across vector lanes. Division by totalWeight is deferred.
     /// Dispatches: AdvSimd → AVX2 → scalar.
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -211,13 +212,11 @@ public static class TernaryTensor
     {
         int length = Math.Min(output.Length, values.Length);
         int i = 0;
+        int w = (int)weight;
 
-        // For SIMD paths: pre-compute weight/totalWeight if they are small enough
-        // to avoid per-element division. We keep the exact integer semantics:
-        // output[d] += (int)(weight * values[d] / totalWeight)
         if (AdvSimd.IsSupported && length >= 4)
         {
-            Vector128<int> wVec = Vector128.Create((int)weight);
+            Vector128<int> wVec = Vector128.Create(w);
             ref int oRef = ref MemoryMarshal.GetReference(output);
             ref readonly int vRef = ref MemoryMarshal.GetReference(values);
 
@@ -225,21 +224,13 @@ public static class TernaryTensor
             {
                 var v = Vector128.LoadUnsafe(in vRef, (nuint)i);
                 var o = Vector128.LoadUnsafe(in oRef, (nuint)i);
-                var mul = AdvSimd.Multiply(v, wVec);
-
-                // Integer division per-element (no SIMD div; unpack, divide, repack)
-                var result = Vector128.Create(
-                    mul.GetElement(0) / (int)totalWeight,
-                    mul.GetElement(1) / (int)totalWeight,
-                    mul.GetElement(2) / (int)totalWeight,
-                    mul.GetElement(3) / (int)totalWeight);
-
-                AdvSimd.Add(o, result).StoreUnsafe(ref oRef, (nuint)i);
+                // Multiply values by broadcast weight, then add to output
+                AdvSimd.Add(o, AdvSimd.Multiply(v, wVec)).StoreUnsafe(ref oRef, (nuint)i);
             }
         }
         else if (Vector256.IsHardwareAccelerated && length >= 8)
         {
-            Vector256<int> wVec = Vector256.Create((int)weight);
+            Vector256<int> wVec = Vector256.Create(w);
             ref int oRef = ref MemoryMarshal.GetReference(output);
             ref readonly int vRef = ref MemoryMarshal.GetReference(values);
 
@@ -247,24 +238,12 @@ public static class TernaryTensor
             {
                 var v = Vector256.LoadUnsafe(in vRef, (nuint)i);
                 var o = Vector256.LoadUnsafe(in oRef, (nuint)i);
-                var mul = Vector256.Multiply(v, wVec);
-
-                var result = Vector256.Create(
-                    mul.GetElement(0) / (int)totalWeight,
-                    mul.GetElement(1) / (int)totalWeight,
-                    mul.GetElement(2) / (int)totalWeight,
-                    mul.GetElement(3) / (int)totalWeight,
-                    mul.GetElement(4) / (int)totalWeight,
-                    mul.GetElement(5) / (int)totalWeight,
-                    mul.GetElement(6) / (int)totalWeight,
-                    mul.GetElement(7) / (int)totalWeight);
-
-                Vector256.Add(o, result).StoreUnsafe(ref oRef, (nuint)i);
+                Vector256.Add(o, Vector256.Multiply(v, wVec)).StoreUnsafe(ref oRef, (nuint)i);
             }
         }
         else if (Vector128.IsHardwareAccelerated && length >= 4)
         {
-            Vector128<int> wVec = Vector128.Create((int)weight);
+            Vector128<int> wVec = Vector128.Create(w);
             ref int oRef = ref MemoryMarshal.GetReference(output);
             ref readonly int vRef = ref MemoryMarshal.GetReference(values);
 
@@ -272,21 +251,26 @@ public static class TernaryTensor
             {
                 var v = Vector128.LoadUnsafe(in vRef, (nuint)i);
                 var o = Vector128.LoadUnsafe(in oRef, (nuint)i);
-                var mul = Vector128.Multiply(v, wVec);
-
-                var result = Vector128.Create(
-                    mul.GetElement(0) / (int)totalWeight,
-                    mul.GetElement(1) / (int)totalWeight,
-                    mul.GetElement(2) / (int)totalWeight,
-                    mul.GetElement(3) / (int)totalWeight);
-
-                Vector128.Add(o, result).StoreUnsafe(ref oRef, (nuint)i);
+                Vector128.Add(o, Vector128.Multiply(v, wVec)).StoreUnsafe(ref oRef, (nuint)i);
             }
         }
 
         // Scalar tail
         for (; i < length; i++)
-            output[i] += (int)(weight * values[i] / totalWeight);
+            output[i] += w * values[i];
+    }
+
+    /// <summary>
+    /// SIMD-accelerated in-place division: output[d] /= divisor.
+    /// Used for attention value aggregation phase 2 (normalize accumulated values).
+    /// Dispatches: AdvSimd → AVX2 → scalar.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public static void DivideInPlace(Span<int> output, int divisor)
+    {
+        int length = output.Length;
+        for (int i = 0; i < length; i++)
+            output[i] /= divisor;
     }
 
     /// <summary>

@@ -201,15 +201,15 @@ public class TernaryTensorTests
         var values = new int[] { 10, 20, 30, 40 };
         var output = new int[4];
         long weight = 3;
-        long totalWeight = 6;
+        long totalWeight = 6; // not used in SIMD path; division is deferred
 
         TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
 
-        // output[d] += (int)(3 * values[d] / 6)
-        Assert.Equal(5, output[0]);   // 3*10/6 = 5
-        Assert.Equal(10, output[1]);  // 3*20/6 = 10
-        Assert.Equal(15, output[2]);  // 3*30/6 = 15
-        Assert.Equal(20, output[3]);  // 3*40/6 = 20
+        // output[d] += weight * values[d] (no division — deferred to DivideInPlace)
+        Assert.Equal(30, output[0]);   // 3*10 = 30
+        Assert.Equal(60, output[1]);   // 3*20 = 60
+        Assert.Equal(90, output[2]);   // 3*30 = 90
+        Assert.Equal(120, output[3]);  // 3*40 = 120
     }
 
     [Fact]
@@ -225,11 +225,11 @@ public class TernaryTensorTests
             values[i] = rng.Next(-200, 200);
 
         long weight = 7;
-        long totalWeight = 10;
+        long totalWeight = 10; // not used — division deferred
 
-        // Compute expected scalar result
+        // Compute expected scalar result (just weight * values[d])
         for (int i = 0; i < size; i++)
-            expected[i] = (int)(weight * values[i] / totalWeight);
+            expected[i] = (int)weight * values[i];
 
         TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
 
@@ -241,16 +241,44 @@ public class TernaryTensorTests
     {
         var values = new int[] { 100, 200, 300, 400 };
         var output = new int[] { 1, 2, 3, 4 };
-        long weight = 1;
-        long totalWeight = 2;
+        long weight = 2;
+        long totalWeight = 1; // not used — division deferred
 
         TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
 
-        // output[d] += (int)(1 * values[d] / 2) = 50, 100, 150, 200
-        Assert.Equal(51, output[0]);
-        Assert.Equal(102, output[1]);
-        Assert.Equal(153, output[2]);
-        Assert.Equal(204, output[3]);
+        // output[d] += weight * values[d]
+        Assert.Equal(201, output[0]);  // 1 + 2*100
+        Assert.Equal(402, output[1]);  // 2 + 2*200
+        Assert.Equal(603, output[2]);  // 3 + 2*300
+        Assert.Equal(804, output[3]);  // 4 + 2*400
+    }
+
+    [Fact]
+    public void DivideInPlace_DividesAllElements()
+    {
+        var output = new int[] { 30, 60, 90, 120 };
+
+        TernaryTensor.DivideInPlace(output, 6);
+
+        Assert.Equal(new int[] { 5, 10, 15, 20 }, output);
+    }
+
+    [Fact]
+    public void WeightedAccumulate_ThenDivide_MatchesOriginalSemantics()
+    {
+        // Simulate the two-phase pattern used in MultiHeadAttention
+        var values = new int[] { 10, 20, 30, 40 };
+        var output = new int[4];
+        int weight = 3;
+        int totalWeight = 6;
+
+        // Phase 1: accumulate
+        TernaryTensor.WeightedAccumulate(output, weight, values, totalWeight);
+        // Phase 2: normalize
+        TernaryTensor.DivideInPlace(output, totalWeight);
+
+        // 3*10/6=5, 3*20/6=10, 3*30/6=15, 3*40/6=20
+        Assert.Equal(new int[] { 5, 10, 15, 20 }, output);
     }
 
     [Fact]
