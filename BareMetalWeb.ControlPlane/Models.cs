@@ -1,5 +1,87 @@
 namespace BareMetalWeb.ControlPlane;
 
+using System.Text.Json.Serialization;
+
+// ── Deployment ring ──────────────────────────────────────────────────────────
+
+/// <summary>
+/// Staged deployment ring that determines which runtime version an agent receives.
+/// Rings are ordered from fastest-moving (Testing) to most stable (Main).
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<DeploymentRing>))]
+public enum DeploymentRing
+{
+    Testing = 0,
+    Canary  = 1,
+    Early   = 2,
+    Main    = 3,
+}
+
+// ── Agent / node identity ────────────────────────────────────────────────────
+
+/// <summary>
+/// Per-node identity provisioned by the control plane and stored locally as
+/// <c>/var/lib/bmw/node.json</c> (or an equivalent path on the target OS).
+/// The agent reads this file at startup to authenticate itself.
+/// </summary>
+public sealed class NodeIdentity
+{
+    /// <summary>Unique identifier for this node (e.g. a UUID assigned at provisioning).</summary>
+    public string NodeId          { get; set; } = "";
+    /// <summary>Service-principal name used for audit and RBAC on the control plane.</summary>
+    public string ServicePrincipal { get; set; } = "";
+    /// <summary>Bearer secret used in <c>Authorization: Bearer {Secret}</c> requests.</summary>
+    public string Secret          { get; set; } = "";
+    /// <summary>Control-plane cluster endpoint base URL.</summary>
+    public string ClusterEndpoint { get; set; } = "";
+    /// <summary>TLS certificate fingerprint (SHA-256 hex) expected from the control plane.</summary>
+    public string CertFingerprint { get; set; } = "";
+    /// <summary>Deployment ring this node belongs to (serialised as a string, e.g. "Canary").</summary>
+    public DeploymentRing Ring    { get; set; } = DeploymentRing.Main;
+}
+
+// ── Agent polling models ─────────────────────────────────────────────────────
+
+/// <summary>
+/// Response from <c>GET /api/runtime/desired/{nodeId}</c>.
+/// Tells the agent which runtime version it should be running and where to get it.
+/// </summary>
+public sealed class RuntimeResponse
+{
+    /// <summary>The version the agent should be running for its ring.</summary>
+    public string? DesiredVersion { get; set; }
+    /// <summary>SHA-256 hex checksum of the binary at <see cref="DownloadUrl"/>.</summary>
+    public string? Sha256 { get; set; }
+    /// <summary>
+    /// URL path (relative to the cluster endpoint) from which the runtime binary
+    /// can be downloaded.  Append to <see cref="NodeIdentity.ClusterEndpoint"/>.
+    /// </summary>
+    public string? DownloadUrl { get; set; }
+    /// <summary>Seconds the agent should wait before the next poll.</summary>
+    public int PollSeconds { get; set; }
+}
+
+/// <summary>
+/// Describes a runtime binary artefact that has been pushed to the control plane by CI.
+/// </summary>
+public sealed class RuntimeArtifact
+{
+    /// <summary>Semantic version string (e.g. "1.4.2").</summary>
+    public string? Version { get; set; }
+    /// <summary>Commit SHA that produced this build.</summary>
+    public string? CommitSha { get; set; }
+    /// <summary>Target platform (e.g. "linux-x64", "linux-arm64").</summary>
+    public string? Platform { get; set; }
+    /// <summary>SHA-256 hex checksum of the binary.</summary>
+    public string? Sha256 { get; set; }
+    /// <summary>Size of the binary in bytes.</summary>
+    public long SizeBytes { get; set; }
+    /// <summary>UTC timestamp when this artefact was registered.</summary>
+    public string? PublishedAt { get; set; }
+    /// <summary>Minimum ring that may receive this version (e.g. Testing gets it first).</summary>
+    public DeploymentRing MinRing { get; set; }
+}
+
 // ── Webstore / gallery template models ──────────────────────────────────────
 
 /// <summary>Summary of a template package available on the control plane webstore.</summary>

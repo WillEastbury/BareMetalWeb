@@ -16,6 +16,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\BareMetalWeb.Host\BareMetalWeb.Host.csproj" />
+    <ProjectReference Include="..\BareMetalWeb.Agent\BareMetalWeb.Agent.csproj" />
   </ItemGroup>
 
   <ItemGroup>

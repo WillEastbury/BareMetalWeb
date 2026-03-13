@@ -114,6 +114,92 @@ public sealed class ControlPlaneClient
         => GetAsync<UpgradeStatus>(
             $"/api/_cluster/upgrade-status?instanceId={Uri.EscapeDataString(instanceId)}&targetVersion={Uri.EscapeDataString(targetVersion)}");
 
+    // ── Agent polling ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Poll the control plane for the desired runtime version for a node.
+    /// Uses <c>GET /api/runtime/desired/{nodeId}</c> with
+    /// <c>Authorization: Bearer {secret}</c> and <c>X-BMW-Architecture</c> headers.
+    /// Returns null if the control plane is unreachable.
+    /// </summary>
+    public static async Task<RuntimeResponse?> GetDesiredVersionAsync(
+        string clusterEndpoint, string nodeId, string secret, string architecture)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get,
+                $"{clusterEndpoint.TrimEnd('/')}/api/runtime/desired/{Uri.EscapeDataString(nodeId)}");
+            request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {secret}");
+            request.Headers.TryAddWithoutValidation("X-BMW-Architecture", architecture);
+            using var response = await Http.SendAsync(request,
+                HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.Error.WriteLine(
+                    $"[BMW Agent] Poll returned {(int)response.StatusCode}");
+                return null;
+            }
+            var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            return JsonSerializer.Deserialize<RuntimeResponse>(json, JsonOpts);
+        }
+        catch (HttpRequestException ex)
+        {
+            Console.Error.WriteLine($"[BMW Agent] Poll network error: {ex.Message}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[BMW Agent] Poll error: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Download a runtime binary from <paramref name="downloadUrl"/> (Bearer-authenticated)
+    /// and write it to <paramref name="destPath"/>.
+    /// Returns <c>true</c> on success.
+    /// </summary>
+    public static async Task<bool> DownloadRuntimeAsync(
+        string downloadUrl, string secret, string destPath, CancellationToken ct = default)
+    {
+        var tmpPath = destPath + ".tmp";
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+            request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {secret}");
+            using var response = await Http.SendAsync(request,
+                HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.Error.WriteLine(
+                    $"[BMW Agent] Download returned {(int)response.StatusCode}");
+                return false;
+            }
+            await using (var fs = new FileStream(tmpPath, FileMode.Create, FileAccess.Write,
+                FileShare.None, bufferSize: 65536, useAsync: true))
+            {
+                await response.Content.CopyToAsync(fs, ct).ConfigureAwait(false);
+            }
+            File.Move(tmpPath, destPath, overwrite: true);
+            return true;
+        }
+        catch (HttpRequestException ex)
+        {
+            Console.Error.WriteLine($"[BMW Agent] Download network error: {ex.Message}");
+            TryDeleteTmp(tmpPath);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[BMW Agent] Download error: {ex.GetType().Name}: {ex.Message}");
+            TryDeleteTmp(tmpPath);
+            return false;
+        }
+    }
+
+    private static void TryDeleteTmp(string path)
+    { try { if (File.Exists(path)) File.Delete(path); } catch { /* best-effort */ } }
+
     private void PostFireAndForget<T>(string entityType, T payload)
     {
         if (!IsConfigured) return;

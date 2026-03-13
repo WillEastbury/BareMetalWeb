@@ -1,0 +1,31 @@
+[Unit]
+Description=BMW Bootstrap Agent
+Documentation=https://github.com/WillEastbury/BareMetalWeb
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/bmw-agent
+Restart=always
+RestartSec=5
+
+# Identity file must be pre-provisioned at this path
+# (override with BMW_STATE_FILE if needed)
+Environment=BMW_STATE_FILE=/var/lib/bmw/node.json
+
+# Drop privileges to a dedicated service account
+User=bmw-agent
+Group=bmw-agent
+
+# Runtime directory where versioned binaries and the active symlink live
+Environment=BMW_RUNTIME_DIR=/opt/bmw
+Environment=BMW_RUNTIME_LINK=/opt/bmw/bmw
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/opt/bmw /var/lib/bmw /tmp
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
