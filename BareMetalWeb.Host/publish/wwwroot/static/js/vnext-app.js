@@ -219,7 +219,8 @@
     }
 
     function setContent(html) {
-        getContent().innerHTML = html;
+        var el = getContent();
+        if (el) el.innerHTML = html;
     }
 
     function showLoading() {
@@ -4845,6 +4846,11 @@
                 }
             }
         } catch (e) {}
+
+        // Only start the SPA router on VNext shell pages that have a #vnext-content
+        // mount point. SSR pages (e.g. /metrics, /topips) include this bundle for
+        // theme/skin support but must not attempt client-side routing.
+        if (!document.getElementById('vnext-content')) return;
 
         // Register routes
         BMRouter
