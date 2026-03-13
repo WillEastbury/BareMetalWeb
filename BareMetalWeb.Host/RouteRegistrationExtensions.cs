@@ -621,6 +621,7 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("POST /api/vector/register", new RouteHandlerData(adminOnly, VectorApiHandlers.RegisterHandler));
         host.RegisterRoute("POST /api/agent/chat", new RouteHandlerData(raw, AgentApiHandlers.ChatHandler));
         host.RegisterRoute("GET /api/agent/metrics", new RouteHandlerData(raw, AgentApiHandlers.MetricsHandler));
+        host.RegisterRoute("GET /ai/generate", new RouteHandlerData(raw, AgentApiHandlers.GenerateHandler));
         var templated = pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "", "" }, "Public", false, 1);
         host.RegisterRoute("GET /page/{slug}", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(PageRenderer.ConfigurePageAsync)));
         host.RegisterRoute("GET /api/pages", new RouteHandlerData(raw, PageRenderer.ListPagesHandler));

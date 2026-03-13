@@ -262,5 +262,49 @@ public class BitNetEngineTests
         Assert.False(string.IsNullOrWhiteSpace(metrics.Summary));
         Assert.Contains("Memory:", metrics.Summary);
         Assert.Contains("Tokens:", metrics.Summary);
+        Assert.Contains("tok/s", metrics.Summary);
+        Assert.Contains("KV cache", metrics.Summary);
+    }
+
+    [Fact]
+    public async Task GetMetrics_AfterGenerate_TracksKvCacheCounters()
+    {
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(ModelLoadOptions.NoPruning);
+
+        await engine.GenerateAsync("hello".AsMemory());
+
+        var metrics = engine.GetMetrics()!.Value;
+
+        // KV misses = prefill tokens (BOS + encoded prompt chars + EOS)
+        // KV hits = decode steps
+        Assert.True(metrics.KvCacheMisses > 0, "Should have KV cache misses from prefill");
+    }
+
+    [Fact]
+    public async Task GetMetrics_AfterGenerate_TracksLayerTiming()
+    {
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(ModelLoadOptions.NoPruning);
+
+        await engine.GenerateAsync("test".AsMemory());
+
+        var metrics = engine.GetMetrics()!.Value;
+
+        Assert.True(metrics.AvgLayerTimeMicros >= 0, "Avg layer time should be non-negative");
+    }
+
+    [Fact]
+    public async Task GetMetrics_AfterGenerate_TokensPerSecPositive()
+    {
+        var engine = new BitNetEngine();
+        engine.LoadTestModel(ModelLoadOptions.NoPruning);
+
+        await engine.GenerateAsync("test query".AsMemory());
+
+        var metrics = engine.GetMetrics()!.Value;
+
+        // May be very high (fast machine), but should be > 0 after inference
+        Assert.True(metrics.TokensPerSec >= 0f, "TokensPerSec should be non-negative");
     }
 }

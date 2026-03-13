@@ -22,10 +22,10 @@ public static class IntelligenceExtensions
         var engine = new BitNetEngine();
         engine.LoadTestModel(ModelLoadOptions.Default);
 
-        //var classifier = new KeywordIntentClassifier(AdminToolCatalogue.GetIntentDefinitions());
+        var classifier = new KeywordIntentClassifier(AdminToolCatalogue.GetIntentDefinitions());
         var tools = AdminToolCatalogue.CreateRegistry();
 
-        _orchestrator = new IntelligenceOrchestrator(engine, tools);
+        _orchestrator = new IntelligenceOrchestrator(engine, classifier, tools);
 
         return new IntelligenceRoutes(
             ChatHandler,

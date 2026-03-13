@@ -106,11 +106,48 @@ public static class AgentApiHandlers
             ["pre_prune_accuracy"]     = m.Value.PrePruneAccuracy,
             ["post_prune_accuracy"]    = m.Value.PostPruneAccuracy,
             ["semantic_test_cases"]    = m.Value.SemanticTestCaseCount,
+            // ── Performance ─────────────────────────────────────────────────
+            ["tokens_per_sec"]         = m.Value.TokensPerSec,
+            ["kv_cache_hits"]          = m.Value.KvCacheHits,
+            ["kv_cache_misses"]        = m.Value.KvCacheMisses,
+            ["kv_cache_hit_ratio"]     = m.Value.KvCacheHitRatio,
+            ["avg_layer_time_micros"]  = m.Value.AvgLayerTimeMicros,
             // ── Summary ─────────────────────────────────────────────────────
             ["summary"]                = m.Value.Summary,
         };
 
         await JsonWriterHelper.WriteResponseAsync(context.Response, payload,
+            ct: context.RequestAborted);
+    }
+
+    /// <summary>GET /ai/generate?prompt=... — simple prompt-based text generation endpoint.</summary>
+    public static async ValueTask GenerateHandler(BmwContext context)
+    {
+        var prompt = context.HttpRequest.Query["prompt"].ToString()?.Trim() ?? "";
+        if (string.IsNullOrEmpty(prompt))
+        {
+            context.Response.StatusCode = 400;
+            await JsonWriterHelper.WriteResponseAsync(context.Response,
+                new Dictionary<string, object?> { ["error"] = "prompt query parameter is required" });
+            return;
+        }
+
+        string reply;
+        try
+        {
+            var orchestrator = GetOrCreateOrchestrator();
+            var response = await orchestrator.ProcessAsync(prompt, context.RequestAborted)
+                .ConfigureAwait(false);
+            reply = response.Message;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError("AgentGenerate|ProcessAsync", ex);
+            reply = "Sorry, an error occurred processing your request.";
+        }
+
+        await JsonWriterHelper.WriteResponseAsync(context.Response,
+            new Dictionary<string, object?> { ["generated"] = reply, ["prompt"] = prompt },
             ct: context.RequestAborted);
     }
 }
