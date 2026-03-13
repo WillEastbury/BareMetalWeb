@@ -13,65 +13,6 @@ namespace BareMetalWeb.Intelligence;
 public static class AdminToolCatalogue
 {
     /// <summary>
-    /// Intent definitions for the keyword classifier.
-    /// Each intent maps to a tool in the registry.
-    /// </summary>
-    public static IReadOnlyList<IntentDefinition> GetIntentDefinitions() =>
-    [
-        new("greeting",
-            "Respond to a greeting or conversational opener",
-            ["hi", "hello", "greeting", "greetings", "hey", "howdy"]),
-
-        new("farewell",
-            "Respond to a farewell or closing message",
-            ["bye", "goodbye", "farewell", "later", "ciao"]),
-
-        new("create-entity",
-            "Create a new record for a data entity",
-            ["create", "add", "new", "make", "insert", "register"]),
-
-        new("list-entities",
-            "List all registered data entities",
-            ["list", "entities", "types", "data", "models", "schema", "all"]),
-
-        new("show-entity",
-            "Show a specific entity record by ID or name",
-            ["show", "display", "view", "open", "detail", "record", "item", "lookup"]),
-
-        new("describe-entity",
-            "Describe fields and metadata for a specific entity",
-            ["describe", "fields", "schema", "metadata", "properties", "columns", "entity", "type", "model"]),
-
-        new("query-entity",
-            "Query records from a data entity",
-            ["query", "find", "search", "get", "records", "rows", "data", "fetch", "where", "filter"]),
-
-        new("count-entity",
-            "Count records in a data entity",
-            ["count", "how", "many", "total", "number"]),
-
-        new("system-status",
-            "Show system status and diagnostics",
-            ["status", "health", "diagnostics", "uptime", "memory", "system", "info"]),
-
-        new("index-status",
-            "Show search index health and statistics",
-            ["index", "search", "reindex", "rebuild", "fragmentation", "statistics"]),
-
-        new("help",
-            "Show available commands and capabilities",
-            ["help", "commands", "what", "can", "you", "do", "capabilities"]),
-
-        new("plan-workflow",
-            "Generate a multi-step workflow plan from natural language",
-            ["plan", "workflow", "automate", "steps", "pipeline", "sequence", "batch", "multi", "chain"]),
-
-        new("create-todo",
-            "Create a new todo item, task, or reminder",
-            ["todo", "task", "reminder", "checklist", "action", "note"]),
-    ];
-
-    /// <summary>
     /// Register all admin tools into a ToolRegistry.
     /// Uses DataScaffold for entity metadata access.
     /// </summary>
