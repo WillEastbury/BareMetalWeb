@@ -7,9 +7,9 @@ namespace BareMetalWeb.Host;
 
 /// <summary>
 /// Backend handler for the Agent Panel chat interface.
-/// Routes all messages through the two-tier IntelligenceOrchestrator pipeline:
-///   Tier 1 — TF-IDF keyword intent classifier (fast path, no model required).
-///   Tier 2 — BitNet ternary engine fallback for unrecognised natural-language queries.
+/// Routes all messages through the IntelligenceOrchestrator.
+/// When the micro SLM (BitNet engine) is loaded it is the sole processing stage.
+/// When no model is loaded, the TF-IDF keyword classifier handles queries instead.
 /// </summary>
 public static class AgentApiHandlers
 {
