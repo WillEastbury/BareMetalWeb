@@ -18,6 +18,12 @@ public sealed class IntelligenceOrchestrator
     }
 
     /// <summary>
+    /// Return aggregated pipeline metrics from the underlying engine.
+    /// Returns <see langword="null"/> if the engine has no model loaded.
+    /// </summary>
+    public BitNetPipelineMetrics? GetMetrics() => _engine.GetMetrics();
+
+    /// <summary>
     /// Process a user query through the single-stage BitNet pipeline.
     /// </summary>
     public async ValueTask<ChatResponse> ProcessAsync(

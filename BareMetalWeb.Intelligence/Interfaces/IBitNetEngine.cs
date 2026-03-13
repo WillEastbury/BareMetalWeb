@@ -18,4 +18,10 @@ public interface IBitNetEngine
         ReadOnlyMemory<char> prompt,
         int maxTokens = 256,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Return aggregated memory, token throughput, and accuracy metrics
+    /// for the pipeline. Returns <see langword="null"/> if no model is loaded.
+    /// </summary>
+    BitNetPipelineMetrics? GetMetrics();
 }
