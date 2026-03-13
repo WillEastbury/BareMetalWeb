@@ -125,4 +125,38 @@ public class IntelligenceOrchestratorTests
 
         Assert.Contains("Available commands", response.Message);
     }
+
+    [Fact]
+    public async Task ProcessAsync_SingleWordHelp_ReturnsHelpMessage()
+    {
+        var orch = CreateOrchestrator();
+
+        var response = await orch.ProcessAsync("help");
+
+        Assert.Contains("Available commands", response.Message);
+        Assert.Equal("help", response.ResolvedIntent);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_Greeting_Word_ReturnsGreeting()
+    {
+        var orch = CreateOrchestrator();
+
+        var response = await orch.ProcessAsync("greeting");
+
+        Assert.Contains("Hello", response.Message);
+        Assert.Equal("greeting", response.ResolvedIntent);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_CreateNewUser_ReturnsCreateResponse()
+    {
+        var orch = CreateOrchestrator();
+
+        var response = await orch.ProcessAsync("create a new user");
+
+        // Should recognise create-entity intent and return actionable guidance
+        Assert.Equal("create-entity", response.ResolvedIntent);
+        Assert.True(response.Confidence >= 0.40f);
+    }
 }

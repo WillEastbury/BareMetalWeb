@@ -95,7 +95,7 @@ public sealed class IntelligenceOrchestrator
     /// </summary>
     private void ApplyContext(Dictionary<string, string> parameters, string intentName)
     {
-        if (intentName is "describe-entity" or "query-entity" or "show-entity" or "count-entity")
+        if (intentName is "describe-entity" or "query-entity" or "show-entity" or "count-entity" or "create-entity")
         {
             if (parameters.TryGetValue("entity", out var entity) && !string.IsNullOrEmpty(entity))
             {
@@ -114,6 +114,7 @@ public sealed class IntelligenceOrchestrator
     {
         "describe", "show", "display", "view", "open", "list",
         "query", "find", "search", "get", "fetch", "count",
+        "create", "add", "new", "make", "insert", "register",
         "how", "many", "fields", "of", "for", "the", "a",
         "an", "in", "from", "all", "me", "record", "detail",
         "records", "items", "results", "data", "please"
@@ -145,7 +146,7 @@ public sealed class IntelligenceOrchestrator
     {
         var parameters = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        if (intentName is not ("describe-entity" or "query-entity" or "show-entity" or "count-entity"))
+        if (intentName is not ("describe-entity" or "query-entity" or "show-entity" or "count-entity" or "create-entity"))
             return parameters;
 
         var words = query.Split(' ', StringSplitOptions.RemoveEmptyEntries);

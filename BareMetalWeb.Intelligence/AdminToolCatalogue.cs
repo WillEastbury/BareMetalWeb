@@ -20,11 +20,15 @@ public static class AdminToolCatalogue
     [
         new("greeting",
             "Respond to a greeting or conversational opener",
-            ["hi", "hello"]),
+            ["hi", "hello", "greeting", "greetings", "hey", "howdy"]),
 
         new("farewell",
             "Respond to a farewell or closing message",
-            ["bye", "goodbye"]),
+            ["bye", "goodbye", "farewell", "later", "ciao"]),
+
+        new("create-entity",
+            "Create a new record for a data entity",
+            ["create", "add", "new", "make", "insert", "register"]),
 
         new("list-entities",
             "List all registered data entities",
@@ -82,6 +86,12 @@ public static class AdminToolCatalogue
             "Respond to a farewell",
             [],
             FarewellHandler);
+
+        registry.Register(
+            "create-entity",
+            "Create a new record for a data entity",
+            [new ToolParameter("entity", "Entity name or slug", false)],
+            CreateEntityHandler);
 
         registry.Register(
             "list-entities",
@@ -167,6 +177,36 @@ public static class AdminToolCatalogue
         IReadOnlyDictionary<string, string> parameters, CancellationToken ct)
     {
         return ValueTask.FromResult(ToolResult.Ok("Goodbye! Feel free to return anytime."));
+    }
+
+    private static ValueTask<ToolResult> CreateEntityHandler(
+        IReadOnlyDictionary<string, string> parameters, CancellationToken ct)
+    {
+        parameters.TryGetValue("entity", out var entityName);
+
+        if (!string.IsNullOrWhiteSpace(entityName))
+        {
+            var entity = ResolveEntity(entityName);
+            if (entity is not null)
+                return ValueTask.FromResult(ToolResult.Ok(
+                    $"To create a new {entity.Name}, navigate to /{entity.Slug}/new"));
+
+            return ValueTask.FromResult(ToolResult.Fail(
+                $"Entity '{entityName}' not found. Use 'list entities' to see available types."));
+        }
+
+        // No entity specified — list available entities for creation
+        var entities = DataScaffold.Entities;
+        if (entities is null || entities.Count == 0)
+            return ValueTask.FromResult(ToolResult.Ok("No data entities are registered."));
+
+        var sb = new System.Text.StringBuilder(256);
+        sb.AppendLine("Which entity would you like to create a record for?");
+        sb.AppendLine();
+        foreach (var e in entities)
+            sb.AppendLine($"  • {e.Name} — create: /{e.Slug}/new");
+
+        return ValueTask.FromResult(ToolResult.Ok(sb.ToString()));
     }
 
     private static ValueTask<ToolResult> ListEntitiesHandler(
@@ -417,6 +457,7 @@ public static class AdminToolCatalogue
         sb.AppendLine("  • show <entity> <id>  — Show a record by numeric ID");
         sb.AppendLine("  • show <entity> <name>— Search for a record by name");
         sb.AppendLine("  • query <entity>      — Query records from an entity");
+        sb.AppendLine("  • create <entity>     — Navigate to the creation form for an entity");
         sb.AppendLine("  • plan workflow       — Generate a multi-step workflow plan from natural language");
         sb.AppendLine("  • system status       — Show memory, GC, uptime diagnostics");
         sb.AppendLine("  • index status        — Show search index health");
