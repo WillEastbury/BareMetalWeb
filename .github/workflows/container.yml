@@ -1,17 +1,22 @@
 # ────────────────────────────────────────────────────────────────────────────────
-# CI2 — Build + Container Build + Push
+# CI — AOT Builds + Agent Container
 #
-# Triggered automatically when CI1 (Unit Tests) passes on main.
-# 1. JIT-publishes an AnyCPU Release package (deploy-package) for Azure Web Apps
-# 2. AOT-publishes a native linux-arm64 binary for the container
-# 3. Packages the arm64 binary into a thin container (Dockerfile.prebuilt)
-# 4. Pushes the linux-arm64 image to ACR
+# Triggered automatically when CI1 (Unit Tests) passes on main, or manually.
 #
-# Downstream: CD1 (cd-canary.yml) triggers on this workflow's success.
+# Produces:
+#   • aot-linux-x64          — BareMetalWeb.Host AOT binary (Ubuntu 22.04 runner)
+#   • aot-linux-arm64        — BareMetalWeb.Host AOT binary (Ubuntu 24.04 arm runner)
+#   • aot-linux-arm64-bookworm — BareMetalWeb.Host AOT binary (Debian bookworm, glibc 2.36)
+#   • bmw-agent-linux-x64    — bmw-agent AOT binary
+#   • bmw-agent-linux-arm64  — bmw-agent AOT binary
+#
+# All artifacts are uploaded to GitHub Actions for later use by the agent bootstrap
+# system.  There is NO deployment step — the agent downloads and installs the
+# correct versioned binary itself.
 # ────────────────────────────────────────────────────────────────────────────────
-name: "2 · CI2 — AOT & Containers"
+name: "2 · CI2 — AOT Builds & Agent Container"
 
-run-name: "2 · CI2 — AOT & Containers — V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+run-name: "2 · CI2 — AOT Builds & Agent Container — V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
 
 on:
   workflow_run:
@@ -26,12 +31,8 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
-  ACR_NAME: metalclusterregistry
-  ACR_LOGIN_SERVER: metalclusterregistry.azurecr.io
-  ACR_IMAGE: baremetalweb
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -43,7 +44,7 @@ jobs:
       github.event_name == 'workflow_dispatch' ||
       github.event.workflow_run.conclusion == 'success'
     steps:
-      - run: echo "CI1 passed — proceeding with AOT build + container push"
+      - run: echo "CI1 passed — proceeding with AOT builds"
 
   # ── Version ─────────────────────────────────────────────────────────────
   version:
@@ -66,9 +67,9 @@ jobs:
           echo "info_version=${MAJOR}.${DATE}.${BUILD}+${SHA}" >> $GITHUB_OUTPUT
           echo "assembly_version=${MAJOR}.0.0.${BUILD}" >> $GITHUB_OUTPUT
 
-  # ── JIT Publish: AnyCPU (for Azure Web App deployments) ───────────────
-  jit-anycpu:
-    name: "JIT · AnyCPU"
+  # ── AOT: BareMetalWeb.Host linux-x64 ────────────────────────────────────
+  aot-host-linux-x64:
+    name: "AOT Host · linux-x64"
     needs: version
     runs-on: ubuntu-latest
     steps:
@@ -86,25 +87,30 @@ jobs:
           key: nuget-${{ hashFiles('**/*.csproj') }}
           restore-keys: nuget-
 
-      - name: JIT publish (AnyCPU)
+      - name: Install native AOT prerequisites
+        run: sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+
+      - name: AOT publish (linux-x64)
         run: |
           dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
             --configuration Release \
+            --runtime linux-x64 \
+            --self-contained \
             --output ./publish \
             -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
             -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
             -p:InformationalVersion=${{ needs.version.outputs.info_version }}
 
-      - name: Upload deploy package
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: deploy-package
+          name: aot-linux-x64
           path: ./publish
-          retention-days: 3
+          retention-days: 30
 
-  # ── AOT Publish: Linux arm64 (GLIBC 2.38+, Ubuntu 24.04) ──────────────
-  aot-linux-arm64:
-    name: "AOT · linux-arm64 (glibc 2.38)"
+  # ── AOT: BareMetalWeb.Host linux-arm64 (Ubuntu 24.04) ───────────────────
+  aot-host-linux-arm64:
+    name: "AOT Host · linux-arm64"
     needs: version
     runs-on: ubuntu-24.04-arm
     steps:
@@ -122,6 +128,9 @@ jobs:
           key: nuget-${{ hashFiles('**/*.csproj') }}
           restore-keys: nuget-
 
+      - name: Install native AOT prerequisites
+        run: sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+
       - name: AOT publish (linux-arm64)
         run: |
           dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
@@ -133,16 +142,16 @@ jobs:
             -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
             -p:InformationalVersion=${{ needs.version.outputs.info_version }}
 
-      - name: Upload AOT artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aot-linux-arm64-glibc2.38
+          name: aot-linux-arm64
           path: ./publish
-          retention-days: 3
+          retention-days: 30
 
-  # ── AOT Publish: Linux arm64 (GLIBC 2.36, Debian 12 bookworm) ────────
-  aot-linux-arm64-bookworm:
-    name: "AOT · linux-arm64 (glibc 2.36)"
+  # ── AOT: BareMetalWeb.Host linux-arm64 (Debian bookworm, glibc 2.36) ───
+  aot-host-linux-arm64-bookworm:
+    name: "AOT Host · linux-arm64 (bookworm/glibc 2.36)"
     needs: version
     runs-on: ubuntu-24.04-arm
     container:
@@ -171,61 +180,131 @@ jobs:
             -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
             -p:InformationalVersion=${{ needs.version.outputs.info_version }}
 
-      - name: Upload AOT artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: aot-linux-arm64-glibc2.36
+          name: aot-linux-arm64-bookworm
           path: ./publish
-          retention-days: 3
+          retention-days: 30
 
-  # ── Container: Linux arm64 ─────────────────────────────────────────────
-  container-linux-arm64:
-    name: "Container · linux-arm64"
-    needs: [version, aot-linux-arm64]
+  # ── AOT: bmw-agent linux-x64 ─────────────────────────────────────────────
+  aot-agent-linux-x64:
+    name: "AOT Agent · linux-x64"
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Install native AOT prerequisites
+        run: sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+
+      - name: AOT publish agent (linux-x64)
+        run: |
+          dotnet publish BareMetalWeb.Agent/BareMetalWeb.Agent.csproj \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained \
+            --output ./agent-out \
+            -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:InformationalVersion=${{ needs.version.outputs.info_version }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bmw-agent-linux-x64
+          path: ./agent-out
+          retention-days: 30
+
+  # ── AOT: bmw-agent linux-arm64 ───────────────────────────────────────────
+  aot-agent-linux-arm64:
+    name: "AOT Agent · linux-arm64"
+    needs: version
     runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download AOT artifact
-        uses: actions/download-artifact@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
         with:
-          name: aot-linux-arm64-glibc2.38
-          path: ./publish
+          dotnet-version: '10.0.x'
 
-      - name: Azure Login
-        uses: azure/login@v2
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
 
-      - name: Log in to ACR
-        run: az acr login --name ${{ env.ACR_NAME }}
+      - name: Install native AOT prerequisites
+        run: sudo apt-get install -y --no-install-recommends clang zlib1g-dev
+
+      - name: AOT publish agent (linux-arm64)
+        run: |
+          dotnet publish BareMetalWeb.Agent/BareMetalWeb.Agent.csproj \
+            --configuration Release \
+            --runtime linux-arm64 \
+            --self-contained \
+            --output ./agent-out \
+            -p:AssemblyVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:FileVersion=${{ needs.version.outputs.assembly_version }} \
+            -p:InformationalVersion=${{ needs.version.outputs.info_version }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bmw-agent-linux-arm64
+          path: ./agent-out
+          retention-days: 30
+
+  # ── Agent container (build verification — no push) ──────────────────────
+  agent-container:
+    name: "Agent container (build verification)"
+    needs: version
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build and push
+      - name: Build agent container image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.prebuilt
+          file: Dockerfile.agent
           platforms: linux/arm64
-          push: true
-          build-args: PUBLISH_DIR=./publish
-          tags: |
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-arm64
+          push: false
+          tags: bmw-agent:${{ needs.version.outputs.tag }}-linux-arm64
           labels: |
-            org.opencontainers.image.title=BareMetalWeb
+            org.opencontainers.image.title=BareMetalWeb Agent
             org.opencontainers.image.version=${{ needs.version.outputs.tag }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp || github.event.workflow_run.created_at }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
   # ── Summary ────────────────────────────────────────────────────────────
   summary:
     name: Build summary
-    needs: [version, jit-anycpu, aot-linux-arm64-bookworm, container-linux-arm64]
+    needs:
+      - version
+      - aot-host-linux-x64
+      - aot-host-linux-arm64
+      - aot-host-linux-arm64-bookworm
+      - aot-agent-linux-x64
+      - aot-agent-linux-arm64
+      - agent-container
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -239,16 +318,16 @@ jobs:
         if: needs.version.result != 'skipped'
         run: |
           TAG="${{ needs.version.outputs.tag }}"
-          echo "### 🏗️ CI2 Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### 🏗️ CI2 Build Summary (${TAG})" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Build | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| JIT AnyCPU (\`deploy-package\`) | ${{ needs.jit-anycpu.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| AOT linux-arm64 glibc 2.38 (\`aot-linux-arm64-glibc2.38\`) | ${{ needs.aot-linux-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| AOT linux-arm64 glibc 2.36 (\`aot-linux-arm64-glibc2.36\`) | ${{ needs.aot-linux-arm64-bookworm.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Artifact | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| AOT Host linux-x64 | ${{ needs.aot-host-linux-x64.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AOT Host linux-arm64 | ${{ needs.aot-host-linux-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AOT Host linux-arm64 (bookworm) | ${{ needs.aot-host-linux-arm64-bookworm.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AOT Agent linux-x64 | ${{ needs.aot-agent-linux-x64.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| AOT Agent linux-arm64 | ${{ needs.aot-agent-linux-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Agent container build | ${{ needs.agent-container.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Container | Tag | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|-----------|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Linux arm64 | \`${TAG}-linux-arm64\` | ${{ needs.container-linux-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Next:** CD1 (cd-canary.yml) will deploy to canary and run extended tests." >> $GITHUB_STEP_SUMMARY
+          echo "All artifacts available for download from this run." >> $GITHUB_STEP_SUMMARY
+          echo "The agent self-registers and downloads the correct binary at runtime — no CD step needed." >> $GITHUB_STEP_SUMMARY

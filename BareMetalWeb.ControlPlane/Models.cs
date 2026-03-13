@@ -20,6 +20,48 @@ public enum DeploymentRing
 // ── Agent / node identity ────────────────────────────────────────────────────
 
 /// <summary>
+/// First-boot registration request.  Sent by the agent to <c>POST /api/bootstrap/register</c>
+/// with a Bearer token derived from the hardware key.
+/// </summary>
+public sealed class NodeRegistrationRequest
+{
+    /// <summary>Hardware-derived node ID (UUID shaped, deterministic per device).</summary>
+    public string NodeId             { get; set; } = "";
+    /// <summary>SHA-256 hex of the bearer secret — never transmitted in plain text.</summary>
+    public string SecretHash         { get; set; } = "";
+    /// <summary>Bootstrap principal used to authorise the registration (e.g. the operator identity).</summary>
+    public string BootstrapPrincipal { get; set; } = "";
+    /// <summary>CPU architecture string (e.g. "X64", "Arm64").</summary>
+    public string Architecture       { get; set; } = "";
+    /// <summary>Human-readable OS description from /etc/os-release PRETTY_NAME.</summary>
+    public string OsDescription      { get; set; } = "";
+    /// <summary>Glibc version string (e.g. "2.38"), or "n/a" on non-Linux.</summary>
+    public string GlibcVersion       { get; set; } = "";
+    /// <summary>SHA-256 hex of the first NIC MAC address (hardware binding).</summary>
+    public string MacHash            { get; set; } = "";
+}
+
+/// <summary>
+/// Per-boot attestation record.  Sent by the agent to <c>POST /api/bootstrap/attest</c>
+/// on each startup so the control plane can verify the node's platform has not changed.
+/// </summary>
+public sealed class NodeAttestationRequest
+{
+    /// <summary>Registered node ID.</summary>
+    public string NodeId        { get; set; } = "";
+    /// <summary>CPU architecture string.</summary>
+    public string Architecture  { get; set; } = "";
+    /// <summary>Human-readable OS description.</summary>
+    public string OsDescription { get; set; } = "";
+    /// <summary>Glibc version string.</summary>
+    public string GlibcVersion  { get; set; } = "";
+    /// <summary>SHA-256 hex of the first NIC MAC (hardware binding check).</summary>
+    public string MacHash       { get; set; } = "";
+    /// <summary>ISO-8601 UTC timestamp of this attestation.</summary>
+    public string Timestamp     { get; set; } = "";
+}
+
+/// <summary>
 /// Per-node identity provisioned by the control plane and stored locally as
 /// <c>/var/lib/bmw/node.json</c> (or an equivalent path on the target OS).
 /// The agent reads this file at startup to authenticate itself.

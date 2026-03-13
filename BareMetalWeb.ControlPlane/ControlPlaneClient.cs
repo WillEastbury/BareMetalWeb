@@ -200,6 +200,91 @@ public sealed class ControlPlaneClient
     private static void TryDeleteTmp(string path)
     { try { if (File.Exists(path)) File.Delete(path); } catch { /* best-effort */ } }
 
+    // ── Bootstrap: registration + attestation ────────────────────────────────
+
+    /// <summary>
+    /// Register a new node with the control plane bootstrap endpoint.
+    /// POSTs a <see cref="NodeRegistrationRequest"/> to
+    /// <c>POST {bootstrapEndpoint}/api/bootstrap/register</c> with
+    /// <c>Authorization: Bearer {secret}</c> and returns the provisioned
+    /// <see cref="NodeIdentity"/>, or <c>null</c> on failure.
+    /// </summary>
+    public static async Task<NodeIdentity?> RegisterNodeAsync(
+        string bootstrapEndpoint,
+        string secret,
+        NodeRegistrationRequest request,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var json    = JsonSerializer.Serialize(request, JsonOpts);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var req = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{bootstrapEndpoint.TrimEnd('/')}/api/bootstrap/register")
+            {
+                Content = content,
+            };
+            req.Headers.TryAddWithoutValidation("Authorization", $"Bearer {secret}");
+
+            using var response = await Http.SendAsync(req,
+                HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.Error.WriteLine(
+                    $"[BMW Agent] Register returned {(int)response.StatusCode}");
+                return null;
+            }
+
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            return JsonSerializer.Deserialize<NodeIdentity>(body, JsonOpts);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"[BMW Agent] Register error: {ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Attest a node's platform with the control plane.
+    /// POSTs a <see cref="NodeAttestationRequest"/> to
+    /// <c>POST {clusterEndpoint}/api/bootstrap/attest</c>.
+    /// Returns <c>true</c> if the control plane accepted the attestation.
+    /// </summary>
+    public static async Task<bool> AttestNodeAsync(
+        string clusterEndpoint,
+        string secret,
+        NodeAttestationRequest request,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            var json    = JsonSerializer.Serialize(request, JsonOpts);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            using var req = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{clusterEndpoint.TrimEnd('/')}/api/bootstrap/attest")
+            {
+                Content = content,
+            };
+            req.Headers.TryAddWithoutValidation("Authorization", $"Bearer {secret}");
+
+            using var response = await Http.SendAsync(req,
+                HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"[BMW Agent] Attest error: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
     private void PostFireAndForget<T>(string entityType, T payload)
     {
         if (!IsConfigured) return;

@@ -1,17 +1,27 @@
 # ── Bootstrap Agent: Multi-stage AOT build ────────────────────────────
-# Produces a minimal (~3-5MB) native binary for the deployment bootstrap agent.
+# Produces a minimal native binary for the deployment bootstrap agent.
+# The agent self-registers on first boot (CPU serial + NIC MAC → secure key),
+# attests its platform with the control plane, then downloads and executes
+# the correct versioned BMW binary for its deployment ring.
 # Stage 1: Build with .NET SDK
 FROM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
 RUN apt-get update && apt-get install -y --no-install-recommends clang zlib1g-dev && rm -rf /var/lib/apt/lists/*
 
-COPY BareMetalWeb.BootstrapAgent/BareMetalWeb.BootstrapAgent.csproj BareMetalWeb.BootstrapAgent/
-RUN dotnet restore BareMetalWeb.BootstrapAgent/BareMetalWeb.BootstrapAgent.csproj
+# Restore dependencies first (layer-cache friendly)
+COPY BareMetalWeb.ControlPlane/BareMetalWeb.ControlPlane.csproj BareMetalWeb.ControlPlane/
+COPY BareMetalWeb.Core/BareMetalWeb.Core.csproj BareMetalWeb.Core/
+COPY BareMetalWeb.Data/BareMetalWeb.Data.csproj BareMetalWeb.Data/
+COPY BareMetalWeb.Agent/BareMetalWeb.Agent.csproj BareMetalWeb.Agent/
+RUN dotnet restore BareMetalWeb.Agent/BareMetalWeb.Agent.csproj
 
-COPY BareMetalWeb.BootstrapAgent/ BareMetalWeb.BootstrapAgent/
+COPY BareMetalWeb.ControlPlane/ BareMetalWeb.ControlPlane/
+COPY BareMetalWeb.Core/ BareMetalWeb.Core/
+COPY BareMetalWeb.Data/ BareMetalWeb.Data/
+COPY BareMetalWeb.Agent/ BareMetalWeb.Agent/
 
-RUN dotnet publish BareMetalWeb.BootstrapAgent/BareMetalWeb.BootstrapAgent.csproj \
+RUN dotnet publish BareMetalWeb.Agent/BareMetalWeb.Agent.csproj \
     --configuration Release \
     --self-contained \
     --output /app
@@ -26,4 +36,4 @@ COPY --from=build /app .
 VOLUME /var/lib/bmw
 VOLUME /opt/bmw
 
-ENTRYPOINT ["./BareMetalWeb.BootstrapAgent"]
+ENTRYPOINT ["./bmw-agent"]
