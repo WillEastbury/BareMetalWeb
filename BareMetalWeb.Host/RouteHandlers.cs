@@ -5991,7 +5991,8 @@ public sealed class RouteHandlers : IRouteHandlers
 
     private static void WriteJobSnapshot(Utf8JsonWriter w, string jobId, string operationName,
         string status, int percentComplete, string? description,
-        string startedAt, string? completedAt, string? error, string? resultUrl)
+        string startedAt, string? completedAt, string? error, string? resultUrl,
+        string? instanceId = null)
     {
         w.WriteStartObject();
         w.WriteString("jobId", jobId);
@@ -6003,6 +6004,7 @@ public sealed class RouteHandlers : IRouteHandlers
         if (completedAt != null) w.WriteString("completedAt", completedAt); else w.WriteNull("completedAt");
         if (error != null) w.WriteString("error", error); else w.WriteNull("error");
         if (resultUrl != null) w.WriteString("resultUrl", resultUrl); else w.WriteNull("resultUrl");
+        w.WriteString("instanceId", instanceId ?? string.Empty);
         w.WriteEndObject();
     }
 
@@ -6572,19 +6574,66 @@ public sealed class RouteHandlers : IRouteHandlers
             WriteJobSnapshot(w, snapshot.JobId, snapshot.OperationName, statusStr,
                 snapshot.PercentComplete, snapshot.Description,
                 snapshot.StartedAt.ToString("O"), snapshot.CompletedAt?.ToString("O"),
-                snapshot.Error, snapshot.ResultUrl);
+                snapshot.Error, snapshot.ResultUrl, snapshot.InstanceId);
         }
     }
 
     /// <summary>
     /// GET /api/jobs
     /// Returns all tracked background jobs (active and recently completed) as a JSON array.
+    /// Merges in-memory jobs (this instance) with WAL-persisted jobs (all instances).
     /// </summary>
     public async ValueTask JobsListHandler(BmwContext context)
     {
-        var jobs = BackgroundJobService.Instance.GetAllJobs();
+        var cutoff = DateTime.UtcNow - BackgroundJobService.RetentionPeriod;
 
-        var jobsList = new List<JobStatusSnapshot>(jobs);
+        // In-memory jobs from this instance (freshest data for local jobs).
+        var localJobs = BackgroundJobService.Instance.GetAllJobs();
+        var mergedById = new Dictionary<string, JobStatusSnapshot>(
+            localJobs.Count + 64, StringComparer.OrdinalIgnoreCase);
+        foreach (var j in localJobs)
+            mergedById[j.JobId] = j;
+
+        // WAL-persisted jobs from all instances — provides cross-instance visibility.
+        try
+        {
+            var walJobs = await DataStoreProvider.Current
+                .QueryAsync<WalPersistedJob>(null, context.RequestAborted)
+                .ConfigureAwait(false);
+
+            foreach (var walJob in walJobs)
+            {
+                if (walJob.StartedAtUtc < cutoff) continue; // skip expired
+                if (mergedById.ContainsKey(walJob.JobId)) continue; // local copy is fresher
+
+                var walStatus = walJob.Status switch
+                {
+                    "queued"    => BackgroundJobStatus.Queued,
+                    "running"   => BackgroundJobStatus.Running,
+                    "succeeded" => BackgroundJobStatus.Succeeded,
+                    "failed"    => BackgroundJobStatus.Failed,
+                    _           => BackgroundJobStatus.Failed
+                };
+
+                mergedById[walJob.JobId] = new JobStatusSnapshot(
+                    walJob.JobId,
+                    walJob.OperationName,
+                    walStatus,
+                    walJob.PercentComplete,
+                    walJob.Description,
+                    walJob.StartedAtUtc,
+                    walJob.CompletedAtUtc,
+                    walJob.Error,
+                    walJob.ResultUrl,
+                    walJob.InstanceId);
+            }
+        }
+        catch
+        {
+            // WAL query failure is non-fatal; fall back to local in-memory jobs.
+        }
+
+        var jobsList = new List<JobStatusSnapshot>(mergedById.Values);
         jobsList.Sort((a, b) => b.StartedAt.CompareTo(a.StartedAt));
         context.Response.StatusCode = StatusCodes.Status200OK;
         context.Response.ContentType = "application/json";
@@ -6605,7 +6654,7 @@ public sealed class RouteHandlers : IRouteHandlers
                 WriteJobSnapshot(w, snapshot.JobId, snapshot.OperationName, statusStr,
                     snapshot.PercentComplete, snapshot.Description,
                     snapshot.StartedAt.ToString("O"), snapshot.CompletedAt?.ToString("O"),
-                    snapshot.Error, snapshot.ResultUrl);
+                    snapshot.Error, snapshot.ResultUrl, snapshot.InstanceId);
             }
             w.WriteEndArray();
         }
