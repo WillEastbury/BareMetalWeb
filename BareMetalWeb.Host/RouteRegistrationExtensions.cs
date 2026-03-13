@@ -2004,9 +2004,9 @@ public static class RouteRegistrationExtensions
 
             // Check if user has any elevated permissions
             bool hasElevated = false;
-            if (user is User typedUser)
+            if (user != null)
             {
-                var resolved = await PermissionResolver.ResolveAsync(typedUser, CancellationToken.None)
+                var resolved = await PermissionResolver.ResolveAsync(user, CancellationToken.None)
                     .ConfigureAwait(false);
                 hasElevated = resolved.HasElevatedPermissions;
             }

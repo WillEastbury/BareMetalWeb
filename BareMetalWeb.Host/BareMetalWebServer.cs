@@ -22,8 +22,8 @@ public class BareMetalWebServer : IBareWebHost
     {
         Clauses = new List<QueryClause>
         {
-            new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "admin" },
-            new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "monitoring" }
+            new QueryClause { Field = "Permissions", Operator = QueryOperator.Contains, Value = "admin" },
+            new QueryClause { Field = "Permissions", Operator = QueryOperator.Contains, Value = "monitoring" }
         }
     };
     public BmwConfig Configuration { get; }
@@ -157,7 +157,6 @@ public class BareMetalWebServer : IBareWebHost
     public async ValueTask BuildAppInfoMenuOptionsAsync(BmwContext? context = null, CancellationToken cancellationToken = default)
     {
         var user = context != null ? await UserAuth.GetUserAsync(context, cancellationToken).ConfigureAwait(false) : null;
-        var typedUser = user as User;
         bool isAnonymous = user == null;
         var userPermissions = new HashSet<string>(UserAuth.GetPermissions(user), StringComparer.OrdinalIgnoreCase);
 
@@ -188,7 +187,7 @@ public class BareMetalWebServer : IBareWebHost
                 !verb.Equals("ALL", StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            if (typedUser?.MfaEnabled == true && path.Equals("/account/mfa", StringComparison.OrdinalIgnoreCase))
+            if (UserAuth.IsMfaEnabled(user) && path.Equals("/account/mfa", StringComparison.OrdinalIgnoreCase))
                 continue;
 
             // Build menu options here
@@ -1117,7 +1116,7 @@ public class BareMetalWebServer : IBareWebHost
 
     private static async ValueTask<bool> RootUserExistsAsync(CancellationToken cancellationToken = default)
     {
-        var users = await DataStoreProvider.Current.QueryAsync<User>(RootUserQuery, cancellationToken).ConfigureAwait(false);
+        var users = await UserAuth.QueryUsersAsync(RootUserQuery, cancellationToken).ConfigureAwait(false);
         foreach (var _ in users)
             return true;
         return false;
@@ -1338,12 +1337,11 @@ public class BareMetalWebServer : IBareWebHost
         if (user == null)
             return $"anon|routes:{routesVersion}";
 
-        var typedUser = user as User;
         var perms = UserAuth.GetPermissions(user);
         var permString = perms.Length == 0
             ? string.Empty
             : string.Join(',', perms);
-        return $"user:{user.Key}|mfa:{typedUser?.MfaEnabled ?? false}|perms:{permString}|routes:{routesVersion}";
+        return $"user:{user.Key}|mfa:{UserAuth.IsMfaEnabled(user)}|perms:{permString}|routes:{routesVersion}";
     }
 
     private static string ComputePrivacyPolicyLink(string url) =>

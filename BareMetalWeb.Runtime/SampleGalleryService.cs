@@ -465,46 +465,49 @@ public static class SampleGalleryService
         {
             Clauses = new List<QueryClause>
             {
-                new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "admin" }
+                new QueryClause { Field = "Permissions", Operator = QueryOperator.Contains, Value = "admin" }
             }
         };
 
-        var users = await store.QueryAsync<User>(query, ct).ConfigureAwait(false);
+        var userMeta = UserAuthHelper.GetUserMeta();
         int grantCount = 0;
-
-        foreach (var user in users)
+        if (userMeta != null)
         {
-            if (user is null || !user.IsActive) continue;
+            var users = await userMeta.Handlers.QueryAsync(query, ct).ConfigureAwait(false);
+            var permissionsField = userMeta.FindField("Permissions");
 
-            var perms = user.Permissions != null
-                ? new List<string>(user.Permissions)
-                : new List<string>();
-            bool changed = false;
-
-            foreach (var code in permCodes)
+            foreach (var user in users)
             {
-                if (string.IsNullOrWhiteSpace(code)) continue;
-                bool alreadyHas = false;
-                foreach (var p in perms)
+                if (user is null || !UserAuthHelper.GetIsActive(user, userMeta)) continue;
+
+                var perms = new List<string>(UserAuthHelper.GetPermissions(user, userMeta));
+                bool changed = false;
+
+                foreach (var code in permCodes)
                 {
-                    if (string.Equals(p, code, StringComparison.OrdinalIgnoreCase))
+                    if (string.IsNullOrWhiteSpace(code)) continue;
+                    bool alreadyHas = false;
+                    foreach (var p in perms)
                     {
-                        alreadyHas = true;
-                        break;
+                        if (string.Equals(p, code, StringComparison.OrdinalIgnoreCase))
+                        {
+                            alreadyHas = true;
+                            break;
+                        }
+                    }
+                    if (!alreadyHas)
+                    {
+                        perms.Add(code);
+                        changed = true;
                     }
                 }
-                if (!alreadyHas)
-                {
-                    perms.Add(code);
-                    changed = true;
-                }
+
+                if (!changed) continue;
+
+                permissionsField?.SetValueFn(user, perms.ToArray());
+                await userMeta.Handlers.SaveAsync(user, ct).ConfigureAwait(false);
+                grantCount++;
             }
-
-            if (!changed) continue;
-
-            user.Permissions = perms.ToArray();
-            await store.SaveAsync(user, ct).ConfigureAwait(false);
-            grantCount++;
         }
 
         if (grantCount > 0)

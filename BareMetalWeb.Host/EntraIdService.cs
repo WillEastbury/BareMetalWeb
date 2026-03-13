@@ -210,7 +210,7 @@ public static class EntraIdService
     /// Provisions or updates a local User from Entra ID claims.
     /// Returns the user ready for sign-in.
     /// </summary>
-    public static async Task<User?> ProvisionUserAsync(
+    public static async Task<BaseDataObject?> ProvisionUserAsync(
         EntraIdOptions options,
         EntraIdUserInfo userInfo,
         CancellationToken cancellationToken = default)
@@ -221,7 +221,7 @@ public static class EntraIdService
         _logger?.LogInfo($"SSO|provision|email={LogRedactor.RedactEmail(userInfo.Email)}|objectId={userInfo.ObjectId}");
 
         // Find existing user by email
-        var user = await Users.FindByEmailAsync(userInfo.Email, cancellationToken)
+        BaseDataObject? user = await UserAuthHelper.FindUserByEmailAsync(userInfo.Email, cancellationToken)
             .ConfigureAwait(false);
 
         if (user == null)
@@ -229,25 +229,19 @@ public static class EntraIdService
             if (!options.AutoProvisionUsers)
                 return null;
 
-            user = new User
-            {
-                UserName = userInfo.Email,
-                Email = userInfo.Email,
-                DisplayName = userInfo.DisplayName ?? userInfo.Email,
-                IsActive = true,
-                // SSO users don't have a local password
-                PasswordHash = string.Empty,
-                PasswordSalt = string.Empty,
-                PasswordIterations = 0,
-                CreatedBy = "SSO",
-                UpdatedBy = "SSO"
-            };
+            user = UserAuth.CreateUser();
+            UserAuth.SetUserName(user, userInfo.Email);
+            UserAuth.SetEmail(user, userInfo.Email);
+            UserAuth.SetDisplayName(user, userInfo.DisplayName ?? userInfo.Email);
+            UserAuth.SetIsActive(user, true);
+            user.CreatedBy = "SSO";
+            user.UpdatedBy = "SSO";
         }
         else
         {
             // Update display name from Entra if it changed
             if (!string.IsNullOrEmpty(userInfo.DisplayName))
-                user.DisplayName = userInfo.DisplayName;
+                UserAuth.SetDisplayName(user, userInfo.DisplayName);
             user.UpdatedBy = "SSO";
         }
 
@@ -273,10 +267,10 @@ public static class EntraIdService
 
         var permArray = new string[permissions.Count];
         permissions.CopyTo(permArray);
-        user.Permissions = permArray;
-        user.IsActive = true;
+        UserAuth.SetPermissions(user, permArray);
+        UserAuth.SetIsActive(user, true);
 
-        await Users.SaveAsync(user, cancellationToken).ConfigureAwait(false);
+        await UserAuth.SaveUserAsync(user, cancellationToken).ConfigureAwait(false);
         return user;
     }
 

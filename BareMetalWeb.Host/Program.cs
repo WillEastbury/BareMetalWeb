@@ -139,7 +139,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
                     context.RequestAborted);
                 return;
             }
-            var user = await DataStoreProvider.Current.LoadAsync<User>(parsedUserId);
+            var user = await UserAuth.LoadUserAsync(parsedUserId);
             if (user != null)
             {
                 await UserAuth.SignInAsync(context, user, false);
@@ -149,7 +149,7 @@ var server = await BareMetalWebExtensions.InitializeAsync(config, contentRoot, c
                 await context.Response.WriteAsync(JsonWriterHelper.ToJsonString(new Dictionary<string, object?>
                 {
                     ["status"] = "approved",
-                    ["user"] = user.DisplayName ?? user.UserName
+                    ["user"] = UserAuth.GetDisplayName(user) ?? UserAuth.GetUserName(user)
                 }));
                 return;
             }
@@ -728,23 +728,23 @@ static class ProgramSetup
         {
             Clauses = new List<QueryClause>
             {
-                new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "admin" },
-                new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "monitoring" }
+                new QueryClause { Field = "Permissions", Operator = QueryOperator.Contains, Value = "admin" },
+                new QueryClause { Field = "Permissions", Operator = QueryOperator.Contains, Value = "monitoring" }
             }
         };
 
-        var usersEnumerable = await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false);
-        var users = new List<User>();
+        var usersEnumerable = await UserAuth.QueryUsersAsync(query, cancellationToken).ConfigureAwait(false);
+        var users = new List<BaseDataObject>();
         foreach (var u in usersEnumerable)
         {
             users.Add(u);
         }
         foreach (var user in users)
         {
-            if (user is null || !user.IsActive)
+            if (user is null || !UserAuth.IsActive(user))
                 continue;
 
-            var perms = user.Permissions != null ? new List<string>(user.Permissions) : new List<string>();
+            var perms = new List<string>(UserAuth.GetPermissions(user));
             var changed = false;
             foreach (var required in requiredPermissions)
             {
@@ -768,9 +768,9 @@ static class ProgramSetup
             if (!changed)
                 continue;
 
-            user.Permissions = perms.ToArray();
-            await DataStoreProvider.Current.SaveAsync(user, cancellationToken).ConfigureAwait(false);
-            logger.LogInfo($"Updated root permissions for {user.UserName}.");
+            UserAuth.SetPermissions(user, perms.ToArray());
+            await UserAuth.SaveUserAsync(user, cancellationToken).ConfigureAwait(false);
+            logger.LogInfo($"Updated root permissions for {UserAuth.GetUserName(user) ?? user.Key.ToString()}.");
         }
     }
 

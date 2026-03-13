@@ -289,8 +289,8 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var user = await Users.FindByEmailOrUserNameAsync(identifier, context.RequestAborted).ConfigureAwait(false);
-        if (user == null || !user.IsActive)
+        BaseDataObject? user = await UserAuthHelper.FindUserByEmailOrUserNameAsync(identifier, context.RequestAborted).ConfigureAwait(false);
+        if (user == null || !UserAuth.IsActive(user))
         {
             // SECURITY: Perform dummy hash to equalize timing regardless of user existence (see #1219)
             PasswordHasher.Verify(password, "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "AAAAAAAAAAAAAAAAAAAAAA==", 100_000);
@@ -313,25 +313,25 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (user.IsLockedOut)
+        if (UserAuth.IsLockedOut(user))
         {
             RenderLoginForm(context, "Account is temporarily locked. Try again later.", identifier);
             await _renderer.RenderPage(context);
             return;
         }
 
-        if (!user.VerifyPassword(password))
+        if (!UserAuth.VerifyPassword(user, password))
         {
             RegisterFailure(ipKey, LoginIpMaxAttempts);
             RegisterFailure(userKey, LoginUserMaxAttempts);
-            user.RegisterFailedLogin();
-            await Users.SaveAsync(user);
+            UserAuth.RegisterFailedLogin(user);
+            await UserAuth.SaveUserAsync(user, context.RequestAborted);
             RenderLoginForm(context, "Invalid credentials.", identifier);
             await _renderer.RenderPage(context);
             return;
         }
 
-        if (user.MfaEnabled)
+        if (UserAuth.IsMfaEnabled(user))
         {
             if (!TryGetActiveSecret(user, out _, out var upgraded))
             {
@@ -341,15 +341,16 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             if (upgraded)
-                await Users.SaveAsync(user);
+                await UserAuth.SaveUserAsync(user, context.RequestAborted);
 
+            var userName = UserAuth.GetUserName(user) ?? user.Key.ToString();
             var challenge = new MfaChallenge
             {
                 UserId = user.Key.ToString(),
                 RememberMe = rememberMe,
                 ExpiresUtc = DateTime.UtcNow.AddMinutes(5),
-                CreatedBy = user.UserName,
-                UpdatedBy = user.UserName
+                CreatedBy = userName,
+                UpdatedBy = userName
             };
             await DataStoreProvider.Current.SaveAsync(challenge);
             context.SetCookie(MfaChallengeCookieName, challenge.Key.ToString(), new CookieOptions
@@ -367,8 +368,8 @@ public sealed class RouteHandlers : IRouteHandlers
 
         RegisterSuccess(ipKey);
         RegisterSuccess(userKey);
-        user.RegisterSuccessfulLogin();
-        await Users.SaveAsync(user);
+        UserAuth.RegisterSuccessfulLogin(user);
+        await UserAuth.SaveUserAsync(user, context.RequestAborted);
         await UserAuth.SignInAsync(context, user, rememberMe);
         context.Response.Redirect("/");
     }
@@ -426,8 +427,8 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var user = await Users.GetByIdAsync(parsedUserId, context.RequestAborted).ConfigureAwait(false);
-        if (user == null || !user.IsActive || !user.MfaEnabled || !TryGetActiveSecret(user, out var activeSecret, out var upgraded))
+        BaseDataObject? user = await UserAuth.LoadUserAsync(parsedUserId, context.RequestAborted).ConfigureAwait(false);
+        if (user == null || !UserAuth.IsActive(user) || !UserAuth.IsMfaEnabled(user) || !TryGetActiveSecret(user, out var activeSecret, out var upgraded))
         {
             RenderMfaChallengeForm(context, "MFA is not available for this account.");
             await _renderer.RenderPage(context);
@@ -435,7 +436,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         if (upgraded)
-            await Users.SaveAsync(user);
+            await UserAuth.SaveUserAsync(user, context.RequestAborted);
 
         var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
         if (IsThrottled(BuildMfaAttemptKey("challenge:user", user.Key.ToString()), MfaChallengeMaxFailures, out var retryAfter)
@@ -459,16 +460,16 @@ public sealed class RouteHandlers : IRouteHandlers
                 return;
             }
 
-            if (matchedStep <= user.MfaLastVerifiedStep)
+            if (matchedStep <= UserAuth.GetMfaLastVerifiedStep(user))
             {
                 RenderMfaChallengeForm(context, "Authentication code already used. Please wait for a new code.");
                 await _renderer.RenderPage(context);
                 return;
             }
 
-            user.MfaLastVerifiedStep = matchedStep;
-            user.RegisterSuccessfulLogin();
-            await Users.SaveAsync(user);
+            UserAuth.SetMfaLastVerifiedStep(user, matchedStep);
+            UserAuth.RegisterSuccessfulLogin(user);
+            await UserAuth.SaveUserAsync(user, context.RequestAborted);
 
             RegisterSuccess(BuildMfaAttemptKey("challenge:user", user.Key.ToString()));
             RegisterSuccess(BuildMfaAttemptKey("challenge:ip", remoteIp));
@@ -569,7 +570,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (await Users.FindByEmailAsync(email, context.RequestAborted).ConfigureAwait(false) != null)
+        if (await UserAuthHelper.FindUserByEmailAsync(email, context.RequestAborted).ConfigureAwait(false) != null)
         {
             // SECURITY: Generic message to prevent account enumeration (see #1219)
             RenderRegisterForm(context, "Registration could not be completed. Please try again or use a different email.", userName, displayName, email);
@@ -577,7 +578,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (await Users.FindByUserNameAsync(userName, context.RequestAborted).ConfigureAwait(false) != null)
+        if (await UserAuthHelper.FindUserByUserNameAsync(userName, context.RequestAborted).ConfigureAwait(false) != null)
         {
             // SECURITY: Generic message to prevent account enumeration (see #1219)
             RenderRegisterForm(context, "Registration could not be completed. Please try again or use a different username.", userName, displayName, email);
@@ -585,18 +586,16 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var user = new User
-        {
-            UserName = userName,
-            DisplayName = string.IsNullOrWhiteSpace(displayName) ? userName : displayName,
-            Email = email,
-            Permissions = new[] { "user" },
-            IsActive = true,
-            CreatedBy = userName,
-            UpdatedBy = userName
-        };
-        user.SetPassword(password);
-        await Users.SaveAsync(user);
+        var user = UserAuth.CreateUser();
+        UserAuth.SetUserName(user, userName);
+        UserAuth.SetDisplayName(user, string.IsNullOrWhiteSpace(displayName) ? userName : displayName);
+        UserAuth.SetEmail(user, email);
+        UserAuth.SetPermissions(user, new[] { "user" });
+        UserAuth.SetIsActive(user, true);
+        user.CreatedBy = userName;
+        user.UpdatedBy = userName;
+        UserAuth.SetPassword(user, password);
+        await UserAuth.SaveUserAsync(user, context.RequestAborted);
         await UserAuth.SignInAsync(context, user, rememberMe: true);
         context.Response.Redirect("/system/me");
     }
@@ -739,7 +738,7 @@ public sealed class RouteHandlers : IRouteHandlers
         }
 
         // Provision or update user
-        var user = await EntraIdService.ProvisionUserAsync(options, userInfo, context.RequestAborted)
+        BaseDataObject? user = await EntraIdService.ProvisionUserAsync(options, userInfo, context.RequestAborted)
             .ConfigureAwait(false);
 
         if (user == null)
@@ -753,7 +752,7 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (!user.IsActive)
+        if (!UserAuth.IsActive(user))
         {
             _logger?.LogInfo($"SSO|callback-inactive|{sourceIp}|email={LogRedactor.RedactEmail(userInfo.Email)}");
             await BuildPageHandler(ctx =>
@@ -805,7 +804,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         await BuildPageHandler(async ctx =>
         {
-            var user = (await UserAuth.GetUserAsync(ctx)) as User;
+            var user = await UserAuth.GetUserAsync(ctx).ConfigureAwait(false);
             if (user == null)
             {
                 ctx.Response.Redirect("/login");
@@ -813,15 +812,17 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             ctx.SetStringValue("title", "Account");
-            var permissions = user.Permissions?.Length > 0
-                ? string.Join(", ", user.Permissions)
+            var userPermissions = UserAuth.GetPermissions(user);
+            var permissions = userPermissions.Length > 0
+                ? string.Join(", ", userPermissions)
                 : "None";
-            var mfaStatus = user.MfaEnabled ? "Enabled" : "Disabled";
-            var mfaLinks = user.MfaEnabled
+            var mfaEnabled = UserAuth.IsMfaEnabled(user);
+            var mfaStatus = mfaEnabled ? "Enabled" : "Disabled";
+            var mfaLinks = mfaEnabled
                 ? "<a href=\"/account/mfa\">Manage MFA</a> | <a href=\"/account/mfa/reset\">Reset MFA</a>"
                 : "<a href=\"/account/mfa\">Manage MFA</a>";
-            var message = $"<p>Signed in as <strong>{WebUtility.HtmlEncode(user.DisplayName)}</strong> ({WebUtility.HtmlEncode(user.UserName)}).</p>" +
-                         $"<p>Email: {WebUtility.HtmlEncode(user.Email)}</p>" +
+            var message = $"<p>Signed in as <strong>{WebUtility.HtmlEncode(UserAuth.GetDisplayName(user))}</strong> ({WebUtility.HtmlEncode(UserAuth.GetUserName(user))}).</p>" +
+                         $"<p>Email: {WebUtility.HtmlEncode(UserAuth.GetEmail(user))}</p>" +
                          $"<p>Permissions: {WebUtility.HtmlEncode(permissions)}</p>" +
                          $"<p>MFA: {WebUtility.HtmlEncode(mfaStatus)} - {mfaLinks}</p>";
             ctx.SetStringValue("html_message", message);
@@ -833,7 +834,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         await BuildPageHandler(async ctx =>
         {
-            var user = (await UserAuth.GetUserAsync(ctx)) as User;
+            var user = await UserAuth.GetUserAsync(ctx).ConfigureAwait(false);
             if (user == null)
             {
                 ctx.Response.Redirect("/login");
@@ -841,9 +842,10 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             ctx.SetStringValue("title", "Multi-Factor Authentication");
-            var status = user.MfaEnabled ? "<strong>Enabled</strong>" : "<strong>Disabled</strong>";
+            var mfaEnabled = UserAuth.IsMfaEnabled(user);
+            var status = mfaEnabled ? "<strong>Enabled</strong>" : "<strong>Disabled</strong>";
             var message = $"<p>MFA status: {status}.</p>";
-            if (!user.MfaEnabled)
+            if (!mfaEnabled)
                 message += "<p><a href=\"/account/mfa/setup\">Enable MFA</a></p>";
             ctx.SetStringValue("html_message", message);
             return true;
@@ -854,14 +856,14 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         await BuildPageHandler(async ctx =>
         {
-            var user = (await UserAuth.GetUserAsync(ctx)) as User;
+            var user = await UserAuth.GetUserAsync(ctx).ConfigureAwait(false);
             if (user == null)
             {
                 ctx.Response.Redirect("/login");
                 return false;
             }
 
-            if (user.MfaEnabled)
+            if (UserAuth.IsMfaEnabled(user))
             {
                 ctx.SetStringValue("title", "Enable MFA");
                 ctx.SetStringValue("html_message", "<p>MFA is already enabled for your account.</p>");
@@ -869,13 +871,13 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             if (RegeneratePendingMfaSecret(user, forceNew: true))
-                await Users.SaveAsync(user);
+                await UserAuth.SaveUserAsync(user, ctx.RequestAborted);
 
             var issuer = ctx.GetApp()?.AppName ?? "BareMetalWeb";
             var pendingSecret = GetPendingSecret(user, out var pendingUpgraded);
             if (pendingUpgraded)
-                await Users.SaveAsync(user);
-            var otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, pendingSecret ?? string.Empty);
+                await UserAuth.SaveUserAsync(user, ctx.RequestAborted);
+            var otpauth = MfaTotp.GetOtpAuthUri(issuer, UserAuth.GetEmail(user) ?? string.Empty, pendingSecret ?? string.Empty);
             RenderMfaSetupForm(ctx, pendingSecret ?? string.Empty, otpauth, null);
             return true;
         })(context);
@@ -883,7 +885,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask MfaSetupPostHandler(BmwContext context)
     {
-        var user = (await UserAuth.GetUserAsync(context)) as User;
+        var user = await UserAuth.GetUserAsync(context).ConfigureAwait(false);
         if (user == null)
         {
             context.Response.Redirect("/login");
@@ -893,12 +895,12 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!context.HttpRequest.HasFormContentType)
         {
             if (RegeneratePendingMfaSecret(user, forceNew: false))
-                await Users.SaveAsync(user);
+                await UserAuth.SaveUserAsync(user, context.RequestAborted);
             var issuer = context.GetApp()?.AppName ?? "BareMetalWeb";
             var pendingSecret = GetPendingSecret(user, out var pendingUpgraded);
             if (pendingUpgraded)
-                await Users.SaveAsync(user);
-            var otpauth = string.IsNullOrWhiteSpace(pendingSecret) ? string.Empty : MfaTotp.GetOtpAuthUri(issuer, user.Email, pendingSecret);
+                await UserAuth.SaveUserAsync(user, context.RequestAborted);
+            var otpauth = string.IsNullOrWhiteSpace(pendingSecret) ? string.Empty : MfaTotp.GetOtpAuthUri(issuer, UserAuth.GetEmail(user) ?? string.Empty, pendingSecret);
             RenderMfaSetupForm(context, pendingSecret ?? string.Empty, otpauth, "Invalid setup request.");
             await _renderer.RenderPage(context);
             return;
@@ -908,12 +910,12 @@ public sealed class RouteHandlers : IRouteHandlers
         if (!CsrfProtection.ValidateFormToken(context, form))
         {
             if (RegeneratePendingMfaSecret(user, forceNew: false))
-                await Users.SaveAsync(user);
+                await UserAuth.SaveUserAsync(user, context.RequestAborted);
             var issuer = context.GetApp()?.AppName ?? "BareMetalWeb";
             var pendingSecret = GetPendingSecret(user, out var pendingUpgraded);
             if (pendingUpgraded)
-                await Users.SaveAsync(user);
-            var otpauth = string.IsNullOrWhiteSpace(pendingSecret) ? string.Empty : MfaTotp.GetOtpAuthUri(issuer, user.Email, pendingSecret);
+                await UserAuth.SaveUserAsync(user, context.RequestAborted);
+            var otpauth = string.IsNullOrWhiteSpace(pendingSecret) ? string.Empty : MfaTotp.GetOtpAuthUri(issuer, UserAuth.GetEmail(user) ?? string.Empty, pendingSecret);
             RenderMfaSetupForm(context, pendingSecret ?? string.Empty, otpauth, "Invalid security token. Please try again.");
             await _renderer.RenderPage(context);
             return;
@@ -925,8 +927,8 @@ public sealed class RouteHandlers : IRouteHandlers
             var issuer = context.GetApp()?.AppName ?? "BareMetalWeb";
             var pendingSecret = GetPendingSecret(user, out var pendingUpgraded);
             if (pendingUpgraded)
-                await Users.SaveAsync(user);
-            var otpauth = string.IsNullOrWhiteSpace(pendingSecret) ? string.Empty : MfaTotp.GetOtpAuthUri(issuer, user.Email, pendingSecret);
+                await UserAuth.SaveUserAsync(user, context.RequestAborted);
+            var otpauth = string.IsNullOrWhiteSpace(pendingSecret) ? string.Empty : MfaTotp.GetOtpAuthUri(issuer, UserAuth.GetEmail(user) ?? string.Empty, pendingSecret);
             RenderMfaSetupForm(context, pendingSecret ?? string.Empty, otpauth, "Please enter a valid 6-digit code.");
             await _renderer.RenderPage(context);
             return;
@@ -934,16 +936,17 @@ public sealed class RouteHandlers : IRouteHandlers
 
         var currentPendingSecret = GetPendingSecret(user, out var currentUpgraded);
         if (currentUpgraded)
-            await Users.SaveAsync(user);
-        if (string.IsNullOrWhiteSpace(currentPendingSecret) || user.MfaPendingExpiresUtc is null || user.MfaPendingExpiresUtc <= DateTime.UtcNow)
+            await UserAuth.SaveUserAsync(user, context.RequestAborted);
+        var pendingExpiresUtc = UserAuth.GetMfaPendingExpiresUtc(user);
+        if (string.IsNullOrWhiteSpace(currentPendingSecret) || pendingExpiresUtc is null || pendingExpiresUtc <= DateTime.UtcNow)
         {
             if (RegeneratePendingMfaSecret(user, forceNew: true))
-                await Users.SaveAsync(user);
+                await UserAuth.SaveUserAsync(user, context.RequestAborted);
             var issuer = context.GetApp()?.AppName ?? "BareMetalWeb";
             var refreshedSecret = GetPendingSecret(user, out var refreshedUpgraded);
             if (refreshedUpgraded)
-                await Users.SaveAsync(user);
-            var otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, refreshedSecret ?? string.Empty);
+                await UserAuth.SaveUserAsync(user, context.RequestAborted);
+            var otpauth = MfaTotp.GetOtpAuthUri(issuer, UserAuth.GetEmail(user) ?? string.Empty, refreshedSecret ?? string.Empty);
             RenderMfaSetupForm(context, refreshedSecret ?? string.Empty, otpauth, "Setup token expired. A new secret was generated.");
             await _renderer.RenderPage(context);
             return;
@@ -955,7 +958,7 @@ public sealed class RouteHandlers : IRouteHandlers
             || IsThrottled(BuildMfaAttemptKey("setup:secret", currentPendingSecret), MfaPendingMaxFailures, out setupRetry))
         {
             var issuer = context.GetApp()?.AppName ?? "BareMetalWeb";
-            var otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, currentPendingSecret);
+            var otpauth = MfaTotp.GetOtpAuthUri(issuer, UserAuth.GetEmail(user) ?? string.Empty, currentPendingSecret);
             RenderMfaSetupForm(context, currentPendingSecret, otpauth, FormatThrottleMessage(setupRetry));
             await _renderer.RenderPage(context);
             return;
@@ -968,16 +971,17 @@ public sealed class RouteHandlers : IRouteHandlers
             if (!MfaTotp.ValidateCode(currentPendingSecret, code, out var matchedStep))
             {
                 var issuer = context.GetApp()?.AppName ?? "BareMetalWeb";
-                var otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, currentPendingSecret);
-                user.MfaPendingFailedAttempts++;
-                if (user.MfaPendingFailedAttempts >= MfaPendingMaxFailures)
+                var otpauth = MfaTotp.GetOtpAuthUri(issuer, UserAuth.GetEmail(user) ?? string.Empty, currentPendingSecret);
+                var pendingFailedAttempts = UserAuth.GetMfaPendingFailedAttempts(user) + 1;
+                UserAuth.SetMfaPendingFailedAttempts(user, pendingFailedAttempts);
+                if (pendingFailedAttempts >= MfaPendingMaxFailures)
                 {
                     if (RegeneratePendingMfaSecret(user, forceNew: true))
-                        await Users.SaveAsync(user);
+                        await UserAuth.SaveUserAsync(user, context.RequestAborted);
                     var refreshedSecret = GetPendingSecret(user, out var refreshedUpgraded) ?? string.Empty;
                     if (refreshedUpgraded)
-                        await Users.SaveAsync(user);
-                    otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, refreshedSecret);
+                        await UserAuth.SaveUserAsync(user, context.RequestAborted);
+                    otpauth = MfaTotp.GetOtpAuthUri(issuer, UserAuth.GetEmail(user) ?? string.Empty, refreshedSecret);
                     RenderMfaSetupForm(context, refreshedSecret, otpauth, "Too many failed attempts. A new secret was generated.");
                     await _renderer.RenderPage(context);
                     return;
@@ -992,28 +996,28 @@ public sealed class RouteHandlers : IRouteHandlers
                 return;
             }
 
-            if (matchedStep <= user.MfaLastVerifiedStep)
+            if (matchedStep <= UserAuth.GetMfaLastVerifiedStep(user))
             {
                 var issuer = context.GetApp()?.AppName ?? "BareMetalWeb";
-                var otpauth = MfaTotp.GetOtpAuthUri(issuer, user.Email, currentPendingSecret);
+                var otpauth = MfaTotp.GetOtpAuthUri(issuer, UserAuth.GetEmail(user) ?? string.Empty, currentPendingSecret);
                 RenderMfaSetupForm(context, currentPendingSecret, otpauth, "Authentication code already used. Please wait for a new code.");
                 await _renderer.RenderPage(context);
                 return;
             }
 
-            user.MfaEnabled = true;
-            user.MfaLastVerifiedStep = matchedStep;
-            user.MfaSecretEncrypted = _mfaProtector.EncryptSecret(currentPendingSecret, user.Key.ToString());
-            user.MfaSecret = null;
-            user.MfaPendingSecret = null;
-            user.MfaPendingSecretEncrypted = null;
-            user.MfaPendingExpiresUtc = null;
-            user.MfaPendingFailedAttempts = 0;
+            UserAuth.SetMfaEnabled(user, true);
+            UserAuth.SetMfaLastVerifiedStep(user, matchedStep);
+            UserAuth.SetMfaSecretEncrypted(user, _mfaProtector.EncryptSecret(currentPendingSecret, user.Key.ToString()));
+            UserAuth.SetMfaSecret(user, null);
+            UserAuth.SetMfaPendingSecret(user, null);
+            UserAuth.SetMfaPendingSecretEncrypted(user, null);
+            UserAuth.SetMfaPendingExpiresUtc(user, null);
+            UserAuth.SetMfaPendingFailedAttempts(user, 0);
 
             var backupCodes = GenerateBackupCodes(user, count: 8);
-            user.MfaBackupCodeHashes = backupCodes.Hashes;
-            user.MfaBackupCodesGeneratedUtc = DateTime.UtcNow;
-            await Users.SaveAsync(user);
+            UserAuth.SetMfaBackupCodeHashes(user, backupCodes.Hashes);
+            UserAuth.SetMfaBackupCodesGeneratedUtc(user, DateTime.UtcNow);
+            await UserAuth.SaveUserAsync(user, context.RequestAborted);
 
             RegisterSuccess(BuildMfaAttemptKey("setup:user", user.Key.ToString()));
             RegisterSuccess(BuildMfaAttemptKey("setup:ip", setupIp));
@@ -1042,7 +1046,7 @@ public sealed class RouteHandlers : IRouteHandlers
     {
         await BuildPageHandler(async ctx =>
         {
-            var user = (await UserAuth.GetUserAsync(ctx)) as User;
+            var user = await UserAuth.GetUserAsync(ctx).ConfigureAwait(false);
             if (user == null)
             {
                 ctx.Response.Redirect("/login");
@@ -1050,7 +1054,7 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             ctx.SetStringValue("title", "Reset MFA");
-            if (!user.MfaEnabled)
+            if (!UserAuth.IsMfaEnabled(user))
             {
                 ctx.SetStringValue("html_message", "<p>MFA is not enabled for your account.</p><p><a href=\"/system/me\">Back to account</a></p>");
                 return true;
@@ -1063,7 +1067,7 @@ public sealed class RouteHandlers : IRouteHandlers
 
     public async ValueTask MfaResetPostHandler(BmwContext context)
     {
-        var user = (await UserAuth.GetUserAsync(context)) as User;
+        var user = await UserAuth.GetUserAsync(context).ConfigureAwait(false);
         if (user == null)
         {
             context.Response.Redirect("/login");
@@ -1085,17 +1089,17 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        user.MfaEnabled = false;
-        user.MfaSecret = null;
-        user.MfaSecretEncrypted = null;
-        user.MfaLastVerifiedStep = 0;
-        user.MfaPendingSecret = null;
-        user.MfaPendingSecretEncrypted = null;
-        user.MfaPendingExpiresUtc = null;
-        user.MfaPendingFailedAttempts = 0;
-        user.MfaBackupCodeHashes = Array.Empty<string>();
-        user.MfaBackupCodesGeneratedUtc = null;
-        await Users.SaveAsync(user);
+        UserAuth.SetMfaEnabled(user, false);
+        UserAuth.SetMfaSecret(user, null);
+        UserAuth.SetMfaSecretEncrypted(user, null);
+        UserAuth.SetMfaLastVerifiedStep(user, 0);
+        UserAuth.SetMfaPendingSecret(user, null);
+        UserAuth.SetMfaPendingSecretEncrypted(user, null);
+        UserAuth.SetMfaPendingExpiresUtc(user, null);
+        UserAuth.SetMfaPendingFailedAttempts(user, 0);
+        UserAuth.SetMfaBackupCodeHashes(user, Array.Empty<string>());
+        UserAuth.SetMfaBackupCodesGeneratedUtc(user, null);
+        await UserAuth.SaveUserAsync(user, context.RequestAborted);
 
         context.SetStringValue("title", "Reset MFA");
         context.SetStringValue("html_message", "<p>MFA has been reset.</p><p><a href=\"/system/me\">Back to account</a></p>");
@@ -1109,19 +1113,20 @@ public sealed class RouteHandlers : IRouteHandlers
             ctx.SetStringValue("title", "Users");
 
             using var rows = new BmwValueList<string[]>(16);
-            var users = await DataStoreProvider.Current.QueryAsync<User>(new QueryDefinition()).ConfigureAwait(false);
+            var users = await UserAuth.QueryUsersAsync(new QueryDefinition(), ctx.RequestAborted).ConfigureAwait(false);
             foreach (var user in users)
             {
+                var permissions = UserAuth.GetPermissions(user);
                 rows.Add(new[]
                 {
-                    WebUtility.HtmlEncode(user.UserName),
-                    WebUtility.HtmlEncode(user.DisplayName),
-                    WebUtility.HtmlEncode(user.Email),
-                    user.IsActive ? "Yes" : "No",
-                    WebUtility.HtmlEncode(user.Permissions != null && user.Permissions.Length > 0
-                        ? string.Join(", ", user.Permissions)
-                        : "None"),
-                    user.LastLoginUtc?.ToString("u") ?? "Never"
+                    WebUtility.HtmlEncode(UserAuth.GetUserName(user) ?? string.Empty),
+                    WebUtility.HtmlEncode(UserAuth.GetDisplayName(user) ?? string.Empty),
+                    WebUtility.HtmlEncode(UserAuth.GetEmail(user) ?? string.Empty),
+                    UserAuth.IsActive(user) ? "Yes" : "No",
+                    WebUtility.HtmlEncode(permissions.Length > 0
+                        ? string.Join(", ", permissions)
+                        : "None") ?? string.Empty,
+                    UserAuth.GetLastLoginUtc(user)?.ToString("u") ?? "Never"
                 });
             }
 
@@ -1179,15 +1184,15 @@ public sealed class RouteHandlers : IRouteHandlers
             }
 
             var unlockPassword = unlockForm["password"].ToString();
-            if (string.IsNullOrWhiteSpace(unlockPassword) || !lockedUser.VerifyPassword(unlockPassword))
+            if (string.IsNullOrWhiteSpace(unlockPassword) || !UserAuth.VerifyPassword(lockedUser, unlockPassword))
             {
                 RenderUnlockForm(context, "Invalid password. Account remains locked.");
                 await _renderer.RenderPage(context);
                 return;
             }
 
-            lockedUser.RegisterSuccessfulLogin();
-            await Users.SaveAsync(lockedUser);
+            UserAuth.RegisterSuccessfulLogin(lockedUser);
+            await UserAuth.SaveUserAsync(lockedUser, context.RequestAborted);
             context.SetStringValue("title", "Setup");
             context.SetStringValue("html_message", "<p>Account unlocked successfully. You may now sign in.</p>");
             await _renderer.RenderPage(context);
@@ -1244,18 +1249,16 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        var user = new User
-        {
-            UserName = userName,
-            DisplayName = userName,
-            Email = email,
-            Permissions = BuildRootPermissions(),
-            IsActive = true,
-            CreatedBy = userName,
-            UpdatedBy = userName
-        };
-        user.SetPassword(password);
-        await Users.SaveAsync(user);
+        var user = UserAuth.CreateUser();
+        UserAuth.SetUserName(user, userName);
+        UserAuth.SetDisplayName(user, userName);
+        UserAuth.SetEmail(user, email);
+        UserAuth.SetPermissions(user, BuildRootPermissions());
+        UserAuth.SetIsActive(user, true);
+        user.CreatedBy = userName;
+        user.UpdatedBy = userName;
+        UserAuth.SetPassword(user, password);
+        await UserAuth.SaveUserAsync(user, context.RequestAborted);
         await SettingsService.EnsureDefaultsAsync(DataStoreProvider.Current, _settingDefaults, userName, context.RequestAborted).ConfigureAwait(false);
         await EnsureDefaultReports(userName);
 
@@ -1365,22 +1368,20 @@ public sealed class RouteHandlers : IRouteHandlers
         var isNewPrincipal = principal is null;
         if (principal is null)
         {
-            principal = new SystemPrincipal
-            {
-                UserName = input.PrincipalName,
-                DisplayName = input.PrincipalName,
-                Email = $"{input.PrincipalName}@local.invalid",
-                Permissions = new[] { "deployment-agent", "monitoring" },
-                IsActive = true,
-                CreatedBy = actor,
-                UpdatedBy = actor
-            };
+            principal = UserAuth.CreatePrincipal();
+            UserAuth.SetUserName(principal, input.PrincipalName);
+            UserAuth.SetDisplayName(principal, input.PrincipalName);
+            UserAuth.SetEmail(principal, $"{input.PrincipalName}@local.invalid");
+            UserAuth.SetPermissions(principal, new[] { "deployment-agent", "monitoring" });
+            UserAuth.SetIsActive(principal, true);
+            principal.CreatedBy = actor;
+            principal.UpdatedBy = actor;
         }
 
-        var rawApiKey = SystemPrincipal.GenerateRawApiKey();
-        principal.AddApiKey(rawApiKey);
+        var rawApiKey = UserAuthHelper.GenerateRawApiKey();
+        UserAuth.AddApiKey(principal, rawApiKey);
         principal.UpdatedBy = actor;
-        await DataStoreProvider.Current.SaveAsync(principal, cancellationToken).ConfigureAwait(false);
+        await UserAuth.SaveUserAsync(principal, cancellationToken).ConfigureAwait(false);
 
         await UpsertAppSettingAsync(ManagementRegistrationEnabledSettingId, "true",
             "Enable setup-based management callback registration.", actor, cancellationToken).ConfigureAwait(false);
@@ -1466,21 +1467,21 @@ public sealed class RouteHandlers : IRouteHandlers
         return trimmed[..maxLength] + "...";
     }
 
-    private static async ValueTask<SystemPrincipal?> LoadSystemPrincipalByUserNameAsync(string userName, CancellationToken cancellationToken)
+    private static async ValueTask<BaseDataObject?> LoadSystemPrincipalByUserNameAsync(string userName, CancellationToken cancellationToken)
     {
         var query = new QueryDefinition
         {
             Clauses = new List<QueryClause>
             {
-                new() { Field = nameof(SystemPrincipal.UserName), Operator = QueryOperator.Equals, Value = userName }
+                new() { Field = "UserName", Operator = QueryOperator.Equals, Value = userName }
             },
             Top = 1
         };
 
-        var principals = await DataStoreProvider.Current.QueryAsync<SystemPrincipal>(query, cancellationToken).ConfigureAwait(false);
+        var principals = await UserAuth.QueryPrincipalsAsync(query, cancellationToken).ConfigureAwait(false);
         foreach (var principal in principals)
         {
-            if (string.Equals(principal.UserName, userName, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(UserAuth.GetUserName(principal), userName, StringComparison.OrdinalIgnoreCase))
                 return principal;
         }
 
@@ -1795,28 +1796,31 @@ public sealed class RouteHandlers : IRouteHandlers
         ));
     }
 
-    private bool RegeneratePendingMfaSecret(User user, bool forceNew)
+    private bool RegeneratePendingMfaSecret(BaseDataObject user, bool forceNew)
     {
         var changed = false;
-        if (forceNew || string.IsNullOrWhiteSpace(user.MfaPendingSecretEncrypted) || user.MfaPendingExpiresUtc is null || user.MfaPendingExpiresUtc <= DateTime.UtcNow)
+        var pendingSecretEncrypted = UserAuth.GetMfaPendingSecretEncrypted(user);
+        var pendingExpiresUtc = UserAuth.GetMfaPendingExpiresUtc(user);
+        if (forceNew || string.IsNullOrWhiteSpace(pendingSecretEncrypted) || pendingExpiresUtc is null || pendingExpiresUtc <= DateTime.UtcNow)
         {
             var secret = MfaTotp.GenerateSecret();
-            user.MfaPendingSecretEncrypted = _mfaProtector.EncryptSecret(secret, user.Key.ToString());
-            user.MfaPendingSecret = null;
-            user.MfaPendingExpiresUtc = DateTime.UtcNow.Add(MfaPendingLifetime);
-            user.MfaPendingFailedAttempts = 0;
+            UserAuth.SetMfaPendingSecretEncrypted(user, _mfaProtector.EncryptSecret(secret, user.Key.ToString()));
+            UserAuth.SetMfaPendingSecret(user, null);
+            UserAuth.SetMfaPendingExpiresUtc(user, DateTime.UtcNow.Add(MfaPendingLifetime));
+            UserAuth.SetMfaPendingFailedAttempts(user, 0);
             changed = true;
         }
 
         return changed;
     }
 
-    private string? GetPendingSecret(User user, out bool upgraded)
+    private string? GetPendingSecret(BaseDataObject user, out bool upgraded)
     {
         upgraded = false;
-        if (!string.IsNullOrWhiteSpace(user.MfaPendingSecretEncrypted))
+        var pendingSecretEncrypted = UserAuth.GetMfaPendingSecretEncrypted(user);
+        if (!string.IsNullOrWhiteSpace(pendingSecretEncrypted))
         {
-            if (_mfaProtector.TryDecryptSecret(user.MfaPendingSecretEncrypted, user.Key.ToString(), out var bytes))
+            if (_mfaProtector.TryDecryptSecret(pendingSecretEncrypted, user.Key.ToString(), out var bytes))
             {
                 try
                 {
@@ -1829,25 +1833,26 @@ public sealed class RouteHandlers : IRouteHandlers
             }
         }
 
-        if (!string.IsNullOrWhiteSpace(user.MfaPendingSecret))
+        var pendingSecret = UserAuth.GetMfaPendingSecret(user);
+        if (!string.IsNullOrWhiteSpace(pendingSecret))
         {
-            var legacy = user.MfaPendingSecret;
-            user.MfaPendingSecretEncrypted = _mfaProtector.EncryptSecret(legacy, user.Key.ToString());
-            user.MfaPendingSecret = null;
+            UserAuth.SetMfaPendingSecretEncrypted(user, _mfaProtector.EncryptSecret(pendingSecret, user.Key.ToString()));
+            UserAuth.SetMfaPendingSecret(user, null);
             upgraded = true;
-            return legacy;
+            return pendingSecret;
         }
 
         return null;
     }
 
-    private bool TryGetActiveSecret(User user, out string secret, out bool upgraded)
+    private bool TryGetActiveSecret(BaseDataObject user, out string secret, out bool upgraded)
     {
         secret = string.Empty;
         upgraded = false;
-        if (!string.IsNullOrWhiteSpace(user.MfaSecretEncrypted))
+        var activeSecretEncrypted = UserAuth.GetMfaSecretEncrypted(user);
+        if (!string.IsNullOrWhiteSpace(activeSecretEncrypted))
         {
-            if (_mfaProtector.TryDecryptSecret(user.MfaSecretEncrypted, user.Key.ToString(), out var bytes))
+            if (_mfaProtector.TryDecryptSecret(activeSecretEncrypted, user.Key.ToString(), out var bytes))
             {
                 try
                 {
@@ -1863,12 +1868,12 @@ public sealed class RouteHandlers : IRouteHandlers
             return false;
         }
 
-        if (!string.IsNullOrWhiteSpace(user.MfaSecret))
+        var activeSecret = UserAuth.GetMfaSecret(user);
+        if (!string.IsNullOrWhiteSpace(activeSecret))
         {
-            var legacy = user.MfaSecret;
-            user.MfaSecretEncrypted = _mfaProtector.EncryptSecret(legacy, user.Key.ToString());
-            user.MfaSecret = null;
-            secret = legacy;
+            UserAuth.SetMfaSecretEncrypted(user, _mfaProtector.EncryptSecret(activeSecret, user.Key.ToString()));
+            UserAuth.SetMfaSecret(user, null);
+            secret = activeSecret;
             upgraded = true;
             return true;
         }
@@ -1969,7 +1974,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return "Too many attempts. Please try again shortly.";
     }
 
-    private static BackupCodeResult GenerateBackupCodes(User user, int count)
+    private static BackupCodeResult GenerateBackupCodes(BaseDataObject user, int count)
     {
         if (count <= 0)
             return new BackupCodeResult(Array.Empty<string>(), Array.Empty<string>());
@@ -1993,7 +1998,7 @@ public sealed class RouteHandlers : IRouteHandlers
         return Convert.ToHexString(bytes);
     }
 
-    private static string HashBackupCode(User user, string code)
+    private static string HashBackupCode(BaseDataObject user, string code)
     {
         var payload = Encoding.UTF8.GetBytes($"{user.Key}:{code}");
         return Convert.ToHexString(SHA256.HashData(payload));
@@ -2406,14 +2411,14 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // TenantCallback principals can only read their own records
         var getUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var getRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(getUser as User);
-        if (getRestricted is { Role: PrincipalRole.TenantCallback } && instance is BaseDataObject getBdo &&
+        var getRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(getUser);
+        if (getRestricted != null && string.Equals(UserAuth.GetPrincipalRole(getRestricted), nameof(PrincipalRole.TenantCallback), StringComparison.OrdinalIgnoreCase) && instance is BaseDataObject getBdo &&
             !PrincipalAuthorizationPolicy.IsRecordOwner(getRestricted, getBdo))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied: record not owned by this principal.");
             await _auditService.AuditDeniedAsync(
-                meta.Slug, parsedId, "Read", getRestricted.UserName ?? getRestricted.Key.ToString(),
+                meta.Slug, parsedId, "Read", UserAuth.GetUserName(getRestricted) ?? getRestricted.Key.ToString(),
                 "TenantCallback principal attempted to read non-owned record", context.RequestAborted).ConfigureAwait(false);
             return;
         }
@@ -2559,14 +2564,14 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // TenantCallback principals can only update their own records
         var putUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var putRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(putUser as User);
-        if (putRestricted is { Role: PrincipalRole.TenantCallback } && instance is BaseDataObject putBdo &&
+        var putRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(putUser);
+        if (putRestricted != null && string.Equals(UserAuth.GetPrincipalRole(putRestricted), nameof(PrincipalRole.TenantCallback), StringComparison.OrdinalIgnoreCase) && instance is BaseDataObject putBdo &&
             !PrincipalAuthorizationPolicy.IsRecordOwner(putRestricted, putBdo))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied: record not owned by this principal.");
             await _auditService.AuditDeniedAsync(
-                meta.Slug, parsedId, "Update", putRestricted.UserName ?? putRestricted.Key.ToString(),
+                meta.Slug, parsedId, "Update", UserAuth.GetUserName(putRestricted) ?? putRestricted.Key.ToString(),
                 "TenantCallback principal attempted to update non-owned record", context.RequestAborted).ConfigureAwait(false);
             return;
         }
@@ -2675,14 +2680,14 @@ public sealed class RouteHandlers : IRouteHandlers
 
         // TenantCallback principals can only update their own records
         var patchUser = await UserAuth.GetRequestUserAsync(context, context.RequestAborted).ConfigureAwait(false);
-        var patchRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(patchUser as User);
-        if (patchRestricted is { Role: PrincipalRole.TenantCallback } && instance is BaseDataObject patchBdo &&
+        var patchRestricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(patchUser);
+        if (patchRestricted != null && string.Equals(UserAuth.GetPrincipalRole(patchRestricted), nameof(PrincipalRole.TenantCallback), StringComparison.OrdinalIgnoreCase) && instance is BaseDataObject patchBdo &&
             !PrincipalAuthorizationPolicy.IsRecordOwner(patchRestricted, patchBdo))
         {
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsync("Access denied: record not owned by this principal.");
             await _auditService.AuditDeniedAsync(
-                meta.Slug, parsedId, "Update", patchRestricted.UserName ?? patchRestricted.Key.ToString(),
+                meta.Slug, parsedId, "Update", UserAuth.GetUserName(patchRestricted) ?? patchRestricted.Key.ToString(),
                 "TenantCallback principal attempted to update non-owned record", context.RequestAborted).ConfigureAwait(false);
             return;
         }
@@ -5662,7 +5667,7 @@ public sealed class RouteHandlers : IRouteHandlers
         BmwContext context, DataEntityMetadata meta, string action, CancellationToken cancellationToken)
     {
         var user = await UserAuth.GetRequestUserAsync(context, cancellationToken).ConfigureAwait(false);
-        var restricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(user as User);
+        var restricted = PrincipalAuthorizationPolicy.AsRestrictedPrincipal(user);
         if (restricted == null)
             return true; // not a restricted principal
 
@@ -5673,7 +5678,7 @@ public sealed class RouteHandlers : IRouteHandlers
         context.Response.StatusCode = StatusCodes.Status403Forbidden;
         await context.Response.WriteAsync(denial);
         await _auditService.AuditDeniedAsync(
-            meta.Slug, 0, action, restricted.UserName ?? restricted.Key.ToString(),
+            meta.Slug, 0, action, UserAuth.GetUserName(restricted) ?? restricted.Key.ToString(),
             denial, cancellationToken).ConfigureAwait(false);
         return false;
     }
@@ -6033,22 +6038,25 @@ public sealed class RouteHandlers : IRouteHandlers
             return;
         }
 
-        if (meta.Type != typeof(User))
+        var userMeta = UserAuthHelper.GetUserMeta();
+        if (userMeta == null || !string.Equals(meta.Slug, userMeta.Slug, StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (instance is not User user)
+        if (instance is not BaseDataObject user)
             return;
 
-        if (!string.IsNullOrWhiteSpace(user.UserName))
+        var userName = UserAuth.GetUserName(user);
+        if (!string.IsNullOrWhiteSpace(userName))
         {
-            var existing = await Users.FindByUserNameAsync(user.UserName, cancellationToken).ConfigureAwait(false);
+            var existing = await UserAuthHelper.FindUserByUserNameAsync(userName, cancellationToken).ConfigureAwait(false);
             if (existing != null && !string.Equals(existing.Key.ToString(), excludeId, StringComparison.OrdinalIgnoreCase))
                 errors.Add("Username is already taken.");
         }
 
-        if (!string.IsNullOrWhiteSpace(user.Email))
+        var email = UserAuth.GetEmail(user);
+        if (!string.IsNullOrWhiteSpace(email))
         {
-            var existing = await Users.FindByEmailAsync(user.Email, cancellationToken).ConfigureAwait(false);
+            var existing = await UserAuthHelper.FindUserByEmailAsync(email, cancellationToken).ConfigureAwait(false);
             if (existing != null && !string.Equals(existing.Key.ToString(), excludeId, StringComparison.OrdinalIgnoreCase))
                 errors.Add("Email is already registered.");
         }
@@ -6138,12 +6146,12 @@ public sealed class RouteHandlers : IRouteHandlers
         {
             Clauses = new List<QueryClause>
             {
-                new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "admin" },
-                new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "monitoring" }
+                new QueryClause { Field = "Permissions", Operator = QueryOperator.Contains, Value = "admin" },
+                new QueryClause { Field = "Permissions", Operator = QueryOperator.Contains, Value = "monitoring" }
             }
         };
 
-        var users = await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false);
+        var users = await UserAuth.QueryUsersAsync(query, cancellationToken).ConfigureAwait(false);
         bool hasUsers = false;
         foreach (var _ in users)
         {
@@ -6153,22 +6161,22 @@ public sealed class RouteHandlers : IRouteHandlers
         return hasUsers;
     }
 
-    private static async ValueTask<User?> GetLockedRootUserAsync(CancellationToken cancellationToken = default)
+    private static async ValueTask<BaseDataObject?> GetLockedRootUserAsync(CancellationToken cancellationToken = default)
     {
         var query = new QueryDefinition
         {
             Clauses = new List<QueryClause>
             {
-                new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "admin" },
-                new QueryClause { Field = nameof(User.Permissions), Operator = QueryOperator.Contains, Value = "monitoring" }
+                new QueryClause { Field = "Permissions", Operator = QueryOperator.Contains, Value = "admin" },
+                new QueryClause { Field = "Permissions", Operator = QueryOperator.Contains, Value = "monitoring" }
             }
         };
 
-        var users = await DataStoreProvider.Current.QueryAsync<User>(query, cancellationToken).ConfigureAwait(false);
-        User? lockedUser = null;
+        var users = await UserAuth.QueryUsersAsync(query, cancellationToken).ConfigureAwait(false);
+        BaseDataObject? lockedUser = null;
         foreach (var u in users)
         {
-            if (u.IsLockedOut)
+            if (UserAuth.IsLockedOut(u))
             {
                 lockedUser = u;
                 break;
