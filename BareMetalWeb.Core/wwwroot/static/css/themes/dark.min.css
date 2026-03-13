@@ -1,0 +1,2 @@
+/* BMW Dark theme */
+:root{--bmw-bg:#1a1a1a;--bmw-fg:#e8e8e8;--bmw-p:#242424;--bmw-b:#3a3a3a;--bmw-a:#4d9fff;--bmw-g:12px;--bs-body-color:#e8e8e8;--bs-body-bg:#1a1a1a;--bs-border-color:#3a3a3a;--bs-secondary-bg:#2a2a2a;--bs-emphasis-color:#fff;--bs-secondary-color:rgba(232,232,232,.75)}body{color-scheme:dark}

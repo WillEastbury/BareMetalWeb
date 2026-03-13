@@ -1,42 +1,52 @@
-// Theme switcher
+// Theme switcher — BMW skin is permanent; 5 colour themes + 2 layout modes
 (function() {
     'use strict';
 
-    const LOCAL_THEME_PATH = '/static/css/themes/vapor.min.css';
+    // BMW skin is always active — set server-side and reinforced here
+    document.body.setAttribute('data-bm-skin', 'bmw');
+
     const THEME_PATH_PREFIX = '/static/css/themes/';
     const THEME_PATH_SUFFIX = '.min.css';
-    const STORAGE_KEY = 'bm-selected-theme';
-    const DEFAULT_THEME = 'vapor';
+    const THEME_STORAGE_KEY = 'bm-selected-theme';
+    const DEFAULT_THEME     = 'light';
 
-    function setStoredTheme(themeName) {
-        document.cookie = `${STORAGE_KEY}=${encodeURIComponent(themeName)}; path=/; max-age=31536000; samesite=lax`;
-    }
+    const LAYOUT_STORAGE_KEY = 'bm-selected-layout';
+    const DEFAULT_LAYOUT     = 'top';
 
-    function getStoredTheme() {
+    // Allowed BMW theme names
+    const ALLOWED_THEMES = new Set(['light', 'dark', 'colourful', 'muted', 'highviz']);
+
+    // Allowed layout names: top (horizontal navbar) or sidebar (left vertical navbar)
+    const ALLOWED_LAYOUTS = new Set(['top', 'sidebar']);
+
+    function getStoredValue(key, defaultVal) {
         const cookies = document.cookie ? document.cookie.split(';') : [];
-        const key = `${STORAGE_KEY}=`;
-
+        const prefix  = key + '=';
         for (let i = 0; i < cookies.length; i++) {
-            const cookie = cookies[i].trim();
-            if (cookie.startsWith(key)) {
-                return decodeURIComponent(cookie.substring(key.length)) || DEFAULT_THEME;
+            const c = cookies[i].trim();
+            if (c.startsWith(prefix)) {
+                return decodeURIComponent(c.substring(prefix.length)) || defaultVal;
             }
         }
-
-        return DEFAULT_THEME;
+        return defaultVal;
     }
 
-    // Get or create the theme stylesheet link element
+    function setStoredValue(key, val) {
+        document.cookie = `${key}=${encodeURIComponent(val)}; path=/; max-age=31536000; samesite=lax`;
+    }
+
+    // Get or create the BMW theme stylesheet link element,
+    // inserted after site.css so theme variables override site.css defaults.
     function getThemeLink() {
-        let link = document.getElementById('bootswatch-theme');
+        let link = document.getElementById('bm-theme');
         if (!link) {
             link = document.createElement('link');
-            link.id = 'bootswatch-theme';
+            link.id  = 'bm-theme';
             link.rel = 'stylesheet';
-            // Insert before site.css to allow site.css to override
             const siteCSS = document.querySelector('link[href*="site.css"]');
             if (siteCSS) {
-                siteCSS.parentNode.insertBefore(link, siteCSS);
+                // insertBefore(node, null) is equivalent to appendChild — handles last-child case
+                siteCSS.parentNode.insertBefore(link, siteCSS.nextSibling);
             } else {
                 document.head.appendChild(link);
             }
@@ -44,69 +54,39 @@
         return link;
     }
 
-    // Allowed Bootswatch theme names
-    const ALLOWED_THEMES = new Set([
-        'cerulean', 'cosmo', 'cyborg', 'darkly', 'flatly', 'journal',
-        'litera', 'lumen', 'lux', 'materia', 'minty', 'morph',
-        'pulse', 'quartz', 'sandstone', 'simplex', 'sketchy', 'slate',
-        'solar', 'spacelab', 'superhero', 'united', 'vapor', 'yeti', 'zephyr'
-    ]);
-
-    // Apply a theme
-    function applyTheme(themeName) {
-        if (!ALLOWED_THEMES.has(themeName)) {
-            themeName = DEFAULT_THEME;
-        }
-        const themeLink = getThemeLink();
-
-        document.body.removeAttribute('data-bs-theme');
-        themeLink.href = THEME_PATH_PREFIX + encodeURIComponent(themeName) + THEME_PATH_SUFFIX;
-
-        setStoredTheme(themeName);
+    // Apply a colour theme by loading its minimal CSS variable file
+    function applyTheme(name) {
+        if (!ALLOWED_THEMES.has(name)) name = DEFAULT_THEME;
+        getThemeLink().href = THEME_PATH_PREFIX + name + THEME_PATH_SUFFIX;
+        setStoredValue(THEME_STORAGE_KEY, name);
     }
 
-    // Initialize theme switcher
-    function init() {
-        const select = document.getElementById('bm-theme-select');
-        if (!select) return;
+    // Apply a layout mode: 'top' = horizontal navbar, 'sidebar' = left vertical navbar
+    function applyLayout(name) {
+        if (!ALLOWED_LAYOUTS.has(name)) name = DEFAULT_LAYOUT;
+        document.body.setAttribute('data-bm-layout', name);
+        setStoredValue(LAYOUT_STORAGE_KEY, name);
+    }
 
-        const savedTheme = getStoredTheme();
-        select.value = savedTheme;
+    // Initialize theme and layout switchers
+    function init() {
+        const themeSelect = document.getElementById('bm-theme-select');
+        if (!themeSelect) return;
+
+        const savedTheme = getStoredValue(THEME_STORAGE_KEY, DEFAULT_THEME);
+        themeSelect.value = savedTheme;
         applyTheme(savedTheme);
 
-        select.addEventListener('change', function() {
+        themeSelect.addEventListener('change', function() {
             applyTheme(this.value);
         });
 
-        // Skin switcher
-        const SKIN_KEY = 'bm-selected-skin';
-        const ALLOWED_SKINS = new Set(['default', 'sidebar', 'compact', 'focus']);
-
-        function getStoredSkin() {
-            const cookies = document.cookie ? document.cookie.split(';') : [];
-            const key = `${SKIN_KEY}=`;
-            for (let i = 0; i < cookies.length; i++) {
-                const cookie = cookies[i].trim();
-                if (cookie.startsWith(key)) {
-                    return decodeURIComponent(cookie.substring(key.length)) || 'default';
-                }
-            }
-            return 'default';
-        }
-
-        function applySkin(name) {
-            if (!ALLOWED_SKINS.has(name)) name = 'default';
-            if (name === 'default') document.body.removeAttribute('data-bm-skin');
-            else document.body.setAttribute('data-bm-skin', name);
-            document.cookie = `${SKIN_KEY}=${encodeURIComponent(name)}; path=/; max-age=31536000; samesite=lax`;
-        }
-
-        const skinSelect = document.getElementById('bm-skin-select');
-        if (skinSelect) {
-            const savedSkin = getStoredSkin();
-            skinSelect.value = savedSkin;
-            applySkin(savedSkin);
-            skinSelect.addEventListener('change', function() { applySkin(this.value); });
+        const layoutSelect = document.getElementById('bm-layout-select');
+        if (layoutSelect) {
+            const savedLayout = getStoredValue(LAYOUT_STORAGE_KEY, DEFAULT_LAYOUT);
+            layoutSelect.value = savedLayout;
+            applyLayout(savedLayout);
+            layoutSelect.addEventListener('change', function() { applyLayout(this.value); });
         }
     }
 

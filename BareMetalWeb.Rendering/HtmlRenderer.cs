@@ -1453,14 +1453,10 @@ public class HtmlRenderer : IHtmlRenderer
 
     private static readonly HashSet<string> _validThemes = new(StringComparer.OrdinalIgnoreCase)
     {
-        "cerulean", "cosmo",    "cyborg",   "darkly",  "flatly",
-        "journal",  "litera",   "lumen",    "lux",     "materia",
-        "minty",    "morph",    "pulse",    "quartz",  "sandstone",
-        "simplex",  "sketchy",  "slate",    "solar",   "spacelab",
-        "superhero","united",   "vapor",    "yeti",    "zephyr"
+        "light", "dark", "colourful", "muted", "highviz"
     };
 
-    private const string DefaultTheme   = "vapor";
+    private const string DefaultTheme   = "light";
     private const string ThemeCookieKey = "bm-selected-theme";
 
     private static string GetThemeCssUrl(BmwContext context)

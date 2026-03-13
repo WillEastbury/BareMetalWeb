@@ -65,5 +65,5 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "chore: update bundled static assets (bootstrap, bootswatch themes, fonts)"
+          git commit -m "chore: update bundled static assets (bootstrap, bootstrap-icons, bmw themes)"
           git push
