@@ -691,7 +691,7 @@
 
         // Title + action bar
         html += '<dr>';
-        html += '<h2 style="margin:0">' + escHtml(meta.name) + '</h2>';
+        html += '<h2 class="m-0">' + escHtml(meta.name) + '</h2>';
         html += '<span class="badge bg-secondary" title="Total records" aria-label="' + total + ' total records">' + total + ' records</span>';
         html += '<a class="btn btn-primary btn-sm" href="' + baseUrl + '/create"><i class="bi bi-plus-lg"></i> New</a>';
         html += '<a class="btn btn-outline-secondary btn-sm" href="' + API + '/' + encodeURIComponent(slug) + '?format=csv" download><i class="bi bi-filetype-csv"></i> Export CSV</a>';
@@ -5053,6 +5053,16 @@
 
   // Auto-refresh handle for the dashboard view — cleared on every navigation.
   let _dashboardRefreshHandle = null;
+
+  // ── Abort controller for in-flight navigation requests ─────────────────────
+  let _navAbortController = null;
+
+  function cancelNavigation() {
+    if (_navAbortController) {
+      _navAbortController.abort();
+      _navAbortController = null;
+    }
+  }
 
   function wire() {
     R.querySelectorAll('[data-go]').forEach(a =>
