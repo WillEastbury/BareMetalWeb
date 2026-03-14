@@ -54,6 +54,8 @@ public sealed class BmwHost : IAsyncDisposable
             {
                 var socket = new System.Net.Sockets.Socket(endpoint.AddressFamily,
                     System.Net.Sockets.SocketType.Stream, System.Net.Sockets.ProtocolType.Tcp);
+                if (endpoint.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
+                    socket.DualMode = true;
                 socket.SetSocketOption(System.Net.Sockets.SocketOptionLevel.Socket,
                     System.Net.Sockets.SocketOptionName.KeepAlive, true);
                 socket.SetSocketOption(System.Net.Sockets.SocketOptionLevel.Socket,
