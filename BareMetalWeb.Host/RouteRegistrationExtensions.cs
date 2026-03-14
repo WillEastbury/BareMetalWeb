@@ -3071,6 +3071,15 @@ public static class RouteRegistrationExtensions
                 w.WriteNumber("latencyMs", assistantMsg.LatencyMs);
                 w.WriteString("resolvedIntent", aiResponse.ResolvedIntent);
                 w.WriteNumber("confidence", assistantMsg.Confidence);
+                if (aiResponse.NavigateUrl is not null)
+                    w.WriteString("navigateUrl", aiResponse.NavigateUrl);
+                if (aiResponse.PrefillFields is { Count: > 0 })
+                {
+                    w.WriteStartObject("prefillFields");
+                    foreach (var kvp in aiResponse.PrefillFields)
+                        w.WriteString(kvp.Key, kvp.Value);
+                    w.WriteEndObject();
+                }
                 w.WriteEndObject();
                 w.WriteEndObject();
             }
