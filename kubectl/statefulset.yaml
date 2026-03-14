@@ -43,7 +43,7 @@ spec:
             allowPrivilegeEscalation: false
       containers:
         - name: baremetalweb
-          image: metalclusterregistry.azurecr.io/baremetalweb:1.20260308.1-linux-arm64
+          image: metalclusterregistry.azurecr.io/baremetalweb:1.20260314.198-linux-arm64
           imagePullPolicy: Always
           ports:
             - name: http
