@@ -23,11 +23,25 @@ internal static class DeviceIdentity
     // ── Public API ────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Compute the hardware key: HMAC-SHA256(cpuSerial, SHA256(macAddress)).
+    /// Compute the hardware key.  Prefers ATECC608A secure element (if present on i2c)
+    /// which provides a 32-byte hardware-bound secret that never leaves the chip.
+    /// Falls back to HMAC-SHA256(cpuSerial, SHA256(macAddress)).
     /// Returns a 64-character lowercase hex string.
     /// </summary>
     public static string ComputeHardwareKey()
     {
+        // Try ATECC608A first — strongest hardware binding available
+        if (OperatingSystem.IsLinux())
+        {
+            try
+            {
+                var slotKey = Data.Atecc608a.ReadSlotKey();
+                if (slotKey is { Length: 32 })
+                    return Convert.ToHexString(slotKey).ToLowerInvariant();
+            }
+            catch { /* chip absent or unreadable — fall through */ }
+        }
+
         var cpuSerial = GetCpuSerial();
         var macHash   = GetFirstNicMacHash();
 

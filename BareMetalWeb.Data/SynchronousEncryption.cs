@@ -179,11 +179,25 @@ public sealed class SynchronousEncryption : ISynchronousEncryption
 
     private static byte[] DeriveMachineKey()
     {
-        string machineId = "baremetalweb-default";
-        try { machineId = File.Exists("/etc/machine-id") ? File.ReadAllText("/etc/machine-id").Trim() : Environment.MachineName; } catch { }
+        // Prefer ATECC608A hardware key if an i2c secure element is present.
+        // The 32-byte slot key never leaves the chip — it provides hardware-bound
+        // entropy that is far stronger than the software-only machine-id fallback.
+        byte[]? ikm = null;
+        if (OperatingSystem.IsLinux())
+        {
+            try { ikm = Atecc608a.ReadSlotKey(); } catch { /* chip absent or unreadable */ }
+        }
+
+        if (ikm is null || ikm.Length != 32)
+        {
+            string machineId = "baremetalweb-default";
+            try { machineId = File.Exists("/etc/machine-id") ? File.ReadAllText("/etc/machine-id").Trim() : Environment.MachineName; } catch { }
+            ikm = Encoding.UTF8.GetBytes(machineId);
+        }
+
         return HKDF.DeriveKey(
             HashAlgorithmName.SHA256,
-            Encoding.UTF8.GetBytes(machineId),
+            ikm,
             32,
             Encoding.UTF8.GetBytes("BareMetalWeb.KeyFile.v1"),
             Encoding.UTF8.GetBytes("key-protection"));
