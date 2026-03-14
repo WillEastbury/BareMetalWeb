@@ -159,6 +159,45 @@ public sealed class SafeTensorsReader : IDisposable
     }
 
     /// <summary>
+    /// Read a single BF16 row from a tensor, converting to float[].
+    /// Reads only the bytes needed for one row, avoiding full tensor allocation.
+    /// </summary>
+    public void ReadBFloat16Row(string name, int row, int cols, Span<float> dest)
+    {
+        if (!_tensors.TryGetValue(name, out var info))
+            throw new KeyNotFoundException($"Tensor '{name}' not found in SafeTensors file");
+
+        int bytesPerRow = cols * 2; // BF16 = 2 bytes per value
+        long rowOffset = _dataRegionStart + info.DataStart + (long)row * bytesPerRow;
+        _stream.Seek(rowOffset, SeekOrigin.Begin);
+
+        Span<byte> buf = stackalloc byte[Math.Min(bytesPerRow, 8192)];
+        int remaining = bytesPerRow;
+        int destIdx = 0;
+
+        while (remaining > 0)
+        {
+            int toRead = Math.Min(remaining, buf.Length);
+            var slice = buf[..toRead];
+            int totalRead = 0;
+            while (totalRead < toRead)
+            {
+                int read = _stream.Read(slice[totalRead..]);
+                if (read == 0) throw new EndOfStreamException($"Tensor '{name}': truncated at row {row}");
+                totalRead += read;
+            }
+
+            for (int i = 0; i < toRead; i += 2)
+            {
+                ushort raw = BinaryPrimitives.ReadUInt16LittleEndian(slice[i..]);
+                uint f32Bits = (uint)raw << 16;
+                dest[destIdx++] = BitConverter.Int32BitsToSingle((int)f32Bits);
+            }
+            remaining -= toRead;
+        }
+    }
+
+    /// <summary>
     /// Check if a tensor exists in the file.
     /// </summary>
     public bool HasTensor(string name) => _tensors.ContainsKey(name);

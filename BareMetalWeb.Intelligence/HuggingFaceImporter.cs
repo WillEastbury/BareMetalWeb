@@ -136,16 +136,43 @@ public static class HuggingFaceImporter
             log.Add($"    Layer {i}: packed to native ({nWq[i].BytesAllocated / 1024}KB per matrix)");
         }
 
-        // 6. Read embeddings — BF16, quantize to ternary (still needs sbyte[] for quantization)
-        log.Add("Loading embeddings (BF16 → ternary)...");
-        var embeddings = ReadEmbeddings(tensorIndex, "model.embed_tokens.weight", hfConfig.VocabSize, dim);
-        log.Add($"Embeddings: {embeddings.Length:N0} weights ({hfConfig.VocabSize} × {dim})");
+        // 6. Vocabulary pruning setup — build remap table BEFORE loading embeddings
+        // to avoid allocating the full 128K×dim float[] (1.3GB for 2B model).
+        int activeVocab = hfConfig.VocabSize;
+        VocabularyPruner? vocabPruner = null;
+        string[] finalTokenTable = tokenTable;
+
+        if (options.PruneVocabulary)
+        {
+            vocabPruner = VocabularyPruner.FromDataScaffold();
+            vocabPruner.BuildRemapTable(tokenTable);
+            activeVocab = vocabPruner.PrunedVocabSize;
+
+            var prunedTokens = new string[activeVocab];
+            for (int i = 0; i < hfConfig.VocabSize && i < tokenTable.Length; i++)
+            {
+                int mapped = vocabPruner.MapTokenId(i);
+                if (mapped >= 0 && mapped < activeVocab)
+                    prunedTokens[mapped] = tokenTable[i];
+            }
+            for (int i = 0; i < activeVocab; i++)
+                prunedTokens[i] ??= $"<{i}>";
+            finalTokenTable = prunedTokens;
+            log.Add($"Vocab pruned: {hfConfig.VocabSize} → {activeVocab} tokens");
+        }
+
+        // 7. Read embeddings — stream row-by-row, only keeping pruned rows
+        log.Add("Loading embeddings (BF16 → ternary, streaming)...");
+        var embeddings = ReadEmbeddingsStreaming(tensorIndex, "model.embed_tokens.weight",
+            hfConfig.VocabSize, dim, vocabPruner);
+        log.Add($"Embeddings: {embeddings.Length:N0} weights ({activeVocab} × {dim})");
 
         // Tied embeddings — output head shares embed_tokens weight
         sbyte[] outputHead;
         if (tensorIndex.ContainsKey("lm_head.weight"))
         {
-            outputHead = ReadEmbeddings(tensorIndex, "lm_head.weight", hfConfig.VocabSize, dim);
+            outputHead = ReadEmbeddingsStreaming(tensorIndex, "lm_head.weight",
+                hfConfig.VocabSize, dim, vocabPruner);
         }
         else
         {
@@ -155,39 +182,13 @@ public static class HuggingFaceImporter
         }
         log.Add($"Output head: {outputHead.Length:N0} weights");
 
-        // 7. Vocabulary pruning
-        int activeVocab = hfConfig.VocabSize;
-        if (options.PruneVocabulary)
-        {
-            var pruner = VocabularyPruner.FromDataScaffold();
-            pruner.BuildRemapTable(tokenTable);
-            embeddings = pruner.PruneEmbeddings(embeddings, dim);
-            outputHead = pruner.PruneOutputHead(outputHead, dim);
-            activeVocab = pruner.PrunedVocabSize;
-
-            // Rebuild token table to match pruned vocab
-            var prunedTokens = new string[activeVocab];
-            for (int i = 0; i < hfConfig.VocabSize && i < tokenTable.Length; i++)
-            {
-                int mapped = pruner.MapTokenId(i);
-                if (mapped >= 0 && mapped < activeVocab)
-                    prunedTokens[mapped] = tokenTable[i];
-            }
-            // Fill any gaps
-            for (int i = 0; i < activeVocab; i++)
-                prunedTokens[i] ??= $"<{i}>";
-            tokenTable = prunedTokens;
-            log.Add($"Vocab pruned: {hfConfig.VocabSize} → {activeVocab} tokens");
-        }
-
-        // 8. Pack embeddings to native (after pruning, so we pack the smaller vocab)
+        // 8. Pack embeddings to native
         var nEmbeddings = NativeTernaryMatrix.Pack(embeddings, activeVocab, dim);
         var nOutputHead = NativeTernaryMatrix.Pack(outputHead, activeVocab, dim);
-        // Free managed arrays now
         embeddings = null!;
         outputHead = null!;
 
-        // 9. Pack and save
+        // 9. Save snapshot directly — skip engine allocation (no inference buffers needed)
         var config = new BitNetModelConfig(
             HiddenDim: dim,
             NumLayers: keepLayers,
@@ -195,15 +196,22 @@ public static class HuggingFaceImporter
             VocabSize: hfConfig.VocabSize,
             MaxSeqLen: Math.Min(hfConfig.MaxSeqLen, options.MaxSeqLen));
 
-        using var engine = new BitNetEngine(config);
-        engine.LoadFromNativeImport(nWq, nWk, nWv, nWo, nFfn, nEmbeddings, nOutputHead,
-            activeVocab, dim, tokenTable);
-        engine.SaveSnapshot(options.OutputPath, tokenTable);
+        ModelSnapshot.Save(options.OutputPath, config, activeVocab,
+            nWq, nWk, nWv, nWo, nFfn, nEmbeddings, nOutputHead, finalTokenTable);
+
+        // Dispose all native matrices — data is now on disk
+        foreach (var m in nWq)  m.Dispose();
+        foreach (var m in nWk)  m.Dispose();
+        foreach (var m in nWv)  m.Dispose();
+        foreach (var m in nWo)  m.Dispose();
+        foreach (var m in nFfn) m.Dispose();
+        nEmbeddings.Dispose();
+        nOutputHead.Dispose();
 
         var fileInfo = new FileInfo(options.OutputPath);
         log.Add($"Saved: {fileInfo.Length / (1024 * 1024)} MB → {options.OutputPath}");
 
-        return new ImportResult(config, activeVocab, tokenTable.Length, fileInfo.Length, log);
+        return new ImportResult(config, activeVocab, finalTokenTable.Length, fileInfo.Length, log);
     }
 
     /// <summary>
@@ -273,43 +281,83 @@ public static class HuggingFaceImporter
         Dictionary<string, (string File, TensorInfo Info)> index,
         string name, int vocabSize, int dim)
     {
+        return ReadEmbeddingsStreaming(index, name, vocabSize, dim, pruner: null);
+    }
+
+    /// <summary>
+    /// Read BF16 embeddings row-by-row, quantize to ternary, optionally pruning vocab.
+    /// Only allocates one float[dim] row buffer — avoids the full vocabSize×dim float[] allocation.
+    /// When pruner is non-null, only rows that map to a pruned ID are loaded.
+    /// </summary>
+    private static sbyte[] ReadEmbeddingsStreaming(
+        Dictionary<string, (string File, TensorInfo Info)> index,
+        string name, int vocabSize, int dim,
+        VocabularyPruner? pruner)
+    {
         if (!index.TryGetValue(name, out var entry))
             throw new KeyNotFoundException($"Tensor '{name}' not found");
 
-        using var reader = SafeTensorsReader.Open(entry.File);
+        // For U8/I8 (already ternary), fall back to bulk read + prune
+        if (entry.Info.DType == "U8" || entry.Info.DType == "I8")
+        {
+            var ternary = ReadPackedTernary(index, name);
+            if (pruner != null)
+                return pruner.PruneEmbeddings(ternary, dim);
+            return ternary;
+        }
 
-        float[] floats;
-        if (entry.Info.DType == "BF16")
-            floats = reader.ReadTensorBFloat16(name);
-        else if (entry.Info.DType == "F32")
-            floats = reader.ReadTensorFloat32(name);
-        else if (entry.Info.DType == "U8" || entry.Info.DType == "I8")
-            return ReadPackedTernary(index, name); // already ternary
-        else
+        if (entry.Info.DType != "BF16" && entry.Info.DType != "F32")
             throw new NotSupportedException($"Embedding dtype '{entry.Info.DType}' not supported");
 
-        // Per-row absmean quantization to ternary
-        var result = new sbyte[vocabSize * dim];
+        int outputVocab = pruner?.PrunedVocabSize ?? vocabSize;
+        var result = new sbyte[outputVocab * dim];
+        var rowBuf = new float[dim];
+
+        using var reader = SafeTensorsReader.Open(entry.File);
+
         for (int row = 0; row < vocabSize; row++)
         {
-            int offset = row * dim;
-            if (offset + dim > floats.Length) break;
+            int destRow;
+            if (pruner != null)
+            {
+                destRow = pruner.MapTokenId(row);
+                if (destRow < 0) continue; // pruned — skip this row entirely
+            }
+            else
+            {
+                destRow = row;
+            }
 
-            // Compute absmean for this row
+            // Read single row from disk
+            if (entry.Info.DType == "BF16")
+                reader.ReadBFloat16Row(name, row, dim, rowBuf);
+            else
+                ReadFloat32Row(reader, name, row, dim, rowBuf);
+
+            // Absmean quantization
             double sum = 0;
             for (int j = 0; j < dim; j++)
-                sum += Math.Abs(floats[offset + j]);
+                sum += Math.Abs(rowBuf[j]);
             float threshold = (float)(sum / dim);
 
+            int offset = destRow * dim;
             for (int j = 0; j < dim; j++)
             {
-                float v = floats[offset + j];
+                float v = rowBuf[j];
                 if (v > threshold) result[offset + j] = 1;
                 else if (v < -threshold) result[offset + j] = -1;
                 // else 0 (default)
             }
         }
         return result;
+    }
+
+    /// <summary>Read a single F32 row from a tensor.</summary>
+    private static void ReadFloat32Row(SafeTensorsReader reader, string name, int row, int cols, Span<float> dest)
+    {
+        // F32 row reading not yet in SafeTensorsReader — fall back to BF16 path structure
+        // This is less common; BF16 is the standard for BitNet embeddings
+        throw new NotSupportedException("Streaming F32 row read not yet implemented — use BF16 model");
     }
 
     /// <summary>
