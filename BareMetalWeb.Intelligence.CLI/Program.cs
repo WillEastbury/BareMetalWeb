@@ -42,13 +42,8 @@ using var engine = new BitNetEngine(config);
 var snapshotPath = FindCliModelSnapshot();
 if (snapshotPath is not null)
 {
-    engine.LoadSnapshot(snapshotPath);
-    config = new BitNetModelConfig(
-        HiddenDim: engine.ModelStats?.LayerCount > 0 ? 2048 : 128,
-        NumLayers: engine.ModelStats?.LayerCount ?? 4,
-        NumHeads: 16,
-        VocabSize: engine.ModelStats is { } ms ? (int)((ms.TotalWeights - ms.LayerWeights) / (2 * (ms.TotalWeights > 0 ? ms.LayerCount : 1))) : 256,
-        MaxSeqLen: 512);
+    // Cap MaxSeqLen to limit KV cache memory (22 layers × seqLen × dim × 4B × 2)
+    engine.LoadSnapshot(snapshotPath, maxSeqLenOverride: 128);
     Console.ForegroundColor = ConsoleColor.Green;
     Console.WriteLine($"loaded snapshot ({sw.ElapsedMilliseconds}ms): {snapshotPath}");
 }

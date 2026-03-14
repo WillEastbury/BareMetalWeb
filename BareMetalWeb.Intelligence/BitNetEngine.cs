@@ -417,7 +417,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// </summary>
     /// <param name="path">Path to the .bmwm snapshot file.</param>
     /// <param name="memoryMapped">If true, use memory-mapped I/O (avoids large managed copies).</param>
-    public void LoadSnapshot(string path, bool memoryMapped = false)
+    public void LoadSnapshot(string path, bool memoryMapped = false, int? maxSeqLenOverride = null)
     {
         var snapshot = memoryMapped
             ? ModelSnapshot.LoadMapped(path)
@@ -427,7 +427,15 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
         // Override engine config with the snapshot's config — the snapshot
         // knows its own dimensions, layer count, vocab size, etc.
-        _config = snapshot.Config;
+        var snapshotConfig = snapshot.Config;
+        if (maxSeqLenOverride.HasValue)
+        {
+            snapshotConfig = snapshotConfig with
+            {
+                MaxSeqLen = Math.Min(snapshotConfig.MaxSeqLen, maxSeqLenOverride.Value)
+            };
+        }
+        _config = snapshotConfig;
 
         _layerCount = snapshot.Wq.Length;
         _compressedWq = snapshot.Wq;
