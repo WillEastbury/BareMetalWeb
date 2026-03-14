@@ -137,13 +137,15 @@ public class IntelligenceOrchestratorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_AmbiguousQuery_FallsBackToBitNet()
+    public async Task ProcessAsync_AmbiguousQuery_FallsBackWithHelpfulMessage()
     {
         var orch = CreateOrchestrator();
 
         var response = await orch.ProcessAsync("what is the meaning of life");
 
-        Assert.Equal("bitnet-generate", response.ResolvedIntent);
-        Assert.NotEmpty(response.Message);
+        // Test model produces degenerate output, so we should get the fallback message
+        Assert.Equal("bitnet-fallback", response.ResolvedIntent);
+        Assert.Contains("help", response.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("tok_", response.Message);
     }
 }

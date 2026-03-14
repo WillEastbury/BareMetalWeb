@@ -78,7 +78,67 @@ public sealed class IntelligenceOrchestrator
         // Stage 3: BitNet engine fallback for freeform/ambiguous queries
         var generated = await _engine.GenerateAsync(sanitised.AsMemory(), 256, ct)
             .ConfigureAwait(false);
+
+        // Guard against degenerate output (untrained/random model weights produce
+        // repetitive token sequences like "tok_72 tok_72 tok_72...")
+        if (IsDegenerate(generated))
+        {
+            return new ChatResponse(
+                "I'm not sure how to help with that. Try 'help' to see what I can do, " +
+                "or use a command like 'create a todo', 'show customers', or 'system status'.",
+                "bitnet-fallback", 0f);
+        }
+
         return new ChatResponse(generated, "bitnet-generate", 0f);
+    }
+
+    /// <summary>
+    /// Detects degenerate BitNet output: repetitive tokens, raw token IDs,
+    /// or very low character diversity indicating untrained weights.
+    /// </summary>
+    private static bool IsDegenerate(string output)
+    {
+        if (string.IsNullOrWhiteSpace(output)) return true;
+
+        // Raw token IDs leaked through (e.g. "tok_72 tok_72")
+        if (output.Contains("tok_", StringComparison.Ordinal)) return true;
+
+        // Check for excessive repetition: split on spaces, see if >60% are the same word
+        var span = output.AsSpan();
+        int wordCount = 0, maxRepeat = 0, currentRepeat = 0;
+        ReadOnlySpan<char> lastWord = default;
+        int wordStart = -1;
+
+        for (int i = 0; i <= span.Length; i++)
+        {
+            bool isBoundary = i == span.Length || span[i] == ' ';
+            if (isBoundary && wordStart >= 0)
+            {
+                var word = span[wordStart..i];
+                wordCount++;
+                if (word.SequenceEqual(lastWord))
+                {
+                    currentRepeat++;
+                    if (currentRepeat > maxRepeat) maxRepeat = currentRepeat;
+                }
+                else
+                {
+                    currentRepeat = 1;
+                    lastWord = span[wordStart..i];
+                }
+                wordStart = -1;
+            }
+            else if (!isBoundary && wordStart < 0)
+            {
+                wordStart = i;
+            }
+        }
+
+        // If the longest run of repeated words is >60% of total, it's degenerate
+        if (wordCount > 3 && maxRepeat > wordCount * 0.6)
+            return true;
+
+        return false;
     }
 
     private static string BuildClassifiedResponse(IntentClassification c)
