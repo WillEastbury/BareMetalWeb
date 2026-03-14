@@ -109,17 +109,18 @@ public sealed class Tokenizer
         }
         return tokenId switch
         {
-            PadId => "<PAD>",
-            BosId => "<BOS>",
-            EosId => "<EOS>",
-            UnkId => "<UNK>",
-            _     => $"tok{tokenId}",
+            PadId => "",
+            BosId => "",
+            EosId => "",
+            UnkId => "?",
+            _     => "?",
         };
     }
 
     /// <summary>
-    /// Decode a sequence of token IDs to a space-joined string.
-    /// Skips PAD, BOS, and EOS tokens.
+    /// Decode a sequence of token IDs to a concatenated string.
+    /// Skips PAD, BOS, and EOS tokens. No space injection — the space
+    /// character is its own vocabulary token.
     /// </summary>
     public string DecodeSequence(ReadOnlySpan<int> ids)
     {
@@ -132,14 +133,11 @@ public sealed class Tokenizer
         }
         if (printable == 0) return string.Empty;
 
-        var sb = new System.Text.StringBuilder(printable * 6);
-        bool first = true;
+        var sb = new System.Text.StringBuilder(printable * 4);
         for (int i = 0; i < ids.Length; i++)
         {
             int id = ids[i];
             if (id == PadId || id == BosId || id == EosId) continue;
-            if (!first) sb.Append(' ');
-            first = false;
             sb.Append(Decode(id));
         }
         return sb.ToString();

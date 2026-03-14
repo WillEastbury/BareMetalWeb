@@ -93,49 +93,52 @@ public sealed class IntelligenceOrchestrator
     }
 
     /// <summary>
-    /// Detects degenerate BitNet output: repetitive tokens, raw token IDs,
-    /// or very low character diversity indicating untrained weights.
+    /// Detects degenerate BitNet output: repetitive characters, very low
+    /// character diversity, or mostly non-printable content.
     /// </summary>
     private static bool IsDegenerate(string output)
     {
         if (string.IsNullOrWhiteSpace(output)) return true;
+        if (output.Length < 2) return true;
 
-        // Raw token IDs leaked through (e.g. "tok_72 tok_72")
-        if (output.Contains("tok_", StringComparison.Ordinal)) return true;
+        // Check character diversity: count distinct chars.
+        // Good text uses many distinct characters; degenerate output repeats a few.
+        Span<bool> seen = stackalloc bool[128];
+        int distinct = 0;
+        int printable = 0;
 
-        // Check for excessive repetition: split on spaces, see if >60% are the same word
-        var span = output.AsSpan();
-        int wordCount = 0, maxRepeat = 0, currentRepeat = 0;
-        ReadOnlySpan<char> lastWord = default;
-        int wordStart = -1;
-
-        for (int i = 0; i <= span.Length; i++)
+        for (int i = 0; i < output.Length; i++)
         {
-            bool isBoundary = i == span.Length || span[i] == ' ';
-            if (isBoundary && wordStart >= 0)
+            char c = output[i];
+            if (c >= 32 && c <= 126) printable++;
+            if (c < 128 && !seen[c])
             {
-                var word = span[wordStart..i];
-                wordCount++;
-                if (word.SequenceEqual(lastWord))
-                {
-                    currentRepeat++;
-                    if (currentRepeat > maxRepeat) maxRepeat = currentRepeat;
-                }
-                else
-                {
-                    currentRepeat = 1;
-                    lastWord = span[wordStart..i];
-                }
-                wordStart = -1;
-            }
-            else if (!isBoundary && wordStart < 0)
-            {
-                wordStart = i;
+                seen[c] = true;
+                distinct++;
             }
         }
 
-        // If the longest run of repeated words is >60% of total, it's degenerate
-        if (wordCount > 3 && maxRepeat > wordCount * 0.6)
+        // If <20% of output is printable ASCII, it's garbage
+        if (output.Length > 4 && printable < output.Length * 0.2)
+            return true;
+
+        // If distinct char count is very low relative to length, it's repetitive
+        // (e.g., "aaaaaaa" = 1 distinct in 7 chars)
+        if (output.Length > 8 && distinct < 3)
+            return true;
+
+        // Check for excessive character-level repetition (e.g., same char >60% of output)
+        Span<int> freq = stackalloc int[128];
+        for (int i = 0; i < output.Length; i++)
+        {
+            char c = output[i];
+            if (c < 128) freq[c]++;
+        }
+        int maxFreq = 0;
+        for (int i = 0; i < 128; i++)
+            if (freq[i] > maxFreq) maxFreq = freq[i];
+
+        if (output.Length > 8 && maxFreq > output.Length * 0.6)
             return true;
 
         return false;
