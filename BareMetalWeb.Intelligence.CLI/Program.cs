@@ -16,33 +16,47 @@ Console.ForegroundColor = ConsoleColor.Cyan;
 Console.Write(Banner);
 Console.ResetColor();
 
+// --- Handle --import command line argument (runs without loading test model) ---
+if (args.Length >= 2 && args[0] == "--import")
+{
+    RunImport(args[1]);
+    return;
+}
+
 // --- Load engine ---
 Console.Write("  Loading engine... ");
 var sw = Stopwatch.StartNew();
 
+// Use a small default config; LoadSnapshot will override with the snapshot's config
 var config = new BitNetModelConfig(
-    HiddenDim: 2048,
-    NumLayers: 24,
-    NumHeads: 16,
-    VocabSize: 32000,
-    MaxSeqLen: 2048);
+    HiddenDim: 128,
+    NumLayers: 4,
+    NumHeads: 4,
+    VocabSize: 256,
+    MaxSeqLen: 512);
 
 var executor = AdminToolCatalogue.CreateRegistry();
 using var engine = new BitNetEngine(config);
 
-// Try loading a trained snapshot first; fall back to test model
+// Try loading a trained snapshot first; fall back to small test model
 var snapshotPath = FindCliModelSnapshot();
 if (snapshotPath is not null)
 {
     engine.LoadSnapshot(snapshotPath);
+    config = new BitNetModelConfig(
+        HiddenDim: engine.ModelStats?.LayerCount > 0 ? 2048 : 128,
+        NumLayers: engine.ModelStats?.LayerCount ?? 4,
+        NumHeads: 16,
+        VocabSize: engine.ModelStats is { } ms ? (int)((ms.TotalWeights - ms.LayerWeights) / (2 * (ms.TotalWeights > 0 ? ms.LayerCount : 1))) : 256,
+        MaxSeqLen: 512);
     Console.ForegroundColor = ConsoleColor.Green;
     Console.WriteLine($"loaded snapshot ({sw.ElapsedMilliseconds}ms): {snapshotPath}");
 }
 else
 {
-    engine.LoadTestModel(ModelLoadOptions.Aggressive);
+    engine.LoadTestModel(ModelLoadOptions.NoPruning);
     Console.ForegroundColor = ConsoleColor.DarkYellow;
-    Console.WriteLine($"no snapshot found — using random test model ({sw.ElapsedMilliseconds}ms)");
+    Console.WriteLine($"no snapshot found — using small test model ({sw.ElapsedMilliseconds}ms)");
 }
 
 // Force GC to reclaim the temporary sbyte[] arrays used during construction

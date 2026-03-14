@@ -213,6 +213,137 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         return matrix;
     }
 
+    // 256-entry LUT: remaps a HuggingFace U8 packed byte to native encoding.
+    // HF encoding per 2-bit field: 0b00→-1, 0b01→0, 0b10→+1
+    // Native encoding per 2-bit field: 0b11→-1, 0b00→0, 0b01→+1
+    // Remap per field: HF 0→Native 3, HF 1→Native 0, HF 2→Native 1
+    private static readonly byte[] s_hfToNativeLut = BuildHfToNativeLut();
+
+    private static byte[] BuildHfToNativeLut()
+    {
+        // Per 2-bit field remapping: HF value → native encoding
+        ReadOnlySpan<byte> fieldMap = [3, 0, 1, 0]; // HF 0→3(-1), 1→0(0), 2→1(+1), 3→0(unused)
+
+        var lut = new byte[256];
+        for (int b = 0; b < 256; b++)
+        {
+            int f0 = fieldMap[b & 3];
+            int f1 = fieldMap[(b >> 2) & 3];
+            int f2 = fieldMap[(b >> 4) & 3];
+            int f3 = fieldMap[(b >> 6) & 3];
+            lut[b] = (byte)(f0 | (f1 << 2) | (f2 << 4) | (f3 << 6));
+        }
+        return lut;
+    }
+
+    /// <summary>
+    /// Create a NativeTernaryMatrix directly from HuggingFace U8 packed ternary bytes.
+    /// Each input byte holds 4 ternary weights in HF encoding (0→-1, 1→0, 2→+1).
+    /// Remaps to native encoding byte-by-byte using a 256-entry LUT — no sbyte[] intermediate.
+    /// </summary>
+    public static NativeTernaryMatrix FromHfU8Packed(ReadOnlySpan<byte> hfPacked, int rows, int cols)
+    {
+        int expectedPackedBytes = (cols + 3) >> 2;
+        int expectedTotal = rows * expectedPackedBytes;
+        if (hfPacked.Length < expectedTotal)
+            throw new ArgumentException(
+                $"HF packed buffer {hfPacked.Length} < required {expectedTotal} ({rows}×{expectedPackedBytes})");
+
+        var matrix = new NativeTernaryMatrix(rows, cols);
+        var lut = s_hfToNativeLut;
+
+        int zeroByteCount = 0;
+        for (int r = 0; r < rows; r++)
+        {
+            int srcRow = r * expectedPackedBytes;
+            long dstRow = (long)r * matrix._rowStrideBytes;
+
+            for (int b = 0; b < expectedPackedBytes; b++)
+            {
+                byte remapped = lut[hfPacked[srcRow + b]];
+                matrix._data[dstRow + b] = remapped;
+                if (remapped == 0) zeroByteCount++;
+            }
+        }
+
+        int totalLogicalBytes = rows * matrix._packedRowBytes;
+        matrix._stats = new MatrixStats(
+            LogicalWeights: rows * cols,
+            PackedBytes: totalLogicalBytes,
+            ZeroByteCount: zeroByteCount,
+            ZeroByteRatio: totalLogicalBytes > 0
+                ? (float)zeroByteCount / totalLogicalBytes
+                : 0f);
+
+        if (matrix._stats.ZeroByteRatio > 0.4f
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
+            && !Sve.IsSupported
+#pragma warning restore SYSLIB5003
+#endif
+            && !Vector512.IsHardwareAccelerated
+            && !Vector256.IsHardwareAccelerated
+            && !AdvSimd.IsSupported)
+            matrix.BuildSkipIndex();
+
+        return matrix;
+    }
+
+    /// <summary>
+    /// Create a NativeTernaryMatrix from HF U8 packed bytes with column truncation.
+    /// Reads only the first <paramref name="keepCols"/> columns per row from a matrix
+    /// stored as <paramref name="srcCols"/> columns. Used for FFN projection (dim×ffnDim → dim×dim)
+    /// without unpacking to sbyte[].
+    /// </summary>
+    public static NativeTernaryMatrix FromHfU8PackedTruncated(
+        ReadOnlySpan<byte> hfPacked, int rows, int srcCols, int keepCols)
+    {
+        int srcPackedPerRow = (srcCols + 3) >> 2;
+        int keepPackedPerRow = (keepCols + 3) >> 2;
+        if (hfPacked.Length < rows * srcPackedPerRow)
+            throw new ArgumentException(
+                $"HF packed buffer {hfPacked.Length} < required {rows * srcPackedPerRow}");
+
+        var matrix = new NativeTernaryMatrix(rows, keepCols);
+        var lut = s_hfToNativeLut;
+
+        int zeroByteCount = 0;
+        for (int r = 0; r < rows; r++)
+        {
+            int srcRow = r * srcPackedPerRow;
+            long dstRow = (long)r * matrix._rowStrideBytes;
+
+            for (int b = 0; b < keepPackedPerRow; b++)
+            {
+                byte remapped = lut[hfPacked[srcRow + b]];
+                matrix._data[dstRow + b] = remapped;
+                if (remapped == 0) zeroByteCount++;
+            }
+        }
+
+        int totalLogicalBytes = rows * matrix._packedRowBytes;
+        matrix._stats = new MatrixStats(
+            LogicalWeights: rows * keepCols,
+            PackedBytes: totalLogicalBytes,
+            ZeroByteCount: zeroByteCount,
+            ZeroByteRatio: totalLogicalBytes > 0
+                ? (float)zeroByteCount / totalLogicalBytes
+                : 0f);
+
+        if (matrix._stats.ZeroByteRatio > 0.4f
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
+            && !Sve.IsSupported
+#pragma warning restore SYSLIB5003
+#endif
+            && !Vector512.IsHardwareAccelerated
+            && !Vector256.IsHardwareAccelerated
+            && !AdvSimd.IsSupported)
+            matrix.BuildSkipIndex();
+
+        return matrix;
+    }
+
     /// <summary>
     /// Dot product of matrix row with an input vector.
     /// Dispatches to SVE2, SVE, AVX-512, AVX2, NEON, sparse skip, or scalar.

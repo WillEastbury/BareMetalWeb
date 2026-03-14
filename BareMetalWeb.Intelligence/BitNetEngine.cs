@@ -263,6 +263,78 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     }
 
     /// <summary>
+    /// Load pre-packed NativeTernaryMatrix arrays directly — no sbyte[] intermediates.
+    /// Used by the streaming HuggingFace importer to avoid OOM on large models.
+    /// </summary>
+    public void LoadFromNativeImport(
+        NativeTernaryMatrix[] wq, NativeTernaryMatrix[] wk,
+        NativeTernaryMatrix[] wv, NativeTernaryMatrix[] wo,
+        NativeTernaryMatrix[] ffn,
+        NativeTernaryMatrix embeddings, NativeTernaryMatrix outputHead,
+        int activeVocab, int dim, string[] tokenTable)
+    {
+        DisposeNative();
+
+        _layerCount = wq.Length;
+        _compressedWq = wq;
+        _compressedWk = wk;
+        _compressedWv = wv;
+        _compressedWo = wo;
+        _compressedFfn = ffn;
+        _compressedEmbeddings = embeddings;
+        _compressedOutputHead = outputHead;
+
+        AllocateInferenceBuffers(dim, activeVocab);
+
+        NativeBytesAllocated = 0;
+        long layerWeights = 0;
+        long zeroWeightEstimate = 0;
+        var layerStatsList = new (MatrixStats Attn, MatrixStats Ffn)[_layerCount];
+        for (int i = 0; i < _layerCount; i++)
+        {
+            NativeBytesAllocated += _compressedWq[i].BytesAllocated
+                                  + _compressedWk[i].BytesAllocated
+                                  + _compressedWv[i].BytesAllocated
+                                  + _compressedWo[i].BytesAllocated;
+            NativeBytesAllocated += _compressedFfn[i].BytesAllocated;
+            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfn[i].Stats);
+
+            layerWeights += _compressedWq[i].Stats.LogicalWeights
+                          + _compressedWk[i].Stats.LogicalWeights
+                          + _compressedWv[i].Stats.LogicalWeights
+                          + _compressedWo[i].Stats.LogicalWeights
+                          + _compressedFfn[i].Stats.LogicalWeights;
+
+            // Estimate zero weights from zero-byte ratio (each zero byte = 4 zero weights)
+            zeroWeightEstimate += (long)(_compressedWq[i].Stats.ZeroByteCount
+                                + _compressedWk[i].Stats.ZeroByteCount
+                                + _compressedWv[i].Stats.ZeroByteCount
+                                + _compressedWo[i].Stats.ZeroByteCount
+                                + _compressedFfn[i].Stats.ZeroByteCount) * 4;
+        }
+        NativeBytesAllocated += _compressedEmbeddings.BytesAllocated;
+        NativeBytesAllocated += _compressedOutputHead.BytesAllocated;
+        LayerStats = layerStatsList;
+
+        long embeddingWeights = (long)activeVocab * dim * 2;
+        long totalWeights = layerWeights + embeddingWeights;
+        float sparsity = layerWeights > 0 ? (float)zeroWeightEstimate / layerWeights : 0f;
+        _modelStats = new ModelSizeStats(
+            TotalWeights: totalWeights,
+            LayerWeights: layerWeights,
+            EmbeddingWeights: embeddingWeights,
+            ZeroWeights: zeroWeightEstimate,
+            StoredBytes: totalWeights,
+            PackedBytes: (totalWeights * 2 + 7) / 8,
+            Sparsity: sparsity,
+            LayerCount: _layerCount);
+
+        _tokenTable = tokenTable;
+        _tokenizer = new Tokenizer(_tokenTable);
+        _isLoaded = true;
+    }
+
+    /// <summary>
     /// Pack all weight matrices from sbyte[] into 2-bit NativeTernaryMatrix.
     /// After packing, managed arrays become eligible for GC.
     /// Also pre-allocates all inference buffers and the KV cache.

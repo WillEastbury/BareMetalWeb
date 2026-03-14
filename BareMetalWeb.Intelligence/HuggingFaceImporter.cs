@@ -36,8 +36,8 @@ public static class HuggingFaceImporter
 
         var hfConfig = ParseConfig(configPath);
         log.Add($"Model: hidden={hfConfig.HiddenSize}, layers={hfConfig.NumLayers}, " +
-                $"heads={hfConfig.NumHeads}, vocab={hfConfig.VocabSize}, " +
-                $"intermediate={hfConfig.IntermediateSize}");
+                $"heads={hfConfig.NumHeads}, kv_heads={hfConfig.NumKvHeads}, " +
+                $"vocab={hfConfig.VocabSize}, intermediate={hfConfig.IntermediateSize}");
 
         // 2. Read tokenizer
         string[] tokenTable;
@@ -65,11 +65,18 @@ public static class HuggingFaceImporter
         var tensorIndex = BuildTensorIndex(stFiles);
         log.Add($"Tensors indexed: {tensorIndex.Count}");
 
-        // 5. Extract weights
+        // 5. Extract weights — streaming, one layer at a time to minimize memory.
+        // U8 packed tensors are remapped directly to NativeTernaryMatrix encoding
+        // via a 256-byte LUT — no sbyte[] intermediate, no 4× memory expansion.
         int dim = hfConfig.HiddenSize;
         int ffnDim = hfConfig.IntermediateSize;
         int numLayers = hfConfig.NumLayers;
         int numHeads = hfConfig.NumHeads;
+        int numKvHeads = hfConfig.NumKvHeads;
+        int headDim = dim / numHeads;
+        int kvDim = numKvHeads * headDim;
+
+        log.Add($"Head dim: {headDim}, Q dim: {dim}, KV dim: {kvDim}");
 
         // Determine how many layers to keep after pruning
         int keepLayers = numLayers;
@@ -79,68 +86,69 @@ public static class HuggingFaceImporter
             log.Add($"Layer pruning: keeping {keepLayers}/{numLayers} layers");
         }
 
-        var layers = new TernaryLayer[keepLayers];
+        bool needsGqa = numKvHeads != numHeads;
+
+        // Pre-allocate NativeTernaryMatrix arrays — these hold native memory, not managed arrays.
+        var nWq  = new NativeTernaryMatrix[keepLayers];
+        var nWk  = new NativeTernaryMatrix[keepLayers];
+        var nWv  = new NativeTernaryMatrix[keepLayers];
+        var nWo  = new NativeTernaryMatrix[keepLayers];
+        var nFfn = new NativeTernaryMatrix[keepLayers];
+
         for (int i = 0; i < keepLayers; i++)
         {
             log.Add($"  Loading layer {i}/{keepLayers}...");
 
-            // Attention projections: [out_features × in_features] = [dim × dim]
-            var wq = ReadTernaryTensor(tensorIndex, $"model.layers.{i}.self_attn.q_proj.weight");
-            var wk = ReadTernaryTensor(tensorIndex, $"model.layers.{i}.self_attn.k_proj.weight");
-            var wv = ReadTernaryTensor(tensorIndex, $"model.layers.{i}.self_attn.v_proj.weight");
-            var wo = ReadTernaryTensor(tensorIndex, $"model.layers.{i}.self_attn.o_proj.weight");
+            // Q and O projections: dim×dim U8 → NativeTernaryMatrix directly (zero sbyte[] alloc)
+            var qPacked = ReadRawPackedBytes(tensorIndex, $"model.layers.{i}.self_attn.q_proj.weight");
+            nWq[i] = NativeTernaryMatrix.FromHfU8Packed(qPacked, dim, dim);
+            // qPacked is now eligible for GC
 
-            // FFN: SwiGLU has gate_proj [intermediate×hidden], up_proj [intermediate×hidden],
-            // down_proj [hidden×intermediate]. We combine into a single FFN matrix by
-            // using the down_proj (which maps intermediate→hidden) as our FFN weight.
-            // The gate/up projections are folded by computing: down_proj @ (gate * up)
-            // For the simplified engine, we use a projection: down_proj @ up_proj^T → [dim×dim]
-            var gate = ReadTernaryTensor(tensorIndex, $"model.layers.{i}.mlp.gate_proj.weight");
-            var up = ReadTernaryTensor(tensorIndex, $"model.layers.{i}.mlp.up_proj.weight");
-            var down = ReadTernaryTensor(tensorIndex, $"model.layers.{i}.mlp.down_proj.weight");
+            var oPacked = ReadRawPackedBytes(tensorIndex, $"model.layers.{i}.self_attn.o_proj.weight");
+            nWo[i] = NativeTernaryMatrix.FromHfU8Packed(oPacked, dim, dim);
 
-            // Combine SwiGLU into single FFN: we store gate, up, and down separately
-            // in the layer and let the engine handle the SwiGLU computation.
-            // For now, create a combined FFN by taking the dominant projection (down_proj).
-            // The full SwiGLU path requires engine extension.
-            sbyte[] ffnWeights;
-            if (options.FullSwiGLU)
+            // K/V: may need GQA expansion (kvDim < dim)
+            if (needsGqa)
             {
-                // Store all three as a concatenated super-matrix for the extended engine.
-                // Layout: [3 * intermediate × hidden] = gate | up | down stacked vertically.
-                ffnWeights = new sbyte[gate.Length + up.Length + down.Length];
-                gate.AsSpan().CopyTo(ffnWeights);
-                up.AsSpan().CopyTo(ffnWeights.AsSpan(gate.Length));
-                down.AsSpan().CopyTo(ffnWeights.AsSpan(gate.Length + up.Length));
+                // GQA: unpack K/V to sbyte[] (small: kvDim×dim), expand, then pack to native
+                var wkSmall = ReadPackedTernary(tensorIndex, $"model.layers.{i}.self_attn.k_proj.weight");
+                var wk = ExpandGQA(wkSmall, kvDim, dim, numKvHeads, numHeads, headDim);
+                nWk[i] = NativeTernaryMatrix.Pack(wk, dim, dim);
+
+                var wvSmall = ReadPackedTernary(tensorIndex, $"model.layers.{i}.self_attn.v_proj.weight");
+                var wv = ExpandGQA(wvSmall, kvDim, dim, numKvHeads, numHeads, headDim);
+                nWv[i] = NativeTernaryMatrix.Pack(wv, dim, dim);
             }
             else
             {
-                // Simplified: project down to [dim × dim] via truncated down_proj
-                ffnWeights = ProjectFfn(down, dim, ffnDim);
+                // No GQA — direct packed remap
+                var kPacked = ReadRawPackedBytes(tensorIndex, $"model.layers.{i}.self_attn.k_proj.weight");
+                nWk[i] = NativeTernaryMatrix.FromHfU8Packed(kPacked, dim, dim);
+
+                var vPacked = ReadRawPackedBytes(tensorIndex, $"model.layers.{i}.self_attn.v_proj.weight");
+                nWv[i] = NativeTernaryMatrix.FromHfU8Packed(vPacked, dim, dim);
             }
 
-            layers[i] = new TernaryLayer
-            {
-                Wq = wq,
-                Wk = wk,
-                Wv = wv,
-                Wo = wo,
-                FfnWeights = ffnWeights,
-            };
+            // FFN: down_proj is [dim × ffnDim], truncate to [dim × dim] directly on packed bytes
+            var downPacked = ReadRawPackedBytes(tensorIndex, $"model.layers.{i}.mlp.down_proj.weight");
+            nFfn[i] = NativeTernaryMatrix.FromHfU8PackedTruncated(downPacked, dim, ffnDim, dim);
+
+            log.Add($"    Layer {i}: packed to native ({nWq[i].BytesAllocated / 1024}KB per matrix)");
         }
 
-        // 6. Read embeddings and output head
-        var embeddings = ReadTernaryTensor(tensorIndex, "model.embed_tokens.weight");
-        log.Add($"Embeddings: {embeddings.Length:N0} weights ({embeddings.Length / dim} × {dim})");
+        // 6. Read embeddings — BF16, quantize to ternary (still needs sbyte[] for quantization)
+        log.Add("Loading embeddings (BF16 → ternary)...");
+        var embeddings = ReadEmbeddings(tensorIndex, "model.embed_tokens.weight", hfConfig.VocabSize, dim);
+        log.Add($"Embeddings: {embeddings.Length:N0} weights ({hfConfig.VocabSize} × {dim})");
 
+        // Tied embeddings — output head shares embed_tokens weight
         sbyte[] outputHead;
         if (tensorIndex.ContainsKey("lm_head.weight"))
         {
-            outputHead = ReadTernaryTensor(tensorIndex, "lm_head.weight");
+            outputHead = ReadEmbeddings(tensorIndex, "lm_head.weight", hfConfig.VocabSize, dim);
         }
         else
         {
-            // Tied embeddings — lm_head shares embed_tokens
             outputHead = new sbyte[embeddings.Length];
             embeddings.AsSpan().CopyTo(outputHead);
             log.Add("Output head: tied to embeddings (no lm_head.weight)");
@@ -172,22 +180,14 @@ public static class HuggingFaceImporter
             log.Add($"Vocab pruned: {hfConfig.VocabSize} → {activeVocab} tokens");
         }
 
-        // 8. Head pruning
-        if (options.HeadPruneRatio > 0f)
-        {
-            int pruned = ModelPruner.PruneAttentionHeads(layers, numHeads, options.HeadPruneRatio);
-            log.Add($"Heads pruned: {pruned} across {keepLayers} layers");
-        }
+        // 8. Pack embeddings to native (after pruning, so we pack the smaller vocab)
+        var nEmbeddings = NativeTernaryMatrix.Pack(embeddings, activeVocab, dim);
+        var nOutputHead = NativeTernaryMatrix.Pack(outputHead, activeVocab, dim);
+        // Free managed arrays now
+        embeddings = null!;
+        outputHead = null!;
 
-        // 9. Group-of-four pruning
-        if (options.GroupPruneAttnThreshold > 0 || options.GroupPruneFfnThreshold > 0)
-        {
-            var stats = ModelPruner.PruneLayerGroups(layers, dim,
-                options.GroupPruneAttnThreshold, options.GroupPruneFfnThreshold);
-            log.Add($"Group pruning: {stats.Summary}");
-        }
-
-        // 10. Pack and save
+        // 9. Pack and save
         var config = new BitNetModelConfig(
             HiddenDim: dim,
             NumLayers: keepLayers,
@@ -196,7 +196,8 @@ public static class HuggingFaceImporter
             MaxSeqLen: Math.Min(hfConfig.MaxSeqLen, options.MaxSeqLen));
 
         using var engine = new BitNetEngine(config);
-        engine.LoadFromImport(layers, embeddings, outputHead, activeVocab, dim, tokenTable);
+        engine.LoadFromNativeImport(nWq, nWk, nWv, nWo, nFfn, nEmbeddings, nOutputHead,
+            activeVocab, dim, tokenTable);
         engine.SaveSnapshot(options.OutputPath, tokenTable);
 
         var fileInfo = new FileInfo(options.OutputPath);
@@ -206,49 +207,138 @@ public static class HuggingFaceImporter
     }
 
     /// <summary>
-    /// Read a tensor as ternary sbyte[] values.
-    /// Handles I8 (direct), BF16/F32 (quantize to ternary via absmean).
+    /// Read raw packed bytes from a U8 tensor without unpacking.
+    /// Returns the original packed byte[] for direct use with NativeTernaryMatrix.FromHfU8Packed().
     /// </summary>
-    private static sbyte[] ReadTernaryTensor(
+    private static byte[] ReadRawPackedBytes(
+        Dictionary<string, (string File, TensorInfo Info)> index, string name)
+    {
+        if (!index.TryGetValue(name, out var entry))
+            throw new KeyNotFoundException($"Tensor '{name}' not found in any SafeTensors file");
+
+        if (entry.Info.DType != "U8")
+            throw new NotSupportedException(
+                $"ReadRawPackedBytes requires U8 tensor, got '{entry.Info.DType}' for '{name}'");
+
+        using var reader = SafeTensorsReader.Open(entry.File);
+        return reader.ReadTensorBytes(name);
+    }
+
+    /// <summary>
+    /// Read a U8 packed ternary weight tensor and unpack to sbyte[].
+    /// HF BitNet stores weights as 2-bit packed U8: 4 ternary values per byte.
+    /// Encoding: 2-bit 0→-1, 1→0, 2→+1.
+    /// </summary>
+    private static sbyte[] ReadPackedTernary(
         Dictionary<string, (string File, TensorInfo Info)> index, string name)
     {
         if (!index.TryGetValue(name, out var entry))
             throw new KeyNotFoundException($"Tensor '{name}' not found in any SafeTensors file");
 
         using var reader = SafeTensorsReader.Open(entry.File);
+        var packed = reader.ReadTensorBytes(name);
 
-        return entry.Info.DType switch
+        if (entry.Info.DType == "U8")
         {
-            "I8" => reader.ReadTensorSBytes(name),
-            "BF16" => QuantizeToTernary(reader.ReadTensorBFloat16(name)),
-            "F32" => QuantizeToTernary(reader.ReadTensorFloat32(name)),
-            _ => throw new NotSupportedException(
-                $"Tensor '{name}' has unsupported dtype '{entry.Info.DType}'")
-        };
+            // Unpack 2-bit → sbyte ternary: each byte holds 4 values
+            var result = new sbyte[packed.Length * 4];
+            for (int i = 0; i < packed.Length; i++)
+            {
+                byte b = packed[i];
+                int baseIdx = i * 4;
+                result[baseIdx]     = (sbyte)((b & 0x03) - 1);       // bits 0-1
+                result[baseIdx + 1] = (sbyte)(((b >> 2) & 0x03) - 1); // bits 2-3
+                result[baseIdx + 2] = (sbyte)(((b >> 4) & 0x03) - 1); // bits 4-5
+                result[baseIdx + 3] = (sbyte)(((b >> 6) & 0x03) - 1); // bits 6-7
+            }
+            return result;
+        }
+
+        if (entry.Info.DType == "I8")
+        {
+            var result = new sbyte[packed.Length];
+            Buffer.BlockCopy(packed, 0, result, 0, packed.Length);
+            return result;
+        }
+
+        throw new NotSupportedException(
+            $"Tensor '{name}' has dtype '{entry.Info.DType}', expected U8 or I8");
     }
 
     /// <summary>
-    /// Quantize float weights to ternary {-1, 0, +1} using absmean threshold.
-    /// This is the same quantization used during BitNet training.
+    /// Read BF16 embeddings and quantize to ternary sbyte[].
+    /// Uses absmean thresholding per row (per token).
     /// </summary>
-    private static sbyte[] QuantizeToTernary(float[] weights)
+    private static sbyte[] ReadEmbeddings(
+        Dictionary<string, (string File, TensorInfo Info)> index,
+        string name, int vocabSize, int dim)
     {
-        // Compute absmean threshold
-        double sum = 0;
-        for (int i = 0; i < weights.Length; i++)
-            sum += Math.Abs(weights[i]);
-        float threshold = (float)(sum / weights.Length);
+        if (!index.TryGetValue(name, out var entry))
+            throw new KeyNotFoundException($"Tensor '{name}' not found");
 
-        var result = new sbyte[weights.Length];
-        for (int i = 0; i < weights.Length; i++)
+        using var reader = SafeTensorsReader.Open(entry.File);
+
+        float[] floats;
+        if (entry.Info.DType == "BF16")
+            floats = reader.ReadTensorBFloat16(name);
+        else if (entry.Info.DType == "F32")
+            floats = reader.ReadTensorFloat32(name);
+        else if (entry.Info.DType == "U8" || entry.Info.DType == "I8")
+            return ReadPackedTernary(index, name); // already ternary
+        else
+            throw new NotSupportedException($"Embedding dtype '{entry.Info.DType}' not supported");
+
+        // Per-row absmean quantization to ternary
+        var result = new sbyte[vocabSize * dim];
+        for (int row = 0; row < vocabSize; row++)
         {
-            if (weights[i] > threshold)
-                result[i] = 1;
-            else if (weights[i] < -threshold)
-                result[i] = -1;
-            // else result[i] = 0 (default)
+            int offset = row * dim;
+            if (offset + dim > floats.Length) break;
+
+            // Compute absmean for this row
+            double sum = 0;
+            for (int j = 0; j < dim; j++)
+                sum += Math.Abs(floats[offset + j]);
+            float threshold = (float)(sum / dim);
+
+            for (int j = 0; j < dim; j++)
+            {
+                float v = floats[offset + j];
+                if (v > threshold) result[offset + j] = 1;
+                else if (v < -threshold) result[offset + j] = -1;
+                // else 0 (default)
+            }
         }
         return result;
+    }
+
+    /// <summary>
+    /// Expand GQA (grouped query attention) KV weights to full head count.
+    /// KV heads are repeated to match the number of query heads.
+    /// Input: [kvDim × inputDim], Output: [fullDim × inputDim]
+    /// </summary>
+    private static sbyte[] ExpandGQA(sbyte[] kvWeights, int kvDim, int fullDim,
+        int numKvHeads, int numHeads, int headDim)
+    {
+        if (numKvHeads == numHeads)
+            return kvWeights; // No GQA, already full size
+
+        int inputDim = kvWeights.Length / kvDim;
+        int repeatFactor = numHeads / numKvHeads;
+        var expanded = new sbyte[fullDim * inputDim];
+
+        for (int kvHead = 0; kvHead < numKvHeads; kvHead++)
+        {
+            int srcBase = kvHead * headDim * inputDim;
+            for (int rep = 0; rep < repeatFactor; rep++)
+            {
+                int dstHead = kvHead * repeatFactor + rep;
+                int dstBase = dstHead * headDim * inputDim;
+                Array.Copy(kvWeights, srcBase, expanded, dstBase, headDim * inputDim);
+            }
+        }
+
+        return expanded;
     }
 
     /// <summary>
@@ -303,13 +393,17 @@ public static class HuggingFaceImporter
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
 
+        int numHeads = root.TryGetProperty("num_attention_heads", out var nh) ? nh.GetInt32() : 20;
+
         return new HfModelConfig(
             HiddenSize: root.TryGetProperty("hidden_size", out var h) ? h.GetInt32() : 2560,
-            IntermediateSize: root.TryGetProperty("intermediate_size", out var im) ? im.GetInt32() : 10240,
-            NumLayers: root.TryGetProperty("num_hidden_layers", out var l) ? l.GetInt32() : 32,
-            NumHeads: root.TryGetProperty("num_attention_heads", out var nh) ? nh.GetInt32() : 32,
+            IntermediateSize: root.TryGetProperty("intermediate_size", out var im) ? im.GetInt32() : 6912,
+            NumLayers: root.TryGetProperty("num_hidden_layers", out var l) ? l.GetInt32() : 30,
+            NumHeads: numHeads,
+            NumKvHeads: root.TryGetProperty("num_key_value_heads", out var nkv) ? nkv.GetInt32() : numHeads,
             VocabSize: root.TryGetProperty("vocab_size", out var v) ? v.GetInt32() : 128256,
-            MaxSeqLen: root.TryGetProperty("max_position_embeddings", out var ms) ? ms.GetInt32() : 4096);
+            MaxSeqLen: root.TryGetProperty("max_position_embeddings", out var ms) ? ms.GetInt32() : 4096,
+            TiedEmbeddings: root.TryGetProperty("tie_word_embeddings", out var tie) && tie.GetBoolean());
     }
 
     // ── Tokenizer parsing ───────────────────────────────────────────────────
@@ -405,8 +499,10 @@ public readonly record struct HfModelConfig(
     int IntermediateSize,
     int NumLayers,
     int NumHeads,
+    int NumKvHeads,
     int VocabSize,
-    int MaxSeqLen);
+    int MaxSeqLen,
+    bool TiedEmbeddings);
 
 /// <summary>Options for the HF → .bmwm import pipeline.</summary>
 public sealed record ImportOptions
@@ -431,12 +527,6 @@ public sealed record ImportOptions
 
     /// <summary>Maximum sequence length (may be lower than the model's native max).</summary>
     public int MaxSeqLen { get; init; } = 2048;
-
-    /// <summary>
-    /// If true, store the full SwiGLU triple (gate/up/down) in the snapshot.
-    /// Requires engine extension to use. If false, projects to single FFN matrix.
-    /// </summary>
-    public bool FullSwiGLU { get; init; }
 
     /// <summary>Default: vocab prune + mild layer/head prune for admin domain.</summary>
     public static readonly ImportOptions DomainTrimmed = new()
