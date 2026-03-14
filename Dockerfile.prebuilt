@@ -21,6 +21,9 @@ WORKDIR /app
 ARG PUBLISH_DIR=./publish
 COPY --chown=app:app ${PUBLISH_DIR} .
 
+# Ensure AOT binary is executable (upload-artifact strips Unix permissions)
+RUN chmod +x ./BareMetalWeb.Host
+
 # Persistent data directory — mount a volume here in production
 VOLUME /app/Data
 
