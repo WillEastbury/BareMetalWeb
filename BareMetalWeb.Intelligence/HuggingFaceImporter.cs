@@ -129,13 +129,9 @@ public static class HuggingFaceImporter
             progress?.Invoke($"  Layer {i + 1}/{numLayers}: importing attention + ffn ...");
 
             wq[i]      = StreamTensor(tensorMap, LayerWqKey(i),   qDim, dim, progress);
-            // GQA: expand KV heads to match Q heads by repeating each KV head group
-            wk[i]      = kvDim < qDim
-                ? StreamTensorWithGqaExpand(tensorMap, LayerWkKey(i), kvDim, qDim, dim, progress)
-                : StreamTensor(tensorMap, LayerWkKey(i), kvDim, dim, progress);
-            wv[i]      = kvDim < qDim
-                ? StreamTensorWithGqaExpand(tensorMap, LayerWvKey(i), kvDim, qDim, dim, progress)
-                : StreamTensor(tensorMap, LayerWvKey(i), kvDim, dim, progress);
+            // GQA: store K/V at original kvDim — expanded at runtime in attention
+            wk[i]      = StreamTensor(tensorMap, LayerWkKey(i), kvDim, dim, progress);
+            wv[i]      = StreamTensor(tensorMap, LayerWvKey(i), kvDim, dim, progress);
             wo[i]      = StreamTensor(tensorMap, LayerWoKey(i),   dim, qDim, progress);
             ffnGate[i] = StreamTensor(tensorMap, LayerGateKey(i), ffnDim, dim, progress);
             ffnUp[i]   = StreamTensor(tensorMap, LayerUpKey(i),   ffnDim, dim, progress);
@@ -146,16 +142,26 @@ public static class HuggingFaceImporter
             GC.Collect(0, GCCollectionMode.Optimized, blocking: true);
         }
 
-        // ── 7. Import embeddings + output head as int8 (NOT ternary) ──────
+        // ── 7. Import embeddings (+ output head if untied) as int8 ──────
         //   Embeddings are BF16 in the model — ternary quantization destroys them.
         //   Scale BF16 → int8 to preserve relative magnitudes.
         progress?.Invoke("  Importing embeddings as int8 (BF16 → scaled int8) ...");
         var embeddings = StreamTensorInt8(tensorMap, EmbedKey, vocab, dim, progress);
         GC.Collect(1, GCCollectionMode.Optimized, blocking: true);
 
-        progress?.Invoke("  Importing output head as int8 ...");
-        var outputHead = StreamTensorInt8(tensorMap, LmHeadKey(tensorMap), vocab, dim, progress);
-        GC.Collect(1, GCCollectionMode.Optimized, blocking: true);
+        // Detect tied embeddings: lm_head.weight missing or same as embed_tokens
+        bool tiedEmbeddings = LmHeadKey(tensorMap) == EmbedKey;
+        NativeInt8Matrix? outputHead = null;
+        if (!tiedEmbeddings)
+        {
+            progress?.Invoke("  Importing output head as int8 ...");
+            outputHead = StreamTensorInt8(tensorMap, LmHeadKey(tensorMap), vocab, dim, progress);
+            GC.Collect(1, GCCollectionMode.Optimized, blocking: true);
+        }
+        else
+        {
+            progress?.Invoke("  Output head tied to embeddings — shared storage");
+        }
 
         // ── 8. Load tokenizer vocab and BPE merges ─────────────────────────
         progress?.Invoke("  Loading tokenizer vocab + BPE merges ...");
@@ -177,9 +183,9 @@ public static class HuggingFaceImporter
 
         // Dispose remaining native matrices not already freed by Save
         embeddings.Dispose();
-        outputHead.Dispose();
+        outputHead?.Dispose();
 
-        // ── 10. Dispose native matrices ────────────────────────────────────
+        // ── 11. Dispose native matrices ────────────────────────────────────
         for (int i = 0; i < numLayers; i++)
         {
             wq[i].Dispose(); wk[i].Dispose(); wv[i].Dispose();
@@ -187,7 +193,7 @@ public static class HuggingFaceImporter
             ffnGate[i].Dispose(); ffnUp[i].Dispose(); ffnDown[i].Dispose();
         }
         embeddings.Dispose();
-        outputHead.Dispose();
+        outputHead?.Dispose();
 
         var fi = new FileInfo(outputPath);
         progress?.Invoke($"  ✓ Snapshot written: {fi.Length / (1024 * 1024)} MB → {fi.FullName}");

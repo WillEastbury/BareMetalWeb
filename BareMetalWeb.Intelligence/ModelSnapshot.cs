@@ -20,7 +20,7 @@ namespace BareMetalWeb.Intelligence;
 public static class ModelSnapshot
 {
     private static ReadOnlySpan<byte> Magic => "BMWM"u8;
-    private const int FormatVersion = 5;
+    private const int FormatVersion = 6;
 
     // Header: magic(4) + version(4) + hiddenDim(4) + numLayers(4) +
     //         numHeads(4) + vocabSize(4) + activeVocab(4) + maxSeqLen(4) +
@@ -32,7 +32,7 @@ public static class ModelSnapshot
     private const int DescriptorSize = 28;
 
     // Matrix ordering per layer: Wq, Wk, Wv, Wo, FfnGate, FfnUp, FfnDown
-    // Total: numLayers * 7 + 2 (embeddings + outputHead)
+    // Total: numLayers * 7 + 2 (embeddings + outputHead) or + 1 (tied embeddings)
 
     /// <summary>
     /// Save the current engine state to a binary snapshot file.
@@ -49,7 +49,7 @@ public static class ModelSnapshot
         NativeTernaryMatrix[] ffnUp,
         NativeTernaryMatrix[] ffnDown,
         NativeInt8Matrix compressedEmbeddings,
-        NativeInt8Matrix compressedOutputHead,
+        NativeInt8Matrix? compressedOutputHead,
         IReadOnlyList<string>? tokenTable = null,
         IReadOnlyList<string>? bpeMerges = null,
         float[][]? weightScales = null,
@@ -61,7 +61,9 @@ public static class ModelSnapshot
     {
         int layerCount = wq.Length;
         int ternaryCount = layerCount * 7;
-        int matrixCount = ternaryCount + 2;
+        bool tiedEmbeddings = compressedOutputHead == null;
+        int int8Count = tiedEmbeddings ? 1 : 2;
+        int matrixCount = ternaryCount + int8Count;
 
         // Encode token table and BPE merges
         byte[] tokenTableBytes = EncodeTokenTable(tokenTable);
@@ -121,11 +123,20 @@ public static class ModelSnapshot
             dataOffset += dataLen;
         }
 
-        // Int8 embedding + output head descriptors
-        var int8Matrices = new[] { compressedEmbeddings, compressedOutputHead };
-        for (int i = 0; i < 2; i++)
+        // Int8 embedding descriptor (+ output head if not tied)
         {
-            var m = int8Matrices[i];
+            var m = compressedEmbeddings;
+            long dataLen = m.TotalPackedDataBytes;
+            bw.Write(m.Rows);
+            bw.Write(m.Cols);
+            bw.Write(m.RowStrideBytes);
+            bw.Write(dataOffset);
+            bw.Write(dataLen);
+            dataOffset += dataLen;
+        }
+        if (!tiedEmbeddings)
+        {
+            var m = compressedOutputHead!;
             long dataLen = m.TotalPackedDataBytes;
             bw.Write(m.Rows);
             bw.Write(m.Cols);
@@ -160,9 +171,22 @@ public static class ModelSnapshot
         }
 
         // Write int8 matrices (caller disposes)
-        for (int i = 0; i < 2; i++)
         {
-            var m = int8Matrices[i];
+            var m = compressedEmbeddings;
+            long remaining = m.TotalPackedDataBytes;
+            long offset = 0;
+            while (remaining > 0)
+            {
+                int chunk = (int)Math.Min(remaining, buf.Length);
+                m.CopyPackedDataChunk(offset, buf.AsSpan(0, chunk));
+                bw.Write(buf, 0, chunk);
+                offset += chunk;
+                remaining -= chunk;
+            }
+        }
+        if (!tiedEmbeddings)
+        {
+            var m = compressedOutputHead!;
             long remaining = m.TotalPackedDataBytes;
             long offset = 0;
             while (remaining > 0)
@@ -264,10 +288,12 @@ public static class ModelSnapshot
         // v1: 2 matrices per layer (combined attn + ffn) + 2 (embeddings + outputHead)
         // v2: 5 matrices per layer (Wq, Wk, Wv, Wo, Ffn) + 2
         // v3: 7 matrices per layer (Wq, Wk, Wv, Wo, FfnGate, FfnUp, FfnDown) + 2
+        // v6: 7 matrices per layer + 1 (tied embeddings)
         bool isV1 = matrixCount == layerCount * 2 + 2;
         bool isV2 = matrixCount == layerCount * 5 + 2;
         bool isV3 = matrixCount == layerCount * 7 + 2;
-        if (!isV1 && !isV2 && !isV3)
+        bool isV6Tied = matrixCount == layerCount * 7 + 1;
+        if (!isV1 && !isV2 && !isV3 && !isV6Tied)
             throw new InvalidDataException(
                 $"Matrix count {matrixCount} doesn't match layer count {layerCount}");
 
@@ -289,7 +315,8 @@ public static class ModelSnapshot
         string[] merges = DecodeTokenTable(br, mergeCount);
 
         // ── Load matrices ───────────────────────────────────────────
-        int ternaryCount = matrixCount - 2;
+        int int8Count = isV6Tied ? 1 : 2;
+        int ternaryCount = matrixCount - int8Count;
         var ternaryMatrices = new NativeTernaryMatrix[ternaryCount];
         for (int i = 0; i < ternaryCount; i++)
         {
@@ -299,7 +326,7 @@ public static class ModelSnapshot
             ternaryMatrices[i] = NativeTernaryMatrix.FromPackedData(packedData, rows, cols);
         }
 
-        // Last 2 matrices: int8 (v4+) or ternary (v3 and below)
+        // Last 1 or 2 matrices: int8 (v4+) or ternary (v3 and below)
         NativeInt8Matrix embMatrix, ohMatrix;
         if (version >= 4)
         {
@@ -307,9 +334,16 @@ public static class ModelSnapshot
             fs.Seek(o0, SeekOrigin.Begin);
             embMatrix = NativeInt8Matrix.FromPackedData(ReadExactBytes(br, l0), r0, c0);
 
-            var (r1, c1, _, o1, l1) = descriptors[ternaryCount + 1];
-            fs.Seek(o1, SeekOrigin.Begin);
-            ohMatrix = NativeInt8Matrix.FromPackedData(ReadExactBytes(br, l1), r1, c1);
+            if (isV6Tied)
+            {
+                ohMatrix = embMatrix; // tied: share the same matrix
+            }
+            else
+            {
+                var (r1, c1, _, o1, l1) = descriptors[ternaryCount + 1];
+                fs.Seek(o1, SeekOrigin.Begin);
+                ohMatrix = NativeInt8Matrix.FromPackedData(ReadExactBytes(br, l1), r1, c1);
+            }
         }
         else
         {
@@ -444,12 +478,13 @@ public static class ModelSnapshot
                 mappedMergeCount = MemoryMarshal.Read<int>(headerSpan[60..]);
             }
 
-            if (matrixCount != layerCount * 7 + 2 && matrixCount != layerCount * 5 + 2 && matrixCount != layerCount * 2 + 2)
+            if (matrixCount != layerCount * 7 + 2 && matrixCount != layerCount * 7 + 1
+                && matrixCount != layerCount * 5 + 2 && matrixCount != layerCount * 2 + 2)
                 throw new InvalidDataException("Matrix count mismatch");
 
             bool isMappedV1 = matrixCount == layerCount * 2 + 2;
             bool isMappedV2 = matrixCount == layerCount * 5 + 2;
-            // isMappedV3: matrixCount == layerCount * 7 + 2
+            bool isMappedTied = matrixCount == layerCount * 7 + 1;
             long descEnd = HeaderSize + (long)matrixCount * DescriptorSize;
             if (descEnd < HeaderSize || descEnd > fileSize)
                 throw new InvalidDataException(
@@ -494,7 +529,8 @@ public static class ModelSnapshot
             }
 
             // ── Matrices from mapped memory ─────────────────────────
-            int ternaryCount = matrixCount - 2;
+            int int8CountM = isMappedTied ? 1 : 2;
+            int ternaryCount = matrixCount - int8CountM;
             var matrices = new NativeTernaryMatrix[ternaryCount];
             for (int i = 0; i < ternaryCount; i++)
             {
@@ -526,6 +562,11 @@ public static class ModelSnapshot
                     : UpcastTernaryToInt8(dataSpan, rows, cols);
             }
 
+            if (isMappedTied)
+            {
+                ohMatrix = embMatrix;
+            }
+            else
             {
                 var (rows, cols, _, offset, length) = descriptors[ternaryCount + 1];
                 var dataSpan = new ReadOnlySpan<byte>(basePtr + offset, (int)length);
@@ -651,11 +692,13 @@ public static class ModelSnapshot
                 lazyMergeCount = MemoryMarshal.Read<int>(headerSpan[60..]);
             }
 
-            if (matrixCount != layerCount * 7 + 2 && matrixCount != layerCount * 5 + 2 && matrixCount != layerCount * 2 + 2)
+            if (matrixCount != layerCount * 7 + 2 && matrixCount != layerCount * 7 + 1
+                && matrixCount != layerCount * 5 + 2 && matrixCount != layerCount * 2 + 2)
                 throw new InvalidDataException("Matrix count mismatch");
 
             bool isLazyV1 = matrixCount == layerCount * 2 + 2;
             bool isLazyV2 = matrixCount == layerCount * 5 + 2;
+            bool isLazyTied = matrixCount == layerCount * 7 + 1;
 
             long minSize = HeaderSize + (long)matrixCount * DescriptorSize;
             if (fs.Length < minSize)
@@ -770,7 +813,7 @@ public static class ModelSnapshot
 
             NativeInt8Matrix embeddings;
             {
-                var (rows, cols, _, offset, length) = descriptors[matrixCount - 2];
+                var (rows, cols, _, offset, length) = descriptors[matrixCount - (isLazyTied ? 1 : 2)];
                 var dataSpan = new ReadOnlySpan<byte>(basePtr + offset, (int)length);
                 embeddings = version >= 4
                     ? NativeInt8Matrix.FromMappedMemory(basePtr + offset, rows, cols)
@@ -778,6 +821,11 @@ public static class ModelSnapshot
             }
 
             NativeInt8Matrix outputHead;
+            if (isLazyTied)
+            {
+                outputHead = embeddings;
+            }
+            else
             {
                 var (rows, cols, _, offset, length) = descriptors[matrixCount - 1];
                 var dataSpan = new ReadOnlySpan<byte>(basePtr + offset, (int)length);

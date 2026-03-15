@@ -25,16 +25,17 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     // Compressed storage — 2-bit packed in native (unmanaged) memory.
     // Each layer has four attention projections (Q, K, V, O) plus gated FFN (gate, up, down).
     private NativeTernaryMatrix[]? _compressedWq;
-    private NativeTernaryMatrix[]? _compressedWk;
-    private NativeTernaryMatrix[]? _compressedWv;
+    private NativeTernaryMatrix[]? _compressedWk;   // [kvDim × dim] (may differ from Q dim for GQA)
+    private NativeTernaryMatrix[]? _compressedWv;   // [kvDim × dim]
     private NativeTernaryMatrix[]? _compressedWo;
     private NativeTernaryMatrix[]? _compressedFfnGate;  // [ffnDim × dim]
     private NativeTernaryMatrix[]? _compressedFfnUp;    // [ffnDim × dim]
     private NativeTernaryMatrix[]? _compressedFfnDown;  // [dim × ffnDim]
     private NativeInt8Matrix? _compressedEmbeddings;
-    private NativeInt8Matrix? _compressedOutputHead;
+    private NativeInt8Matrix? _compressedOutputHead;    // may alias _compressedEmbeddings (tied)
     private LazySnapshot? _lazySnapshot; // holds mmap open when lazy-loaded
     private int _layerCount;
+    private int _kvDim;                 // KV projection dimension (may be < dim for GQA)
     private bool _isLoaded;
 
     // Learned model parameters — norms and per-matrix weight scales.
@@ -51,8 +52,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private float[]? _fHidden;     // current hidden state [dim]
     private float[]? _fNorm;       // normalized activation [max(dim, ffnDim)]
     private float[]? _fQ;          // query projection [dim]
-    private float[]? _fK;          // key projection [dim]
-    private float[]? _fV;          // value projection [dim]
+    private float[]? _fK;          // key projection [kvDim]
+    private float[]? _fV;          // value projection [kvDim]
     private float[]? _fAttnOut;    // attention output [dim]
     private float[]? _fFfnGate;    // FFN gate output [ffnDim]
     private float[]? _fFfnUp;      // FFN up output [ffnDim]
@@ -63,8 +64,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private int[]? _bufLogits;     // output head logits [vocabSize] (int for sampling)
 
     // Per-layer float KV cache — stores K and V for every past token position.
-    private float[][]? _fKvCacheK;   // [layer][maxSeqLen × dim]
-    private float[][]? _fKvCacheV;   // [layer][maxSeqLen × dim]
+    private float[][]? _fKvCacheK;   // [layer][maxSeqLen × kvDim]
+    private float[][]? _fKvCacheV;   // [layer][maxSeqLen × kvDim]
 
     // Precomputed RoPE sin/cos tables [maxSeqLen × headDim/2]
     private float[]? _ropeCos;
@@ -286,6 +287,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         DisposeNative();
 
         _layerCount = layers.Length;
+        _kvDim = dim; // Legacy path: no GQA, kvDim == dim
         _compressedWq = new NativeTernaryMatrix[layers.Length];
         _compressedWk = new NativeTernaryMatrix[layers.Length];
         _compressedWv = new NativeTernaryMatrix[layers.Length];
@@ -352,11 +354,13 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             throw new InvalidOperationException("No model loaded to snapshot");
 
         int activeVocab = _pruner?.PrunedVocabSize ?? _config.VocabSize;
+        // Detect tied embeddings: same matrix instance for embed and output head
+        bool tied = ReferenceEquals(_compressedEmbeddings, _compressedOutputHead);
 
         ModelSnapshot.Save(path, _config, activeVocab,
             _compressedWq, _compressedWk!, _compressedWv!, _compressedWo!,
             _compressedFfnGate!, _compressedFfnUp!, _compressedFfnDown!,
-            _compressedEmbeddings, _compressedOutputHead,
+            _compressedEmbeddings, tied ? null : _compressedOutputHead,
             tokenTable ?? _tokenTable);
     }
 
@@ -397,6 +401,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _compressedFfnDown = snapshot.FfnDown;
         _compressedEmbeddings = snapshot.Embeddings;
         _compressedOutputHead = snapshot.OutputHead;
+        _kvDim = _compressedWk[0].Rows; // may be < dim for GQA
 
         // If the snapshot has a token table, use it.
         // Otherwise build a synthetic vocabulary from the active vocab size.
@@ -490,6 +495,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _compressedFfnDown = snap.FfnDown;
         _compressedEmbeddings = snap.Embeddings;
         _compressedOutputHead = snap.OutputHead;
+        _kvDim = _compressedWk[0].Rows;
 
         if (snap.Tokens is { Length: > 0 })
         {
@@ -546,14 +552,15 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private void AllocateInferenceBuffers(int dim, int vocabSize)
     {
         int ffnDim = _config.EffectiveFfnDim;
+        int kvDim = _kvDim > 0 ? _kvDim : dim;
         int maxBuf = Math.Max(dim, ffnDim);
 
         // Float buffers for hidden state and intermediates
         _fHidden   = new float[dim];
         _fNorm     = new float[maxBuf];
         _fQ        = new float[dim];
-        _fK        = new float[dim];
-        _fV        = new float[dim];
+        _fK        = new float[kvDim];
+        _fV        = new float[kvDim];
         _fAttnOut  = new float[dim];
         _fFfnGate  = new float[ffnDim];
         _fFfnUp    = new float[ffnDim];
@@ -565,8 +572,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _iMatmulOut = new int[Math.Max(maxBuf, vocabSize)];
         _bufLogits  = new int[vocabSize];
 
-        // Float KV caches
-        int cacheSize = _config.MaxSeqLen * dim;
+        // Float KV caches — use kvDim (may be < dim for GQA)
+        int cacheSize = _config.MaxSeqLen * kvDim;
         _fKvCacheK = new float[_layerCount][];
         _fKvCacheV = new float[_layerCount][];
         for (int i = 0; i < _layerCount; i++)
@@ -744,6 +751,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
 
         int dim    = _config.HiddenDim;
+        int kvDim  = _kvDim;
         int ffnDim = _config.EffectiveFfnDim;
         var fH     = _fHidden!;
         var fNorm  = _fNorm!;
@@ -765,16 +773,16 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             TernaryMatmulDequant(_compressedWk![L], _iQuantized!, dim, fK, absmax, scales?[1] ?? 1f);
             TernaryMatmulDequant(_compressedWv![L], _iQuantized!, dim, fV, absmax, scales?[2] ?? 1f);
 
-            // RoPE on Q and K
-            ApplyRoPE(fQ, seqPos, dim);
-            ApplyRoPE(fK, seqPos, dim);
+            // RoPE on Q (nHeads) and K (nKvHeads)
+            ApplyRoPE(fQ, seqPos, _config.NumHeads);
+            ApplyRoPE(fK, seqPos, _kvDim / _config.HeadDim);
 
-            // Cache K, V as float
-            int cacheBase = seqPos * dim;
-            fK.AsSpan(0, dim).CopyTo(_fKvCacheK![L].AsSpan(cacheBase, dim));
-            fV.AsSpan(0, dim).CopyTo(_fKvCacheV![L].AsSpan(cacheBase, dim));
+            // Cache K, V as float (kvDim per position)
+            int cacheBase = seqPos * kvDim;
+            fK.AsSpan(0, kvDim).CopyTo(_fKvCacheK![L].AsSpan(cacheBase, kvDim));
+            fV.AsSpan(0, kvDim).CopyTo(_fKvCacheV![L].AsSpan(cacheBase, kvDim));
 
-            // Float multi-head attention → fAttn
+            // Float multi-head attention with GQA → fAttn
             MultiHeadAttentionFloat(L, seqPos, fQ, fAttn);
 
             // attn_sub_norm → quantize → Wo → dequantize → scale
@@ -829,14 +837,17 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     }
 
     /// <summary>
-    /// Float multi-head self-attention with RoPE and proper softmax.
+    /// Float multi-head self-attention with GQA and RoPE.
     /// Q is provided directly; K and V are read from the float KV cache.
+    /// GQA: each Q head h uses KV head (h * nKvHeads / nHeads).
     /// </summary>
     private void MultiHeadAttentionFloat(int layer, int seqPos, float[] fQ, float[] output)
     {
         int dim     = _config.HiddenDim;
         int nHeads  = _config.NumHeads;
         int headDim = _config.HeadDim;
+        int kvDim   = _kvDim;
+        int nKvHeads = kvDim / headDim;
         float scale = 1f / MathF.Sqrt(headDim);
 
         int posCount = seqPos + 1;
@@ -846,16 +857,19 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
         for (int h = 0; h < nHeads; h++)
         {
-            int hOff = h * headDim;
+            int qOff  = h * headDim;
+            // GQA: map Q head to KV head
+            int kvH   = h * nKvHeads / nHeads;
+            int kvOff = kvH * headDim;
 
             // Compute QK^T / sqrt(d_k) for all cached positions
             float maxScore = float.NegativeInfinity;
             for (int p = 0; p < posCount; p++)
             {
-                int kBase = p * dim + hOff;
+                int kBase = p * kvDim + kvOff;
                 float dot = 0;
                 for (int d = 0; d < headDim; d++)
-                    dot += fQ[hOff + d] * _fKvCacheK![layer][kBase + d];
+                    dot += fQ[qOff + d] * _fKvCacheK![layer][kBase + d];
                 dot *= scale;
                 scores[p] = dot;
                 if (dot > maxScore) maxScore = dot;
@@ -881,9 +895,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             {
                 float w = scores[p];
                 if (w < 1e-8f) continue;
-                int vBase = p * dim + hOff;
+                int vBase = p * kvDim + kvOff;
                 for (int d = 0; d < headDim; d++)
-                    output[hOff + d] += w * _fKvCacheV![layer][vBase + d];
+                    output[qOff + d] += w * _fKvCacheV![layer][vBase + d];
             }
         }
     }
@@ -968,13 +982,13 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// <summary>
     /// Apply RoPE (Rotary Position Embeddings) to a vector in-place.
     /// Rotates pairs of dimensions using precomputed sin/cos tables.
+    /// nHeads specifies how many heads are in the vector (nKvHeads for K, nHeads for Q).
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ApplyRoPE(float[] vec, int pos, int dim)
+    private void ApplyRoPE(float[] vec, int pos, int nHeads)
     {
         if (_ropeCos == null || _ropeSin == null) return;
 
-        int nHeads  = _config.NumHeads;
         int headDim = _config.HeadDim;
         int halfDim = headDim / 2;
         int ropeBase = pos * halfDim;
@@ -1149,8 +1163,11 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             if (_compressedFfnGate is not null) { foreach (var m in _compressedFfnGate) m?.Dispose(); _compressedFfnGate = null; }
             if (_compressedFfnUp is not null) { foreach (var m in _compressedFfnUp) m?.Dispose(); _compressedFfnUp = null; }
             if (_compressedFfnDown is not null) { foreach (var m in _compressedFfnDown) m?.Dispose(); _compressedFfnDown = null; }
+            // Don't double-dispose when output head is tied to embeddings
+            bool tied = ReferenceEquals(_compressedEmbeddings, _compressedOutputHead);
             _compressedEmbeddings?.Dispose(); _compressedEmbeddings = null;
-            _compressedOutputHead?.Dispose(); _compressedOutputHead = null;
+            if (!tied) _compressedOutputHead?.Dispose();
+            _compressedOutputHead = null;
         }
 
         // Clear buffer references (GC will reclaim them)
