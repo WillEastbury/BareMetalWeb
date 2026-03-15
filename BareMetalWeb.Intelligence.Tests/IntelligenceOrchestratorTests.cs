@@ -1,4 +1,5 @@
 using BareMetalWeb.Intelligence;
+using BareMetalWeb.Intelligence.Interfaces;
 
 namespace BareMetalWeb.Intelligence.Tests;
 
@@ -23,25 +24,28 @@ public class IntelligenceOrchestratorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_ValidQuery_UsesBitNetEngine()
+    public async Task ProcessAsync_ValidQuery_SystemStatus_RoutedByClassifier()
     {
+        // "system status" is a known pattern — classifier routes it directly without the engine.
         var orch = CreateOrchestrator();
 
         var response = await orch.ProcessAsync("system status");
 
-        Assert.Equal("bitnet-generate", response.ResolvedIntent);
-        Assert.Equal(0f, response.Confidence);
+        Assert.Equal("system.status", response.ResolvedIntent);
+        Assert.True(response.Confidence >= 0.6f);
         Assert.NotNull(response.Message);
     }
 
     [Fact]
     public async Task ProcessAsync_AnyQuery_ReturnsInferenceResult()
     {
+        // Queries that don't match any keyword pattern fall through to the BitNet engine.
         var orch = CreateOrchestrator();
 
         var response = await orch.ProcessAsync("hello");
 
-        Assert.Equal("bitnet-generate", response.ResolvedIntent);
+        // Unknown query — falls through to BitNet or returns low-confidence result.
+        Assert.NotNull(response.Message);
         Assert.NotEmpty(response.Message);
     }
 
@@ -65,8 +69,9 @@ public class IntelligenceOrchestratorTests
 
         var response = await orch.ProcessAsync(malicious);
 
-        Assert.Equal("bitnet-generate", response.ResolvedIntent);
+        // Control characters are stripped; "help" triggers the classifier.
         Assert.NotNull(response.Message);
+        Assert.NotEmpty(response.ResolvedIntent);
     }
 
     [Fact]
@@ -81,15 +86,51 @@ public class IntelligenceOrchestratorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_AlwaysUsesBitNetEngine()
+    public async Task ProcessAsync_KnownEntityAction_RoutedByClassifier()
     {
-        // Without a classifier, all queries go through the BitNet engine.
+        // "create a user" is a known action+entity — classifier routes it directly.
+        var orch = CreateOrchestrator();
+
+        var response = await orch.ProcessAsync("create a user");
+
+        Assert.StartsWith("entity.create.users", response.ResolvedIntent);
+        Assert.True(response.Confidence >= 0.6f);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ListEntities_RoutedToSystemIntent()
+    {
+        var orch = CreateOrchestrator();
+
+        var response = await orch.ProcessAsync("list entities");
+
+        Assert.Equal("system.list-entities", response.ResolvedIntent);
+        Assert.True(response.Confidence >= 0.6f);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_LowConfidenceQuery_FallsThroughToEngine()
+    {
+        // Queries with no keyword matches fall through to the BitNet engine.
+        var orch = CreateOrchestrator();
+
+        var response = await orch.ProcessAsync("xyzzy plugh");
+
+        // No keyword match → BitNet fallback
+        Assert.Equal("bitnet-generate", response.ResolvedIntent);
+        Assert.NotEmpty(response.Message);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_AlwaysReturnsNonNullMessage()
+    {
         var orch = CreateOrchestrator();
 
         var response = await orch.ProcessAsync("create a todo");
 
-        Assert.Equal("bitnet-generate", response.ResolvedIntent);
-        Assert.NotEmpty(response.Message);
+        // Whether routed via classifier or BitNet, message must be non-null.
+        Assert.NotNull(response.Message);
+        Assert.NotEmpty(response.ResolvedIntent);
         Assert.DoesNotContain("[BitNet spike]", response.Message);
     }
 }

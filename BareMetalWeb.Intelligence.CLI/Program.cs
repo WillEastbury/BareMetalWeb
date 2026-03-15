@@ -6,7 +6,7 @@ const string Banner = """
 
     ╔══════════════════════════════════════════════════════════╗
     ║  BareMetalWeb Intelligence CLI                          ║
-    ║  Hybrid Embeddings + BitNet b1.58 Ternary Engine        ║
+    ║  Intent Classifier + BitNet b1.58 Ternary Engine        ║
     ║  2-bit packed · native memory · zero-skip sparse        ║
     ╚══════════════════════════════════════════════════════════╝
 
@@ -16,34 +16,58 @@ Console.ForegroundColor = ConsoleColor.Cyan;
 Console.Write(Banner);
 Console.ResetColor();
 
-// --- Load engine ---
+// --- Load engine from snapshot (no random-weight fallback) ---
 Console.Write("  Loading engine... ");
 var sw = Stopwatch.StartNew();
 
+// Config is a placeholder used to size pre-allocated inference buffers before
+// a snapshot is loaded.  Once LoadSnapshot() runs, the engine rebuilds its
+// internal buffers from the snapshot's actual dimensions.
+// MaxSeqLen=512 matches HuggingFaceImporter.MaxSeqLenCap — keeping both in sync
+// avoids KV-cache resizing on the first snapshot load.
 var config = new BitNetModelConfig(
     HiddenDim: 2048,
     NumLayers: 24,
     NumHeads: 16,
     VocabSize: 32000,
-    MaxSeqLen: 2048);
+    MaxSeqLen: HuggingFaceImporter.MaxSeqLenCap);
 
 var executor = AdminToolCatalogue.CreateRegistry();
 using var engine = new BitNetEngine(config);
-engine.LoadTestModel(ModelLoadOptions.Aggressive);
 
-// Force GC to reclaim the temporary sbyte[] arrays used during construction
+bool modelLoaded = IntelligenceExtensions.TryLoadSnapshot(engine);
+
 GC.Collect(2, GCCollectionMode.Aggressive, true, true);
 
 var orchestrator = new IntelligenceOrchestrator(engine);
 sw.Stop();
 
-Console.ForegroundColor = ConsoleColor.Green;
-Console.WriteLine($"ready ({sw.ElapsedMilliseconds}ms)");
+if (modelLoaded)
+{
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"ready ({sw.ElapsedMilliseconds}ms)");
+}
+else
+{
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine("started (no model — intent classifier active, BitNet unavailable)");
+    Console.ResetColor();
+    Console.ForegroundColor = ConsoleColor.DarkGray;
+    Console.WriteLine();
+    Console.WriteLine("  No .bmwm snapshot found. To import a model:");
+    Console.WriteLine("  1. Download microsoft/BitNet-b1.58-2B-4T from HuggingFace");
+    Console.WriteLine("  2. Run:  import <path-to-hf-model-dir>");
+    Console.WriteLine("  3. Then: load model.bmwm");
+    Console.WriteLine();
+    Console.WriteLine("  Search paths:");
+    foreach (var p in IntelligenceExtensions.GetSnapshotSearchPaths())
+        Console.WriteLine($"    {p}");
+}
 Console.ResetColor();
 Console.WriteLine();
 
-// --- Print stats ---
-PrintStats(engine, config);
+// --- Print stats (only if model loaded) ---
+if (modelLoaded) PrintStats(engine, config);
 
 // --- REPL ---
 Console.WriteLine("  Type a query, or use a command below:");
@@ -103,6 +127,13 @@ while (true)
             continue;
 
         default:
+            if (input.StartsWith("import ", StringComparison.OrdinalIgnoreCase))
+            {
+                var newOrch = await ImportHuggingFaceModel(engine, input[7..].Trim(), config);
+                if (newOrch is not null) orchestrator = newOrch;
+                modelLoaded = engine.IsLoaded;
+                continue;
+            }
             if (input.StartsWith("save ", StringComparison.OrdinalIgnoreCase))
             {
                 SaveSnapshot(engine, input[5..].Trim());
@@ -131,20 +162,21 @@ static void PrintHelp()
     Console.ForegroundColor = ConsoleColor.DarkGray;
     Console.WriteLine("  ┌─────────────────────────────────────────────────┐");
     Console.WriteLine("  │  Commands:                                      │");
-    Console.WriteLine("  │    help, ?      — Show this help                │");
-    Console.WriteLine("  │    stats, mem   — Show model & memory stats     │");
-    Console.WriteLine("  │    gc           — Force GC and show memory      │");
-    Console.WriteLine("  │    tools        — List available admin tools     │");
-    Console.WriteLine("  │    layers       — Per-layer sparsity stats      │");
-    Console.WriteLine("  │    semantic     — Run semantic pruning comparison│");
-    Console.WriteLine("  │    bench        — Run inference benchmark       │");
-    Console.WriteLine("  │    compare      — Compare pruning levels RAM    │");
-    Console.WriteLine("  │    save <path>  — Save model snapshot (.bmwm)   │");
-    Console.WriteLine("  │    load <path>  — Load model snapshot (.bmwm)   │");
-    Console.WriteLine("  │    loadlazy <p> — Lazy mmap load (zero-copy)    │");
-    Console.WriteLine("  │    exit, quit   — Exit                          │");
+    Console.WriteLine("  │    help, ?          — Show this help            │");
+    Console.WriteLine("  │    stats, mem       — Show model & memory stats │");
+    Console.WriteLine("  │    gc               — Force GC and show memory  │");
+    Console.WriteLine("  │    tools            — List available admin tools │");
+    Console.WriteLine("  │    layers           — Per-layer sparsity stats  │");
+    Console.WriteLine("  │    semantic         — Semantic pruning compare  │");
+    Console.WriteLine("  │    bench            — Run inference benchmark   │");
+    Console.WriteLine("  │    compare          — Compare pruning levels    │");
+    Console.WriteLine("  │    import <hf-dir>  — Import HF model → .bmwm  │");
+    Console.WriteLine("  │    save <path>      — Save snapshot (.bmwm)     │");
+    Console.WriteLine("  │    load <path>      — Load snapshot (.bmwm)     │");
+    Console.WriteLine("  │    loadlazy <path>  — Lazy mmap load (zero-copy)│");
+    Console.WriteLine("  │    exit, quit       — Exit                      │");
     Console.WriteLine("  │                                                 │");
-    Console.WriteLine("  │  Or just type a natural language query:         │");
+    Console.WriteLine("  │  Or type a natural language query:              │");
     Console.WriteLine("  │    > list entities                              │");
     Console.WriteLine("  │    > system status                              │");
     Console.WriteLine("  │    > describe user                              │");
@@ -581,4 +613,76 @@ static void LoadSnapshotLazy(
         Console.ResetColor();
     }
     Console.WriteLine();
+}
+
+static async Task<IntelligenceOrchestrator?> ImportHuggingFaceModel(
+    BitNetEngine engine, string hfDir,
+    BitNetModelConfig config)
+{
+    if (string.IsNullOrWhiteSpace(hfDir))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("  Usage: import <path-to-hf-model-dir>");
+        Console.ResetColor();
+        Console.WriteLine();
+        return null;
+    }
+
+    if (!Directory.Exists(hfDir))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"  ✗ Directory not found: {hfDir}");
+        Console.ResetColor();
+        Console.WriteLine();
+        return null;
+    }
+
+    // Default output path: model.bmwm in the current directory
+    string outputPath = Path.Combine(Directory.GetCurrentDirectory(), "model.bmwm");
+
+    Console.ForegroundColor = ConsoleColor.DarkCyan;
+    Console.WriteLine("  ── HuggingFace Import ────────────────────────────────");
+    Console.ResetColor();
+    Console.WriteLine($"    Source : {hfDir}");
+    Console.WriteLine($"    Output : {outputPath}");
+    Console.WriteLine();
+
+    try
+    {
+        var sw = Stopwatch.StartNew();
+
+        // Stream import with progress callbacks — runs on the thread pool to keep UI responsive
+        await Task.Run(() => HuggingFaceImporter.Import(hfDir, outputPath, msg =>
+        {
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine(msg);
+            Console.ResetColor();
+        }));
+
+        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
+        sw.Stop();
+
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine($"  ✓ Import complete ({sw.ElapsedMilliseconds / 1000.0:F1}s)");
+        Console.ResetColor();
+        Console.WriteLine();
+
+        // Auto-load the freshly imported snapshot
+        Console.Write("  Loading imported snapshot... ");
+        engine.LoadSnapshot(outputPath);
+        var orchestrator = new IntelligenceOrchestrator(engine);
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.WriteLine("done");
+        Console.ResetColor();
+        PrintStats(engine, config);
+        return orchestrator;
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"  ✗ Import failed: {ex.Message}");
+        Console.ResetColor();
+    }
+    Console.WriteLine();
+    return null;
 }

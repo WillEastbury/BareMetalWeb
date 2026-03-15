@@ -16,11 +16,19 @@ public static class IntelligenceExtensions
     /// <summary>
     /// Initialise the Intelligence module and return route handler delegates.
     /// The caller is responsible for registering these with the host's route table.
+    /// Attempts to load the model from a .bmwm snapshot file. Accepted search
+    /// paths (first match wins):
+    ///   1. BMWM_MODEL_PATH environment variable
+    ///   2. model.bmwm in the current working directory
+    ///   3. ~/.bmwm/model.bmwm
+    ///   4. The directory of the running executable
+    /// When no snapshot is found the engine starts unloaded — queries return a
+    /// descriptive "model not available" response until a snapshot is loaded.
     /// </summary>
     public static IntelligenceRoutes CreateIntelligenceRoutes()
     {
         var engine = new BitNetEngine();
-        engine.LoadTestModel(ModelLoadOptions.Default);
+        TryLoadSnapshot(engine);
 
         var tools = AdminToolCatalogue.CreateRegistry();
 
@@ -30,6 +38,54 @@ public static class IntelligenceExtensions
             ChatHandler,
             ToolsHandler,
             StatusHandler);
+    }
+
+    /// <summary>
+    /// Attempt to load a .bmwm snapshot from well-known paths.
+    /// Returns true when a snapshot was found and loaded successfully.
+    /// </summary>
+    public static bool TryLoadSnapshot(BitNetEngine engine)
+    {
+        foreach (var path in GetSnapshotSearchPaths())
+        {
+            if (!File.Exists(path)) continue;
+            try
+            {
+                engine.LoadSnapshot(path);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // Corrupt or incompatible snapshot — try the next candidate.
+                // Write to stderr so the issue is visible without crashing startup.
+                Console.Error.WriteLine($"  [Intelligence] Skipping '{path}': {ex.Message}");
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Enumerate candidate .bmwm snapshot paths in priority order.
+    /// </summary>
+    public static IEnumerable<string> GetSnapshotSearchPaths()
+    {
+        // 1. Explicit override via environment variable
+        var envPath = Environment.GetEnvironmentVariable("BMWM_MODEL_PATH");
+        if (!string.IsNullOrWhiteSpace(envPath))
+            yield return envPath;
+
+        // 2. Current working directory
+        yield return Path.Combine(Directory.GetCurrentDirectory(), "model.bmwm");
+
+        // 3. User home directory
+        yield return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            ".bmwm", "model.bmwm");
+
+        // 4. Executable directory
+        var exeDir = Path.GetDirectoryName(Environment.ProcessPath);
+        if (!string.IsNullOrWhiteSpace(exeDir))
+            yield return Path.Combine(exeDir, "model.bmwm");
     }
 
     private static async Task ChatHandler(HttpContext context)
@@ -105,9 +161,10 @@ public static class IntelligenceExtensions
     {
         context.Response.ContentType = "application/json; charset=utf-8";
         bool loaded = _orchestrator is not null;
+        bool modelLoaded = _orchestrator?.GetMetrics() is not null;
         var json = $"{{\"initialized\":{(loaded ? "true" : "false")}," +
-                   $"\"bitnet_loaded\":{(_orchestrator is not null ? "true" : "false")}," +
-                   $"\"architecture\":\"single-stage-slm\"}}";
+                   $"\"bitnet_loaded\":{(modelLoaded ? "true" : "false")}," +
+                   $"\"architecture\":\"two-stage-intent-classifier+slm\"}}";
         await context.Response.WriteAsync(json, context.RequestAborted);
     }
 

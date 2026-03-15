@@ -24,6 +24,9 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
 {
     private const int RowAlignment = 32; // AVX2 register width in bytes
     private const int ParallelRowThreshold = 128;
+    // Zero-byte ratio above which the sparse skip-index is built for acceleration.
+    // At 40% zeros the per-row non-zero index provides a net throughput gain.
+    private const float SparsitySkipThreshold = 0.4f;
 
     // 256-entry LUT: packed byte → 4 decoded ternary weights {-1, 0, +1}
     private static readonly int[] s_decodeLut = BuildDecodeLut();
@@ -199,7 +202,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
                 ? (float)zeroByteCount / totalLogicalBytes
                 : 0f);
 
-        if (matrix._stats.ZeroByteRatio > 0.4f
+        if (matrix._stats.ZeroByteRatio > SparsitySkipThreshold
 #if NET9_0_OR_GREATER
 #pragma warning disable SYSLIB5003
             && !Sve.IsSupported
@@ -888,7 +891,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
             ZeroByteRatio: totalLogicalBytes > 0
                 ? (float)zeroByteCount / totalLogicalBytes : 0f);
 
-        if (matrix._stats.ZeroByteRatio > 0.4f
+        if (matrix._stats.ZeroByteRatio > SparsitySkipThreshold
 #if NET9_0_OR_GREATER
 #pragma warning disable SYSLIB5003
             && !Sve.IsSupported
@@ -941,6 +944,87 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
             for (int k = 0; k < tailWeights; k++)
                 output[col + k] = Unsafe.Add(ref lutRef, lutBase + k);
         }
+    }
+
+    /// <summary>
+    /// Streaming pack factory — allocates native memory for the full matrix
+    /// without filling any data. Caller must then call <see cref="PackRowInPlace"/>
+    /// for each row (0..rows-1) and then <see cref="FinalizeStats"/> once.
+    /// Used by the HF importer to avoid materialising a full sbyte[] tensor.
+    /// </summary>
+    internal static NativeTernaryMatrix Allocate(int rows, int cols)
+        => new NativeTernaryMatrix(rows, cols); // native memory zeroed by NativeMemory.AllocZeroed
+
+    /// <summary>
+    /// Pack a single row of sbyte ternary weights {-1, 0, +1} into this matrix.
+    /// Must be called after <see cref="Allocate"/> and before <see cref="FinalizeStats"/>.
+    /// </summary>
+    internal void PackRowInPlace(int row, ReadOnlySpan<sbyte> rowWeights)
+    {
+        if ((uint)row >= (uint)_rows)
+            ThrowRowOutOfRange(row);
+        if (rowWeights.Length < _cols)
+            ThrowInputTooShort(rowWeights.Length, _cols);
+
+        long dstRow = (long)row * _rowStrideBytes;
+
+        int c = 0;
+        int byteIdx = 0;
+        for (; c + 3 < _cols; c += 4, byteIdx++)
+        {
+            byte packed = (byte)(
+                (rowWeights[c]     & 3)        |
+                ((rowWeights[c + 1] & 3) << 2) |
+                ((rowWeights[c + 2] & 3) << 4) |
+                ((rowWeights[c + 3] & 3) << 6));
+            _data[dstRow + byteIdx] = packed;
+        }
+
+        // Tail (0-3 remaining weights)
+        if (c < _cols)
+        {
+            byte packed = 0;
+            for (int k = 0; c + k < _cols; k++)
+                packed |= (byte)((rowWeights[c + k] & 3) << (k * 2));
+            _data[dstRow + byteIdx] = packed;
+        }
+    }
+
+    /// <summary>
+    /// Compute and store sparsity stats after all rows have been packed via
+    /// <see cref="PackRowInPlace"/>. Also builds the sparse skip-index when
+    /// the zero-byte ratio crosses the acceleration threshold.
+    /// Must be called exactly once, after all rows are packed.
+    /// </summary>
+    internal void FinalizeStats()
+    {
+        int totalLogicalBytes = _rows * _packedRowBytes;
+        int zeroByteCount = 0;
+        for (int r = 0; r < _rows; r++)
+        {
+            byte* rowPtr = _data + (long)r * _rowStrideBytes;
+            for (int b = 0; b < _packedRowBytes; b++)
+                if (rowPtr[b] == 0) zeroByteCount++;
+        }
+
+        _stats = new MatrixStats(
+            LogicalWeights: _rows * _cols,
+            PackedBytes: totalLogicalBytes,
+            ZeroByteCount: zeroByteCount,
+            ZeroByteRatio: totalLogicalBytes > 0
+                ? (float)zeroByteCount / totalLogicalBytes
+                : 0f);
+
+        if (_stats.ZeroByteRatio > SparsitySkipThreshold
+#if NET9_0_OR_GREATER
+#pragma warning disable SYSLIB5003
+            && !Sve.IsSupported
+#pragma warning restore SYSLIB5003
+#endif
+            && !Vector512.IsHardwareAccelerated
+            && !Vector256.IsHardwareAccelerated
+            && !AdvSimd.IsSupported)
+            BuildSkipIndex();
     }
 
     private static void ThrowRowOutOfRange(int row) =>
