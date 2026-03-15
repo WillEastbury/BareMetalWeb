@@ -54,9 +54,11 @@ public static class IntelligenceExtensions
                 engine.LoadSnapshot(path);
                 return true;
             }
-            catch
+            catch (Exception ex)
             {
-                // Corrupt snapshot — try the next candidate
+                // Corrupt or incompatible snapshot — try the next candidate.
+                // Write to stderr so the issue is visible without crashing startup.
+                Console.Error.WriteLine($"  [Intelligence] Skipping '{path}': {ex.Message}");
             }
         }
         return false;

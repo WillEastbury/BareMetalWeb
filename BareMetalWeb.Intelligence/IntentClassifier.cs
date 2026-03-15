@@ -21,10 +21,21 @@ public sealed class IntentClassifier
     // ── Configuration ─────────────────────────────────────────────────────
 
     /// <summary>
-    /// Confidence threshold below which the BitNet engine is consulted.
-    /// Range 0-1. Default: 0.6 (keyword matches above this need no model).
+    /// Default confidence threshold below which the BitNet engine is consulted.
+    /// Keyword matches above this confidence are returned directly (zero model latency).
     /// </summary>
-    public float BitNetFallbackThreshold { get; init; } = 0.6f;
+    public const float DefaultFallbackThreshold = 0.6f;
+
+    /// <summary>
+    /// Confidence threshold below which the BitNet engine is consulted.
+    /// Range 0-1. Default: <see cref="DefaultFallbackThreshold"/>.
+    /// </summary>
+    public float BitNetFallbackThreshold { get; init; } = DefaultFallbackThreshold;
+
+    // Max form-field key length — anything longer is unlikely to be a real field name.
+    private const int MaxFormFieldKeyLength = 32;
+    // Expected typical number of form fields in a single query.
+    private const int TypicalFormFieldCount = 4;
 
     // ── Known intent verbs ────────────────────────────────────────────────
 
@@ -275,7 +286,7 @@ public sealed class IntentClassifier
             if (keyEnd <= keyStart) { i = eq + 1; continue; }
 
             string key = span[keyStart..(keyEnd + 1)].Trim().ToString();
-            if (key.Length == 0 || key.Length > 32) { i = eq + 1; continue; }
+            if (key.Length == 0 || key.Length > MaxFormFieldKeyLength) { i = eq + 1; continue; }
 
             // Extract value (non-whitespace to the right of '=')
             int valStart = eq + 1;
@@ -287,7 +298,7 @@ public sealed class IntentClassifier
             string val = span[valStart..valEnd].Trim().ToString();
             if (val.Length > 0)
             {
-                fields ??= new Dictionary<string, string>(4, StringComparer.OrdinalIgnoreCase);
+                fields ??= new Dictionary<string, string>(TypicalFormFieldCount, StringComparer.OrdinalIgnoreCase);
                 fields[key] = val;
             }
 

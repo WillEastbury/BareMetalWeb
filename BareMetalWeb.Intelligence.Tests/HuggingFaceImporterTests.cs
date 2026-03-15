@@ -132,7 +132,6 @@ public class HuggingFaceImporterTests
         var rng = Random.Shared;
 
         // Build data section first to know offsets
-        long dataOffset = 0;
         var dataChunks  = new List<(string Name, byte[] Data)>();
 
         foreach (var (name, rows, cols) in tensors)

@@ -27,9 +27,19 @@ public static class HuggingFaceImporter
     /// <summary>
     /// Maximum sequence length written into the .bmwm snapshot.
     /// Capped to avoid the KV-cache allocation (layers × maxSeq × dim × 4 bytes)
-    /// ballooning on constrained hosts (2B model: 32 × 512 × 2560 × 4 ≈ 167 MB).
+    /// ballooning on constrained hosts.
+    /// Formula: 32L × 512 × 2560d × 4 bytes = 167 MB (BitNet-b1.58-2B-4T).
+    /// Without the cap the default 2048-token window would require 671 MB for KV cache alone.
     /// </summary>
     public const int MaxSeqLenCap = 512;
+
+    // Default architecture constants for microsoft/BitNet-b1.58-2B-4T
+    // Used when config.json is absent.
+    private const int DefaultHiddenDim  = 2560;
+    private const int DefaultNumLayers  = 32;
+    private const int DefaultNumHeads   = 32;
+    private const int DefaultVocabSize  = 131072;
+    private const int DefaultMaxSeqLen  = 2048;
 
     // ── Import entry point ────────────────────────────────────────────────
 
@@ -103,18 +113,21 @@ public static class HuggingFaceImporter
             wo[i]  = StreamTensor(tensorMap, LayerWoKey(i),   dim, dim, progress);
             ffn[i] = StreamTensor(tensorMap, LayerFfnKey(i),  dim, dim, progress);
 
-            // Force GC after each layer to release the row-buffer rented by StreamTensor
-            GC.Collect(0, GCCollectionMode.Optimized, blocking: false);
+            // Blocking GC after each layer to reclaim row-buffers before next layer allocates.
+            // Non-blocking collection risks memory pressure spikes on constrained hosts.
+            GC.Collect(0, GCCollectionMode.Optimized, blocking: true);
         }
 
         // ── 7. Import embeddings + output head ────────────────────────────
         progress?.Invoke("  Importing embeddings (large — streaming) ...");
         var embeddings = StreamTensor(tensorMap, EmbedKey, vocab, dim, progress);
-        GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
+        // Blocking GC ensures the embedding row-buffer is freed before allocating output head.
+        GC.Collect(1, GCCollectionMode.Optimized, blocking: true);
 
         progress?.Invoke("  Importing output head ...");
         var outputHead = StreamTensor(tensorMap, LmHeadKey(tensorMap), vocab, dim, progress);
-        GC.Collect(1, GCCollectionMode.Optimized, blocking: false);
+        // Blocking GC to reclaim output head row-buffer before tokenizer loading.
+        GC.Collect(1, GCCollectionMode.Optimized, blocking: true);
 
         // ── 8. Load tokenizer vocab ────────────────────────────────────────
         progress?.Invoke("  Loading tokenizer vocab ...");
@@ -245,17 +258,18 @@ public static class HuggingFaceImporter
         string configPath = Path.Combine(hfDir, "config.json");
         if (!File.Exists(configPath))
         {
-            // Provide sensible defaults for BitNet-b1.58-2B-4T
-            return new HfModelConfig(2560, 32, 32, 131072, 2048);
+            // Use architecture defaults for microsoft/BitNet-b1.58-2B-4T
+            return new HfModelConfig(DefaultHiddenDim, DefaultNumLayers, DefaultNumHeads,
+                                     DefaultVocabSize, DefaultMaxSeqLen);
         }
 
         // Manual JSON parse (AOT-safe, no reflection)
         var text = File.ReadAllText(configPath).AsSpan();
-        int hiddenDim  = ExtractInt(text, "hidden_size",        2560);
-        int numLayers  = ExtractInt(text, "num_hidden_layers",  32);
-        int numHeads   = ExtractInt(text, "num_attention_heads", 32);
-        int vocabSize  = ExtractInt(text, "vocab_size",         131072);
-        int maxSeqLen  = ExtractInt(text, "max_position_embeddings", 2048);
+        int hiddenDim  = ExtractInt(text, "hidden_size",             DefaultHiddenDim);
+        int numLayers  = ExtractInt(text, "num_hidden_layers",       DefaultNumLayers);
+        int numHeads   = ExtractInt(text, "num_attention_heads",     DefaultNumHeads);
+        int vocabSize  = ExtractInt(text, "vocab_size",              DefaultVocabSize);
+        int maxSeqLen  = ExtractInt(text, "max_position_embeddings", DefaultMaxSeqLen);
 
         return new HfModelConfig(hiddenDim, numLayers, numHeads, vocabSize, maxSeqLen);
     }

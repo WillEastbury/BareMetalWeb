@@ -20,14 +20,17 @@ Console.ResetColor();
 Console.Write("  Loading engine... ");
 var sw = Stopwatch.StartNew();
 
-// Config is a placeholder; actual shape is determined by the snapshot.
-// If no snapshot is found the engine starts unloaded and prompts the user to import.
+// Config is a placeholder used to size pre-allocated inference buffers before
+// a snapshot is loaded.  Once LoadSnapshot() runs, the engine rebuilds its
+// internal buffers from the snapshot's actual dimensions.
+// MaxSeqLen=512 matches HuggingFaceImporter.MaxSeqLenCap — keeping both in sync
+// avoids KV-cache resizing on the first snapshot load.
 var config = new BitNetModelConfig(
     HiddenDim: 2048,
     NumLayers: 24,
     NumHeads: 16,
     VocabSize: 32000,
-    MaxSeqLen: 512);
+    MaxSeqLen: HuggingFaceImporter.MaxSeqLenCap);
 
 var executor = AdminToolCatalogue.CreateRegistry();
 using var engine = new BitNetEngine(config);

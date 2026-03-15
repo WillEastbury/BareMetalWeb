@@ -26,6 +26,18 @@ namespace BareMetalWeb.Intelligence;
 /// </summary>
 public static class SafeTensorsReader
 {
+    // Maximum safe header size (128 MB) — headers larger than this indicate corruption.
+    private const int MaxHeaderSizeBytes = 128 * 1024 * 1024;
+
+    // BF16 exponent threshold for |value| >= 0.5.
+    // BF16 exponent is biased by 127. Value 0.5 = 2^(-1) → biased exp = 126.
+    // Values with exp < 126 have |value| < 0.5 and are treated as zero.
+    private const int Bf16HalfThresholdExp = 126;
+
+    // F16 exponent threshold for |value| >= 0.5.
+    // F16 exponent is biased by 15. Value 0.5 = 2^(-1) → biased exp = 14.
+    // Values with exp < 14 have |value| < 0.5 and are treated as zero.
+    private const int F16HalfThresholdExp = 14;
     // ── Public types ──────────────────────────────────────────────────────
 
     /// <summary>Metadata for a single tensor extracted from the JSON header.</summary>
@@ -95,7 +107,7 @@ public static class SafeTensorsReader
         Span<byte> lenBuf = stackalloc byte[8];
         ReadExact(stream, lenBuf);
         long headerLen = (long)BinaryPrimitives.ReadUInt64LittleEndian(lenBuf);
-        if (headerLen <= 0 || headerLen > 128 * 1024 * 1024) // sanity: 128 MB
+        if (headerLen <= 0 || headerLen > MaxHeaderSizeBytes)
             throw new InvalidDataException($"SafeTensors header length {headerLen} is out of range.");
 
         // Absolute offset where the data section begins
@@ -212,8 +224,8 @@ public static class SafeTensorsReader
             ushort bits = (ushort)(raw[offset] | (raw[offset + 1] << 8));
             // Extract exponent (bits 14-7) — biased by 127
             int exp = (bits >> 7) & 0xFF;
-            // Ignore denorms and near-zero (exp < 126 ≈ |value| < 0.5)
-            if (exp < 126) { ternary[i] = 0; continue; }
+            // Ignore denorms and near-zero (exp < Bf16HalfThresholdExp ≈ |value| < 0.5)
+            if (exp < Bf16HalfThresholdExp) { ternary[i] = 0; continue; }
             // Sign bit
             ternary[i] = (bits & 0x8000) != 0 ? (sbyte)-1 : (sbyte)1;
         }
@@ -228,7 +240,7 @@ public static class SafeTensorsReader
             int offset = i * 2;
             ushort bits = (ushort)(raw[offset] | (raw[offset + 1] << 8));
             int exp = (bits >> 10) & 0x1F;
-            if (exp < 14) { ternary[i] = 0; continue; }
+            if (exp < F16HalfThresholdExp) { ternary[i] = 0; continue; }
             ternary[i] = (bits & 0x8000) != 0 ? (sbyte)-1 : (sbyte)1;
         }
     }

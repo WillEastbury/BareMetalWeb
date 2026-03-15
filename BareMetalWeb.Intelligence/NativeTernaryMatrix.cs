@@ -24,6 +24,9 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
 {
     private const int RowAlignment = 32; // AVX2 register width in bytes
     private const int ParallelRowThreshold = 128;
+    // Zero-byte ratio above which the sparse skip-index is built for acceleration.
+    // At 40% zeros the per-row non-zero index provides a net throughput gain.
+    private const float SparsitySkipThreshold = 0.4f;
 
     // 256-entry LUT: packed byte → 4 decoded ternary weights {-1, 0, +1}
     private static readonly int[] s_decodeLut = BuildDecodeLut();
@@ -199,7 +202,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
                 ? (float)zeroByteCount / totalLogicalBytes
                 : 0f);
 
-        if (matrix._stats.ZeroByteRatio > 0.4f
+        if (matrix._stats.ZeroByteRatio > SparsitySkipThreshold
 #if NET9_0_OR_GREATER
 #pragma warning disable SYSLIB5003
             && !Sve.IsSupported
@@ -888,7 +891,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
             ZeroByteRatio: totalLogicalBytes > 0
                 ? (float)zeroByteCount / totalLogicalBytes : 0f);
 
-        if (matrix._stats.ZeroByteRatio > 0.4f
+        if (matrix._stats.ZeroByteRatio > SparsitySkipThreshold
 #if NET9_0_OR_GREATER
 #pragma warning disable SYSLIB5003
             && !Sve.IsSupported
@@ -1012,7 +1015,7 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
                 ? (float)zeroByteCount / totalLogicalBytes
                 : 0f);
 
-        if (_stats.ZeroByteRatio > 0.4f
+        if (_stats.ZeroByteRatio > SparsitySkipThreshold
 #if NET9_0_OR_GREATER
 #pragma warning disable SYSLIB5003
             && !Sve.IsSupported
