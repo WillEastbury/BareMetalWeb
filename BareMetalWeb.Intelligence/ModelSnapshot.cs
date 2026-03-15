@@ -150,9 +150,9 @@ public static class ModelSnapshot
             throw new InvalidDataException("Not a BMWM snapshot file");
 
         int version = br.ReadInt32();
-        if (version != FormatVersion)
+        if (version < 1 || version > FormatVersion)
             throw new InvalidDataException(
-                $"Unsupported snapshot version {version} (expected {FormatVersion})");
+                $"Unsupported snapshot version {version} (expected 1–{FormatVersion})");
 
         int hiddenDim = br.ReadInt32();
         int layerCount = br.ReadInt32();
@@ -165,9 +165,13 @@ public static class ModelSnapshot
         long tokenTableOffset = br.ReadInt64();
         long packedDataOffset = br.ReadInt64();
 
-        if (matrixCount != layerCount * 5 + 2)
+        // v1: 2 matrices per layer (combined attn + ffn) + 2 (embeddings + outputHead)
+        // v2: 5 matrices per layer (Wq, Wk, Wv, Wo, Ffn) + 2
+        bool isV1 = matrixCount == layerCount * 2 + 2;
+        bool isV2 = matrixCount == layerCount * 5 + 2;
+        if (!isV1 && !isV2)
             throw new InvalidDataException(
-                $"Matrix count {matrixCount} != expected {layerCount * 5 + 2}");
+                $"Matrix count {matrixCount} doesn't match layer count {layerCount}");
 
         // ── Matrix descriptors ──────────────────────────────────────
         var descriptors = new (int Rows, int Cols, int Stride, long Offset, long Length)[matrixCount];
@@ -210,13 +214,31 @@ public static class ModelSnapshot
         var wv  = new NativeTernaryMatrix[layerCount];
         var wo  = new NativeTernaryMatrix[layerCount];
         var ffn = new NativeTernaryMatrix[layerCount];
-        for (int i = 0; i < layerCount; i++)
+
+        if (isV1)
         {
-            wq[i]  = matrices[i * 5];
-            wk[i]  = matrices[i * 5 + 1];
-            wv[i]  = matrices[i * 5 + 2];
-            wo[i]  = matrices[i * 5 + 3];
-            ffn[i] = matrices[i * 5 + 4];
+            // v1: 2 per layer — combined attention projection shared across Q/K/V/O
+            for (int i = 0; i < layerCount; i++)
+            {
+                var attn = matrices[i * 2];
+                wq[i]  = attn;
+                wk[i]  = attn;
+                wv[i]  = attn;
+                wo[i]  = attn;
+                ffn[i] = matrices[i * 2 + 1];
+            }
+        }
+        else
+        {
+            // v2: 5 per layer — separate Q/K/V/O projections
+            for (int i = 0; i < layerCount; i++)
+            {
+                wq[i]  = matrices[i * 5];
+                wk[i]  = matrices[i * 5 + 1];
+                wv[i]  = matrices[i * 5 + 2];
+                wo[i]  = matrices[i * 5 + 3];
+                ffn[i] = matrices[i * 5 + 4];
+            }
         }
 
         var config = new BitNetModelConfig(hiddenDim, layerCount, numHeads, vocabSize, maxSeqLen);
@@ -261,7 +283,7 @@ public static class ModelSnapshot
                 throw new InvalidDataException("Not a BMWM snapshot file");
 
             int version = MemoryMarshal.Read<int>(headerSpan[4..]);
-            if (version != FormatVersion)
+            if (version < 1 || version > FormatVersion)
                 throw new InvalidDataException(
                     $"Unsupported version {version}");
 
@@ -275,10 +297,10 @@ public static class ModelSnapshot
             int tokenCount = MemoryMarshal.Read<int>(headerSpan[36..]);
             long tokenTableOffset = MemoryMarshal.Read<long>(headerSpan[40..]);
 
-            if (matrixCount != layerCount * 5 + 2)
+            if (matrixCount != layerCount * 5 + 2 && matrixCount != layerCount * 2 + 2)
                 throw new InvalidDataException("Matrix count mismatch");
 
-            // Bounds: ensure descriptor region fits within file
+            bool isMappedV1 = matrixCount == layerCount * 2 + 2;
             long descEnd = HeaderSize + (long)matrixCount * DescriptorSize;
             if (descEnd < HeaderSize || descEnd > fileSize)
                 throw new InvalidDataException(
@@ -339,13 +361,26 @@ public static class ModelSnapshot
             var wvA  = new NativeTernaryMatrix[layerCount];
             var woA  = new NativeTernaryMatrix[layerCount];
             var ffnA = new NativeTernaryMatrix[layerCount];
-            for (int i = 0; i < layerCount; i++)
+
+            if (isMappedV1)
             {
-                wqA[i]  = matrices[i * 5];
-                wkA[i]  = matrices[i * 5 + 1];
-                wvA[i]  = matrices[i * 5 + 2];
-                woA[i]  = matrices[i * 5 + 3];
-                ffnA[i] = matrices[i * 5 + 4];
+                for (int i = 0; i < layerCount; i++)
+                {
+                    var attn = matrices[i * 2];
+                    wqA[i] = attn; wkA[i] = attn; wvA[i] = attn; woA[i] = attn;
+                    ffnA[i] = matrices[i * 2 + 1];
+                }
+            }
+            else
+            {
+                for (int i = 0; i < layerCount; i++)
+                {
+                    wqA[i]  = matrices[i * 5];
+                    wkA[i]  = matrices[i * 5 + 1];
+                    wvA[i]  = matrices[i * 5 + 2];
+                    woA[i]  = matrices[i * 5 + 3];
+                    ffnA[i] = matrices[i * 5 + 4];
+                }
             }
 
             var config = new BitNetModelConfig(
@@ -392,7 +427,7 @@ public static class ModelSnapshot
                 throw new InvalidDataException("Not a BMWM snapshot file");
 
             int version = MemoryMarshal.Read<int>(headerSpan[4..]);
-            if (version != FormatVersion)
+            if (version < 1 || version > FormatVersion)
                 throw new InvalidDataException($"Unsupported version {version}");
 
             int hiddenDim = MemoryMarshal.Read<int>(headerSpan[8..]);
@@ -405,8 +440,10 @@ public static class ModelSnapshot
             int tokenCount = MemoryMarshal.Read<int>(headerSpan[36..]);
             long tokenTableOffset = MemoryMarshal.Read<long>(headerSpan[40..]);
 
-            if (matrixCount != layerCount * 5 + 2)
+            if (matrixCount != layerCount * 5 + 2 && matrixCount != layerCount * 2 + 2)
                 throw new InvalidDataException("Matrix count mismatch");
+
+            bool isLazyV1 = matrixCount == layerCount * 2 + 2;
 
             long minSize = HeaderSize + (long)matrixCount * DescriptorSize;
             if (fs.Length < minSize)
@@ -464,18 +501,33 @@ public static class ModelSnapshot
             var wvL  = new NativeTernaryMatrix[layerCount];
             var woL  = new NativeTernaryMatrix[layerCount];
             var ffnL = new NativeTernaryMatrix[layerCount];
-            for (int i = 0; i < layerCount; i++)
+
+            if (isLazyV1)
             {
-                var (rows, cols, _, offset, _) = descriptors[i * 5];
-                wqL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
-                (rows, cols, _, offset, _) = descriptors[i * 5 + 1];
-                wkL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
-                (rows, cols, _, offset, _) = descriptors[i * 5 + 2];
-                wvL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
-                (rows, cols, _, offset, _) = descriptors[i * 5 + 3];
-                woL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
-                (rows, cols, _, offset, _) = descriptors[i * 5 + 4];
-                ffnL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                for (int i = 0; i < layerCount; i++)
+                {
+                    var (rows, cols, _, offset, _) = descriptors[i * 2];
+                    var attn = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                    wqL[i] = attn; wkL[i] = attn; wvL[i] = attn; woL[i] = attn;
+                    (rows, cols, _, offset, _) = descriptors[i * 2 + 1];
+                    ffnL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < layerCount; i++)
+                {
+                    var (rows, cols, _, offset, _) = descriptors[i * 5];
+                    wqL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                    (rows, cols, _, offset, _) = descriptors[i * 5 + 1];
+                    wkL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                    (rows, cols, _, offset, _) = descriptors[i * 5 + 2];
+                    wvL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                    (rows, cols, _, offset, _) = descriptors[i * 5 + 3];
+                    woL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                    (rows, cols, _, offset, _) = descriptors[i * 5 + 4];
+                    ffnL[i] = NativeTernaryMatrix.FromMappedMemory(basePtr + offset, rows, cols);
+                }
             }
 
             var (eRows, eCols, _, eOff, _) = descriptors[matrixCount - 2];

@@ -16,20 +16,43 @@ Console.ForegroundColor = ConsoleColor.Cyan;
 Console.Write(Banner);
 Console.ResetColor();
 
+// --- Handle --import command line argument (runs without loading test model) ---
+if (args.Length >= 2 && args[0] == "--import")
+{
+    RunImport(args[1]);
+    return;
+}
+
 // --- Load engine ---
 Console.Write("  Loading engine... ");
 var sw = Stopwatch.StartNew();
 
+// Use a small default config; LoadSnapshot will override with the snapshot's config
 var config = new BitNetModelConfig(
-    HiddenDim: 2048,
-    NumLayers: 24,
-    NumHeads: 16,
-    VocabSize: 32000,
-    MaxSeqLen: 2048);
+    HiddenDim: 128,
+    NumLayers: 4,
+    NumHeads: 4,
+    VocabSize: 256,
+    MaxSeqLen: 512);
 
 var executor = AdminToolCatalogue.CreateRegistry();
 using var engine = new BitNetEngine(config);
-engine.LoadTestModel(ModelLoadOptions.Aggressive);
+
+// Try loading a trained snapshot first; fall back to small test model
+var snapshotPath = FindCliModelSnapshot();
+if (snapshotPath is not null)
+{
+    // Cap MaxSeqLen to limit KV cache memory (22 layers × seqLen × dim × 4B × 2)
+    engine.LoadSnapshot(snapshotPath, maxSeqLenOverride: 128);
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"loaded snapshot ({sw.ElapsedMilliseconds}ms): {snapshotPath}");
+}
+else
+{
+    engine.LoadTestModel(ModelLoadOptions.NoPruning);
+    Console.ForegroundColor = ConsoleColor.DarkYellow;
+    Console.WriteLine($"no snapshot found — using small test model ({sw.ElapsedMilliseconds}ms)");
+}
 
 // Force GC to reclaim the temporary sbyte[] arrays used during construction
 GC.Collect(2, GCCollectionMode.Aggressive, true, true);
@@ -103,6 +126,11 @@ while (true)
             continue;
 
         default:
+            if (input.StartsWith("import ", StringComparison.OrdinalIgnoreCase))
+            {
+                RunImport(input[7..].Trim());
+                continue;
+            }
             if (input.StartsWith("save ", StringComparison.OrdinalIgnoreCase))
             {
                 SaveSnapshot(engine, input[5..].Trim());
@@ -142,6 +170,7 @@ static void PrintHelp()
     Console.WriteLine("  │    save <path>  — Save model snapshot (.bmwm)   │");
     Console.WriteLine("  │    load <path>  — Load model snapshot (.bmwm)   │");
     Console.WriteLine("  │    loadlazy <p> — Lazy mmap load (zero-copy)    │");
+    Console.WriteLine("  │    import <dir> — Import HF model to .bmwm      │");
     Console.WriteLine("  │    exit, quit   — Exit                          │");
     Console.WriteLine("  │                                                 │");
     Console.WriteLine("  │  Or just type a natural language query:         │");
@@ -578,6 +607,84 @@ static void LoadSnapshotLazy(
     {
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"  ✗ Lazy load failed: {ex.Message}");
+        Console.ResetColor();
+    }
+    Console.WriteLine();
+}
+
+static string? FindCliModelSnapshot()
+{
+    string[] candidates =
+    [
+        "model.bmwm",
+        Path.Combine(AppContext.BaseDirectory, "model.bmwm"),
+        Path.Combine(AppContext.BaseDirectory, "..", "model.bmwm"),
+    ];
+
+    foreach (var path in candidates)
+    {
+        if (File.Exists(path))
+            return Path.GetFullPath(path);
+    }
+
+    return null;
+}
+
+static void RunImport(string modelDir)
+{
+    if (string.IsNullOrWhiteSpace(modelDir))
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("  Usage: import <path-to-hf-model-directory>");
+        Console.WriteLine();
+        Console.WriteLine("  The directory should contain:");
+        Console.WriteLine("    config.json       — HuggingFace model config");
+        Console.WriteLine("    tokenizer.json    — Tokenizer vocabulary");
+        Console.WriteLine("    *.safetensors     — Model weight files");
+        Console.WriteLine();
+        Console.WriteLine("  Download first with:");
+        Console.WriteLine("    huggingface-cli download microsoft/bitnet-b1.58-2B-4T --local-dir ./bitnet-2b");
+        Console.ResetColor();
+        Console.WriteLine();
+        return;
+    }
+
+    if (!Directory.Exists(modelDir))
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"  ✗ Directory not found: {modelDir}");
+        Console.ResetColor();
+        Console.WriteLine();
+        return;
+    }
+
+    Console.ForegroundColor = ConsoleColor.DarkCyan;
+    Console.WriteLine("  ── HuggingFace Import ────────────────────────────");
+    Console.ResetColor();
+
+    try
+    {
+        var sw = Stopwatch.StartNew();
+        var result = HuggingFaceImporter.Import(modelDir, ImportOptions.DomainTrimmed);
+        sw.Stop();
+
+        Console.WriteLine();
+        Console.ForegroundColor = ConsoleColor.Green;
+        Console.Write($"  ✓ Import complete ");
+        Console.ResetColor();
+        Console.WriteLine($"({sw.ElapsedMilliseconds}ms)");
+        Console.WriteLine($"    Config: {result.Config.HiddenDim}d × {result.Config.NumLayers}L × {result.Config.NumHeads}H");
+        Console.WriteLine($"    Vocab: {result.ActiveVocab} active tokens ({result.TokenTableSize} in table)");
+        Console.WriteLine($"    File: {result.FileSizeBytes / (1024 * 1024)} MB → {ImportOptions.DomainTrimmed.OutputPath}");
+        Console.WriteLine();
+        Console.WriteLine("    Load with: load model.bmwm");
+    }
+    catch (Exception ex)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine($"  ✗ Import failed: {ex.Message}");
+        if (ex.InnerException is not null)
+            Console.WriteLine($"    {ex.InnerException.Message}");
         Console.ResetColor();
     }
     Console.WriteLine();

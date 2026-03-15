@@ -35,12 +35,43 @@ public static class AgentApiHandlers
             return _orchestrator;
 
         var engine = new BitNetEngine();
-        engine.LoadTestModel(ModelLoadOptions.Aggressive);
+
+        // Load the trained snapshot if available; fall back to test model
+        var snapshotPath = FindModelSnapshot();
+        if (snapshotPath is not null)
+            engine.LoadSnapshot(snapshotPath);
+        else
+            engine.LoadTestModel(ModelLoadOptions.Aggressive);
 
         var tools = AdminToolCatalogue.CreateRegistry();
 
         _orchestrator = new IntelligenceOrchestrator(engine, tools);
         return _orchestrator;
+    }
+
+    /// <summary>
+    /// Search well-known locations for the trained model snapshot (.bmwm).
+    /// Returns null if no snapshot is found.
+    /// </summary>
+    private static string? FindModelSnapshot()
+    {
+        // Check relative to the running assembly first, then common paths
+        var baseDir = AppContext.BaseDirectory;
+        string[] candidates =
+        [
+            Path.Combine(baseDir, "model.bmwm"),
+            Path.Combine(baseDir, "..", "model.bmwm"),
+            "model.bmwm",
+            Path.Combine(baseDir, "Data", "model.bmwm"),
+        ];
+
+        foreach (var path in candidates)
+        {
+            if (File.Exists(path))
+                return Path.GetFullPath(path);
+        }
+
+        return null;
     }
 
     /// <summary>POST /api/agent/chat</summary>

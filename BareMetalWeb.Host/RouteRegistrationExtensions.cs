@@ -3022,7 +3022,9 @@ public static class RouteRegistrationExtensions
             try
             {
                 var orchestrator = AgentApiHandlers.GetOrCreateOrchestrator();
-                aiResponse = await orchestrator.ProcessAsync(content, context.RequestAborted).ConfigureAwait(false);
+                aiResponse = orchestrator is null
+                    ? new Intelligence.ChatResponse("No model loaded — import a .bmwm snapshot first.", "error", 0f)
+                    : await orchestrator.ProcessAsync(content, context.RequestAborted).ConfigureAwait(false);
             }
             catch
             {
@@ -3071,6 +3073,15 @@ public static class RouteRegistrationExtensions
                 w.WriteNumber("latencyMs", assistantMsg.LatencyMs);
                 w.WriteString("resolvedIntent", aiResponse.ResolvedIntent);
                 w.WriteNumber("confidence", assistantMsg.Confidence);
+                if (aiResponse.NavigateUrl is not null)
+                    w.WriteString("navigateUrl", aiResponse.NavigateUrl);
+                if (aiResponse.PrefillFields is { Count: > 0 })
+                {
+                    w.WriteStartObject("prefillFields");
+                    foreach (var kvp in aiResponse.PrefillFields)
+                        w.WriteString(kvp.Key, kvp.Value);
+                    w.WriteEndObject();
+                }
                 w.WriteEndObject();
                 w.WriteEndObject();
             }
@@ -3954,6 +3965,206 @@ public static class RouteRegistrationExtensions
 
             await DataStoreProvider.Current.DeleteAsync<DeploymentNode>(key, context.RequestAborted).ConfigureAwait(false);
             context.Response.StatusCode = 204;
+        }));
+
+        // ── POST /api/bootstrap/register — first-boot node self-registration ────
+        host.RegisterRoute("POST /api/bootstrap/register", new RouteHandlerData(raw, async context =>
+        {
+            using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body,
+                default, context.RequestAborted).ConfigureAwait(false);
+            var root = doc.RootElement;
+
+            var nodeId     = root.TryGetProperty("nodeId", out var nid)             ? nid.GetString() ?? "" : "";
+            var secretHash = root.TryGetProperty("secretHash", out var sh)          ? sh.GetString() ?? "" : "";
+            var principal  = root.TryGetProperty("bootstrapPrincipal", out var bp)  ? bp.GetString() ?? "" : "";
+            var arch       = root.TryGetProperty("architecture", out var ar)        ? ar.GetString() ?? "" : "";
+            var osDesc     = root.TryGetProperty("osDescription", out var od)       ? od.GetString() ?? "" : "";
+            var glibc      = root.TryGetProperty("glibcVersion", out var gv)        ? gv.GetString() ?? "" : "";
+            var macHash    = root.TryGetProperty("macHash", out var mh)             ? mh.GetString() ?? "" : "";
+
+            if (string.IsNullOrEmpty(nodeId) || string.IsNullOrEmpty(secretHash))
+            {
+                context.Response.StatusCode = 400;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"error\":\"nodeId and secretHash required\"}");
+                return;
+            }
+
+            // Validate bootstrap principal against server-configured value
+            var expectedPrincipal = Environment.GetEnvironmentVariable("BMW_BOOTSTRAP_PRINCIPAL") ?? "";
+            if (!string.IsNullOrEmpty(expectedPrincipal) &&
+                !string.Equals(principal, expectedPrincipal, StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = 403;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"error\":\"bootstrap principal rejected\"}");
+                return;
+            }
+
+            // Reject duplicate registrations
+            var existing = DataStoreProvider.Current.Query<DeploymentNode>(new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "NodeId", Operator = QueryOperator.Equals, Value = nodeId }
+                },
+                Top = 1
+            }).FirstOrDefault();
+
+            if (existing != null)
+            {
+                context.Response.StatusCode = 409;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"error\":\"node already registered\"}");
+                return;
+            }
+
+            // Provision a new DeploymentNode — new nodes start in Testing ring
+            var node = new DeploymentNode
+            {
+                NodeId             = nodeId,
+                SecretHash         = secretHash,
+                Architecture       = string.IsNullOrEmpty(arch) ? "Arm64" : arch,
+                Ring               = "testing",
+                IsEnabled          = true,
+                PollIntervalSeconds = 60,
+                LastHeartbeatUtc   = DateTime.UtcNow,
+                LastAttestationUtc = DateTime.UtcNow,
+                OsDescription      = osDesc,
+                GlibcVersion       = glibc,
+                MacHash            = macHash,
+                BootstrapPrincipal = principal,
+                DisplayName        = nodeId,
+            };
+
+            // Derive cluster endpoint from the current request Host header
+            var scheme = context.HttpRequest.Scheme;
+            var hostHeader = context.HttpRequest.Host.ToString();
+            var clusterEndpoint = $"{scheme}://{hostHeader}";
+            node.ClusterEndpoint = clusterEndpoint;
+
+            await DataStoreProvider.Current.SaveAsync(node, context.RequestAborted).ConfigureAwait(false);
+
+            // Generate a per-node secret for future auth (derived from server-side randomness)
+            Span<byte> secretBytes = stackalloc byte[32];
+            System.Security.Cryptography.RandomNumberGenerator.Fill(secretBytes);
+            var nodeSecret = Convert.ToBase64String(secretBytes);
+
+            // Store the SHA-256 hash of the generated secret
+            node.SecretHash = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(nodeSecret))).ToLowerInvariant();
+            await DataStoreProvider.Current.SaveAsync(node, context.RequestAborted).ConfigureAwait(false);
+
+            // Return NodeIdentity so the agent can persist it
+            context.Response.StatusCode = 201;
+            context.Response.ContentType = "application/json";
+            await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
+            w.WriteStartObject();
+            w.WriteString("nodeId", node.NodeId);
+            w.WriteString("servicePrincipal", principal);
+            w.WriteString("secret", nodeSecret);
+            w.WriteString("clusterEndpoint", clusterEndpoint);
+            w.WriteString("certFingerprint", "");
+            w.WriteString("ring", node.Ring);
+            w.WriteEndObject();
+        }));
+
+        // ── POST /api/bootstrap/attest — per-boot platform attestation ──────────
+        host.RegisterRoute("POST /api/bootstrap/attest", new RouteHandlerData(raw, async context =>
+        {
+            // Authenticate via Bearer token
+            var authHeader = context.HttpRequest.Headers["Authorization"].ToString();
+            if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.Ordinal))
+            {
+                context.Response.StatusCode = 401; return;
+            }
+            var secret = authHeader.AsSpan(7).ToString();
+
+            using var doc = await JsonDocument.ParseAsync(context.HttpRequest.Body,
+                default, context.RequestAborted).ConfigureAwait(false);
+            var root = doc.RootElement;
+
+            var nodeId = root.TryGetProperty("nodeId", out var nid) ? nid.GetString() ?? "" : "";
+            if (string.IsNullOrEmpty(nodeId))
+            {
+                context.Response.StatusCode = 400;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"error\":\"nodeId required\"}");
+                return;
+            }
+
+            // Look up registered node
+            var node = DataStoreProvider.Current.Query<DeploymentNode>(new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "NodeId", Operator = QueryOperator.Equals, Value = nodeId }
+                },
+                Top = 1
+            }).FirstOrDefault();
+
+            if (node == null)
+            {
+                context.Response.StatusCode = 404;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"error\":\"node not registered\"}");
+                return;
+            }
+
+            // Verify bearer secret against stored hash
+            var secretHash = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(secret))).ToLowerInvariant();
+            if (!string.Equals(node.SecretHash, secretHash, StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = 401; return;
+            }
+
+            if (!node.IsEnabled)
+            {
+                context.Response.StatusCode = 403;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("{\"error\":\"node disabled\"}");
+                return;
+            }
+
+            // Check for platform drift (log warnings but don't block)
+            var arch    = root.TryGetProperty("architecture", out var ar)  ? ar.GetString() ?? "" : "";
+            var osDesc  = root.TryGetProperty("osDescription", out var od) ? od.GetString() ?? "" : "";
+            var glibc   = root.TryGetProperty("glibcVersion", out var gv)  ? gv.GetString() ?? "" : "";
+            var macHash = root.TryGetProperty("macHash", out var mh)       ? mh.GetString() ?? "" : "";
+
+            bool drifted = false;
+            if (!string.IsNullOrEmpty(node.MacHash) && !string.Equals(node.MacHash, macHash, StringComparison.OrdinalIgnoreCase))
+            {
+                Console.Error.WriteLine($"[BMW Bootstrap] WARN: node {nodeId} MAC hash changed (hardware swap?)");
+                drifted = true;
+            }
+            if (!string.IsNullOrEmpty(node.Architecture) && !string.Equals(node.Architecture, arch, StringComparison.OrdinalIgnoreCase))
+            {
+                Console.Error.WriteLine($"[BMW Bootstrap] WARN: node {nodeId} architecture changed {node.Architecture} → {arch}");
+                drifted = true;
+            }
+
+            // Update attestation fields
+            node.LastHeartbeatUtc   = DateTime.UtcNow;
+            node.LastAttestationUtc = DateTime.UtcNow;
+            if (!string.IsNullOrEmpty(arch))    node.Architecture  = arch;
+            if (!string.IsNullOrEmpty(osDesc))  node.OsDescription = osDesc;
+            if (!string.IsNullOrEmpty(glibc))   node.GlibcVersion  = glibc;
+            if (!string.IsNullOrEmpty(macHash)) node.MacHash        = macHash;
+
+            await DataStoreProvider.Current.SaveAsync(node, context.RequestAborted).ConfigureAwait(false);
+
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "application/json";
+            await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
+            w.WriteStartObject();
+            w.WriteBoolean("accepted", true);
+            w.WriteBoolean("drifted", drifted);
+            w.WriteString("ring", node.Ring);
+            w.WriteEndObject();
         }));
     }
 

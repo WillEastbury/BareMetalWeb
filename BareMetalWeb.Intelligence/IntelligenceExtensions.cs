@@ -20,7 +20,13 @@ public static class IntelligenceExtensions
     public static IntelligenceRoutes CreateIntelligenceRoutes()
     {
         var engine = new BitNetEngine();
-        engine.LoadTestModel(ModelLoadOptions.Default);
+
+        // Load the trained snapshot if available; fall back to test model
+        var snapshotPath = FindModelSnapshot();
+        if (snapshotPath is not null)
+            engine.LoadSnapshot(snapshotPath);
+        else
+            engine.LoadTestModel(ModelLoadOptions.Default);
 
         var tools = AdminToolCatalogue.CreateRegistry();
 
@@ -30,6 +36,31 @@ public static class IntelligenceExtensions
             ChatHandler,
             ToolsHandler,
             StatusHandler);
+    }
+
+    /// <summary>
+    /// Search well-known locations for the trained model snapshot (.bmwm).
+    /// </summary>
+    private static string? FindModelSnapshot()
+    {
+        var baseDir = AppContext.BaseDirectory;
+        string[] candidates =
+        [
+            Path.Combine(baseDir, "model.bmwm"),
+            Path.Combine(baseDir, "..", "model.bmwm"),
+            "model.bmwm",
+            Path.Combine(baseDir, "Data", "model.bmwm"),
+            Path.Combine(baseDir, "..", "BareMetalWeb.Intelligence.CLI", "model.bmwm"),
+            Path.Combine(baseDir, "..", "..", "BareMetalWeb.Intelligence.CLI", "model.bmwm"),
+        ];
+
+        foreach (var path in candidates)
+        {
+            if (File.Exists(path))
+                return Path.GetFullPath(path);
+        }
+
+        return null;
     }
 
     private static async Task ChatHandler(HttpContext context)

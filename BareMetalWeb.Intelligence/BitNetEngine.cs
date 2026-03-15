@@ -15,7 +15,7 @@ namespace BareMetalWeb.Intelligence;
 /// 
 public sealed class BitNetEngine : IBitNetEngine, IDisposable
 {
-    private readonly BitNetModelConfig _config;
+    private BitNetModelConfig _config;
     private VocabularyPruner? _pruner;
     private PruneStats? _pruneStats;
     private ModelSizeStats? _modelStats;
@@ -241,6 +241,100 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     }
 
     /// <summary>
+    /// Load weights directly from an import pipeline (HuggingFace importer).
+    /// Skips all pruning — the importer has already applied it.
+    /// </summary>
+    public void LoadFromImport(
+        TernaryLayer[] layers,
+        sbyte[] embeddings,
+        sbyte[] outputHead,
+        int activeVocab,
+        int dim,
+        string[] tokenTable)
+    {
+        _modelStats = ModelPruner.CalculateSize(layers, activeVocab, dim);
+
+        CompressToNative(layers, embeddings, outputHead, activeVocab, dim);
+
+        _tokenTable = tokenTable;
+        _tokenizer = new Tokenizer(_tokenTable);
+
+        _isLoaded = true;
+    }
+
+    /// <summary>
+    /// Load pre-packed NativeTernaryMatrix arrays directly — no sbyte[] intermediates.
+    /// Used by the streaming HuggingFace importer to avoid OOM on large models.
+    /// </summary>
+    public void LoadFromNativeImport(
+        NativeTernaryMatrix[] wq, NativeTernaryMatrix[] wk,
+        NativeTernaryMatrix[] wv, NativeTernaryMatrix[] wo,
+        NativeTernaryMatrix[] ffn,
+        NativeTernaryMatrix embeddings, NativeTernaryMatrix outputHead,
+        int activeVocab, int dim, string[] tokenTable)
+    {
+        DisposeNative();
+
+        _layerCount = wq.Length;
+        _compressedWq = wq;
+        _compressedWk = wk;
+        _compressedWv = wv;
+        _compressedWo = wo;
+        _compressedFfn = ffn;
+        _compressedEmbeddings = embeddings;
+        _compressedOutputHead = outputHead;
+
+        AllocateInferenceBuffers(dim, activeVocab);
+
+        NativeBytesAllocated = 0;
+        long layerWeights = 0;
+        long zeroWeightEstimate = 0;
+        var layerStatsList = new (MatrixStats Attn, MatrixStats Ffn)[_layerCount];
+        for (int i = 0; i < _layerCount; i++)
+        {
+            NativeBytesAllocated += _compressedWq[i].BytesAllocated
+                                  + _compressedWk[i].BytesAllocated
+                                  + _compressedWv[i].BytesAllocated
+                                  + _compressedWo[i].BytesAllocated;
+            NativeBytesAllocated += _compressedFfn[i].BytesAllocated;
+            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfn[i].Stats);
+
+            layerWeights += _compressedWq[i].Stats.LogicalWeights
+                          + _compressedWk[i].Stats.LogicalWeights
+                          + _compressedWv[i].Stats.LogicalWeights
+                          + _compressedWo[i].Stats.LogicalWeights
+                          + _compressedFfn[i].Stats.LogicalWeights;
+
+            // Estimate zero weights from zero-byte ratio (each zero byte = 4 zero weights)
+            zeroWeightEstimate += (long)(_compressedWq[i].Stats.ZeroByteCount
+                                + _compressedWk[i].Stats.ZeroByteCount
+                                + _compressedWv[i].Stats.ZeroByteCount
+                                + _compressedWo[i].Stats.ZeroByteCount
+                                + _compressedFfn[i].Stats.ZeroByteCount) * 4;
+        }
+        NativeBytesAllocated += _compressedEmbeddings.BytesAllocated;
+        NativeBytesAllocated += _compressedOutputHead.BytesAllocated;
+        LayerStats = layerStatsList;
+
+        long embeddingWeights = (long)activeVocab * dim * 2;
+        long totalWeights = layerWeights + embeddingWeights;
+        float sparsity = layerWeights > 0 ? (float)zeroWeightEstimate / layerWeights : 0f;
+        _modelStats = new ModelSizeStats(
+            TotalWeights: totalWeights,
+            LayerWeights: layerWeights,
+            EmbeddingWeights: embeddingWeights,
+            ZeroWeights: zeroWeightEstimate,
+            StoredBytes: totalWeights,
+            PackedBytes: (totalWeights * 2 + 7) / 8,
+            Sparsity: sparsity,
+            LayerCount: _layerCount);
+
+        _tokenTable = tokenTable;
+        _tokenizer = new Tokenizer(_tokenTable);
+        _isLoaded = true;
+    }
+
+    /// <summary>
     /// Pack all weight matrices from sbyte[] into 2-bit NativeTernaryMatrix.
     /// After packing, managed arrays become eligible for GC.
     /// Also pre-allocates all inference buffers and the KV cache.
@@ -323,13 +417,25 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// </summary>
     /// <param name="path">Path to the .bmwm snapshot file.</param>
     /// <param name="memoryMapped">If true, use memory-mapped I/O (avoids large managed copies).</param>
-    public void LoadSnapshot(string path, bool memoryMapped = false)
+    public void LoadSnapshot(string path, bool memoryMapped = false, int? maxSeqLenOverride = null)
     {
         var snapshot = memoryMapped
             ? ModelSnapshot.LoadMapped(path)
             : ModelSnapshot.Load(path);
 
         DisposeNative();
+
+        // Override engine config with the snapshot's config — the snapshot
+        // knows its own dimensions, layer count, vocab size, etc.
+        var snapshotConfig = snapshot.Config;
+        if (maxSeqLenOverride.HasValue)
+        {
+            snapshotConfig = snapshotConfig with
+            {
+                MaxSeqLen = Math.Min(snapshotConfig.MaxSeqLen, maxSeqLenOverride.Value)
+            };
+        }
+        _config = snapshotConfig;
 
         _layerCount = snapshot.Wq.Length;
         _compressedWq = snapshot.Wq;
@@ -339,8 +445,19 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _compressedFfn = snapshot.Ffn;
         _compressedEmbeddings = snapshot.Embeddings;
         _compressedOutputHead = snapshot.OutputHead;
-        _tokenTable = snapshot.Tokens;
-        _tokenizer  = _tokenTable is not null ? new Tokenizer(_tokenTable) : null;
+
+        // If the snapshot has a token table, use it.
+        // Otherwise build a synthetic vocabulary from the active vocab size.
+        if (snapshot.Tokens is { Length: > 0 })
+        {
+            _tokenTable = snapshot.Tokens;
+        }
+        else
+        {
+            var syntheticVocab = BuildSyntheticVocabulary(snapshot.ActiveVocab);
+            _tokenTable = syntheticVocab is string[] arr ? arr : syntheticVocab.ToArray();
+        }
+        _tokenizer = new Tokenizer(_tokenTable);
 
         int dim = _config.HiddenDim;
         int activeVocab = snapshot.ActiveVocab;
@@ -396,6 +513,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _lazySnapshot = ModelSnapshot.LoadLazy(path);
         var snap = _lazySnapshot.Data;
 
+        _config = snap.Config;
+
         _layerCount = snap.Wq.Length;
         _compressedWq = snap.Wq;
         _compressedWk = snap.Wk;
@@ -404,8 +523,17 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _compressedFfn = snap.Ffn;
         _compressedEmbeddings = snap.Embeddings;
         _compressedOutputHead = snap.OutputHead;
-        _tokenTable = snap.Tokens;
-        _tokenizer  = _tokenTable is not null ? new Tokenizer(_tokenTable) : null;
+
+        if (snap.Tokens is { Length: > 0 })
+        {
+            _tokenTable = snap.Tokens;
+        }
+        else
+        {
+            var syntheticVocab = BuildSyntheticVocabulary(snap.ActiveVocab);
+            _tokenTable = syntheticVocab is string[] arr ? arr : syntheticVocab.ToArray();
+        }
+        _tokenizer = new Tokenizer(_tokenTable);
 
         int dim = _config.HiddenDim;
         AllocateInferenceBuffers(dim, snap.ActiveVocab);
@@ -569,6 +697,12 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             TernaryTensor.RmsNormalize(bufHidden, bufNorm);
             _compressedOutputHead.MatVecMultiply(bufNorm, bufLogits);
 
+            // Suppress special tokens (PAD, BOS, UNK) from sampling —
+            // the model should only generate content tokens or EOS.
+            bufLogits[0] = int.MinValue; // PAD
+            bufLogits[1] = int.MinValue; // BOS
+            bufLogits[3] = int.MinValue; // UNK
+
             // Top-K sampling — stochastic, integer arithmetic
             int nextToken = Sampling.SampleTopK(
                 bufLogits,
@@ -579,9 +713,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
             if (nextToken == EosTokenId) break;
 
-            // Decode token to text and append
+            // Decode token to text and append — no separator injection;
+            // the space character is its own token (ID 4) in the vocabulary.
             string tok = DecodeToken(nextToken);
-            if (output.Length > 0) output.Append(' ');
             output.Append(tok);
 
             // Feed next token as input for the next step
@@ -761,14 +895,17 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private string DecodeToken(int tokenId)
     {
         if (_tokenTable is not null && (uint)tokenId < (uint)_tokenTable.Length)
-            return _tokenTable[tokenId] ?? $"tok{tokenId}";
+        {
+            var s = _tokenTable[tokenId];
+            if (s is not null && s.Length > 0)
+                return s;
+        }
         return tokenId switch
         {
-            0 => "<pad>",
-            1 => "<bos>",
-            EosTokenId => "<eos>",
-            3 => "<unk>",
-            _ => $"tok{tokenId}"
+            Tokenizer.PadId => "",
+            Tokenizer.BosId => "",
+            Tokenizer.EosId => "",
+            _ => "?",
         };
     }
 
@@ -786,6 +923,13 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         return denom > 1e-10 ? (float)(dot / denom) : 0f;
     }
 
+    /// <summary>
+    /// Builds a character-unigram vocabulary for a 256-token model.
+    /// IDs 0–3: special tokens. IDs 4–98: printable ASCII (space 0x20 … tilde 0x7E).
+    /// IDs 99+: multi-character domain tokens used by greedy longest-match encoding.
+    /// Space is token ID 4 — the model generates it explicitly, so decoded tokens
+    /// are concatenated without injected separators.
+    /// </summary>
     private static IReadOnlyList<string> BuildSyntheticVocabulary(int vocabSize)
     {
         var tokens = new string[vocabSize];
@@ -793,17 +937,50 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         tokens[1] = "<BOS>";
         tokens[2] = "<EOS>";
         tokens[3] = "<UNK>";
-        for (int i = 4; i < vocabSize; i++)
-            tokens[i] = $"tok_{i}";
 
+        // Printable ASCII: 95 characters (space 0x20 through tilde 0x7E)
+        // ID 4 = ' ', ID 5 = '!', ..., ID 98 = '~'
+        const int asciiBase = 4;
+        const char firstPrintable = ' ';  // 0x20
+        const char lastPrintable  = '~';  // 0x7E
+        int asciiCount = lastPrintable - firstPrintable + 1; // 95
+
+        for (int i = 0; i < asciiCount && asciiBase + i < vocabSize; i++)
+            tokens[asciiBase + i] = ((char)(firstPrintable + i)).ToString();
+
+        // Multi-character domain tokens at IDs 99+.
+        // These let the greedy encoder compress common words into single tokens,
+        // producing shorter sequences and better inference quality.
+        int domainBase = asciiBase + asciiCount; // 99
         string[] domainTokens = [
-            "query", "entity", "list", "describe", "search", "status",
-            "help", "index", "system", "field", "schema", "data",
-            "count", "user", "session", "type", "name", "id",
-            "create", "delete", "update", "show", "find", "get"
+            // Whitespace / formatting
+            "  ", "\n", "\t",
+            // Common English
+            "the", "is", "are", "was", "not", "and", "for", "with", "that", "this",
+            "from", "have", "has", "can", "will", "but", "all", "your", "you", "it",
+            "of", "to", "in", "on", "at", "by", "an", "or", "if", "no", "yes",
+            "do", "did", "be", "my", "me", "we", "so", "up", "out", "how", "what",
+            "when", "where", "which", "who", "why",
+            // Domain commands & entities
+            "create", "delete", "update", "show", "find", "get", "list", "search",
+            "query", "entity", "field", "schema", "data", "index", "view",
+            "help", "status", "system", "count", "describe",
+            "user", "session", "name", "type", "id", "value",
+            "todo", "task", "note", "item", "record", "page",
+            // Common suffixes / fragments
+            "ing", "tion", "ed", "er", "ly", "ment", "ness", "able",
+            // Punctuation bigrams
+            ": ", ", ", ". ", "? ", "! ",
         ];
-        for (int i = 0; i < domainTokens.Length && i + 4 < vocabSize; i++)
-            tokens[i + 4] = domainTokens[i];
+        for (int i = 0; i < domainTokens.Length && domainBase + i < vocabSize; i++)
+            tokens[domainBase + i] = domainTokens[i];
+
+        // Fill any remaining slots with single-char fallback
+        for (int i = 0; i < vocabSize; i++)
+        {
+            if (tokens[i] is null)
+                tokens[i] = $"<{i}>";
+        }
 
         return tokens;
     }
