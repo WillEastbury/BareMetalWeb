@@ -121,24 +121,23 @@ public static class ModelSnapshot
         bw.Write(mergeTableBytes);
 
         // ── Packed matrix data ──────────────────────────────────────
+        // Stream each matrix in 64KB chunks and dispose after writing to free native memory
         var buf = new byte[65536];
         for (int i = 0; i < matrixCount; i++)
         {
             var m = matrices[i];
             long remaining = m.TotalPackedDataBytes;
-            // Write entire matrix packed data
-            if (remaining <= buf.Length)
+            long offset = 0;
+            while (remaining > 0)
             {
-                m.CopyPackedDataTo(buf.AsSpan(0, (int)remaining));
-                bw.Write(buf, 0, (int)remaining);
+                int chunk = (int)Math.Min(remaining, buf.Length);
+                m.CopyPackedDataChunk(offset, buf.AsSpan(0, chunk));
+                bw.Write(buf, 0, chunk);
+                offset += chunk;
+                remaining -= chunk;
             }
-            else
-            {
-                // For very large matrices, write in chunks
-                var fullBuf = new byte[remaining];
-                m.CopyPackedDataTo(fullBuf);
-                bw.Write(fullBuf);
-            }
+            // Free native memory as we go — critical for large models
+            m.Dispose();
         }
 
         bw.Flush();
