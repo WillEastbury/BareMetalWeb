@@ -319,4 +319,66 @@ public class NativeTernaryMatrixTests
         // 512 cols / 4 = 128 bytes/row, AlignUp(128,32)=128, 512*128 = 65536
         Assert.Equal(65536, matrix.BytesAllocated);
     }
+
+    // ── Streaming pack API (used by HF importer) ──────────────────────────
+
+    [Fact]
+    public void AllocateAndPackRowInPlace_ProducesSameResultAsPack()
+    {
+        int rows = 4, cols = 8;
+        var weights = new sbyte[rows * cols];
+        var rng = Random.Shared;
+        int[] vals = [-1, 0, 1];
+        for (int i = 0; i < weights.Length; i++)
+            weights[i] = (sbyte)vals[rng.Next(3)];
+
+        // Build via Pack (reference)
+        using var reference = NativeTernaryMatrix.Pack(weights, rows, cols);
+
+        // Build via streaming API
+        using var streamed = NativeTernaryMatrix.Allocate(rows, cols);
+        for (int r = 0; r < rows; r++)
+            streamed.PackRowInPlace(r, weights.AsSpan(r * cols, cols));
+        streamed.FinalizeStats();
+
+        // Both matrices must decode identically
+        var refRow    = new int[cols];
+        var streamRow = new int[cols];
+        for (int r = 0; r < rows; r++)
+        {
+            reference.DecodeRow(r, refRow);
+            streamed.DecodeRow(r, streamRow);
+            Assert.Equal(refRow, streamRow);
+        }
+    }
+
+    [Fact]
+    public void FinalizeStats_ComputesCorrectZeroByteRatio()
+    {
+        // 4×4 matrix of all-zero weights → every packed byte is 0x00
+        int rows = 4, cols = 4;
+        using var m = NativeTernaryMatrix.Allocate(rows, cols);
+        for (int r = 0; r < rows; r++)
+            m.PackRowInPlace(r, new sbyte[cols]);
+        m.FinalizeStats();
+
+        Assert.Equal(1.0f, m.Stats.ZeroByteRatio);
+        Assert.Equal(rows * cols, m.Stats.LogicalWeights);
+    }
+
+    [Fact]
+    public void PackRowInPlace_OutOfRange_Throws()
+    {
+        using var m = NativeTernaryMatrix.Allocate(2, 4);
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => m.PackRowInPlace(2, new sbyte[4])); // row 2 >= rows 2
+    }
+
+    [Fact]
+    public void PackRowInPlace_ShortRow_Throws()
+    {
+        using var m = NativeTernaryMatrix.Allocate(2, 4);
+        Assert.Throws<ArgumentException>(
+            () => m.PackRowInPlace(0, new sbyte[3])); // 3 < 4 cols
+    }
 }
