@@ -139,17 +139,17 @@ public static class HuggingFaceImporter
         // Blocking GC to reclaim output head row-buffer before tokenizer loading.
         GC.Collect(1, GCCollectionMode.Optimized, blocking: true);
 
-        // ── 8. Load tokenizer vocab ────────────────────────────────────────
-        progress?.Invoke("  Loading tokenizer vocab ...");
-        var tokenTable = LoadTokenizerVocab(hfDir, vocab);
-        progress?.Invoke($"  Vocab loaded: {tokenTable?.Count ?? 0} tokens");
+        // ── 8. Load tokenizer vocab and BPE merges ─────────────────────────
+        progress?.Invoke("  Loading tokenizer vocab + BPE merges ...");
+        var (tokenTable, bpeMerges) = LoadTokenizerVocabAndMerges(hfDir, vocab);
+        progress?.Invoke($"  Vocab loaded: {tokenTable?.Count ?? 0} tokens, {bpeMerges?.Count ?? 0} merges");
 
         // ── 9. Write .bmwm snapshot ───────────────────────────────────────
         progress?.Invoke($"  Writing snapshot to {outputPath} ...");
         ModelSnapshot.Save(outputPath, bmwConfig, vocab,
             wq, wk, wv, wo, ffnGate, ffnUp, ffnDown,
             embeddings, outputHead,
-            tokenTable);
+            tokenTable, bpeMerges);
 
         // ── 10. Dispose native matrices ────────────────────────────────────
         for (int i = 0; i < numLayers; i++)
@@ -282,6 +282,28 @@ public static class HuggingFaceImporter
     }
 
     /// <summary>
+    /// Load the tokenizer vocabulary and BPE merges from tokenizer.json.
+    /// </summary>
+    private static (IReadOnlyList<string>? Vocab, IReadOnlyList<string>? Merges)
+        LoadTokenizerVocabAndMerges(string hfDir, int vocabSize)
+    {
+        string tokPath = Path.Combine(hfDir, "tokenizer.json");
+        if (!File.Exists(tokPath)) return (null, null);
+
+        try
+        {
+            var text = File.ReadAllText(tokPath).AsSpan();
+            var vocab = ParseVocabFromTokenizerJson(text, vocabSize);
+            var merges = ParseMergesFromTokenizerJson(text);
+            return (vocab, merges);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    /// <summary>
     /// Load the tokenizer vocabulary from tokenizer.json (HuggingFace format).
     /// Returns null if no tokenizer file is found.
     /// </summary>
@@ -341,6 +363,33 @@ public static class HuggingFaceImporter
         // Array form not needed for BitNet-b1.58-2B-4T (uses object form)
 
         return result;
+    }
+
+    /// <summary>
+    /// Parse the "merges" array from a HuggingFace tokenizer.json.
+    /// Returns a list of merge strings like "Ġ t" (space-separated pair).
+    /// </summary>
+    private static IReadOnlyList<string>? ParseMergesFromTokenizerJson(ReadOnlySpan<char> json)
+    {
+        int idx = IndexOf(json, "\"merges\"");
+        if (idx < 0) return null;
+        idx += 8; // skip "merges"
+
+        while (idx < json.Length && json[idx] is ' ' or '\t' or '\n' or '\r' or ':') idx++;
+        if (idx >= json.Length || json[idx] != '[') return null;
+        idx++; // consume '['
+
+        var merges = new List<string>(300_000);
+        while (idx < json.Length && json[idx] != ']')
+        {
+            while (idx < json.Length && json[idx] is ' ' or '\t' or '\n' or '\r' or ',') idx++;
+            if (idx >= json.Length || json[idx] == ']') break;
+            if (json[idx] != '"') { SkipJsonValue(json, ref idx); continue; }
+
+            merges.Add(ReadJsonString(json, ref idx));
+        }
+
+        return merges;
     }
 
     // ── Config.json field helpers ─────────────────────────────────────────

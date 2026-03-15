@@ -50,7 +50,8 @@ public static class ModelSnapshot
         NativeTernaryMatrix[] ffnDown,
         NativeTernaryMatrix compressedEmbeddings,
         NativeTernaryMatrix compressedOutputHead,
-        IReadOnlyList<string>? tokenTable = null)
+        IReadOnlyList<string>? tokenTable = null,
+        IReadOnlyList<string>? bpeMerges = null)
     {
         int layerCount = wq.Length;
         int matrixCount = layerCount * 7 + 2;
@@ -70,14 +71,16 @@ public static class ModelSnapshot
         matrices[matrixCount - 2] = compressedEmbeddings;
         matrices[matrixCount - 1] = compressedOutputHead;
 
-        // Encode token table
+        // Encode token table and BPE merges
         byte[] tokenTableBytes = EncodeTokenTable(tokenTable);
+        byte[] mergeTableBytes = EncodeTokenTable(bpeMerges);
         int tokenCount = tokenTable?.Count ?? 0;
+        int mergeCount = bpeMerges?.Count ?? 0;
 
         // Calculate offsets
         long descriptorsOffset = HeaderSize;
         long tokenTableOffset = descriptorsOffset + (long)matrixCount * DescriptorSize;
-        long packedDataOffset = tokenTableOffset + tokenTableBytes.Length;
+        long packedDataOffset = tokenTableOffset + tokenTableBytes.Length + mergeTableBytes.Length;
 
         using var fs = new FileStream(path, FileMode.Create, FileAccess.Write,
             FileShare.None, 65536, FileOptions.SequentialScan);
@@ -97,7 +100,7 @@ public static class ModelSnapshot
         bw.Write(tokenTableOffset);
         bw.Write(packedDataOffset);
         bw.Write(config.FfnDim);    // v3: FFN intermediate dimension
-        bw.Write(0);                // reserved
+        bw.Write(mergeCount);        // v3: BPE merge count (was reserved)
 
         // ── Matrix descriptors ──────────────────────────────────────
         long dataOffset = packedDataOffset;
@@ -113,8 +116,9 @@ public static class ModelSnapshot
             dataOffset += dataLen;
         }
 
-        // ── Token table ─────────────────────────────────────────────
+        // ── Token table + BPE merges ────────────────────────────────
         bw.Write(tokenTableBytes);
+        bw.Write(mergeTableBytes);
 
         // ── Packed matrix data ──────────────────────────────────────
         var buf = new byte[65536];
@@ -172,10 +176,11 @@ public static class ModelSnapshot
         long packedDataOffset = br.ReadInt64();
 
         int ffnDim = 0;
+        int mergeCount = 0;
         if (version >= 3)
         {
             ffnDim = br.ReadInt32();
-            br.ReadInt32(); // reserved
+            mergeCount = br.ReadInt32(); // BPE merge count (was reserved)
         }
 
         // v1: 2 matrices per layer (combined attn + ffn) + 2 (embeddings + outputHead)
@@ -200,9 +205,10 @@ public static class ModelSnapshot
                 br.ReadInt64()); // dataLength
         }
 
-        // ── Token table ─────────────────────────────────────────────
+        // ── Token table + BPE merges ────────────────────────────────
         fs.Seek(tokenTableOffset, SeekOrigin.Begin);
         string[] tokens = DecodeTokenTable(br, tokenCount);
+        string[] merges = DecodeTokenTable(br, mergeCount);
 
         // ── Load matrices ───────────────────────────────────────────
         var matrices = new NativeTernaryMatrix[matrixCount];
@@ -286,7 +292,8 @@ public static class ModelSnapshot
             FfnGate: ffnGate, FfnUp: ffnUp, FfnDown: ffnDown,
             Embeddings: matrices[matrixCount - 2],
             OutputHead: matrices[matrixCount - 1],
-            Tokens: tokens);
+            Tokens: tokens,
+            Merges: merges);
     }
 
     /// <summary>
@@ -334,10 +341,11 @@ public static class ModelSnapshot
             long tokenTableOffset = MemoryMarshal.Read<long>(headerSpan[40..]);
 
             int mappedFfnDim = 0;
+            int mappedMergeCount = 0;
             if (version >= 3)
             {
                 mappedFfnDim = MemoryMarshal.Read<int>(headerSpan[56..]);
-                // headerSpan[60..64] is reserved
+                mappedMergeCount = MemoryMarshal.Read<int>(headerSpan[60..]);
             }
 
             if (matrixCount != layerCount * 7 + 2 && matrixCount != layerCount * 5 + 2 && matrixCount != layerCount * 2 + 2)
@@ -368,7 +376,7 @@ public static class ModelSnapshot
                 );
             }
 
-            // ── Token table ─────────────────────────────────────────
+            // ── Token table + BPE merges ────────────────────────────
             // Bounds: validate tokenTableOffset and token table region
             if (tokenTableOffset < 0 || tokenTableOffset > fileSize)
                 throw new InvalidDataException(
@@ -379,12 +387,14 @@ public static class ModelSnapshot
                     $"Token table region out of bounds (offset={tokenTableOffset}, end={tokenTableEnd}, file={fileSize})");
 
             string[] tokens;
+            string[] mappedMerges;
             using (var tokenStream = new UnmanagedMemoryStream(
                 basePtr + tokenTableOffset,
                 tokenTableEnd - tokenTableOffset))
             using (var tbr = new BinaryReader(tokenStream, Encoding.UTF8))
             {
                 tokens = DecodeTokenTable(tbr, tokenCount);
+                mappedMerges = DecodeTokenTable(tbr, mappedMergeCount);
             }
 
             // ── Matrices from mapped memory ─────────────────────────
@@ -452,7 +462,7 @@ public static class ModelSnapshot
 
             return new SnapshotData(config, activeVocab, wqA, wkA, wvA, woA,
                 ffnGateA, ffnUpA, ffnDownA,
-                matrices[matrixCount - 2], matrices[matrixCount - 1], tokens);
+                matrices[matrixCount - 2], matrices[matrixCount - 1], tokens, mappedMerges);
         }
         finally
         {
@@ -506,10 +516,11 @@ public static class ModelSnapshot
             long tokenTableOffset = MemoryMarshal.Read<long>(headerSpan[40..]);
 
             int lazyFfnDim = 0;
+            int lazyMergeCount = 0;
             if (version >= 3)
             {
                 lazyFfnDim = MemoryMarshal.Read<int>(headerSpan[56..]);
-                // headerSpan[60..64] is reserved
+                lazyMergeCount = MemoryMarshal.Read<int>(headerSpan[60..]);
             }
 
             if (matrixCount != layerCount * 7 + 2 && matrixCount != layerCount * 5 + 2 && matrixCount != layerCount * 2 + 2)
@@ -540,7 +551,7 @@ public static class ModelSnapshot
                 );
             }
 
-            // ── Token table ─────────────────────────────────────────────
+            // ── Token table + BPE merges ────────────────────────────────
             // Bounds: validate tokenTableOffset and token table region
             if (tokenTableOffset < 0 || tokenTableOffset > fs.Length)
                 throw new InvalidDataException(
@@ -551,12 +562,14 @@ public static class ModelSnapshot
                     $"Token table region out of bounds (offset={tokenTableOffset}, end={lazyTokenEnd}, file={fs.Length})");
 
             string[] tokens;
+            string[] lazyMerges;
             using (var tokenStream = new UnmanagedMemoryStream(
                 basePtr + tokenTableOffset,
                 lazyTokenEnd - tokenTableOffset))
             using (var tbr = new BinaryReader(tokenStream, Encoding.UTF8))
             {
                 tokens = DecodeTokenTable(tbr, tokenCount);
+                lazyMerges = DecodeTokenTable(tbr, lazyMergeCount);
             }
 
             // ── Zero-copy matrices from mapped memory ───────────────────
@@ -635,7 +648,7 @@ public static class ModelSnapshot
 
             var config = new BitNetModelConfig(hiddenDim, layerCount, numHeads, vocabSize, maxSeqLen, lazyFfnDim);
             var data = new SnapshotData(config, activeVocab, wqL, wkL, wvL, woL,
-                ffnGateL, ffnUpL, ffnDownL, embeddings, outputHead, tokens);
+                ffnGateL, ffnUpL, ffnDownL, embeddings, outputHead, tokens, lazyMerges);
 
             return new LazySnapshot(fs, mmf, accessor, basePtr, data);
         }
@@ -691,7 +704,8 @@ public sealed record SnapshotData(
     NativeTernaryMatrix[] FfnDown,
     NativeTernaryMatrix Embeddings,
     NativeTernaryMatrix OutputHead,
-    string[] Tokens) : IDisposable
+    string[] Tokens,
+    string[] Merges) : IDisposable
 {
     public void Dispose()
     {

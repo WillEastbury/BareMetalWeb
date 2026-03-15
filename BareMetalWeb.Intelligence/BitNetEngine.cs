@@ -58,6 +58,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
     // Vocabulary strings for token decoding, set at load time.
     private string[]? _tokenTable;
+    // BPE merge rules (from HuggingFace tokenizer.json), null for legacy models.
+    private string[]? _merges;
     // Tokenizer wraps the token table with encode/decode logic.
     private Tokenizer? _tokenizer;
 
@@ -167,7 +169,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         CompressToNative(layers, embeddings, outputHead, activeVocab, dim);
 
         _tokenTable = tokenTable;
-        _tokenizer = new Tokenizer(_tokenTable);
+        _tokenizer = new Tokenizer(_tokenTable, _merges);
 
         _isLoaded = true;
     }
@@ -248,7 +250,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             LayerCount: _layerCount);
 
         _tokenTable = tokenTable;
-        _tokenizer = new Tokenizer(_tokenTable);
+        _tokenizer = new Tokenizer(_tokenTable, _merges);
         _isLoaded = true;
     }
 
@@ -384,7 +386,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             var syntheticVocab = BuildSyntheticVocabulary(snapshot.ActiveVocab);
             _tokenTable = syntheticVocab is string[] arr ? arr : syntheticVocab.ToArray();
         }
-        _tokenizer = new Tokenizer(_tokenTable);
+        _merges = snapshot.Merges is { Length: > 0 } ? snapshot.Merges : null;
+        _tokenizer = new Tokenizer(_tokenTable, _merges);
 
         int dim = _config.HiddenDim;
         int activeVocab = snapshot.ActiveVocab;
@@ -471,7 +474,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             var syntheticVocab = BuildSyntheticVocabulary(snap.ActiveVocab);
             _tokenTable = syntheticVocab is string[] arr ? arr : syntheticVocab.ToArray();
         }
-        _tokenizer = new Tokenizer(_tokenTable);
+        _merges = snap.Merges is { Length: > 0 } ? snap.Merges : null;
+        _tokenizer = new Tokenizer(_tokenTable, _merges);
 
         int dim = _config.HiddenDim;
         AllocateInferenceBuffers(dim, snap.ActiveVocab);
@@ -863,11 +867,14 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     }
 
     /// <summary>
-    /// Maps a token ID to its display string using the loaded token table,
-    /// or falls back to a domain-generic name.
+    /// Maps a token ID to its display string using the loaded token table.
+    /// For BPE tokenizers, converts byte-level Unicode chars to UTF-8 text.
     /// </summary>
     private string DecodeToken(int tokenId)
     {
+        if (_tokenizer is not null)
+            return _tokenizer.DecodeToText(tokenId);
+
         if (_tokenTable is not null && (uint)tokenId < (uint)_tokenTable.Length)
         {
             var s = _tokenTable[tokenId];
@@ -993,6 +1000,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _kvCacheK = null;
         _kvCacheV = null;
         _tokenTable = null;
+        _merges = null;
         _tokenizer  = null;
         NativeBytesAllocated = 0;
         LayerStats = null;
