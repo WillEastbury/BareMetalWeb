@@ -44,14 +44,19 @@ public static class IntelligenceExtensions
     /// Attempt to load a .bmwm snapshot from well-known paths.
     /// Returns true when a snapshot was found and loaded successfully.
     /// </summary>
-    public static bool TryLoadSnapshot(BitNetEngine engine)
+    public static bool TryLoadSnapshot(BitNetEngine engine, int? maxSeqLenOverride = null)
     {
         foreach (var path in GetSnapshotSearchPaths())
         {
             if (!File.Exists(path)) continue;
             try
             {
-                engine.LoadSnapshot(path);
+                // Use lazy mmap loading for large models (>50 MB) to avoid OOM
+                var fi = new FileInfo(path);
+                if (fi.Length > 50 * 1024 * 1024)
+                    engine.LoadSnapshotLazy(path, maxSeqLenOverride);
+                else
+                    engine.LoadSnapshot(path, maxSeqLenOverride: maxSeqLenOverride);
                 return true;
             }
             catch (Exception ex)

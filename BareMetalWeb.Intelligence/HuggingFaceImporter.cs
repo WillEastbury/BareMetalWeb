@@ -93,25 +93,35 @@ public static class HuggingFaceImporter
 
         progress?.Invoke($"  Effective dim={dim}, maxSeqLen capped to {maxSeqLen}");
 
-        // ── 5. Build output config ─────────────────────────────────────────
-        var bmwConfig = new BitNetModelConfig(dim, numLayers, numHeads, vocab, maxSeqLen);
+        // ── 5. Derive FFN intermediate dimension from gate_proj shape ──────
+        var gate0Key = LayerGateKey(0);
+        int ffnDim = tensorMap.ContainsKey(gate0Key)
+            ? tensorMap[gate0Key].Info.Rows   // gate_proj is [ffnDim × dim]
+            : dim;                            // fallback: square FFN
+
+        var bmwConfig = new BitNetModelConfig(dim, numLayers, numHeads, vocab, maxSeqLen, ffnDim);
+        progress?.Invoke($"  FFN intermediate dim={ffnDim}, gated SwiGLU={bmwConfig.HasGatedFfn}");
 
         // ── 6. Import per-layer matrices ───────────────────────────────────
-        var wq  = new NativeTernaryMatrix[numLayers];
-        var wk  = new NativeTernaryMatrix[numLayers];
-        var wv  = new NativeTernaryMatrix[numLayers];
-        var wo  = new NativeTernaryMatrix[numLayers];
-        var ffn = new NativeTernaryMatrix[numLayers];
+        var wq      = new NativeTernaryMatrix[numLayers];
+        var wk      = new NativeTernaryMatrix[numLayers];
+        var wv      = new NativeTernaryMatrix[numLayers];
+        var wo      = new NativeTernaryMatrix[numLayers];
+        var ffnGate = new NativeTernaryMatrix[numLayers];
+        var ffnUp   = new NativeTernaryMatrix[numLayers];
+        var ffnDown = new NativeTernaryMatrix[numLayers];
 
         for (int i = 0; i < numLayers; i++)
         {
             progress?.Invoke($"  Layer {i + 1}/{numLayers}: importing attention + ffn ...");
 
-            wq[i]  = StreamTensor(tensorMap, LayerWqKey(i),   dim, dim, progress);
-            wk[i]  = StreamTensor(tensorMap, LayerWkKey(i),   dim, dim, progress);
-            wv[i]  = StreamTensor(tensorMap, LayerWvKey(i),   dim, dim, progress);
-            wo[i]  = StreamTensor(tensorMap, LayerWoKey(i),   dim, dim, progress);
-            ffn[i] = StreamTensor(tensorMap, LayerFfnKey(i),  dim, dim, progress);
+            wq[i]      = StreamTensor(tensorMap, LayerWqKey(i),   dim, dim, progress);
+            wk[i]      = StreamTensor(tensorMap, LayerWkKey(i),   dim, dim, progress);
+            wv[i]      = StreamTensor(tensorMap, LayerWvKey(i),   dim, dim, progress);
+            wo[i]      = StreamTensor(tensorMap, LayerWoKey(i),   dim, dim, progress);
+            ffnGate[i] = StreamTensor(tensorMap, LayerGateKey(i), ffnDim, dim, progress);
+            ffnUp[i]   = StreamTensor(tensorMap, LayerUpKey(i),   ffnDim, dim, progress);
+            ffnDown[i] = StreamTensor(tensorMap, LayerDownKey(i), dim, ffnDim, progress);
 
             // Blocking GC after each layer to reclaim row-buffers before next layer allocates.
             // Non-blocking collection risks memory pressure spikes on constrained hosts.
@@ -137,7 +147,7 @@ public static class HuggingFaceImporter
         // ── 9. Write .bmwm snapshot ───────────────────────────────────────
         progress?.Invoke($"  Writing snapshot to {outputPath} ...");
         ModelSnapshot.Save(outputPath, bmwConfig, vocab,
-            wq, wk, wv, wo, ffn,
+            wq, wk, wv, wo, ffnGate, ffnUp, ffnDown,
             embeddings, outputHead,
             tokenTable);
 
@@ -145,7 +155,8 @@ public static class HuggingFaceImporter
         for (int i = 0; i < numLayers; i++)
         {
             wq[i].Dispose(); wk[i].Dispose(); wv[i].Dispose();
-            wo[i].Dispose(); ffn[i].Dispose();
+            wo[i].Dispose();
+            ffnGate[i].Dispose(); ffnUp[i].Dispose(); ffnDown[i].Dispose();
         }
         embeddings.Dispose();
         outputHead.Dispose();
@@ -166,15 +177,9 @@ public static class HuggingFaceImporter
     private static string LayerWvKey(int i)  => $"model.layers.{i}.self_attn.v_proj.weight";
     private static string LayerWoKey(int i)  => $"model.layers.{i}.self_attn.o_proj.weight";
 
-    /// <summary>
-    /// Prefer gate_proj (SwiGLU first operand) as the FFN representative.
-    /// Falls back to mlp.fc1 or mlp.dense_h_to_4h for other architectures.
-    /// </summary>
-    private static string LayerFfnKey(int i)
-    {
-        // Priority list — return first key; validated separately
-        return $"model.layers.{i}.mlp.gate_proj.weight";
-    }
+    private static string LayerGateKey(int i) => $"model.layers.{i}.mlp.gate_proj.weight";
+    private static string LayerUpKey(int i)   => $"model.layers.{i}.mlp.up_proj.weight";
+    private static string LayerDownKey(int i) => $"model.layers.{i}.mlp.down_proj.weight";
 
     private static string[] RequiredLayerSuffixes =
     [
@@ -183,6 +188,8 @@ public static class HuggingFaceImporter
         "self_attn.v_proj.weight",
         "self_attn.o_proj.weight",
         "mlp.gate_proj.weight",
+        "mlp.up_proj.weight",
+        "mlp.down_proj.weight",
     ];
 
     // ── Validation ────────────────────────────────────────────────────────

@@ -15,20 +15,22 @@ namespace BareMetalWeb.Intelligence;
 /// 
 public sealed class BitNetEngine : IBitNetEngine, IDisposable
 {
-    private readonly BitNetModelConfig _config;
-    private VocabularyPruner? _pruner;
-    private PruneStats? _pruneStats;
+    private BitNetModelConfig _config;
+    private VocabularyPruner? _pruner = null;
+    private PruneStats? _pruneStats = null;
     private ModelSizeStats? _modelStats;
-    private GroupPruneStats? _groupPruneStats;
-    private SemanticPruningStats? _semanticPruneStats;
+    private GroupPruneStats? _groupPruneStats = null;
+    private SemanticPruningStats? _semanticPruneStats = null;
 
     // Compressed storage — 2-bit packed in native (unmanaged) memory.
-    // Each layer has four attention projections (Q, K, V, O) plus FFN.
+    // Each layer has four attention projections (Q, K, V, O) plus gated FFN (gate, up, down).
     private NativeTernaryMatrix[]? _compressedWq;
     private NativeTernaryMatrix[]? _compressedWk;
     private NativeTernaryMatrix[]? _compressedWv;
     private NativeTernaryMatrix[]? _compressedWo;
-    private NativeTernaryMatrix[]? _compressedFfn;
+    private NativeTernaryMatrix[]? _compressedFfnGate;  // [ffnDim × dim]
+    private NativeTernaryMatrix[]? _compressedFfnUp;    // [ffnDim × dim]
+    private NativeTernaryMatrix[]? _compressedFfnDown;  // [dim × ffnDim]
     private NativeTernaryMatrix? _compressedEmbeddings;
     private NativeTernaryMatrix? _compressedOutputHead;
     private LazySnapshot? _lazySnapshot; // holds mmap open when lazy-loaded
@@ -45,6 +47,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private int[]? _bufPreWo;     // pre-Wo attention output [dim]
     private int[]? _bufScores;    // per-head dot-product scores [maxSeqLen]
     private int[]? _bufLogits;    // output head logits [vocabSize]
+    private int[]? _bufFfnGate;   // gated FFN gate output   [ffnDim]
+    private int[]? _bufFfnUp;     // gated FFN up output     [ffnDim]
+    private int[]? _bufFfnDown;   // gated FFN down input    [ffnDim]
 
     // Per-layer KV cache — stores K and V for every past token position.
     // _kvCacheK[layer] = int[maxSeqLen × dim],  _kvCacheV[layer] = int[maxSeqLen × dim]
@@ -146,97 +151,104 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     }
 
     /// <summary>
-    /// Load a test model with optional DataScaffold-informed vocabulary pruning
-    /// and layer/head pruning. After pruning, compresses all weights to 2-bit
-    /// packed native memory and frees managed arrays.
+    /// Load weights directly from an import pipeline (HuggingFace importer).
+    /// Skips all pruning — the importer has already applied it.
     /// </summary>
-    public void LoadTestModel(ModelLoadOptions? options = null)
+    public void LoadFromImport(
+        TernaryLayer[] layers,
+        sbyte[] embeddings,
+        sbyte[] outputHead,
+        int activeVocab,
+        int dim,
+        string[] tokenTable)
     {
-        options ??= ModelLoadOptions.Default;
-        int dim = _config.HiddenDim;
-        int vocab = _config.VocabSize;
-
-        // 1. Create layers (temporary managed arrays)
-        var layers = new TernaryLayer[_config.NumLayers];
-        for (int i = 0; i < _config.NumLayers; i++)
-            layers[i] = TernaryLayer.CreateRandom(dim, _config.NumHeads);
-
-        // 2. Create embedding and output head weights
-        var rng = Random.Shared;
-        var embeddings = new sbyte[vocab * dim];
-        var outputHead = new sbyte[vocab * dim];
-        for (int i = 0; i < embeddings.Length; i++)
-        {
-            embeddings[i] = (sbyte)(rng.Next(3) - 1);
-            outputHead[i] = (sbyte)(rng.Next(3) - 1);
-        }
-
-        // 3. Vocabulary pruning — informed by DataScaffold metadata
-        int activeVocab = vocab;
-        if (options.PruneVocabulary)
-        {
-            _pruner = options.CustomPruner ?? VocabularyPruner.FromDataScaffold();
-            var tokenList = BuildSyntheticVocabulary(vocab);
-            _pruner.BuildRemapTable(tokenList, specialTokenCount: options.SpecialTokenCount);
-
-            embeddings = _pruner.PruneEmbeddings(embeddings, dim);
-            outputHead = _pruner.PruneOutputHead(outputHead, dim);
-            activeVocab = _pruner.PrunedVocabSize;
-
-            _pruneStats = _pruner.GetStats(dim);
-        }
-
-        // 4. Layer pruning — drop last N layers for constrained domain
-        if (options.LayerPruneRatio > 0f && layers.Length > 1)
-        {
-            int keepLayers = Math.Max(1, (int)(layers.Length * (1f - options.LayerPruneRatio)));
-            layers = ModelPruner.PruneLayers(layers, keepLayers);
-        }
-
-        // 5. Attention head pruning — zero out low-importance heads
-        if (options.HeadPruneRatio > 0f)
-        {
-            ModelPruner.PruneAttentionHeads(layers, _config.NumHeads, options.HeadPruneRatio);
-        }
-
-        // 6. Group-of-four structured pruning — aligns with packed byte boundaries
-        if (options.GroupPruneAttnThreshold > 0 || options.GroupPruneFfnThreshold > 0)
-        {
-            _groupPruneStats = ModelPruner.PruneLayerGroups(
-                layers, dim,
-                options.GroupPruneAttnThreshold,
-                options.GroupPruneFfnThreshold);
-        }
-
-        // 7. Coarse-to-fine semantic pruning — after magnitude, before packing
-        if (options.SemanticPruning)
-        {
-            _semanticPruneStats = SemanticPruner.Prune(
-                layers, dim, _config.NumHeads,
-                corpus: null,
-                headPruneRatio: options.SemanticHeadPruneRatio,
-                neuronPruneRatio: options.SemanticNeuronPruneRatio,
-                blockPruneRatio: options.SemanticBlockPruneRatio,
-                driftThreshold: options.SemanticDriftThreshold);
-        }
-
-        // 8. Calculate logical model stats (after all pruning)
         _modelStats = ModelPruner.CalculateSize(layers, activeVocab, dim);
 
-        // 9. Build/cache the synthetic vocabulary token table for decoding.
-        // Use the full synthetic vocabulary directly (pruner reordering is complex; 
-        // correct decoding happens through the remaining active vocab indices).
-        var vocabTokenList = BuildSyntheticVocabulary(activeVocab);
-        var tokenTableArray = vocabTokenList is string[] strArr ? strArr : vocabTokenList.ToArray();
-
-        // 10. Compress to 2-bit packed native memory
-        // NOTE: CompressToNative calls DisposeNative() which nulls _tokenTable/_tokenizer,
-        //       so we must set them AFTER CompressToNative.
         CompressToNative(layers, embeddings, outputHead, activeVocab, dim);
 
-        _tokenTable = tokenTableArray;
-        _tokenizer  = new Tokenizer(_tokenTable);
+        _tokenTable = tokenTable;
+        _tokenizer = new Tokenizer(_tokenTable);
 
+        _isLoaded = true;
+    }
+
+    /// <summary>
+    /// Load pre-packed NativeTernaryMatrix arrays directly — no sbyte[] intermediates.
+    /// Used by the streaming HuggingFace importer to avoid OOM on large models.
+    /// </summary>
+    public void LoadFromNativeImport(
+        NativeTernaryMatrix[] wq, NativeTernaryMatrix[] wk,
+        NativeTernaryMatrix[] wv, NativeTernaryMatrix[] wo,
+        NativeTernaryMatrix[] ffnGate, NativeTernaryMatrix[] ffnUp, NativeTernaryMatrix[] ffnDown,
+        NativeTernaryMatrix embeddings, NativeTernaryMatrix outputHead,
+        int activeVocab, int dim, string[] tokenTable)
+    {
+        DisposeNative();
+
+        _layerCount = wq.Length;
+        _compressedWq = wq;
+        _compressedWk = wk;
+        _compressedWv = wv;
+        _compressedWo = wo;
+        _compressedFfnGate = ffnGate;
+        _compressedFfnUp = ffnUp;
+        _compressedFfnDown = ffnDown;
+        _compressedEmbeddings = embeddings;
+        _compressedOutputHead = outputHead;
+
+        AllocateInferenceBuffers(dim, activeVocab);
+
+        NativeBytesAllocated = 0;
+        long layerWeights = 0;
+        long zeroWeightEstimate = 0;
+        var layerStatsList = new (MatrixStats Attn, MatrixStats Ffn)[_layerCount];
+        for (int i = 0; i < _layerCount; i++)
+        {
+            NativeBytesAllocated += _compressedWq[i].BytesAllocated
+                                  + _compressedWk[i].BytesAllocated
+                                  + _compressedWv[i].BytesAllocated
+                                  + _compressedWo[i].BytesAllocated;
+            NativeBytesAllocated += _compressedFfnGate![i].BytesAllocated
+                                  + _compressedFfnUp![i].BytesAllocated
+                                  + _compressedFfnDown![i].BytesAllocated;
+            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfnDown[i].Stats);
+
+            layerWeights += _compressedWq[i].Stats.LogicalWeights
+                          + _compressedWk[i].Stats.LogicalWeights
+                          + _compressedWv[i].Stats.LogicalWeights
+                          + _compressedWo[i].Stats.LogicalWeights
+                          + _compressedFfnGate[i].Stats.LogicalWeights
+                          + _compressedFfnUp[i].Stats.LogicalWeights
+                          + _compressedFfnDown[i].Stats.LogicalWeights;
+
+            // Estimate zero weights from zero-byte ratio (each zero byte = 4 zero weights)
+            zeroWeightEstimate += (long)(_compressedWq[i].Stats.ZeroByteCount
+                                + _compressedWk[i].Stats.ZeroByteCount
+                                + _compressedWv[i].Stats.ZeroByteCount
+                                + _compressedWo[i].Stats.ZeroByteCount
+                                + _compressedFfnGate[i].Stats.ZeroByteCount
+                                + _compressedFfnUp[i].Stats.ZeroByteCount
+                                + _compressedFfnDown[i].Stats.ZeroByteCount) * 4;
+        }
+        NativeBytesAllocated += _compressedEmbeddings.BytesAllocated;
+        NativeBytesAllocated += _compressedOutputHead.BytesAllocated;
+        LayerStats = layerStatsList;
+
+        long embeddingWeights = (long)activeVocab * dim * 2;
+        long totalWeights = layerWeights + embeddingWeights;
+        float sparsity = layerWeights > 0 ? (float)zeroWeightEstimate / layerWeights : 0f;
+        _modelStats = new ModelSizeStats(
+            TotalWeights: totalWeights,
+            LayerWeights: layerWeights,
+            EmbeddingWeights: embeddingWeights,
+            ZeroWeights: zeroWeightEstimate,
+            StoredBytes: totalWeights,
+            PackedBytes: (totalWeights * 2 + 7) / 8,
+            Sparsity: sparsity,
+            LayerCount: _layerCount);
+
+        _tokenTable = tokenTable;
+        _tokenizer = new Tokenizer(_tokenTable);
         _isLoaded = true;
     }
 
@@ -262,7 +274,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _compressedWk = new NativeTernaryMatrix[layers.Length];
         _compressedWv = new NativeTernaryMatrix[layers.Length];
         _compressedWo = new NativeTernaryMatrix[layers.Length];
-        _compressedFfn = new NativeTernaryMatrix[layers.Length];
+        _compressedFfnGate = new NativeTernaryMatrix[layers.Length];
+        _compressedFfnUp   = new NativeTernaryMatrix[layers.Length];
+        _compressedFfnDown = new NativeTernaryMatrix[layers.Length];
 
         for (int i = 0; i < layers.Length; i++)
         {
@@ -270,7 +284,10 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             _compressedWk[i]  = NativeTernaryMatrix.Pack(layers[i].Wk,  dim, dim);
             _compressedWv[i]  = NativeTernaryMatrix.Pack(layers[i].Wv,  dim, dim);
             _compressedWo[i]  = NativeTernaryMatrix.Pack(layers[i].Wo,  dim, dim);
-            _compressedFfn[i] = NativeTernaryMatrix.Pack(layers[i].FfnWeights, dim, dim);
+            // Legacy path: single FfnWeights → replicate as gate=identity, up=weights, down=identity
+            _compressedFfnGate[i] = NativeTernaryMatrix.Pack(layers[i].FfnWeights, dim, dim);
+            _compressedFfnUp[i]   = NativeTernaryMatrix.Pack(layers[i].FfnWeights, dim, dim);
+            _compressedFfnDown[i] = NativeTernaryMatrix.Pack(layers[i].FfnWeights, dim, dim);
         }
 
         _compressedEmbeddings = NativeTernaryMatrix.Pack(embeddings, activeVocab, dim);
@@ -288,8 +305,10 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
                                   + _compressedWk[i].BytesAllocated
                                   + _compressedWv[i].BytesAllocated
                                   + _compressedWo[i].BytesAllocated;
-            NativeBytesAllocated += _compressedFfn[i].BytesAllocated;
-            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfn[i].Stats);
+            NativeBytesAllocated += _compressedFfnGate![i].BytesAllocated
+                                  + _compressedFfnUp![i].BytesAllocated
+                                  + _compressedFfnDown![i].BytesAllocated;
+            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfnDown[i].Stats);
         }
         NativeBytesAllocated += _compressedEmbeddings.BytesAllocated;
         NativeBytesAllocated += _compressedOutputHead.BytesAllocated;
@@ -303,7 +322,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// </summary>
     public void SaveSnapshot(string path, IReadOnlyList<string>? tokenTable = null)
     {
-        if (!_isLoaded || _compressedWq is null || _compressedFfn is null
+        if (!_isLoaded || _compressedWq is null || _compressedFfnDown is null
             || _compressedEmbeddings is null || _compressedOutputHead is null)
             throw new InvalidOperationException("No model loaded to snapshot");
 
@@ -311,7 +330,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
         ModelSnapshot.Save(path, _config, activeVocab,
             _compressedWq, _compressedWk!, _compressedWv!, _compressedWo!,
-            _compressedFfn,
+            _compressedFfnGate!, _compressedFfnUp!, _compressedFfnDown!,
             _compressedEmbeddings, _compressedOutputHead,
             tokenTable ?? _tokenTable);
     }
@@ -323,7 +342,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// </summary>
     /// <param name="path">Path to the .bmwm snapshot file.</param>
     /// <param name="memoryMapped">If true, use memory-mapped I/O (avoids large managed copies).</param>
-    public void LoadSnapshot(string path, bool memoryMapped = false)
+    public void LoadSnapshot(string path, bool memoryMapped = false, int? maxSeqLenOverride = null)
     {
         var snapshot = memoryMapped
             ? ModelSnapshot.LoadMapped(path)
@@ -331,16 +350,41 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
         DisposeNative();
 
+        // Override engine config with the snapshot's config — the snapshot
+        // knows its own dimensions, layer count, vocab size, etc.
+        var snapshotConfig = snapshot.Config;
+        if (maxSeqLenOverride.HasValue)
+        {
+            snapshotConfig = snapshotConfig with
+            {
+                MaxSeqLen = Math.Min(snapshotConfig.MaxSeqLen, maxSeqLenOverride.Value)
+            };
+        }
+        _config = snapshotConfig;
+
         _layerCount = snapshot.Wq.Length;
         _compressedWq = snapshot.Wq;
         _compressedWk = snapshot.Wk;
         _compressedWv = snapshot.Wv;
         _compressedWo = snapshot.Wo;
-        _compressedFfn = snapshot.Ffn;
+        _compressedFfnGate = snapshot.FfnGate;
+        _compressedFfnUp = snapshot.FfnUp;
+        _compressedFfnDown = snapshot.FfnDown;
         _compressedEmbeddings = snapshot.Embeddings;
         _compressedOutputHead = snapshot.OutputHead;
-        _tokenTable = snapshot.Tokens;
-        _tokenizer  = _tokenTable is not null ? new Tokenizer(_tokenTable) : null;
+
+        // If the snapshot has a token table, use it.
+        // Otherwise build a synthetic vocabulary from the active vocab size.
+        if (snapshot.Tokens is { Length: > 0 })
+        {
+            _tokenTable = snapshot.Tokens;
+        }
+        else
+        {
+            var syntheticVocab = BuildSyntheticVocabulary(snapshot.ActiveVocab);
+            _tokenTable = syntheticVocab is string[] arr ? arr : syntheticVocab.ToArray();
+        }
+        _tokenizer = new Tokenizer(_tokenTable);
 
         int dim = _config.HiddenDim;
         int activeVocab = snapshot.ActiveVocab;
@@ -352,8 +396,10 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         {
             NativeBytesAllocated += _compressedWq[i].BytesAllocated + _compressedWk[i].BytesAllocated
                                   + _compressedWv[i].BytesAllocated + _compressedWo[i].BytesAllocated;
-            NativeBytesAllocated += _compressedFfn[i].BytesAllocated;
-            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfn[i].Stats);
+            NativeBytesAllocated += _compressedFfnGate![i].BytesAllocated
+                                  + _compressedFfnUp![i].BytesAllocated
+                                  + _compressedFfnDown![i].BytesAllocated;
+            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfnDown[i].Stats);
         }
         NativeBytesAllocated += _compressedEmbeddings.BytesAllocated;
         NativeBytesAllocated += _compressedOutputHead.BytesAllocated;
@@ -364,10 +410,14 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         {
             totalWeights += _compressedWq[i].Stats.LogicalWeights + _compressedWk[i].Stats.LogicalWeights
                           + _compressedWv[i].Stats.LogicalWeights + _compressedWo[i].Stats.LogicalWeights;
-            totalWeights += _compressedFfn[i].Stats.LogicalWeights;
+            totalWeights += _compressedFfnGate![i].Stats.LogicalWeights
+                          + _compressedFfnUp![i].Stats.LogicalWeights
+                          + _compressedFfnDown![i].Stats.LogicalWeights;
             zeroWeights  += (_compressedWq[i].Stats.ZeroByteCount + _compressedWk[i].Stats.ZeroByteCount
                            + _compressedWv[i].Stats.ZeroByteCount + _compressedWo[i].Stats.ZeroByteCount) * 4L;
-            zeroWeights  += _compressedFfn[i].Stats.ZeroByteCount * 4L;
+            zeroWeights  += (_compressedFfnGate[i].Stats.ZeroByteCount
+                           + _compressedFfnUp[i].Stats.ZeroByteCount
+                           + _compressedFfnDown[i].Stats.ZeroByteCount) * 4L;
         }
         long embWeights = (long)_compressedEmbeddings.Stats.LogicalWeights
                         + _compressedOutputHead.Stats.LogicalWeights;
@@ -389,23 +439,39 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// Load a model from a snapshot using persistent memory-mapping.
     /// Matrices reference the mapped file directly — zero copy, instant load.
     /// </summary>
-    public void LoadSnapshotLazy(string path)
+    public void LoadSnapshotLazy(string path, int? maxSeqLenOverride = null)
     {
         DisposeNative();
 
         _lazySnapshot = ModelSnapshot.LoadLazy(path);
         var snap = _lazySnapshot.Data;
 
+        if (maxSeqLenOverride is int seqOverride && seqOverride > 0)
+            _config = snap.Config with { MaxSeqLen = seqOverride };
+        else
+            _config = snap.Config;
+
         _layerCount = snap.Wq.Length;
         _compressedWq = snap.Wq;
         _compressedWk = snap.Wk;
         _compressedWv = snap.Wv;
         _compressedWo = snap.Wo;
-        _compressedFfn = snap.Ffn;
+        _compressedFfnGate = snap.FfnGate;
+        _compressedFfnUp = snap.FfnUp;
+        _compressedFfnDown = snap.FfnDown;
         _compressedEmbeddings = snap.Embeddings;
         _compressedOutputHead = snap.OutputHead;
-        _tokenTable = snap.Tokens;
-        _tokenizer  = _tokenTable is not null ? new Tokenizer(_tokenTable) : null;
+
+        if (snap.Tokens is { Length: > 0 })
+        {
+            _tokenTable = snap.Tokens;
+        }
+        else
+        {
+            var syntheticVocab = BuildSyntheticVocabulary(snap.ActiveVocab);
+            _tokenTable = syntheticVocab is string[] arr ? arr : syntheticVocab.ToArray();
+        }
+        _tokenizer = new Tokenizer(_tokenTable);
 
         int dim = _config.HiddenDim;
         AllocateInferenceBuffers(dim, snap.ActiveVocab);
@@ -413,7 +479,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         NativeBytesAllocated = 0; // data lives in mmap
         var layerStatsList = new (MatrixStats Attn, MatrixStats Ffn)[_layerCount];
         for (int i = 0; i < _layerCount; i++)
-            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfn[i].Stats);
+            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfnDown![i].Stats);
         LayerStats = layerStatsList;
 
         long totalWeights = 0;
@@ -421,7 +487,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         {
             totalWeights += _compressedWq[i].Stats.LogicalWeights + _compressedWk[i].Stats.LogicalWeights
                           + _compressedWv[i].Stats.LogicalWeights + _compressedWo[i].Stats.LogicalWeights;
-            totalWeights += _compressedFfn[i].Stats.LogicalWeights;
+            totalWeights += _compressedFfnGate![i].Stats.LogicalWeights
+                          + _compressedFfnUp![i].Stats.LogicalWeights
+                          + _compressedFfnDown![i].Stats.LogicalWeights;
         }
         long embWeights = (long)_compressedEmbeddings.Stats.LogicalWeights
                         + _compressedOutputHead.Stats.LogicalWeights;
@@ -445,6 +513,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// </summary>
     private void AllocateInferenceBuffers(int dim, int vocabSize)
     {
+        int ffnDim = _config.EffectiveFfnDim;
         _bufHidden = new int[dim];
         _bufNorm   = new int[dim];
         _bufQ      = new int[dim];
@@ -453,6 +522,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _bufPreWo  = new int[dim];
         _bufScores = new int[_config.MaxSeqLen];
         _bufLogits = new int[vocabSize];
+        _bufFfnGate = new int[ffnDim];
+        _bufFfnUp   = new int[ffnDim];
+        _bufFfnDown = new int[ffnDim];
 
         int cacheSize = _config.MaxSeqLen * dim;
         _kvCacheK = new int[_layerCount][];
@@ -569,6 +641,12 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             TernaryTensor.RmsNormalize(bufHidden, bufNorm);
             _compressedOutputHead.MatVecMultiply(bufNorm, bufLogits);
 
+            // Suppress special tokens (PAD, BOS, UNK) from sampling —
+            // the model should only generate content tokens or EOS.
+            bufLogits[0] = int.MinValue; // PAD
+            bufLogits[1] = int.MinValue; // BOS
+            bufLogits[3] = int.MinValue; // UNK
+
             // Top-K sampling — stochastic, integer arithmetic
             int nextToken = Sampling.SampleTopK(
                 bufLogits,
@@ -579,9 +657,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
             if (nextToken == EosTokenId) break;
 
-            // Decode token to text and append
+            // Decode token to text and append — no separator injection;
+            // the space character is its own token (ID 4) in the vocabulary.
             string tok = DecodeToken(nextToken);
-            if (output.Length > 0) output.Append(' ');
             output.Append(tok);
 
             // Feed next token as input for the next step
@@ -612,9 +690,39 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             MultiHeadAttention(L, seqPos, norm, attnOut);
             TernaryTensor.Add(hidden, attnOut, hidden);
 
-            // Pre-norm → FFN → residual
+            // Pre-norm → gated FFN (ReLU²) → residual
+            //   gate = gate_proj(x)
+            //   up   = up_proj(x)
+            //   ffn  = relu2(gate) ⊙ up   (relu2(x) = max(0,x)²)
+            //   out  = down_proj(ffn)
             TernaryTensor.RmsNormalize(hidden, norm);
-            _compressedFfn![L].MatVecMultiply(norm, attnOut);
+            if (_config.HasGatedFfn)
+            {
+                var gate = _bufFfnGate!.AsSpan();
+                var up   = _bufFfnUp!.AsSpan();
+                var down = _bufFfnDown!.AsSpan();
+                _compressedFfnGate![L].MatVecMultiply(norm, gate);
+                _compressedFfnUp![L].MatVecMultiply(norm, up);
+                // ReLU² gating with overflow-safe long intermediate
+                int ffnDim = gate.Length;
+                for (int j = 0; j < ffnDim; j++)
+                {
+                    long g = gate[j];
+                    if (g <= 0) { down[j] = 0; continue; }
+                    // relu2(g) * up = g² * up — use long to avoid int32 overflow,
+                    // then right-shift to keep values in int32 range.
+                    // The shift amount is tuned to preserve precision while avoiding overflow
+                    // in the subsequent down_proj ternary matmul (which sums ffnDim terms).
+                    long product = g * g * up[j];
+                    down[j] = (int)(product >> 16);
+                }
+                _compressedFfnDown![L].MatVecMultiply(down, attnOut);
+            }
+            else
+            {
+                // Legacy single-matrix FFN (no gating)
+                _compressedFfnDown![L].MatVecMultiply(norm, attnOut);
+            }
             TernaryTensor.Add(hidden, attnOut, hidden);
         }
 
@@ -761,14 +869,17 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private string DecodeToken(int tokenId)
     {
         if (_tokenTable is not null && (uint)tokenId < (uint)_tokenTable.Length)
-            return _tokenTable[tokenId] ?? $"tok{tokenId}";
+        {
+            var s = _tokenTable[tokenId];
+            if (s is not null && s.Length > 0)
+                return s;
+        }
         return tokenId switch
         {
-            0 => "<pad>",
-            1 => "<bos>",
-            EosTokenId => "<eos>",
-            3 => "<unk>",
-            _ => $"tok{tokenId}"
+            Tokenizer.PadId => "",
+            Tokenizer.BosId => "",
+            Tokenizer.EosId => "",
+            _ => "?",
         };
     }
 
@@ -786,6 +897,13 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         return denom > 1e-10 ? (float)(dot / denom) : 0f;
     }
 
+    /// <summary>
+    /// Builds a character-unigram vocabulary for a 256-token model.
+    /// IDs 0–3: special tokens. IDs 4–98: printable ASCII (space 0x20 … tilde 0x7E).
+    /// IDs 99+: multi-character domain tokens used by greedy longest-match encoding.
+    /// Space is token ID 4 — the model generates it explicitly, so decoded tokens
+    /// are concatenated without injected separators.
+    /// </summary>
     private static IReadOnlyList<string> BuildSyntheticVocabulary(int vocabSize)
     {
         var tokens = new string[vocabSize];
@@ -793,17 +911,50 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         tokens[1] = "<BOS>";
         tokens[2] = "<EOS>";
         tokens[3] = "<UNK>";
-        for (int i = 4; i < vocabSize; i++)
-            tokens[i] = $"tok_{i}";
 
+        // Printable ASCII: 95 characters (space 0x20 through tilde 0x7E)
+        // ID 4 = ' ', ID 5 = '!', ..., ID 98 = '~'
+        const int asciiBase = 4;
+        const char firstPrintable = ' ';  // 0x20
+        const char lastPrintable  = '~';  // 0x7E
+        int asciiCount = lastPrintable - firstPrintable + 1; // 95
+
+        for (int i = 0; i < asciiCount && asciiBase + i < vocabSize; i++)
+            tokens[asciiBase + i] = ((char)(firstPrintable + i)).ToString();
+
+        // Multi-character domain tokens at IDs 99+.
+        // These let the greedy encoder compress common words into single tokens,
+        // producing shorter sequences and better inference quality.
+        int domainBase = asciiBase + asciiCount; // 99
         string[] domainTokens = [
-            "query", "entity", "list", "describe", "search", "status",
-            "help", "index", "system", "field", "schema", "data",
-            "count", "user", "session", "type", "name", "id",
-            "create", "delete", "update", "show", "find", "get"
+            // Whitespace / formatting
+            "  ", "\n", "\t",
+            // Common English
+            "the", "is", "are", "was", "not", "and", "for", "with", "that", "this",
+            "from", "have", "has", "can", "will", "but", "all", "your", "you", "it",
+            "of", "to", "in", "on", "at", "by", "an", "or", "if", "no", "yes",
+            "do", "did", "be", "my", "me", "we", "so", "up", "out", "how", "what",
+            "when", "where", "which", "who", "why",
+            // Domain commands & entities
+            "create", "delete", "update", "show", "find", "get", "list", "search",
+            "query", "entity", "field", "schema", "data", "index", "view",
+            "help", "status", "system", "count", "describe",
+            "user", "session", "name", "type", "id", "value",
+            "todo", "task", "note", "item", "record", "page",
+            // Common suffixes / fragments
+            "ing", "tion", "ed", "er", "ly", "ment", "ness", "able",
+            // Punctuation bigrams
+            ": ", ", ", ". ", "? ", "! ",
         ];
-        for (int i = 0; i < domainTokens.Length && i + 4 < vocabSize; i++)
-            tokens[i + 4] = domainTokens[i];
+        for (int i = 0; i < domainTokens.Length && domainBase + i < vocabSize; i++)
+            tokens[domainBase + i] = domainTokens[i];
+
+        // Fill any remaining slots with single-char fallback
+        for (int i = 0; i < vocabSize; i++)
+        {
+            if (tokens[i] is null)
+                tokens[i] = $"<{i}>";
+        }
 
         return tokens;
     }
@@ -818,8 +969,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             _compressedWk = null;
             _compressedWv = null;
             _compressedWo = null;
-            _compressedFfn = null;
-            _compressedEmbeddings = null;
+            _compressedFfnGate = null;
+            _compressedFfnUp = null;
+            _compressedFfnDown = null;            _compressedEmbeddings = null;
             _compressedOutputHead = null;
         }
         else
@@ -828,13 +980,16 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             if (_compressedWk is not null) { foreach (var m in _compressedWk) m?.Dispose(); _compressedWk = null; }
             if (_compressedWv is not null) { foreach (var m in _compressedWv) m?.Dispose(); _compressedWv = null; }
             if (_compressedWo is not null) { foreach (var m in _compressedWo) m?.Dispose(); _compressedWo = null; }
-            if (_compressedFfn is not null) { foreach (var m in _compressedFfn) m?.Dispose(); _compressedFfn = null; }
+            if (_compressedFfnGate is not null) { foreach (var m in _compressedFfnGate) m?.Dispose(); _compressedFfnGate = null; }
+            if (_compressedFfnUp is not null) { foreach (var m in _compressedFfnUp) m?.Dispose(); _compressedFfnUp = null; }
+            if (_compressedFfnDown is not null) { foreach (var m in _compressedFfnDown) m?.Dispose(); _compressedFfnDown = null; }
             _compressedEmbeddings?.Dispose(); _compressedEmbeddings = null;
             _compressedOutputHead?.Dispose(); _compressedOutputHead = null;
         }
 
         // Clear buffer references (GC will reclaim them)
         _bufHidden = _bufNorm = _bufQ = _bufK = _bufV = _bufPreWo = _bufScores = _bufLogits = null;
+        _bufFfnGate = _bufFfnUp = _bufFfnDown = null;
         _kvCacheK = null;
         _kvCacheV = null;
         _tokenTable = null;
@@ -858,84 +1013,21 @@ public readonly record struct BitNetModelConfig(
     int NumLayers,
     int NumHeads,
     int VocabSize,
-    int MaxSeqLen)
+    int MaxSeqLen,
+    int FfnDim = 0)
 {
+    /// <summary>Effective FFN intermediate dimension. Falls back to HiddenDim when not set.</summary>
+    public int EffectiveFfnDim => FfnDim > 0 ? FfnDim : HiddenDim;
+
+    /// <summary>Whether this config uses a gated FFN (SwiGLU/ReLU²) with 3 separate matrices.</summary>
+    public bool HasGatedFfn => FfnDim > 0;
+
     public static readonly BitNetModelConfig Default = new(
         HiddenDim: 128,
         NumLayers: 4,
         NumHeads: 4,
         VocabSize: 256,
         MaxSeqLen: 512);
-}
-
-/// <summary>
-/// Options controlling model loading, pruning, and optimisation.
-/// </summary>
-public sealed record ModelLoadOptions
-{
-    /// <summary>Prune vocabulary against DataScaffold metadata on load.</summary>
-    public bool PruneVocabulary { get; init; } = true;
-
-    /// <summary>Ratio of layers to remove from the end (0.0 = none, 0.3 = drop 30%).</summary>
-    public float LayerPruneRatio { get; init; }
-
-    /// <summary>Ratio of attention heads to zero out per layer (0.0 = none, 0.25 = prune 25%).</summary>
-    public float HeadPruneRatio { get; init; }
-
-    /// <summary>
-    /// Group-of-four L1 threshold for attention weights.
-    /// Groups with L1 sum ≤ threshold are zeroed (0 = disabled, 1 = conservative, 2 = moderate).
-    /// </summary>
-    public int GroupPruneAttnThreshold { get; init; }
-
-    /// <summary>
-    /// Group-of-four L1 threshold for FFN weights.
-    /// FFN layers tolerate more aggressive pruning (0 = disabled, 2 = moderate, 3 = aggressive).
-    /// </summary>
-    public int GroupPruneFfnThreshold { get; init; }
-
-    /// <summary>Enable coarse-to-fine semantic pruning after magnitude pruning.</summary>
-    public bool SemanticPruning { get; init; }
-
-    /// <summary>Ratio of attention heads to evaluate for semantic pruning (0.0–1.0).</summary>
-    public float SemanticHeadPruneRatio { get; init; } = 0.20f;
-
-    /// <summary>Ratio of neurons to evaluate for semantic pruning (0.0–1.0).</summary>
-    public float SemanticNeuronPruneRatio { get; init; } = 0.15f;
-
-    /// <summary>Ratio of blocks to evaluate for semantic pruning (0.0–1.0).</summary>
-    public float SemanticBlockPruneRatio { get; init; } = 0.10f;
-
-    /// <summary>Minimum cosine similarity for hidden-state drift screening (0.90–0.99).</summary>
-    public float SemanticDriftThreshold { get; init; } = 0.95f;
-
-    /// <summary>Number of special tokens to always retain (PAD, BOS, EOS, UNK).</summary>
-    public int SpecialTokenCount { get; init; } = 4;
-
-    /// <summary>Optional custom pruner. If null, FromDataScaffold() is used.</summary>
-    public VocabularyPruner? CustomPruner { get; init; }
-
-    public static readonly ModelLoadOptions Default = new();
-
-    /// <summary>Aggressive pruning: vocab + 25% layers + 25% heads + group-of-4.</summary>
-    public static readonly ModelLoadOptions Aggressive = new()
-    {
-        PruneVocabulary = true,
-        LayerPruneRatio = 0.25f,
-        HeadPruneRatio = 0.25f,
-        GroupPruneAttnThreshold = 1,
-        GroupPruneFfnThreshold = 2,
-    };
-
-    /// <summary>No pruning — load the full model.</summary>
-    public static readonly ModelLoadOptions NoPruning = new()
-    {
-        PruneVocabulary = false,
-        LayerPruneRatio = 0f,
-        HeadPruneRatio = 0f,
-        GroupPruneAttnThreshold = 0,
-        GroupPruneFfnThreshold = 0,
-    };
 }
 
 /// <summary>
@@ -961,25 +1053,4 @@ public struct TernaryLayer
     /// Pruning code that zeros elements through this reference modifies Wq.
     /// </summary>
     public readonly sbyte[] AttentionWeights => Wq;
-
-    public static TernaryLayer CreateRandom(int dim, int numHeads)
-    {
-        return new TernaryLayer
-        {
-            Wq         = CreateTernary(dim * dim),
-            Wk         = CreateTernary(dim * dim),
-            Wv         = CreateTernary(dim * dim),
-            Wo         = CreateTernary(dim * dim),
-            FfnWeights = CreateTernary(dim * dim),
-        };
-    }
-
-    private static sbyte[] CreateTernary(int count)
-    {
-        var rng = Random.Shared;
-        var arr = new sbyte[count];
-        for (int i = 0; i < arr.Length; i++)
-            arr[i] = (sbyte)(rng.Next(3) - 1);
-        return arr;
-    }
 }

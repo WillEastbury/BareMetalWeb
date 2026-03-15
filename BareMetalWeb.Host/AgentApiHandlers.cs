@@ -35,7 +35,9 @@ public static class AgentApiHandlers
             return _orchestrator;
 
         var engine = new BitNetEngine();
-        engine.LoadTestModel(ModelLoadOptions.Aggressive);
+        var modelPath = Path.Combine(AppContext.BaseDirectory, "model.bmwm");
+        if (File.Exists(modelPath))
+            engine.LoadSnapshotLazy(modelPath);
 
         var tools = AdminToolCatalogue.CreateRegistry();
 
