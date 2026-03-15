@@ -52,5 +52,25 @@ public class DeploymentNode : BaseDataObject
     [DataField(Label = "Cluster Endpoint", Order = 10, View = true, Edit = true)]
     public string ClusterEndpoint { get; set; } = string.Empty;
 
+    /// <summary>Human-readable OS description reported during registration/attestation.</summary>
+    [DataField(Label = "OS", Order = 11, List = true, View = true, ReadOnly = true)]
+    public string OsDescription { get; set; } = string.Empty;
+
+    /// <summary>Glibc version string reported during registration/attestation.</summary>
+    [DataField(Label = "Glibc", Order = 12, View = true, ReadOnly = true)]
+    public string GlibcVersion { get; set; } = string.Empty;
+
+    /// <summary>SHA-256 hex of the first NIC MAC address (hardware binding).</summary>
+    [DataField(Label = "MAC Hash", Order = 13, View = true, ReadOnly = true)]
+    public string MacHash { get; set; } = string.Empty;
+
+    /// <summary>UTC timestamp of the last successful attestation.</summary>
+    [DataField(Label = "Last Attestation", Order = 14, List = true, View = true, ReadOnly = true, FieldType = FormFieldType.DateTime)]
+    public DateTime LastAttestationUtc { get; set; }
+
+    /// <summary>Bootstrap principal that registered this node.</summary>
+    [DataField(Label = "Principal", Order = 15, View = true, ReadOnly = true)]
+    public string BootstrapPrincipal { get; set; } = string.Empty;
+
     public override string ToString() => string.IsNullOrEmpty(DisplayName) ? NodeId : DisplayName;
 }
