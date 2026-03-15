@@ -542,9 +542,9 @@ static async Task<IntelligenceOrchestrator?> ImportHuggingFaceModel(
         Console.ResetColor();
         Console.WriteLine();
 
-        // Auto-load the freshly imported snapshot
-        Console.Write("  Loading imported snapshot... ");
-        engine.LoadSnapshot(outputPath);
+        // Auto-load the freshly imported snapshot using lazy mmap to avoid OOM
+        Console.Write("  Loading imported snapshot (lazy mmap)... ");
+        engine.LoadSnapshotLazy(outputPath, maxSeqLenOverride: config.MaxSeqLen);
         var orchestrator = new IntelligenceOrchestrator(engine);
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine("done");
