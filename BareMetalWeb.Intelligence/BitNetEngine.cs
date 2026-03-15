@@ -37,24 +37,38 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private int _layerCount;
     private bool _isLoaded;
 
-    // Pre-allocated inference buffers — zero GC pressure on the hot path.
-    // All allocated once in CompressToNative / LoadSnapshot and reused each call.
-    private int[]? _bufHidden;    // current hidden state [dim]
-    private int[]? _bufNorm;      // RMS-normalised hidden  [dim]
-    private int[]? _bufQ;         // query projection        [dim]
-    private int[]? _bufK;         // key projection          [dim]
-    private int[]? _bufV;         // value projection        [dim]
-    private int[]? _bufPreWo;     // pre-Wo attention output [dim]
-    private int[]? _bufScores;    // per-head dot-product scores [maxSeqLen]
-    private int[]? _bufLogits;    // output head logits [vocabSize]
-    private int[]? _bufFfnGate;   // gated FFN gate output   [ffnDim]
-    private int[]? _bufFfnUp;     // gated FFN up output     [ffnDim]
-    private int[]? _bufFfnDown;   // gated FFN down input    [ffnDim]
+    // Learned model parameters — norms and per-matrix weight scales.
+    private float[][]? _weightScales;     // [layers][7]: Wq,Wk,Wv,Wo,gate,up,down
+    private float[][]? _inputNorm;        // [layers][dim]: learned input_layernorm γ
+    private float[][]? _attnSubNorm;      // [layers][dim]: attn_sub_norm γ
+    private float[][]? _postAttnNorm;     // [layers][dim]: post_attention_layernorm γ
+    private float[][]? _ffnSubNorm;       // [layers][ffnDim]: ffn_sub_norm γ
+    private float[]? _finalNorm;          // [dim]: final model.norm γ
 
-    // Per-layer KV cache — stores K and V for every past token position.
-    // _kvCacheK[layer] = int[maxSeqLen × dim],  _kvCacheV[layer] = int[maxSeqLen × dim]
-    private int[][]? _kvCacheK;
-    private int[][]? _kvCacheV;
+    // Pre-allocated inference buffers — float hidden state, int for matmul I/O.
+    // Float buffers hold the hidden state and intermediate results.
+    // Int buffers are for quantized activations (matmul input/output).
+    private float[]? _fHidden;     // current hidden state [dim]
+    private float[]? _fNorm;       // normalized activation [max(dim, ffnDim)]
+    private float[]? _fQ;          // query projection [dim]
+    private float[]? _fK;          // key projection [dim]
+    private float[]? _fV;          // value projection [dim]
+    private float[]? _fAttnOut;    // attention output [dim]
+    private float[]? _fFfnGate;    // FFN gate output [ffnDim]
+    private float[]? _fFfnUp;      // FFN up output [ffnDim]
+    private float[]? _fFfnDown;    // FFN down/mid buffer [ffnDim]
+    private float[]? _fScores;     // attention scores [maxSeqLen]
+    private int[]? _iQuantized;    // quantized activation for matmul input [max(dim, ffnDim)]
+    private int[]? _iMatmulOut;    // matmul output [max(dim, ffnDim, vocabSize)]
+    private int[]? _bufLogits;     // output head logits [vocabSize] (int for sampling)
+
+    // Per-layer float KV cache — stores K and V for every past token position.
+    private float[][]? _fKvCacheK;   // [layer][maxSeqLen × dim]
+    private float[][]? _fKvCacheV;   // [layer][maxSeqLen × dim]
+
+    // Precomputed RoPE sin/cos tables [maxSeqLen × headDim/2]
+    private float[]? _ropeCos;
+    private float[]? _ropeSin;
 
     // Vocabulary strings for token decoding, set at load time.
     private string[]? _tokenTable;
@@ -398,6 +412,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _merges = snapshot.Merges is { Length: > 0 } ? snapshot.Merges : null;
         _tokenizer = new Tokenizer(_tokenTable, _merges);
 
+        // Load learned norms and weight scales (v5+)
+        LoadNormsAndScales(snapshot);
+
         int dim = _config.HiddenDim;
         int activeVocab = snapshot.ActiveVocab;
         AllocateInferenceBuffers(dim, activeVocab);
@@ -486,6 +503,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _merges = snap.Merges is { Length: > 0 } ? snap.Merges : null;
         _tokenizer = new Tokenizer(_tokenTable, _merges);
 
+        LoadNormsAndScales(snap);
+
         int dim = _config.HiddenDim;
         AllocateInferenceBuffers(dim, snap.ActiveVocab);
 
@@ -527,26 +546,75 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private void AllocateInferenceBuffers(int dim, int vocabSize)
     {
         int ffnDim = _config.EffectiveFfnDim;
-        _bufHidden = new int[dim];
-        _bufNorm   = new int[dim];
-        _bufQ      = new int[dim];
-        _bufK      = new int[dim];
-        _bufV      = new int[dim];
-        _bufPreWo  = new int[dim];
-        _bufScores = new int[_config.MaxSeqLen];
-        _bufLogits = new int[vocabSize];
-        _bufFfnGate = new int[ffnDim];
-        _bufFfnUp   = new int[ffnDim];
-        _bufFfnDown = new int[ffnDim];
+        int maxBuf = Math.Max(dim, ffnDim);
 
+        // Float buffers for hidden state and intermediates
+        _fHidden   = new float[dim];
+        _fNorm     = new float[maxBuf];
+        _fQ        = new float[dim];
+        _fK        = new float[dim];
+        _fV        = new float[dim];
+        _fAttnOut  = new float[dim];
+        _fFfnGate  = new float[ffnDim];
+        _fFfnUp    = new float[ffnDim];
+        _fFfnDown  = new float[ffnDim];
+        _fScores   = new float[_config.MaxSeqLen];
+
+        // Int buffers for ternary matmul I/O
+        _iQuantized = new int[maxBuf];
+        _iMatmulOut = new int[Math.Max(maxBuf, vocabSize)];
+        _bufLogits  = new int[vocabSize];
+
+        // Float KV caches
         int cacheSize = _config.MaxSeqLen * dim;
-        _kvCacheK = new int[_layerCount][];
-        _kvCacheV = new int[_layerCount][];
+        _fKvCacheK = new float[_layerCount][];
+        _fKvCacheV = new float[_layerCount][];
         for (int i = 0; i < _layerCount; i++)
         {
-            _kvCacheK[i] = new int[cacheSize];
-            _kvCacheV[i] = new int[cacheSize];
+            _fKvCacheK[i] = new float[cacheSize];
+            _fKvCacheV[i] = new float[cacheSize];
         }
+
+        // Precompute RoPE sin/cos tables
+        PrecomputeRoPE();
+    }
+
+    /// <summary>
+    /// Precompute RoPE (Rotary Position Embeddings) sin/cos tables.
+    /// Table layout: [position * headDim/2 + pair_index] for interleaved pairs.
+    /// </summary>
+    private void PrecomputeRoPE()
+    {
+        int headDim = _config.HeadDim;
+        int halfDim = headDim / 2;
+        int maxSeq  = _config.MaxSeqLen;
+        float theta = _config.RopeTheta;
+
+        _ropeCos = new float[maxSeq * halfDim];
+        _ropeSin = new float[maxSeq * halfDim];
+
+        for (int pos = 0; pos < maxSeq; pos++)
+        {
+            int baseIdx = pos * halfDim;
+            for (int j = 0; j < halfDim; j++)
+            {
+                double freq = 1.0 / Math.Pow(theta, (2.0 * j) / headDim);
+                double angle = pos * freq;
+                _ropeCos[baseIdx + j] = (float)Math.Cos(angle);
+                _ropeSin[baseIdx + j] = (float)Math.Sin(angle);
+            }
+        }
+    }
+
+    /// <summary>Store learned norms and weight scales from snapshot data.</summary>
+    private void LoadNormsAndScales(SnapshotData snapshot)
+    {
+        _weightScales = snapshot.WeightScales;
+        _inputNorm    = snapshot.InputNorm;
+        _attnSubNorm  = snapshot.AttnSubNorm;
+        _postAttnNorm = snapshot.PostAttnNorm;
+        _ffnSubNorm   = snapshot.FfnSubNorm;
+        _finalNorm    = snapshot.FinalNorm;
     }
 
     public async ValueTask<string> GenerateAsync(
@@ -588,32 +656,25 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private const int DefaultTempQ8 = 0;
 
     /// <summary>
-    /// Full autoregressive token-generation loop.
-    /// 1. Encodes the prompt with the Tokenizer (Encode → int[]).
-    /// 2. Runs a forward pass for each prompt token to build the KV cache.
-    /// 3. Samples the next token using Top-K sampling (or greedy if temp=0).
-    /// 4. Repeats until EOS or <paramref name="maxTokens"/> generated.
-    /// All intermediate buffers are pre-allocated — zero per-call GC pressure.
+    /// Full autoregressive token-generation loop with float hidden state.
+    /// Ternary matmuls stay integer; norms, scales, attention, and RoPE use float.
     /// </summary>
     private string RunInference(ReadOnlySpan<char> prompt, int maxTokens, CancellationToken ct)
     {
-        int dim      = _config.HiddenDim;
+        int dim       = _config.HiddenDim;
         int vocabSize = _compressedOutputHead!.Rows;
 
-        // Work with pre-allocated slices
-        var bufHidden = _bufHidden!.AsSpan(0, dim);
-        var bufNorm   = _bufNorm!.AsSpan(0, dim);
+        var fHidden   = _fHidden!;
         var bufLogits = _bufLogits!.AsSpan(0, vocabSize);
 
-        // Clear KV cache for this inference pass
+        // Clear KV caches
         for (int L = 0; L < _layerCount; L++)
         {
-            Array.Clear(_kvCacheK![L], 0, _config.MaxSeqLen * dim);
-            Array.Clear(_kvCacheV![L], 0, _config.MaxSeqLen * dim);
+            Array.Clear(_fKvCacheK![L]);
+            Array.Clear(_fKvCacheV![L]);
         }
 
-        // ── Tokenize prompt ────────────────────────────────────────────────────
-        // Use the tokenizer when available; fall back to char-mod encoding.
+        // ── Tokenize prompt ────────────────────────────────────────────────
         int[] promptTokens;
         if (_tokenizer is not null)
         {
@@ -630,54 +691,44 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
         int seqLen = 0;
 
-        // ── Prefill: process each prompt token ────────────────────────────────
+        // ── Prefill: process each prompt token ────────────────────────────
         for (int p = 0; p < promptTokens.Length && seqLen < _config.MaxSeqLen; p++, seqLen++)
         {
             ct.ThrowIfCancellationRequested();
             int tid = Math.Clamp(promptTokens[p], 0, vocabSize - 1);
-            EmbedToken(tid, bufHidden);
-            ForwardAllLayers(seqLen, bufHidden, bufNorm, isMiss: true);
+            EmbedTokenFloat(tid, fHidden);
+            ForwardAllLayersFloat(seqLen);
         }
 
-        // ── Decode: generate tokens ────────────────────────────────────────────
+        // ── Decode: generate tokens ────────────────────────────────────────
         int generateLimit = Math.Min(maxTokens, MaxGenerateTokens);
         var output = new System.Text.StringBuilder(generateLimit * 8);
-
-        // Re-use the logits buffer as sampling scratch (same size, no extra alloc)
         var samplingBuf = _bufLogits!.AsSpan(0, vocabSize);
 
         for (int gen = 0; gen < generateLimit && seqLen < _config.MaxSeqLen; gen++)
         {
             ct.ThrowIfCancellationRequested();
 
-            // Compute logits from current hidden state
-            TernaryTensor.RmsNormalize(bufHidden, bufNorm);
-            _compressedOutputHead.MatVecMultiply(bufNorm, bufLogits);
+            // Final norm → quantize → output head matmul → logits
+            RmsNormWithGamma(fHidden.AsSpan(0, dim), _fNorm!.AsSpan(0, dim), _finalNorm);
+            QuantizeAndMatmul(_fNorm!.AsSpan(0, dim), _compressedOutputHead, bufLogits);
 
-            // Suppress special tokens (PAD, BOS, UNK) from sampling —
-            // the model should only generate content tokens or EOS.
+            // Suppress special tokens
             bufLogits[0] = int.MinValue; // PAD
             bufLogits[1] = int.MinValue; // BOS
             bufLogits[3] = int.MinValue; // UNK
 
-            // Top-K sampling — stochastic, integer arithmetic
             int nextToken = Sampling.SampleTopK(
-                bufLogits,
-                topK:   DefaultTopK,
-                tempQ8: DefaultTempQ8,
-                rng:    Random.Shared,
-                scratch: samplingBuf);
+                bufLogits, topK: DefaultTopK, tempQ8: DefaultTempQ8,
+                rng: Random.Shared, scratch: samplingBuf);
 
             if (nextToken == EosTokenId) break;
 
-            // Decode token to text and append — no separator injection;
-            // the space character is its own token (ID 4) in the vocabulary.
             string tok = DecodeToken(nextToken);
             output.Append(tok);
 
-            // Feed next token as input for the next step
-            EmbedToken(nextToken, bufHidden);
-            ForwardAllLayers(seqLen, bufHidden, bufNorm, isMiss: false);
+            EmbedTokenFloat(nextToken, fHidden);
+            ForwardAllLayersFloat(seqLen);
             seqLen++;
         }
 
@@ -685,177 +736,276 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     }
 
     /// <summary>
-    /// Runs all transformer layers in order. Modifies <paramref name="hidden"/> in-place.
-    /// Uses only pre-allocated buffers — no managed heap allocations.
-    /// <paramref name="isMiss"/> controls KV-cache accounting (true = encode/miss, false = decode/hit).
+    /// Runs all transformer layers with float hidden state.
+    /// Ternary matmuls remain integer; norms, scales, attention use float.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ForwardAllLayers(int seqPos, Span<int> hidden, Span<int> norm, bool isMiss = true)
+    private void ForwardAllLayersFloat(int seqPos)
     {
-        // Layer timing instrumentation
         long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        var attnOut = _bufPreWo!.AsSpan();
+        int dim    = _config.HiddenDim;
+        int ffnDim = _config.EffectiveFfnDim;
+        var fH     = _fHidden!;
+        var fNorm  = _fNorm!;
+        var fQ     = _fQ!;
+        var fK     = _fK!;
+        var fV     = _fV!;
+        var fAttn  = _fAttnOut!;
+
         for (int L = 0; L < _layerCount; L++)
         {
-            // Pre-norm → multi-head attention → residual
-            TernaryTensor.RmsNormalize(hidden, norm);
-            MultiHeadAttention(L, seqPos, norm, attnOut);
-            TernaryTensor.Add(hidden, attnOut, hidden);
+            float[]? scales = _weightScales?[L];
 
-            // Pre-norm → gated FFN (ReLU²) → residual
-            //   gate = gate_proj(x)
-            //   up   = up_proj(x)
-            //   ffn  = relu2(gate) ⊙ up   (relu2(x) = max(0,x)²)
-            //   out  = down_proj(ffn)
-            TernaryTensor.RmsNormalize(hidden, norm);
+            // ── Attention ─────────────────────────────────────────────
+            // input_layernorm → quantize → Q/K/V projections → dequantize → scale
+            RmsNormWithGamma(fH.AsSpan(0, dim), fNorm.AsSpan(0, dim), _inputNorm?[L]);
+            float absmax = QuantizeActivation(fNorm.AsSpan(0, dim), _iQuantized!.AsSpan(0, dim));
+
+            TernaryMatmulDequant(_compressedWq![L], _iQuantized!, dim, fQ, absmax, scales?[0] ?? 1f);
+            TernaryMatmulDequant(_compressedWk![L], _iQuantized!, dim, fK, absmax, scales?[1] ?? 1f);
+            TernaryMatmulDequant(_compressedWv![L], _iQuantized!, dim, fV, absmax, scales?[2] ?? 1f);
+
+            // RoPE on Q and K
+            ApplyRoPE(fQ, seqPos, dim);
+            ApplyRoPE(fK, seqPos, dim);
+
+            // Cache K, V as float
+            int cacheBase = seqPos * dim;
+            fK.AsSpan(0, dim).CopyTo(_fKvCacheK![L].AsSpan(cacheBase, dim));
+            fV.AsSpan(0, dim).CopyTo(_fKvCacheV![L].AsSpan(cacheBase, dim));
+
+            // Float multi-head attention → fAttn
+            MultiHeadAttentionFloat(L, seqPos, fQ, fAttn);
+
+            // attn_sub_norm → quantize → Wo → dequantize → scale
+            RmsNormWithGamma(fAttn.AsSpan(0, dim), fNorm.AsSpan(0, dim), _attnSubNorm?[L]);
+            absmax = QuantizeActivation(fNorm.AsSpan(0, dim), _iQuantized!.AsSpan(0, dim));
+            TernaryMatmulDequant(_compressedWo![L], _iQuantized!, dim, fAttn, absmax, scales?[3] ?? 1f);
+
+            // Residual add
+            for (int i = 0; i < dim; i++) fH[i] += fAttn[i];
+
+            // ── FFN ───────────────────────────────────────────────────
             if (_config.HasGatedFfn)
             {
-                var gate = _bufFfnGate!.AsSpan();
-                var up   = _bufFfnUp!.AsSpan();
-                var down = _bufFfnDown!.AsSpan();
-                _compressedFfnGate![L].MatVecMultiply(norm, gate);
-                _compressedFfnUp![L].MatVecMultiply(norm, up);
-                // ReLU² gating with overflow-safe long intermediate
-                int ffnDim = gate.Length;
+                var fGate = _fFfnGate!;
+                var fUp   = _fFfnUp!;
+                var fDown = _fFfnDown!;
+
+                // post_attention_layernorm → quantize → gate/up projections
+                RmsNormWithGamma(fH.AsSpan(0, dim), fNorm.AsSpan(0, dim), _postAttnNorm?[L]);
+                absmax = QuantizeActivation(fNorm.AsSpan(0, dim), _iQuantized!.AsSpan(0, dim));
+
+                TernaryMatmulDequant(_compressedFfnGate![L], _iQuantized!, dim, fGate, absmax, scales?[4] ?? 1f);
+                TernaryMatmulDequant(_compressedFfnUp![L], _iQuantized!, dim, fUp, absmax, scales?[5] ?? 1f);
+
+                // ReLU² gating: relu2(gate) * up
                 for (int j = 0; j < ffnDim; j++)
                 {
-                    long g = gate[j];
-                    if (g <= 0) { down[j] = 0; continue; }
-                    // relu2(g) * up = g² * up — use long to avoid int32 overflow,
-                    // then right-shift to keep values in int32 range.
-                    // The shift amount is tuned to preserve precision while avoiding overflow
-                    // in the subsequent down_proj ternary matmul (which sums ffnDim terms).
-                    long product = g * g * up[j];
-                    down[j] = (int)(product >> 16);
+                    float g = fGate[j];
+                    fDown[j] = g > 0 ? g * g * fUp[j] : 0;
                 }
-                _compressedFfnDown![L].MatVecMultiply(down, attnOut);
+
+                // ffn_sub_norm → quantize → down_proj → dequantize → scale
+                RmsNormWithGamma(fDown.AsSpan(0, ffnDim), fNorm.AsSpan(0, ffnDim), _ffnSubNorm?[L]);
+                absmax = QuantizeActivation(fNorm.AsSpan(0, ffnDim), _iQuantized!.AsSpan(0, ffnDim));
+                TernaryMatmulDequant(_compressedFfnDown![L], _iQuantized!, ffnDim, fAttn, absmax, scales?[6] ?? 1f);
             }
             else
             {
-                // Legacy single-matrix FFN (no gating)
-                _compressedFfnDown![L].MatVecMultiply(norm, attnOut);
+                RmsNormWithGamma(fH.AsSpan(0, dim), fNorm.AsSpan(0, dim), _postAttnNorm?[L]);
+                absmax = QuantizeActivation(fNorm.AsSpan(0, dim), _iQuantized!.AsSpan(0, dim));
+                TernaryMatmulDequant(_compressedFfnDown![L], _iQuantized!, dim, fAttn, absmax, scales?[6] ?? 1f);
             }
-            TernaryTensor.Add(hidden, attnOut, hidden);
+
+            // Residual add
+            for (int i = 0; i < dim; i++) fH[i] += fAttn[i];
         }
 
-        // Instrumentation: record layer time and KV-cache accounting
         long elapsedTicks = System.Diagnostics.Stopwatch.GetTimestamp() - t0;
         long elapsedMicros = elapsedTicks * 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
         Interlocked.Add(ref _totalLayerTimeMicros, elapsedMicros);
         Interlocked.Increment(ref _totalLayerTimeSamples);
-
-        if (isMiss)
-            Interlocked.Increment(ref _kvCacheMisses);
-        else
-            Interlocked.Increment(ref _kvCacheHits);
     }
 
     /// <summary>
-    /// Real multi-head self-attention.
-    ///   Q  = Wq × input
-    ///   K  = Wk × input  (cached in KV store)
-    ///   V  = Wv × input  (cached in KV store)
-    ///   score[h,p] = Q[h] · K_cache[h,p] / sqrt(head_dim)
-    ///   attn[h]    = Σ softmax(scores)[p] * V_cache[h,p]
-    ///   output     = Wo × concat(attn heads)
-    /// Integer arithmetic throughout — no floating-point on the hot path.
+    /// Float multi-head self-attention with RoPE and proper softmax.
+    /// Q is provided directly; K and V are read from the float KV cache.
     /// </summary>
-    private void MultiHeadAttention(int layer, int seqPos, ReadOnlySpan<int> input, Span<int> output)
+    private void MultiHeadAttentionFloat(int layer, int seqPos, float[] fQ, float[] output)
     {
         int dim     = _config.HiddenDim;
         int nHeads  = _config.NumHeads;
-        int headDim = dim / nHeads;
-
-        var bufQ = _bufQ!.AsSpan(0, dim);
-        var bufK = _bufK!.AsSpan(0, dim);
-        var bufV = _bufV!.AsSpan(0, dim);
-
-        // Q, K, V projections using pre-allocated buffers
-        _compressedWq![layer].MatVecMultiply(input, bufQ);
-        _compressedWk![layer].MatVecMultiply(input, bufK);
-        _compressedWv![layer].MatVecMultiply(input, bufV);
-
-        // Cache K and V for current position
-        int cacheBase = seqPos * dim;
-        bufK.CopyTo(_kvCacheK![layer].AsSpan(cacheBase, dim));
-        bufV.CopyTo(_kvCacheV![layer].AsSpan(cacheBase, dim));
-
-        output.Clear();
-
-        // scaleShift = floor(log2(headDim)/2)  — used to right-shift raw dot-product
-        // scores, approximating division by sqrt(headDim) with integer arithmetic.
-        //   headDim=4  → log2=2 → scaleShift=1  (divide by ~2  ≈ sqrt(4)=2)
-        //   headDim=16 → log2=4 → scaleShift=2  (divide by ~4  ≈ sqrt(16)=4)
-        //   headDim=32 → log2=5 → scaleShift=2  (divide by ~4  ≈ sqrt(32)≈5.7)
-        int scaleShift = headDim > 1 ? (int)Math.Log2(headDim) >> 1 : 0;
+        int headDim = _config.HeadDim;
+        float scale = 1f / MathF.Sqrt(headDim);
 
         int posCount = seqPos + 1;
-        var scores = _bufScores!.AsSpan(0, posCount);
+        var scores   = _fScores!;
+
+        Array.Clear(output, 0, dim);
 
         for (int h = 0; h < nHeads; h++)
         {
             int hOff = h * headDim;
 
-            // Compute raw dot-product attention scores for head h over all past positions
-            // Use IntrinsicsMatVec.DotProduct for AVX2/NEON acceleration
-            int maxScore = int.MinValue;
+            // Compute QK^T / sqrt(d_k) for all cached positions
+            float maxScore = float.NegativeInfinity;
             for (int p = 0; p < posCount; p++)
             {
                 int kBase = p * dim + hOff;
-                var kCache = _kvCacheK[layer].AsSpan(kBase, headDim);
-                var qSlice = bufQ.Slice(hOff, headDim);
-                int score = IntrinsicsMatVec.DotProduct(qSlice, kCache);
-                // Scale to prevent overflow: divide by √headDim using bit-shift
-                score >>= scaleShift;
-                scores[p] = score;
-                if (score > maxScore) maxScore = score;
+                float dot = 0;
+                for (int d = 0; d < headDim; d++)
+                    dot += fQ[hOff + d] * _fKvCacheK![layer][kBase + d];
+                dot *= scale;
+                scores[p] = dot;
+                if (dot > maxScore) maxScore = dot;
             }
 
-            // Integer softmax approximation via exponential shift.
-            // Maps scores to approximate softmax weights using the identity:
-            //   exp(x - max) ≈ 2^((x - max) / scale)
-            // We use scale=8 (right-shift by 3) to convert the score delta
-            // into a bit-shift exponent.
-            //   shift = |delta| >> 3  →  weight = 256 >> shift
-            //   When shift > 8: 256 >> shift = 0, clamped to 1 (minimum).
-            // This replaces the previous linear clamp which was over-simplistic.
-            long totalWeight = 0;
+            // Softmax: exp(score - max) / sum(exp(score - max))
+            float sumExp = 0;
             for (int p = 0; p < posCount; p++)
             {
-                int delta = scores[p] - maxScore; // ≤ 0
-                int shift = (-delta) >> 3;         // non-negative right-shift amount
-                // 2^(delta/8) in range [1, 256]: when shift > 8, result < 1 → clamp to 1
-                int w = shift > 8 ? 1 : (256 >> shift);
-                scores[p]   = w;
-                totalWeight += w;
+                float e = MathF.Exp(scores[p] - maxScore);
+                scores[p] = e;
+                sumExp += e;
             }
-            if (totalWeight == 0) totalWeight = 1;
+            if (sumExp > 0)
+            {
+                float invSum = 1f / sumExp;
+                for (int p = 0; p < posCount; p++)
+                    scores[p] *= invSum;
+            }
 
-            // Weighted sum of V values for this head using IntrinsicsMatVec
+            // Weighted sum of V values
             for (int p = 0; p < posCount; p++)
             {
-                long w = scores[p];
+                float w = scores[p];
+                if (w < 1e-8f) continue;
                 int vBase = p * dim + hOff;
-                var vSlice  = _kvCacheV![layer].AsSpan(vBase, headDim);
-                var outSlice = output.Slice(hOff, headDim);
-                IntrinsicsMatVec.WeightedAccumulate(w, vSlice, outSlice, totalWeight);
+                for (int d = 0; d < headDim; d++)
+                    output[hOff + d] += w * _fKvCacheV![layer][vBase + d];
             }
         }
-
-        // Output projection: Wo × attention_output
-        // Borrow _bufNorm to hold the pre-projection values without extra allocation
-        output.CopyTo(_bufNorm!.AsSpan(0, dim));
-        _compressedWo![layer].MatVecMultiply(_bufNorm.AsSpan(0, dim), output);
     }
 
-    /// <summary>Embeds a token ID into the hidden state using the embedding table row.</summary>
+    // ── Float inference primitives ──────────────────────────────────────
+
+    /// <summary>
+    /// RMS normalize with learned gamma weights.
+    /// output[i] = input[i] / rms(input) * gamma[i]
+    /// If gamma is null, uses identity (gamma=1).
+    /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void EmbedToken(int tokenId, Span<int> hidden)
+    private static void RmsNormWithGamma(ReadOnlySpan<float> input, Span<float> output, float[]? gamma)
+    {
+        float sumSq = 0;
+        for (int i = 0; i < input.Length; i++)
+            sumSq += input[i] * input[i];
+        float rms = MathF.Sqrt(sumSq / input.Length + 1e-5f);
+        float invRms = 1f / rms;
+
+        if (gamma != null)
+        {
+            for (int i = 0; i < input.Length; i++)
+                output[i] = input[i] * invRms * gamma[i];
+        }
+        else
+        {
+            for (int i = 0; i < input.Length; i++)
+                output[i] = input[i] * invRms;
+        }
+    }
+
+    /// <summary>
+    /// Quantize float activations to int8 range (±127) for ternary matmul input.
+    /// Returns the absmax scale factor for dequantization.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float QuantizeActivation(ReadOnlySpan<float> input, Span<int> output)
+    {
+        float absmax = 0;
+        for (int i = 0; i < input.Length; i++)
+        {
+            float a = MathF.Abs(input[i]);
+            if (a > absmax) absmax = a;
+        }
+        if (absmax < 1e-10f) absmax = 1e-10f;
+        float scale = 127f / absmax;
+        for (int i = 0; i < input.Length; i++)
+            output[i] = (int)MathF.Round(input[i] * scale);
+        return absmax;
+    }
+
+    /// <summary>
+    /// Run ternary matmul on quantized int input, then dequantize output to float.
+    /// float_output[i] = int_output[i] * weight_scale * absmax / 127
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void TernaryMatmulDequant(
+        NativeTernaryMatrix W, int[] quantizedInput, int inputLen,
+        float[] floatOutput, float absmax, float weightScale)
+    {
+        var iOut = _iMatmulOut!;
+        W.MatVecMultiply(quantizedInput.AsSpan(0, inputLen), iOut.AsSpan(0, W.Rows));
+        float dequantScale = weightScale * absmax / 127f;
+        int outLen = W.Rows;
+        for (int i = 0; i < outLen; i++)
+            floatOutput[i] = iOut[i] * dequantScale;
+    }
+
+    /// <summary>
+    /// Quantize float input → int8, run int8 matmul (NativeInt8Matrix), write int output.
+    /// Used for output head projection where we need int logits for sampling.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void QuantizeAndMatmul(ReadOnlySpan<float> floatInput, NativeInt8Matrix W, Span<int> intOutput)
+    {
+        var iQ = _iQuantized!;
+        QuantizeActivation(floatInput, iQ.AsSpan(0, floatInput.Length));
+        W.MatVecMultiply(iQ.AsSpan(0, floatInput.Length), intOutput);
+    }
+
+    /// <summary>
+    /// Apply RoPE (Rotary Position Embeddings) to a vector in-place.
+    /// Rotates pairs of dimensions using precomputed sin/cos tables.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ApplyRoPE(float[] vec, int pos, int dim)
+    {
+        if (_ropeCos == null || _ropeSin == null) return;
+
+        int nHeads  = _config.NumHeads;
+        int headDim = _config.HeadDim;
+        int halfDim = headDim / 2;
+        int ropeBase = pos * halfDim;
+
+        for (int h = 0; h < nHeads; h++)
+        {
+            int hOff = h * headDim;
+            for (int j = 0; j < halfDim; j++)
+            {
+                float cos = _ropeCos[ropeBase + j];
+                float sin = _ropeSin[ropeBase + j];
+                float x0 = vec[hOff + j];
+                float x1 = vec[hOff + halfDim + j];
+                vec[hOff + j]           = x0 * cos - x1 * sin;
+                vec[hOff + halfDim + j] = x0 * sin + x1 * cos;
+            }
+        }
+    }
+
+    /// <summary>Embeds a token ID into the float hidden state.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void EmbedTokenFloat(int tokenId, float[] fHidden)
     {
         int rows = _compressedEmbeddings!.Rows;
         int id = tokenId < 0 ? 0 : tokenId >= rows ? tokenId % rows : tokenId;
-        _compressedEmbeddings.DecodeRow(id, hidden);
+        int cols = _compressedEmbeddings.Cols;
+        // DecodeRow writes int8 values → convert to float
+        var iTemp = _iQuantized!;
+        _compressedEmbeddings.DecodeRow(id, iTemp.AsSpan(0, cols));
+        for (int i = 0; i < cols; i++)
+            fHidden[i] = iTemp[i];
     }
 
     /// <summary>Greedy argmax over integer logits — no allocations.</summary>
@@ -1004,10 +1154,15 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         }
 
         // Clear buffer references (GC will reclaim them)
-        _bufHidden = _bufNorm = _bufQ = _bufK = _bufV = _bufPreWo = _bufScores = _bufLogits = null;
-        _bufFfnGate = _bufFfnUp = _bufFfnDown = null;
-        _kvCacheK = null;
-        _kvCacheV = null;
+        _fHidden = _fNorm = _fQ = _fK = _fV = _fAttnOut = null;
+        _fFfnGate = _fFfnUp = _fFfnDown = null;
+        _fScores = null;
+        _iQuantized = _iMatmulOut = _bufLogits = null;
+        _fKvCacheK = null;
+        _fKvCacheV = null;
+        _ropeCos = _ropeSin = null;
+        _weightScales = _inputNorm = _attnSubNorm = _postAttnNorm = _ffnSubNorm = null;
+        _finalNorm = null;
         _tokenTable = null;
         _merges = null;
         _tokenizer  = null;
@@ -1031,13 +1186,21 @@ public readonly record struct BitNetModelConfig(
     int NumHeads,
     int VocabSize,
     int MaxSeqLen,
-    int FfnDim = 0)
+    int FfnDim = 0,
+    int NumKvHeads = 0,
+    float RopeTheta = 500_000f)
 {
     /// <summary>Effective FFN intermediate dimension. Falls back to HiddenDim when not set.</summary>
     public int EffectiveFfnDim => FfnDim > 0 ? FfnDim : HiddenDim;
 
     /// <summary>Whether this config uses a gated FFN (SwiGLU/ReLU²) with 3 separate matrices.</summary>
     public bool HasGatedFfn => FfnDim > 0;
+
+    /// <summary>Effective KV head count. Falls back to NumHeads (MHA) when not set.</summary>
+    public int EffectiveNumKvHeads => NumKvHeads > 0 ? NumKvHeads : NumHeads;
+
+    /// <summary>Head dimension = HiddenDim / NumHeads.</summary>
+    public int HeadDim => HiddenDim / NumHeads;
 
     public static readonly BitNetModelConfig Default = new(
         HiddenDim: 128,

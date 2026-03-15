@@ -159,8 +159,7 @@ public sealed unsafe class NativeInt8Matrix : IDisposable
         int cols = _cols;
         for (int c = 0; c < cols; c++)
             acc += (long)rowPtr[c] * input[c];
-        // Scale down to avoid overflow in downstream ternary matmul chains
-        return (int)(acc >> 7);
+        return (int)acc;
     }
 
     /// <summary>Full matrix-vector multiply: output[r] = dot(row[r], input) for all rows.</summary>
@@ -184,7 +183,7 @@ public sealed unsafe class NativeInt8Matrix : IDisposable
                 long acc = 0;
                 for (int c = 0; c < cols; c++)
                     acc += (long)rowPtr[c] * inputArr[c];
-                results[r] = (int)(acc >> 7);
+                results[r] = (int)acc;
             });
             results.AsSpan(0, _rows).CopyTo(output);
         }

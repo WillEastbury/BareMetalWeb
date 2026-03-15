@@ -162,12 +162,18 @@ public static class HuggingFaceImporter
         var (tokenTable, bpeMerges) = LoadTokenizerVocabAndMerges(hfDir, vocab);
         progress?.Invoke($"  Vocab loaded: {tokenTable?.Count ?? 0} tokens, {bpeMerges?.Count ?? 0} merges");
 
-        // ── 9. Write .bmwm snapshot ───────────────────────────────────────
+        // ── 9. Extract weight scales and layer norm weights ───────────────
+        progress?.Invoke("  Extracting weight scales and layer norms ...");
+        var (weightScales, inputNorm, attnSubNorm, postAttnNorm, ffnSubNorm, finalNorm) =
+            ExtractNormsAndScales(tensorMap, numLayers, dim, ffnDim, progress);
+
+        // ── 10. Write .bmwm snapshot ──────────────────────────────────────
         progress?.Invoke($"  Writing snapshot to {outputPath} ...");
         ModelSnapshot.Save(outputPath, bmwConfig, vocab,
             wq, wk, wv, wo, ffnGate, ffnUp, ffnDown,
             embeddings, outputHead,
-            tokenTable, bpeMerges);
+            tokenTable, bpeMerges,
+            weightScales, inputNorm, attnSubNorm, postAttnNorm, ffnSubNorm, finalNorm);
 
         // Dispose remaining native matrices not already freed by Save
         embeddings.Dispose();
@@ -480,6 +486,116 @@ public static class HuggingFaceImporter
                     output[i] = (sbyte)raw[i];
                 break;
         }
+    }
+
+    // ── Weight scales and layer norms extraction ─────────────────────────
+
+    /// <summary>
+    /// Extract per-layer weight scales (BF16 scalars) and learned RMS norm weights
+    /// (BF16 vectors) from the safetensors model. These are critical for correct
+    /// BitNet inference — without them, magnitudes between projections are wrong
+    /// and per-dimension learned scaling is lost.
+    /// </summary>
+    private static (float[][], float[][], float[][], float[][], float[][], float[])
+        ExtractNormsAndScales(
+            Dictionary<string, (SafeTensorsReader.TensorInfo Info, string FilePath)> tensorMap,
+            int numLayers, int hiddenDim, int ffnDim,
+            Action<string>? progress)
+    {
+        var weightScales = new float[numLayers][];
+        var inputNorm    = new float[numLayers][];
+        var attnSubNorm  = new float[numLayers][];
+        var postAttnNorm = new float[numLayers][];
+        var ffnSubNorm   = new float[numLayers][];
+
+        string[] scaleKeys =
+        [
+            "self_attn.q_proj.weight_scale",
+            "self_attn.k_proj.weight_scale",
+            "self_attn.v_proj.weight_scale",
+            "self_attn.o_proj.weight_scale",
+            "mlp.gate_proj.weight_scale",
+            "mlp.up_proj.weight_scale",
+            "mlp.down_proj.weight_scale",
+        ];
+
+        for (int L = 0; L < numLayers; L++)
+        {
+            // Weight scales: 7 BF16 scalars per layer
+            weightScales[L] = new float[7];
+            for (int m = 0; m < 7; m++)
+            {
+                string key = $"model.layers.{L}.{scaleKeys[m]}";
+                weightScales[L][m] = tensorMap.ContainsKey(key)
+                    ? ReadBf16Scalar(tensorMap[key])
+                    : 1f;
+            }
+
+            // Layer norms: BF16 vectors
+            inputNorm[L]    = ReadBf16Vector(tensorMap, $"model.layers.{L}.input_layernorm.weight", hiddenDim);
+            attnSubNorm[L]  = ReadBf16Vector(tensorMap, $"model.layers.{L}.self_attn.attn_sub_norm.weight", hiddenDim);
+            postAttnNorm[L] = ReadBf16Vector(tensorMap, $"model.layers.{L}.post_attention_layernorm.weight", hiddenDim);
+            ffnSubNorm[L]   = ReadBf16Vector(tensorMap, $"model.layers.{L}.mlp.ffn_sub_norm.weight", ffnDim);
+
+            if (L == 0 || L == numLayers - 1)
+                progress?.Invoke($"    Layer {L}: scales=[{string.Join(", ", weightScales[L].Select(s => s.ToString("F3")))}]");
+        }
+
+        // Final norm (before output head)
+        var finalNorm = ReadBf16Vector(tensorMap, "model.norm.weight", hiddenDim);
+        progress?.Invoke($"    Final norm: mean={finalNorm.Average():F4}, range=[{finalNorm.Min():F4}, {finalNorm.Max():F4}]");
+
+        return (weightScales, inputNorm, attnSubNorm, postAttnNorm, ffnSubNorm, finalNorm);
+    }
+
+    /// <summary>Read a single BF16 scalar from a safetensors tensor.</summary>
+    private static float ReadBf16Scalar(
+        (SafeTensorsReader.TensorInfo Info, string FilePath) entry)
+    {
+        using var fs = new FileStream(entry.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        fs.Seek(entry.Info.DataStart, SeekOrigin.Begin);
+        Span<byte> buf = stackalloc byte[2];
+        fs.ReadExactly(buf);
+        ushort bits = (ushort)(buf[0] | (buf[1] << 8));
+        uint f32Bits = (uint)bits << 16;
+        return BitConverter.Int32BitsToSingle((int)f32Bits);
+    }
+
+    /// <summary>Read a BF16 vector from safetensors and convert to float32.</summary>
+    private static float[] ReadBf16Vector(
+        Dictionary<string, (SafeTensorsReader.TensorInfo Info, string FilePath)> tensorMap,
+        string key, int expectedLen)
+    {
+        if (!tensorMap.ContainsKey(key))
+        {
+            // Identity fallback — norm weight of 1.0
+            var identity = new float[expectedLen];
+            Array.Fill(identity, 1f);
+            return identity;
+        }
+
+        var (info, filePath) = tensorMap[key];
+        int count = Math.Min(info.Rows * info.Cols, expectedLen);
+        var result = new float[expectedLen];
+
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        fs.Seek(info.DataStart, SeekOrigin.Begin);
+
+        int elemBytes = info.ElementBytes;
+        var rawBuf = new byte[count * elemBytes];
+        ReadExact(fs, rawBuf);
+
+        // For 1D vectors, shape is [N] → Rows=N, Cols=1 in our parser.
+        // Use ConvertToFloat for dtype-agnostic conversion.
+        var floatBuf = new float[count];
+        ConvertToFloat(rawBuf, floatBuf, info.Dtype, count);
+        Array.Copy(floatBuf, result, count);
+
+        // Fill remaining with 1.0 (identity) if shorter than expected
+        for (int i = count; i < expectedLen; i++)
+            result[i] = 1f;
+
+        return result;
     }
 
     // ── Config / tokenizer loading ────────────────────────────────────────

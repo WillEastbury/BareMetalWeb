@@ -20,7 +20,7 @@ namespace BareMetalWeb.Intelligence;
 public static class ModelSnapshot
 {
     private static ReadOnlySpan<byte> Magic => "BMWM"u8;
-    private const int FormatVersion = 4;
+    private const int FormatVersion = 5;
 
     // Header: magic(4) + version(4) + hiddenDim(4) + numLayers(4) +
     //         numHeads(4) + vocabSize(4) + activeVocab(4) + maxSeqLen(4) +
@@ -51,7 +51,13 @@ public static class ModelSnapshot
         NativeInt8Matrix compressedEmbeddings,
         NativeInt8Matrix compressedOutputHead,
         IReadOnlyList<string>? tokenTable = null,
-        IReadOnlyList<string>? bpeMerges = null)
+        IReadOnlyList<string>? bpeMerges = null,
+        float[][]? weightScales = null,
+        float[][]? inputNorm = null,
+        float[][]? attnSubNorm = null,
+        float[][]? postAttnNorm = null,
+        float[][]? ffnSubNorm = null,
+        float[]? finalNorm = null)
     {
         int layerCount = wq.Length;
         int ternaryCount = layerCount * 7;
@@ -170,6 +176,50 @@ public static class ModelSnapshot
         }
 
         bw.Flush();
+
+        // ── v5 Norms/Scales appendix ────────────────────────────────
+        // Written after packed data. Presence detected by "SNRM" marker.
+        bool hasNorms = weightScales != null || inputNorm != null || finalNorm != null;
+        if (hasNorms)
+        {
+            bw.Write("SNRM"u8);
+            int layerCount2 = wq.Length;
+            bw.Write(layerCount2);
+            bw.Write(config.HiddenDim);
+            bw.Write(config.EffectiveFfnDim);
+
+            // Weight scales: [numLayers][7] as float32
+            for (int L = 0; L < layerCount2; L++)
+            {
+                if (weightScales != null && L < weightScales.Length)
+                    for (int m = 0; m < 7; m++)
+                        bw.Write(m < weightScales[L].Length ? weightScales[L][m] : 1f);
+                else
+                    for (int m = 0; m < 7; m++)
+                        bw.Write(1f);
+            }
+
+            // Final norm: float32[hiddenDim]
+            WriteFloatArray(bw, finalNorm, config.HiddenDim);
+
+            // Per-layer norms: inputNorm, attnSubNorm, postAttnNorm (each [hiddenDim])
+            //                  ffnSubNorm ([ffnDim])
+            for (int L = 0; L < layerCount2; L++)
+            {
+                WriteFloatArray(bw, inputNorm?[L], config.HiddenDim);
+                WriteFloatArray(bw, attnSubNorm?[L], config.HiddenDim);
+                WriteFloatArray(bw, postAttnNorm?[L], config.HiddenDim);
+                WriteFloatArray(bw, ffnSubNorm?[L], config.EffectiveFfnDim);
+            }
+
+            bw.Flush();
+        }
+    }
+
+    private static void WriteFloatArray(BinaryWriter bw, float[]? arr, int expectedLen)
+    {
+        for (int i = 0; i < expectedLen; i++)
+            bw.Write(arr != null && i < arr.Length ? arr[i] : 1f);
     }
 
     /// <summary>
@@ -322,6 +372,9 @@ public static class ModelSnapshot
 
         var config = new BitNetModelConfig(hiddenDim, layerCount, numHeads, vocabSize, maxSeqLen, ffnDim);
 
+        // ── v5 Norms/Scales appendix ────────────────────────────────
+        var normsData = TryReadNormsAppendix(br, version);
+
         return new SnapshotData(
             Config: config,
             ActiveVocab: activeVocab,
@@ -330,7 +383,13 @@ public static class ModelSnapshot
             Embeddings: embMatrix,
             OutputHead: ohMatrix,
             Tokens: tokens,
-            Merges: merges);
+            Merges: merges,
+            WeightScales: normsData.WeightScales,
+            InputNorm: normsData.InputNorm,
+            AttnSubNorm: normsData.AttnSubNorm,
+            PostAttnNorm: normsData.PostAttnNorm,
+            FfnSubNorm: normsData.FfnSubNorm,
+            FinalNorm: normsData.FinalNorm);
     }
 
     /// <summary>
@@ -524,9 +583,14 @@ public static class ModelSnapshot
             var config = new BitNetModelConfig(
                 hiddenDim, layerCount, numHeads, vocabSize, maxSeqLen, mappedFfnDim);
 
+            // Read norms appendix from mapped memory
+            var normsData = TryReadNormsAppendixMapped(basePtr, fileSize, descriptors, matrixCount, version);
+
             return new SnapshotData(config, activeVocab, wqA, wkA, wvA, woA,
                 ffnGateA, ffnUpA, ffnDownA,
-                embMatrix, ohMatrix, tokens, mappedMerges);
+                embMatrix, ohMatrix, tokens, mappedMerges,
+                normsData.WeightScales, normsData.InputNorm, normsData.AttnSubNorm,
+                normsData.PostAttnNorm, normsData.FfnSubNorm, normsData.FinalNorm);
         }
         finally
         {
@@ -723,8 +787,14 @@ public static class ModelSnapshot
             }
 
             var config = new BitNetModelConfig(hiddenDim, layerCount, numHeads, vocabSize, maxSeqLen, lazyFfnDim);
+
+            // Read norms appendix from mapped memory
+            var normsData = TryReadNormsAppendixMapped(basePtr, fs.Length, descriptors, matrixCount, version);
+
             var data = new SnapshotData(config, activeVocab, wqL, wkL, wvL, woL,
-                ffnGateL, ffnUpL, ffnDownL, embeddings, outputHead, tokens, lazyMerges);
+                ffnGateL, ffnUpL, ffnDownL, embeddings, outputHead, tokens, lazyMerges,
+                normsData.WeightScales, normsData.InputNorm, normsData.AttnSubNorm,
+                normsData.PostAttnNorm, normsData.FfnSubNorm, normsData.FinalNorm);
 
             return new LazySnapshot(fs, mmf, accessor, basePtr, data);
         }
@@ -738,6 +808,123 @@ public static class ModelSnapshot
             fs.Dispose();
             throw;
         }
+    }
+
+    // ── Norms/Scales appendix (v5+) ──────────────────────────────────────
+
+    private record struct NormsAppendix(
+        float[][]? WeightScales,
+        float[][]? InputNorm,
+        float[][]? AttnSubNorm,
+        float[][]? PostAttnNorm,
+        float[][]? FfnSubNorm,
+        float[]? FinalNorm);
+
+    private static readonly ReadOnlyMemory<byte> NormsMagic = "SNRM"u8.ToArray();
+
+    /// <summary>Read norms appendix from a BinaryReader (after packed data).</summary>
+    private static NormsAppendix TryReadNormsAppendix(BinaryReader br, int version)
+    {
+        if (version < 5) return default;
+        try
+        {
+            Span<byte> marker = stackalloc byte[4];
+            if (br.Read(marker) != 4 || !marker.SequenceEqual(NormsMagic.Span))
+                return default;
+
+            int numLayers = br.ReadInt32();
+            int hiddenDim = br.ReadInt32();
+            int ffnDim    = br.ReadInt32();
+
+            var weightScales = new float[numLayers][];
+            for (int L = 0; L < numLayers; L++)
+            {
+                weightScales[L] = new float[7];
+                for (int m = 0; m < 7; m++)
+                    weightScales[L][m] = br.ReadSingle();
+            }
+
+            var finalNorm = ReadFloatArray(br, hiddenDim);
+
+            var inputNorm    = new float[numLayers][];
+            var attnSubNorm  = new float[numLayers][];
+            var postAttnNorm = new float[numLayers][];
+            var ffnSubNorm   = new float[numLayers][];
+            for (int L = 0; L < numLayers; L++)
+            {
+                inputNorm[L]    = ReadFloatArray(br, hiddenDim);
+                attnSubNorm[L]  = ReadFloatArray(br, hiddenDim);
+                postAttnNorm[L] = ReadFloatArray(br, hiddenDim);
+                ffnSubNorm[L]   = ReadFloatArray(br, ffnDim);
+            }
+
+            return new NormsAppendix(weightScales, inputNorm, attnSubNorm, postAttnNorm, ffnSubNorm, finalNorm);
+        }
+        catch (EndOfStreamException) { return default; }
+    }
+
+    /// <summary>Read norms appendix from memory-mapped data.</summary>
+    private static unsafe NormsAppendix TryReadNormsAppendixMapped(
+        byte* basePtr, long fileSize,
+        (int Rows, int Cols, int Stride, long Offset, long Length)[] descriptors,
+        int matrixCount, int version)
+    {
+        if (version < 5 || matrixCount == 0) return default;
+
+        // Norms section starts after the last matrix's packed data
+        var lastDesc = descriptors[matrixCount - 1];
+        long normsStart = lastDesc.Offset + lastDesc.Length;
+        if (normsStart + 16 > fileSize) return default;
+
+        var markerSpan = new ReadOnlySpan<byte>(basePtr + normsStart, 4);
+        if (!markerSpan.SequenceEqual(NormsMagic.Span))
+            return default;
+
+        // Read via UnmanagedMemoryStream + BinaryReader for simplicity
+        long remaining = fileSize - normsStart;
+        using var stream = new UnmanagedMemoryStream(basePtr + normsStart, remaining);
+        using var br = new BinaryReader(stream, Encoding.UTF8);
+        br.ReadInt32(); // skip marker
+        return TryReadNormsFromReader(br);
+    }
+
+    private static NormsAppendix TryReadNormsFromReader(BinaryReader br)
+    {
+        int numLayers = br.ReadInt32();
+        int hiddenDim = br.ReadInt32();
+        int ffnDim    = br.ReadInt32();
+
+        var weightScales = new float[numLayers][];
+        for (int L = 0; L < numLayers; L++)
+        {
+            weightScales[L] = new float[7];
+            for (int m = 0; m < 7; m++)
+                weightScales[L][m] = br.ReadSingle();
+        }
+
+        var finalNorm = ReadFloatArray(br, hiddenDim);
+
+        var inputNorm    = new float[numLayers][];
+        var attnSubNorm  = new float[numLayers][];
+        var postAttnNorm = new float[numLayers][];
+        var ffnSubNorm   = new float[numLayers][];
+        for (int L = 0; L < numLayers; L++)
+        {
+            inputNorm[L]    = ReadFloatArray(br, hiddenDim);
+            attnSubNorm[L]  = ReadFloatArray(br, hiddenDim);
+            postAttnNorm[L] = ReadFloatArray(br, hiddenDim);
+            ffnSubNorm[L]   = ReadFloatArray(br, ffnDim);
+        }
+
+        return new NormsAppendix(weightScales, inputNorm, attnSubNorm, postAttnNorm, ffnSubNorm, finalNorm);
+    }
+
+    private static float[] ReadFloatArray(BinaryReader br, int count)
+    {
+        var arr = new float[count];
+        for (int i = 0; i < count; i++)
+            arr[i] = br.ReadSingle();
+        return arr;
     }
 
     // ── Token table encoding ────────────────────────────────────────────
@@ -824,7 +1011,13 @@ public sealed record SnapshotData(
     NativeInt8Matrix Embeddings,
     NativeInt8Matrix OutputHead,
     string[] Tokens,
-    string[] Merges) : IDisposable
+    string[] Merges,
+    float[][]? WeightScales = null,
+    float[][]? InputNorm = null,
+    float[][]? AttnSubNorm = null,
+    float[][]? PostAttnNorm = null,
+    float[][]? FfnSubNorm = null,
+    float[]? FinalNorm = null) : IDisposable
 {
     public void Dispose()
     {
