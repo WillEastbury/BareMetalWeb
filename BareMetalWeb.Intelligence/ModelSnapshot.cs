@@ -336,8 +336,8 @@ public static class ModelSnapshot
             int mappedFfnDim = 0;
             if (version >= 3)
             {
-                mappedFfnDim = MemoryMarshal.Read<int>(headerSpan[48..]);
-                // headerSpan[52..56] is reserved
+                mappedFfnDim = MemoryMarshal.Read<int>(headerSpan[56..]);
+                // headerSpan[60..64] is reserved
             }
 
             if (matrixCount != layerCount * 7 + 2 && matrixCount != layerCount * 5 + 2 && matrixCount != layerCount * 2 + 2)
@@ -508,7 +508,8 @@ public static class ModelSnapshot
             int lazyFfnDim = 0;
             if (version >= 3)
             {
-                lazyFfnDim = MemoryMarshal.Read<int>(headerSpan[48..]);
+                lazyFfnDim = MemoryMarshal.Read<int>(headerSpan[56..]);
+                // headerSpan[60..64] is reserved
             }
 
             if (matrixCount != layerCount * 7 + 2 && matrixCount != layerCount * 5 + 2 && matrixCount != layerCount * 2 + 2)

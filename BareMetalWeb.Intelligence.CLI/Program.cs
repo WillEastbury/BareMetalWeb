@@ -35,7 +35,7 @@ var config = new BitNetModelConfig(
 var executor = AdminToolCatalogue.CreateRegistry();
 using var engine = new BitNetEngine(config);
 
-bool modelLoaded = IntelligenceExtensions.TryLoadSnapshot(engine);
+bool modelLoaded = IntelligenceExtensions.TryLoadSnapshot(engine, maxSeqLenOverride: 128);
 
 GC.Collect(2, GCCollectionMode.Aggressive, true, true);
 
@@ -421,7 +421,7 @@ static void LoadSnapshot(
     try
     {
         var sw = Stopwatch.StartNew();
-        engine.LoadSnapshot(path);
+        engine.LoadSnapshot(path, maxSeqLenOverride: 128);
         GC.Collect(2, GCCollectionMode.Aggressive, true, true);
         sw.Stop();
 
@@ -465,7 +465,7 @@ static void LoadSnapshotLazy(
     try
     {
         var sw = Stopwatch.StartNew();
-        engine.LoadSnapshotLazy(path);
+        engine.LoadSnapshotLazy(path, maxSeqLenOverride: 128);
         sw.Stop();
 
         orchestrator = new IntelligenceOrchestrator(engine);
