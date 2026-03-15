@@ -171,6 +171,7 @@ static void PrintHelp()
     Console.WriteLine("  │    bench            — Run inference benchmark   │");
     Console.WriteLine("  │    compare          — Compare pruning levels    │");
     Console.WriteLine("  │    import <hf-dir>  — Import HF model → .bmwm  │");
+    Console.WriteLine("  │      [output.bmwm]    (optional output path)    │");
     Console.WriteLine("  │    save <path>      — Save snapshot (.bmwm)     │");
     Console.WriteLine("  │    load <path>      — Load snapshot (.bmwm)     │");
     Console.WriteLine("  │    loadlazy <path>  — Lazy mmap load (zero-copy)│");
@@ -486,13 +487,18 @@ static void LoadSnapshotLazy(
 }
 
 static async Task<IntelligenceOrchestrator?> ImportHuggingFaceModel(
-    BitNetEngine engine, string hfDir,
+    BitNetEngine engine, string args,
     BitNetModelConfig config)
 {
+    // Parse: import <hf-dir> [output-path]
+    var parts = args.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    string? hfDir = parts.Length > 0 ? parts[0] : null;
+    string? outputPath = parts.Length > 1 ? parts[1] : null;
+
     if (string.IsNullOrWhiteSpace(hfDir))
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("  Usage: import <path-to-hf-model-dir>");
+        Console.WriteLine("  Usage: import <path-to-hf-model-dir> [output.bmwm]");
         Console.ResetColor();
         Console.WriteLine();
         return null;
@@ -507,8 +513,7 @@ static async Task<IntelligenceOrchestrator?> ImportHuggingFaceModel(
         return null;
     }
 
-    // Default output path: model.bmwm in the current directory
-    string outputPath = Path.Combine(Directory.GetCurrentDirectory(), "model.bmwm");
+    outputPath ??= Path.Combine(Directory.GetCurrentDirectory(), "model.bmwm");
 
     Console.ForegroundColor = ConsoleColor.DarkCyan;
     Console.WriteLine("  ── HuggingFace Import ────────────────────────────────");
@@ -551,6 +556,7 @@ static async Task<IntelligenceOrchestrator?> ImportHuggingFaceModel(
     {
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"  ✗ Import failed: {ex.Message}");
+        Console.WriteLine($"    {ex.StackTrace}");
         Console.ResetColor();
     }
     Console.WriteLine();

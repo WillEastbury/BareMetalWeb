@@ -95,12 +95,25 @@ public static class HuggingFaceImporter
 
         // ── 5. Derive FFN intermediate dimension from gate_proj shape ──────
         var gate0Key = LayerGateKey(0);
-        int ffnDim = tensorMap.ContainsKey(gate0Key)
-            ? tensorMap[gate0Key].Info.Rows   // gate_proj is [ffnDim × dim]
-            : dim;                            // fallback: square FFN
+        var gate0Info = tensorMap.ContainsKey(gate0Key) ? tensorMap[gate0Key].Info : (SafeTensorsReader.TensorInfo?)null;
+        // For U8 packed ternary: logical rows = packed rows × 4
+        int ffnDim = gate0Info is not null
+            ? gate0Info.Value.Rows * (gate0Info.Value.Dtype == "U8" ? 4 : 1)
+            : dim;
+
+        // Derive KV head dimension for GQA (Grouped Query Attention)
+        var wk0Key = LayerWkKey(0);
+        var wk0Info = tensorMap.ContainsKey(wk0Key) ? tensorMap[wk0Key].Info : (SafeTensorsReader.TensorInfo?)null;
+        int kvDim = wk0Info is not null
+            ? wk0Info.Value.Rows * (wk0Info.Value.Dtype == "U8" ? 4 : 1)
+            : dim;
+
+        // Derive Q dimension (should match dim, but verify)
+        int qDim = wq0Info.Rows * (wq0Info.Dtype == "U8" ? 4 : 1);
 
         var bmwConfig = new BitNetModelConfig(dim, numLayers, numHeads, vocab, maxSeqLen, ffnDim);
         progress?.Invoke($"  FFN intermediate dim={ffnDim}, gated SwiGLU={bmwConfig.HasGatedFfn}");
+        progress?.Invoke($"  Q dim={qDim}, KV dim={kvDim} (GQA={kvDim != qDim})");
 
         // ── 6. Import per-layer matrices ───────────────────────────────────
         var wq      = new NativeTernaryMatrix[numLayers];
@@ -115,10 +128,15 @@ public static class HuggingFaceImporter
         {
             progress?.Invoke($"  Layer {i + 1}/{numLayers}: importing attention + ffn ...");
 
-            wq[i]      = StreamTensor(tensorMap, LayerWqKey(i),   dim, dim, progress);
-            wk[i]      = StreamTensor(tensorMap, LayerWkKey(i),   dim, dim, progress);
-            wv[i]      = StreamTensor(tensorMap, LayerWvKey(i),   dim, dim, progress);
-            wo[i]      = StreamTensor(tensorMap, LayerWoKey(i),   dim, dim, progress);
+            wq[i]      = StreamTensor(tensorMap, LayerWqKey(i),   qDim, dim, progress);
+            // GQA: expand KV heads to match Q heads by repeating each KV head group
+            wk[i]      = kvDim < qDim
+                ? StreamTensorWithGqaExpand(tensorMap, LayerWkKey(i), kvDim, qDim, dim, progress)
+                : StreamTensor(tensorMap, LayerWkKey(i), kvDim, dim, progress);
+            wv[i]      = kvDim < qDim
+                ? StreamTensorWithGqaExpand(tensorMap, LayerWvKey(i), kvDim, qDim, dim, progress)
+                : StreamTensor(tensorMap, LayerWvKey(i), kvDim, dim, progress);
+            wo[i]      = StreamTensor(tensorMap, LayerWoKey(i),   dim, qDim, progress);
             ffnGate[i] = StreamTensor(tensorMap, LayerGateKey(i), ffnDim, dim, progress);
             ffnUp[i]   = StreamTensor(tensorMap, LayerUpKey(i),   ffnDim, dim, progress);
             ffnDown[i] = StreamTensor(tensorMap, LayerDownKey(i), dim, ffnDim, progress);
@@ -227,6 +245,11 @@ public static class HuggingFaceImporter
         Action<string>? progress)
     {
         var (info, filePath) = map[key];
+
+        // U8 packed ternary: 4 ternary values per byte, packed along rows
+        if (info.Dtype == "U8")
+            return StreamPackedTernaryTensor(info, filePath, targetRows, targetCols);
+
         int srcRows = info.Rows;
         int srcCols = info.Cols;
         int rows = Math.Min(srcRows, targetRows);
@@ -234,7 +257,6 @@ public static class HuggingFaceImporter
 
         var matrix = NativeTernaryMatrix.Allocate(targetRows, targetCols);
 
-        // Row buffer — reused for all rows of this tensor
         var ternRow = new sbyte[srcCols];
         var rawRow  = new byte[srcCols * info.ElementBytes];
 
@@ -246,16 +268,112 @@ public static class HuggingFaceImporter
         {
             ReadExact(fs, rawRow);
 
-            if (r >= rows) continue; // skip excess rows (truncation)
+            if (r >= rows) continue;
 
             SafeTensorsReader.QuantiseRow(rawRow, ternRow, info.Dtype, srcCols);
-
-            // If tensor is narrower than target, we pack only cols (rest stays zero)
             matrix.PackRowInPlace(r, ternRow.AsSpan(0, cols));
         }
 
         matrix.FinalizeStats();
         return matrix;
+    }
+
+    /// <summary>
+    /// Stream a U8-packed ternary tensor. Each byte stores 4 ternary values (2 bits each)
+    /// packed along the row dimension: packed_shape[0] = logical_rows/4, packed_shape[1] = logical_cols.
+    /// Encoding per byte (little-endian bit pairs): 0→0, 1→+1, 2→-1.
+    /// </summary>
+    private static NativeTernaryMatrix StreamPackedTernaryTensor(
+        SafeTensorsReader.TensorInfo info, string filePath,
+        int targetRows, int targetCols)
+    {
+        int packedRows = info.Rows;
+        int cols = info.Cols;
+        int logicalRows = packedRows * 4;
+
+        int rows = Math.Min(logicalRows, targetRows);
+        int outCols = Math.Min(cols, targetCols);
+
+        var matrix = NativeTernaryMatrix.Allocate(targetRows, targetCols);
+
+        var packedRow = new byte[cols];
+        // 4 unpacked rows, one for each 2-bit slot
+        var ternRows = new sbyte[4][];
+        for (int s = 0; s < 4; s++) ternRows[s] = new sbyte[cols];
+
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+            FileShare.Read, Math.Max(65536, cols), FileOptions.SequentialScan);
+        fs.Seek(info.DataStart, SeekOrigin.Begin);
+
+        for (int pr = 0; pr < packedRows; pr++)
+        {
+            ReadExact(fs, packedRow);
+
+            int baseRow = pr * 4;
+            if (baseRow >= rows) continue;
+
+            // Unpack: each byte → 4 ternary values
+            for (int c = 0; c < cols; c++)
+            {
+                byte packed = packedRow[c];
+                // 2-bit slots: bits [1:0], [3:2], [5:4], [7:6]
+                // Encoding: 0→0, 1→+1, 2→-1
+                for (int s = 0; s < 4; s++)
+                {
+                    int val = (packed >> (s * 2)) & 0x03;
+                    ternRows[s][c] = val switch { 1 => 1, 2 => -1, _ => 0 };
+                }
+            }
+
+            // Pack each unpacked row into the native matrix
+            for (int s = 0; s < 4; s++)
+            {
+                int logRow = baseRow + s;
+                if (logRow >= rows) break;
+                matrix.PackRowInPlace(logRow, ternRows[s].AsSpan(0, outCols));
+            }
+        }
+
+        matrix.FinalizeStats();
+        return matrix;
+    }
+
+    /// <summary>
+    /// Stream a KV projection tensor and expand for GQA (Grouped Query Attention).
+    /// Repeats each KV head's rows to match the Q head count.
+    /// E.g., 5 KV heads × 128 headDim = 640 rows → repeated 4× → 2560 rows = 20 Q heads × 128.
+    /// </summary>
+    private static NativeTernaryMatrix StreamTensorWithGqaExpand(
+        Dictionary<string, (SafeTensorsReader.TensorInfo Info, string FilePath)> map,
+        string key,
+        int kvDim, int qDim, int dim,
+        Action<string>? progress)
+    {
+        // First stream the KV tensor at its natural size
+        var kvMatrix = StreamTensor(map, key, kvDim, dim, progress);
+
+        // If no expansion needed, return as-is
+        if (kvDim >= qDim) return kvMatrix;
+
+        int repeatFactor = qDim / kvDim;
+        var expanded = NativeTernaryMatrix.Allocate(qDim, dim);
+
+        // Decode each row from KV as int[], convert to sbyte[], repeat into expanded
+        var intRow = new int[dim];
+        var sbyteRow = new sbyte[dim];
+        for (int r = 0; r < kvDim; r++)
+        {
+            kvMatrix.DecodeRow(r, intRow);
+            for (int c = 0; c < dim; c++)
+                sbyteRow[c] = (sbyte)intRow[c];
+
+            for (int rep = 0; rep < repeatFactor; rep++)
+                expanded.PackRowInPlace(r * repeatFactor + rep, sbyteRow);
+        }
+
+        kvMatrix.Dispose();
+        expanded.FinalizeStats();
+        return expanded;
     }
 
     // ── Config / tokenizer loading ────────────────────────────────────────
