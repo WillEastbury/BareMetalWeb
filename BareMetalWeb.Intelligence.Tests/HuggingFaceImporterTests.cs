@@ -77,6 +77,8 @@ public class HuggingFaceImporterTests
                 tensors.Add(($"model.layers.{i}.self_attn.v_proj.weight", dim, dim));
                 tensors.Add(($"model.layers.{i}.self_attn.o_proj.weight", dim, dim));
                 tensors.Add(($"model.layers.{i}.mlp.gate_proj.weight",    dim, dim));
+                tensors.Add(($"model.layers.{i}.mlp.up_proj.weight",      dim, dim));
+                tensors.Add(($"model.layers.{i}.mlp.down_proj.weight",    dim, dim));
             }
 
             WriteSyntheticSafeTensors(

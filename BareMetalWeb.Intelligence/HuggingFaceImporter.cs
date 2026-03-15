@@ -93,62 +93,107 @@ public static class HuggingFaceImporter
 
         progress?.Invoke($"  Effective dim={dim}, maxSeqLen capped to {maxSeqLen}");
 
-        // ── 5. Build output config ─────────────────────────────────────────
-        var bmwConfig = new BitNetModelConfig(dim, numLayers, numHeads, vocab, maxSeqLen);
+        // ── 5. Derive FFN intermediate dimension from gate_proj shape ──────
+        var gate0Key = LayerGateKey(0);
+        var gate0Info = tensorMap.ContainsKey(gate0Key) ? tensorMap[gate0Key].Info : (SafeTensorsReader.TensorInfo?)null;
+        // For U8 packed ternary: logical rows = packed rows × 4
+        int ffnDim = gate0Info is not null
+            ? gate0Info.Value.Rows * (gate0Info.Value.Dtype == "U8" ? 4 : 1)
+            : dim;
+
+        // Derive KV head dimension for GQA (Grouped Query Attention)
+        var wk0Key = LayerWkKey(0);
+        var wk0Info = tensorMap.ContainsKey(wk0Key) ? tensorMap[wk0Key].Info : (SafeTensorsReader.TensorInfo?)null;
+        int kvDim = wk0Info is not null
+            ? wk0Info.Value.Rows * (wk0Info.Value.Dtype == "U8" ? 4 : 1)
+            : dim;
+
+        // Derive Q dimension (should match dim, but verify)
+        int qDim = wq0Info.Rows * (wq0Info.Dtype == "U8" ? 4 : 1);
+
+        var bmwConfig = new BitNetModelConfig(dim, numLayers, numHeads, vocab, maxSeqLen, ffnDim);
+        progress?.Invoke($"  FFN intermediate dim={ffnDim}, gated SwiGLU={bmwConfig.HasGatedFfn}");
+        progress?.Invoke($"  Q dim={qDim}, KV dim={kvDim} (GQA={kvDim != qDim})");
 
         // ── 6. Import per-layer matrices ───────────────────────────────────
-        var wq  = new NativeTernaryMatrix[numLayers];
-        var wk  = new NativeTernaryMatrix[numLayers];
-        var wv  = new NativeTernaryMatrix[numLayers];
-        var wo  = new NativeTernaryMatrix[numLayers];
-        var ffn = new NativeTernaryMatrix[numLayers];
+        var wq      = new NativeTernaryMatrix[numLayers];
+        var wk      = new NativeTernaryMatrix[numLayers];
+        var wv      = new NativeTernaryMatrix[numLayers];
+        var wo      = new NativeTernaryMatrix[numLayers];
+        var ffnGate = new NativeTernaryMatrix[numLayers];
+        var ffnUp   = new NativeTernaryMatrix[numLayers];
+        var ffnDown = new NativeTernaryMatrix[numLayers];
 
         for (int i = 0; i < numLayers; i++)
         {
             progress?.Invoke($"  Layer {i + 1}/{numLayers}: importing attention + ffn ...");
 
-            wq[i]  = StreamTensor(tensorMap, LayerWqKey(i),   dim, dim, progress);
-            wk[i]  = StreamTensor(tensorMap, LayerWkKey(i),   dim, dim, progress);
-            wv[i]  = StreamTensor(tensorMap, LayerWvKey(i),   dim, dim, progress);
-            wo[i]  = StreamTensor(tensorMap, LayerWoKey(i),   dim, dim, progress);
-            ffn[i] = StreamTensor(tensorMap, LayerFfnKey(i),  dim, dim, progress);
+            wq[i]      = StreamTensor(tensorMap, LayerWqKey(i),   qDim, dim, progress);
+            // GQA: store K/V at original kvDim — expanded at runtime in attention
+            wk[i]      = StreamTensor(tensorMap, LayerWkKey(i), kvDim, dim, progress);
+            wv[i]      = StreamTensor(tensorMap, LayerWvKey(i), kvDim, dim, progress);
+            wo[i]      = StreamTensor(tensorMap, LayerWoKey(i),   dim, qDim, progress);
+            ffnGate[i] = StreamTensor(tensorMap, LayerGateKey(i), ffnDim, dim, progress);
+            ffnUp[i]   = StreamTensor(tensorMap, LayerUpKey(i),   ffnDim, dim, progress);
+            ffnDown[i] = StreamTensor(tensorMap, LayerDownKey(i), dim, ffnDim, progress);
 
             // Blocking GC after each layer to reclaim row-buffers before next layer allocates.
             // Non-blocking collection risks memory pressure spikes on constrained hosts.
             GC.Collect(0, GCCollectionMode.Optimized, blocking: true);
         }
 
-        // ── 7. Import embeddings + output head ────────────────────────────
-        progress?.Invoke("  Importing embeddings (large — streaming) ...");
-        var embeddings = StreamTensor(tensorMap, EmbedKey, vocab, dim, progress);
-        // Blocking GC ensures the embedding row-buffer is freed before allocating output head.
+        // ── 7. Import embeddings (+ output head if untied) as int8 ──────
+        //   Embeddings are BF16 in the model — ternary quantization destroys them.
+        //   Scale BF16 → int8 to preserve relative magnitudes.
+        progress?.Invoke("  Importing embeddings as int8 (BF16 → scaled int8) ...");
+        var embeddings = StreamTensorInt8(tensorMap, EmbedKey, vocab, dim, progress);
         GC.Collect(1, GCCollectionMode.Optimized, blocking: true);
 
-        progress?.Invoke("  Importing output head ...");
-        var outputHead = StreamTensor(tensorMap, LmHeadKey(tensorMap), vocab, dim, progress);
-        // Blocking GC to reclaim output head row-buffer before tokenizer loading.
-        GC.Collect(1, GCCollectionMode.Optimized, blocking: true);
+        // Detect tied embeddings: lm_head.weight missing or same as embed_tokens
+        bool tiedEmbeddings = LmHeadKey(tensorMap) == EmbedKey;
+        NativeInt8Matrix? outputHead = null;
+        if (!tiedEmbeddings)
+        {
+            progress?.Invoke("  Importing output head as int8 ...");
+            outputHead = StreamTensorInt8(tensorMap, LmHeadKey(tensorMap), vocab, dim, progress);
+            GC.Collect(1, GCCollectionMode.Optimized, blocking: true);
+        }
+        else
+        {
+            progress?.Invoke("  Output head tied to embeddings — shared storage");
+        }
 
-        // ── 8. Load tokenizer vocab ────────────────────────────────────────
-        progress?.Invoke("  Loading tokenizer vocab ...");
-        var tokenTable = LoadTokenizerVocab(hfDir, vocab);
-        progress?.Invoke($"  Vocab loaded: {tokenTable?.Count ?? 0} tokens");
+        // ── 8. Load tokenizer vocab and BPE merges ─────────────────────────
+        progress?.Invoke("  Loading tokenizer vocab + BPE merges ...");
+        var (tokenTable, bpeMerges) = LoadTokenizerVocabAndMerges(hfDir, vocab);
+        progress?.Invoke($"  Vocab loaded: {tokenTable?.Count ?? 0} tokens, {bpeMerges?.Count ?? 0} merges");
 
-        // ── 9. Write .bmwm snapshot ───────────────────────────────────────
+        // ── 9. Extract weight scales and layer norm weights ───────────────
+        progress?.Invoke("  Extracting weight scales and layer norms ...");
+        var (weightScales, inputNorm, attnSubNorm, postAttnNorm, ffnSubNorm, finalNorm) =
+            ExtractNormsAndScales(tensorMap, numLayers, dim, ffnDim, progress);
+
+        // ── 10. Write .bmwm snapshot ──────────────────────────────────────
         progress?.Invoke($"  Writing snapshot to {outputPath} ...");
         ModelSnapshot.Save(outputPath, bmwConfig, vocab,
-            wq, wk, wv, wo, ffn,
+            wq, wk, wv, wo, ffnGate, ffnUp, ffnDown,
             embeddings, outputHead,
-            tokenTable);
+            tokenTable, bpeMerges,
+            weightScales, inputNorm, attnSubNorm, postAttnNorm, ffnSubNorm, finalNorm);
 
-        // ── 10. Dispose native matrices ────────────────────────────────────
+        // Dispose remaining native matrices not already freed by Save
+        embeddings.Dispose();
+        outputHead?.Dispose();
+
+        // ── 11. Dispose native matrices ────────────────────────────────────
         for (int i = 0; i < numLayers; i++)
         {
             wq[i].Dispose(); wk[i].Dispose(); wv[i].Dispose();
-            wo[i].Dispose(); ffn[i].Dispose();
+            wo[i].Dispose();
+            ffnGate[i].Dispose(); ffnUp[i].Dispose(); ffnDown[i].Dispose();
         }
         embeddings.Dispose();
-        outputHead.Dispose();
+        outputHead?.Dispose();
 
         var fi = new FileInfo(outputPath);
         progress?.Invoke($"  ✓ Snapshot written: {fi.Length / (1024 * 1024)} MB → {fi.FullName}");
@@ -166,15 +211,9 @@ public static class HuggingFaceImporter
     private static string LayerWvKey(int i)  => $"model.layers.{i}.self_attn.v_proj.weight";
     private static string LayerWoKey(int i)  => $"model.layers.{i}.self_attn.o_proj.weight";
 
-    /// <summary>
-    /// Prefer gate_proj (SwiGLU first operand) as the FFN representative.
-    /// Falls back to mlp.fc1 or mlp.dense_h_to_4h for other architectures.
-    /// </summary>
-    private static string LayerFfnKey(int i)
-    {
-        // Priority list — return first key; validated separately
-        return $"model.layers.{i}.mlp.gate_proj.weight";
-    }
+    private static string LayerGateKey(int i) => $"model.layers.{i}.mlp.gate_proj.weight";
+    private static string LayerUpKey(int i)   => $"model.layers.{i}.mlp.up_proj.weight";
+    private static string LayerDownKey(int i) => $"model.layers.{i}.mlp.down_proj.weight";
 
     private static string[] RequiredLayerSuffixes =
     [
@@ -183,6 +222,8 @@ public static class HuggingFaceImporter
         "self_attn.v_proj.weight",
         "self_attn.o_proj.weight",
         "mlp.gate_proj.weight",
+        "mlp.up_proj.weight",
+        "mlp.down_proj.weight",
     ];
 
     // ── Validation ────────────────────────────────────────────────────────
@@ -220,6 +261,11 @@ public static class HuggingFaceImporter
         Action<string>? progress)
     {
         var (info, filePath) = map[key];
+
+        // U8 packed ternary: 4 ternary values per byte, packed along rows
+        if (info.Dtype == "U8")
+            return StreamPackedTernaryTensor(info, filePath, targetRows, targetCols);
+
         int srcRows = info.Rows;
         int srcCols = info.Cols;
         int rows = Math.Min(srcRows, targetRows);
@@ -227,7 +273,6 @@ public static class HuggingFaceImporter
 
         var matrix = NativeTernaryMatrix.Allocate(targetRows, targetCols);
 
-        // Row buffer — reused for all rows of this tensor
         var ternRow = new sbyte[srcCols];
         var rawRow  = new byte[srcCols * info.ElementBytes];
 
@@ -239,16 +284,324 @@ public static class HuggingFaceImporter
         {
             ReadExact(fs, rawRow);
 
-            if (r >= rows) continue; // skip excess rows (truncation)
+            if (r >= rows) continue;
 
             SafeTensorsReader.QuantiseRow(rawRow, ternRow, info.Dtype, srcCols);
-
-            // If tensor is narrower than target, we pack only cols (rest stays zero)
             matrix.PackRowInPlace(r, ternRow.AsSpan(0, cols));
         }
 
         matrix.FinalizeStats();
         return matrix;
+    }
+
+    /// <summary>
+    /// Stream a U8-packed ternary tensor. Each byte stores 4 ternary values (2 bits each)
+    /// packed along the row dimension: packed_shape[0] = logical_rows/4, packed_shape[1] = logical_cols.
+    /// Encoding per byte (little-endian bit pairs): 0→0, 1→+1, 2→-1.
+    /// </summary>
+    private static NativeTernaryMatrix StreamPackedTernaryTensor(
+        SafeTensorsReader.TensorInfo info, string filePath,
+        int targetRows, int targetCols)
+    {
+        int packedRows = info.Rows;
+        int cols = info.Cols;
+        int logicalRows = packedRows * 4;
+
+        int rows = Math.Min(logicalRows, targetRows);
+        int outCols = Math.Min(cols, targetCols);
+
+        var matrix = NativeTernaryMatrix.Allocate(targetRows, targetCols);
+
+        var packedRow = new byte[cols];
+        // 4 unpacked rows, one for each 2-bit slot
+        var ternRows = new sbyte[4][];
+        for (int s = 0; s < 4; s++) ternRows[s] = new sbyte[cols];
+
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+            FileShare.Read, Math.Max(65536, cols), FileOptions.SequentialScan);
+        fs.Seek(info.DataStart, SeekOrigin.Begin);
+
+        for (int pr = 0; pr < packedRows; pr++)
+        {
+            ReadExact(fs, packedRow);
+
+            int baseRow = pr * 4;
+            if (baseRow >= rows) continue;
+
+            // Unpack: each byte → 4 ternary values
+            for (int c = 0; c < cols; c++)
+            {
+                byte packed = packedRow[c];
+                // 2-bit slots: bits [1:0], [3:2], [5:4], [7:6]
+                // Encoding: 0→0, 1→+1, 2→-1
+                for (int s = 0; s < 4; s++)
+                {
+                    int val = (packed >> (s * 2)) & 0x03;
+                    ternRows[s][c] = val switch { 1 => 1, 2 => -1, _ => 0 };
+                }
+            }
+
+            // Pack each unpacked row into the native matrix
+            for (int s = 0; s < 4; s++)
+            {
+                int logRow = baseRow + s;
+                if (logRow >= rows) break;
+                matrix.PackRowInPlace(logRow, ternRows[s].AsSpan(0, outCols));
+            }
+        }
+
+        matrix.FinalizeStats();
+        return matrix;
+    }
+
+    /// <summary>
+    /// Stream a KV projection tensor and expand for GQA (Grouped Query Attention).
+    /// Repeats each KV head's rows to match the Q head count.
+    /// E.g., 5 KV heads × 128 headDim = 640 rows → repeated 4× → 2560 rows = 20 Q heads × 128.
+    /// </summary>
+    private static NativeTernaryMatrix StreamTensorWithGqaExpand(
+        Dictionary<string, (SafeTensorsReader.TensorInfo Info, string FilePath)> map,
+        string key,
+        int kvDim, int qDim, int dim,
+        Action<string>? progress)
+    {
+        // First stream the KV tensor at its natural size
+        var kvMatrix = StreamTensor(map, key, kvDim, dim, progress);
+
+        // If no expansion needed, return as-is
+        if (kvDim >= qDim) return kvMatrix;
+
+        int repeatFactor = qDim / kvDim;
+        var expanded = NativeTernaryMatrix.Allocate(qDim, dim);
+
+        // Decode each row from KV as int[], convert to sbyte[], repeat into expanded
+        var intRow = new int[dim];
+        var sbyteRow = new sbyte[dim];
+        for (int r = 0; r < kvDim; r++)
+        {
+            kvMatrix.DecodeRow(r, intRow);
+            for (int c = 0; c < dim; c++)
+                sbyteRow[c] = (sbyte)intRow[c];
+
+            for (int rep = 0; rep < repeatFactor; rep++)
+                expanded.PackRowInPlace(r * repeatFactor + rep, sbyteRow);
+        }
+
+        kvMatrix.Dispose();
+        expanded.FinalizeStats();
+        return expanded;
+    }
+
+    /// <summary>
+    /// Stream a BF16/F16/F32 tensor and quantize to int8 (scaled to ±127).
+    /// Used for embeddings and output heads where ternary quantization is too lossy.
+    /// Two-pass: first pass finds max abs value per row for scaling, second pass quantizes.
+    /// For large tensors we use a global scale computed from the first 256 rows.
+    /// </summary>
+    private static NativeInt8Matrix StreamTensorInt8(
+        Dictionary<string, (SafeTensorsReader.TensorInfo Info, string FilePath)> map,
+        string key,
+        int targetRows, int targetCols,
+        Action<string>? progress)
+    {
+        var (info, filePath) = map[key];
+        int srcRows = info.Rows;
+        int srcCols = info.Cols;
+        int rows = Math.Min(srcRows, targetRows);
+        int cols = Math.Min(srcCols, targetCols);
+        int elemBytes = info.ElementBytes;
+
+        var matrix = NativeInt8Matrix.Allocate(targetRows, targetCols);
+        var rawRow = new byte[srcCols * elemBytes];
+        var floatRow = new float[srcCols];
+        var int8Row = new sbyte[cols];
+
+        // First pass (sample): compute global scale from first N rows
+        float globalMaxAbs = 0f;
+        int sampleRows = Math.Min(rows, 256);
+        using (var fs1 = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+            FileShare.Read, Math.Max(65536, rawRow.Length), FileOptions.SequentialScan))
+        {
+            fs1.Seek(info.DataStart, SeekOrigin.Begin);
+            for (int r = 0; r < sampleRows; r++)
+            {
+                ReadExact(fs1, rawRow);
+                ConvertToFloat(rawRow, floatRow, info.Dtype, srcCols);
+                for (int c = 0; c < cols; c++)
+                {
+                    float abs = MathF.Abs(floatRow[c]);
+                    if (abs > globalMaxAbs) globalMaxAbs = abs;
+                }
+            }
+        }
+
+        float scale = globalMaxAbs > 0f ? 127f / globalMaxAbs : 1f;
+
+        // Second pass: quantize all rows
+        using var fs2 = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+            FileShare.Read, Math.Max(65536, rawRow.Length), FileOptions.SequentialScan);
+        fs2.Seek(info.DataStart, SeekOrigin.Begin);
+
+        for (int r = 0; r < srcRows; r++)
+        {
+            ReadExact(fs2, rawRow);
+            if (r >= rows) continue;
+
+            ConvertToFloat(rawRow, floatRow, info.Dtype, srcCols);
+            for (int c = 0; c < cols; c++)
+            {
+                float scaled = floatRow[c] * scale;
+                int clamped = (int)MathF.Round(scaled);
+                int8Row[c] = (sbyte)Math.Clamp(clamped, -127, 127);
+            }
+            matrix.PackRowInPlace(r, int8Row);
+        }
+
+        matrix.FinalizeStats();
+        return matrix;
+    }
+
+    /// <summary>Convert a raw byte row to float values based on dtype.</summary>
+    private static void ConvertToFloat(byte[] raw, float[] output, string dtype, int cols)
+    {
+        switch (dtype)
+        {
+            case "BF16":
+                for (int i = 0; i < cols; i++)
+                {
+                    ushort bits = (ushort)(raw[i * 2] | (raw[i * 2 + 1] << 8));
+                    // BF16 → float32: shift left 16 bits
+                    uint f32Bits = (uint)bits << 16;
+                    output[i] = BitConverter.Int32BitsToSingle((int)f32Bits);
+                }
+                break;
+            case "F16":
+                for (int i = 0; i < cols; i++)
+                {
+                    ushort bits = (ushort)(raw[i * 2] | (raw[i * 2 + 1] << 8));
+                    output[i] = (float)BitConverter.UInt16BitsToHalf(bits);
+                }
+                break;
+            case "F32":
+                for (int i = 0; i < cols; i++)
+                    output[i] = BitConverter.ToSingle(raw, i * 4);
+                break;
+            default:
+                // For I8/U8 packed data, just cast directly
+                for (int i = 0; i < cols; i++)
+                    output[i] = (sbyte)raw[i];
+                break;
+        }
+    }
+
+    // ── Weight scales and layer norms extraction ─────────────────────────
+
+    /// <summary>
+    /// Extract per-layer weight scales (BF16 scalars) and learned RMS norm weights
+    /// (BF16 vectors) from the safetensors model. These are critical for correct
+    /// BitNet inference — without them, magnitudes between projections are wrong
+    /// and per-dimension learned scaling is lost.
+    /// </summary>
+    private static (float[][], float[][], float[][], float[][], float[][], float[])
+        ExtractNormsAndScales(
+            Dictionary<string, (SafeTensorsReader.TensorInfo Info, string FilePath)> tensorMap,
+            int numLayers, int hiddenDim, int ffnDim,
+            Action<string>? progress)
+    {
+        var weightScales = new float[numLayers][];
+        var inputNorm    = new float[numLayers][];
+        var attnSubNorm  = new float[numLayers][];
+        var postAttnNorm = new float[numLayers][];
+        var ffnSubNorm   = new float[numLayers][];
+
+        string[] scaleKeys =
+        [
+            "self_attn.q_proj.weight_scale",
+            "self_attn.k_proj.weight_scale",
+            "self_attn.v_proj.weight_scale",
+            "self_attn.o_proj.weight_scale",
+            "mlp.gate_proj.weight_scale",
+            "mlp.up_proj.weight_scale",
+            "mlp.down_proj.weight_scale",
+        ];
+
+        for (int L = 0; L < numLayers; L++)
+        {
+            // Weight scales: 7 BF16 scalars per layer
+            weightScales[L] = new float[7];
+            for (int m = 0; m < 7; m++)
+            {
+                string key = $"model.layers.{L}.{scaleKeys[m]}";
+                weightScales[L][m] = tensorMap.ContainsKey(key)
+                    ? ReadBf16Scalar(tensorMap[key])
+                    : 1f;
+            }
+
+            // Layer norms: BF16 vectors
+            inputNorm[L]    = ReadBf16Vector(tensorMap, $"model.layers.{L}.input_layernorm.weight", hiddenDim);
+            attnSubNorm[L]  = ReadBf16Vector(tensorMap, $"model.layers.{L}.self_attn.attn_sub_norm.weight", hiddenDim);
+            postAttnNorm[L] = ReadBf16Vector(tensorMap, $"model.layers.{L}.post_attention_layernorm.weight", hiddenDim);
+            ffnSubNorm[L]   = ReadBf16Vector(tensorMap, $"model.layers.{L}.mlp.ffn_sub_norm.weight", ffnDim);
+
+            if (L == 0 || L == numLayers - 1)
+                progress?.Invoke($"    Layer {L}: scales=[{string.Join(", ", weightScales[L].Select(s => s.ToString("F3")))}]");
+        }
+
+        // Final norm (before output head)
+        var finalNorm = ReadBf16Vector(tensorMap, "model.norm.weight", hiddenDim);
+        progress?.Invoke($"    Final norm: mean={finalNorm.Average():F4}, range=[{finalNorm.Min():F4}, {finalNorm.Max():F4}]");
+
+        return (weightScales, inputNorm, attnSubNorm, postAttnNorm, ffnSubNorm, finalNorm);
+    }
+
+    /// <summary>Read a single BF16 scalar from a safetensors tensor.</summary>
+    private static float ReadBf16Scalar(
+        (SafeTensorsReader.TensorInfo Info, string FilePath) entry)
+    {
+        using var fs = new FileStream(entry.FilePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        fs.Seek(entry.Info.DataStart, SeekOrigin.Begin);
+        Span<byte> buf = stackalloc byte[2];
+        fs.ReadExactly(buf);
+        ushort bits = (ushort)(buf[0] | (buf[1] << 8));
+        uint f32Bits = (uint)bits << 16;
+        return BitConverter.Int32BitsToSingle((int)f32Bits);
+    }
+
+    /// <summary>Read a BF16 vector from safetensors and convert to float32.</summary>
+    private static float[] ReadBf16Vector(
+        Dictionary<string, (SafeTensorsReader.TensorInfo Info, string FilePath)> tensorMap,
+        string key, int expectedLen)
+    {
+        if (!tensorMap.ContainsKey(key))
+        {
+            // Identity fallback — norm weight of 1.0
+            var identity = new float[expectedLen];
+            Array.Fill(identity, 1f);
+            return identity;
+        }
+
+        var (info, filePath) = tensorMap[key];
+        int count = Math.Min(info.Rows * info.Cols, expectedLen);
+        var result = new float[expectedLen];
+
+        using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        fs.Seek(info.DataStart, SeekOrigin.Begin);
+
+        int elemBytes = info.ElementBytes;
+        var rawBuf = new byte[count * elemBytes];
+        ReadExact(fs, rawBuf);
+
+        // For 1D vectors, shape is [N] → Rows=N, Cols=1 in our parser.
+        // Use ConvertToFloat for dtype-agnostic conversion.
+        var floatBuf = new float[count];
+        ConvertToFloat(rawBuf, floatBuf, info.Dtype, count);
+        Array.Copy(floatBuf, result, count);
+
+        // Fill remaining with 1.0 (identity) if shorter than expected
+        for (int i = count; i < expectedLen; i++)
+            result[i] = 1f;
+
+        return result;
     }
 
     // ── Config / tokenizer loading ────────────────────────────────────────
@@ -272,6 +625,28 @@ public static class HuggingFaceImporter
         int maxSeqLen  = ExtractInt(text, "max_position_embeddings", DefaultMaxSeqLen);
 
         return new HfModelConfig(hiddenDim, numLayers, numHeads, vocabSize, maxSeqLen);
+    }
+
+    /// <summary>
+    /// Load the tokenizer vocabulary and BPE merges from tokenizer.json.
+    /// </summary>
+    private static (IReadOnlyList<string>? Vocab, IReadOnlyList<string>? Merges)
+        LoadTokenizerVocabAndMerges(string hfDir, int vocabSize)
+    {
+        string tokPath = Path.Combine(hfDir, "tokenizer.json");
+        if (!File.Exists(tokPath)) return (null, null);
+
+        try
+        {
+            var text = File.ReadAllText(tokPath).AsSpan();
+            var vocab = ParseVocabFromTokenizerJson(text, vocabSize);
+            var merges = ParseMergesFromTokenizerJson(text);
+            return (vocab, merges);
+        }
+        catch
+        {
+            return (null, null);
+        }
     }
 
     /// <summary>
@@ -334,6 +709,33 @@ public static class HuggingFaceImporter
         // Array form not needed for BitNet-b1.58-2B-4T (uses object form)
 
         return result;
+    }
+
+    /// <summary>
+    /// Parse the "merges" array from a HuggingFace tokenizer.json.
+    /// Returns a list of merge strings like "Ġ t" (space-separated pair).
+    /// </summary>
+    private static IReadOnlyList<string>? ParseMergesFromTokenizerJson(ReadOnlySpan<char> json)
+    {
+        int idx = IndexOf(json, "\"merges\"");
+        if (idx < 0) return null;
+        idx += 8; // skip "merges"
+
+        while (idx < json.Length && json[idx] is ' ' or '\t' or '\n' or '\r' or ':') idx++;
+        if (idx >= json.Length || json[idx] != '[') return null;
+        idx++; // consume '['
+
+        var merges = new List<string>(300_000);
+        while (idx < json.Length && json[idx] != ']')
+        {
+            while (idx < json.Length && json[idx] is ' ' or '\t' or '\n' or '\r' or ',') idx++;
+            if (idx >= json.Length || json[idx] == ']') break;
+            if (json[idx] != '"') { SkipJsonValue(json, ref idx); continue; }
+
+            merges.Add(ReadJsonString(json, ref idx));
+        }
+
+        return merges;
     }
 
     // ── Config.json field helpers ─────────────────────────────────────────

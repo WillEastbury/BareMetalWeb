@@ -35,7 +35,7 @@ var config = new BitNetModelConfig(
 var executor = AdminToolCatalogue.CreateRegistry();
 using var engine = new BitNetEngine(config);
 
-bool modelLoaded = IntelligenceExtensions.TryLoadSnapshot(engine);
+bool modelLoaded = IntelligenceExtensions.TryLoadSnapshot(engine, maxSeqLenOverride: 128);
 
 GC.Collect(2, GCCollectionMode.Aggressive, true, true);
 
@@ -171,6 +171,7 @@ static void PrintHelp()
     Console.WriteLine("  │    bench            — Run inference benchmark   │");
     Console.WriteLine("  │    compare          — Compare pruning levels    │");
     Console.WriteLine("  │    import <hf-dir>  — Import HF model → .bmwm  │");
+    Console.WriteLine("  │      [output.bmwm]    (optional output path)    │");
     Console.WriteLine("  │    save <path>      — Save snapshot (.bmwm)     │");
     Console.WriteLine("  │    load <path>      — Load snapshot (.bmwm)     │");
     Console.WriteLine("  │    loadlazy <path>  — Lazy mmap load (zero-copy)│");
@@ -357,146 +358,16 @@ static void RunBenchmark(IntelligenceOrchestrator orch)
 
 static void RunPruneComparison(BitNetModelConfig config)
 {
-    Console.ForegroundColor = ConsoleColor.DarkCyan;
-    Console.WriteLine("  ── Pruning Level Comparison ──────────────────────");
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine("  Pruning comparison not yet available for v3 models.");
     Console.ResetColor();
-
-    var levels = new (string Name, ModelLoadOptions Opts)[]
-    {
-        ("No pruning",  ModelLoadOptions.NoPruning),
-        ("Vocab only",  ModelLoadOptions.Default),
-        ("Aggressive",  ModelLoadOptions.Aggressive),
-        ("Maximum",     new ModelLoadOptions
-        {
-            PruneVocabulary = true,
-            LayerPruneRatio = 0.50f,
-            HeadPruneRatio = 0.50f,
-            GroupPruneAttnThreshold = 2,
-            GroupPruneFfnThreshold = 3,
-        }),
-    };
-
-    Console.WriteLine("    {0,-16} {1,10} {2,8} {3,8} {4,7} {5,9} {6,8}", "Level", "WorkSet", "GCHeap", "Native", "Layers", "Sparsity", "Vocab");
-    Console.WriteLine("    {0,-16} {1,10} {2,8} {3,8} {4,7} {5,9} {6,8}", "─────", "──────", "──────", "──────", "──────", "────────", "─────");
-
-    foreach (var (name, opts) in levels)
-    {
-        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
-        var proc = Process.GetCurrentProcess();
-        proc.Refresh();
-        long wsBefore = proc.WorkingSet64;
-
-        using var e = new BitNetEngine(config);
-        e.LoadTestModel(opts);
-        GC.Collect(2, GCCollectionMode.Aggressive, true, true);
-
-        proc.Refresh();
-        long wsAfter = proc.WorkingSet64;
-        long wsDelta = wsAfter - wsBefore;
-
-        int vocab = e.VocabPruneStats?.PrunedVocabSize ?? config.VocabSize;
-        int layers = e.ModelStats?.LayerCount ?? config.NumLayers;
-        float sparsity = e.ModelStats?.Sparsity ?? 0f;
-        long nativeBytes = e.NativeBytesAllocated;
-        long gcHeap = GC.GetTotalMemory(false);
-
-        Console.Write($"    {name,-16}");
-        Console.ForegroundColor = ConsoleColor.White;
-        Console.Write($" {wsAfter / (1024 * 1024),7} MB");
-        Console.ResetColor();
-        Console.Write($" {gcHeap / (1024 * 1024),5} MB");
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.Write($" {nativeBytes / (1024 * 1024),5} MB");
-        Console.ResetColor();
-        Console.WriteLine($" {layers,7} {sparsity,9:P1} {vocab,8}");
-    }
-
-    Console.WriteLine();
 }
 
 static void RunSemanticComparison(BitNetModelConfig config)
 {
-    // Use a smaller model for the interactive comparison to keep it fast
-    var smallConfig = new BitNetModelConfig(
-        HiddenDim: 256,
-        NumLayers: 4,
-        NumHeads: 4,
-        VocabSize: 1000,
-        MaxSeqLen: 512);
-
-    Console.ForegroundColor = ConsoleColor.DarkCyan;
-    Console.WriteLine("  ── Semantic Pruning Comparison (256-dim model) ───");
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine("  Semantic pruning comparison not yet available for v3 models.");
     Console.ResetColor();
-
-    var levels = new (string Name, ModelLoadOptions Opts)[]
-    {
-        ("Magnitude only",  new ModelLoadOptions
-        {
-            PruneVocabulary = true,
-            GroupPruneAttnThreshold = 1,
-            GroupPruneFfnThreshold = 2,
-        }),
-        ("Semantic (0.95)",  new ModelLoadOptions
-        {
-            PruneVocabulary = true,
-            GroupPruneAttnThreshold = 1,
-            GroupPruneFfnThreshold = 2,
-            SemanticPruning = true,
-            SemanticDriftThreshold = 0.95f,
-        }),
-        ("Semantic (0.90)",  new ModelLoadOptions
-        {
-            PruneVocabulary = true,
-            GroupPruneAttnThreshold = 1,
-            GroupPruneFfnThreshold = 2,
-            SemanticPruning = true,
-            SemanticDriftThreshold = 0.90f,
-        }),
-    };
-
-    Console.WriteLine("    {0,-18} {1,10} {2,7} {3,8} {4,7} {5,7} {6,6}",
-        "Level", "Sparsity", "Heads", "Neurons", "Blocks", "Fine", "Acc");
-    Console.WriteLine("    {0,-18} {1,10} {2,7} {3,8} {4,7} {5,7} {6,6}",
-        "─────", "────────", "─────", "───────", "──────", "────", "───");
-
-    foreach (var (name, opts) in levels)
-    {
-        var sw = Stopwatch.StartNew();
-        using var e = new BitNetEngine(smallConfig);
-        e.LoadTestModel(opts);
-        sw.Stop();
-
-        float sparsity = e.ModelStats?.Sparsity ?? 0f;
-        var sp = e.SemanticPruneInfo;
-
-        Console.Write($"    {name,-18}");
-        Console.ForegroundColor = ConsoleColor.Green;
-        Console.Write($" {sparsity,9:P1}");
-        Console.ResetColor();
-
-        if (sp is { } s)
-        {
-            Console.Write($" {s.HeadsPruned,7}");
-            Console.Write($" {s.NeuronsPruned,8}");
-            Console.Write($" {s.BlocksPruned,7}");
-            Console.Write($" {s.FineGroupsPruned,7}");
-            Console.ForegroundColor = ConsoleColor.White;
-            Console.Write($" {s.PostPruneAccuracy,5:P0}");
-            Console.ResetColor();
-        }
-        else
-        {
-            Console.Write($" {"—",7} {"—",8} {"—",7} {"—",7} {"—",5}");
-        }
-
-        Console.ForegroundColor = ConsoleColor.DarkGray;
-        Console.Write($"  ({sw.ElapsedMilliseconds}ms)");
-        Console.ResetColor();
-        Console.WriteLine();
-    }
-
-    GC.Collect(2, GCCollectionMode.Aggressive, true, true);
-    Console.WriteLine();
 }
 
 static void SaveSnapshot(BitNetEngine engine, string path)
@@ -551,7 +422,7 @@ static void LoadSnapshot(
     try
     {
         var sw = Stopwatch.StartNew();
-        engine.LoadSnapshot(path);
+        engine.LoadSnapshot(path, maxSeqLenOverride: 128);
         GC.Collect(2, GCCollectionMode.Aggressive, true, true);
         sw.Stop();
 
@@ -595,7 +466,7 @@ static void LoadSnapshotLazy(
     try
     {
         var sw = Stopwatch.StartNew();
-        engine.LoadSnapshotLazy(path);
+        engine.LoadSnapshotLazy(path, maxSeqLenOverride: 128);
         sw.Stop();
 
         orchestrator = new IntelligenceOrchestrator(engine);
@@ -616,13 +487,18 @@ static void LoadSnapshotLazy(
 }
 
 static async Task<IntelligenceOrchestrator?> ImportHuggingFaceModel(
-    BitNetEngine engine, string hfDir,
+    BitNetEngine engine, string args,
     BitNetModelConfig config)
 {
+    // Parse: import <hf-dir> [output-path]
+    var parts = args.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    string? hfDir = parts.Length > 0 ? parts[0] : null;
+    string? outputPath = parts.Length > 1 ? parts[1] : null;
+
     if (string.IsNullOrWhiteSpace(hfDir))
     {
         Console.ForegroundColor = ConsoleColor.Red;
-        Console.WriteLine("  Usage: import <path-to-hf-model-dir>");
+        Console.WriteLine("  Usage: import <path-to-hf-model-dir> [output.bmwm]");
         Console.ResetColor();
         Console.WriteLine();
         return null;
@@ -637,8 +513,7 @@ static async Task<IntelligenceOrchestrator?> ImportHuggingFaceModel(
         return null;
     }
 
-    // Default output path: model.bmwm in the current directory
-    string outputPath = Path.Combine(Directory.GetCurrentDirectory(), "model.bmwm");
+    outputPath ??= Path.Combine(Directory.GetCurrentDirectory(), "model.bmwm");
 
     Console.ForegroundColor = ConsoleColor.DarkCyan;
     Console.WriteLine("  ── HuggingFace Import ────────────────────────────────");
@@ -667,9 +542,9 @@ static async Task<IntelligenceOrchestrator?> ImportHuggingFaceModel(
         Console.ResetColor();
         Console.WriteLine();
 
-        // Auto-load the freshly imported snapshot
-        Console.Write("  Loading imported snapshot... ");
-        engine.LoadSnapshot(outputPath);
+        // Auto-load the freshly imported snapshot using lazy mmap to avoid OOM
+        Console.Write("  Loading imported snapshot (lazy mmap)... ");
+        engine.LoadSnapshotLazy(outputPath, maxSeqLenOverride: config.MaxSeqLen);
         var orchestrator = new IntelligenceOrchestrator(engine);
         Console.ForegroundColor = ConsoleColor.Green;
         Console.WriteLine("done");
@@ -681,6 +556,7 @@ static async Task<IntelligenceOrchestrator?> ImportHuggingFaceModel(
     {
         Console.ForegroundColor = ConsoleColor.Red;
         Console.WriteLine($"  ✗ Import failed: {ex.Message}");
+        Console.WriteLine($"    {ex.StackTrace}");
         Console.ResetColor();
     }
     Console.WriteLine();

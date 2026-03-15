@@ -15,44 +15,66 @@ namespace BareMetalWeb.Intelligence;
 /// 
 public sealed class BitNetEngine : IBitNetEngine, IDisposable
 {
-    private readonly BitNetModelConfig _config;
-    private VocabularyPruner? _pruner;
-    private PruneStats? _pruneStats;
+    private BitNetModelConfig _config;
+    private VocabularyPruner? _pruner = null;
+    private PruneStats? _pruneStats = null;
     private ModelSizeStats? _modelStats;
-    private GroupPruneStats? _groupPruneStats;
-    private SemanticPruningStats? _semanticPruneStats;
+    private GroupPruneStats? _groupPruneStats = null;
+    private SemanticPruningStats? _semanticPruneStats = null;
 
     // Compressed storage — 2-bit packed in native (unmanaged) memory.
-    // Each layer has four attention projections (Q, K, V, O) plus FFN.
+    // Each layer has four attention projections (Q, K, V, O) plus gated FFN (gate, up, down).
     private NativeTernaryMatrix[]? _compressedWq;
-    private NativeTernaryMatrix[]? _compressedWk;
-    private NativeTernaryMatrix[]? _compressedWv;
+    private NativeTernaryMatrix[]? _compressedWk;   // [kvDim × dim] (may differ from Q dim for GQA)
+    private NativeTernaryMatrix[]? _compressedWv;   // [kvDim × dim]
     private NativeTernaryMatrix[]? _compressedWo;
-    private NativeTernaryMatrix[]? _compressedFfn;
-    private NativeTernaryMatrix? _compressedEmbeddings;
-    private NativeTernaryMatrix? _compressedOutputHead;
+    private NativeTernaryMatrix[]? _compressedFfnGate;  // [ffnDim × dim]
+    private NativeTernaryMatrix[]? _compressedFfnUp;    // [ffnDim × dim]
+    private NativeTernaryMatrix[]? _compressedFfnDown;  // [dim × ffnDim]
+    private NativeInt8Matrix? _compressedEmbeddings;
+    private NativeInt8Matrix? _compressedOutputHead;    // may alias _compressedEmbeddings (tied)
     private LazySnapshot? _lazySnapshot; // holds mmap open when lazy-loaded
     private int _layerCount;
+    private int _kvDim;                 // KV projection dimension (may be < dim for GQA)
     private bool _isLoaded;
 
-    // Pre-allocated inference buffers — zero GC pressure on the hot path.
-    // All allocated once in CompressToNative / LoadSnapshot and reused each call.
-    private int[]? _bufHidden;    // current hidden state [dim]
-    private int[]? _bufNorm;      // RMS-normalised hidden  [dim]
-    private int[]? _bufQ;         // query projection        [dim]
-    private int[]? _bufK;         // key projection          [dim]
-    private int[]? _bufV;         // value projection        [dim]
-    private int[]? _bufPreWo;     // pre-Wo attention output [dim]
-    private int[]? _bufScores;    // per-head dot-product scores [maxSeqLen]
-    private int[]? _bufLogits;    // output head logits [vocabSize]
+    // Learned model parameters — norms and per-matrix weight scales.
+    private float[][]? _weightScales;     // [layers][7]: Wq,Wk,Wv,Wo,gate,up,down
+    private float[][]? _inputNorm;        // [layers][dim]: learned input_layernorm γ
+    private float[][]? _attnSubNorm;      // [layers][dim]: attn_sub_norm γ
+    private float[][]? _postAttnNorm;     // [layers][dim]: post_attention_layernorm γ
+    private float[][]? _ffnSubNorm;       // [layers][ffnDim]: ffn_sub_norm γ
+    private float[]? _finalNorm;          // [dim]: final model.norm γ
 
-    // Per-layer KV cache — stores K and V for every past token position.
-    // _kvCacheK[layer] = int[maxSeqLen × dim],  _kvCacheV[layer] = int[maxSeqLen × dim]
-    private int[][]? _kvCacheK;
-    private int[][]? _kvCacheV;
+    // Pre-allocated inference buffers — float hidden state, int for matmul I/O.
+    // Float buffers hold the hidden state and intermediate results.
+    // Int buffers are for quantized activations (matmul input/output).
+    private float[]? _fHidden;     // current hidden state [dim]
+    private float[]? _fNorm;       // normalized activation [max(dim, ffnDim)]
+    private float[]? _fQ;          // query projection [dim]
+    private float[]? _fK;          // key projection [kvDim]
+    private float[]? _fV;          // value projection [kvDim]
+    private float[]? _fAttnOut;    // attention output [dim]
+    private float[]? _fFfnGate;    // FFN gate output [ffnDim]
+    private float[]? _fFfnUp;      // FFN up output [ffnDim]
+    private float[]? _fFfnDown;    // FFN down/mid buffer [ffnDim]
+    private float[]? _fScores;     // attention scores [maxSeqLen]
+    private int[]? _iQuantized;    // quantized activation for matmul input [max(dim, ffnDim)]
+    private int[]? _iMatmulOut;    // matmul output [max(dim, ffnDim, vocabSize)]
+    private int[]? _bufLogits;     // output head logits [vocabSize] (int for sampling)
+
+    // Per-layer float KV cache — stores K and V for every past token position.
+    private float[][]? _fKvCacheK;   // [layer][maxSeqLen × kvDim]
+    private float[][]? _fKvCacheV;   // [layer][maxSeqLen × kvDim]
+
+    // Precomputed RoPE sin/cos tables [maxSeqLen × headDim/2]
+    private float[]? _ropeCos;
+    private float[]? _ropeSin;
 
     // Vocabulary strings for token decoding, set at load time.
     private string[]? _tokenTable;
+    // BPE merge rules (from HuggingFace tokenizer.json), null for legacy models.
+    private string[]? _merges;
     // Tokenizer wraps the token table with encode/decode logic.
     private Tokenizer? _tokenizer;
 
@@ -146,97 +168,104 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     }
 
     /// <summary>
-    /// Load a test model with optional DataScaffold-informed vocabulary pruning
-    /// and layer/head pruning. After pruning, compresses all weights to 2-bit
-    /// packed native memory and frees managed arrays.
+    /// Load weights directly from an import pipeline (HuggingFace importer).
+    /// Skips all pruning — the importer has already applied it.
     /// </summary>
-    public void LoadTestModel(ModelLoadOptions? options = null)
+    public void LoadFromImport(
+        TernaryLayer[] layers,
+        sbyte[] embeddings,
+        sbyte[] outputHead,
+        int activeVocab,
+        int dim,
+        string[] tokenTable)
     {
-        options ??= ModelLoadOptions.Default;
-        int dim = _config.HiddenDim;
-        int vocab = _config.VocabSize;
-
-        // 1. Create layers (temporary managed arrays)
-        var layers = new TernaryLayer[_config.NumLayers];
-        for (int i = 0; i < _config.NumLayers; i++)
-            layers[i] = TernaryLayer.CreateRandom(dim, _config.NumHeads);
-
-        // 2. Create embedding and output head weights
-        var rng = Random.Shared;
-        var embeddings = new sbyte[vocab * dim];
-        var outputHead = new sbyte[vocab * dim];
-        for (int i = 0; i < embeddings.Length; i++)
-        {
-            embeddings[i] = (sbyte)(rng.Next(3) - 1);
-            outputHead[i] = (sbyte)(rng.Next(3) - 1);
-        }
-
-        // 3. Vocabulary pruning — informed by DataScaffold metadata
-        int activeVocab = vocab;
-        if (options.PruneVocabulary)
-        {
-            _pruner = options.CustomPruner ?? VocabularyPruner.FromDataScaffold();
-            var tokenList = BuildSyntheticVocabulary(vocab);
-            _pruner.BuildRemapTable(tokenList, specialTokenCount: options.SpecialTokenCount);
-
-            embeddings = _pruner.PruneEmbeddings(embeddings, dim);
-            outputHead = _pruner.PruneOutputHead(outputHead, dim);
-            activeVocab = _pruner.PrunedVocabSize;
-
-            _pruneStats = _pruner.GetStats(dim);
-        }
-
-        // 4. Layer pruning — drop last N layers for constrained domain
-        if (options.LayerPruneRatio > 0f && layers.Length > 1)
-        {
-            int keepLayers = Math.Max(1, (int)(layers.Length * (1f - options.LayerPruneRatio)));
-            layers = ModelPruner.PruneLayers(layers, keepLayers);
-        }
-
-        // 5. Attention head pruning — zero out low-importance heads
-        if (options.HeadPruneRatio > 0f)
-        {
-            ModelPruner.PruneAttentionHeads(layers, _config.NumHeads, options.HeadPruneRatio);
-        }
-
-        // 6. Group-of-four structured pruning — aligns with packed byte boundaries
-        if (options.GroupPruneAttnThreshold > 0 || options.GroupPruneFfnThreshold > 0)
-        {
-            _groupPruneStats = ModelPruner.PruneLayerGroups(
-                layers, dim,
-                options.GroupPruneAttnThreshold,
-                options.GroupPruneFfnThreshold);
-        }
-
-        // 7. Coarse-to-fine semantic pruning — after magnitude, before packing
-        if (options.SemanticPruning)
-        {
-            _semanticPruneStats = SemanticPruner.Prune(
-                layers, dim, _config.NumHeads,
-                corpus: null,
-                headPruneRatio: options.SemanticHeadPruneRatio,
-                neuronPruneRatio: options.SemanticNeuronPruneRatio,
-                blockPruneRatio: options.SemanticBlockPruneRatio,
-                driftThreshold: options.SemanticDriftThreshold);
-        }
-
-        // 8. Calculate logical model stats (after all pruning)
         _modelStats = ModelPruner.CalculateSize(layers, activeVocab, dim);
 
-        // 9. Build/cache the synthetic vocabulary token table for decoding.
-        // Use the full synthetic vocabulary directly (pruner reordering is complex; 
-        // correct decoding happens through the remaining active vocab indices).
-        var vocabTokenList = BuildSyntheticVocabulary(activeVocab);
-        var tokenTableArray = vocabTokenList is string[] strArr ? strArr : vocabTokenList.ToArray();
-
-        // 10. Compress to 2-bit packed native memory
-        // NOTE: CompressToNative calls DisposeNative() which nulls _tokenTable/_tokenizer,
-        //       so we must set them AFTER CompressToNative.
         CompressToNative(layers, embeddings, outputHead, activeVocab, dim);
 
-        _tokenTable = tokenTableArray;
-        _tokenizer  = new Tokenizer(_tokenTable);
+        _tokenTable = tokenTable;
+        _tokenizer = new Tokenizer(_tokenTable, _merges);
 
+        _isLoaded = true;
+    }
+
+    /// <summary>
+    /// Load pre-packed native matrices directly — ternary layer weights plus int8 embeddings/output head.
+    /// Used by the streaming HuggingFace importer to avoid OOM on large models.
+    /// </summary>
+    public void LoadFromNativeImport(
+        NativeTernaryMatrix[] wq, NativeTernaryMatrix[] wk,
+        NativeTernaryMatrix[] wv, NativeTernaryMatrix[] wo,
+        NativeTernaryMatrix[] ffnGate, NativeTernaryMatrix[] ffnUp, NativeTernaryMatrix[] ffnDown,
+        NativeInt8Matrix embeddings, NativeInt8Matrix outputHead,
+        int activeVocab, int dim, string[] tokenTable)
+    {
+        DisposeNative();
+
+        _layerCount = wq.Length;
+        _compressedWq = wq;
+        _compressedWk = wk;
+        _compressedWv = wv;
+        _compressedWo = wo;
+        _compressedFfnGate = ffnGate;
+        _compressedFfnUp = ffnUp;
+        _compressedFfnDown = ffnDown;
+        _compressedEmbeddings = embeddings;
+        _compressedOutputHead = outputHead;
+
+        AllocateInferenceBuffers(dim, activeVocab);
+
+        NativeBytesAllocated = 0;
+        long layerWeights = 0;
+        long zeroWeightEstimate = 0;
+        var layerStatsList = new (MatrixStats Attn, MatrixStats Ffn)[_layerCount];
+        for (int i = 0; i < _layerCount; i++)
+        {
+            NativeBytesAllocated += _compressedWq[i].BytesAllocated
+                                  + _compressedWk[i].BytesAllocated
+                                  + _compressedWv[i].BytesAllocated
+                                  + _compressedWo[i].BytesAllocated;
+            NativeBytesAllocated += _compressedFfnGate![i].BytesAllocated
+                                  + _compressedFfnUp![i].BytesAllocated
+                                  + _compressedFfnDown![i].BytesAllocated;
+            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfnDown[i].Stats);
+
+            layerWeights += _compressedWq[i].Stats.LogicalWeights
+                          + _compressedWk[i].Stats.LogicalWeights
+                          + _compressedWv[i].Stats.LogicalWeights
+                          + _compressedWo[i].Stats.LogicalWeights
+                          + _compressedFfnGate[i].Stats.LogicalWeights
+                          + _compressedFfnUp[i].Stats.LogicalWeights
+                          + _compressedFfnDown[i].Stats.LogicalWeights;
+
+            // Estimate zero weights from zero-byte ratio (each zero byte = 4 zero weights)
+            zeroWeightEstimate += (long)(_compressedWq[i].Stats.ZeroByteCount
+                                + _compressedWk[i].Stats.ZeroByteCount
+                                + _compressedWv[i].Stats.ZeroByteCount
+                                + _compressedWo[i].Stats.ZeroByteCount
+                                + _compressedFfnGate[i].Stats.ZeroByteCount
+                                + _compressedFfnUp[i].Stats.ZeroByteCount
+                                + _compressedFfnDown[i].Stats.ZeroByteCount) * 4;
+        }
+        NativeBytesAllocated += _compressedEmbeddings.BytesAllocated;
+        NativeBytesAllocated += _compressedOutputHead.BytesAllocated;
+        LayerStats = layerStatsList;
+
+        long embeddingWeights = (long)activeVocab * dim * 2;
+        long totalWeights = layerWeights + embeddingWeights;
+        float sparsity = layerWeights > 0 ? (float)zeroWeightEstimate / layerWeights : 0f;
+        _modelStats = new ModelSizeStats(
+            TotalWeights: totalWeights,
+            LayerWeights: layerWeights,
+            EmbeddingWeights: embeddingWeights,
+            ZeroWeights: zeroWeightEstimate,
+            StoredBytes: totalWeights,
+            PackedBytes: (totalWeights * 2 + 7) / 8,
+            Sparsity: sparsity,
+            LayerCount: _layerCount);
+
+        _tokenTable = tokenTable;
+        _tokenizer = new Tokenizer(_tokenTable, _merges);
         _isLoaded = true;
     }
 
@@ -258,11 +287,14 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         DisposeNative();
 
         _layerCount = layers.Length;
+        _kvDim = dim; // Legacy path: no GQA, kvDim == dim
         _compressedWq = new NativeTernaryMatrix[layers.Length];
         _compressedWk = new NativeTernaryMatrix[layers.Length];
         _compressedWv = new NativeTernaryMatrix[layers.Length];
         _compressedWo = new NativeTernaryMatrix[layers.Length];
-        _compressedFfn = new NativeTernaryMatrix[layers.Length];
+        _compressedFfnGate = new NativeTernaryMatrix[layers.Length];
+        _compressedFfnUp   = new NativeTernaryMatrix[layers.Length];
+        _compressedFfnDown = new NativeTernaryMatrix[layers.Length];
 
         for (int i = 0; i < layers.Length; i++)
         {
@@ -270,11 +302,14 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             _compressedWk[i]  = NativeTernaryMatrix.Pack(layers[i].Wk,  dim, dim);
             _compressedWv[i]  = NativeTernaryMatrix.Pack(layers[i].Wv,  dim, dim);
             _compressedWo[i]  = NativeTernaryMatrix.Pack(layers[i].Wo,  dim, dim);
-            _compressedFfn[i] = NativeTernaryMatrix.Pack(layers[i].FfnWeights, dim, dim);
+            // Legacy path: single FfnWeights → replicate as gate=identity, up=weights, down=identity
+            _compressedFfnGate[i] = NativeTernaryMatrix.Pack(layers[i].FfnWeights, dim, dim);
+            _compressedFfnUp[i]   = NativeTernaryMatrix.Pack(layers[i].FfnWeights, dim, dim);
+            _compressedFfnDown[i] = NativeTernaryMatrix.Pack(layers[i].FfnWeights, dim, dim);
         }
 
-        _compressedEmbeddings = NativeTernaryMatrix.Pack(embeddings, activeVocab, dim);
-        _compressedOutputHead = NativeTernaryMatrix.Pack(outputHead, activeVocab, dim);
+        _compressedEmbeddings = PackInt8Matrix(embeddings, activeVocab, dim);
+        _compressedOutputHead = PackInt8Matrix(outputHead, activeVocab, dim);
 
         // Pre-allocate all inference buffers using the shared helper.
         AllocateInferenceBuffers(dim, activeVocab);
@@ -288,12 +323,23 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
                                   + _compressedWk[i].BytesAllocated
                                   + _compressedWv[i].BytesAllocated
                                   + _compressedWo[i].BytesAllocated;
-            NativeBytesAllocated += _compressedFfn[i].BytesAllocated;
-            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfn[i].Stats);
+            NativeBytesAllocated += _compressedFfnGate![i].BytesAllocated
+                                  + _compressedFfnUp![i].BytesAllocated
+                                  + _compressedFfnDown![i].BytesAllocated;
+            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfnDown[i].Stats);
         }
         NativeBytesAllocated += _compressedEmbeddings.BytesAllocated;
         NativeBytesAllocated += _compressedOutputHead.BytesAllocated;
         LayerStats = layerStatsList;
+    }
+
+    private static NativeInt8Matrix PackInt8Matrix(sbyte[] source, int rows, int cols)
+    {
+        var matrix = NativeInt8Matrix.Allocate(rows, cols);
+        for (int r = 0; r < rows; r++)
+            matrix.PackRowInPlace(r, source.AsSpan(r * cols, cols));
+        matrix.FinalizeStats();
+        return matrix;
     }
 
     /// <summary>
@@ -303,16 +349,18 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// </summary>
     public void SaveSnapshot(string path, IReadOnlyList<string>? tokenTable = null)
     {
-        if (!_isLoaded || _compressedWq is null || _compressedFfn is null
+        if (!_isLoaded || _compressedWq is null || _compressedFfnDown is null
             || _compressedEmbeddings is null || _compressedOutputHead is null)
             throw new InvalidOperationException("No model loaded to snapshot");
 
         int activeVocab = _pruner?.PrunedVocabSize ?? _config.VocabSize;
+        // Detect tied embeddings: same matrix instance for embed and output head
+        bool tied = ReferenceEquals(_compressedEmbeddings, _compressedOutputHead);
 
         ModelSnapshot.Save(path, _config, activeVocab,
             _compressedWq, _compressedWk!, _compressedWv!, _compressedWo!,
-            _compressedFfn,
-            _compressedEmbeddings, _compressedOutputHead,
+            _compressedFfnGate!, _compressedFfnUp!, _compressedFfnDown!,
+            _compressedEmbeddings, tied ? null : _compressedOutputHead,
             tokenTable ?? _tokenTable);
     }
 
@@ -323,7 +371,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// </summary>
     /// <param name="path">Path to the .bmwm snapshot file.</param>
     /// <param name="memoryMapped">If true, use memory-mapped I/O (avoids large managed copies).</param>
-    public void LoadSnapshot(string path, bool memoryMapped = false)
+    public void LoadSnapshot(string path, bool memoryMapped = false, int? maxSeqLenOverride = null)
     {
         var snapshot = memoryMapped
             ? ModelSnapshot.LoadMapped(path)
@@ -331,16 +379,46 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
         DisposeNative();
 
+        // Override engine config with the snapshot's config — the snapshot
+        // knows its own dimensions, layer count, vocab size, etc.
+        var snapshotConfig = snapshot.Config;
+        if (maxSeqLenOverride.HasValue)
+        {
+            snapshotConfig = snapshotConfig with
+            {
+                MaxSeqLen = Math.Min(snapshotConfig.MaxSeqLen, maxSeqLenOverride.Value)
+            };
+        }
+        _config = snapshotConfig;
+
         _layerCount = snapshot.Wq.Length;
         _compressedWq = snapshot.Wq;
         _compressedWk = snapshot.Wk;
         _compressedWv = snapshot.Wv;
         _compressedWo = snapshot.Wo;
-        _compressedFfn = snapshot.Ffn;
+        _compressedFfnGate = snapshot.FfnGate;
+        _compressedFfnUp = snapshot.FfnUp;
+        _compressedFfnDown = snapshot.FfnDown;
         _compressedEmbeddings = snapshot.Embeddings;
         _compressedOutputHead = snapshot.OutputHead;
-        _tokenTable = snapshot.Tokens;
-        _tokenizer  = _tokenTable is not null ? new Tokenizer(_tokenTable) : null;
+        _kvDim = _compressedWk[0].Rows; // may be < dim for GQA
+
+        // If the snapshot has a token table, use it.
+        // Otherwise build a synthetic vocabulary from the active vocab size.
+        if (snapshot.Tokens is { Length: > 0 })
+        {
+            _tokenTable = snapshot.Tokens;
+        }
+        else
+        {
+            var syntheticVocab = BuildSyntheticVocabulary(snapshot.ActiveVocab);
+            _tokenTable = syntheticVocab is string[] arr ? arr : syntheticVocab.ToArray();
+        }
+        _merges = snapshot.Merges is { Length: > 0 } ? snapshot.Merges : null;
+        _tokenizer = new Tokenizer(_tokenTable, _merges);
+
+        // Load learned norms and weight scales (v5+)
+        LoadNormsAndScales(snapshot);
 
         int dim = _config.HiddenDim;
         int activeVocab = snapshot.ActiveVocab;
@@ -352,8 +430,10 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         {
             NativeBytesAllocated += _compressedWq[i].BytesAllocated + _compressedWk[i].BytesAllocated
                                   + _compressedWv[i].BytesAllocated + _compressedWo[i].BytesAllocated;
-            NativeBytesAllocated += _compressedFfn[i].BytesAllocated;
-            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfn[i].Stats);
+            NativeBytesAllocated += _compressedFfnGate![i].BytesAllocated
+                                  + _compressedFfnUp![i].BytesAllocated
+                                  + _compressedFfnDown![i].BytesAllocated;
+            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfnDown[i].Stats);
         }
         NativeBytesAllocated += _compressedEmbeddings.BytesAllocated;
         NativeBytesAllocated += _compressedOutputHead.BytesAllocated;
@@ -364,10 +444,14 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         {
             totalWeights += _compressedWq[i].Stats.LogicalWeights + _compressedWk[i].Stats.LogicalWeights
                           + _compressedWv[i].Stats.LogicalWeights + _compressedWo[i].Stats.LogicalWeights;
-            totalWeights += _compressedFfn[i].Stats.LogicalWeights;
+            totalWeights += _compressedFfnGate![i].Stats.LogicalWeights
+                          + _compressedFfnUp![i].Stats.LogicalWeights
+                          + _compressedFfnDown![i].Stats.LogicalWeights;
             zeroWeights  += (_compressedWq[i].Stats.ZeroByteCount + _compressedWk[i].Stats.ZeroByteCount
                            + _compressedWv[i].Stats.ZeroByteCount + _compressedWo[i].Stats.ZeroByteCount) * 4L;
-            zeroWeights  += _compressedFfn[i].Stats.ZeroByteCount * 4L;
+            zeroWeights  += (_compressedFfnGate[i].Stats.ZeroByteCount
+                           + _compressedFfnUp[i].Stats.ZeroByteCount
+                           + _compressedFfnDown[i].Stats.ZeroByteCount) * 4L;
         }
         long embWeights = (long)_compressedEmbeddings.Stats.LogicalWeights
                         + _compressedOutputHead.Stats.LogicalWeights;
@@ -389,23 +473,43 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// Load a model from a snapshot using persistent memory-mapping.
     /// Matrices reference the mapped file directly — zero copy, instant load.
     /// </summary>
-    public void LoadSnapshotLazy(string path)
+    public void LoadSnapshotLazy(string path, int? maxSeqLenOverride = null)
     {
         DisposeNative();
 
         _lazySnapshot = ModelSnapshot.LoadLazy(path);
         var snap = _lazySnapshot.Data;
 
+        if (maxSeqLenOverride is int seqOverride && seqOverride > 0)
+            _config = snap.Config with { MaxSeqLen = seqOverride };
+        else
+            _config = snap.Config;
+
         _layerCount = snap.Wq.Length;
         _compressedWq = snap.Wq;
         _compressedWk = snap.Wk;
         _compressedWv = snap.Wv;
         _compressedWo = snap.Wo;
-        _compressedFfn = snap.Ffn;
+        _compressedFfnGate = snap.FfnGate;
+        _compressedFfnUp = snap.FfnUp;
+        _compressedFfnDown = snap.FfnDown;
         _compressedEmbeddings = snap.Embeddings;
         _compressedOutputHead = snap.OutputHead;
-        _tokenTable = snap.Tokens;
-        _tokenizer  = _tokenTable is not null ? new Tokenizer(_tokenTable) : null;
+        _kvDim = _compressedWk[0].Rows;
+
+        if (snap.Tokens is { Length: > 0 })
+        {
+            _tokenTable = snap.Tokens;
+        }
+        else
+        {
+            var syntheticVocab = BuildSyntheticVocabulary(snap.ActiveVocab);
+            _tokenTable = syntheticVocab is string[] arr ? arr : syntheticVocab.ToArray();
+        }
+        _merges = snap.Merges is { Length: > 0 } ? snap.Merges : null;
+        _tokenizer = new Tokenizer(_tokenTable, _merges);
+
+        LoadNormsAndScales(snap);
 
         int dim = _config.HiddenDim;
         AllocateInferenceBuffers(dim, snap.ActiveVocab);
@@ -413,7 +517,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         NativeBytesAllocated = 0; // data lives in mmap
         var layerStatsList = new (MatrixStats Attn, MatrixStats Ffn)[_layerCount];
         for (int i = 0; i < _layerCount; i++)
-            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfn[i].Stats);
+            layerStatsList[i] = (_compressedWq[i].Stats, _compressedFfnDown![i].Stats);
         LayerStats = layerStatsList;
 
         long totalWeights = 0;
@@ -421,7 +525,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         {
             totalWeights += _compressedWq[i].Stats.LogicalWeights + _compressedWk[i].Stats.LogicalWeights
                           + _compressedWv[i].Stats.LogicalWeights + _compressedWo[i].Stats.LogicalWeights;
-            totalWeights += _compressedFfn[i].Stats.LogicalWeights;
+            totalWeights += _compressedFfnGate![i].Stats.LogicalWeights
+                          + _compressedFfnUp![i].Stats.LogicalWeights
+                          + _compressedFfnDown![i].Stats.LogicalWeights;
         }
         long embWeights = (long)_compressedEmbeddings.Stats.LogicalWeights
                         + _compressedOutputHead.Stats.LogicalWeights;
@@ -445,23 +551,77 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// </summary>
     private void AllocateInferenceBuffers(int dim, int vocabSize)
     {
-        _bufHidden = new int[dim];
-        _bufNorm   = new int[dim];
-        _bufQ      = new int[dim];
-        _bufK      = new int[dim];
-        _bufV      = new int[dim];
-        _bufPreWo  = new int[dim];
-        _bufScores = new int[_config.MaxSeqLen];
-        _bufLogits = new int[vocabSize];
+        int ffnDim = _config.EffectiveFfnDim;
+        int kvDim = _kvDim > 0 ? _kvDim : dim;
+        int maxBuf = Math.Max(dim, ffnDim);
 
-        int cacheSize = _config.MaxSeqLen * dim;
-        _kvCacheK = new int[_layerCount][];
-        _kvCacheV = new int[_layerCount][];
+        // Float buffers for hidden state and intermediates
+        _fHidden   = new float[dim];
+        _fNorm     = new float[maxBuf];
+        _fQ        = new float[dim];
+        _fK        = new float[kvDim];
+        _fV        = new float[kvDim];
+        _fAttnOut  = new float[dim];
+        _fFfnGate  = new float[ffnDim];
+        _fFfnUp    = new float[ffnDim];
+        _fFfnDown  = new float[ffnDim];
+        _fScores   = new float[_config.MaxSeqLen];
+
+        // Int buffers for ternary matmul I/O
+        _iQuantized = new int[maxBuf];
+        _iMatmulOut = new int[Math.Max(maxBuf, vocabSize)];
+        _bufLogits  = new int[vocabSize];
+
+        // Float KV caches — use kvDim (may be < dim for GQA)
+        int cacheSize = _config.MaxSeqLen * kvDim;
+        _fKvCacheK = new float[_layerCount][];
+        _fKvCacheV = new float[_layerCount][];
         for (int i = 0; i < _layerCount; i++)
         {
-            _kvCacheK[i] = new int[cacheSize];
-            _kvCacheV[i] = new int[cacheSize];
+            _fKvCacheK[i] = new float[cacheSize];
+            _fKvCacheV[i] = new float[cacheSize];
         }
+
+        // Precompute RoPE sin/cos tables
+        PrecomputeRoPE();
+    }
+
+    /// <summary>
+    /// Precompute RoPE (Rotary Position Embeddings) sin/cos tables.
+    /// Table layout: [position * headDim/2 + pair_index] for interleaved pairs.
+    /// </summary>
+    private void PrecomputeRoPE()
+    {
+        int headDim = _config.HeadDim;
+        int halfDim = headDim / 2;
+        int maxSeq  = _config.MaxSeqLen;
+        float theta = _config.RopeTheta;
+
+        _ropeCos = new float[maxSeq * halfDim];
+        _ropeSin = new float[maxSeq * halfDim];
+
+        for (int pos = 0; pos < maxSeq; pos++)
+        {
+            int baseIdx = pos * halfDim;
+            for (int j = 0; j < halfDim; j++)
+            {
+                double freq = 1.0 / Math.Pow(theta, (2.0 * j) / headDim);
+                double angle = pos * freq;
+                _ropeCos[baseIdx + j] = (float)Math.Cos(angle);
+                _ropeSin[baseIdx + j] = (float)Math.Sin(angle);
+            }
+        }
+    }
+
+    /// <summary>Store learned norms and weight scales from snapshot data.</summary>
+    private void LoadNormsAndScales(SnapshotData snapshot)
+    {
+        _weightScales = snapshot.WeightScales;
+        _inputNorm    = snapshot.InputNorm;
+        _attnSubNorm  = snapshot.AttnSubNorm;
+        _postAttnNorm = snapshot.PostAttnNorm;
+        _ffnSubNorm   = snapshot.FfnSubNorm;
+        _finalNorm    = snapshot.FinalNorm;
     }
 
     public async ValueTask<string> GenerateAsync(
@@ -503,32 +663,25 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private const int DefaultTempQ8 = 0;
 
     /// <summary>
-    /// Full autoregressive token-generation loop.
-    /// 1. Encodes the prompt with the Tokenizer (Encode → int[]).
-    /// 2. Runs a forward pass for each prompt token to build the KV cache.
-    /// 3. Samples the next token using Top-K sampling (or greedy if temp=0).
-    /// 4. Repeats until EOS or <paramref name="maxTokens"/> generated.
-    /// All intermediate buffers are pre-allocated — zero per-call GC pressure.
+    /// Full autoregressive token-generation loop with float hidden state.
+    /// Ternary matmuls stay integer; norms, scales, attention, and RoPE use float.
     /// </summary>
     private string RunInference(ReadOnlySpan<char> prompt, int maxTokens, CancellationToken ct)
     {
-        int dim      = _config.HiddenDim;
+        int dim       = _config.HiddenDim;
         int vocabSize = _compressedOutputHead!.Rows;
 
-        // Work with pre-allocated slices
-        var bufHidden = _bufHidden!.AsSpan(0, dim);
-        var bufNorm   = _bufNorm!.AsSpan(0, dim);
+        var fHidden   = _fHidden!;
         var bufLogits = _bufLogits!.AsSpan(0, vocabSize);
 
-        // Clear KV cache for this inference pass
+        // Clear KV caches
         for (int L = 0; L < _layerCount; L++)
         {
-            Array.Clear(_kvCacheK![L], 0, _config.MaxSeqLen * dim);
-            Array.Clear(_kvCacheV![L], 0, _config.MaxSeqLen * dim);
+            Array.Clear(_fKvCacheK![L]);
+            Array.Clear(_fKvCacheV![L]);
         }
 
-        // ── Tokenize prompt ────────────────────────────────────────────────────
-        // Use the tokenizer when available; fall back to char-mod encoding.
+        // ── Tokenize prompt ────────────────────────────────────────────────
         int[] promptTokens;
         if (_tokenizer is not null)
         {
@@ -545,48 +698,44 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
         int seqLen = 0;
 
-        // ── Prefill: process each prompt token ────────────────────────────────
+        // ── Prefill: process each prompt token ────────────────────────────
         for (int p = 0; p < promptTokens.Length && seqLen < _config.MaxSeqLen; p++, seqLen++)
         {
             ct.ThrowIfCancellationRequested();
             int tid = Math.Clamp(promptTokens[p], 0, vocabSize - 1);
-            EmbedToken(tid, bufHidden);
-            ForwardAllLayers(seqLen, bufHidden, bufNorm, isMiss: true);
+            EmbedTokenFloat(tid, fHidden);
+            ForwardAllLayersFloat(seqLen);
         }
 
-        // ── Decode: generate tokens ────────────────────────────────────────────
+        // ── Decode: generate tokens ────────────────────────────────────────
         int generateLimit = Math.Min(maxTokens, MaxGenerateTokens);
         var output = new System.Text.StringBuilder(generateLimit * 8);
-
-        // Re-use the logits buffer as sampling scratch (same size, no extra alloc)
         var samplingBuf = _bufLogits!.AsSpan(0, vocabSize);
 
         for (int gen = 0; gen < generateLimit && seqLen < _config.MaxSeqLen; gen++)
         {
             ct.ThrowIfCancellationRequested();
 
-            // Compute logits from current hidden state
-            TernaryTensor.RmsNormalize(bufHidden, bufNorm);
-            _compressedOutputHead.MatVecMultiply(bufNorm, bufLogits);
+            // Final norm → quantize → output head matmul → logits
+            RmsNormWithGamma(fHidden.AsSpan(0, dim), _fNorm!.AsSpan(0, dim), _finalNorm);
+            QuantizeAndMatmul(_fNorm!.AsSpan(0, dim), _compressedOutputHead, bufLogits);
 
-            // Top-K sampling — stochastic, integer arithmetic
+            // Suppress special tokens
+            bufLogits[0] = int.MinValue; // PAD
+            bufLogits[1] = int.MinValue; // BOS
+            bufLogits[3] = int.MinValue; // UNK
+
             int nextToken = Sampling.SampleTopK(
-                bufLogits,
-                topK:   DefaultTopK,
-                tempQ8: DefaultTempQ8,
-                rng:    Random.Shared,
-                scratch: samplingBuf);
+                bufLogits, topK: DefaultTopK, tempQ8: DefaultTempQ8,
+                rng: Random.Shared, scratch: samplingBuf);
 
             if (nextToken == EosTokenId) break;
 
-            // Decode token to text and append
             string tok = DecodeToken(nextToken);
-            if (output.Length > 0) output.Append(' ');
             output.Append(tok);
 
-            // Feed next token as input for the next step
-            EmbedToken(nextToken, bufHidden);
-            ForwardAllLayers(seqLen, bufHidden, bufNorm, isMiss: false);
+            EmbedTokenFloat(nextToken, fHidden);
+            ForwardAllLayersFloat(seqLen);
             seqLen++;
         }
 
@@ -594,147 +743,283 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     }
 
     /// <summary>
-    /// Runs all transformer layers in order. Modifies <paramref name="hidden"/> in-place.
-    /// Uses only pre-allocated buffers — no managed heap allocations.
-    /// <paramref name="isMiss"/> controls KV-cache accounting (true = encode/miss, false = decode/hit).
+    /// Runs all transformer layers with float hidden state.
+    /// Ternary matmuls remain integer; norms, scales, attention use float.
     /// </summary>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void ForwardAllLayers(int seqPos, Span<int> hidden, Span<int> norm, bool isMiss = true)
+    private void ForwardAllLayersFloat(int seqPos)
     {
-        // Layer timing instrumentation
         long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        var attnOut = _bufPreWo!.AsSpan();
+        int dim    = _config.HiddenDim;
+        int kvDim  = _kvDim;
+        int ffnDim = _config.EffectiveFfnDim;
+        var fH     = _fHidden!;
+        var fNorm  = _fNorm!;
+        var fQ     = _fQ!;
+        var fK     = _fK!;
+        var fV     = _fV!;
+        var fAttn  = _fAttnOut!;
+
         for (int L = 0; L < _layerCount; L++)
         {
-            // Pre-norm → multi-head attention → residual
-            TernaryTensor.RmsNormalize(hidden, norm);
-            MultiHeadAttention(L, seqPos, norm, attnOut);
-            TernaryTensor.Add(hidden, attnOut, hidden);
+            float[]? scales = _weightScales?[L];
 
-            // Pre-norm → FFN → residual
-            TernaryTensor.RmsNormalize(hidden, norm);
-            _compressedFfn![L].MatVecMultiply(norm, attnOut);
-            TernaryTensor.Add(hidden, attnOut, hidden);
+            // ── Attention ─────────────────────────────────────────────
+            // input_layernorm → quantize → Q/K/V projections → dequantize → scale
+            RmsNormWithGamma(fH.AsSpan(0, dim), fNorm.AsSpan(0, dim), _inputNorm?[L]);
+            float absmax = QuantizeActivation(fNorm.AsSpan(0, dim), _iQuantized!.AsSpan(0, dim));
+
+            TernaryMatmulDequant(_compressedWq![L], _iQuantized!, dim, fQ, absmax, scales?[0] ?? 1f);
+            TernaryMatmulDequant(_compressedWk![L], _iQuantized!, dim, fK, absmax, scales?[1] ?? 1f);
+            TernaryMatmulDequant(_compressedWv![L], _iQuantized!, dim, fV, absmax, scales?[2] ?? 1f);
+
+            // RoPE on Q (nHeads) and K (nKvHeads)
+            ApplyRoPE(fQ, seqPos, _config.NumHeads);
+            ApplyRoPE(fK, seqPos, _kvDim / _config.HeadDim);
+
+            // Cache K, V as float (kvDim per position)
+            int cacheBase = seqPos * kvDim;
+            fK.AsSpan(0, kvDim).CopyTo(_fKvCacheK![L].AsSpan(cacheBase, kvDim));
+            fV.AsSpan(0, kvDim).CopyTo(_fKvCacheV![L].AsSpan(cacheBase, kvDim));
+
+            // Float multi-head attention with GQA → fAttn
+            MultiHeadAttentionFloat(L, seqPos, fQ, fAttn);
+
+            // attn_sub_norm → quantize → Wo → dequantize → scale
+            RmsNormWithGamma(fAttn.AsSpan(0, dim), fNorm.AsSpan(0, dim), _attnSubNorm?[L]);
+            absmax = QuantizeActivation(fNorm.AsSpan(0, dim), _iQuantized!.AsSpan(0, dim));
+            TernaryMatmulDequant(_compressedWo![L], _iQuantized!, dim, fAttn, absmax, scales?[3] ?? 1f);
+
+            // Residual add
+            for (int i = 0; i < dim; i++) fH[i] += fAttn[i];
+
+            // ── FFN ───────────────────────────────────────────────────
+            if (_config.HasGatedFfn)
+            {
+                var fGate = _fFfnGate!;
+                var fUp   = _fFfnUp!;
+                var fDown = _fFfnDown!;
+
+                // post_attention_layernorm → quantize → gate/up projections
+                RmsNormWithGamma(fH.AsSpan(0, dim), fNorm.AsSpan(0, dim), _postAttnNorm?[L]);
+                absmax = QuantizeActivation(fNorm.AsSpan(0, dim), _iQuantized!.AsSpan(0, dim));
+
+                TernaryMatmulDequant(_compressedFfnGate![L], _iQuantized!, dim, fGate, absmax, scales?[4] ?? 1f);
+                TernaryMatmulDequant(_compressedFfnUp![L], _iQuantized!, dim, fUp, absmax, scales?[5] ?? 1f);
+
+                // ReLU² gating: relu2(gate) * up
+                for (int j = 0; j < ffnDim; j++)
+                {
+                    float g = fGate[j];
+                    fDown[j] = g > 0 ? g * g * fUp[j] : 0;
+                }
+
+                // ffn_sub_norm → quantize → down_proj → dequantize → scale
+                RmsNormWithGamma(fDown.AsSpan(0, ffnDim), fNorm.AsSpan(0, ffnDim), _ffnSubNorm?[L]);
+                absmax = QuantizeActivation(fNorm.AsSpan(0, ffnDim), _iQuantized!.AsSpan(0, ffnDim));
+                TernaryMatmulDequant(_compressedFfnDown![L], _iQuantized!, ffnDim, fAttn, absmax, scales?[6] ?? 1f);
+            }
+            else
+            {
+                RmsNormWithGamma(fH.AsSpan(0, dim), fNorm.AsSpan(0, dim), _postAttnNorm?[L]);
+                absmax = QuantizeActivation(fNorm.AsSpan(0, dim), _iQuantized!.AsSpan(0, dim));
+                TernaryMatmulDequant(_compressedFfnDown![L], _iQuantized!, dim, fAttn, absmax, scales?[6] ?? 1f);
+            }
+
+            // Residual add
+            for (int i = 0; i < dim; i++) fH[i] += fAttn[i];
         }
 
-        // Instrumentation: record layer time and KV-cache accounting
         long elapsedTicks = System.Diagnostics.Stopwatch.GetTimestamp() - t0;
         long elapsedMicros = elapsedTicks * 1_000_000L / System.Diagnostics.Stopwatch.Frequency;
         Interlocked.Add(ref _totalLayerTimeMicros, elapsedMicros);
         Interlocked.Increment(ref _totalLayerTimeSamples);
-
-        if (isMiss)
-            Interlocked.Increment(ref _kvCacheMisses);
-        else
-            Interlocked.Increment(ref _kvCacheHits);
     }
 
     /// <summary>
-    /// Real multi-head self-attention.
-    ///   Q  = Wq × input
-    ///   K  = Wk × input  (cached in KV store)
-    ///   V  = Wv × input  (cached in KV store)
-    ///   score[h,p] = Q[h] · K_cache[h,p] / sqrt(head_dim)
-    ///   attn[h]    = Σ softmax(scores)[p] * V_cache[h,p]
-    ///   output     = Wo × concat(attn heads)
-    /// Integer arithmetic throughout — no floating-point on the hot path.
+    /// Float multi-head self-attention with GQA and RoPE.
+    /// Q is provided directly; K and V are read from the float KV cache.
+    /// GQA: each Q head h uses KV head (h * nKvHeads / nHeads).
     /// </summary>
-    private void MultiHeadAttention(int layer, int seqPos, ReadOnlySpan<int> input, Span<int> output)
+    private void MultiHeadAttentionFloat(int layer, int seqPos, float[] fQ, float[] output)
     {
         int dim     = _config.HiddenDim;
         int nHeads  = _config.NumHeads;
-        int headDim = dim / nHeads;
-
-        var bufQ = _bufQ!.AsSpan(0, dim);
-        var bufK = _bufK!.AsSpan(0, dim);
-        var bufV = _bufV!.AsSpan(0, dim);
-
-        // Q, K, V projections using pre-allocated buffers
-        _compressedWq![layer].MatVecMultiply(input, bufQ);
-        _compressedWk![layer].MatVecMultiply(input, bufK);
-        _compressedWv![layer].MatVecMultiply(input, bufV);
-
-        // Cache K and V for current position
-        int cacheBase = seqPos * dim;
-        bufK.CopyTo(_kvCacheK![layer].AsSpan(cacheBase, dim));
-        bufV.CopyTo(_kvCacheV![layer].AsSpan(cacheBase, dim));
-
-        output.Clear();
-
-        // scaleShift = floor(log2(headDim)/2)  — used to right-shift raw dot-product
-        // scores, approximating division by sqrt(headDim) with integer arithmetic.
-        //   headDim=4  → log2=2 → scaleShift=1  (divide by ~2  ≈ sqrt(4)=2)
-        //   headDim=16 → log2=4 → scaleShift=2  (divide by ~4  ≈ sqrt(16)=4)
-        //   headDim=32 → log2=5 → scaleShift=2  (divide by ~4  ≈ sqrt(32)≈5.7)
-        int scaleShift = headDim > 1 ? (int)Math.Log2(headDim) >> 1 : 0;
+        int headDim = _config.HeadDim;
+        int kvDim   = _kvDim;
+        int nKvHeads = kvDim / headDim;
+        float scale = 1f / MathF.Sqrt(headDim);
 
         int posCount = seqPos + 1;
-        var scores = _bufScores!.AsSpan(0, posCount);
+        var scores   = _fScores!;
+
+        Array.Clear(output, 0, dim);
+
+        for (int h = 0; h < nHeads; h++)
+        {
+            int qOff  = h * headDim;
+            // GQA: map Q head to KV head
+            int kvH   = h * nKvHeads / nHeads;
+            int kvOff = kvH * headDim;
+
+            // Compute QK^T / sqrt(d_k) for all cached positions
+            float maxScore = float.NegativeInfinity;
+            for (int p = 0; p < posCount; p++)
+            {
+                int kBase = p * kvDim + kvOff;
+                float dot = 0;
+                for (int d = 0; d < headDim; d++)
+                    dot += fQ[qOff + d] * _fKvCacheK![layer][kBase + d];
+                dot *= scale;
+                scores[p] = dot;
+                if (dot > maxScore) maxScore = dot;
+            }
+
+            // Softmax: exp(score - max) / sum(exp(score - max))
+            float sumExp = 0;
+            for (int p = 0; p < posCount; p++)
+            {
+                float e = MathF.Exp(scores[p] - maxScore);
+                scores[p] = e;
+                sumExp += e;
+            }
+            if (sumExp > 0)
+            {
+                float invSum = 1f / sumExp;
+                for (int p = 0; p < posCount; p++)
+                    scores[p] *= invSum;
+            }
+
+            // Weighted sum of V values
+            for (int p = 0; p < posCount; p++)
+            {
+                float w = scores[p];
+                if (w < 1e-8f) continue;
+                int vBase = p * kvDim + kvOff;
+                for (int d = 0; d < headDim; d++)
+                    output[qOff + d] += w * _fKvCacheV![layer][vBase + d];
+            }
+        }
+    }
+
+    // ── Float inference primitives ──────────────────────────────────────
+
+    /// <summary>
+    /// RMS normalize with learned gamma weights.
+    /// output[i] = input[i] / rms(input) * gamma[i]
+    /// If gamma is null, uses identity (gamma=1).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static void RmsNormWithGamma(ReadOnlySpan<float> input, Span<float> output, float[]? gamma)
+    {
+        float sumSq = 0;
+        for (int i = 0; i < input.Length; i++)
+            sumSq += input[i] * input[i];
+        float rms = MathF.Sqrt(sumSq / input.Length + 1e-5f);
+        float invRms = 1f / rms;
+
+        if (gamma != null)
+        {
+            for (int i = 0; i < input.Length; i++)
+                output[i] = input[i] * invRms * gamma[i];
+        }
+        else
+        {
+            for (int i = 0; i < input.Length; i++)
+                output[i] = input[i] * invRms;
+        }
+    }
+
+    /// <summary>
+    /// Quantize float activations to int8 range (±127) for ternary matmul input.
+    /// Returns the absmax scale factor for dequantization.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static float QuantizeActivation(ReadOnlySpan<float> input, Span<int> output)
+    {
+        float absmax = 0;
+        for (int i = 0; i < input.Length; i++)
+        {
+            float a = MathF.Abs(input[i]);
+            if (a > absmax) absmax = a;
+        }
+        if (absmax < 1e-10f) absmax = 1e-10f;
+        float scale = 127f / absmax;
+        for (int i = 0; i < input.Length; i++)
+            output[i] = (int)MathF.Round(input[i] * scale);
+        return absmax;
+    }
+
+    /// <summary>
+    /// Run ternary matmul on quantized int input, then dequantize output to float.
+    /// float_output[i] = int_output[i] * weight_scale * absmax / 127
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void TernaryMatmulDequant(
+        NativeTernaryMatrix W, int[] quantizedInput, int inputLen,
+        float[] floatOutput, float absmax, float weightScale)
+    {
+        var iOut = _iMatmulOut!;
+        W.MatVecMultiply(quantizedInput.AsSpan(0, inputLen), iOut.AsSpan(0, W.Rows));
+        float dequantScale = weightScale * absmax / 127f;
+        int outLen = W.Rows;
+        for (int i = 0; i < outLen; i++)
+            floatOutput[i] = iOut[i] * dequantScale;
+    }
+
+    /// <summary>
+    /// Quantize float input → int8, run int8 matmul (NativeInt8Matrix), write int output.
+    /// Used for output head projection where we need int logits for sampling.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void QuantizeAndMatmul(ReadOnlySpan<float> floatInput, NativeInt8Matrix W, Span<int> intOutput)
+    {
+        var iQ = _iQuantized!;
+        QuantizeActivation(floatInput, iQ.AsSpan(0, floatInput.Length));
+        W.MatVecMultiply(iQ.AsSpan(0, floatInput.Length), intOutput);
+    }
+
+    /// <summary>
+    /// Apply RoPE (Rotary Position Embeddings) to a vector in-place.
+    /// Rotates pairs of dimensions using precomputed sin/cos tables.
+    /// nHeads specifies how many heads are in the vector (nKvHeads for K, nHeads for Q).
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private void ApplyRoPE(float[] vec, int pos, int nHeads)
+    {
+        if (_ropeCos == null || _ropeSin == null) return;
+
+        int headDim = _config.HeadDim;
+        int halfDim = headDim / 2;
+        int ropeBase = pos * halfDim;
 
         for (int h = 0; h < nHeads; h++)
         {
             int hOff = h * headDim;
-
-            // Compute raw dot-product attention scores for head h over all past positions
-            // Use IntrinsicsMatVec.DotProduct for AVX2/NEON acceleration
-            int maxScore = int.MinValue;
-            for (int p = 0; p < posCount; p++)
+            for (int j = 0; j < halfDim; j++)
             {
-                int kBase = p * dim + hOff;
-                var kCache = _kvCacheK[layer].AsSpan(kBase, headDim);
-                var qSlice = bufQ.Slice(hOff, headDim);
-                int score = IntrinsicsMatVec.DotProduct(qSlice, kCache);
-                // Scale to prevent overflow: divide by √headDim using bit-shift
-                score >>= scaleShift;
-                scores[p] = score;
-                if (score > maxScore) maxScore = score;
-            }
-
-            // Integer softmax approximation via exponential shift.
-            // Maps scores to approximate softmax weights using the identity:
-            //   exp(x - max) ≈ 2^((x - max) / scale)
-            // We use scale=8 (right-shift by 3) to convert the score delta
-            // into a bit-shift exponent.
-            //   shift = |delta| >> 3  →  weight = 256 >> shift
-            //   When shift > 8: 256 >> shift = 0, clamped to 1 (minimum).
-            // This replaces the previous linear clamp which was over-simplistic.
-            long totalWeight = 0;
-            for (int p = 0; p < posCount; p++)
-            {
-                int delta = scores[p] - maxScore; // ≤ 0
-                int shift = (-delta) >> 3;         // non-negative right-shift amount
-                // 2^(delta/8) in range [1, 256]: when shift > 8, result < 1 → clamp to 1
-                int w = shift > 8 ? 1 : (256 >> shift);
-                scores[p]   = w;
-                totalWeight += w;
-            }
-            if (totalWeight == 0) totalWeight = 1;
-
-            // Weighted sum of V values for this head using IntrinsicsMatVec
-            for (int p = 0; p < posCount; p++)
-            {
-                long w = scores[p];
-                int vBase = p * dim + hOff;
-                var vSlice  = _kvCacheV![layer].AsSpan(vBase, headDim);
-                var outSlice = output.Slice(hOff, headDim);
-                IntrinsicsMatVec.WeightedAccumulate(w, vSlice, outSlice, totalWeight);
+                float cos = _ropeCos[ropeBase + j];
+                float sin = _ropeSin[ropeBase + j];
+                float x0 = vec[hOff + j];
+                float x1 = vec[hOff + halfDim + j];
+                vec[hOff + j]           = x0 * cos - x1 * sin;
+                vec[hOff + halfDim + j] = x0 * sin + x1 * cos;
             }
         }
-
-        // Output projection: Wo × attention_output
-        // Borrow _bufNorm to hold the pre-projection values without extra allocation
-        output.CopyTo(_bufNorm!.AsSpan(0, dim));
-        _compressedWo![layer].MatVecMultiply(_bufNorm.AsSpan(0, dim), output);
     }
 
-    /// <summary>Embeds a token ID into the hidden state using the embedding table row.</summary>
+    /// <summary>Embeds a token ID into the float hidden state.</summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    private void EmbedToken(int tokenId, Span<int> hidden)
+    private void EmbedTokenFloat(int tokenId, float[] fHidden)
     {
         int rows = _compressedEmbeddings!.Rows;
         int id = tokenId < 0 ? 0 : tokenId >= rows ? tokenId % rows : tokenId;
-        _compressedEmbeddings.DecodeRow(id, hidden);
+        int cols = _compressedEmbeddings.Cols;
+        // DecodeRow writes int8 values → convert to float
+        var iTemp = _iQuantized!;
+        _compressedEmbeddings.DecodeRow(id, iTemp.AsSpan(0, cols));
+        for (int i = 0; i < cols; i++)
+            fHidden[i] = iTemp[i];
     }
 
     /// <summary>Greedy argmax over integer logits — no allocations.</summary>
@@ -755,20 +1040,26 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     }
 
     /// <summary>
-    /// Maps a token ID to its display string using the loaded token table,
-    /// or falls back to a domain-generic name.
+    /// Maps a token ID to its display string using the loaded token table.
+    /// For BPE tokenizers, converts byte-level Unicode chars to UTF-8 text.
     /// </summary>
     private string DecodeToken(int tokenId)
     {
+        if (_tokenizer is not null)
+            return _tokenizer.DecodeToText(tokenId);
+
         if (_tokenTable is not null && (uint)tokenId < (uint)_tokenTable.Length)
-            return _tokenTable[tokenId] ?? $"tok{tokenId}";
+        {
+            var s = _tokenTable[tokenId];
+            if (s is not null && s.Length > 0)
+                return s;
+        }
         return tokenId switch
         {
-            0 => "<pad>",
-            1 => "<bos>",
-            EosTokenId => "<eos>",
-            3 => "<unk>",
-            _ => $"tok{tokenId}"
+            Tokenizer.PadId => "",
+            Tokenizer.BosId => "",
+            Tokenizer.EosId => "",
+            _ => "?",
         };
     }
 
@@ -786,6 +1077,13 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         return denom > 1e-10 ? (float)(dot / denom) : 0f;
     }
 
+    /// <summary>
+    /// Builds a character-unigram vocabulary for a 256-token model.
+    /// IDs 0–3: special tokens. IDs 4–98: printable ASCII (space 0x20 … tilde 0x7E).
+    /// IDs 99+: multi-character domain tokens used by greedy longest-match encoding.
+    /// Space is token ID 4 — the model generates it explicitly, so decoded tokens
+    /// are concatenated without injected separators.
+    /// </summary>
     private static IReadOnlyList<string> BuildSyntheticVocabulary(int vocabSize)
     {
         var tokens = new string[vocabSize];
@@ -793,17 +1091,50 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         tokens[1] = "<BOS>";
         tokens[2] = "<EOS>";
         tokens[3] = "<UNK>";
-        for (int i = 4; i < vocabSize; i++)
-            tokens[i] = $"tok_{i}";
 
+        // Printable ASCII: 95 characters (space 0x20 through tilde 0x7E)
+        // ID 4 = ' ', ID 5 = '!', ..., ID 98 = '~'
+        const int asciiBase = 4;
+        const char firstPrintable = ' ';  // 0x20
+        const char lastPrintable  = '~';  // 0x7E
+        int asciiCount = lastPrintable - firstPrintable + 1; // 95
+
+        for (int i = 0; i < asciiCount && asciiBase + i < vocabSize; i++)
+            tokens[asciiBase + i] = ((char)(firstPrintable + i)).ToString();
+
+        // Multi-character domain tokens at IDs 99+.
+        // These let the greedy encoder compress common words into single tokens,
+        // producing shorter sequences and better inference quality.
+        int domainBase = asciiBase + asciiCount; // 99
         string[] domainTokens = [
-            "query", "entity", "list", "describe", "search", "status",
-            "help", "index", "system", "field", "schema", "data",
-            "count", "user", "session", "type", "name", "id",
-            "create", "delete", "update", "show", "find", "get"
+            // Whitespace / formatting
+            "  ", "\n", "\t",
+            // Common English
+            "the", "is", "are", "was", "not", "and", "for", "with", "that", "this",
+            "from", "have", "has", "can", "will", "but", "all", "your", "you", "it",
+            "of", "to", "in", "on", "at", "by", "an", "or", "if", "no", "yes",
+            "do", "did", "be", "my", "me", "we", "so", "up", "out", "how", "what",
+            "when", "where", "which", "who", "why",
+            // Domain commands & entities
+            "create", "delete", "update", "show", "find", "get", "list", "search",
+            "query", "entity", "field", "schema", "data", "index", "view",
+            "help", "status", "system", "count", "describe",
+            "user", "session", "name", "type", "id", "value",
+            "todo", "task", "note", "item", "record", "page",
+            // Common suffixes / fragments
+            "ing", "tion", "ed", "er", "ly", "ment", "ness", "able",
+            // Punctuation bigrams
+            ": ", ", ", ". ", "? ", "! ",
         ];
-        for (int i = 0; i < domainTokens.Length && i + 4 < vocabSize; i++)
-            tokens[i + 4] = domainTokens[i];
+        for (int i = 0; i < domainTokens.Length && domainBase + i < vocabSize; i++)
+            tokens[domainBase + i] = domainTokens[i];
+
+        // Fill any remaining slots with single-char fallback
+        for (int i = 0; i < vocabSize; i++)
+        {
+            if (tokens[i] is null)
+                tokens[i] = $"<{i}>";
+        }
 
         return tokens;
     }
@@ -818,8 +1149,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             _compressedWk = null;
             _compressedWv = null;
             _compressedWo = null;
-            _compressedFfn = null;
-            _compressedEmbeddings = null;
+            _compressedFfnGate = null;
+            _compressedFfnUp = null;
+            _compressedFfnDown = null;            _compressedEmbeddings = null;
             _compressedOutputHead = null;
         }
         else
@@ -828,16 +1160,28 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             if (_compressedWk is not null) { foreach (var m in _compressedWk) m?.Dispose(); _compressedWk = null; }
             if (_compressedWv is not null) { foreach (var m in _compressedWv) m?.Dispose(); _compressedWv = null; }
             if (_compressedWo is not null) { foreach (var m in _compressedWo) m?.Dispose(); _compressedWo = null; }
-            if (_compressedFfn is not null) { foreach (var m in _compressedFfn) m?.Dispose(); _compressedFfn = null; }
+            if (_compressedFfnGate is not null) { foreach (var m in _compressedFfnGate) m?.Dispose(); _compressedFfnGate = null; }
+            if (_compressedFfnUp is not null) { foreach (var m in _compressedFfnUp) m?.Dispose(); _compressedFfnUp = null; }
+            if (_compressedFfnDown is not null) { foreach (var m in _compressedFfnDown) m?.Dispose(); _compressedFfnDown = null; }
+            // Don't double-dispose when output head is tied to embeddings
+            bool tied = ReferenceEquals(_compressedEmbeddings, _compressedOutputHead);
             _compressedEmbeddings?.Dispose(); _compressedEmbeddings = null;
-            _compressedOutputHead?.Dispose(); _compressedOutputHead = null;
+            if (!tied) _compressedOutputHead?.Dispose();
+            _compressedOutputHead = null;
         }
 
         // Clear buffer references (GC will reclaim them)
-        _bufHidden = _bufNorm = _bufQ = _bufK = _bufV = _bufPreWo = _bufScores = _bufLogits = null;
-        _kvCacheK = null;
-        _kvCacheV = null;
+        _fHidden = _fNorm = _fQ = _fK = _fV = _fAttnOut = null;
+        _fFfnGate = _fFfnUp = _fFfnDown = null;
+        _fScores = null;
+        _iQuantized = _iMatmulOut = _bufLogits = null;
+        _fKvCacheK = null;
+        _fKvCacheV = null;
+        _ropeCos = _ropeSin = null;
+        _weightScales = _inputNorm = _attnSubNorm = _postAttnNorm = _ffnSubNorm = null;
+        _finalNorm = null;
         _tokenTable = null;
+        _merges = null;
         _tokenizer  = null;
         NativeBytesAllocated = 0;
         LayerStats = null;
@@ -858,84 +1202,29 @@ public readonly record struct BitNetModelConfig(
     int NumLayers,
     int NumHeads,
     int VocabSize,
-    int MaxSeqLen)
+    int MaxSeqLen,
+    int FfnDim = 0,
+    int NumKvHeads = 0,
+    float RopeTheta = 500_000f)
 {
+    /// <summary>Effective FFN intermediate dimension. Falls back to HiddenDim when not set.</summary>
+    public int EffectiveFfnDim => FfnDim > 0 ? FfnDim : HiddenDim;
+
+    /// <summary>Whether this config uses a gated FFN (SwiGLU/ReLU²) with 3 separate matrices.</summary>
+    public bool HasGatedFfn => FfnDim > 0;
+
+    /// <summary>Effective KV head count. Falls back to NumHeads (MHA) when not set.</summary>
+    public int EffectiveNumKvHeads => NumKvHeads > 0 ? NumKvHeads : NumHeads;
+
+    /// <summary>Head dimension = HiddenDim / NumHeads.</summary>
+    public int HeadDim => HiddenDim / NumHeads;
+
     public static readonly BitNetModelConfig Default = new(
         HiddenDim: 128,
         NumLayers: 4,
         NumHeads: 4,
         VocabSize: 256,
         MaxSeqLen: 512);
-}
-
-/// <summary>
-/// Options controlling model loading, pruning, and optimisation.
-/// </summary>
-public sealed record ModelLoadOptions
-{
-    /// <summary>Prune vocabulary against DataScaffold metadata on load.</summary>
-    public bool PruneVocabulary { get; init; } = true;
-
-    /// <summary>Ratio of layers to remove from the end (0.0 = none, 0.3 = drop 30%).</summary>
-    public float LayerPruneRatio { get; init; }
-
-    /// <summary>Ratio of attention heads to zero out per layer (0.0 = none, 0.25 = prune 25%).</summary>
-    public float HeadPruneRatio { get; init; }
-
-    /// <summary>
-    /// Group-of-four L1 threshold for attention weights.
-    /// Groups with L1 sum ≤ threshold are zeroed (0 = disabled, 1 = conservative, 2 = moderate).
-    /// </summary>
-    public int GroupPruneAttnThreshold { get; init; }
-
-    /// <summary>
-    /// Group-of-four L1 threshold for FFN weights.
-    /// FFN layers tolerate more aggressive pruning (0 = disabled, 2 = moderate, 3 = aggressive).
-    /// </summary>
-    public int GroupPruneFfnThreshold { get; init; }
-
-    /// <summary>Enable coarse-to-fine semantic pruning after magnitude pruning.</summary>
-    public bool SemanticPruning { get; init; }
-
-    /// <summary>Ratio of attention heads to evaluate for semantic pruning (0.0–1.0).</summary>
-    public float SemanticHeadPruneRatio { get; init; } = 0.20f;
-
-    /// <summary>Ratio of neurons to evaluate for semantic pruning (0.0–1.0).</summary>
-    public float SemanticNeuronPruneRatio { get; init; } = 0.15f;
-
-    /// <summary>Ratio of blocks to evaluate for semantic pruning (0.0–1.0).</summary>
-    public float SemanticBlockPruneRatio { get; init; } = 0.10f;
-
-    /// <summary>Minimum cosine similarity for hidden-state drift screening (0.90–0.99).</summary>
-    public float SemanticDriftThreshold { get; init; } = 0.95f;
-
-    /// <summary>Number of special tokens to always retain (PAD, BOS, EOS, UNK).</summary>
-    public int SpecialTokenCount { get; init; } = 4;
-
-    /// <summary>Optional custom pruner. If null, FromDataScaffold() is used.</summary>
-    public VocabularyPruner? CustomPruner { get; init; }
-
-    public static readonly ModelLoadOptions Default = new();
-
-    /// <summary>Aggressive pruning: vocab + 25% layers + 25% heads + group-of-4.</summary>
-    public static readonly ModelLoadOptions Aggressive = new()
-    {
-        PruneVocabulary = true,
-        LayerPruneRatio = 0.25f,
-        HeadPruneRatio = 0.25f,
-        GroupPruneAttnThreshold = 1,
-        GroupPruneFfnThreshold = 2,
-    };
-
-    /// <summary>No pruning — load the full model.</summary>
-    public static readonly ModelLoadOptions NoPruning = new()
-    {
-        PruneVocabulary = false,
-        LayerPruneRatio = 0f,
-        HeadPruneRatio = 0f,
-        GroupPruneAttnThreshold = 0,
-        GroupPruneFfnThreshold = 0,
-    };
 }
 
 /// <summary>
@@ -961,25 +1250,4 @@ public struct TernaryLayer
     /// Pruning code that zeros elements through this reference modifies Wq.
     /// </summary>
     public readonly sbyte[] AttentionWeights => Wq;
-
-    public static TernaryLayer CreateRandom(int dim, int numHeads)
-    {
-        return new TernaryLayer
-        {
-            Wq         = CreateTernary(dim * dim),
-            Wk         = CreateTernary(dim * dim),
-            Wv         = CreateTernary(dim * dim),
-            Wo         = CreateTernary(dim * dim),
-            FfnWeights = CreateTernary(dim * dim),
-        };
-    }
-
-    private static sbyte[] CreateTernary(int count)
-    {
-        var rng = Random.Shared;
-        var arr = new sbyte[count];
-        for (int i = 0; i < arr.Length; i++)
-            arr[i] = (sbyte)(rng.Next(3) - 1);
-        return arr;
-    }
 }
