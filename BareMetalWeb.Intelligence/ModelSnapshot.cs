@@ -20,7 +20,7 @@ namespace BareMetalWeb.Intelligence;
 public static class ModelSnapshot
 {
     private static ReadOnlySpan<byte> Magic => "BMWM"u8;
-    private const int FormatVersion = 3;
+    private const int FormatVersion = 4;
 
     // Header: magic(4) + version(4) + hiddenDim(4) + numLayers(4) +
     //         numHeads(4) + vocabSize(4) + activeVocab(4) + maxSeqLen(4) +
@@ -48,28 +48,14 @@ public static class ModelSnapshot
         NativeTernaryMatrix[] ffnGate,
         NativeTernaryMatrix[] ffnUp,
         NativeTernaryMatrix[] ffnDown,
-        NativeTernaryMatrix compressedEmbeddings,
-        NativeTernaryMatrix compressedOutputHead,
+        NativeInt8Matrix compressedEmbeddings,
+        NativeInt8Matrix compressedOutputHead,
         IReadOnlyList<string>? tokenTable = null,
         IReadOnlyList<string>? bpeMerges = null)
     {
         int layerCount = wq.Length;
-        int matrixCount = layerCount * 7 + 2;
-
-        // Gather all matrices in order: Wq, Wk, Wv, Wo, FfnGate, FfnUp, FfnDown per layer, then embeddings, outputHead
-        var matrices = new NativeTernaryMatrix[matrixCount];
-        for (int i = 0; i < layerCount; i++)
-        {
-            matrices[i * 7]     = wq[i];
-            matrices[i * 7 + 1] = wk[i];
-            matrices[i * 7 + 2] = wv[i];
-            matrices[i * 7 + 3] = wo[i];
-            matrices[i * 7 + 4] = ffnGate[i];
-            matrices[i * 7 + 5] = ffnUp[i];
-            matrices[i * 7 + 6] = ffnDown[i];
-        }
-        matrices[matrixCount - 2] = compressedEmbeddings;
-        matrices[matrixCount - 1] = compressedOutputHead;
+        int ternaryCount = layerCount * 7;
+        int matrixCount = ternaryCount + 2;
 
         // Encode token table and BPE merges
         byte[] tokenTableBytes = EncodeTokenTable(tokenTable);
@@ -99,14 +85,41 @@ public static class ModelSnapshot
         bw.Write(tokenCount);
         bw.Write(tokenTableOffset);
         bw.Write(packedDataOffset);
-        bw.Write(config.FfnDim);    // v3: FFN intermediate dimension
-        bw.Write(mergeCount);        // v3: BPE merge count (was reserved)
+        bw.Write(config.FfnDim);
+        bw.Write(mergeCount);
 
-        // ── Matrix descriptors ──────────────────────────────────────
+        // ── Matrix descriptors (ternary layers, then int8 embeddings) ──
         long dataOffset = packedDataOffset;
-        for (int i = 0; i < matrixCount; i++)
+
+        // Ternary layer matrices
+        var ternaryMatrices = new NativeTernaryMatrix[ternaryCount];
+        for (int i = 0; i < layerCount; i++)
         {
-            var m = matrices[i];
+            ternaryMatrices[i * 7]     = wq[i];
+            ternaryMatrices[i * 7 + 1] = wk[i];
+            ternaryMatrices[i * 7 + 2] = wv[i];
+            ternaryMatrices[i * 7 + 3] = wo[i];
+            ternaryMatrices[i * 7 + 4] = ffnGate[i];
+            ternaryMatrices[i * 7 + 5] = ffnUp[i];
+            ternaryMatrices[i * 7 + 6] = ffnDown[i];
+        }
+        for (int i = 0; i < ternaryCount; i++)
+        {
+            var m = ternaryMatrices[i];
+            long dataLen = m.TotalPackedDataBytes;
+            bw.Write(m.Rows);
+            bw.Write(m.Cols);
+            bw.Write(m.RowStrideBytes);
+            bw.Write(dataOffset);
+            bw.Write(dataLen);
+            dataOffset += dataLen;
+        }
+
+        // Int8 embedding + output head descriptors
+        var int8Matrices = new[] { compressedEmbeddings, compressedOutputHead };
+        for (int i = 0; i < 2; i++)
+        {
+            var m = int8Matrices[i];
             long dataLen = m.TotalPackedDataBytes;
             bw.Write(m.Rows);
             bw.Write(m.Cols);
@@ -121,11 +134,12 @@ public static class ModelSnapshot
         bw.Write(mergeTableBytes);
 
         // ── Packed matrix data ──────────────────────────────────────
-        // Stream each matrix in 64KB chunks and dispose after writing to free native memory
         var buf = new byte[65536];
-        for (int i = 0; i < matrixCount; i++)
+
+        // Write ternary matrices (dispose after each to free native memory)
+        for (int i = 0; i < ternaryCount; i++)
         {
-            var m = matrices[i];
+            var m = ternaryMatrices[i];
             long remaining = m.TotalPackedDataBytes;
             long offset = 0;
             while (remaining > 0)
@@ -136,8 +150,23 @@ public static class ModelSnapshot
                 offset += chunk;
                 remaining -= chunk;
             }
-            // Free native memory as we go — critical for large models
             m.Dispose();
+        }
+
+        // Write int8 matrices (caller disposes)
+        for (int i = 0; i < 2; i++)
+        {
+            var m = int8Matrices[i];
+            long remaining = m.TotalPackedDataBytes;
+            long offset = 0;
+            while (remaining > 0)
+            {
+                int chunk = (int)Math.Min(remaining, buf.Length);
+                m.CopyPackedDataChunk(offset, buf.AsSpan(0, chunk));
+                bw.Write(buf, 0, chunk);
+                offset += chunk;
+                remaining -= chunk;
+            }
         }
 
         bw.Flush();
@@ -210,22 +239,38 @@ public static class ModelSnapshot
         string[] merges = DecodeTokenTable(br, mergeCount);
 
         // ── Load matrices ───────────────────────────────────────────
-        var matrices = new NativeTernaryMatrix[matrixCount];
-        for (int i = 0; i < matrixCount; i++)
+        int ternaryCount = matrixCount - 2;
+        var ternaryMatrices = new NativeTernaryMatrix[ternaryCount];
+        for (int i = 0; i < ternaryCount; i++)
         {
             var (rows, cols, _, offset, length) = descriptors[i];
             fs.Seek(offset, SeekOrigin.Begin);
+            var packedData = ReadExactBytes(br, length);
+            ternaryMatrices[i] = NativeTernaryMatrix.FromPackedData(packedData, rows, cols);
+        }
 
-            var packedData = new byte[length];
-            int totalRead = 0;
-            while (totalRead < length)
-            {
-                int read = br.Read(packedData, totalRead, (int)(length - totalRead));
-                if (read == 0) throw new EndOfStreamException();
-                totalRead += read;
-            }
+        // Last 2 matrices: int8 (v4+) or ternary (v3 and below)
+        NativeInt8Matrix embMatrix, ohMatrix;
+        if (version >= 4)
+        {
+            var (r0, c0, _, o0, l0) = descriptors[ternaryCount];
+            fs.Seek(o0, SeekOrigin.Begin);
+            embMatrix = NativeInt8Matrix.FromPackedData(ReadExactBytes(br, l0), r0, c0);
 
-            matrices[i] = NativeTernaryMatrix.FromPackedData(packedData, rows, cols);
+            var (r1, c1, _, o1, l1) = descriptors[ternaryCount + 1];
+            fs.Seek(o1, SeekOrigin.Begin);
+            ohMatrix = NativeInt8Matrix.FromPackedData(ReadExactBytes(br, l1), r1, c1);
+        }
+        else
+        {
+            // Legacy v1-v3: embeddings stored as ternary — load and wrap
+            var (r0, c0, _, o0, l0) = descriptors[ternaryCount];
+            fs.Seek(o0, SeekOrigin.Begin);
+            embMatrix = UpcastTernaryToInt8(ReadExactBytes(br, l0), r0, c0);
+
+            var (r1, c1, _, o1, l1) = descriptors[ternaryCount + 1];
+            fs.Seek(o1, SeekOrigin.Begin);
+            ohMatrix = UpcastTernaryToInt8(ReadExactBytes(br, l1), r1, c1);
         }
 
         // Unpack into named arrays
@@ -239,46 +284,39 @@ public static class ModelSnapshot
 
         if (isV1)
         {
-            // v1: 2 per layer — combined attention projection shared across Q/K/V/O
             for (int i = 0; i < layerCount; i++)
             {
-                var attn = matrices[i * 2];
-                wq[i]  = attn;
-                wk[i]  = attn;
-                wv[i]  = attn;
-                wo[i]  = attn;
-                // Legacy: single FFN → use as down_proj, gate/up are identity
-                ffnGate[i] = matrices[i * 2 + 1];
-                ffnUp[i]   = matrices[i * 2 + 1];
-                ffnDown[i] = matrices[i * 2 + 1];
+                var attn = ternaryMatrices[i * 2];
+                wq[i] = attn; wk[i] = attn; wv[i] = attn; wo[i] = attn;
+                ffnGate[i] = ternaryMatrices[i * 2 + 1];
+                ffnUp[i]   = ternaryMatrices[i * 2 + 1];
+                ffnDown[i] = ternaryMatrices[i * 2 + 1];
             }
         }
         else if (isV2)
         {
-            // v2: 5 per layer — separate Q/K/V/O projections + single FFN
             for (int i = 0; i < layerCount; i++)
             {
-                wq[i]  = matrices[i * 5];
-                wk[i]  = matrices[i * 5 + 1];
-                wv[i]  = matrices[i * 5 + 2];
-                wo[i]  = matrices[i * 5 + 3];
-                ffnGate[i] = matrices[i * 5 + 4];
-                ffnUp[i]   = matrices[i * 5 + 4];
-                ffnDown[i] = matrices[i * 5 + 4];
+                wq[i] = ternaryMatrices[i * 5];
+                wk[i] = ternaryMatrices[i * 5 + 1];
+                wv[i] = ternaryMatrices[i * 5 + 2];
+                wo[i] = ternaryMatrices[i * 5 + 3];
+                ffnGate[i] = ternaryMatrices[i * 5 + 4];
+                ffnUp[i]   = ternaryMatrices[i * 5 + 4];
+                ffnDown[i] = ternaryMatrices[i * 5 + 4];
             }
         }
         else
         {
-            // v3: 7 per layer — separate Q/K/V/O + gated FFN (gate, up, down)
             for (int i = 0; i < layerCount; i++)
             {
-                wq[i]      = matrices[i * 7];
-                wk[i]      = matrices[i * 7 + 1];
-                wv[i]      = matrices[i * 7 + 2];
-                wo[i]      = matrices[i * 7 + 3];
-                ffnGate[i] = matrices[i * 7 + 4];
-                ffnUp[i]   = matrices[i * 7 + 5];
-                ffnDown[i] = matrices[i * 7 + 6];
+                wq[i]      = ternaryMatrices[i * 7];
+                wk[i]      = ternaryMatrices[i * 7 + 1];
+                wv[i]      = ternaryMatrices[i * 7 + 2];
+                wo[i]      = ternaryMatrices[i * 7 + 3];
+                ffnGate[i] = ternaryMatrices[i * 7 + 4];
+                ffnUp[i]   = ternaryMatrices[i * 7 + 5];
+                ffnDown[i] = ternaryMatrices[i * 7 + 6];
             }
         }
 
@@ -289,8 +327,8 @@ public static class ModelSnapshot
             ActiveVocab: activeVocab,
             Wq: wq, Wk: wk, Wv: wv, Wo: wo,
             FfnGate: ffnGate, FfnUp: ffnUp, FfnDown: ffnDown,
-            Embeddings: matrices[matrixCount - 2],
-            OutputHead: matrices[matrixCount - 1],
+            Embeddings: embMatrix,
+            OutputHead: ohMatrix,
             Tokens: tokens,
             Merges: merges);
     }
@@ -397,8 +435,9 @@ public static class ModelSnapshot
             }
 
             // ── Matrices from mapped memory ─────────────────────────
-            var matrices = new NativeTernaryMatrix[matrixCount];
-            for (int i = 0; i < matrixCount; i++)
+            int ternaryCount = matrixCount - 2;
+            var matrices = new NativeTernaryMatrix[ternaryCount];
+            for (int i = 0; i < ternaryCount; i++)
             {
                 var (rows, cols, _, offset, length) = descriptors[i];
                 if (offset < 0 || length < 0 || length > int.MaxValue ||
@@ -408,6 +447,32 @@ public static class ModelSnapshot
                 var dataSpan = new ReadOnlySpan<byte>(
                     basePtr + offset, (int)length);
                 matrices[i] = NativeTernaryMatrix.FromPackedData(dataSpan, rows, cols);
+            }
+
+            NativeInt8Matrix embMatrix, ohMatrix;
+            for (int i = ternaryCount; i < matrixCount; i++)
+            {
+                var (_, _, _, offset, length) = descriptors[i];
+                if (offset < 0 || length < 0 || length > int.MaxValue ||
+                    offset + length < offset || offset + length > fileSize)
+                    throw new InvalidDataException(
+                        $"Matrix descriptor {i} out of bounds (offset={offset}, length={length}, file={fileSize})");
+            }
+
+            {
+                var (rows, cols, _, offset, length) = descriptors[ternaryCount];
+                var dataSpan = new ReadOnlySpan<byte>(basePtr + offset, (int)length);
+                embMatrix = version >= 4
+                    ? MaterializeMappedInt8(basePtr + offset, rows, cols)
+                    : UpcastTernaryToInt8(dataSpan, rows, cols);
+            }
+
+            {
+                var (rows, cols, _, offset, length) = descriptors[ternaryCount + 1];
+                var dataSpan = new ReadOnlySpan<byte>(basePtr + offset, (int)length);
+                ohMatrix = version >= 4
+                    ? MaterializeMappedInt8(basePtr + offset, rows, cols)
+                    : UpcastTernaryToInt8(dataSpan, rows, cols);
             }
 
             var wqA  = new NativeTernaryMatrix[layerCount];
@@ -461,7 +526,7 @@ public static class ModelSnapshot
 
             return new SnapshotData(config, activeVocab, wqA, wkA, wvA, woA,
                 ffnGateA, ffnUpA, ffnDownA,
-                matrices[matrixCount - 2], matrices[matrixCount - 1], tokens, mappedMerges);
+                embMatrix, ohMatrix, tokens, mappedMerges);
         }
         finally
         {
@@ -639,11 +704,23 @@ public static class ModelSnapshot
                 }
             }
 
-            var (eRows, eCols, _, eOff, _) = descriptors[matrixCount - 2];
-            var embeddings = NativeTernaryMatrix.FromMappedMemory(basePtr + eOff, eRows, eCols);
+            NativeInt8Matrix embeddings;
+            {
+                var (rows, cols, _, offset, length) = descriptors[matrixCount - 2];
+                var dataSpan = new ReadOnlySpan<byte>(basePtr + offset, (int)length);
+                embeddings = version >= 4
+                    ? NativeInt8Matrix.FromMappedMemory(basePtr + offset, rows, cols)
+                    : UpcastTernaryToInt8(dataSpan, rows, cols);
+            }
 
-            var (oRows, oCols, _, oOff, _) = descriptors[matrixCount - 1];
-            var outputHead = NativeTernaryMatrix.FromMappedMemory(basePtr + oOff, oRows, oCols);
+            NativeInt8Matrix outputHead;
+            {
+                var (rows, cols, _, offset, length) = descriptors[matrixCount - 1];
+                var dataSpan = new ReadOnlySpan<byte>(basePtr + offset, (int)length);
+                outputHead = version >= 4
+                    ? NativeInt8Matrix.FromMappedMemory(basePtr + offset, rows, cols)
+                    : UpcastTernaryToInt8(dataSpan, rows, cols);
+            }
 
             var config = new BitNetModelConfig(hiddenDim, layerCount, numHeads, vocabSize, maxSeqLen, lazyFfnDim);
             var data = new SnapshotData(config, activeVocab, wqL, wkL, wvL, woL,
@@ -686,6 +763,49 @@ public static class ModelSnapshot
             tokens[i] = br.ReadString();
         return tokens;
     }
+
+    private static byte[] ReadExactBytes(BinaryReader br, long length)
+    {
+        var buf = new byte[length];
+        int totalRead = 0;
+        while (totalRead < length)
+        {
+            int read = br.Read(buf, totalRead, (int)(length - totalRead));
+            if (read == 0) throw new EndOfStreamException();
+            totalRead += read;
+        }
+        return buf;
+    }
+
+    private static unsafe NativeInt8Matrix MaterializeMappedInt8(byte* data, int rows, int cols)
+    {
+        using var mapped = NativeInt8Matrix.FromMappedMemory(data, rows, cols);
+        var packedData = new byte[mapped.TotalPackedDataBytes];
+        mapped.CopyPackedDataTo(packedData);
+        return NativeInt8Matrix.FromPackedData(packedData, rows, cols);
+    }
+
+    /// <summary>
+    /// Upcast a ternary-packed matrix to int8 for backward compatibility.
+    /// Creates a NativeTernaryMatrix, decodes each row, and repacks as int8.
+    /// </summary>
+    private static NativeInt8Matrix UpcastTernaryToInt8(ReadOnlySpan<byte> packedData, int rows, int cols)
+    {
+        var ternary = NativeTernaryMatrix.FromPackedData(packedData, rows, cols);
+        var int8 = NativeInt8Matrix.Allocate(rows, cols);
+        var intRow = new int[cols];
+        var sbyteRow = new sbyte[cols];
+        for (int r = 0; r < rows; r++)
+        {
+            ternary.DecodeRow(r, intRow);
+            for (int c = 0; c < cols; c++)
+                sbyteRow[c] = (sbyte)intRow[c];
+            int8.PackRowInPlace(r, sbyteRow);
+        }
+        ternary.Dispose();
+        int8.FinalizeStats();
+        return int8;
+    }
 }
 
 /// <summary>
@@ -701,8 +821,8 @@ public sealed record SnapshotData(
     NativeTernaryMatrix[] FfnGate,
     NativeTernaryMatrix[] FfnUp,
     NativeTernaryMatrix[] FfnDown,
-    NativeTernaryMatrix Embeddings,
-    NativeTernaryMatrix OutputHead,
+    NativeInt8Matrix Embeddings,
+    NativeInt8Matrix OutputHead,
     string[] Tokens,
     string[] Merges) : IDisposable
 {

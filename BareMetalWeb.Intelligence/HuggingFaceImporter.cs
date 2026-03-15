@@ -146,15 +146,15 @@ public static class HuggingFaceImporter
             GC.Collect(0, GCCollectionMode.Optimized, blocking: true);
         }
 
-        // ── 7. Import embeddings + output head ────────────────────────────
-        progress?.Invoke("  Importing embeddings (large — streaming) ...");
-        var embeddings = StreamTensor(tensorMap, EmbedKey, vocab, dim, progress);
-        // Blocking GC ensures the embedding row-buffer is freed before allocating output head.
+        // ── 7. Import embeddings + output head as int8 (NOT ternary) ──────
+        //   Embeddings are BF16 in the model — ternary quantization destroys them.
+        //   Scale BF16 → int8 to preserve relative magnitudes.
+        progress?.Invoke("  Importing embeddings as int8 (BF16 → scaled int8) ...");
+        var embeddings = StreamTensorInt8(tensorMap, EmbedKey, vocab, dim, progress);
         GC.Collect(1, GCCollectionMode.Optimized, blocking: true);
 
-        progress?.Invoke("  Importing output head ...");
-        var outputHead = StreamTensor(tensorMap, LmHeadKey(tensorMap), vocab, dim, progress);
-        // Blocking GC to reclaim output head row-buffer before tokenizer loading.
+        progress?.Invoke("  Importing output head as int8 ...");
+        var outputHead = StreamTensorInt8(tensorMap, LmHeadKey(tensorMap), vocab, dim, progress);
         GC.Collect(1, GCCollectionMode.Optimized, blocking: true);
 
         // ── 8. Load tokenizer vocab and BPE merges ─────────────────────────
@@ -168,6 +168,10 @@ public static class HuggingFaceImporter
             wq, wk, wv, wo, ffnGate, ffnUp, ffnDown,
             embeddings, outputHead,
             tokenTable, bpeMerges);
+
+        // Dispose remaining native matrices not already freed by Save
+        embeddings.Dispose();
+        outputHead.Dispose();
 
         // ── 10. Dispose native matrices ────────────────────────────────────
         for (int i = 0; i < numLayers; i++)
@@ -374,6 +378,108 @@ public static class HuggingFaceImporter
         kvMatrix.Dispose();
         expanded.FinalizeStats();
         return expanded;
+    }
+
+    /// <summary>
+    /// Stream a BF16/F16/F32 tensor and quantize to int8 (scaled to ±127).
+    /// Used for embeddings and output heads where ternary quantization is too lossy.
+    /// Two-pass: first pass finds max abs value per row for scaling, second pass quantizes.
+    /// For large tensors we use a global scale computed from the first 256 rows.
+    /// </summary>
+    private static NativeInt8Matrix StreamTensorInt8(
+        Dictionary<string, (SafeTensorsReader.TensorInfo Info, string FilePath)> map,
+        string key,
+        int targetRows, int targetCols,
+        Action<string>? progress)
+    {
+        var (info, filePath) = map[key];
+        int srcRows = info.Rows;
+        int srcCols = info.Cols;
+        int rows = Math.Min(srcRows, targetRows);
+        int cols = Math.Min(srcCols, targetCols);
+        int elemBytes = info.ElementBytes;
+
+        var matrix = NativeInt8Matrix.Allocate(targetRows, targetCols);
+        var rawRow = new byte[srcCols * elemBytes];
+        var floatRow = new float[srcCols];
+        var int8Row = new sbyte[cols];
+
+        // First pass (sample): compute global scale from first N rows
+        float globalMaxAbs = 0f;
+        int sampleRows = Math.Min(rows, 256);
+        using (var fs1 = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+            FileShare.Read, Math.Max(65536, rawRow.Length), FileOptions.SequentialScan))
+        {
+            fs1.Seek(info.DataStart, SeekOrigin.Begin);
+            for (int r = 0; r < sampleRows; r++)
+            {
+                ReadExact(fs1, rawRow);
+                ConvertToFloat(rawRow, floatRow, info.Dtype, srcCols);
+                for (int c = 0; c < cols; c++)
+                {
+                    float abs = MathF.Abs(floatRow[c]);
+                    if (abs > globalMaxAbs) globalMaxAbs = abs;
+                }
+            }
+        }
+
+        float scale = globalMaxAbs > 0f ? 127f / globalMaxAbs : 1f;
+
+        // Second pass: quantize all rows
+        using var fs2 = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+            FileShare.Read, Math.Max(65536, rawRow.Length), FileOptions.SequentialScan);
+        fs2.Seek(info.DataStart, SeekOrigin.Begin);
+
+        for (int r = 0; r < srcRows; r++)
+        {
+            ReadExact(fs2, rawRow);
+            if (r >= rows) continue;
+
+            ConvertToFloat(rawRow, floatRow, info.Dtype, srcCols);
+            for (int c = 0; c < cols; c++)
+            {
+                float scaled = floatRow[c] * scale;
+                int clamped = (int)MathF.Round(scaled);
+                int8Row[c] = (sbyte)Math.Clamp(clamped, -127, 127);
+            }
+            matrix.PackRowInPlace(r, int8Row);
+        }
+
+        matrix.FinalizeStats();
+        return matrix;
+    }
+
+    /// <summary>Convert a raw byte row to float values based on dtype.</summary>
+    private static void ConvertToFloat(byte[] raw, float[] output, string dtype, int cols)
+    {
+        switch (dtype)
+        {
+            case "BF16":
+                for (int i = 0; i < cols; i++)
+                {
+                    ushort bits = (ushort)(raw[i * 2] | (raw[i * 2 + 1] << 8));
+                    // BF16 → float32: shift left 16 bits
+                    uint f32Bits = (uint)bits << 16;
+                    output[i] = BitConverter.Int32BitsToSingle((int)f32Bits);
+                }
+                break;
+            case "F16":
+                for (int i = 0; i < cols; i++)
+                {
+                    ushort bits = (ushort)(raw[i * 2] | (raw[i * 2 + 1] << 8));
+                    output[i] = (float)BitConverter.UInt16BitsToHalf(bits);
+                }
+                break;
+            case "F32":
+                for (int i = 0; i < cols; i++)
+                    output[i] = BitConverter.ToSingle(raw, i * 4);
+                break;
+            default:
+                // For I8/U8 packed data, just cast directly
+                for (int i = 0; i < cols; i++)
+                    output[i] = (sbyte)raw[i];
+                break;
+        }
     }
 
     // ── Config / tokenizer loading ────────────────────────────────────────

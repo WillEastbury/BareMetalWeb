@@ -31,8 +31,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     private NativeTernaryMatrix[]? _compressedFfnGate;  // [ffnDim × dim]
     private NativeTernaryMatrix[]? _compressedFfnUp;    // [ffnDim × dim]
     private NativeTernaryMatrix[]? _compressedFfnDown;  // [dim × ffnDim]
-    private NativeTernaryMatrix? _compressedEmbeddings;
-    private NativeTernaryMatrix? _compressedOutputHead;
+    private NativeInt8Matrix? _compressedEmbeddings;
+    private NativeInt8Matrix? _compressedOutputHead;
     private LazySnapshot? _lazySnapshot; // holds mmap open when lazy-loaded
     private int _layerCount;
     private bool _isLoaded;
@@ -175,14 +175,14 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     }
 
     /// <summary>
-    /// Load pre-packed NativeTernaryMatrix arrays directly — no sbyte[] intermediates.
+    /// Load pre-packed native matrices directly — ternary layer weights plus int8 embeddings/output head.
     /// Used by the streaming HuggingFace importer to avoid OOM on large models.
     /// </summary>
     public void LoadFromNativeImport(
         NativeTernaryMatrix[] wq, NativeTernaryMatrix[] wk,
         NativeTernaryMatrix[] wv, NativeTernaryMatrix[] wo,
         NativeTernaryMatrix[] ffnGate, NativeTernaryMatrix[] ffnUp, NativeTernaryMatrix[] ffnDown,
-        NativeTernaryMatrix embeddings, NativeTernaryMatrix outputHead,
+        NativeInt8Matrix embeddings, NativeInt8Matrix outputHead,
         int activeVocab, int dim, string[] tokenTable)
     {
         DisposeNative();
@@ -292,8 +292,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             _compressedFfnDown[i] = NativeTernaryMatrix.Pack(layers[i].FfnWeights, dim, dim);
         }
 
-        _compressedEmbeddings = NativeTernaryMatrix.Pack(embeddings, activeVocab, dim);
-        _compressedOutputHead = NativeTernaryMatrix.Pack(outputHead, activeVocab, dim);
+        _compressedEmbeddings = PackInt8Matrix(embeddings, activeVocab, dim);
+        _compressedOutputHead = PackInt8Matrix(outputHead, activeVocab, dim);
 
         // Pre-allocate all inference buffers using the shared helper.
         AllocateInferenceBuffers(dim, activeVocab);
@@ -315,6 +315,15 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         NativeBytesAllocated += _compressedEmbeddings.BytesAllocated;
         NativeBytesAllocated += _compressedOutputHead.BytesAllocated;
         LayerStats = layerStatsList;
+    }
+
+    private static NativeInt8Matrix PackInt8Matrix(sbyte[] source, int rows, int cols)
+    {
+        var matrix = NativeInt8Matrix.Allocate(rows, cols);
+        for (int r = 0; r < rows; r++)
+            matrix.PackRowInPlace(r, source.AsSpan(r * cols, cols));
+        matrix.FinalizeStats();
+        return matrix;
     }
 
     /// <summary>
