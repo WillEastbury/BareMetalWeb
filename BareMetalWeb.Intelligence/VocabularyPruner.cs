@@ -28,6 +28,32 @@ public sealed class VocabularyPruner
     }
 
     /// <summary>
+    /// Reconstruct a pruner from a persisted remap table (loaded from snapshot).
+    /// The remap table maps original token ID → pruned ID (-1 = pruned).
+    /// </summary>
+    public static VocabularyPruner FromRemapTable(int[] remapTable)
+    {
+        var pruner = new VocabularyPruner(Array.Empty<string>());
+        pruner._remapTable = remapTable;
+        pruner.OriginalVocabSize = remapTable.Length;
+
+        int maxPrunedId = -1;
+        var reverseList = new List<int>();
+        for (int i = 0; i < remapTable.Length; i++)
+        {
+            if (remapTable[i] >= 0)
+            {
+                reverseList.Add(i);
+                if (remapTable[i] > maxPrunedId)
+                    maxPrunedId = remapTable[i];
+            }
+        }
+        pruner._reverseTable = reverseList.ToArray();
+        pruner.PrunedVocabSize = maxPrunedId + 1;
+        return pruner;
+    }
+
+    /// <summary>
     /// Build the domain vocabulary from BareMetalWeb DataScaffold metadata.
     /// Includes entity names, field names, field types, action/command names,
     /// lookup relationships, related document references, query operators,
@@ -367,6 +393,7 @@ public sealed class VocabularyPruner
     /// Tokenize all domain terms through the BPE tokenizer and collect the set
     /// of token IDs needed to represent them. Also includes fundamental tokens
     /// (special tokens, short fragments) so basic text generation works.
+    /// Tokenizes both bare and space-prefixed forms to capture all BPE variants.
     /// </summary>
     public HashSet<int> CollectDomainTokenIds(Tokenizer tokenizer, IReadOnlyList<string> vocabTable)
     {
@@ -385,18 +412,24 @@ public sealed class VocabularyPruner
                 ids.Add(i);
         }
 
-        // Tokenize each domain term and collect constituent BPE token IDs
+        // Tokenize each domain term in BOTH bare and space-prefixed forms.
+        // BPE produces different tokens for "hello" vs " hello" (Ġhello).
+        // Also encode multi-word phrases to capture cross-word merge tokens.
         foreach (var term in _domainTokens)
         {
             if (string.IsNullOrWhiteSpace(term)) continue;
             try
             {
+                // Bare form: captures tokens when word is at start of text
                 var tokenIds = tokenizer.Encode(term.AsSpan());
                 foreach (var id in tokenIds)
-                {
-                    if ((uint)id < (uint)vocabTable.Count)
-                        ids.Add(id);
-                }
+                    if ((uint)id < (uint)vocabTable.Count) ids.Add(id);
+
+                // Space-prefixed form: captures Ġ-prefixed BPE tokens (most common case)
+                var prefixed = " " + term;
+                tokenIds = tokenizer.Encode(prefixed.AsSpan());
+                foreach (var id in tokenIds)
+                    if ((uint)id < (uint)vocabTable.Count) ids.Add(id);
             }
             catch { /* Skip terms that fail to tokenize */ }
         }

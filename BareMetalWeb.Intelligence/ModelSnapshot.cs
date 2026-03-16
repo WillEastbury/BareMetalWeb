@@ -57,7 +57,8 @@ public static class ModelSnapshot
         float[][]? attnSubNorm = null,
         float[][]? postAttnNorm = null,
         float[][]? ffnSubNorm = null,
-        float[]? finalNorm = null)
+        float[]? finalNorm = null,
+        VocabularyPruner? pruner = null)
     {
         int layerCount = wq.Length;
         int ternaryCount = layerCount * 7;
@@ -244,6 +245,19 @@ public static class ModelSnapshot
         bw.Write("SEMD"u8);
         bw.Write(compressedEmbeddings.DequantScale);
         bw.Flush();
+
+        // ── Vocabulary remap appendix ────────────────────────────────
+        // Written after SEMD. Presence detected by "VRMP" marker.
+        // Stores the remap table so the pruner can be reconstructed on load.
+        if (pruner is not null)
+        {
+            bw.Write("VRMP"u8);
+            bw.Write(pruner.OriginalVocabSize);
+            bw.Write(pruner.PrunedVocabSize);
+            for (int i = 0; i < pruner.OriginalVocabSize; i++)
+                bw.Write(pruner.MapTokenId(i));
+            bw.Flush();
+        }
     }
 
     private static void WriteFloatArray(BinaryWriter bw, float[]? arr, int expectedLen)
@@ -421,6 +435,9 @@ public static class ModelSnapshot
         if (ohMatrix != embMatrix)
             ohMatrix.DequantScale = embDequant;
 
+        // ── Vocabulary remap appendix ────────────────────────────────
+        int[]? remapTable = TryReadVocabRemap(br);
+
         return new SnapshotData(
             Config: config,
             ActiveVocab: activeVocab,
@@ -435,7 +452,8 @@ public static class ModelSnapshot
             AttnSubNorm: normsData.AttnSubNorm,
             PostAttnNorm: normsData.PostAttnNorm,
             FfnSubNorm: normsData.FfnSubNorm,
-            FinalNorm: normsData.FinalNorm);
+            FinalNorm: normsData.FinalNorm,
+            VocabRemapTable: remapTable);
     }
 
     /// <summary>
@@ -636,11 +654,24 @@ public static class ModelSnapshot
             var config = new BitNetModelConfig(
                 hiddenDim, layerCount, numHeads, vocabSize, maxSeqLen, mappedFfnDim);
 
-            // Read norms appendix from mapped memory
-            var normsData = TryReadNormsAppendixMapped(basePtr, fileSize, descriptors, matrixCount, version);
+            // Read all appendices from a sequential reader starting after packed data
+            var lastDesc = descriptors[matrixCount - 1];
+            long appendixStart = lastDesc.Offset + lastDesc.Length;
+            NormsAppendix normsData = default;
+            float embDequant = 1f;
+            int[]? remapTable = null;
 
-            // Read embedding dequant scale from mapped memory
-            float embDequant = TryReadEmbeddingDequantScaleMapped(basePtr, fileSize, descriptors, matrixCount, version);
+            if (appendixStart < fileSize)
+            {
+                long remaining = fileSize - appendixStart;
+                using var appendixStream = new UnmanagedMemoryStream(basePtr + appendixStart, remaining);
+                using var abr = new BinaryReader(appendixStream, Encoding.UTF8);
+
+                normsData = TryReadNormsAppendix(abr, version);
+                embDequant = TryReadEmbeddingDequantScale(abr);
+                remapTable = TryReadVocabRemap(abr);
+            }
+
             embMatrix.DequantScale = embDequant;
             if (ohMatrix != embMatrix)
                 ohMatrix.DequantScale = embDequant;
@@ -649,7 +680,8 @@ public static class ModelSnapshot
                 ffnGateA, ffnUpA, ffnDownA,
                 embMatrix, ohMatrix, tokens, mappedMerges,
                 normsData.WeightScales, normsData.InputNorm, normsData.AttnSubNorm,
-                normsData.PostAttnNorm, normsData.FfnSubNorm, normsData.FinalNorm);
+                normsData.PostAttnNorm, normsData.FfnSubNorm, normsData.FinalNorm,
+                remapTable);
         }
         finally
         {
@@ -854,11 +886,24 @@ public static class ModelSnapshot
 
             var config = new BitNetModelConfig(hiddenDim, layerCount, numHeads, vocabSize, maxSeqLen, lazyFfnDim);
 
-            // Read norms appendix from mapped memory
-            var normsData = TryReadNormsAppendixMapped(basePtr, fs.Length, descriptors, matrixCount, version);
+            // Read all appendices sequentially from after packed data
+            var lastDesc = descriptors[matrixCount - 1];
+            long appendixStart = lastDesc.Offset + lastDesc.Length;
+            NormsAppendix normsData = default;
+            float lazyEmbDequant = 1f;
+            int[]? remapTable = null;
 
-            // Read embedding dequant scale from mapped memory
-            float lazyEmbDequant = TryReadEmbeddingDequantScaleMapped(basePtr, fs.Length, descriptors, matrixCount, version);
+            if (appendixStart < fs.Length)
+            {
+                long remaining = fs.Length - appendixStart;
+                using var appendixStream = new UnmanagedMemoryStream(basePtr + appendixStart, remaining);
+                using var abr = new BinaryReader(appendixStream, Encoding.UTF8);
+
+                normsData = TryReadNormsAppendix(abr, version);
+                lazyEmbDequant = TryReadEmbeddingDequantScale(abr);
+                remapTable = TryReadVocabRemap(abr);
+            }
+
             embeddings.DequantScale = lazyEmbDequant;
             if (outputHead != embeddings)
                 outputHead.DequantScale = lazyEmbDequant;
@@ -866,7 +911,8 @@ public static class ModelSnapshot
             var data = new SnapshotData(config, activeVocab, wqL, wkL, wvL, woL,
                 ffnGateL, ffnUpL, ffnDownL, embeddings, outputHead, tokens, lazyMerges,
                 normsData.WeightScales, normsData.InputNorm, normsData.AttnSubNorm,
-                normsData.PostAttnNorm, normsData.FfnSubNorm, normsData.FinalNorm);
+                normsData.PostAttnNorm, normsData.FfnSubNorm, normsData.FinalNorm,
+                remapTable);
 
             return new LazySnapshot(fs, mmf, accessor, basePtr, data);
         }
@@ -935,31 +981,6 @@ public static class ModelSnapshot
         catch (EndOfStreamException) { return default; }
     }
 
-    /// <summary>Read norms appendix from memory-mapped data.</summary>
-    private static unsafe NormsAppendix TryReadNormsAppendixMapped(
-        byte* basePtr, long fileSize,
-        (int Rows, int Cols, int Stride, long Offset, long Length)[] descriptors,
-        int matrixCount, int version)
-    {
-        if (version < 5 || matrixCount == 0) return default;
-
-        // Norms section starts after the last matrix's packed data
-        var lastDesc = descriptors[matrixCount - 1];
-        long normsStart = lastDesc.Offset + lastDesc.Length;
-        if (normsStart + 16 > fileSize) return default;
-
-        var markerSpan = new ReadOnlySpan<byte>(basePtr + normsStart, 4);
-        if (!markerSpan.SequenceEqual(NormsMagic.Span))
-            return default;
-
-        // Read via UnmanagedMemoryStream + BinaryReader for simplicity
-        long remaining = fileSize - normsStart;
-        using var stream = new UnmanagedMemoryStream(basePtr + normsStart, remaining);
-        using var br = new BinaryReader(stream, Encoding.UTF8);
-        br.ReadInt32(); // skip marker
-        return TryReadNormsFromReader(br);
-    }
-
     private static NormsAppendix TryReadNormsFromReader(BinaryReader br)
     {
         int numLayers = br.ReadInt32();
@@ -1016,19 +1037,27 @@ public static class ModelSnapshot
         catch (EndOfStreamException) { return 1f; }
     }
 
-    /// <summary>Read embedding dequant scale from memory-mapped data.</summary>
-    private static unsafe float TryReadEmbeddingDequantScaleMapped(
-        byte* basePtr, long fileSize,
-        (int Rows, int Cols, int Stride, long Offset, long Length)[] descriptors,
-        int matrixCount, int version)
+    // ── Vocabulary remap table (after SEMD block) ────────────────────────
+
+    private static readonly ReadOnlyMemory<byte> VocabRemapMagic = "VRMP"u8.ToArray();
+
+    /// <summary>Read vocab remap table from a BinaryReader (after SEMD block).</summary>
+    private static int[]? TryReadVocabRemap(BinaryReader br)
     {
-        // SEMD is the last 8 bytes of the file (4-byte marker + 4-byte float)
-        if (fileSize < 8) return 1f;
-        long semdStart = fileSize - 8;
-        var markerSpan = new ReadOnlySpan<byte>(basePtr + semdStart, 4);
-        if (!markerSpan.SequenceEqual(EmbDequantMagic.Span))
-            return 1f;
-        return MemoryMarshal.Read<float>(new ReadOnlySpan<byte>(basePtr + semdStart + 4, 4));
+        try
+        {
+            Span<byte> marker = stackalloc byte[4];
+            if (br.Read(marker) != 4 || !marker.SequenceEqual(VocabRemapMagic.Span))
+                return null;
+            int origSize = br.ReadInt32();
+            int prunedSize = br.ReadInt32();
+            if (origSize <= 0 || origSize > 1_000_000) return null;
+            var remap = new int[origSize];
+            for (int i = 0; i < origSize; i++)
+                remap[i] = br.ReadInt32();
+            return remap;
+        }
+        catch (EndOfStreamException) { return null; }
     }
 
     // ── Token table encoding ────────────────────────────────────────────
@@ -1121,7 +1150,8 @@ public sealed record SnapshotData(
     float[][]? AttnSubNorm = null,
     float[][]? PostAttnNorm = null,
     float[][]? FfnSubNorm = null,
-    float[]? FinalNorm = null) : IDisposable
+    float[]? FinalNorm = null,
+    int[]? VocabRemapTable = null) : IDisposable
 {
     public void Dispose()
     {

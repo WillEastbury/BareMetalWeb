@@ -126,6 +126,10 @@ while (true)
             RunPruneComparison(config);
             continue;
 
+        case "trim":
+            TrimAndSave(engine);
+            continue;
+
         default:
             if (input.StartsWith("import ", StringComparison.OrdinalIgnoreCase))
             {
@@ -561,4 +565,85 @@ static async Task<IntelligenceOrchestrator?> ImportHuggingFaceModel(
     }
     Console.WriteLine();
     return null;
+}
+
+static void TrimAndSave(BitNetEngine engine)
+{
+    if (!engine.IsLoaded)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("  ✗ No model loaded");
+        Console.ResetColor();
+        return;
+    }
+
+    if (engine.LoadedTokenizer is null || engine.TokenTable is null)
+    {
+        Console.ForegroundColor = ConsoleColor.Red;
+        Console.WriteLine("  ✗ Model has no tokenizer/token table");
+        Console.ResetColor();
+        return;
+    }
+
+    Console.ForegroundColor = ConsoleColor.DarkCyan;
+    Console.WriteLine("  ── Vocabulary Trim ───────────────────────────────────");
+    Console.ResetColor();
+
+    var sw = Stopwatch.StartNew();
+
+    // Build domain vocabulary from static lists (no DataScaffold in CLI)
+    var pruner = VocabularyPruner.FromDataScaffold();
+    var keepIds = pruner.CollectDomainTokenIds(engine.LoadedTokenizer, engine.TokenTable);
+    Console.WriteLine($"    Domain token IDs to keep : {keepIds.Count:N0}");
+
+    pruner.BuildRemapTableFromIds(engine.LoadedTokenizer.VocabSize, keepIds);
+    Console.WriteLine($"    Original vocab           : {pruner.OriginalVocabSize:N0}");
+    Console.WriteLine($"    Pruned vocab             : {pruner.PrunedVocabSize:N0}");
+    Console.WriteLine($"    Compression              : {pruner.CompressionRatio:P1}");
+
+    // Trim
+    engine.TrimVocabulary(pruner);
+    Console.WriteLine($"    Trim time                : {sw.ElapsedMilliseconds:N0} ms");
+
+    // Save
+    var trimmedPath = Path.Combine(Directory.GetCurrentDirectory(), "model-trimmed.bmwm");
+    engine.SaveSnapshot(trimmedPath);
+    var fi = new FileInfo(trimmedPath);
+    Console.WriteLine($"    Saved                    : {trimmedPath}");
+    Console.WriteLine($"    Size                     : {fi.Length / 1024 / 1024:N0} MB");
+
+    var stats = pruner.GetStats(2560);
+    Console.WriteLine($"    Embedding bytes saved    : {stats.BytesSaved / 1024 / 1024:N0} MB");
+    Console.ForegroundColor = ConsoleColor.Green;
+    Console.WriteLine($"    ✓ Done in {sw.ElapsedMilliseconds:N0} ms");
+    Console.ResetColor();
+    Console.WriteLine();
+
+    // Test: reload and generate
+    Console.Write("    Reloading trimmed model... ");
+    engine.LoadSnapshotLazy(trimmedPath);
+    Console.WriteLine($"OK ({engine.TokenTable?.Count:N0} tokens)");
+
+    // Diagnostic: check token encoding + remapping
+    if (engine.LoadedTokenizer is not null)
+    {
+        var testPrompt = "list entities";
+        var origIds = engine.LoadedTokenizer.Encode(testPrompt.AsSpan());
+        Console.Write($"    '{testPrompt}' token IDs: [");
+        Console.Write(string.Join(", ", origIds));
+        Console.WriteLine("]");
+    }
+
+    Console.Write("    Generating 'list entities' → ");
+    var result = engine.GenerateAsync("list entities".AsMemory()).GetAwaiter().GetResult();
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine(result);
+    Console.ResetColor();
+
+    Console.Write("    Generating 'show all users' → ");
+    var result2 = engine.GenerateAsync("show all users".AsMemory()).GetAwaiter().GetResult();
+    Console.ForegroundColor = ConsoleColor.Yellow;
+    Console.WriteLine(result2);
+    Console.ResetColor();
+    Console.WriteLine();
 }

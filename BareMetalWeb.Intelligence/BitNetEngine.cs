@@ -73,6 +73,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
     // Vocabulary strings for token decoding, set at load time.
     private string[]? _tokenTable;
+    // Full vocabulary, preserved after trimming for BPE encoding (null when untrimmed).
+    private string[]? _fullTokenTable;
     // BPE merge rules (from HuggingFace tokenizer.json), null for legacy models.
     private string[]? _merges;
     // Tokenizer wraps the token table with encode/decode logic.
@@ -352,6 +354,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// Save the current pruned + packed model state to a binary snapshot.
     /// The snapshot can be loaded later with <see cref="LoadSnapshot"/> to
     /// skip all pruning and compression steps.
+    /// When vocabulary is trimmed, saves the full token table + remap appendix
+    /// so the BPE tokenizer can be reconstructed on reload.
     /// </summary>
     public void SaveSnapshot(string path, IReadOnlyList<string>? tokenTable = null)
     {
@@ -363,18 +367,24 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         // Detect tied embeddings: same matrix instance for embed and output head
         bool tied = ReferenceEquals(_compressedEmbeddings, _compressedOutputHead);
 
+        // When trimmed, save the FULL token table (BPE needs all vocab + merges)
+        var tokensToSave = tokenTable ?? _fullTokenTable ?? _tokenTable;
+
         ModelSnapshot.Save(path, _config, activeVocab,
             _compressedWq, _compressedWk!, _compressedWv!, _compressedWo!,
             _compressedFfnGate!, _compressedFfnUp!, _compressedFfnDown!,
             _compressedEmbeddings, tied ? null : _compressedOutputHead,
-            tokenTable ?? _tokenTable);
+            tokensToSave, _merges,
+            _weightScales, _inputNorm, _attnSubNorm, _postAttnNorm, _ffnSubNorm, _finalNorm,
+            _pruner);
     }
 
     /// <summary>
     /// Trim the vocabulary to only domain-relevant tokens using the provided pruner.
-    /// Prunes embedding and output head matrices, updates the token table,
-    /// and reallocates inference buffers for the smaller vocab. After trimming,
-    /// call <see cref="SaveSnapshot"/> to persist the trimmed model.
+    /// Prunes embedding and output head matrices and reallocates inference buffers.
+    /// The full tokenizer is preserved (BPE needs all merges to encode correctly) —
+    /// token ID remapping happens at inference time via the pruner.
+    /// After trimming, call <see cref="SaveSnapshot"/> to persist the trimmed model.
     /// </summary>
     public void TrimVocabulary(VocabularyPruner pruner)
     {
@@ -389,17 +399,19 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         // Prune output head (reuse pruned embed if tied)
         var prunedOutputHead = tied ? prunedEmbed : pruner.PruneInt8Matrix(_compressedOutputHead);
 
-        // Prune token table
-        var prunedTokenTable = pruner.PruneTokenTable(_tokenTable);
+        // Preserve full token table for BPE encoding and snapshot persistence
+        _fullTokenTable = _tokenTable;
+
+        // Pruned token table for snapshot (used on reload)
+        _tokenTable = pruner.PruneTokenTable(_fullTokenTable);
 
         // Replace matrices — old ones may be mmap'd (no-op dispose) or owned
         _compressedEmbeddings = prunedEmbed;
         _compressedOutputHead = prunedOutputHead;
-        _tokenTable = prunedTokenTable;
         _pruner = pruner;
 
-        // Rebuild tokenizer with pruned vocab
-        _tokenizer = new Tokenizer(_tokenTable, _merges);
+        // Keep the full tokenizer — BPE encoding needs all merges + full vocab.
+        // RunInference remaps IDs through _pruner at encode/decode time.
 
         // Reallocate inference buffers for new vocab size
         AllocateInferenceBuffers(_config.HiddenDim, pruner.PrunedVocabSize);
@@ -457,6 +469,15 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         }
         _merges = snapshot.Merges is { Length: > 0 } ? snapshot.Merges : null;
         _tokenizer = new Tokenizer(_tokenTable, _merges);
+
+        // Reconstruct vocabulary pruner if remap table is present (trimmed model)
+        _pruner = null;
+        _fullTokenTable = null;
+        if (snapshot.VocabRemapTable is { Length: > 0 } remap)
+        {
+            _pruner = VocabularyPruner.FromRemapTable(remap);
+            _fullTokenTable = _tokenTable; // full vocab was saved
+        }
 
         // Load learned norms and weight scales (v5+)
         LoadNormsAndScales(snapshot);
@@ -549,6 +570,15 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         }
         _merges = snap.Merges is { Length: > 0 } ? snap.Merges : null;
         _tokenizer = new Tokenizer(_tokenTable, _merges);
+
+        // Reconstruct vocabulary pruner if remap table is present (trimmed model)
+        _pruner = null;
+        _fullTokenTable = null;
+        if (snap.VocabRemapTable is { Length: > 0 } remap)
+        {
+            _pruner = VocabularyPruner.FromRemapTable(remap);
+            _fullTokenTable = _tokenTable;
+        }
 
         LoadNormsAndScales(snap);
 
@@ -727,6 +757,15 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         if (_tokenizer is not null)
         {
             promptTokens = _tokenizer.Encode(prompt);
+            // Remap original token IDs → pruned IDs when vocabulary is trimmed
+            if (_pruner is not null)
+            {
+                for (int i = 0; i < promptTokens.Length; i++)
+                {
+                    int mapped = _pruner.MapTokenId(promptTokens[i]);
+                    promptTokens[i] = mapped >= 0 ? mapped : 3; // UNK for pruned tokens
+                }
+            }
         }
         else
         {
@@ -1085,11 +1124,16 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// <summary>
     /// Maps a token ID to its display string using the loaded token table.
     /// For BPE tokenizers, converts byte-level Unicode chars to UTF-8 text.
+    /// When vocabulary is pruned, unmaps pruned ID → original ID first.
     /// </summary>
     private string DecodeToken(int tokenId)
     {
+        // Unmap pruned ID → original ID for the full tokenizer
+        int displayId = (_pruner is not null) ? _pruner.UnmapTokenId(tokenId) : tokenId;
+        if (displayId < 0) return "?";
+
         if (_tokenizer is not null)
-            return _tokenizer.DecodeToText(tokenId);
+            return _tokenizer.DecodeToText(displayId);
 
         if (_tokenTable is not null && (uint)tokenId < (uint)_tokenTable.Length)
         {
@@ -1217,8 +1261,10 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         _weightScales = _inputNorm = _attnSubNorm = _postAttnNorm = _ffnSubNorm = null;
         _finalNorm = null;
         _tokenTable = null;
+        _fullTokenTable = null;
         _merges = null;
         _tokenizer  = null;
+        _pruner = null;
         NativeBytesAllocated = 0;
         LayerStats = null;
     }
