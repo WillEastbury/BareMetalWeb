@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -69,7 +68,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
     {
         if (level < MinimumLevel) return;
 
-        var entry = FormatJsonEntry(level, message, correlationId, fields: null, ex: null);
+        var entry = FormatEntry(level, message, correlationId, fields: null, ex: null);
 
         if (level >= BmwLogLevel.Error)
         {
@@ -89,7 +88,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
     public void LogError(string message, Exception ex, string? correlationId)
     {
         if (BmwLogLevel.Error < MinimumLevel) return;
-        var entry = FormatJsonEntry(BmwLogLevel.Error, message, correlationId, fields: null, ex);
+        var entry = FormatEntry(BmwLogLevel.Error, message, correlationId, fields: null, ex);
         _ = LogErrorRawAsync(entry, BmwLogLevel.Error);
         ErrorHook?.Invoke("ERROR", message, ex.GetType().Name, ex.ToString(), null, null, 0, correlationId);
     }
@@ -98,7 +97,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
     {
         if (level < MinimumLevel) return;
 
-        var entry = FormatJsonEntry(level, message, correlationId, fields, ex: null);
+        var entry = FormatEntry(level, message, correlationId, fields, ex: null);
 
         if (level >= BmwLogLevel.Error)
         {
@@ -116,47 +115,52 @@ public sealed class DiskBufferedLogger : IBufferedLogger
         }
     }
 
-    // ── JSON formatting ────────────────────────────────────────────────────
+    // ── Pipe-delimited formatting (zero JSON dependency, AOT/trim safe) ───
 
-    private string FormatJsonEntry(BmwLogLevel level, string message, string? correlationId, LogFields? fields, Exception? ex)
+    private string FormatEntry(BmwLogLevel level, string message, string? correlationId, LogFields? fields, Exception? ex)
     {
         bool redact = RedactPII;
+        var msg = redact ? LogRedactor.RedactFreeText(message) : message;
 
-        using var ms = new MemoryStream(256);
-        using (var w = new Utf8JsonWriter(ms, new JsonWriterOptions { SkipValidation = true }))
+        // Base format: LEVEL | ISO-8601 | message
+        var sb = new StringBuilder(256);
+        sb.Append(s_levelLabels[(int)level]);
+        sb.Append(" | ");
+        sb.Append(DateTime.UtcNow.ToString("O"));
+        sb.Append(" | ");
+        sb.Append(msg);
+
+        if (correlationId != null)
         {
-            w.WriteStartObject();
-            w.WriteString("ts", DateTime.UtcNow.ToString("O"));
-            w.WriteString("level", s_levelLabels[(int)level]);
-            if (correlationId != null)
-                w.WriteString("rid", correlationId);
-            w.WriteString("msg", redact ? LogRedactor.RedactFreeText(message) : message);
-
-            if (fields != null)
-            {
-                if (fields.Method != null) w.WriteString("method", fields.Method);
-                if (fields.Path != null) w.WriteString("path", fields.Path);
-                if (fields.StatusCode.HasValue) w.WriteNumber("status", fields.StatusCode.Value);
-                if (fields.DurationMs.HasValue) w.WriteNumber("ms", Math.Round(fields.DurationMs.Value, 2));
-                if (fields.UserId != null) w.WriteString("uid", fields.UserId);
-                if (fields.SourceIp != null) w.WriteString("ip", redact ? LogRedactor.RedactIp(fields.SourceIp) : fields.SourceIp);
-                if (fields.Detail != null) w.WriteString("detail", redact ? LogRedactor.RedactFreeText(fields.Detail) : fields.Detail);
-            }
-
-            if (ex != null)
-            {
-                w.WriteString("error", ex.GetType().Name);
-                w.WriteString("stack", LogRedactor.RedactStackTrace(ex.ToString()));
-            }
-
-            w.WriteEndObject();
+            sb.Append(" | rid=");
+            sb.Append(correlationId);
         }
-        return Encoding.UTF8.GetString(ms.ToArray());
+
+        if (fields != null)
+        {
+            if (fields.Method != null) { sb.Append(" | method="); sb.Append(fields.Method); }
+            if (fields.Path != null) { sb.Append(" | path="); sb.Append(fields.Path); }
+            if (fields.StatusCode.HasValue) { sb.Append(" | status="); sb.Append(fields.StatusCode.Value); }
+            if (fields.DurationMs.HasValue) { sb.Append(" | ms="); sb.Append(Math.Round(fields.DurationMs.Value, 2)); }
+            if (fields.UserId != null) { sb.Append(" | uid="); sb.Append(fields.UserId); }
+            if (fields.SourceIp != null) { sb.Append(" | ip="); sb.Append(redact ? LogRedactor.RedactIp(fields.SourceIp) : fields.SourceIp); }
+            if (fields.Detail != null) { sb.Append(" | detail="); sb.Append(redact ? LogRedactor.RedactFreeText(fields.Detail) : fields.Detail); }
+        }
+
+        if (ex != null)
+        {
+            sb.Append(" | error=");
+            sb.Append(ex.GetType().Name);
+            sb.Append(" | stack=");
+            sb.Append(LogRedactor.RedactStackTrace(ex.ToString()));
+        }
+
+        return sb.ToString();
     }
 
     // ── Error logging (async, non-blocking) ────────────────────────────────
 
-    private async Task LogErrorRawAsync(string jsonEntry, BmwLogLevel level)
+    private async Task LogErrorRawAsync(string entry, BmwLogLevel level)
     {
         try
         {
@@ -164,7 +168,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
             var category = level >= BmwLogLevel.Fatal ? "fatal" : "error";
             await AppendTextSharedAsync(
                 GetLogFilePath(nowUtc, category),
-                jsonEntry + Environment.NewLine).ConfigureAwait(false);
+                entry + Environment.NewLine).ConfigureAwait(false);
         }
         catch (Exception secondEx)
         {
@@ -265,7 +269,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
 
         if (!isShutdown && previousMinuteUtc.HasValue && previousMinuteUtc.Value != currentMinuteUtc)
         {
-            var segmentLine = FormatJsonEntry(BmwLogLevel.Info, "Log segment complete; cycling to next segment.", null, null, null);
+            var segmentLine = FormatEntry(BmwLogLevel.Info, "Log segment complete; cycling to next segment.", null, null, null);
             await AppendLinesSharedAsync(
                 GetLogFilePath(previousMinuteUtc.Value, "info"),
                 new[] { segmentLine },
@@ -278,7 +282,7 @@ public sealed class DiskBufferedLogger : IBufferedLogger
 
         if (isShutdown)
         {
-            lines.Add(FormatJsonEntry(BmwLogLevel.Info, "Clean shutdown completed.", null, null, null));
+            lines.Add(FormatEntry(BmwLogLevel.Info, "Clean shutdown completed.", null, null, null));
         }
 
         await AppendLinesSharedAsync(GetLogFilePath(nowUtc, "info"), lines, token).ConfigureAwait(false);
