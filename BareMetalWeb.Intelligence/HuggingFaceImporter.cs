@@ -297,7 +297,9 @@ public static class HuggingFaceImporter
     /// <summary>
     /// Stream a U8-packed ternary tensor. Each byte stores 4 ternary values (2 bits each)
     /// packed along the row dimension: packed_shape[0] = logical_rows/4, packed_shape[1] = logical_cols.
-    /// Encoding per byte (little-endian bit pairs): 0→0, 1→+1, 2→-1.
+    /// HuggingFace encoding: original {-1,0,+1} shifted to {0,1,2} before packing.
+    /// Unpacking: val = ((byte >> (slot*2)) &amp; 3) - 1.
+    /// Row layout: packed row pr produces unpacked rows [pr, pr+packedRows, pr+2*packedRows, pr+3*packedRows].
     /// </summary>
     private static NativeTernaryMatrix StreamPackedTernaryTensor(
         SafeTensorsReader.TensorInfo info, string filePath,
@@ -325,27 +327,23 @@ public static class HuggingFaceImporter
         {
             ReadExact(fs, packedRow);
 
-            int baseRow = pr * 4;
-            if (baseRow >= rows) continue;
-
             // Unpack: each byte → 4 ternary values
+            // HF packing: {-1,0,+1} → +1 → {0,1,2}, so decode: val - 1
             for (int c = 0; c < cols; c++)
             {
                 byte packed = packedRow[c];
-                // 2-bit slots: bits [1:0], [3:2], [5:4], [7:6]
-                // Encoding: 0→0, 1→+1, 2→-1
                 for (int s = 0; s < 4; s++)
                 {
-                    int val = (packed >> (s * 2)) & 0x03;
-                    ternRows[s][c] = val switch { 1 => 1, 2 => -1, _ => 0 };
+                    int raw = (packed >> (s * 2)) & 0x03;
+                    ternRows[s][c] = (sbyte)(raw - 1);
                 }
             }
 
-            // Pack each unpacked row into the native matrix
+            // HF row layout: slot s → unpacked row (s * packedRows + pr)
             for (int s = 0; s < 4; s++)
             {
-                int logRow = baseRow + s;
-                if (logRow >= rows) break;
+                int logRow = s * packedRows + pr;
+                if (logRow >= rows) continue;
                 matrix.PackRowInPlace(logRow, ternRows[s].AsSpan(0, outCols));
             }
         }
@@ -436,6 +434,8 @@ public static class HuggingFaceImporter
         }
 
         float scale = globalMaxAbs > 0f ? 127f / globalMaxAbs : 1f;
+        float dequantScale = globalMaxAbs > 0f ? globalMaxAbs / 127f : 1f;
+        matrix.DequantScale = dequantScale;
 
         // Second pass: quantize all rows
         using var fs2 = new FileStream(filePath, FileMode.Open, FileAccess.Read,

@@ -33,6 +33,12 @@ public sealed unsafe class NativeInt8Matrix : IDisposable
     private MatrixStats _stats;
     private int _disposedFlag;
 
+    /// <summary>
+    /// Dequantisation scale: original_float = int8_value * DequantScale.
+    /// Set during import (= globalMaxAbs / 127). Default 1.0 for legacy snapshots.
+    /// </summary>
+    public float DequantScale { get; set; } = 1f;
+
     public int Rows => _rows;
     public int Cols => _cols;
     public int RowStrideBytes => _rowStrideBytes;

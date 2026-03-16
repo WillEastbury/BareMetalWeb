@@ -952,6 +952,8 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
     /// <summary>
     /// Run ternary matmul on quantized int input, then dequantize output to float.
+    /// Reference formula (HF AutoBitLinear offline): output = float_matmul * weight_scale
+    /// Since float_matmul ≈ int_result * absmax / 127:
     /// float_output[i] = int_output[i] * weight_scale * absmax / 127
     /// </summary>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1015,11 +1017,11 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
         int rows = _compressedEmbeddings!.Rows;
         int id = tokenId < 0 ? 0 : tokenId >= rows ? tokenId % rows : tokenId;
         int cols = _compressedEmbeddings.Cols;
-        // DecodeRow writes int8 values → convert to float
         var iTemp = _iQuantized!;
         _compressedEmbeddings.DecodeRow(id, iTemp.AsSpan(0, cols));
+        float dequant = _compressedEmbeddings.DequantScale;
         for (int i = 0; i < cols; i++)
-            fHidden[i] = iTemp[i];
+            fHidden[i] = iTemp[i] * dequant;
     }
 
     /// <summary>Greedy argmax over integer logits — no allocations.</summary>

@@ -238,6 +238,12 @@ public static class ModelSnapshot
 
             bw.Flush();
         }
+
+        // ── Embedding dequant scale appendix ─────────────────────────
+        // Written after SNRM block. Presence detected by "SEMD" marker.
+        bw.Write("SEMD"u8);
+        bw.Write(compressedEmbeddings.DequantScale);
+        bw.Flush();
     }
 
     private static void WriteFloatArray(BinaryWriter bw, float[]? arr, int expectedLen)
@@ -408,6 +414,12 @@ public static class ModelSnapshot
 
         // ── v5 Norms/Scales appendix ────────────────────────────────
         var normsData = TryReadNormsAppendix(br, version);
+
+        // ── Embedding dequant scale appendix ─────────────────────────
+        float embDequant = TryReadEmbeddingDequantScale(br);
+        embMatrix.DequantScale = embDequant;
+        if (ohMatrix != embMatrix)
+            ohMatrix.DequantScale = embDequant;
 
         return new SnapshotData(
             Config: config,
@@ -627,6 +639,12 @@ public static class ModelSnapshot
             // Read norms appendix from mapped memory
             var normsData = TryReadNormsAppendixMapped(basePtr, fileSize, descriptors, matrixCount, version);
 
+            // Read embedding dequant scale from mapped memory
+            float embDequant = TryReadEmbeddingDequantScaleMapped(basePtr, fileSize, descriptors, matrixCount, version);
+            embMatrix.DequantScale = embDequant;
+            if (ohMatrix != embMatrix)
+                ohMatrix.DequantScale = embDequant;
+
             return new SnapshotData(config, activeVocab, wqA, wkA, wvA, woA,
                 ffnGateA, ffnUpA, ffnDownA,
                 embMatrix, ohMatrix, tokens, mappedMerges,
@@ -839,6 +857,12 @@ public static class ModelSnapshot
             // Read norms appendix from mapped memory
             var normsData = TryReadNormsAppendixMapped(basePtr, fs.Length, descriptors, matrixCount, version);
 
+            // Read embedding dequant scale from mapped memory
+            float lazyEmbDequant = TryReadEmbeddingDequantScaleMapped(basePtr, fs.Length, descriptors, matrixCount, version);
+            embeddings.DequantScale = lazyEmbDequant;
+            if (outputHead != embeddings)
+                outputHead.DequantScale = lazyEmbDequant;
+
             var data = new SnapshotData(config, activeVocab, wqL, wkL, wvL, woL,
                 ffnGateL, ffnUpL, ffnDownL, embeddings, outputHead, tokens, lazyMerges,
                 normsData.WeightScales, normsData.InputNorm, normsData.AttnSubNorm,
@@ -973,6 +997,38 @@ public static class ModelSnapshot
         for (int i = 0; i < count; i++)
             arr[i] = br.ReadSingle();
         return arr;
+    }
+
+    // ── Embedding dequant scale (after SNRM block) ──────────────────────
+
+    private static readonly ReadOnlyMemory<byte> EmbDequantMagic = "SEMD"u8.ToArray();
+
+    /// <summary>Read embedding dequant scale from a BinaryReader (after SNRM block).</summary>
+    private static float TryReadEmbeddingDequantScale(BinaryReader br)
+    {
+        try
+        {
+            Span<byte> marker = stackalloc byte[4];
+            if (br.Read(marker) != 4 || !marker.SequenceEqual(EmbDequantMagic.Span))
+                return 1f;
+            return br.ReadSingle();
+        }
+        catch (EndOfStreamException) { return 1f; }
+    }
+
+    /// <summary>Read embedding dequant scale from memory-mapped data.</summary>
+    private static unsafe float TryReadEmbeddingDequantScaleMapped(
+        byte* basePtr, long fileSize,
+        (int Rows, int Cols, int Stride, long Offset, long Length)[] descriptors,
+        int matrixCount, int version)
+    {
+        // SEMD is the last 8 bytes of the file (4-byte marker + 4-byte float)
+        if (fileSize < 8) return 1f;
+        long semdStart = fileSize - 8;
+        var markerSpan = new ReadOnlySpan<byte>(basePtr + semdStart, 4);
+        if (!markerSpan.SequenceEqual(EmbDequantMagic.Span))
+            return 1f;
+        return MemoryMarshal.Read<float>(new ReadOnlySpan<byte>(basePtr + semdStart + 4, 4));
     }
 
     // ── Token table encoding ────────────────────────────────────────────
