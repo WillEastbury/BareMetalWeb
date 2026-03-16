@@ -1178,9 +1178,9 @@ public class BareMetalWebServer : IBareWebHost
         context.ResponseHeaders["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
         if (isHttps)
             context.ResponseHeaders["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains; preload";
-        // HTTP/1.x keep-alive hint — check protocol from request feature
-        var protocol = context.RequestHeaders[":protocol"];
-        if (protocol.Count == 0)
+        // HTTP/1.x keep-alive hint — skip for HTTP/2+ (connection multiplexing makes it unnecessary)
+        if (!context.RequestProtocol.StartsWith("HTTP/2", StringComparison.OrdinalIgnoreCase)
+            && !context.RequestProtocol.StartsWith("HTTP/3", StringComparison.OrdinalIgnoreCase))
             context.ResponseHeaders["Keep-Alive"] = "timeout=60, max=1000";
     }
 

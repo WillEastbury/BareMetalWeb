@@ -66,6 +66,9 @@ public sealed class BmwContext
     /// <summary>Request scheme (http or https).</summary>
     public string RequestScheme => _requestFeature.Scheme;
 
+    /// <summary>HTTP protocol version string (e.g. "HTTP/1.1", "HTTP/2").</summary>
+    public string RequestProtocol => _requestFeature.Protocol;
+
     /// <summary>True when the request arrived over HTTPS (or was forwarded as such).</summary>
     public bool IsHttps => string.Equals(RequestScheme, "https", StringComparison.OrdinalIgnoreCase);
 
