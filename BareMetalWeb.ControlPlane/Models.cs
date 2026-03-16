@@ -82,6 +82,42 @@ public sealed class NodeIdentity
     public DeploymentRing Ring    { get; set; } = DeploymentRing.Main;
 }
 
+// ── Runtime capsule models ──────────────────────────────────────────────────
+
+/// <summary>
+/// Capsule request sent by the bootstrap agent to <c>GET /api/runtime/capsule/{nodeId}</c>.
+/// Headers carry the device fingerprint for identity verification.
+/// </summary>
+public sealed class CapsuleRequest
+{
+    public string NodeId       { get; set; } = "";
+    public string Secret       { get; set; } = "";
+    public string Fingerprint  { get; set; } = "";
+    public string RequestIp    { get; set; } = "";
+    public string RequestAsn   { get; set; } = "";
+    public string RequestRegion { get; set; } = "";
+}
+
+/// <summary>Denial reason codes returned by the capsule policy engine.</summary>
+public enum CapsuleDenialReason
+{
+    None,
+    NodeNotFound,
+    NodeRevoked,
+    FingerprintMismatch,
+    NetworkPolicyViolation,
+    NodeDisabled,
+    AuthenticationFailed,
+}
+
+/// <summary>Result of capsule policy evaluation.</summary>
+public sealed class CapsulePolicyResult
+{
+    public bool Allowed { get; set; }
+    public CapsuleDenialReason Reason { get; set; }
+    public int RiskScore { get; set; }
+}
+
 // ── Agent polling models ─────────────────────────────────────────────────────
 
 /// <summary>
