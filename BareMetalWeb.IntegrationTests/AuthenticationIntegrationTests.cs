@@ -1,3 +1,9 @@
+// TODO: Rebuild integration test stack — these tests need to be rewritten
+//       to use an in-process test host rather than hitting a deployed instance.
+//       See GitHub issue #1500.
+
+#if false // Commented out pending integration test rebuild
+
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.RegularExpressions;
@@ -278,3 +284,5 @@ public class AuthenticationIntegrationTests : IDisposable
         Assert.NotEqual(HttpStatusCode.ServiceUnavailable, response.StatusCode);
     }
 }
+
+#endif
