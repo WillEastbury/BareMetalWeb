@@ -357,7 +357,7 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// When vocabulary is trimmed, saves the full token table + remap appendix
     /// so the BPE tokenizer can be reconstructed on reload.
     /// </summary>
-    public void SaveSnapshot(string path, IReadOnlyList<string>? tokenTable = null)
+    public void SaveSnapshot(string path, IReadOnlyList<string>? tokenTable = null, bool compress = false)
     {
         if (!_isLoaded || _compressedWq is null || _compressedFfnDown is null
             || _compressedEmbeddings is null || _compressedOutputHead is null)
@@ -377,6 +377,9 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             tokensToSave, _merges,
             _weightScales, _inputNorm, _attnSubNorm, _postAttnNorm, _ffnSubNorm, _finalNorm,
             _pruner);
+
+        if (compress)
+            ModelSnapshot.Compress(path);
     }
 
     /// <summary>

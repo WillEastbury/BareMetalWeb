@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.IO.MemoryMappedFiles;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -260,6 +261,61 @@ public static class ModelSnapshot
         }
     }
 
+    // ── Brotli compression ──────────────────────────────────────────────
+
+    private static ReadOnlySpan<byte> CompressedMagic => "BMWC"u8;
+
+    /// <summary>
+    /// Compress a snapshot file in-place with Brotli (quality 0 = fastest).
+    /// Replaces the file with a "BMWC" + Brotli-compressed stream.
+    /// </summary>
+    public static void Compress(string path)
+    {
+        var tmpPath = path + ".tmp";
+        using (var input = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.None, 65536, FileOptions.SequentialScan))
+        using (var output = new FileStream(tmpPath, FileMode.Create, FileAccess.Write,
+            FileShare.None, 65536, FileOptions.SequentialScan))
+        {
+            output.Write(CompressedMagic);
+            using var brotli = new BrotliStream(output, CompressionLevel.Fastest, leaveOpen: true);
+            input.CopyTo(brotli, 65536);
+        }
+        File.Delete(path);
+        File.Move(tmpPath, path);
+    }
+
+    /// <summary>
+    /// Check if a file starts with the BMWC compressed magic.
+    /// </summary>
+    public static bool IsCompressed(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.Read, 4, FileOptions.SequentialScan);
+        Span<byte> magic = stackalloc byte[4];
+        return fs.Read(magic) == 4 && magic.SequenceEqual(CompressedMagic);
+    }
+
+    /// <summary>
+    /// Decompress a BMWC file to a temporary file for mmap loading.
+    /// Returns the temp file path (caller must delete when done).
+    /// </summary>
+    private static string DecompressToTempFile(string path)
+    {
+        var tmpPath = Path.Combine(Path.GetTempPath(), $"bmwm-{Guid.NewGuid():N}.tmp");
+        using (var input = new FileStream(path, FileMode.Open, FileAccess.Read,
+            FileShare.Read, 65536, FileOptions.SequentialScan))
+        {
+            // Skip BMWC magic
+            input.Seek(4, SeekOrigin.Begin);
+            using var brotli = new BrotliStream(input, CompressionMode.Decompress, leaveOpen: true);
+            using var output = new FileStream(tmpPath, FileMode.Create, FileAccess.Write,
+                FileShare.None, 65536, FileOptions.SequentialScan);
+            brotli.CopyTo(output, 65536);
+        }
+        return tmpPath;
+    }
+
     private static void WriteFloatArray(BinaryWriter bw, float[]? arr, int expectedLen)
     {
         for (int i = 0; i < expectedLen; i++)
@@ -269,8 +325,31 @@ public static class ModelSnapshot
     /// <summary>
     /// Load a binary snapshot from disk. Reconstructs NativeTernaryMatrix
     /// instances directly from packed data — no intermediate tensors needed.
+    /// Handles Brotli-compressed (BMWC) files transparently.
     /// </summary>
     public static SnapshotData Load(string path)
+    {
+        // Decompress if needed
+        string actualPath = path;
+        bool isTempFile = false;
+        if (IsCompressed(path))
+        {
+            actualPath = DecompressToTempFile(path);
+            isTempFile = true;
+        }
+
+        try
+        {
+            return LoadUncompressed(actualPath);
+        }
+        finally
+        {
+            if (isTempFile)
+                try { File.Delete(actualPath); } catch { }
+        }
+    }
+
+    private static SnapshotData LoadUncompressed(string path)
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
             FileShare.Read, 65536, FileOptions.SequentialScan);
@@ -460,8 +539,31 @@ public static class ModelSnapshot
     /// Load a snapshot using memory-mapped I/O. Matrix data is mapped
     /// directly from disk — avoids copying large packed arrays into
     /// managed memory. Best for large models on systems with limited RAM.
+    /// Handles Brotli-compressed (BMWC) files transparently.
     /// </summary>
     public static unsafe SnapshotData LoadMapped(string path)
+    {
+        // Decompress if needed
+        string actualPath = path;
+        bool isTempFile = false;
+        if (IsCompressed(path))
+        {
+            actualPath = DecompressToTempFile(path);
+            isTempFile = true;
+        }
+
+        try
+        {
+            return LoadMappedUncompressed(actualPath);
+        }
+        finally
+        {
+            if (isTempFile)
+                try { File.Delete(actualPath); } catch { }
+        }
+    }
+
+    private static unsafe SnapshotData LoadMappedUncompressed(string path)
     {
         using var fs = new FileStream(path, FileMode.Open, FileAccess.Read,
             FileShare.Read);
@@ -696,9 +798,24 @@ public static class ModelSnapshot
     /// consume physical memory.
     /// Returns a <see cref="LazySnapshot"/> that owns the mmap lifetime.
     /// </summary>
+    /// <summary>
+    /// Load a snapshot using lazy memory-mapped I/O. Matrices point directly
+    /// at mapped pages — the LazySnapshot must be kept alive while in use.
+    /// Handles Brotli-compressed (BMWC) files transparently by decompressing
+    /// to a temp file (deleted on Dispose).
+    /// </summary>
     public static unsafe LazySnapshot LoadLazy(string path)
     {
-        var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        // Decompress if needed — LazySnapshot will own the temp file
+        string actualPath = path;
+        string? tempPath = null;
+        if (IsCompressed(path))
+        {
+            tempPath = DecompressToTempFile(path);
+            actualPath = tempPath;
+        }
+
+        var fs = new FileStream(actualPath, FileMode.Open, FileAccess.Read, FileShare.Read);
         MemoryMappedFile? mmf = null;
         MemoryMappedViewAccessor? accessor = null;
         byte* basePtr = null;
@@ -914,7 +1031,7 @@ public static class ModelSnapshot
                 normsData.PostAttnNorm, normsData.FfnSubNorm, normsData.FinalNorm,
                 remapTable);
 
-            return new LazySnapshot(fs, mmf, accessor, basePtr, data);
+            return new LazySnapshot(fs, mmf, accessor, basePtr, data, tempPath);
         }
         catch
         {
@@ -924,6 +1041,8 @@ public static class ModelSnapshot
             accessor?.Dispose();
             mmf?.Dispose();
             fs.Dispose();
+            if (tempPath != null)
+                try { File.Delete(tempPath); } catch { }
             throw;
         }
     }
@@ -1177,6 +1296,7 @@ public sealed unsafe class LazySnapshot : IDisposable
     private readonly FileStream _fs;
     private readonly MemoryMappedFile _mmf;
     private readonly MemoryMappedViewAccessor _accessor;
+    private readonly string? _tempFilePath;
     private byte* _basePtr;
     private int _disposedFlag;
 
@@ -1188,12 +1308,14 @@ public sealed unsafe class LazySnapshot : IDisposable
         MemoryMappedFile mmf,
         MemoryMappedViewAccessor accessor,
         byte* basePtr,
-        SnapshotData data)
+        SnapshotData data,
+        string? tempFilePath = null)
     {
         _fs = fs;
         _mmf = mmf;
         _accessor = accessor;
         _basePtr = basePtr;
+        _tempFilePath = tempFilePath;
         Data = data;
     }
 
@@ -1214,5 +1336,9 @@ public sealed unsafe class LazySnapshot : IDisposable
         _accessor.Dispose();
         _mmf.Dispose();
         _fs.Dispose();
+
+        // Clean up decompressed temp file
+        if (_tempFilePath != null)
+            try { File.Delete(_tempFilePath); } catch { }
     }
 }

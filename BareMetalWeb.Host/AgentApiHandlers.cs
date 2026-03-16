@@ -164,9 +164,9 @@ public static class AgentApiHandlers
                 var keepIds = pruner.CollectDomainTokenIds(tempEngine.LoadedTokenizer, tempEngine.TokenTable);
                 pruner.BuildRemapTableFromIds(tempEngine.LoadedTokenizer.VocabSize, keepIds);
 
-                // Trim and save
+                // Trim and save with Brotli compression
                 tempEngine.TrimVocabulary(pruner);
-                tempEngine.SaveSnapshot(trimmedPath);
+                tempEngine.SaveSnapshot(trimmedPath, compress: true);
 
                 var stats = pruner.GetStats(2560);
                 _logger?.LogInfo(

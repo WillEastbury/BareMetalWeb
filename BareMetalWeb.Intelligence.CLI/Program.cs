@@ -605,12 +605,12 @@ static void TrimAndSave(BitNetEngine engine)
     engine.TrimVocabulary(pruner);
     Console.WriteLine($"    Trim time                : {sw.ElapsedMilliseconds:N0} ms");
 
-    // Save
+    // Save with Brotli compression
     var trimmedPath = Path.Combine(Directory.GetCurrentDirectory(), "model-trimmed.bmwm");
-    engine.SaveSnapshot(trimmedPath);
+    engine.SaveSnapshot(trimmedPath, compress: true);
     var fi = new FileInfo(trimmedPath);
     Console.WriteLine($"    Saved                    : {trimmedPath}");
-    Console.WriteLine($"    Size                     : {fi.Length / 1024 / 1024:N0} MB");
+    Console.WriteLine($"    Size (compressed)        : {fi.Length / 1024 / 1024:N0} MB");
 
     var stats = pruner.GetStats(2560);
     Console.WriteLine($"    Embedding bytes saved    : {stats.BytesSaved / 1024 / 1024:N0} MB");
