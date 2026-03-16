@@ -96,6 +96,20 @@ public sealed class IntelligenceOrchestrator
                     sb.Append(" with ");
                     foreach (var kv in fields) sb.Append($"{kv.Key}={kv.Value} ");
                 }
+                if (intent.SearchTerms is { Count: > 0 } createSearchTerms)
+                {
+                    sb.Append(" [");
+                    bool first = true;
+                    foreach (var kv in createSearchTerms)
+                    {
+                        if (!first) sb.Append(", ");
+                        sb.Append(kv.Key.StartsWith('_') ? kv.Key[1..] : kv.Key);
+                        sb.Append('=');
+                        sb.Append(kv.Value);
+                        first = false;
+                    }
+                    sb.Append(']');
+                }
                 break;
 
             case IntentAction.Edit:
@@ -118,6 +132,20 @@ public sealed class IntelligenceOrchestrator
                 if (intent.EntitySlug is not null)
                     sb.Append($" → GET /api/{intent.EntitySlug}");
                 if (intent.EntityId is not null) sb.Append($"/{intent.EntityId}");
+                if (intent.SearchTerms is { Count: > 0 } searchTerms)
+                {
+                    sb.Append(" [");
+                    bool first = true;
+                    foreach (var kv in searchTerms)
+                    {
+                        if (!first) sb.Append(", ");
+                        sb.Append(kv.Key.StartsWith('_') ? kv.Key[1..] : kv.Key);
+                        sb.Append('=');
+                        sb.Append(kv.Value);
+                        first = false;
+                    }
+                    sb.Append(']');
+                }
                 break;
 
             case IntentAction.SystemStatus:

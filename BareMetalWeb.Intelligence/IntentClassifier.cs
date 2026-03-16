@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Text;
 
 namespace BareMetalWeb.Intelligence;
 
@@ -225,6 +226,9 @@ public sealed class IntentClassifier
         if (verbConf > 0 && entityConf > 0) confidence = Math.Min(verbConf + entityConf * 0.4f, 0.95f);
         else if (verbConf > 0 || entityConf > 0) confidence = Math.Max(verbConf, entityConf);
 
+        var formFields = ExtractFormFields(lower);
+        var searchTerms = ExtractNaturalLanguageParams(lower);
+
         return new IntentResult(
             ResolvedIntent: resolved2,
             Action:         action,
@@ -232,8 +236,8 @@ public sealed class IntentClassifier
             Confidence:     confidence,
             EntityName:     entityName,
             EntityId:       ExtractEntityId(lower),
-            FormFields:     action is IntentAction.Create or IntentAction.Edit
-                            ? ExtractFormFields(lower) : null);
+            FormFields:     formFields,
+            SearchTerms:    searchTerms);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
@@ -349,6 +353,216 @@ public sealed class IntentClassifier
                 .Replace(">", "&gt;").Replace("\"", "&quot;")
                 .Replace("'", "&#39;");
     }
+
+    // Prepositions/connectors that introduce a value after a field-hint keyword
+    private static readonly string[] s_namedPatterns =
+        ["called", "named", "titled", "labelled", "labeled"];
+
+    // "where <field> is <value>" style patterns
+    private static readonly string[] s_whereConnectors =
+        ["is", "equals", "=", "contains", "like", "matching"];
+
+    /// <summary>
+    /// Extract search/filter parameters from natural language patterns.
+    /// Handles: "called dave", "named alice", "where name is dave",
+    /// "with id 13", quoted values like 'dave smith'.
+    /// Remaining unmatched words after verb/entity removal are stored as "_search".
+    /// </summary>
+    private static Dictionary<string, string>? ExtractNaturalLanguageParams(string lower)
+    {
+        Dictionary<string, string>? result = null;
+        var words = lower.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0) return null;
+
+        for (int i = 0; i < words.Length; i++)
+        {
+            var word = words[i];
+
+            // Pattern: "called <value>" / "named <value>" / "titled <value>"
+            foreach (var pattern in s_namedPatterns)
+            {
+                if (word == pattern && i + 1 < words.Length)
+                {
+                    var value = CollectValue(words, i + 1, out int consumed);
+                    if (value.Length > 0)
+                    {
+                        result ??= new(TypicalFormFieldCount, StringComparer.OrdinalIgnoreCase);
+                        result["_name"] = SanitiseFieldValue(value);
+                        i += consumed;
+                        goto nextWord;
+                    }
+                }
+            }
+
+            // Pattern: "where <field> is/equals/= <value>"
+            if (word == "where" && i + 3 <= words.Length)
+            {
+                string fieldHint = words[i + 1];
+                if (i + 2 < words.Length)
+                {
+                    string connector = words[i + 2];
+                    bool isConnector = false;
+                    foreach (var c in s_whereConnectors)
+                        if (connector == c) { isConnector = true; break; }
+
+                    if (isConnector && i + 3 < words.Length)
+                    {
+                        var value = CollectValue(words, i + 3, out int consumed);
+                        if (value.Length > 0)
+                        {
+                            result ??= new(TypicalFormFieldCount, StringComparer.OrdinalIgnoreCase);
+                            result[SanitiseFieldValue(fieldHint)] = SanitiseFieldValue(value);
+                            i += 2 + consumed;
+                            goto nextWord;
+                        }
+                    }
+                }
+            }
+
+            // Pattern: "with <field> <value>" (e.g. "with name dave", "with email foo@bar")
+            // Special case: "with id 13" → _id=13
+            if (word == "with" && i + 2 < words.Length)
+            {
+                string fieldHint = words[i + 1];
+                if (fieldHint == "id")
+                {
+                    var idVal = words[i + 2];
+                    if (idVal.Length > 0 && char.IsDigit(idVal[0]))
+                    {
+                        result ??= new(TypicalFormFieldCount, StringComparer.OrdinalIgnoreCase);
+                        result["_id"] = SanitiseFieldValue(idVal);
+                        i += 2;
+                        goto nextWord;
+                    }
+                }
+                // Skip if the field hint is a known verb/filler
+                if (!IsKnownVerb(fieldHint) && !IsKnownEntity(fieldHint))
+                {
+                    var value = CollectValue(words, i + 2, out int consumed);
+                    if (value.Length > 0)
+                    {
+                        result ??= new(TypicalFormFieldCount, StringComparer.OrdinalIgnoreCase);
+                        result[SanitiseFieldValue(fieldHint)] = SanitiseFieldValue(value);
+                        i += 1 + consumed;
+                        goto nextWord;
+                    }
+                }
+            }
+
+            // Pattern: "id <number>" or "#<number>" (single token like #42)
+            if (word == "id" && i + 1 < words.Length)
+            {
+                var next = words[i + 1];
+                if (next.Length > 0 && char.IsDigit(next[0]))
+                {
+                    result ??= new(TypicalFormFieldCount, StringComparer.OrdinalIgnoreCase);
+                    result["_id"] = SanitiseFieldValue(next);
+                    i++;
+                    goto nextWord;
+                }
+            }
+            if (word.Length > 1 && word[0] == '#' && char.IsDigit(word[1]))
+            {
+                result ??= new(TypicalFormFieldCount, StringComparer.OrdinalIgnoreCase);
+                result["_id"] = SanitiseFieldValue(word[1..]);
+                goto nextWord;
+            }
+
+            nextWord:;
+        }
+
+        // Collect remaining unmatched words as a search term (skip known verbs/entities/fillers)
+        var searchParts = new List<string>();
+        var matched = new HashSet<string>(result?.Values ?? Enumerable.Empty<string>(),
+            StringComparer.OrdinalIgnoreCase);
+        if (result != null)
+            foreach (var k in result.Keys) matched.Add(k);
+
+        for (int i = 0; i < words.Length; i++)
+        {
+            var w = words[i];
+            if (IsKnownVerb(w) || IsKnownEntity(w) || IsFillerWord(w)) continue;
+            if (matched.Contains(w)) continue;
+            // Skip words that are part of extracted patterns
+            bool isPattern = false;
+            foreach (var p in s_namedPatterns)
+                if (w == p) { isPattern = true; break; }
+            foreach (var c in s_whereConnectors)
+                if (w == c) { isPattern = true; break; }
+            if (w is "where" or "with" or "id" or "#") isPattern = true;
+            if (isPattern) continue;
+            searchParts.Add(w);
+        }
+
+        if (searchParts.Count > 0)
+        {
+            result ??= new(TypicalFormFieldCount, StringComparer.OrdinalIgnoreCase);
+            result["_search"] = SanitiseFieldValue(string.Join(' ', searchParts));
+        }
+
+        return result;
+    }
+
+    /// <summary>Collect a value from words starting at index, handling quoted strings.</summary>
+    private static string CollectValue(string[] words, int startIdx, out int consumed)
+    {
+        consumed = 0;
+        if (startIdx >= words.Length) return "";
+
+        var first = words[startIdx];
+
+        // Quoted value: 'dave smith' or "dave smith"
+        if (first.Length > 0 && first[0] is '\'' or '"')
+        {
+            char quote = first[0];
+            var sb = new StringBuilder(32);
+            for (int j = startIdx; j < words.Length; j++)
+            {
+                consumed++;
+                var part = words[j];
+                if (j == startIdx) part = part[1..]; // strip opening quote
+                if (part.Length > 0 && part[^1] == quote)
+                {
+                    sb.Append(part[..^1]); // strip closing quote
+                    return sb.ToString().Trim();
+                }
+                sb.Append(part);
+                sb.Append(' ');
+            }
+            return sb.ToString().Trim(); // unclosed quote — return what we have
+        }
+
+        // Single word value (stop at known filler/verb/connector)
+        consumed = 1;
+        return first;
+    }
+
+    /// <summary>Check if a word is a known action verb.</summary>
+    private static bool IsKnownVerb(string word)
+    {
+        foreach (var (verbs, _) in s_verbMap)
+            foreach (var v in verbs)
+                if (v == word) return true;
+        return false;
+    }
+
+    /// <summary>Check if a word is a known entity token.</summary>
+    private static bool IsKnownEntity(string word)
+    {
+        foreach (var (tokens, _, _) in s_entityMap)
+            foreach (var t in tokens)
+                if (t == word) return true;
+        return false;
+    }
+
+    /// <summary>Common filler words to skip during search term extraction.</summary>
+    private static bool IsFillerWord(string word) =>
+        word is "the" or "a" or "an" or "all" or "my" or "me" or "i" or "we"
+        or "to" or "for" or "of" or "from" or "in" or "on" or "at" or "by"
+        or "and" or "or" or "not" or "as" or "is" or "are" or "was" or "were"
+        or "this" or "that" or "these" or "those" or "it" or "its" or "you"
+        or "your" or "can" or "could" or "would" or "will" or "should"
+        or "please" or "?" or "!" or "." or "," or ";" or "";
 }
 
 // ── Result types ──────────────────────────────────────────────────────────
@@ -370,7 +584,13 @@ public readonly record struct IntentResult(
     /// <summary>Extracted entity ID if present in the query.</summary>
     string? EntityId = null,
     /// <summary>Extracted field key/value pairs for form prefill (null if none).</summary>
-    Dictionary<string, string>? FormFields = null)
+    Dictionary<string, string>? FormFields = null,
+    /// <summary>
+    /// Extracted search/filter parameters from natural language patterns.
+    /// Keys are field hints ("name", "email", "_search" for unqualified terms).
+    /// Values are the extracted terms. Used for semantic search over metadata/WAL.
+    /// </summary>
+    Dictionary<string, string>? SearchTerms = null)
 {
     /// <summary>Sentinel empty result returned when the query is blank.</summary>
     public static readonly IntentResult Empty = new(

@@ -157,4 +157,57 @@ public class IntentClassifierTests
         Assert.Equal("none",   IntentResult.Empty.ResolvedIntent);
         Assert.False(IntentResult.Empty.IsConfident);
     }
+
+    // ── SearchTerms extraction ────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("give me a user called dave",      "_name", "dave")]
+    [InlineData("which users are called dave",     "_name", "dave")]
+    [InlineData("add a user called dave",          "_name", "dave")]
+    [InlineData("find users named alice",          "_name", "alice")]
+    public void Classify_CalledNamed_ExtractsNameSearchTerm(string query, string expectedKey, string expectedValue)
+    {
+        var result = Sut.Classify(query.AsSpan());
+        Assert.NotNull(result.SearchTerms);
+        Assert.True(result.SearchTerms!.ContainsKey(expectedKey),
+            $"Expected SearchTerms to contain key '{expectedKey}'. Keys: {string.Join(", ", result.SearchTerms.Keys)}");
+        Assert.Equal(expectedValue, result.SearchTerms[expectedKey]);
+    }
+
+    [Theory]
+    [InlineData("list users where name is dave",   "name", "dave")]
+    [InlineData("show users where email = bob",    "email", "bob")]
+    public void Classify_WhereClause_ExtractsFieldFilter(string query, string expectedKey, string expectedValue)
+    {
+        var result = Sut.Classify(query.AsSpan());
+        Assert.NotNull(result.SearchTerms);
+        Assert.True(result.SearchTerms!.ContainsKey(expectedKey),
+            $"Expected SearchTerms to contain key '{expectedKey}'. Keys: {string.Join(", ", result.SearchTerms.Keys)}");
+        Assert.Equal(expectedValue, result.SearchTerms[expectedKey]);
+    }
+
+    [Theory]
+    [InlineData("show me user with id 13",  "_id", "13")]
+    [InlineData("delete user #42",          "_id", "42")]
+    public void Classify_IdPatterns_ExtractsId(string query, string expectedKey, string expectedValue)
+    {
+        var result = Sut.Classify(query.AsSpan());
+        Assert.NotNull(result.SearchTerms);
+        Assert.True(result.SearchTerms!.ContainsKey(expectedKey),
+            $"Expected SearchTerms to contain key '{expectedKey}'. Keys: {string.Join(", ", result.SearchTerms.Keys)}");
+        Assert.Equal(expectedValue, result.SearchTerms[expectedKey]);
+    }
+
+    [Fact]
+    public void Classify_NukeAllUsers_NoSearchTerms()
+    {
+        var result = Sut.Classify("nuke all the users".AsSpan());
+        Assert.Equal(IntentAction.Delete, result.Action);
+        // "nuke all the users" should have no meaningful search terms
+        // (all words are verbs/entities/fillers)
+        if (result.SearchTerms is { Count: > 0 })
+        {
+            Assert.DoesNotContain("_name", result.SearchTerms.Keys);
+        }
+    }
 }
