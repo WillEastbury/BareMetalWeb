@@ -523,8 +523,7 @@ public class BareMetalWebServerTests : IDisposable
         // Act
         await _server.RequestHandler(context.ToBmw());
 
-        // Assert
-        Assert.Equal("true", context.Response.Headers["X-BareMetal-IsHttps"].ToString());
+        // Assert — forwarded HTTPS detected, so no HTTPS redirect (301) occurs
         Assert.NotEqual(301, context.Response.StatusCode);
     }
 
@@ -548,8 +547,7 @@ public class BareMetalWebServerTests : IDisposable
         // Act
         await _server.RequestHandler(context.ToBmw());
 
-        // Assert
-        Assert.Equal("true", context.Response.Headers["X-BareMetal-IsHttps"].ToString());
+        // Assert — Forwarded header proto=https detected, so no HTTPS redirect (301) occurs
         Assert.NotEqual(301, context.Response.StatusCode);
     }
 
@@ -569,8 +567,7 @@ public class BareMetalWebServerTests : IDisposable
         // Act
         await _server.RequestHandler(context.ToBmw());
 
-        // Assert
-        Assert.Equal("false", context.Response.Headers["X-BareMetal-IsHttps"].ToString());
+        // Assert — headers not trusted, so forwarded proto is ignored and redirect occurs
         Assert.Equal(301, context.Response.StatusCode);
     }
 

@@ -85,6 +85,8 @@ internal static class ApiErrorWriter
         await using var writer = new Utf8JsonWriter(context.ResponseBody, WriterOptions);
         WriteErrorBody(writer, error);
         await writer.FlushAsync(ct);
+        // Flush the PipeWriter to push buffered bytes to the underlying transport/stream
+        await context.ResponseBody.FlushAsync(ct);
     }
 
     /// <summary>
