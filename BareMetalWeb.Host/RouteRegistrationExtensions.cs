@@ -26,6 +26,21 @@ public static class RouteRegistrationExtensions
     private static readonly JsonWriterOptions s_compactWriterOptions = new();
     private static readonly JsonWriterOptions s_indentedWriterOptions = new() { Indented = true };
 
+    /// <summary>Cached capsule master key derived once at startup via HKDF.</summary>
+    private static readonly byte[] s_capsuleMasterKey = DeriveCapsuleMasterKey();
+
+    private static byte[] DeriveCapsuleMasterKey()
+    {
+        string machineId = "baremetalweb-default";
+        try { machineId = File.Exists("/etc/machine-id") ? File.ReadAllText("/etc/machine-id").Trim() : Environment.MachineName; } catch { }
+        return System.Security.Cryptography.HKDF.DeriveKey(
+            System.Security.Cryptography.HashAlgorithmName.SHA256,
+            System.Text.Encoding.UTF8.GetBytes(machineId),
+            32,
+            System.Text.Encoding.UTF8.GetBytes("BareMetalWeb.CapsuleMaster.v1"),
+            System.Text.Encoding.UTF8.GetBytes("capsule-master"));
+    }
+
     private static bool TryGetInboxMessageMeta(out DataEntityMetadata meta)
         => DataScaffold.TryGetEntity("inbox-messages", out meta);
 
@@ -3967,7 +3982,7 @@ public static class RouteRegistrationExtensions
             var authHeader = context.HttpRequest.Headers["Authorization"].ToString();
             if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.Ordinal))
             {
-                WriteCapsuleDenied(context, 401, CapsuleDenialReason.AuthenticationFailed);
+                await WriteCapsuleDenied(context, 401, CapsuleDenialReason.AuthenticationFailed);
                 return;
             }
             var secret = authHeader.AsSpan(7).ToString();
@@ -3983,30 +3998,31 @@ public static class RouteRegistrationExtensions
 
             if (nodes.Count == 0)
             {
-                WriteCapsuleDenied(context, 403, CapsuleDenialReason.NodeNotFound);
+                await WriteCapsuleDenied(context, 403, CapsuleDenialReason.NodeNotFound);
                 return;
             }
             var node = nodes[0];
 
-            var secretHash = Convert.ToHexString(
-                System.Security.Cryptography.SHA256.HashData(
-                    System.Text.Encoding.UTF8.GetBytes(secret))).ToLowerInvariant();
-            if (!string.Equals(node.SecretHash, secretHash, StringComparison.OrdinalIgnoreCase))
+            var secretHash = System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(secret));
+            var storedHash = Convert.FromHexString(node.SecretHash ?? "");
+            if (storedHash.Length != secretHash.Length
+                || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(secretHash, storedHash))
             {
-                WriteCapsuleDenied(context, 401, CapsuleDenialReason.AuthenticationFailed);
+                await WriteCapsuleDenied(context, 401, CapsuleDenialReason.AuthenticationFailed);
                 return;
             }
 
             // ── 2. Identity verification ──
             if (node.Status == NodeStatus.Revoked)
             {
-                WriteCapsuleDenied(context, 403, CapsuleDenialReason.NodeRevoked);
+                await WriteCapsuleDenied(context, 403, CapsuleDenialReason.NodeRevoked);
                 return;
             }
 
             if (!node.IsEnabled)
             {
-                WriteCapsuleDenied(context, 403, CapsuleDenialReason.NodeDisabled);
+                await WriteCapsuleDenied(context, 403, CapsuleDenialReason.NodeDisabled);
                 return;
             }
 
@@ -4015,7 +4031,7 @@ public static class RouteRegistrationExtensions
                 && !string.IsNullOrEmpty(requestFingerprint)
                 && !string.Equals(node.Fingerprint, requestFingerprint, StringComparison.OrdinalIgnoreCase))
             {
-                WriteCapsuleDenied(context, 403, CapsuleDenialReason.FingerprintMismatch);
+                await WriteCapsuleDenied(context, 403, CapsuleDenialReason.FingerprintMismatch);
                 return;
             }
 
@@ -4052,7 +4068,7 @@ public static class RouteRegistrationExtensions
             {
                 node.Status = NodeStatus.Quarantined;
                 await DataStoreProvider.Current.SaveAsync(node, context.RequestAborted).ConfigureAwait(false);
-                WriteCapsuleDenied(context, 403, CapsuleDenialReason.NetworkPolicyViolation, riskScore);
+                await WriteCapsuleDenied(context, 403, CapsuleDenialReason.NetworkPolicyViolation, riskScore);
                 return;
             }
 
@@ -4060,22 +4076,11 @@ public static class RouteRegistrationExtensions
             var runtimeVersion = node.CurrentVersion;
             if (string.IsNullOrEmpty(runtimeVersion)) runtimeVersion = "0.0.0";
 
-            // IKM: cluster master key derived from machine-id (same as SynchronousEncryption)
-            var ikm = System.Security.Cryptography.HKDF.DeriveKey(
-                System.Security.Cryptography.HashAlgorithmName.SHA256,
-                System.Text.Encoding.UTF8.GetBytes(
-                    File.Exists("/etc/machine-id")
-                        ? File.ReadAllText("/etc/machine-id").Trim()
-                        : Environment.MachineName),
-                32,
-                System.Text.Encoding.UTF8.GetBytes("BareMetalWeb.CapsuleMaster.v1"),
-                System.Text.Encoding.UTF8.GetBytes("capsule-master"));
-
-            // Derive per-node runtime key: HKDF(masterKey, nodeId + fingerprint + version)
+            // Derive per-node runtime key: HKDF(cachedMasterKey, nodeId + fingerprint + version)
             var info = $"{nodeId}:{node.Fingerprint}:{runtimeVersion}";
             var runtimeKey = System.Security.Cryptography.HKDF.DeriveKey(
                 System.Security.Cryptography.HashAlgorithmName.SHA256,
-                ikm,
+                s_capsuleMasterKey,
                 32,
                 System.Text.Encoding.UTF8.GetBytes("BareMetalWeb.RuntimeCapsule.v1"),
                 System.Text.Encoding.UTF8.GetBytes(info));
@@ -4114,7 +4119,7 @@ public static class RouteRegistrationExtensions
     }
 
     /// <summary>Write a JSON denial response for capsule requests.</summary>
-    private static void WriteCapsuleDenied(
+    private static async ValueTask WriteCapsuleDenied(
         BmwContext context, int statusCode,
         CapsuleDenialReason reason, int riskScore = 0)
     {
@@ -4133,7 +4138,7 @@ public static class RouteRegistrationExtensions
         var json = riskScore > 0
             ? $"{{\"denied\":true,\"reason\":\"{reasonStr}\",\"riskScore\":{riskScore}}}"
             : $"{{\"denied\":true,\"reason\":\"{reasonStr}\"}}";
-        context.Response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(json));
+        await context.Response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(json)).ConfigureAwait(false);
     }
 
     /// <summary>
