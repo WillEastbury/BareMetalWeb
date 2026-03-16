@@ -75,6 +75,10 @@ public sealed class VocabularyPruner
         foreach (var t in ToolActionTokens)
             tokens.Add(t);
 
+        // Conversational phrases (greetings, goodbyes, pleasantries)
+        foreach (var t in ConversationalTokens)
+            tokens.Add(t);
+
         // Query operators — users may type "contains", "equals", "greater than" etc.
         foreach (var t in QueryOperatorTokens)
             tokens.Add(t);
@@ -354,23 +358,71 @@ public sealed class VocabularyPruner
         "create", "update", "delete", "remove",
         "status", "health", "system", "index", "help",
         "this", "that", "these", "those",
-        "yes", "no", "ok", "please", "thank"
+        "yes", "no", "ok", "okay", "please", "thank", "thanks",
+        "can", "could", "would", "will", "should",
+        "i", "me", "my", "we", "you", "your", "it", "its",
+        "want", "need", "like", "have", "has", "had", "do", "does", "did",
+        "new", "old", "current", "existing", "available"
+    ];
+
+    // Greetings, goodbyes, and conversational phrases
+    private static readonly string[] ConversationalTokens =
+    [
+        // Greetings
+        "hello", "hi", "hey", "hiya", "howdy", "morning",
+        "good morning", "good afternoon", "good evening",
+        "greetings", "welcome", "sup", "yo",
+        // Goodbyes
+        "bye", "goodbye", "cheerio", "cheers", "later",
+        "see you", "see ya", "take care", "ta", "ciao", "cya",
+        "goodnight", "night",
+        // Pleasantries
+        "thanks", "thank you", "cheers", "ta", "nice one",
+        "great", "cool", "awesome", "perfect", "brilliant",
+        "sorry", "apologies", "excuse me", "pardon"
     ];
 
     private static readonly string[] ToolActionTokens =
     [
-        "list", "entities", "describe", "query", "records",
+        // List / read synonyms
+        "list", "table", "grid", "query", "entities", "records",
+        "show", "display", "view", "open", "detail", "lookup",
+        "read", "look at", "call up", "pull up", "bring up",
+        "see", "check", "inspect", "browse", "explore",
+        // Create synonyms
+        "create", "add", "new", "insert", "make", "plus", "+",
+        "register", "submit", "post", "build",
+        // Update synonyms
+        "update", "edit", "change", "modify", "alter", "patch",
+        "amend", "revise", "adjust", "set", "assign", "rename",
+        // Delete synonyms
+        "delete", "remove", "kill", "bin", "sack off", "nuke",
+        "drop", "destroy", "purge", "trash", "wipe", "erase",
+        // Action / invoke synonyms
+        "execute", "run", "invoke", "action", "command",
+        "call", "tool", "do", "perform", "trigger", "fire", "launch",
+        // Reports / settings / config
+        "report", "reports", "reporting", "dashboard", "analytics",
+        "settings", "setting", "configure", "configuration", "config",
+        "preferences", "options", "option",
+        "metadata", "gallery", "import", "export",
+        "download", "upload", "sync", "refresh", "reload",
+        // Describe / info
+        "describe", "info", "information", "about", "details",
+        "help", "commands", "capabilities",
+        // System / diagnostics
         "status", "diagnostics", "memory", "uptime",
         "index", "rebuild", "reindex", "search",
-        "help", "commands", "capabilities",
-        "show", "display", "view", "open", "detail", "lookup",
-        "execute", "run", "invoke", "action", "command",
         "user", "session", "audit", "log",
         "data", "schema", "fields", "properties",
+        // Aggregates
         "count", "total", "average", "sum", "min", "max",
-        "create", "update", "delete", "save", "remove",
-        "filter", "sort", "order", "by", "where", "limit",
-        "first", "last", "latest", "recent", "newest", "oldest"
+        // Save
+        "save", "commit", "apply", "confirm", "approve",
+        // Query clauses
+        "filter", "sort", "order", "by", "where", "limit", "group",
+        "first", "last", "latest", "recent", "newest", "oldest",
+        "top", "bottom", "next", "previous", "page"
     ];
 
     private static readonly string[] QueryOperatorTokens =
