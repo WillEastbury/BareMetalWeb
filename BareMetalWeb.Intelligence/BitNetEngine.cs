@@ -98,6 +98,12 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
     /// <summary>Vocabulary pruning stats, available after load with pruning enabled.</summary>
     public PruneStats? VocabPruneStats => _pruneStats;
 
+    /// <summary>The BPE tokenizer built from the loaded token table.</summary>
+    public Tokenizer? LoadedTokenizer => _tokenizer;
+
+    /// <summary>The raw token table (vocab entries by ID). Null when no model is loaded.</summary>
+    public IReadOnlyList<string>? TokenTable => _tokenTable;
+
     /// <summary>Model size stats, available after load.</summary>
     public ModelSizeStats? ModelStats => _modelStats;
 
@@ -362,6 +368,41 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
             _compressedFfnGate!, _compressedFfnUp!, _compressedFfnDown!,
             _compressedEmbeddings, tied ? null : _compressedOutputHead,
             tokenTable ?? _tokenTable);
+    }
+
+    /// <summary>
+    /// Trim the vocabulary to only domain-relevant tokens using the provided pruner.
+    /// Prunes embedding and output head matrices, updates the token table,
+    /// and reallocates inference buffers for the smaller vocab. After trimming,
+    /// call <see cref="SaveSnapshot"/> to persist the trimmed model.
+    /// </summary>
+    public void TrimVocabulary(VocabularyPruner pruner)
+    {
+        if (!_isLoaded || _compressedEmbeddings is null || _compressedOutputHead is null || _tokenTable is null)
+            throw new InvalidOperationException("No model loaded");
+
+        bool tied = ReferenceEquals(_compressedEmbeddings, _compressedOutputHead);
+
+        // Prune embedding matrix
+        var prunedEmbed = pruner.PruneInt8Matrix(_compressedEmbeddings);
+
+        // Prune output head (reuse pruned embed if tied)
+        var prunedOutputHead = tied ? prunedEmbed : pruner.PruneInt8Matrix(_compressedOutputHead);
+
+        // Prune token table
+        var prunedTokenTable = pruner.PruneTokenTable(_tokenTable);
+
+        // Replace matrices — old ones may be mmap'd (no-op dispose) or owned
+        _compressedEmbeddings = prunedEmbed;
+        _compressedOutputHead = prunedOutputHead;
+        _tokenTable = prunedTokenTable;
+        _pruner = pruner;
+
+        // Rebuild tokenizer with pruned vocab
+        _tokenizer = new Tokenizer(_tokenTable, _merges);
+
+        // Reallocate inference buffers for new vocab size
+        AllocateInferenceBuffers(_config.HiddenDim, pruner.PrunedVocabSize);
     }
 
     /// <summary>
@@ -1143,33 +1184,26 @@ public sealed class BitNetEngine : IBitNetEngine, IDisposable
 
     private void DisposeNative()
     {
+        // Always dispose matrices individually — safe for both owned and mmap'd.
+        // Mmap'd matrices (ownsMemory=false) are no-ops; owned matrices free native memory.
+        // This handles mixed ownership after TrimVocabulary (owned embeddings + mmap'd layers).
+        if (_compressedWq is not null) { foreach (var m in _compressedWq) m?.Dispose(); _compressedWq = null; }
+        if (_compressedWk is not null) { foreach (var m in _compressedWk) m?.Dispose(); _compressedWk = null; }
+        if (_compressedWv is not null) { foreach (var m in _compressedWv) m?.Dispose(); _compressedWv = null; }
+        if (_compressedWo is not null) { foreach (var m in _compressedWo) m?.Dispose(); _compressedWo = null; }
+        if (_compressedFfnGate is not null) { foreach (var m in _compressedFfnGate) m?.Dispose(); _compressedFfnGate = null; }
+        if (_compressedFfnUp is not null) { foreach (var m in _compressedFfnUp) m?.Dispose(); _compressedFfnUp = null; }
+        if (_compressedFfnDown is not null) { foreach (var m in _compressedFfnDown) m?.Dispose(); _compressedFfnDown = null; }
+        bool tied = ReferenceEquals(_compressedEmbeddings, _compressedOutputHead);
+        _compressedEmbeddings?.Dispose(); _compressedEmbeddings = null;
+        if (!tied) _compressedOutputHead?.Dispose();
+        _compressedOutputHead = null;
+
+        // Dispose mmap after matrices are released
         if (_lazySnapshot is not null)
         {
             _lazySnapshot.Dispose();
             _lazySnapshot = null;
-            _compressedWq = null;
-            _compressedWk = null;
-            _compressedWv = null;
-            _compressedWo = null;
-            _compressedFfnGate = null;
-            _compressedFfnUp = null;
-            _compressedFfnDown = null;            _compressedEmbeddings = null;
-            _compressedOutputHead = null;
-        }
-        else
-        {
-            if (_compressedWq is not null) { foreach (var m in _compressedWq) m?.Dispose(); _compressedWq = null; }
-            if (_compressedWk is not null) { foreach (var m in _compressedWk) m?.Dispose(); _compressedWk = null; }
-            if (_compressedWv is not null) { foreach (var m in _compressedWv) m?.Dispose(); _compressedWv = null; }
-            if (_compressedWo is not null) { foreach (var m in _compressedWo) m?.Dispose(); _compressedWo = null; }
-            if (_compressedFfnGate is not null) { foreach (var m in _compressedFfnGate) m?.Dispose(); _compressedFfnGate = null; }
-            if (_compressedFfnUp is not null) { foreach (var m in _compressedFfnUp) m?.Dispose(); _compressedFfnUp = null; }
-            if (_compressedFfnDown is not null) { foreach (var m in _compressedFfnDown) m?.Dispose(); _compressedFfnDown = null; }
-            // Don't double-dispose when output head is tied to embeddings
-            bool tied = ReferenceEquals(_compressedEmbeddings, _compressedOutputHead);
-            _compressedEmbeddings?.Dispose(); _compressedEmbeddings = null;
-            if (!tied) _compressedOutputHead?.Dispose();
-            _compressedOutputHead = null;
         }
 
         // Clear buffer references (GC will reclaim them)

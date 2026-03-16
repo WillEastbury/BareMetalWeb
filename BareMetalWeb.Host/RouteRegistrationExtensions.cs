@@ -638,6 +638,8 @@ public static class RouteRegistrationExtensions
         host.RegisterRoute("POST /api/agent/chat", new RouteHandlerData(raw, AgentApiHandlers.ChatHandler));
         host.RegisterRoute("GET /api/agent/metrics", new RouteHandlerData(raw, AgentApiHandlers.MetricsHandler));
         host.RegisterRoute("GET /ai/generate", new RouteHandlerData(raw, AgentApiHandlers.GenerateHandler));
+        // Wire up metadata change → intelligence model invalidation
+        DataScaffold.OnMetadataChanged = AgentApiHandlers.InvalidateTrimmedModel;
         var templated = pageInfoFactory.TemplatedPage(mainTemplate, 200, new[] { "title", "html_message" }, new[] { "", "" }, "Public", false, 1);
         host.RegisterRoute("GET /page/{slug}", new RouteHandlerData(templated, routeHandlers.BuildPageHandler(PageRenderer.ConfigurePageAsync)));
         host.RegisterRoute("GET /api/pages", new RouteHandlerData(raw, PageRenderer.ListPagesHandler));

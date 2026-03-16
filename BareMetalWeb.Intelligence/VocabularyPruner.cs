@@ -364,6 +364,114 @@ public sealed class VocabularyPruner
     ];
 
     /// <summary>
+    /// Tokenize all domain terms through the BPE tokenizer and collect the set
+    /// of token IDs needed to represent them. Also includes fundamental tokens
+    /// (special tokens, short fragments) so basic text generation works.
+    /// </summary>
+    public HashSet<int> CollectDomainTokenIds(Tokenizer tokenizer, IReadOnlyList<string> vocabTable)
+    {
+        var ids = new HashSet<int>();
+
+        // Always keep special tokens (PAD, BOS, EOS, UNK)
+        for (int i = 0; i < 4 && i < vocabTable.Count; i++)
+            ids.Add(i);
+
+        // Keep short tokens (≤2 chars) — single bytes, digraphs, whitespace, punctuation.
+        // These are fundamental building blocks for any text.
+        for (int i = 0; i < vocabTable.Count; i++)
+        {
+            var tok = vocabTable[i];
+            if (tok is not null && tok.Length <= 2)
+                ids.Add(i);
+        }
+
+        // Tokenize each domain term and collect constituent BPE token IDs
+        foreach (var term in _domainTokens)
+        {
+            if (string.IsNullOrWhiteSpace(term)) continue;
+            try
+            {
+                var tokenIds = tokenizer.Encode(term.AsSpan());
+                foreach (var id in tokenIds)
+                {
+                    if ((uint)id < (uint)vocabTable.Count)
+                        ids.Add(id);
+                }
+            }
+            catch { /* Skip terms that fail to tokenize */ }
+        }
+
+        return ids;
+    }
+
+    /// <summary>
+    /// Build the remap table from an explicit set of token IDs to keep.
+    /// Use with <see cref="CollectDomainTokenIds"/> for BPE-aware pruning.
+    /// </summary>
+    public void BuildRemapTableFromIds(int vocabSize, HashSet<int> keepIds)
+    {
+        OriginalVocabSize = vocabSize;
+        _remapTable = new int[vocabSize];
+        var reverseList = new List<int>(keepIds.Count);
+
+        int prunedId = 0;
+        for (int i = 0; i < vocabSize; i++)
+        {
+            if (keepIds.Contains(i))
+            {
+                _remapTable[i] = prunedId;
+                reverseList.Add(i);
+                prunedId++;
+            }
+            else
+            {
+                _remapTable[i] = -1;
+            }
+        }
+
+        _reverseTable = reverseList.ToArray();
+        PrunedVocabSize = prunedId;
+    }
+
+    /// <summary>
+    /// Prune an int8 native matrix by keeping only rows in the remap table.
+    /// Used for embedding and output head matrices. Preserves DequantScale.
+    /// </summary>
+    public NativeInt8Matrix PruneInt8Matrix(NativeInt8Matrix source)
+    {
+        if (_reverseTable is null)
+            throw new InvalidOperationException("Call BuildRemapTableFromIds first");
+
+        var pruned = NativeInt8Matrix.Allocate(PrunedVocabSize, source.Cols);
+        pruned.DequantScale = source.DequantScale;
+
+        var rowBuf = new byte[source.RowStrideBytes];
+
+        for (int p = 0; p < _reverseTable.Length; p++)
+        {
+            int origRow = _reverseTable[p];
+            source.CopyPackedDataChunk((long)origRow * source.RowStrideBytes, rowBuf);
+            pruned.PackRowFromBytes(p, rowBuf);
+        }
+        pruned.FinalizeStats();
+        return pruned;
+    }
+
+    /// <summary>
+    /// Build a pruned token table containing only kept tokens.
+    /// </summary>
+    public string[] PruneTokenTable(IReadOnlyList<string> fullTokenTable)
+    {
+        if (_reverseTable is null)
+            throw new InvalidOperationException("Call BuildRemapTableFromIds first");
+
+        var pruned = new string[PrunedVocabSize];
+        for (int p = 0; p < _reverseTable.Length; p++)
+            pruned[p] = fullTokenTable[_reverseTable[p]];
+        return pruned;
+    }
+
+    /// <summary>
     /// Split a PascalCase/camelCase identifier into words.
     /// e.g., "BlogPost" → ["Blog", "Post"], "userId" → ["user", "Id"]
     /// </summary>

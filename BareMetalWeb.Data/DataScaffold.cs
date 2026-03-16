@@ -171,6 +171,12 @@ public static class DataScaffold
     private static readonly NullabilityInfoContext NullabilityContext = new();
     private static readonly ConcurrentDictionary<string, LookupCacheEntry> LookupCache = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Callback invoked when entity or field metadata changes.
+    /// Used by the intelligence module to rebuild the trimmed model.
+    /// </summary>
+    public static Action? OnMetadataChanged;
+
     // Max number of entries in LookupCache before expired entries are pruned.
     private const int LookupCacheMaxSize = 500;
     // Hard upper bound — if the cache exceeds this after pruning, clear it entirely.
@@ -334,6 +340,13 @@ public static class DataScaffold
         if (string.Equals(slug, "modules", StringComparison.OrdinalIgnoreCase))
         {
             ModuleRegistry.Invalidate();
+        }
+
+        // Invalidate intelligence model when entity metadata changes
+        if (string.Equals(slug, "entity-definitions", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(slug, "field-definitions", StringComparison.OrdinalIgnoreCase))
+        {
+            OnMetadataChanged?.Invoke();
         }
     }
 
