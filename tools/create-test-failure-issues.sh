@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Auto-generated script to create GitHub issues for failing tests
 # Run: bash tools/create-test-failure-issues.sh
 # Requires: gh CLI authenticated with issues:write permission
