@@ -41,17 +41,27 @@ public sealed class IntentClassifier
 
     private static readonly (string[] Verbs, IntentAction Action)[] s_verbMap =
     [
-        (["list",   "show all", "display all", "get all", "fetch all", "index"], IntentAction.List),
-        (["create", "add",      "new",          "insert",  "register"],          IntentAction.Create),
-        (["edit",   "update",   "modify",       "change",  "set",     "patch"],  IntentAction.Edit),
-        (["delete", "remove",   "drop",         "erase",   "purge"],             IntentAction.Delete),
+        (["list",   "show all", "display all", "get all", "fetch all", "index",
+          "browse", "table",    "grid"],                                           IntentAction.List),
+        (["create", "add",      "new",          "insert",  "register",
+          "make",   "submit",   "post",         "build"],                          IntentAction.Create),
+        (["edit",   "update",   "modify",       "change",  "set",     "patch",
+          "amend",  "revise",   "adjust",       "rename",  "alter"],               IntentAction.Edit),
+        (["delete", "remove",   "drop",         "erase",   "purge",
+          "nuke",   "bin",      "trash",        "wipe",    "destroy"],             IntentAction.Delete),
+        (["status", "health",   "diagnostics",  "ping",    "check"],               IntentAction.SystemStatus),
+        (["memory", "ram",      "heap",         "gc",      "usage"],               IntentAction.SystemMemory),
         (["show",   "get",      "fetch",        "view",    "display", "find",
-          "search", "lookup",   "describe",     "detail",  "read"],              IntentAction.Query),
-        (["status", "health",   "diagnostics",  "ping",    "check"],             IntentAction.SystemStatus),
-        (["memory", "ram",      "heap",         "gc",      "usage"],             IntentAction.SystemMemory),
-        (["help",   "what",     "how",          "explain", "?"],                 IntentAction.Help),
-        (["stats",  "metrics",  "statistics",   "measure"],                      IntentAction.Stats),
-        (["rebuild","reindex",  "compact",      "flush",   "sync"],              IntentAction.Maintenance),
+          "search", "lookup",   "describe",     "detail",  "read",
+          "give",   "give me",  "grab",         "pull",    "bring",
+          "which",  "select",   "retrieve",     "inspect", "look up",
+          "call up","pull up",  "bring up",     "see"],                            IntentAction.Query),
+        (["help",   "what",     "how",          "explain", "?"],                   IntentAction.Help),
+        (["stats",  "metrics",  "statistics",   "measure"],                        IntentAction.Stats),
+        (["rebuild","reindex",  "compact",      "flush",   "sync"],                IntentAction.Maintenance),
+        (["run",    "execute",  "invoke",       "perform", "trigger",
+          "fire",   "launch",   "do"],                                             IntentAction.Execute),
+        (["configure", "settings", "config",    "import",  "export"],              IntentAction.Configure),
     ];
 
     // ── Entity name registry ──────────────────────────────────────────────
@@ -206,6 +216,8 @@ public sealed class IntentClassifier
             IntentAction.Help         => "system.help",
             IntentAction.Stats        => entitySlug is null ? "system.stats" : $"entity.stats.{entitySlug}",
             IntentAction.Maintenance  => "system.maintenance",
+            IntentAction.Execute      => entitySlug is null ? "entity.execute" : $"entity.execute.{entitySlug}",
+            IntentAction.Configure    => entitySlug is null ? "system.configure" : $"entity.configure.{entitySlug}",
             _                         => entitySlug is null ? "unknown" : $"entity.unknown.{entitySlug}",
         };
 
@@ -382,4 +394,6 @@ public enum IntentAction : byte
     Help          = 8,
     Stats         = 9,
     Maintenance   = 10,
+    Execute       = 11,
+    Configure     = 12,
 }

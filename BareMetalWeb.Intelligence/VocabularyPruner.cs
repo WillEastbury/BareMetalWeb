@@ -353,16 +353,19 @@ public sealed class VocabularyPruner
         "in", "on", "at", "to", "for", "of", "from",
         "and", "or", "not", "with", "by", "as",
         "all", "any", "each", "every", "some",
-        "how", "many", "much", "what", "which", "who",
+        "how", "many", "much", "what", "which", "who", "whose", "whom",
         "show", "list", "get", "find", "search", "describe",
         "create", "update", "delete", "remove",
+        "give", "give me", "fetch", "grab", "pull", "bring",
         "status", "health", "system", "index", "help",
         "this", "that", "these", "those",
         "yes", "no", "ok", "okay", "please", "thank", "thanks",
         "can", "could", "would", "will", "should",
         "i", "me", "my", "we", "you", "your", "it", "its",
         "want", "need", "like", "have", "has", "had", "do", "does", "did",
-        "new", "old", "current", "existing", "available"
+        "new", "old", "current", "existing", "available",
+        "called", "named", "titled", "labelled", "labeled",
+        "where", "when", "why", "there"
     ];
 
     // Greetings, goodbyes, and conversational phrases
@@ -384,11 +387,13 @@ public sealed class VocabularyPruner
 
     private static readonly string[] ToolActionTokens =
     [
-        // List / read synonyms
+        // List / read / fetch synonyms
         "list", "table", "grid", "query", "entities", "records",
         "show", "display", "view", "open", "detail", "lookup",
         "read", "look at", "call up", "pull up", "bring up",
         "see", "check", "inspect", "browse", "explore",
+        "give", "give me", "fetch", "grab", "pull", "bring",
+        "retrieve", "return", "select", "pick",
         // Create synonyms
         "create", "add", "new", "insert", "make", "plus", "+",
         "register", "submit", "post", "build",
@@ -419,10 +424,11 @@ public sealed class VocabularyPruner
         "count", "total", "average", "sum", "min", "max",
         // Save
         "save", "commit", "apply", "confirm", "approve",
-        // Query clauses
+        // Query clauses / filter words
         "filter", "sort", "order", "by", "where", "limit", "group",
         "first", "last", "latest", "recent", "newest", "oldest",
-        "top", "bottom", "next", "previous", "page"
+        "top", "bottom", "next", "previous", "page",
+        "called", "named", "titled", "matching", "containing"
     ];
 
     private static readonly string[] QueryOperatorTokens =
