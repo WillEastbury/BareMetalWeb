@@ -167,8 +167,29 @@ public sealed class SafeTensorsReader : IDisposable
         if (!_tensors.TryGetValue(name, out var info))
             throw new KeyNotFoundException($"Tensor '{name}' not found in SafeTensors file");
 
+        if (dest.Length < cols)
+            throw new ArgumentException($"Destination span length {dest.Length} is smaller than cols {cols}");
+
+        if (row < 0 || row >= info.Rows)
+            throw new ArgumentOutOfRangeException(nameof(row), $"Row {row} out of range [0, {info.Rows})");
+
         int bytesPerRow = cols * 2; // BF16 = 2 bytes per value
-        long rowOffset = _dataRegionStart + info.DataStart + (long)row * bytesPerRow;
+
+        // Checked arithmetic to catch overflow with malformed metadata
+        long rowOffset;
+        try
+        {
+            rowOffset = checked(_dataRegionStart + info.DataStart + (long)row * bytesPerRow);
+        }
+        catch (OverflowException)
+        {
+            throw new InvalidDataException($"Tensor '{name}': row offset overflow at row {row}");
+        }
+
+        long rowEnd = rowOffset + bytesPerRow;
+        if (rowEnd > _dataRegionStart + info.DataEnd)
+            throw new InvalidDataException($"Tensor '{name}': row {row} exceeds tensor data bounds");
+
         _stream.Seek(rowOffset, SeekOrigin.Begin);
 
         Span<byte> buf = stackalloc byte[Math.Min(bytesPerRow, 8192)];

@@ -19,7 +19,12 @@ public static class IntentClassifier
         if (string.IsNullOrWhiteSpace(prompt))
             return null;
 
-        var lower = prompt.Trim().ToLowerInvariant();
+        // Avoid ToLowerInvariant() allocation — lower in-place on a stack buffer
+        var trimmed = prompt.AsSpan().Trim();
+        int len = trimmed.Length;
+        Span<char> lowerBuf = len <= 512 ? stackalloc char[len] : new char[len];
+        trimmed.ToLowerInvariant(lowerBuf);
+        var lower = new string(lowerBuf);
 
         // ── Greetings / farewells ───────────────────────────────────────
         if (IsGreeting(lower))
@@ -57,7 +62,7 @@ public static class IntentClassifier
             return descResult;
 
         // ── Query / find / show entity ──────────────────────────────────
-        if (TryClassifyQuery(lower, out var queryResult))
+        if (TryClassifyQuery(lower, prompt, out var queryResult))
             return queryResult;
 
         // ── Count entity ────────────────────────────────────────────────
@@ -97,6 +102,10 @@ public static class IntentClassifier
         {
             (entityHint, remainder) = ParseEntityAndRemainder(afterCreate, original);
         }
+        else if (span is "create")
+        {
+            // Bare verb with no entity
+        }
         else if (TryExtractAfterVerb(span, "add ", out var afterAdd))
         {
             (entityHint, remainder) = ParseEntityAndRemainder(afterAdd, original);
@@ -135,7 +144,7 @@ public static class IntentClassifier
             {
                 result.PrefillFields = new Dictionary<string, string>
                 {
-                    ["Title"] = CapitaliseFirst(remainder.Trim())
+                    ["Title"] = SanitiseForField(remainder.Trim())
                 };
             }
             return true;
@@ -152,8 +161,8 @@ public static class IntentClassifier
         {
             result.PrefillFields = new Dictionary<string, string>
             {
-                ["Title"] = CapitaliseFirst(remainder.Trim()),
-                ["Name"] = CapitaliseFirst(remainder.Trim())
+                ["Title"] = SanitiseForField(remainder.Trim()),
+                ["Name"] = SanitiseForField(remainder.Trim())
             };
         }
 
@@ -242,11 +251,13 @@ public static class IntentClassifier
 
     // ── Query / find / show intent parser ────────────────────────────────────
 
-    private static bool TryClassifyQuery(string lower, out IntentClassification? result)
+    private static bool TryClassifyQuery(string lower, string original,
+        out IntentClassification? result)
     {
         result = null;
 
         ReadOnlySpan<char> span = lower.AsSpan();
+        ReadOnlySpan<char> origSpan = original.AsSpan().Trim();
         string? entityHint = null;
         string? filterHint = null;
 
@@ -289,8 +300,15 @@ public static class IntentClassifier
             Entity = entityHint,
             Parameters = new Dictionary<string, string> { ["entity"] = entityHint }
         };
+
+        // Extract filter from original prompt to preserve casing
         if (filterHint is not null)
-            result.Parameters["query"] = filterHint;
+        {
+            int filterIdx = origSpan.IndexOf(filterHint.AsSpan(), StringComparison.OrdinalIgnoreCase);
+            result.Parameters["query"] = filterIdx >= 0
+                ? origSpan.Slice(filterIdx, filterHint.Length).ToString()
+                : filterHint;
+        }
 
         return true;
     }
@@ -367,8 +385,11 @@ public static class IntentClassifier
         lower is "hi" or "hello" or "hey" or "good morning" or "good afternoon" or
             "good evening" or "howdy" or "yo" or "hiya" or "greetings" ||
         lower.StartsWith("hi ", StringComparison.Ordinal) ||
+        lower.StartsWith("hi,", StringComparison.Ordinal) ||
         lower.StartsWith("hello ", StringComparison.Ordinal) ||
-        lower.StartsWith("hey ", StringComparison.Ordinal);
+        lower.StartsWith("hello,", StringComparison.Ordinal) ||
+        lower.StartsWith("hey ", StringComparison.Ordinal) ||
+        lower.StartsWith("hey,", StringComparison.Ordinal);
 
     private static bool IsFarewell(string lower) =>
         lower is "bye" or "goodbye" or "good bye" or "see you" or "later" or
@@ -378,6 +399,29 @@ public static class IntentClassifier
 
     private static string CapitaliseFirst(string s) =>
         string.IsNullOrEmpty(s) ? s : char.ToUpperInvariant(s[0]) + s[1..];
+
+    /// <summary>
+    /// Strip HTML-special characters from user input before using as form field values.
+    /// Prevents XSS if the frontend renders PrefillFields unsafely.
+    /// </summary>
+    private static string SanitiseForField(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return s;
+        // Fast path: scan for any dangerous char
+        bool needsEscape = false;
+        foreach (char c in s)
+        {
+            if (c is '<' or '>' or '&' or '"' or '\'')
+            { needsEscape = true; break; }
+        }
+        if (!needsEscape) return CapitaliseFirst(s);
+        return CapitaliseFirst(s
+            .Replace("&", "&amp;")
+            .Replace("<", "&lt;")
+            .Replace(">", "&gt;")
+            .Replace("\"", "&quot;")
+            .Replace("'", "&#39;"));
+    }
 }
 
 /// <summary>
