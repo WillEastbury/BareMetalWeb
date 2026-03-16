@@ -4,12 +4,34 @@ namespace BareMetalWeb.Intelligence.Tests;
 
 public class ModelPrunerTests
 {
-    private static TernaryLayer[] CreateTestLayers(int count, int dim)
+    private static TernaryLayer[] CreateTestLayers(int count, int dim, int seed = 42)
     {
         var layers = new TernaryLayer[count];
         for (int i = 0; i < count; i++)
-            layers[i] = TernaryLayer.CreateRandom(dim, 4);
+            layers[i] = CreateDeterministicLayer(dim, 4, seed + i);
         return layers;
+    }
+
+    private static TernaryLayer CreateDeterministicLayer(int dim, int numHeads, int seed)
+    {
+        _ = numHeads;
+        var rng = new Random(seed);
+        return new TernaryLayer
+        {
+            Wq = CreateWeights(dim * dim, rng),
+            Wk = CreateWeights(dim * dim, rng),
+            Wv = CreateWeights(dim * dim, rng),
+            Wo = CreateWeights(dim * dim, rng),
+            FfnWeights = CreateWeights(dim * dim, rng)
+        };
+    }
+
+    private static sbyte[] CreateWeights(int count, Random rng)
+    {
+        var weights = new sbyte[count];
+        for (int i = 0; i < weights.Length; i++)
+            weights[i] = (sbyte)(rng.Next(3) - 1);
+        return weights;
     }
 
     [Fact]
@@ -244,7 +266,7 @@ public class ModelPrunerTests
     {
         int dim = 8;
         var layers = new TernaryLayer[1];
-        layers[0] = TernaryLayer.CreateRandom(dim, 4);
+        layers[0] = CreateDeterministicLayer(dim, 4, seed: 99);
 
         var stats = ModelPruner.PruneLayerGroups(layers, dim,
             attnThreshold: 1, ffnThreshold: 2);

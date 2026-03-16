@@ -853,6 +853,16 @@ public sealed unsafe class NativeTernaryMatrix : IDisposable
         return _totalBytes;
     }
 
+    /// <summary>Copy a chunk of packed data starting at the given byte offset.</summary>
+    public void CopyPackedDataChunk(long offset, Span<byte> destination)
+    {
+        if (_data == null) ThrowObjectDisposed();
+        if (offset + destination.Length > _totalBytes)
+            throw new ArgumentException(
+                $"Chunk [{offset}..{offset + destination.Length}) exceeds total {_totalBytes}");
+        new ReadOnlySpan<byte>(_data + offset, destination.Length).CopyTo(destination);
+    }
+
     /// <summary>Total bytes of raw packed data (including alignment padding per row).</summary>
     public long TotalPackedDataBytes => _totalBytes;
 

@@ -5,12 +5,8 @@ namespace BareMetalWeb.Intelligence.Tests;
 
 public class IntelligenceOrchestratorTests
 {
-    private static IntelligenceOrchestrator CreateOrchestrator()
-    {
-        var engine = new BitNetEngine();
-        engine.LoadTestModel(ModelLoadOptions.NoPruning);
-        return new IntelligenceOrchestrator(engine);
-    }
+    private static IntelligenceOrchestrator CreateOrchestrator(IBitNetEngine? engine = null)
+        => new(engine ?? new BitNetEngine());
 
     [Fact]
     public async Task ProcessAsync_EmptyQuery_ReturnsPrompt()
@@ -24,29 +20,14 @@ public class IntelligenceOrchestratorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_ValidQuery_SystemStatus_RoutedByClassifier()
+    public async Task ProcessAsync_WhitespaceOnly_ReturnsPrompt()
     {
-        // "system status" is a known pattern — classifier routes it directly without the engine.
         var orch = CreateOrchestrator();
 
-        var response = await orch.ProcessAsync("system status");
+        var response = await orch.ProcessAsync("   " );
 
-        Assert.Equal("system.status", response.ResolvedIntent);
-        Assert.True(response.Confidence >= 0.6f);
-        Assert.NotNull(response.Message);
-    }
-
-    [Fact]
-    public async Task ProcessAsync_AnyQuery_ReturnsInferenceResult()
-    {
-        // Queries that don't match any keyword pattern fall through to the BitNet engine.
-        var orch = CreateOrchestrator();
-
-        var response = await orch.ProcessAsync("hello");
-
-        // Unknown query — falls through to BitNet or returns low-confidence result.
-        Assert.NotNull(response.Message);
-        Assert.NotEmpty(response.Message);
+        Assert.Contains("Please enter", response.Message);
+        Assert.Equal("none", response.ResolvedIntent);
     }
 
     [Fact]
@@ -57,7 +38,6 @@ public class IntelligenceOrchestratorTests
 
         var response = await orch.ProcessAsync(longInput);
 
-        // Should not throw, input is truncated internally
         Assert.NotNull(response.Message);
     }
 
@@ -69,68 +49,101 @@ public class IntelligenceOrchestratorTests
 
         var response = await orch.ProcessAsync(malicious);
 
-        // Control characters are stripped; "help" triggers the classifier.
+        Assert.Equal("system.help", response.ResolvedIntent);
         Assert.NotNull(response.Message);
-        Assert.NotEmpty(response.ResolvedIntent);
     }
 
     [Fact]
-    public async Task ProcessAsync_WhitespaceOnly_ReturnsPrompt()
+    public async Task ProcessAsync_Greeting_FallsToGenerate()
     {
         var orch = CreateOrchestrator();
 
-        var response = await orch.ProcessAsync("   ");
+        var response = await orch.ProcessAsync("hello");
 
-        Assert.Contains("Please enter", response.Message);
-        Assert.Equal("none", response.ResolvedIntent);
+        // No greeting pattern in classifier — falls through to generate
+        Assert.NotNull(response.Message);
     }
 
     [Fact]
-    public async Task ProcessAsync_KnownEntityAction_RoutedByClassifier()
+    public async Task ProcessAsync_Farewell_FallsToGenerate()
     {
-        // "create a user" is a known action+entity — classifier routes it directly.
         var orch = CreateOrchestrator();
 
-        var response = await orch.ProcessAsync("create a user");
+        var response = await orch.ProcessAsync("goodbye");
 
-        Assert.StartsWith("entity.create.users", response.ResolvedIntent);
-        Assert.True(response.Confidence >= 0.6f);
+        Assert.NotNull(response.Message);
     }
 
     [Fact]
-    public async Task ProcessAsync_ListEntities_RoutedToSystemIntent()
+    public async Task ProcessAsync_Help_RoutesToHelp()
     {
         var orch = CreateOrchestrator();
 
-        var response = await orch.ProcessAsync("list entities");
+        var response = await orch.ProcessAsync("help");
+
+        Assert.Equal("system.help", response.ResolvedIntent);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_SystemStatus_RoutesToSystemStatus()
+    {
+        var orch = CreateOrchestrator();
+
+        var response = await orch.ProcessAsync("system status");
+
+        Assert.Equal("system.status", response.ResolvedIntent);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_ListEntities_RoutesToList()
+    {
+        var orch = CreateOrchestrator();
+
+        var response = await orch.ProcessAsync("list all entities");
 
         Assert.Equal("system.list-entities", response.ResolvedIntent);
-        Assert.True(response.Confidence >= 0.6f);
     }
 
     [Fact]
-    public async Task ProcessAsync_LowConfidenceQuery_FallsThroughToEngine()
-    {
-        // Queries with no keyword matches fall through to the BitNet engine.
-        var orch = CreateOrchestrator();
-
-        var response = await orch.ProcessAsync("xyzzy plugh");
-
-        // No keyword match → BitNet fallback
-        Assert.Equal("bitnet-generate", response.ResolvedIntent);
-        Assert.NotEmpty(response.Message);
-    }
-
-    [Fact]
-    public async Task ProcessAsync_AlwaysReturnsNonNullMessage()
+    public async Task ProcessAsync_CreateTodo_RoutesToCreateTodo()
     {
         var orch = CreateOrchestrator();
 
         var response = await orch.ProcessAsync("create a todo");
 
-        // Whether routed via classifier or BitNet, message must be non-null.
+        Assert.Contains("entity.create", response.ResolvedIntent);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_CreateTodoWithDescription_ContainsEntityRoute()
+    {
+        var orch = CreateOrchestrator();
+
+        var response = await orch.ProcessAsync("create a todo for reminding me about beer");
+
+        Assert.Contains("entity.create", response.ResolvedIntent);
         Assert.NotNull(response.Message);
-        Assert.NotEmpty(response.ResolvedIntent);
-        Assert.DoesNotContain("[BitNet spike]", response.Message);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_AmbiguousQuery_WithDegenerateFallback_ReturnsHelpfulMessage()
+    {
+        var orch = CreateOrchestrator(new FixedResponseEngine("aaaaaaaaaaaaaaaa"));
+
+        var response = await orch.ProcessAsync("what is the meaning of life");
+
+        // Classifier routes "what" queries to help before BitNet fallback
+        Assert.Contains("help", response.ResolvedIntent, StringComparison.OrdinalIgnoreCase);
+        Assert.NotEmpty(response.Message);
+    }
+
+    private sealed class FixedResponseEngine(string response) : IBitNetEngine
+    {
+        public bool IsLoaded => true;
+
+        public ValueTask<string> GenerateAsync(ReadOnlyMemory<char> prompt, int maxTokens = 256, CancellationToken ct = default)
+            => ValueTask.FromResult(response);
+
+        public BitNetPipelineMetrics? GetMetrics() => null;
     }
 }

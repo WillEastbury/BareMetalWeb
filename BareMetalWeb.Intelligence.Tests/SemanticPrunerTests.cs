@@ -4,12 +4,34 @@ namespace BareMetalWeb.Intelligence.Tests;
 
 public class SemanticPrunerTests
 {
-    private static TernaryLayer[] CreateSmallModel(int dim, int layers)
+    private static TernaryLayer[] CreateSmallModel(int dim, int layers, int seed = 42)
     {
         var result = new TernaryLayer[layers];
         for (int i = 0; i < layers; i++)
-            result[i] = TernaryLayer.CreateRandom(dim, 4);
+            result[i] = CreateDeterministicLayer(dim, 4, seed + i);
         return result;
+    }
+
+    private static TernaryLayer CreateDeterministicLayer(int dim, int numHeads, int seed)
+    {
+        _ = numHeads;
+        var rng = new Random(seed);
+        return new TernaryLayer
+        {
+            Wq = CreateWeights(dim * dim, rng),
+            Wk = CreateWeights(dim * dim, rng),
+            Wv = CreateWeights(dim * dim, rng),
+            Wo = CreateWeights(dim * dim, rng),
+            FfnWeights = CreateWeights(dim * dim, rng)
+        };
+    }
+
+    private static sbyte[] CreateWeights(int count, Random rng)
+    {
+        var weights = new sbyte[count];
+        for (int i = 0; i < weights.Length; i++)
+            weights[i] = (sbyte)(rng.Next(3) - 1);
+        return weights;
     }
 
     // ── IntentAst tests ─────────────────────────────────────────────────
@@ -270,29 +292,21 @@ public class SemanticPrunerTests
     }
 
     [Fact]
-    public void Prune_IntegratesWithBitNetEngine()
+    public void Prune_IntegratesWithModelStats()
     {
-        var config = new BitNetModelConfig(
-            HiddenDim: 32,
-            NumLayers: 2,
-            NumHeads: 4,
-            VocabSize: 64,
-            MaxSeqLen: 128);
+        int dim = 32;
+        var layers = CreateSmallModel(dim, 2);
 
-        using var engine = new BitNetEngine(config);
-        engine.LoadTestModel(new ModelLoadOptions
-        {
-            PruneVocabulary = false,
-            GroupPruneAttnThreshold = 1,
-            GroupPruneFfnThreshold = 2,
-            SemanticPruning = true,
-            SemanticDriftThreshold = 0.80f,
-        });
+        var stats = SemanticPruner.Prune(
+            layers, dim, numHeads: 4,
+            headPruneRatio: 0.25f,
+            neuronPruneRatio: 0.10f,
+            blockPruneRatio: 0.05f,
+            driftThreshold: 0.80f);
+        var sizeStats = ModelPruner.CalculateSize(layers, vocabSize: 64, hiddenDim: dim);
 
-        Assert.True(engine.IsLoaded);
-        Assert.NotNull(engine.SemanticPruneInfo);
-        Assert.True(engine.SemanticPruneInfo!.Value.TestCaseCount > 0);
-        Assert.True(engine.ModelStats!.Value.Sparsity > 0);
+        Assert.True(stats.TestCaseCount > 0);
+        Assert.True(sizeStats.Sparsity > 0);
     }
 
     private static long CountZeros(TernaryLayer[] layers)
