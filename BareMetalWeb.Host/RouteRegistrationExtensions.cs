@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Host;
 using BareMetalWeb.Core.Interfaces;
+using BareMetalWeb.ControlPlane;
 using BareMetalWeb.Data;
 using BareMetalWeb.Interfaces;
 using BareMetalWeb.Rendering;
@@ -3955,6 +3956,184 @@ public static class RouteRegistrationExtensions
             await DataStoreProvider.Current.DeleteAsync<DeploymentNode>(key, context.RequestAborted).ConfigureAwait(false);
             context.Response.StatusCode = 204;
         }));
+
+        // ── GET /api/runtime/capsule/{nodeId} — policy-gated runtime capsule issuance ──
+        host.RegisterRoute("GET /api/runtime/capsule/{id}", new RouteHandlerData(raw, async context =>
+        {
+            var nodeId = GetRouteParam(context, "id");
+            if (string.IsNullOrEmpty(nodeId)) { context.Response.StatusCode = 400; return; }
+
+            // ── 1. Authenticate node via Bearer token ──
+            var authHeader = context.HttpRequest.Headers["Authorization"].ToString();
+            if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith("Bearer ", StringComparison.Ordinal))
+            {
+                WriteCapsuleDenied(context, 401, CapsuleDenialReason.AuthenticationFailed);
+                return;
+            }
+            var secret = authHeader.AsSpan(7).ToString();
+
+            var nodes = DataStoreProvider.Current.Query<DeploymentNode>(new QueryDefinition
+            {
+                Clauses = new List<QueryClause>
+                {
+                    new() { Field = "NodeId", Operator = QueryOperator.Equals, Value = nodeId }
+                },
+                Top = 1
+            }).ToList();
+
+            if (nodes.Count == 0)
+            {
+                WriteCapsuleDenied(context, 403, CapsuleDenialReason.NodeNotFound);
+                return;
+            }
+            var node = nodes[0];
+
+            var secretHash = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(
+                    System.Text.Encoding.UTF8.GetBytes(secret))).ToLowerInvariant();
+            if (!string.Equals(node.SecretHash, secretHash, StringComparison.OrdinalIgnoreCase))
+            {
+                WriteCapsuleDenied(context, 401, CapsuleDenialReason.AuthenticationFailed);
+                return;
+            }
+
+            // ── 2. Identity verification ──
+            if (node.Status == NodeStatus.Revoked)
+            {
+                WriteCapsuleDenied(context, 403, CapsuleDenialReason.NodeRevoked);
+                return;
+            }
+
+            if (!node.IsEnabled)
+            {
+                WriteCapsuleDenied(context, 403, CapsuleDenialReason.NodeDisabled);
+                return;
+            }
+
+            var requestFingerprint = context.HttpRequest.Headers["X-BMW-Fingerprint"].ToString();
+            if (!string.IsNullOrEmpty(node.Fingerprint)
+                && !string.IsNullOrEmpty(requestFingerprint)
+                && !string.Equals(node.Fingerprint, requestFingerprint, StringComparison.OrdinalIgnoreCase))
+            {
+                WriteCapsuleDenied(context, 403, CapsuleDenialReason.FingerprintMismatch);
+                return;
+            }
+
+            // ── 3. Extract request context ──
+            var requestIp = context.Connection.RemoteIpAddress?.ToString() ?? "";
+            var requestAsn = context.HttpRequest.Headers["X-BMW-ASN"].ToString();
+            var requestRegion = context.HttpRequest.Headers["X-BMW-Region"].ToString();
+
+            // ── 4. Telemetry behaviour check ──
+            var now = DateTime.UtcNow;
+            var telemetryThresholdSeconds = 300; // 5 minutes
+            bool abruptStop = !node.LastShutdownClean
+                && node.LastTelemetryUtc != default
+                && (now - node.LastTelemetryUtc).TotalSeconds < telemetryThresholdSeconds;
+
+            // ── 5. Network policy evaluation ──
+            bool ipChanged = !string.IsNullOrEmpty(node.LastKnownIp)
+                && !string.IsNullOrEmpty(requestIp)
+                && !string.Equals(node.LastKnownIp, requestIp, StringComparison.OrdinalIgnoreCase);
+            bool asnChanged = !string.IsNullOrEmpty(node.LastKnownAsn)
+                && !string.IsNullOrEmpty(requestAsn)
+                && !string.Equals(node.LastKnownAsn, requestAsn, StringComparison.OrdinalIgnoreCase);
+            bool regionChanged = !string.IsNullOrEmpty(node.LastKnownRegion)
+                && !string.IsNullOrEmpty(requestRegion)
+                && !string.Equals(node.LastKnownRegion, requestRegion, StringComparison.OrdinalIgnoreCase);
+
+            int riskScore = 0;
+            if (ipChanged) riskScore += 20;
+            if (asnChanged) riskScore += 40;
+            if (regionChanged) riskScore += 50;
+            if (abruptStop) riskScore += 80;
+
+            if (riskScore >= 80)
+            {
+                node.Status = NodeStatus.Quarantined;
+                await DataStoreProvider.Current.SaveAsync(node, context.RequestAborted).ConfigureAwait(false);
+                WriteCapsuleDenied(context, 403, CapsuleDenialReason.NetworkPolicyViolation, riskScore);
+                return;
+            }
+
+            // ── 6. Derive runtime key via HKDF and build capsule envelope ──
+            var runtimeVersion = node.CurrentVersion;
+            if (string.IsNullOrEmpty(runtimeVersion)) runtimeVersion = "0.0.0";
+
+            // IKM: cluster master key derived from machine-id (same as SynchronousEncryption)
+            var ikm = System.Security.Cryptography.HKDF.DeriveKey(
+                System.Security.Cryptography.HashAlgorithmName.SHA256,
+                System.Text.Encoding.UTF8.GetBytes(
+                    File.Exists("/etc/machine-id")
+                        ? File.ReadAllText("/etc/machine-id").Trim()
+                        : Environment.MachineName),
+                32,
+                System.Text.Encoding.UTF8.GetBytes("BareMetalWeb.CapsuleMaster.v1"),
+                System.Text.Encoding.UTF8.GetBytes("capsule-master"));
+
+            // Derive per-node runtime key: HKDF(masterKey, nodeId + fingerprint + version)
+            var info = $"{nodeId}:{node.Fingerprint}:{runtimeVersion}";
+            var runtimeKey = System.Security.Cryptography.HKDF.DeriveKey(
+                System.Security.Cryptography.HashAlgorithmName.SHA256,
+                ikm,
+                32,
+                System.Text.Encoding.UTF8.GetBytes("BareMetalWeb.RuntimeCapsule.v1"),
+                System.Text.Encoding.UTF8.GetBytes(info));
+
+            var expiresUtc = now.AddHours(24);
+            var capsuleId = Guid.NewGuid().ToString("N");
+
+            // Sign capsule: HMAC-SHA256(runtimeKey, capsuleId + nodeId + expiry)
+            var signatureInput = System.Text.Encoding.UTF8.GetBytes($"{capsuleId}:{nodeId}:{expiresUtc:O}");
+            var signature = System.Security.Cryptography.HMACSHA256.HashData(runtimeKey, signatureInput);
+
+            // ── 7. Update node state ──
+            if (!string.IsNullOrEmpty(requestFingerprint) && string.IsNullOrEmpty(node.Fingerprint))
+                node.Fingerprint = requestFingerprint;
+            if (!string.IsNullOrEmpty(requestIp)) node.LastKnownIp = requestIp;
+            if (!string.IsNullOrEmpty(requestAsn)) node.LastKnownAsn = requestAsn;
+            if (!string.IsNullOrEmpty(requestRegion)) node.LastKnownRegion = requestRegion;
+            node.LastCapsuleIssuedUtc = now;
+            node.LastHeartbeatUtc = now;
+            await DataStoreProvider.Current.SaveAsync(node, context.RequestAborted).ConfigureAwait(false);
+
+            // ── 8. Write capsule response ──
+            context.Response.StatusCode = 200;
+            context.Response.ContentType = "application/json";
+            await using var w = new Utf8JsonWriter(context.Response.Body, s_compactWriterOptions);
+            w.WriteStartObject();
+            w.WriteString("capsuleId", capsuleId);
+            w.WriteString("nodeId", nodeId);
+            w.WriteString("runtimeKey", Convert.ToBase64String(runtimeKey));
+            w.WriteString("expiresUtc", expiresUtc.ToString("O"));
+            w.WriteString("signature", Convert.ToHexString(signature).ToLowerInvariant());
+            w.WriteString("servicePrincipal", node.ClusterEndpoint);
+            w.WriteNumber("riskScore", riskScore);
+            w.WriteEndObject();
+        }));
+    }
+
+    /// <summary>Write a JSON denial response for capsule requests.</summary>
+    private static void WriteCapsuleDenied(
+        BmwContext context, int statusCode,
+        CapsuleDenialReason reason, int riskScore = 0)
+    {
+        context.Response.StatusCode = statusCode;
+        context.Response.ContentType = "application/json";
+        var reasonStr = reason switch
+        {
+            CapsuleDenialReason.NodeNotFound => "NODE_NOT_FOUND",
+            CapsuleDenialReason.NodeRevoked => "NODE_REVOKED",
+            CapsuleDenialReason.FingerprintMismatch => "FINGERPRINT_MISMATCH",
+            CapsuleDenialReason.NetworkPolicyViolation => "NETWORK_POLICY_VIOLATION",
+            CapsuleDenialReason.NodeDisabled => "NODE_DISABLED",
+            CapsuleDenialReason.AuthenticationFailed => "AUTHENTICATION_FAILED",
+            _ => "DENIED"
+        };
+        var json = riskScore > 0
+            ? $"{{\"denied\":true,\"reason\":\"{reasonStr}\",\"riskScore\":{riskScore}}}"
+            : $"{{\"denied\":true,\"reason\":\"{reasonStr}\"}}";
+        context.Response.Body.WriteAsync(System.Text.Encoding.UTF8.GetBytes(json));
     }
 
     /// <summary>
