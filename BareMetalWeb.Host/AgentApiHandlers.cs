@@ -13,7 +13,8 @@ namespace BareMetalWeb.Host;
 public static class AgentApiHandlers
 {
     private static IBufferedLogger? _logger;
-    private static IntelligenceOrchestrator? _orchestrator;
+    private static volatile IntelligenceOrchestrator? _orchestrator;
+    private static readonly object _orchestratorLock = new();
 
     /// <summary>
     /// Optionally supply a logger before the first chat request.
@@ -31,18 +32,27 @@ public static class AgentApiHandlers
     /// </summary>
     public static IntelligenceOrchestrator GetOrCreateOrchestrator()
     {
-        if (_orchestrator is not null)
+        // Fast path — volatile read, no lock
+        var existing = _orchestrator;
+        if (existing is not null)
+            return existing;
+
+        // Slow path — double-checked lock to avoid duplicate BitNet engines
+        lock (_orchestratorLock)
+        {
+            if (_orchestrator is not null)
+                return _orchestrator;
+
+            var engine = new BitNetEngine();
+            var modelPath = Path.Combine(AppContext.BaseDirectory, "model.bmwm");
+            if (File.Exists(modelPath))
+                engine.LoadSnapshotLazy(modelPath);
+
+            var tools = AdminToolCatalogue.CreateRegistry();
+
+            _orchestrator = new IntelligenceOrchestrator(engine, tools);
             return _orchestrator;
-
-        var engine = new BitNetEngine();
-        var modelPath = Path.Combine(AppContext.BaseDirectory, "model.bmwm");
-        if (File.Exists(modelPath))
-            engine.LoadSnapshotLazy(modelPath);
-
-        var tools = AdminToolCatalogue.CreateRegistry();
-
-        _orchestrator = new IntelligenceOrchestrator(engine, tools);
-        return _orchestrator;
+        }
     }
 
     /// <summary>POST /api/agent/chat</summary>

@@ -102,7 +102,12 @@ public sealed class IntentClassifier
     public IntentResult Classify(ReadOnlySpan<char> query)
     {
         if (query.IsEmpty) return IntentResult.Empty;
-        var lower = query.ToString().ToLowerInvariant().Trim();
+        // Avoid ToLowerInvariant() string allocation — lower in-place on stack
+        var trimmed = query.Trim();
+        int len = trimmed.Length;
+        Span<char> buf = len <= 512 ? stackalloc char[len] : new char[len];
+        trimmed.ToLowerInvariant(buf);
+        var lower = new string(buf);
         return ClassifyCore(lower);
     }
 
@@ -122,7 +127,12 @@ public sealed class IntentClassifier
         if (string.IsNullOrWhiteSpace(query))
             return ValueTask.FromResult(IntentResult.Empty);
 
-        var lower = query.ToLowerInvariant().Trim();
+        // Avoid ToLowerInvariant() string allocation — lower in-place on stack
+        var trimmed = query.AsSpan().Trim();
+        int len = trimmed.Length;
+        Span<char> buf = len <= 512 ? stackalloc char[len] : new char[len];
+        trimmed.ToLowerInvariant(buf);
+        var lower = new string(buf);
         return ValueTask.FromResult(ClassifyCore(lower));
         // NOTE: Real-model fallback is intentionally deferred until a properly-imported
         //       .bmwm snapshot is available. The random-weight test model does not produce
@@ -295,7 +305,7 @@ public sealed class IntentClassifier
             while (valEnd < span.Length && span[valEnd] != ' ' && span[valEnd] != ',' && span[valEnd] != ';')
                 valEnd++;
 
-            string val = span[valStart..valEnd].Trim().ToString();
+            string val = SanitiseFieldValue(span[valStart..valEnd].Trim().ToString());
             if (val.Length > 0)
             {
                 fields ??= new Dictionary<string, string>(TypicalFormFieldCount, StringComparer.OrdinalIgnoreCase);
@@ -306,6 +316,26 @@ public sealed class IntentClassifier
         }
 
         return fields;
+    }
+
+    /// <summary>
+    /// Strip HTML-special characters from user input before using as form field values.
+    /// Prevents XSS if the frontend renders FormFields unsafely.
+    /// </summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    private static string SanitiseFieldValue(string s)
+    {
+        if (s.Length == 0) return s;
+        bool needsEscape = false;
+        foreach (char c in s)
+        {
+            if (c is '<' or '>' or '&' or '"' or '\'')
+            { needsEscape = true; break; }
+        }
+        if (!needsEscape) return s;
+        return s.Replace("&", "&amp;").Replace("<", "&lt;")
+                .Replace(">", "&gt;").Replace("\"", "&quot;")
+                .Replace("'", "&#39;");
     }
 }
 
