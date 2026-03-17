@@ -1871,7 +1871,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             var fileName = Path.GetFileNameWithoutExtension(path);
             var fileContext = $"schema:{fileName}";
             var bytes = EncryptedFileIO.ReadDecrypted(path, fileContext);
-            return JsonSerializer.Deserialize(bytes, BmwDataJsonContext.Default.SchemaDefinitionFile);
+            return ManualJsonHelper.DeserializeObject(bytes, ManualJsonHelper.ReadSchemaDefinitionFile);
         }
         catch (Exception ex)
         {
@@ -1883,7 +1883,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
     private void SaveSchemaFile(Type type, SchemaDefinitionFile schema)
     {
         var path  = GetSchemaFilePath(type, schema.Version);
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(schema, BmwDataJsonContext.Default.SchemaDefinitionFile);
+        var bytes = ManualJsonHelper.SerializeObjectToUtf8(schema, ManualJsonHelper.WriteSchemaDefinitionFile);
         var fileContext = $"schema:{type.Name}:{schema.Version}";
         EncryptedFileIO.WriteEncrypted(path, bytes, fileContext);
     }
