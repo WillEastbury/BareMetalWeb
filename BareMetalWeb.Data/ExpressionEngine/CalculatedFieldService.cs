@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using BareMetalWeb.Core;
 
@@ -196,15 +194,12 @@ public static class CalculatedFieldService
         }
     }
 
-    [UnconditionalSuppressMessage("Trimming", "IL2067",
-        Justification = "Fallback reflection path for types not registered with DataScaffold. Production entities use the metadata path which is AOT-safe.")]
     private static List<CalculatedFieldInfo> GetCalculatedFields(Type type)
     {
         return _calculatedFieldsByType.GetOrAdd(type, static t =>
         {
             var fields = new List<CalculatedFieldInfo>();
 
-            // Prefer metadata-driven lookup (no reflection) over CLR attribute scanning.
             var meta = DataScaffold.GetEntityByType(t);
             if (meta != null)
             {
@@ -218,31 +213,9 @@ public static class CalculatedFieldService
                     var dependencies = ExtractDependencies(expression);
                     fields.Add(new CalculatedFieldInfo(f.Name, f.ClrType, f.SetValueFn, attr, expression, dependencies));
                 }
-                return fields;
             }
-
-            // Fallback for types not registered with DataScaffold (e.g. test helpers or embedded child types).
-            // Scans CLR attributes once and caches the result — not a hot-path concern.
-            return ScanCalculatedFieldsViaReflection(t);
+            return fields;
         });
-    }
-
-    [UnconditionalSuppressMessage("Trimming", "IL2070",
-        Justification = "Fallback for types not registered with DataScaffold. Production entities use the metadata path above.")]
-    private static List<CalculatedFieldInfo> ScanCalculatedFieldsViaReflection(Type t)
-    {
-        var fields = new List<CalculatedFieldInfo>();
-        foreach (var prop in t.GetProperties())
-        {
-            var attr = prop.GetCustomAttribute<CalculatedFieldAttribute>();
-            if (attr == null || string.IsNullOrWhiteSpace(attr.Expression))
-                continue;
-
-            var expression = GetCompiledExpression(attr.Expression);
-            var dependencies = ExtractDependencies(expression);
-            fields.Add(new CalculatedFieldInfo(prop.Name, prop.PropertyType, PropertyAccessorFactory.BuildSetter(prop), attr, expression, dependencies));
-        }
-        return fields;
     }
 
     private static List<CalculatedFieldInfo> GetCalculatedFieldsInDependencyOrder(Type type)
@@ -345,22 +318,16 @@ public static class CalculatedFieldService
             foreach (var field in layout.Fields)
             {
                 try { context[field.Name] = field.Getter(instance); }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"CalculatedFieldService: field '{field.Name}' getter failed: {ex.Message}"); context[field.Name] = null; }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"CalculatedFieldService: field '{field.Name}' getter failed: {ex.Message}");
+                    context[field.Name] = null;
+                }
             }
             return context;
         }
 
-        // Fallback for types without DataScaffold metadata (e.g. test entities)
-        var props = type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-        var fallback = new Dictionary<string, object?>(props.Length + 4);
-        fallback["Key"] = instance.Key;
-        foreach (var prop in props)
-        {
-            if (!prop.CanRead) continue;
-            try { fallback[prop.Name] = prop.GetValue(instance); }
-            catch { fallback[prop.Name] = null; }
-        }
-        return fallback;
+        return new Dictionary<string, object?>(1) { ["Key"] = instance.Key };
     }
 
     private static bool HasCycle(

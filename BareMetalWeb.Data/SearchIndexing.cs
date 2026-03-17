@@ -6,7 +6,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -404,24 +403,10 @@ public sealed class SearchIndexManager
                 };
             }
 
-            // Fallback: scan properties for [DataIndex] attributes when DataScaffold metadata is unavailable
-            var props = t.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-            var fallbackFields = new List<IndexedFieldAccessor>();
-            var fallbackKinds = new HashSet<IndexKind>(4);
-            foreach (var prop in props)
-            {
-                var attr = prop.GetCustomAttribute<DataIndexAttribute>();
-                if (attr != null && prop.CanRead)
-                {
-                    var getter = new Func<object, object?>(obj => prop.GetValue(obj));
-                    fallbackFields.Add(new IndexedFieldAccessor(prop.Name, prop.PropertyType, getter, attr));
-                    fallbackKinds.Add(attr.Kind);
-                }
-            }
             return new TypeMetadata
             {
-                IndexedFields = fallbackFields.ToArray(),
-                IndexKinds = fallbackKinds
+                IndexedFields = Array.Empty<IndexedFieldAccessor>(),
+                IndexKinds = new HashSet<IndexKind>(0)
             };
         });
     }

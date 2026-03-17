@@ -1,55 +1,66 @@
+using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.ExpressionEngine;
 using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
 
+[DataEntity("Calculated Test", Slug = "calculatedtest")]
+public class CalculatedTestEntity : BaseDataObject
+{
+    [DataField] public int Quantity { get; set; }
+    [DataField] public decimal UnitPrice { get; set; }
+    [DataField] public decimal DiscountPercent { get; set; }
+
+    [DataField]
+    [CalculatedField(Expression = "Quantity * UnitPrice")]
+    public decimal Subtotal { get; set; }
+
+    [DataField]
+    [CalculatedField(Expression = "Subtotal * (1 - DiscountPercent / 100)")]
+    public decimal LineTotal { get; set; }
+}
+
+[DataEntity("Circular Test", Slug = "circulartest")]
+public class CircularTestEntity : BaseDataObject
+{
+    [DataField]
+    [CalculatedField(Expression = "B + 1")]
+    public decimal A { get; set; }
+
+    [DataField]
+    [CalculatedField(Expression = "A + 1")]
+    public decimal B { get; set; }
+}
+
+[DataEntity("Independent Test", Slug = "independenttest")]
+public class IndependentFieldsTestEntity : BaseDataObject
+{
+    [DataField] public decimal Price { get; set; }
+    [DataField] public decimal Tax { get; set; }
+
+    [DataField]
+    [CalculatedField(Expression = "Price * 1.1")]
+    public decimal PriceWithMarkup { get; set; }
+
+    [DataField]
+    [CalculatedField(Expression = "Price * Tax")]
+    public decimal TaxAmount { get; set; }
+}
+
 public class CalculatedFieldServiceTests
 {
-    private class TestEntity : BaseDataObject
+    public CalculatedFieldServiceTests()
     {
-        public int Quantity { get; set; }
-        public decimal UnitPrice { get; set; }
-        public decimal DiscountPercent { get; set; }
-
-        [CalculatedField(Expression = "Quantity * UnitPrice")]
-        public decimal Subtotal { get; set; }
-
-        [CalculatedField(Expression = "Subtotal * (1 - DiscountPercent / 100)")]
-        public decimal LineTotal { get; set; }
-
-        public TestEntity() : base("test") { }
-    }
-
-    private class CircularEntity : BaseDataObject
-    {
-        [CalculatedField(Expression = "B + 1")]
-        public decimal A { get; set; }
-
-        [CalculatedField(Expression = "A + 1")]
-        public decimal B { get; set; }
-
-        public CircularEntity() : base("test") { }
-    }
-
-    private class IndependentFieldsEntity : BaseDataObject
-    {
-        public decimal Price { get; set; }
-        public decimal Tax { get; set; }
-
-        [CalculatedField(Expression = "Price * 1.1")]
-        public decimal PriceWithMarkup { get; set; }
-
-        [CalculatedField(Expression = "Price * Tax")]
-        public decimal TaxAmount { get; set; }
-
-        public IndependentFieldsEntity() : base("test") { }
+        DataScaffold.RegisterEntity<CalculatedTestEntity>();
+        DataScaffold.RegisterEntity<CircularTestEntity>();
+        DataScaffold.RegisterEntity<IndependentFieldsTestEntity>();
     }
 
     [Fact]
     public void EvaluateCalculatedFields_SimpleCalculation_ComputesCorrectValue()
     {
-        var entity = new TestEntity
+        var entity = new CalculatedTestEntity
         {
             Quantity = 5,
             UnitPrice = 10.50m,
@@ -65,7 +76,7 @@ public class CalculatedFieldServiceTests
     [Fact]
     public void EvaluateCalculatedFields_WithDiscount_AppliesCorrectly()
     {
-        var entity = new TestEntity
+        var entity = new CalculatedTestEntity
         {
             Quantity = 10,
             UnitPrice = 20m,
@@ -81,7 +92,7 @@ public class CalculatedFieldServiceTests
     [Fact]
     public void EvaluateCalculatedFields_DependencyChain_EvaluatesInCorrectOrder()
     {
-        var entity = new TestEntity
+        var entity = new CalculatedTestEntity
         {
             Quantity = 3,
             UnitPrice = 15m,
@@ -101,7 +112,7 @@ public class CalculatedFieldServiceTests
     {
         Assert.Throws<InvalidOperationException>(() =>
         {
-            CalculatedFieldService.ValidateNoCycles(typeof(CircularEntity));
+            CalculatedFieldService.ValidateNoCycles(typeof(CircularTestEntity));
         });
     }
 
@@ -110,7 +121,7 @@ public class CalculatedFieldServiceTests
     {
         var exception = Record.Exception(() =>
         {
-            CalculatedFieldService.ValidateNoCycles(typeof(TestEntity));
+            CalculatedFieldService.ValidateNoCycles(typeof(CalculatedTestEntity));
         });
 
         Assert.Null(exception);
@@ -119,7 +130,7 @@ public class CalculatedFieldServiceTests
     [Fact]
     public void GetDependencies_ReturnsCorrectFieldNames()
     {
-        var deps = CalculatedFieldService.GetDependencies(typeof(TestEntity), "Subtotal");
+        var deps = CalculatedFieldService.GetDependencies(typeof(CalculatedTestEntity), "Subtotal");
 
         Assert.Contains("Quantity", deps);
         Assert.Contains("UnitPrice", deps);
@@ -129,7 +140,7 @@ public class CalculatedFieldServiceTests
     [Fact]
     public void GetDependencies_ForDependentField_IncludesOnlyDirectDependencies()
     {
-        var deps = CalculatedFieldService.GetDependencies(typeof(TestEntity), "LineTotal");
+        var deps = CalculatedFieldService.GetDependencies(typeof(CalculatedTestEntity), "LineTotal");
 
         Assert.Contains("Subtotal", deps);
         Assert.Contains("DiscountPercent", deps);
@@ -139,7 +150,7 @@ public class CalculatedFieldServiceTests
     [Fact]
     public void EvaluateCalculatedFields_IndependentFields_ComputesBoth()
     {
-        var entity = new IndependentFieldsEntity
+        var entity = new IndependentFieldsTestEntity
         {
             Price = 100m,
             Tax = 0.08m
@@ -154,7 +165,7 @@ public class CalculatedFieldServiceTests
     [Fact]
     public void GenerateJavaScript_ProducesValidJavaScriptCode()
     {
-        var js = CalculatedFieldService.GenerateJavaScript(typeof(TestEntity));
+        var js = CalculatedFieldService.GenerateJavaScript(typeof(CalculatedTestEntity));
 
         Assert.Contains("Subtotal", js);
         Assert.Contains("LineTotal", js);
@@ -175,7 +186,7 @@ public class CalculatedFieldServiceTests
     [Fact]
     public void EvaluateCalculatedFields_WithZeroValues_HandlesCorrectly()
     {
-        var entity = new TestEntity
+        var entity = new CalculatedTestEntity
         {
             Quantity = 0,
             UnitPrice = 0,
@@ -191,7 +202,7 @@ public class CalculatedFieldServiceTests
     [Fact]
     public void EvaluateCalculatedFields_WithDecimalPrecision_MaintainsPrecision()
     {
-        var entity = new TestEntity
+        var entity = new CalculatedTestEntity
         {
             Quantity = 3,
             UnitPrice = 10.333333m,
