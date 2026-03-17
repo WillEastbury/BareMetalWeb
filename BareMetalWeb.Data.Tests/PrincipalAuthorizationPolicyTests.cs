@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
 using Xunit;
@@ -24,6 +25,12 @@ public sealed class PrincipalAuthorizationPolicyTests : IDisposable
         _store = new DataObjectStore();
         _store.RegisterProvider(provider);
         DataStoreProvider.Current = _store;
+
+        // Register entity metadata so PrincipalAuthorizationPolicy helpers can
+        // resolve roles, usernames, and entity types via DataScaffold lookups.
+        DataScaffold.RegisterEntity<User>();
+        DataScaffold.RegisterEntity<SystemPrincipal>();
+        DataScaffold.RegisterEntity<AuditEntry>();
 
         _auditService = new AuditService(_store) { RunSynchronously = true };
     }
