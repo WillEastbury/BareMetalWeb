@@ -2,6 +2,8 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
+using BareMetalWeb.Data;
 using BareMetalWeb.Data.ExpressionEngine;
 using Xunit;
 
@@ -12,6 +14,11 @@ namespace BareMetalWeb.Data.Tests;
 /// </summary>
 public class ExpressionRelationshipTests
 {
+    public ExpressionRelationshipTests()
+    {
+        DataScaffold.RegisterEntity<OrderLineEntity>();
+    }
+
     // ── Test lookup resolver ──────────────────────────────────────────────────
 
     /// <summary>
@@ -523,18 +530,19 @@ public class ExpressionRelationshipTests
 
     // ── EvaluateCalculatedFieldsAsync with parentContext ─────────────────────
 
-    private class OrderLineEntity : BaseDataObject
+    [DataEntity("Order Line Test", Slug = "orderlinetest")]
+    public class OrderLineEntity : BaseDataObject
     {
-        public string ProductId { get; set; } = string.Empty;
-        public decimal UnitPrice { get; set; }
+        [DataField] public string ProductId { get; set; } = string.Empty;
+        [DataField] public decimal UnitPrice { get; set; }
 
+        [DataField]
         [CalculatedField(Expression = "Parent.DiscountPercent")]
         public decimal CustomerDiscount { get; set; }
 
+        [DataField]
         [CalculatedField(Expression = "UnitPrice * (1 - Parent.DiscountPercent / 100)")]
         public decimal DiscountedPrice { get; set; }
-
-        public OrderLineEntity() : base("test") { }
     }
 
     [Fact]
