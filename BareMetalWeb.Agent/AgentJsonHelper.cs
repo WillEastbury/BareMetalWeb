@@ -24,7 +24,7 @@ internal static class AgentJsonHelper
             w.WriteString("ring", identity.Ring.ToString());
             w.WriteEndObject();
         }
-        return System.Text.Encoding.UTF8.GetString(buffer.ToArray());
+        return System.Text.Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
     }
 
     public static NodeIdentity DeserializeNodeIdentity(string json)

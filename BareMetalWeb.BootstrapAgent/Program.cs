@@ -202,7 +202,7 @@ static RuntimeResponse ReadRuntimeResponse(string json)
         r.TryGetProperty("desiredVersion", out var dv) ? dv.GetString() : null,
         r.TryGetProperty("sha256", out var sha) ? sha.GetString() : null,
         r.TryGetProperty("downloadUrl", out var du) ? du.GetString() : null,
-        r.TryGetProperty("pollSeconds", out var ps) && ps.ValueKind == JsonValueKind.Number ? ps.GetInt32() : 0
+        r.TryGetProperty("pollSeconds", out var ps) && ps.TryGetInt32(out var pollVal) ? pollVal : 0
     );
 }
 
