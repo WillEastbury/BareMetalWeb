@@ -29,12 +29,6 @@ public sealed class ControlPlaneClient
         Timeout = TimeSpan.FromSeconds(10),
     };
 
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-    };
-
     public ControlPlaneClient(string baseUrl, string apiKey, IBufferedLogger? logger = null)
     {
         _baseUrl = baseUrl.TrimEnd('/');
@@ -99,12 +93,12 @@ public sealed class ControlPlaneClient
     public Task<bool> TrySendAsync<T>(string entityType, T payload)
     {
         if (!IsConfigured) return Task.FromResult(false);
-        var json = JsonSerializer.Serialize(payload, JsonOpts);
+        var json = ControlPlaneJsonHelper.SerializeObject(payload);
         return TrySendRawAsync(entityType, json);
     }
 
     /// <summary>Serialise <paramref name="payload"/> to a JSON string without sending it.</summary>
-    public string Serialize<T>(T payload) => JsonSerializer.Serialize(payload, JsonOpts);
+    public string Serialize<T>(T payload) => ControlPlaneJsonHelper.SerializeObject(payload);
 
     /// <summary>
     /// Query the control plane for the upgrade status of a specific instance.
@@ -140,7 +134,7 @@ public sealed class ControlPlaneClient
                 return null;
             }
             var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            return JsonSerializer.Deserialize<RuntimeResponse>(json, JsonOpts);
+            return ControlPlaneJsonHelper.DeserializeRuntimeResponse(json);
         }
         catch (HttpRequestException ex)
         {
@@ -217,7 +211,7 @@ public sealed class ControlPlaneClient
     {
         try
         {
-            var json    = JsonSerializer.Serialize(request, JsonOpts);
+            var json    = ControlPlaneJsonHelper.Serialize(request);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             using var req = new HttpRequestMessage(
                 HttpMethod.Post,
@@ -238,7 +232,7 @@ public sealed class ControlPlaneClient
             }
 
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            return JsonSerializer.Deserialize<NodeIdentity>(body, JsonOpts);
+            return ControlPlaneJsonHelper.DeserializeNodeIdentity(body);
         }
         catch (Exception ex)
         {
@@ -262,7 +256,7 @@ public sealed class ControlPlaneClient
     {
         try
         {
-            var json    = JsonSerializer.Serialize(request, JsonOpts);
+            var json    = ControlPlaneJsonHelper.Serialize(request);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             using var req = new HttpRequestMessage(
                 HttpMethod.Post,
@@ -292,7 +286,7 @@ public sealed class ControlPlaneClient
         {
             try
             {
-                var json = JsonSerializer.Serialize(payload, JsonOpts);
+                var json = ControlPlaneJsonHelper.SerializeObject(payload);
                 using var content = new StringContent(json, Encoding.UTF8, "application/json");
                 using var request = new HttpRequestMessage(HttpMethod.Post,
                     $"{_baseUrl}/api/data/{entityType}");
@@ -330,7 +324,7 @@ public sealed class ControlPlaneClient
                 return null;
             }
             var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            return JsonSerializer.Deserialize<T>(json, JsonOpts);
+            return ControlPlaneJsonHelper.DeserializeObject<T>(json);
         }
         catch (Exception ex)
         {
