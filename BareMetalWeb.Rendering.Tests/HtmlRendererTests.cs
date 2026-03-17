@@ -71,7 +71,7 @@ internal sealed class StubBareWebHost : IBareWebHost
     public static string[] appMetaDataKeys { get; set; } = Array.Empty<string>();
 
     public WebApplication app { get; set; } = null!;
-    public IBufferedLogger BufferedLogger => null!;
+    public IBufferedLogger BufferedLogger { get; } = new NoOpBufferedLogger();
     public IMetricsTracker Metrics { get; set; } = null!;
     public IClientRequestTracker ClientRequests => null!;
     public IHtmlRenderer HtmlRenderer => null!;
@@ -106,6 +106,15 @@ internal sealed class StubBareWebHost : IBareWebHost
     public Task RenderForbidden(BmwContext context) => Task.CompletedTask;
     public Task RequestHandler(BmwContext context) => Task.CompletedTask;
     public Task WireUpRequestHandlingAndLoggerAsyncLifetime() => Task.CompletedTask;
+}
+
+internal sealed class NoOpBufferedLogger : IBufferedLogger
+{
+    public void LogInfo(string message) { }
+    public void LogError(string message, Exception ex) { }
+    public Task RunAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    public void OnApplicationStopping(CancellationTokenSource cts, Task loggerTask) { }
+    public bool IsEnabled(BmwLogLevel level) => false;
 }
 
 #endregion
