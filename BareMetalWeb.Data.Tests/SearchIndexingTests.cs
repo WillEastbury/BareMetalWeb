@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
@@ -9,20 +10,50 @@ using Xunit;
 
 namespace BareMetalWeb.Data.Tests;
 
-// Test data object for indexing tests
+// Test data object for multi-index-kind tests (no shipped entity has all 4 kinds)
+[DataEntity("Test Searchable Item", Slug = "testsearchableitem")]
 public class TestSearchableItem : BaseDataObject
 {
-    [DataIndex(IndexKind.Inverted)]
+    [DataField] [DataIndex(IndexKind.Inverted)]
     public string? Name { get; set; }
-    
-    [DataIndex(IndexKind.BTree)]
+
+    [DataField] [DataIndex(IndexKind.BTree)]
     public string? Category { get; set; }
-    
-    [DataIndex(IndexKind.Treap)]
+
+    [DataField] [DataIndex(IndexKind.Treap)]
     public string? Tags { get; set; }
-    
-    [DataIndex(IndexKind.Bloom)]
+
+    [DataField] [DataIndex(IndexKind.Bloom)]
     public string? Description { get; set; }
+}
+
+// Edge-case test entities — no shipped entity has these field types
+[DataEntity("List Field Test", Slug = "listfieldtest")]
+public class ListFieldEntity : BaseDataObject
+{
+    [DataField] [DataIndex]
+    public List<string> Tags { get; set; } = new();
+}
+
+[DataEntity("Nullable Int Test", Slug = "nullableinttest")]
+public class NullableIntEntity : BaseDataObject
+{
+    [DataField] [DataIndex]
+    public int? Score { get; set; }
+}
+
+[DataEntity("Int List Test", Slug = "intlisttest")]
+public class IntListEntity : BaseDataObject
+{
+    [DataField] [DataIndex]
+    public List<int> Values { get; set; } = new();
+}
+
+[DataEntity("BTree Test", Slug = "btreetest")]
+public class BTreeEntity : BaseDataObject
+{
+    [DataField] [DataIndex(IndexKind.BTree)]
+    public string Label { get; set; } = string.Empty;
 }
 
 public class SearchIndexingTests : IDisposable
@@ -36,6 +67,16 @@ public class SearchIndexingTests : IDisposable
         _testRoot = Path.Combine(Path.GetTempPath(), "BareMetalWeb_SearchIndexing_Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testRoot);
         _logger = new TestBufferedLogger();
+
+        DataScaffold.RegisterEntity<AppSetting>();
+        DataScaffold.RegisterEntity<User>();
+        DataScaffold.RegisterEntity<AuditEntry>();
+        DataScaffold.RegisterEntity<TestSearchableItem>();
+        DataScaffold.RegisterEntity<ListFieldEntity>();
+        DataScaffold.RegisterEntity<NullableIntEntity>();
+        DataScaffold.RegisterEntity<IntListEntity>();
+        DataScaffold.RegisterEntity<BTreeEntity>();
+
         _manager = new SearchIndexManager(_testRoot, logger: null);
     }
 
@@ -271,42 +312,9 @@ public class SearchIndexingTests : IDisposable
 
     // --- Test entities ---
 
-    private class SimpleEntity : BaseDataObject
-    {
-        [DataIndex]
-        public string Name { get; set; } = string.Empty;
-    }
-
-    private class MultiFieldEntity : BaseDataObject
-    {
-        [DataIndex]
-        public string Title { get; set; } = string.Empty;
-
-        [DataIndex]
-        public string Description { get; set; } = string.Empty;
-    }
-
-    private class IntFieldEntity : BaseDataObject
-    {
-        [DataIndex]
-        public int Code { get; set; }
-    }
-
-    private class ListFieldEntity : BaseDataObject
-    {
-        [DataIndex]
-        public List<string> Tags { get; set; } = new();
-    }
-
     private class NoIndexEntity : BaseDataObject
     {
         public string Value { get; set; } = string.Empty;
-    }
-
-    private class NullableIntEntity : BaseDataObject
-    {
-        [DataIndex]
-        public int? Score { get; set; }
     }
 
     // --- HasIndexedFields ---
@@ -315,12 +323,12 @@ public class SearchIndexingTests : IDisposable
     public void HasIndexedFields_TypeWithAttribute_ReturnsTrue()
     {
         // Act
-        var result = _manager.HasIndexedFields(typeof(SimpleEntity), out var fields);
+        var result = _manager.HasIndexedFields(typeof(AppSetting), out var fields);
 
         // Assert
         Assert.True(result);
         Assert.Single(fields);
-        Assert.Equal("Name", fields[0].Name);
+        Assert.Equal("SettingId", fields[0].Name);
     }
 
     [Fact]
@@ -338,13 +346,13 @@ public class SearchIndexingTests : IDisposable
     public void HasIndexedFields_MultiFieldEntity_ReturnsAllIndexedFields()
     {
         // Act
-        var result = _manager.HasIndexedFields(typeof(MultiFieldEntity), out var fields);
+        var result = _manager.HasIndexedFields(typeof(User), out var fields);
 
         // Assert
         Assert.True(result);
         Assert.Equal(2, fields.Count);
-        Assert.Contains(fields, f => f.Name == "Title");
-        Assert.Contains(fields, f => f.Name == "Description");
+        Assert.Contains(fields, f => f.Name == "UserName");
+        Assert.Contains(fields, f => f.Name == "Email");
     }
 
     // --- Index building and search ---
@@ -353,11 +361,11 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_And_Search_FindsByExactToken()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "Hello World" };
+        var entity = new AppSetting { Key = 1, SettingId = "Hello World" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "hello", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "hello", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -367,11 +375,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_CaseInsensitive_FindsMatch()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "FooBar" };
+        var entity = new AppSetting { Key = 1, SettingId = "FooBar" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "FOOBAR", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "FOOBAR", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -381,13 +389,13 @@ public class SearchIndexingTests : IDisposable
     public void Search_MultipleTokensInQuery_FindsAll()
     {
         // Arrange
-        var e1 = new SimpleEntity { Key = 1, Name = "alpha" };
-        var e2 = new SimpleEntity { Key = 2, Name = "beta" };
+        var e1 = new AppSetting { Key = 1, SettingId = "alpha" };
+        var e2 = new AppSetting { Key = 2, SettingId = "beta" };
         _manager.IndexObject(e1);
         _manager.IndexObject(e2);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "alpha beta", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "alpha beta", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -398,11 +406,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_NoMatch_ReturnsEmpty()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "Hello" };
+        var entity = new AppSetting { Key = 1, SettingId = "Hello" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "xyz", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "xyz", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Empty(results);
@@ -412,11 +420,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_PrefixMatch_FindsToken()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "programming" };
+        var entity = new AppSetting { Key = 1, SettingId = "programming" };
         _manager.IndexObject(entity);
 
         // Act - "pro" is a 3-char prefix that should match via prefix tree
-        var results = _manager.Search(typeof(SimpleEntity), "pro", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "pro", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -428,17 +436,17 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_MultiField_SearchFindsFromEitherField()
     {
         // Arrange
-        var entity = new MultiFieldEntity
+        var entity = new User
         {
             Key = 1,
-            Title = "Widgets",
-            Description = "Industrial gadgets"
+            UserName = "Widgets",
+            Email = "Industrial gadgets"
         };
         _manager.IndexObject(entity);
 
         // Act
-        var byTitle = _manager.Search(typeof(MultiFieldEntity), "widgets", () => Array.Empty<BaseDataObject>());
-        var byDesc = _manager.Search(typeof(MultiFieldEntity), "gadgets", () => Array.Empty<BaseDataObject>());
+        var byTitle = _manager.Search(typeof(User), "widgets", () => Array.Empty<BaseDataObject>());
+        var byDesc = _manager.Search(typeof(User), "gadgets", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, byTitle);
@@ -451,11 +459,11 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_IntField_SearchByNumberString()
     {
         // Arrange
-        var entity = new IntFieldEntity { Key = 1, Code = 42 };
+        var entity = new AuditEntry { Key = 1, EntityKey = 42 };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(IntFieldEntity), "42", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AuditEntry), "42", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -483,14 +491,14 @@ public class SearchIndexingTests : IDisposable
     public void Search_TokenizesOnPunctuation()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "foo-bar_baz.qux" };
+        var entity = new AppSetting { Key = 1, SettingId = "foo-bar_baz.qux" };
         _manager.IndexObject(entity);
 
         // Act - each word between separators is a token
-        var r1 = _manager.Search(typeof(SimpleEntity), "foo", () => Array.Empty<BaseDataObject>());
-        var r2 = _manager.Search(typeof(SimpleEntity), "bar", () => Array.Empty<BaseDataObject>());
-        var r3 = _manager.Search(typeof(SimpleEntity), "baz", () => Array.Empty<BaseDataObject>());
-        var r4 = _manager.Search(typeof(SimpleEntity), "qux", () => Array.Empty<BaseDataObject>());
+        var r1 = _manager.Search(typeof(AppSetting), "foo", () => Array.Empty<BaseDataObject>());
+        var r2 = _manager.Search(typeof(AppSetting), "bar", () => Array.Empty<BaseDataObject>());
+        var r3 = _manager.Search(typeof(AppSetting), "baz", () => Array.Empty<BaseDataObject>());
+        var r4 = _manager.Search(typeof(AppSetting), "qux", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, r1);
@@ -503,11 +511,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_TokensAreLowercased()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "CamelCaseWord" };
+        var entity = new AppSetting { Key = 1, SettingId = "CamelCaseWord" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "camelcaseword", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "camelcaseword", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -519,11 +527,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_UnicodeLetters_AreIndexed()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "café résumé" };
+        var entity = new AppSetting { Key = 1, SettingId = "café résumé" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "café", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "café", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -533,11 +541,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_SpecialCharactersStripped_TokensSplit()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "hello@world.com" };
+        var entity = new AppSetting { Key = 1, SettingId = "hello@world.com" };
         _manager.IndexObject(entity);
 
         // Act - '@' and '.' are separators, tokens are "hello", "world", "com"
-        var results = _manager.Search(typeof(SimpleEntity), "world", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "world", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -547,11 +555,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_DigitsInTokens_ArePreserved()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "version2 release3" };
+        var entity = new AppSetting { Key = 1, SettingId = "version2 release3" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "version2", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "version2", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -563,11 +571,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_EmptyQuery_ReturnsEmpty()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "test" };
+        var entity = new AppSetting { Key = 1, SettingId = "test" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Empty(results);
@@ -577,11 +585,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_NullQuery_ReturnsEmpty()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "test" };
+        var entity = new AppSetting { Key = 1, SettingId = "test" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), null!, () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), null!, () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Empty(results);
@@ -591,11 +599,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_WhitespaceQuery_ReturnsEmpty()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "test" };
+        var entity = new AppSetting { Key = 1, SettingId = "test" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "   ", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "   ", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Empty(results);
@@ -612,7 +620,7 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_NullId_DoesNotThrow()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 0, Name = "test" };
+        var entity = new AppSetting { Key = 0, SettingId = "test" };
 
         // Act & Assert - should not throw
         _manager.IndexObject(entity);
@@ -622,12 +630,12 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_EmptyName_DoesNotThrow()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "" };
+        var entity = new AppSetting { Key = 1, SettingId = "" };
 
         // Act & Assert - should not throw
         _manager.IndexObject(entity);
 
-        var results = _manager.Search(typeof(SimpleEntity), "anything", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "anything", () => Array.Empty<BaseDataObject>());
         Assert.DoesNotContain(1u, results);
     }
 
@@ -650,12 +658,12 @@ public class SearchIndexingTests : IDisposable
     public void RemoveObject_RemovesFromIndex()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "removeme" };
+        var entity = new AppSetting { Key = 1, SettingId = "removeme" };
         _manager.IndexObject(entity);
 
         // Act
         _manager.RemoveObject(entity);
-        var results = _manager.Search(typeof(SimpleEntity), "removeme", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "removeme", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Empty(results);
@@ -676,14 +684,14 @@ public class SearchIndexingTests : IDisposable
         // Arrange
         var entities = new List<BaseDataObject>
         {
-            new SimpleEntity { Key = 1, Name = "apple" },
-            new SimpleEntity { Key = 2, Name = "banana" },
-            new SimpleEntity { Key = 3, Name = "cherry" }
+            new AppSetting { Key = 1, SettingId = "apple" },
+            new AppSetting { Key = 2, SettingId = "banana" },
+            new AppSetting { Key = 3, SettingId = "cherry" }
         };
 
         // Act
-        _manager.EnsureBuilt(typeof(SimpleEntity), () => entities);
-        var results = _manager.Search(typeof(SimpleEntity), "banana", () => entities);
+        _manager.EnsureBuilt(typeof(AppSetting), () => entities);
+        var results = _manager.Search(typeof(AppSetting), "banana", () => entities);
 
         // Assert
         Assert.Single(results);
@@ -696,14 +704,14 @@ public class SearchIndexingTests : IDisposable
         // Arrange
         var entities = new List<BaseDataObject>
         {
-            new SimpleEntity { Key = 1, Name = "valid" },
+            new AppSetting { Key = 1, SettingId = "valid" },
             null!,
-            new SimpleEntity { Key = 0, Name = "emptyid" }
+            new AppSetting { Key = 0, SettingId = "emptyid" }
         };
 
         // Act & Assert - should not throw
-        _manager.EnsureBuilt(typeof(SimpleEntity), () => entities);
-        var results = _manager.Search(typeof(SimpleEntity), "valid", () => entities);
+        _manager.EnsureBuilt(typeof(AppSetting), () => entities);
+        var results = _manager.Search(typeof(AppSetting), "valid", () => entities);
         Assert.Contains(1u, results);
     }
 
@@ -713,16 +721,16 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_ReindexSameId_UpdatesTokens()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "oldvalue" };
+        var entity = new AppSetting { Key = 1, SettingId = "oldvalue" };
         _manager.IndexObject(entity);
 
         // Act - update the entity and re-index
-        entity.Name = "newvalue";
+        entity.SettingId = "newvalue";
         _manager.IndexObject(entity);
 
         // Assert
-        var oldResults = _manager.Search(typeof(SimpleEntity), "oldvalue", () => Array.Empty<BaseDataObject>());
-        var newResults = _manager.Search(typeof(SimpleEntity), "newvalue", () => Array.Empty<BaseDataObject>());
+        var oldResults = _manager.Search(typeof(AppSetting), "oldvalue", () => Array.Empty<BaseDataObject>());
+        var newResults = _manager.Search(typeof(AppSetting), "newvalue", () => Array.Empty<BaseDataObject>());
         Assert.Empty(oldResults);
         Assert.Contains(1u, newResults);
     }
@@ -755,15 +763,15 @@ public class SearchIndexingTests : IDisposable
     public void Search_ReturnsAllMatchingIds()
     {
         // Arrange
-        var e1 = new SimpleEntity { Key = 1, Name = "search term here" };
-        var e2 = new SimpleEntity { Key = 2, Name = "another search result" };
-        var e3 = new SimpleEntity { Key = 3, Name = "unrelated content" };
+        var e1 = new AppSetting { Key = 1, SettingId = "search term here" };
+        var e2 = new AppSetting { Key = 2, SettingId = "another search result" };
+        var e3 = new AppSetting { Key = 3, SettingId = "unrelated content" };
         _manager.IndexObject(e1);
         _manager.IndexObject(e2);
         _manager.IndexObject(e3);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "search", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "search", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -777,11 +785,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_ShortQueryToken_FallsBackToContains()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "example" };
+        var entity = new AppSetting { Key = 1, SettingId = "example" };
         _manager.IndexObject(entity);
 
         // Act - short query tokens (< 3 chars) that don't exactly match use fallback contains
-        var results = _manager.Search(typeof(SimpleEntity), "ex", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "ex", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -793,12 +801,12 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_PersistsToFile_NewManagerCanSearch()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "persisted" };
+        var entity = new AppSetting { Key = 1, SettingId = "persisted" };
         _manager.IndexObject(entity);
 
         // Act - create a new manager pointing at the same root
         var manager2 = new SearchIndexManager(_testRoot, logger: null);
-        var results = manager2.Search(typeof(SimpleEntity), "persisted", () => Array.Empty<BaseDataObject>());
+        var results = manager2.Search(typeof(AppSetting), "persisted", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -810,7 +818,7 @@ public class SearchIndexingTests : IDisposable
     public void RemoveObject_NonExistentId_DoesNotThrow()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 999, Name = "test" };
+        var entity = new AppSetting { Key = 999, SettingId = "test" };
 
         // Act & Assert - should not throw
         _manager.RemoveObject(entity);
@@ -820,7 +828,7 @@ public class SearchIndexingTests : IDisposable
     public void RemoveObject_EmptyId_DoesNotThrow()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 0, Name = "test" };
+        var entity = new AppSetting { Key = 0, SettingId = "test" };
 
         // Act & Assert - should not throw
         _manager.RemoveObject(entity);
@@ -830,14 +838,14 @@ public class SearchIndexingTests : IDisposable
     public void RemoveObject_OnlyRemovesTargetEntity()
     {
         // Arrange
-        var e1 = new SimpleEntity { Key = 1, Name = "shared token" };
-        var e2 = new SimpleEntity { Key = 2, Name = "shared value" };
+        var e1 = new AppSetting { Key = 1, SettingId = "shared token" };
+        var e2 = new AppSetting { Key = 2, SettingId = "shared value" };
         _manager.IndexObject(e1);
         _manager.IndexObject(e2);
 
         // Act
         _manager.RemoveObject(e1);
-        var results = _manager.Search(typeof(SimpleEntity), "shared", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "shared", () => Array.Empty<BaseDataObject>());
 
         // Assert - only e2 remains
         Assert.DoesNotContain(1u, results);
@@ -854,12 +862,12 @@ public class SearchIndexingTests : IDisposable
         IEnumerable<BaseDataObject> LoadAll()
         {
             loadCount++;
-            return new[] { new SimpleEntity { Key = 1, Name = "test" } };
+            return new[] { new AppSetting { Key = 1, SettingId = "test" } };
         }
 
         // Act
-        _manager.EnsureBuilt(typeof(SimpleEntity), LoadAll);
-        _manager.EnsureBuilt(typeof(SimpleEntity), LoadAll);
+        _manager.EnsureBuilt(typeof(AppSetting), LoadAll);
+        _manager.EnsureBuilt(typeof(AppSetting), LoadAll);
 
         // Assert - loadAll should only be called once
         Assert.Equal(1, loadCount);
@@ -909,12 +917,6 @@ public class SearchIndexingTests : IDisposable
 
     // --- Non-inverted IndexKind fallback ---
 
-    private class BTreeEntity : BaseDataObject
-    {
-        [DataIndex(IndexKind.BTree)]
-        public string Label { get; set; } = string.Empty;
-    }
-
     [Fact]
     public void IndexObject_NonInvertedKind_FallsBackToInverted()
     {
@@ -935,11 +937,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_CJKCharacters_AreIndexed()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "日本語テスト" };
+        var entity = new AppSetting { Key = 1, SettingId = "日本語テスト" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "日本語テスト", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "日本語テスト", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -949,12 +951,12 @@ public class SearchIndexingTests : IDisposable
     public void Search_EmojiStripped_TokensSplit()
     {
         // Arrange - emoji are not letters/digits, so they act as separators
-        var entity = new SimpleEntity { Key = 1, Name = "hello😀world" };
+        var entity = new AppSetting { Key = 1, SettingId = "hello😀world" };
         _manager.IndexObject(entity);
 
         // Act
-        var r1 = _manager.Search(typeof(SimpleEntity), "hello", () => Array.Empty<BaseDataObject>());
-        var r2 = _manager.Search(typeof(SimpleEntity), "world", () => Array.Empty<BaseDataObject>());
+        var r1 = _manager.Search(typeof(AppSetting), "hello", () => Array.Empty<BaseDataObject>());
+        var r2 = _manager.Search(typeof(AppSetting), "world", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, r1);
@@ -965,11 +967,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_AccentedCharacters_AreLowercased()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "RÉSUMÉ" };
+        var entity = new AppSetting { Key = 1, SettingId = "RÉSUMÉ" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "résumé", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "résumé", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -979,11 +981,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_QueryWithOnlySpecialChars_ReturnsEmpty()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "test" };
+        var entity = new AppSetting { Key = 1, SettingId = "test" };
         _manager.IndexObject(entity);
 
         // Act - query of only special characters produces no tokens
-        var results = _manager.Search(typeof(SimpleEntity), "@#$%^&*()", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "@#$%^&*()", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Empty(results);
@@ -996,11 +998,11 @@ public class SearchIndexingTests : IDisposable
     {
         // Arrange - token > 256 chars triggers overflow buffer in TokenizeToHashSet
         var longWord = new string('a', 300);
-        var entity = new SimpleEntity { Key = 1, Name = longWord };
+        var entity = new AppSetting { Key = 1, SettingId = longWord };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), longWord, () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), longWord, () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -1012,12 +1014,12 @@ public class SearchIndexingTests : IDisposable
     public void RemoveObject_CleansUpPrefixTree_NoStaleResults()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "uniqueprefix" };
+        var entity = new AppSetting { Key = 1, SettingId = "uniqueprefix" };
         _manager.IndexObject(entity);
 
         // Act
         _manager.RemoveObject(entity);
-        var results = _manager.Search(typeof(SimpleEntity), "uni", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "uni", () => Array.Empty<BaseDataObject>());
 
         // Assert - prefix "uni" should no longer match
         Assert.Empty(results);
@@ -1029,13 +1031,13 @@ public class SearchIndexingTests : IDisposable
     public void Search_MultiField_MatchesAcrossFieldsIndependently()
     {
         // Arrange
-        var e1 = new MultiFieldEntity { Key = 1, Title = "alpha", Description = "beta" };
-        var e2 = new MultiFieldEntity { Key = 2, Title = "gamma", Description = "delta" };
+        var e1 = new User { Key = 1, UserName = "alpha", Email = "beta" };
+        var e2 = new User { Key = 2, UserName = "gamma", Email = "delta" };
         _manager.IndexObject(e1);
         _manager.IndexObject(e2);
 
         // Act - query matches title of e1 and description of e2
-        var results = _manager.Search(typeof(MultiFieldEntity), "alpha delta", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(User), "alpha delta", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -1069,26 +1071,20 @@ public class SearchIndexingTests : IDisposable
         // Arrange
         var entities = new List<BaseDataObject>
         {
-            new SimpleEntity { Key = 1, Name = "original" }
+            new AppSetting { Key = 1, SettingId = "original" }
         };
-        _manager.EnsureBuilt(typeof(SimpleEntity), () => entities);
+        _manager.EnsureBuilt(typeof(AppSetting), () => entities);
 
         // Act - add a new entity after index is built
-        var newEntity = new SimpleEntity { Key = 2, Name = "incremental" };
+        var newEntity = new AppSetting { Key = 2, SettingId = "incremental" };
         _manager.IndexObject(newEntity);
-        var results = _manager.Search(typeof(SimpleEntity), "incremental", () => entities);
+        var results = _manager.Search(typeof(AppSetting), "incremental", () => entities);
 
         // Assert
         Assert.Contains(2u, results);
     }
 
     // --- IEnumerable of non-string (int list) ---
-
-    private class IntListEntity : BaseDataObject
-    {
-        [DataIndex]
-        public List<int> Values { get; set; } = new();
-    }
 
     [Fact]
     public void IndexObject_IntEnumerable_TokenizesViaToString()
@@ -1110,15 +1106,15 @@ public class SearchIndexingTests : IDisposable
     public void Search_MultipleEntitiesSameToken_ReturnsAll()
     {
         // Arrange
-        var e1 = new SimpleEntity { Key = 1, Name = "common word" };
-        var e2 = new SimpleEntity { Key = 2, Name = "common phrase" };
-        var e3 = new SimpleEntity { Key = 3, Name = "common term" };
+        var e1 = new AppSetting { Key = 1, SettingId = "common word" };
+        var e2 = new AppSetting { Key = 2, SettingId = "common phrase" };
+        var e3 = new AppSetting { Key = 3, SettingId = "common term" };
         _manager.IndexObject(e1);
         _manager.IndexObject(e2);
         _manager.IndexObject(e3);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "common", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "common", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Equal(3, results.Count);
@@ -1147,14 +1143,14 @@ public class SearchIndexingTests : IDisposable
     public void Search_DifferentTypes_AreIsolated()
     {
         // Arrange
-        var simple = new SimpleEntity { Key = 1, Name = "overlap" };
-        var multi = new MultiFieldEntity { Key = 2, Title = "overlap", Description = "" };
+        var simple = new AppSetting { Key = 1, SettingId = "overlap" };
+        var multi = new User { Key = 2, UserName = "overlap", Email = "" };
         _manager.IndexObject(simple);
         _manager.IndexObject(multi);
 
         // Act
-        var simpleResults = _manager.Search(typeof(SimpleEntity), "overlap", () => Array.Empty<BaseDataObject>());
-        var multiResults = _manager.Search(typeof(MultiFieldEntity), "overlap", () => Array.Empty<BaseDataObject>());
+        var simpleResults = _manager.Search(typeof(AppSetting), "overlap", () => Array.Empty<BaseDataObject>());
+        var multiResults = _manager.Search(typeof(User), "overlap", () => Array.Empty<BaseDataObject>());
 
         // Assert - each type's index is separate
         Assert.Single(simpleResults);
@@ -1169,8 +1165,8 @@ public class SearchIndexingTests : IDisposable
     public void EnsureBuilt_EmptyCollection_CreatesEmptyIndex()
     {
         // Act
-        _manager.EnsureBuilt(typeof(SimpleEntity), () => Array.Empty<BaseDataObject>());
-        var results = _manager.Search(typeof(SimpleEntity), "anything", () => Array.Empty<BaseDataObject>());
+        _manager.EnsureBuilt(typeof(AppSetting), () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "anything", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Empty(results);
@@ -1182,11 +1178,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_MixedAlphanumericToken_IsKeptTogether()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "abc123def" };
+        var entity = new AppSetting { Key = 1, SettingId = "abc123def" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "abc123def", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "abc123def", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -1220,11 +1216,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_SingleCharToken_MatchesViaContainsFallback()
     {
         // Arrange - "a" is < 3 chars, so prefix tree won't be used
-        var entity = new SimpleEntity { Key = 1, Name = "a" };
+        var entity = new AppSetting { Key = 1, SettingId = "a" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "a", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "a", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -1234,11 +1230,11 @@ public class SearchIndexingTests : IDisposable
     public void Search_TwoCharToken_ExactMatch()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "ab" };
+        var entity = new AppSetting { Key = 1, SettingId = "ab" };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "ab", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "ab", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Contains(1u, results);
@@ -1250,11 +1246,11 @@ public class SearchIndexingTests : IDisposable
     public void IndexObject_WhitespaceOnlyName_ProducesNoTokens()
     {
         // Arrange
-        var entity = new SimpleEntity { Key = 1, Name = "   \t\n  " };
+        var entity = new AppSetting { Key = 1, SettingId = "   \t\n  " };
         _manager.IndexObject(entity);
 
         // Act
-        var results = _manager.Search(typeof(SimpleEntity), "anything", () => Array.Empty<BaseDataObject>());
+        var results = _manager.Search(typeof(AppSetting), "anything", () => Array.Empty<BaseDataObject>());
 
         // Assert
         Assert.Empty(results);
@@ -1281,14 +1277,14 @@ public class SearchIndexingTests : IDisposable
         // Arrange - two entities with the same ID, last one's tokens should win
         var entities = new List<BaseDataObject>
         {
-            new SimpleEntity { Key = 1, Name = "first" },
-            new SimpleEntity { Key = 1, Name = "second" }
+            new AppSetting { Key = 1, SettingId = "first" },
+            new AppSetting { Key = 1, SettingId = "second" }
         };
 
         // Act
-        _manager.EnsureBuilt(typeof(SimpleEntity), () => entities);
-        var firstResults = _manager.Search(typeof(SimpleEntity), "first", () => entities);
-        var secondResults = _manager.Search(typeof(SimpleEntity), "second", () => entities);
+        _manager.EnsureBuilt(typeof(AppSetting), () => entities);
+        var firstResults = _manager.Search(typeof(AppSetting), "first", () => entities);
+        var secondResults = _manager.Search(typeof(AppSetting), "second", () => entities);
 
         // Assert - both tokens are indexed because BuildFrom doesn't de-dup
         // The last entity's tokens are in IdToTokens, but first entity's tokens remain in Tokens

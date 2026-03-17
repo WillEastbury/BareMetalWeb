@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Numerics;
 using System.Text;
+using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 using BareMetalWeb.Data;
 using Xunit;
@@ -21,6 +22,11 @@ namespace BareMetalWeb.Data.Tests;
 /// </summary>
 public sealed class SimdAccelerationTests
 {
+    public SimdAccelerationTests()
+    {
+        DataScaffold.RegisterEntity<TestSearchableItem>();
+    }
+
     // ── SimdDistance ─────────────────────────────────────────────────────────
 
     [Fact]

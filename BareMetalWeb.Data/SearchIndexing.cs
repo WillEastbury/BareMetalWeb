@@ -6,7 +6,6 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Numerics;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
@@ -380,50 +379,38 @@ public sealed class SearchIndexManager
         GetOrCreateTypeMetadata(type);
     }
 
+    private static readonly TypeMetadata EmptyMetadata = new()
+    {
+        IndexedFields = Array.Empty<IndexedFieldAccessor>(),
+        IndexKinds = new HashSet<IndexKind>(0)
+    };
+
     private TypeMetadata GetOrCreateTypeMetadata(Type type)
     {
-        return _typeMetadata.GetOrAdd(type, t =>
-        {
-            var entityMeta = BareMetalWeb.Core.DataScaffold.GetEntityByType(t);
-            if (entityMeta != null)
-            {
-                var indexed = new List<IndexedFieldAccessor>();
-                var kinds = new HashSet<IndexKind>(4);
-                foreach (var f in entityMeta.Fields)
-                {
-                    if (f.DataIndex != null)
-                    {
-                        indexed.Add(new IndexedFieldAccessor(f.Name, f.ClrType, f.GetValueFn, f.DataIndex));
-                        kinds.Add(f.DataIndex.Kind);
-                    }
-                }
-                return new TypeMetadata
-                {
-                    IndexedFields = indexed.ToArray(),
-                    IndexKinds = kinds
-                };
-            }
+        if (_typeMetadata.TryGetValue(type, out var cached))
+            return cached;
 
-            // Fallback: scan properties for [DataIndex] attributes when DataScaffold metadata is unavailable
-            var props = t.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-            var fallbackFields = new List<IndexedFieldAccessor>();
-            var fallbackKinds = new HashSet<IndexKind>(4);
-            foreach (var prop in props)
+        var entityMeta = BareMetalWeb.Core.DataScaffold.GetEntityByType(type);
+        if (entityMeta == null)
+            return EmptyMetadata; // Don't cache — entity may be registered later
+
+        var indexed = new List<IndexedFieldAccessor>();
+        var kinds = new HashSet<IndexKind>(4);
+        foreach (var f in entityMeta.Fields)
+        {
+            if (f.DataIndex != null)
             {
-                var attr = prop.GetCustomAttribute<DataIndexAttribute>();
-                if (attr != null && prop.CanRead)
-                {
-                    var getter = new Func<object, object?>(obj => prop.GetValue(obj));
-                    fallbackFields.Add(new IndexedFieldAccessor(prop.Name, prop.PropertyType, getter, attr));
-                    fallbackKinds.Add(attr.Kind);
-                }
+                indexed.Add(new IndexedFieldAccessor(f.Name, f.ClrType, f.GetValueFn, f.DataIndex));
+                kinds.Add(f.DataIndex.Kind);
             }
-            return new TypeMetadata
-            {
-                IndexedFields = fallbackFields.ToArray(),
-                IndexKinds = fallbackKinds
-            };
-        });
+        }
+        var metadata = new TypeMetadata
+        {
+            IndexedFields = indexed.ToArray(),
+            IndexKinds = kinds
+        };
+        _typeMetadata.TryAdd(type, metadata);
+        return metadata;
     }
 
     public void EnsureBuilt(Type type, Func<IEnumerable<BaseDataObject>> loadAll)
