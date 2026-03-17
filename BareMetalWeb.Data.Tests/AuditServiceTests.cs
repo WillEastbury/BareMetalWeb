@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Data.Interfaces;
 using Xunit;
@@ -25,6 +26,8 @@ public sealed class AuditServiceTests : IDisposable
         _store = new DataObjectStore();
         _store.RegisterProvider(provider);
         DataStoreProvider.Current = _store;
+
+        DataScaffold.RegisterEntity<AuditEntry>();
         
         _auditService = new AuditService(_store) { RunSynchronously = true };
     }

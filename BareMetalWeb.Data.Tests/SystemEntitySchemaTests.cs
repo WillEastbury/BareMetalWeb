@@ -13,7 +13,7 @@ public class SystemEntitySchemaTests
     public void AllSchemas_AreNonNull()
     {
         Assert.NotNull(SystemEntitySchemas.All);
-        Assert.Equal(17, SystemEntitySchemas.All.Count);
+        Assert.Equal(22, SystemEntitySchemas.All.Count);
         foreach (var schema in SystemEntitySchemas.All)
         {
             Assert.NotNull(schema);

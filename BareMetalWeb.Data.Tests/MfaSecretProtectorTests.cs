@@ -466,7 +466,7 @@ public class MfaSecretProtectorTests : IDisposable
         // Assert — key file should exist after constructor
         Assert.True(File.Exists(keyPath));
         var keyBytes = File.ReadAllBytes(keyPath);
-        Assert.Equal(32, keyBytes.Length);
+        Assert.Equal(64, keyBytes.Length);
 
         // Act — creating another instance should reuse the same key file
         var protector2 = MfaSecretProtector.CreateDefault(_tempDirectory);

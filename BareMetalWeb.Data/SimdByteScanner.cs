@@ -395,19 +395,14 @@ public static class SimdByteScanner
         int vectorizableLength = length & ~0xF; // Round down to 16-byte boundary
         var vecs = MemoryMarshal.Cast<byte, Vector128<byte>>(data[..vectorizableLength]);
         Vector128<byte> needle = Vector128.Create(target);
-        // Each matching lane is 0xFF. We use subtraction from a zero accumulator:
-        // 0 - 0xFF = wraps, so instead we just sum each chunk's scalar count.
-        // Simple and correct: extract the match count via AddAcross.
+        Vector128<byte> one = Vector128.Create((byte)1);
 
         for (int k = 0; k < vecs.Length; k++)
         {
             Vector128<byte> cmp = AdvSimd.CompareEqual(vecs[k], needle);
-            // Each matching lane = 0xFF. Negate (0-0xFF wraps to 1 in signed)
-            // is tricky; simpler: horizontally add all bytes then divide by 255.
-            // AddAcross sums all 16 byte lanes into one ushort.
-            ushort laneSum = AdvSimd.Arm64.AddAcross(cmp).ToScalar();
-            // Each match contributes 0xFF=255, so matches = laneSum / 255
-            count += laneSum / 255;
+            // Each matching lane = 0xFF; mask to 0x01 to avoid overflow in AddAcross
+            Vector128<byte> masked = AdvSimd.And(cmp, one);
+            count += AdvSimd.Arm64.AddAcross(masked).ToScalar();
         }
 
         // Process remaining bytes beyond the 16-byte-aligned region

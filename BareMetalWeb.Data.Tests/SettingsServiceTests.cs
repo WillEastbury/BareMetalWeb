@@ -26,6 +26,7 @@ public class SettingsServiceTests : IDisposable
         _testStore = new DataObjectStore();
         _testStore.RegisterProvider(_provider);
         DataStoreProvider.Current = _testStore;
+        DataScaffold.RegisterEntity<AppSetting>();
         SettingsService.InvalidateCache();
         SettingsService.OnSettingInvalidated = null;
     }
@@ -518,30 +519,9 @@ public class SettingsServiceTests : IDisposable
         // Update the stored value directly so the in-memory store has the new value
         setting.Value = "new-token";
 
-        // Build a minimal metadata whose SaveAsync delegates to the test store
-        var handlers = new DataEntityHandlers(
-            Create: () => new AppSetting(),
-            LoadAsync: (key, ct) => ValueTask.FromResult((BaseDataObject?)_testStore.Query<AppSetting>().FirstOrDefault(s => s.Key == key)),
-            SaveAsync: (obj, ct) => { _testStore.Save((AppSetting)obj); return ValueTask.CompletedTask; },
-            DeleteAsync: (key, ct) => { _testStore.Delete<AppSetting>(key); return ValueTask.CompletedTask; },
-            QueryAsync: (q, ct) => ValueTask.FromResult(_testStore.Query<AppSetting>(q).Cast<BaseDataObject>()),
-            CountAsync: (q, ct) => ValueTask.FromResult(_testStore.Query<AppSetting>(q).Count())
-        );
-        var metadata = new DataEntityMetadata(
-            Type: typeof(AppSetting),
-            Name: "Settings",
-            Slug: "settings",
-            Permissions: "admin",
-            ShowOnNav: false,
-            NavGroup: null,
-            NavOrder: 0,
-            IdGeneration: AutoIdStrategy.Sequential,
-            ViewType: ViewType.Table,
-            ParentField: null,
-            Fields: Array.Empty<DataFieldMetadata>(),
-            Handlers: handlers,
-            Commands: Array.Empty<RemoteCommandMetadata>()
-        );
+        // Use the registered metadata so FindField("SettingId") resolves for cache invalidation
+        Assert.True(DataScaffold.TryGetEntity("settings", out var metadata),
+            "AppSetting metadata must be registered");
 
         // Act — save via DataScaffold; this should invalidate the cache
         await DataScaffold.SaveAsync(metadata, setting);
