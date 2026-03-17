@@ -388,6 +388,9 @@ public class DataStoreFixture : IDisposable
         _originalStore = DataStoreProvider.Current;
         Store = new InMemoryDataStore();
         DataStoreProvider.Current = Store;
+        // Register entity metadata so UserAuth can resolve users/sessions via DataScaffold
+        DataScaffold.RegisterEntity<User>();
+        DataScaffold.RegisterEntity<UserSession>();
     }
 
     public void Dispose()

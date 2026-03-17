@@ -16,3 +16,5 @@ Data/
 publish/
 *.bmwm
 *.bmwm.hash
+*.safetensors
+bitnet-2b/

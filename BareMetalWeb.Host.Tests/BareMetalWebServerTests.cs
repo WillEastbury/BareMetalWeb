@@ -49,6 +49,10 @@ public class BareMetalWebServerTests : IDisposable
         _testStore = new InMemoryDataStore();
         DataStoreProvider.Current = _testStore;
 
+        // Register entity metadata so UserAuth/DataScaffold can resolve users and sessions
+        DataScaffold.RegisterEntity<User>();
+        DataScaffold.RegisterEntity<UserSession>();
+
         // Create a root user to prevent setup redirects in tests
         var rootUser = CreateUser(1, new[] { "admin", "monitoring" });
         _testStore.Save(rootUser);
