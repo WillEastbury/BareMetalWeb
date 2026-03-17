@@ -448,8 +448,7 @@ public sealed class SimdAccelerationTests
             {
                 string name = $"Field_{i}_{m}_{rng.Next()}";
                 string typeName = typeNames[rng.Next(typeNames.Length)];
-                int? blittableSize = rng.Next(3) == 0 ? rng.Next(1, 64) : null;
-                members[m] = new MemberSignature(name, typeName, typeof(string), blittableSize);
+                members[m] = new MemberSignature(name, typeName, typeof(string));
             }
 
             var schema = ser.CreateSchema(1, members);

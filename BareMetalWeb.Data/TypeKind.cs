@@ -5,7 +5,7 @@ namespace BareMetalWeb.Data;
         Primitive,
         String,
         Guid,
-        Blittable,
+        Blittable, // Removed — no longer used
         DateTime,
         DateOnly,
         TimeOnly,

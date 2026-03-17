@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Numerics;
-using System.Reflection;
+
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -1919,7 +1919,6 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             {
                 Name          = m.Name,
                 TypeName      = m.TypeName,
-                BlittableSize = m.BlittableSize,
             });
         }
         return list;
@@ -2029,8 +2028,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
                 var m = members[i];
                 arr[i] = new MemberSignature(
                     m.Name, m.TypeName,
-                    AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)),
-                    m.BlittableSize);
+                    AssumePublicMembers(_serializer.ResolveTypeName(m.TypeName)));
             }
             return arr;
         });
@@ -2046,64 +2044,30 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
 
     // ── Singleton-flag enforcement ────────────────────────────────────────────
 
-    private void ClearSingletonFlagsOnOtherRecords<[System.Diagnostics.CodeAnalysis.DynamicallyAccessedMembers(System.Diagnostics.CodeAnalysis.DynamicallyAccessedMemberTypes.PublicProperties)] T>(T obj) where T : BaseDataObject
+    private void ClearSingletonFlagsOnOtherRecords<T>(T obj) where T : BaseDataObject
     {
         var type = typeof(T);
-        // Use DataScaffold metadata (compiled delegates) instead of raw reflection
         var meta = DataScaffold.GetEntityByType(type);
-        if (meta != null)
+        if (meta == null) return; // Entity not registered — no singleton flags to enforce
+
+        var singletonFields = new List<DataFieldMetadata>();
+        foreach (var f in meta.Fields)
         {
-            var singletonFields = new List<DataFieldMetadata>();
-            foreach (var f in meta.Fields)
-            {
-                if (f.HasSingletonFlag && f.ClrType == typeof(bool) && true.Equals(f.GetValueFn(obj)))
-                    singletonFields.Add(f);
-            }
-
-            if (singletonFields.Count == 0) return;
-
-            foreach (var record in Query<T>())
-            {
-                if (record.Key == obj.Key) continue;
-                bool changed = false;
-                foreach (var f in singletonFields)
-                {
-                    if (true.Equals(f.GetValueFn(record)))
-                    {
-                        f.SetValueFn(record, false);
-                        changed = true;
-                    }
-                }
-                if (changed) Save(record);
-            }
-            return;
+            if (f.HasSingletonFlag && f.ClrType == typeof(bool) && true.Equals(f.GetValueFn(obj)))
+                singletonFields.Add(f);
         }
 
-        // Fallback for entities not registered with DataScaffold: use live reflection on the CLR type.
-        var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var singletonProps = new List<PropertyInfo>();
-        foreach (var p in props)
-        {
-            if (p.PropertyType == typeof(bool)
-                && p.GetCustomAttribute<SingletonFlagAttribute>() != null
-                && p.CanRead && p.CanWrite
-                && true.Equals(p.GetValue(obj)))
-            {
-                singletonProps.Add(p);
-            }
-        }
-
-        if (singletonProps.Count == 0) return;
+        if (singletonFields.Count == 0) return;
 
         foreach (var record in Query<T>())
         {
             if (record.Key == obj.Key) continue;
             bool changed = false;
-            foreach (var prop in singletonProps)
+            foreach (var f in singletonFields)
             {
-                if (true.Equals(prop.GetValue(record)))
+                if (true.Equals(f.GetValueFn(record)))
                 {
-                    prop.SetValue(record, false);
+                    f.SetValueFn(record, false);
                     changed = true;
                 }
             }

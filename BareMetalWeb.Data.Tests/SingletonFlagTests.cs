@@ -45,6 +45,8 @@ public class SingletonFlagTests : IDisposable
     {
         _testRoot = Path.Combine(Path.GetTempPath(), "BareMetalWeb_SingletonTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testRoot);
+        DataScaffold.RegisterEntity<SingletonTestItem>();
+        DataScaffold.RegisterEntity<MultiSingletonTestItem>();
         _provider = new WalDataProvider(_testRoot);
     }
 

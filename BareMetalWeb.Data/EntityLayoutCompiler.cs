@@ -48,8 +48,7 @@ public static class EntityLayoutCompiler
         foreach (var f in meta.Fields)
             metaFieldsByName[f.Name] = f;
 
-        var allProps = meta.Type
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        var allProps = meta.AllProperties;
         var propList = new List<PropertyInfo>(allProps.Length);
         foreach (var p in allProps)
         {

@@ -28,6 +28,7 @@ public sealed class AuditServiceTests : IDisposable
         DataStoreProvider.Current = _store;
 
         DataScaffold.RegisterEntity<AuditEntry>();
+        DataScaffold.RegisterEntity<AuditTestEntity>();
         
         _auditService = new AuditService(_store) { RunSynchronously = true };
     }
@@ -49,7 +50,7 @@ public sealed class AuditServiceTests : IDisposable
     public async Task AuditCreateAsync_CreatesAuditEntry()
     {
         // Arrange
-        var testEntity = new TestEntity("testuser")
+        var testEntity = new AuditTestEntity("testuser")
         {
             Key = 1,
             Name = "Test Entity",
@@ -63,7 +64,7 @@ public sealed class AuditServiceTests : IDisposable
         var auditEntries = await _store.QueryAsync<AuditEntry>();
         var entry = auditEntries.FirstOrDefault(e => e.EntityKey == testEntity.Key);
         Assert.NotNull(entry);
-        Assert.Equal(typeof(TestEntity).Name, entry.EntityType);
+        Assert.Equal(typeof(AuditTestEntity).Name, entry.EntityType);
         Assert.Equal(testEntity.Key, entry.EntityKey);
         Assert.Equal(AuditOperation.Create, entry.Operation);
         Assert.Equal("testuser", entry.UserName);
@@ -73,14 +74,14 @@ public sealed class AuditServiceTests : IDisposable
     public async Task AuditUpdateAsync_DetectsFieldChanges()
     {
         // Arrange
-        var oldEntity = new TestEntity("testuser")
+        var oldEntity = new AuditTestEntity("testuser")
         {
             Key = 2,
             Name = "Old Name",
             Value = 10
         };
         
-        var newEntity = new TestEntity("testuser")
+        var newEntity = new AuditTestEntity("testuser")
         {
             Key = oldEntity.Key,
             CreatedOnUtc = oldEntity.CreatedOnUtc,
@@ -99,12 +100,12 @@ public sealed class AuditServiceTests : IDisposable
         Assert.Equal(AuditOperation.Update, entry.Operation);
         Assert.Equal(2, entry.FieldChanges.Count);
         
-        var nameChange = entry.FieldChanges.FirstOrDefault(c => c.FieldName == nameof(TestEntity.Name));
+        var nameChange = entry.FieldChanges.FirstOrDefault(c => c.FieldName == nameof(AuditTestEntity.Name));
         Assert.NotNull(nameChange);
         Assert.Equal("Old Name", nameChange.OldValue);
         Assert.Equal("New Name", nameChange.NewValue);
         
-        var valueChange = entry.FieldChanges.FirstOrDefault(c => c.FieldName == nameof(TestEntity.Value));
+        var valueChange = entry.FieldChanges.FirstOrDefault(c => c.FieldName == nameof(AuditTestEntity.Value));
         Assert.NotNull(valueChange);
         Assert.Equal("10", valueChange.OldValue);
         Assert.Equal("20", valueChange.NewValue);
@@ -114,14 +115,14 @@ public sealed class AuditServiceTests : IDisposable
     public async Task AuditUpdateAsync_SkipsWhenNoMeaningfulChanges()
     {
         // Arrange
-        var oldEntity = new TestEntity("testuser")
+        var oldEntity = new AuditTestEntity("testuser")
         {
             Key = 3,
             Name = "Same Name",
             Value = 42
         };
         
-        var newEntity = new TestEntity("testuser")
+        var newEntity = new AuditTestEntity("testuser")
         {
             Key = oldEntity.Key,
             CreatedOnUtc = oldEntity.CreatedOnUtc,
@@ -148,14 +149,14 @@ public sealed class AuditServiceTests : IDisposable
         var entityKey = (uint)Random.Shared.Next(1, int.MaxValue);
 
         // Act
-        await _auditService.AuditDeleteAsync<TestEntity>(entityKey, "testuser");
+        await _auditService.AuditDeleteAsync<AuditTestEntity>(entityKey, "testuser");
 
         // Assert
         var auditEntries = await _store.QueryAsync<AuditEntry>();
         var entry = auditEntries.FirstOrDefault(e => e.EntityKey == entityKey);
         
         Assert.NotNull(entry);
-        Assert.Equal(typeof(TestEntity).Name, entry.EntityType);
+        Assert.Equal(typeof(AuditTestEntity).Name, entry.EntityType);
         Assert.Equal(AuditOperation.Delete, entry.Operation);
         Assert.Equal("testuser", entry.UserName);
     }
@@ -164,7 +165,7 @@ public sealed class AuditServiceTests : IDisposable
     public async Task AuditRemoteCommandAsync_CreatesAuditEntry()
     {
         // Arrange
-        var testEntity = new TestEntity("testuser")
+        var testEntity = new AuditTestEntity("testuser")
         {
             Key = 4,
             Name = "Test Entity",
@@ -189,18 +190,18 @@ public sealed class AuditServiceTests : IDisposable
     public async Task GetEntityHistoryAsync_ReturnsAuditEntriesForEntity()
     {
         // Arrange
-        var testEntity = new TestEntity("testuser") { Key = 5, Name = "Test", Value = 1 };
+        var testEntity = new AuditTestEntity("testuser") { Key = 5, Name = "Test", Value = 1 };
         
         await _auditService.AuditCreateAsync(testEntity, "testuser");
         
-        var updatedEntity = new TestEntity("testuser") { Key = testEntity.Key, CreatedOnUtc = testEntity.CreatedOnUtc, CreatedBy = testEntity.CreatedBy, Name = "Updated", Value = 2 };
+        var updatedEntity = new AuditTestEntity("testuser") { Key = testEntity.Key, CreatedOnUtc = testEntity.CreatedOnUtc, CreatedBy = testEntity.CreatedBy, Name = "Updated", Value = 2 };
         await _auditService.AuditUpdateAsync(testEntity, updatedEntity, "testuser");
         
-        await _auditService.AuditDeleteAsync<TestEntity>(testEntity.Key, "testuser");
+        await _auditService.AuditDeleteAsync<AuditTestEntity>(testEntity.Key, "testuser");
 
         // Act
         var allEntries = await _store.QueryAsync<AuditEntry>();
-        var history = allEntries.Where(e => e.EntityKey == testEntity.Key && e.EntityType == "TestEntity").ToList();
+        var history = allEntries.Where(e => e.EntityKey == testEntity.Key && e.EntityType == "AuditTestEntity").ToList();
 
         // Assert
         Assert.Equal(3, history.Count);
@@ -210,14 +211,14 @@ public sealed class AuditServiceTests : IDisposable
     }
     
     // Test entity class for audit testing
-    [DataEntity("Test Entity", Slug = "testentity")]
-    private sealed class TestEntity : BaseDataObject
+    [DataEntity("Audit Test Entity", Slug = "audit-test-entity")]
+    public sealed class AuditTestEntity : BaseDataObject
     {
-        public TestEntity() : base()
+        public AuditTestEntity() : base()
         {
         }
 
-        public TestEntity(string createdBy) : base(createdBy)
+        public AuditTestEntity(string createdBy) : base(createdBy)
         {
         }
 

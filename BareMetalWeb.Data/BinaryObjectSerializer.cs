@@ -5,9 +5,9 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO.Hashing;
 using System.Reflection;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using BareMetalWeb.Core;
 using BareMetalWeb.Data.Interfaces;
 namespace BareMetalWeb.Data;
 
@@ -36,7 +36,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     private const int MaxStringBytes = 4 * 1024 * 1024; // 4 MiB
     private const int MaxCollectionLength = 100_000;
     private const int MaxDictionaryEntries = 1_000_000;
-    private const int MaxBlittableSize = 4 * 1024 * 1024; // 4 MiB
+
     private const int SignatureSize = 32;
     private const int HeaderFieldsSizeV2 = 4 + 4 + 4 + 1;
     private const int HeaderFieldsSizeV3 = 4 + 4 + 4 + 1;
@@ -317,20 +317,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
                 return;
             }
             case TypeKind.Blittable:
-            {
-                var size = shape.BlittableSize;
-                var rented = ArrayPool<byte>.Shared.Rent(size);
-                try
-                {
-                    shape.BlittableWrite!(value, rented);
-                    writer.Write(rented, 0, size);
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(rented);
-                }
-                return;
-            }
+                throw new NotSupportedException($"Blittable struct serialization has been removed. Type: {type.Name}");
             case TypeKind.DateTime:
             {
                 var dt = (DateTime)(value ?? default(DateTime));
@@ -500,20 +487,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
                 return;
             }
             case TypeKind.Blittable:
-            {
-                var size = shape.BlittableSize;
-                var rented = ArrayPool<byte>.Shared.Rent(size);
-                try
-                {
-                    shape.BlittableWrite!(value, rented);
-                    writer.WriteBytes(rented.AsSpan(0, size));
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(rented);
-                }
-                return;
-            }
+                throw new NotSupportedException($"Blittable struct serialization has been removed. Type: {type.Name}");
             case TypeKind.DateTime:
             {
                 var dt = (DateTime)(value ?? default(DateTime));
@@ -675,19 +649,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
                 return new Guid(buffer);
             }
             case TypeKind.Blittable:
-            {
-                var size = shape.BlittableSize;
-                var rented = ArrayPool<byte>.Shared.Rent(size);
-                try
-                {
-                    ReadExact(reader, rented.AsSpan(0, size));
-                    return shape.BlittableRead!(rented);
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(rented);
-                }
-            }
+                throw new NotSupportedException($"Blittable struct serialization has been removed. Type: {type.Name}");
             case TypeKind.DateTime:
             {
                 var ticks = reader.ReadInt64();
@@ -849,19 +811,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
                 return new Guid(buffer);
             }
             case TypeKind.Blittable:
-            {
-                var size = shape.BlittableSize;
-                var rented = ArrayPool<byte>.Shared.Rent(size);
-                try
-                {
-                    reader.ReadBytes(rented.AsSpan(0, size));
-                    return shape.BlittableRead!(rented);
-                }
-                finally
-                {
-                    ArrayPool<byte>.Shared.Return(rented);
-                }
-            }
+                throw new NotSupportedException($"Blittable struct serialization has been removed. Type: {type.Name}");
             case TypeKind.DateTime:
             {
                 var ticks = reader.ReadInt64();
@@ -1219,14 +1169,6 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             AppendUtf8(ref hasher, member.Name);
             hasher.Append(":"u8);
             AppendUtf8(ref hasher, member.TypeName);
-            if (member.BlittableSize.HasValue)
-            {
-                hasher.Append(":blittable-size="u8);
-                // Encode the size as 4 little-endian bytes — zero allocation, unambiguous.
-                Span<byte> intBuf = stackalloc byte[4];
-                System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(intBuf, member.BlittableSize.Value);
-                hasher.Append(intBuf);
-            }
             hasher.Append(";"u8);
         }
         ulong h64 = hasher.GetCurrentHashAsUInt64();
@@ -1503,21 +1445,6 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (type == typeof(Guid))
         {
             shape.Kind = TypeKind.Guid;
-            return shape;
-        }
-
-        if (IsBlittable(type))
-        {
-            shape.Kind = TypeKind.Blittable;
-            shape.BlittableSize = GetBlittableSize(type);
-            if (shape.BlittableSize > MaxBlittableSize)
-                throw new InvalidOperationException($"Blittable size {shape.BlittableSize} exceeds MaxBlittableSize {MaxBlittableSize}.");
-            shape.BlittableWrite = CreateBlittableWrite(type);
-            shape.BlittableRead = CreateBlittableRead(type);
-            shape.MemberSignatures = Array.Empty<MemberSignature>();
-            shape.MemberMap = EmptyMemberMap;
-            shape.Members = Array.Empty<MemberAccessor>();
-            shape.SignatureHash = GetBlittableSignatureHash(shape.BlittableSize);
             return shape;
         }
 
@@ -1812,8 +1739,6 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
                 if (mode == SchemaReadMode.Strict)
                     throw new InvalidOperationException($"Schema member '{signature.Name}' type mismatch. Expected {member.MemberType.Name}, schema has {signature.Type.Name}.");
             }
-
-            // Blittable validation disabled.
         }
 
         SchemaValidationCache.TryAdd(cacheKey, 0);
@@ -1840,91 +1765,12 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         {
             var member = members[i];
             map[member.Name] = member;
-            signatures[i] = new MemberSignature(member.Name, GetTypeIdentifier(member.MemberType), AssumePublicMembers(member.MemberType), null);
+            signatures[i] = new MemberSignature(member.Name, GetTypeIdentifier(member.MemberType), AssumePublicMembers(member.MemberType));
         }
 
         shape.MemberMap = map;
         shape.MemberSignatures = signatures;
         shape.SignatureHash = GetSignatureHash(signatures);
-    }
-
-    private static bool IsBlittable(Type type)
-    {
-        if (!type.IsValueType || type.IsEnum)
-            return false;
-
-        if (Type.GetTypeCode(type) != TypeCode.Object)
-            return false;
-
-        if (IsKnownSpecialType(type))
-            return false;
-
-        if (!type.IsLayoutSequential && !type.IsExplicitLayout)
-            return false;
-
-        return IsBlittableStruct(type, new HashSet<Type>());
-    }
-
-    private static bool IsBlittableStruct([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields)] Type type, HashSet<Type> visited)
-    {
-        if (visited.Contains(type))
-            return true;
-
-        visited.Add(type);
-
-        if (type.IsPrimitive || type.IsEnum)
-            return true;
-
-        if (!type.IsValueType)
-            return false;
-
-        if (!type.IsLayoutSequential && !type.IsExplicitLayout)
-            return false;
-
-        var fields = type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        for (int i = 0; i < fields.Length; i++)
-        {
-            var fieldType = fields[i].FieldType;
-            if (fieldType.IsPointer || fieldType == typeof(IntPtr) || fieldType == typeof(UIntPtr))
-                return false;
-
-            if (!fieldType.IsValueType)
-                return false;
-
-            if (Type.GetTypeCode(fieldType) != TypeCode.Object)
-                continue;
-
-            if (IsKnownSpecialType(fieldType))
-                return false;
-
-            if (!IsBlittableStruct(fieldType, visited))
-                return false;
-        }
-
-        return true;
-    }
-
-    private static bool IsKnownSpecialType(Type type)
-    {
-        return type == typeof(DateTime)
-            || type == typeof(DateOnly)
-            || type == typeof(TimeOnly)
-            || type == typeof(DateTimeOffset)
-            || type == typeof(TimeSpan)
-            || type == typeof(Half)
-            || type == typeof(IntPtr)
-            || type == typeof(UIntPtr);
-    }
-
-    private static uint GetBlittableSignatureHash(int size)
-    {
-        var hasher = new XxHash64();
-        hasher.Append("blittable:"u8);
-        Span<byte> intBuf = stackalloc byte[4];
-        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(intBuf, size);
-        hasher.Append(intBuf);
-        ulong h64 = hasher.GetCurrentHashAsUInt64();
-        return (uint)(h64 ^ (h64 >> 32));
     }
 
     private static void ValidateArchitecture(SchemaDefinition schema, BinaryArchitecture payloadArchitecture)
@@ -1938,152 +1784,6 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         var current = BinaryArchitectureMapper.Current;
         if (current != BinaryArchitecture.Unknown && payloadArchitecture != current)
             throw new InvalidOperationException($"Payload architecture {payloadArchitecture} does not match current architecture {current}.");
-    }
-
-    private static int GetBlittableSize(Type type)
-    {
-        if (!IsBlittable(type))
-            throw new NotSupportedException($"Type '{type.FullName}' is not blittable.");
-
-        // AOT-safe: compute size from fields instead of using Marshal.SizeOf
-        // which requires runtime marshalling data generation.
-        return ComputeBlittableSize(type);
-    }
-
-    private static int ComputeBlittableSize([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields)] Type type)
-    {
-        if (type.IsPrimitive) return GetPrimitiveSize(type);
-
-        var fields = type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        int total = 0;
-        for (int i = 0; i < fields.Length; i++)
-        {
-            var ft = fields[i].FieldType;
-            total += ft.IsPrimitive ? GetPrimitiveSize(ft) : ComputeBlittableSize(ft);
-        }
-        return total;
-    }
-
-    private static int GetPrimitiveSize(Type type)
-    {
-        if (type == typeof(byte) || type == typeof(sbyte) || type == typeof(bool)) return 1;
-        if (type == typeof(short) || type == typeof(ushort) || type == typeof(char)) return 2;
-        if (type == typeof(int) || type == typeof(uint) || type == typeof(float)) return 4;
-        if (type == typeof(long) || type == typeof(ulong) || type == typeof(double)) return 8;
-        if (type == typeof(decimal)) return 16;
-        return Marshal.SizeOf(type); // fallback for exotic primitives
-    }
-
-    private static Action<object?, byte[]> CreateBlittableWrite([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields)] Type type)
-    {
-        if (!IsBlittable(type))
-            throw new NotSupportedException($"Type '{type.FullName}' is not blittable.");
-
-        var size = ComputeBlittableSize(type);
-        var fields = type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        return (value, buffer) =>
-        {
-            if (buffer is null) throw new ArgumentNullException(nameof(buffer));
-            if (buffer.Length < size)
-                throw new ArgumentException("Blittable buffer is too small.", nameof(buffer));
-
-            if (value is null)
-            {
-                buffer.AsSpan(0, size).Clear();
-                return;
-            }
-
-            // AOT-safe: write fields directly instead of Marshal.StructureToPtr
-            int offset = 0;
-            for (int i = 0; i < fields.Length; i++)
-            {
-                var fv = fields[i].GetValue(value);
-                var ft = fields[i].FieldType;
-                WritePrimitiveOrStruct(buffer, ref offset, ft, fv);
-            }
-        };
-    }
-
-    private static void WritePrimitiveOrStruct(byte[] buffer, ref int offset, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields)] Type fieldType, object? value)
-    {
-        if (fieldType == typeof(byte))   { if (offset + 1 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); buffer[offset++] = (byte)(value ?? (byte)0); return; }
-        if (fieldType == typeof(sbyte))  { if (offset + 1 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); buffer[offset++] = unchecked((byte)(sbyte)(value ?? (sbyte)0)); return; }
-        if (fieldType == typeof(bool))   { if (offset + 1 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); buffer[offset++] = (bool)(value ?? false) ? (byte)1 : (byte)0; return; }
-        if (fieldType == typeof(short))  { if (offset + 2 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteInt16LittleEndian(buffer.AsSpan(offset), (short)(value ?? (short)0)); offset += 2; return; }
-        if (fieldType == typeof(ushort)) { if (offset + 2 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(offset), (ushort)(value ?? (ushort)0)); offset += 2; return; }
-        if (fieldType == typeof(char))   { if (offset + 2 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteUInt16LittleEndian(buffer.AsSpan(offset), (ushort)(char)(value ?? '\0')); offset += 2; return; }
-        if (fieldType == typeof(int))    { if (offset + 4 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(offset), (int)(value ?? 0)); offset += 4; return; }
-        if (fieldType == typeof(uint))   { if (offset + 4 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(offset), (uint)(value ?? 0u)); offset += 4; return; }
-        if (fieldType == typeof(float))  { if (offset + 4 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteInt32LittleEndian(buffer.AsSpan(offset), BitConverter.SingleToInt32Bits((float)(value ?? 0f))); offset += 4; return; }
-        if (fieldType == typeof(long))   { if (offset + 8 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteInt64LittleEndian(buffer.AsSpan(offset), (long)(value ?? 0L)); offset += 8; return; }
-        if (fieldType == typeof(ulong))  { if (offset + 8 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteUInt64LittleEndian(buffer.AsSpan(offset), (ulong)(value ?? 0UL)); offset += 8; return; }
-        if (fieldType == typeof(double)) { if (offset + 8 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write"); BinaryPrimitives.WriteInt64LittleEndian(buffer.AsSpan(offset), BitConverter.DoubleToInt64Bits((double)(value ?? 0.0))); offset += 8; return; }
-
-        // Nested blittable struct
-        if (value is null)
-        {
-            var sz = ComputeBlittableSize(fieldType);
-            if (offset + sz > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable write");
-            buffer.AsSpan(offset, sz).Clear();
-            offset = checked(offset + sz);
-            return;
-        }
-        var nestedFields = fieldType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        for (int i = 0; i < nestedFields.Length; i++)
-            WritePrimitiveOrStruct(buffer, ref offset, nestedFields[i].FieldType, nestedFields[i].GetValue(value));
-    }
-
-    private static Func<byte[], object> CreateBlittableRead([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
-    {
-        if (!IsBlittable(type))
-            throw new NotSupportedException($"Type '{type.FullName}' is not blittable.");
-
-        var fields = type.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        return buffer =>
-        {
-            if (buffer is null) throw new ArgumentNullException(nameof(buffer));
-            var size = ComputeBlittableSize(type);
-            if (buffer.Length < size)
-                throw new ArgumentException("Blittable buffer is too small.", nameof(buffer));
-
-            // AOT-safe: read fields directly instead of Marshal.PtrToStructure
-            var instance = CreateInstance(type);
-            int offset = 0;
-            ReadPrimitiveOrStruct(buffer, ref offset, type, ref instance, fields);
-            return instance;
-        };
-    }
-
-    private static void ReadPrimitiveOrStruct(byte[] buffer, ref int offset, [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.NonPublicFields | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type, ref object instance, FieldInfo[] fields)
-    {
-        for (int i = 0; i < fields.Length; i++)
-        {
-            var ft = fields[i].FieldType;
-            object fieldValue;
-
-            if (ft == typeof(byte))        { if (offset + 1 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = buffer[offset++]; }
-            else if (ft == typeof(sbyte))  { if (offset + 1 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = unchecked((sbyte)buffer[offset++]); }
-            else if (ft == typeof(bool))   { if (offset + 1 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = buffer[offset++] != 0; }
-            else if (ft == typeof(short))  { if (offset + 2 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BinaryPrimitives.ReadInt16LittleEndian(buffer.AsSpan(offset)); offset += 2; }
-            else if (ft == typeof(ushort)) { if (offset + 2 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(offset)); offset += 2; }
-            else if (ft == typeof(char))   { if (offset + 2 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = (char)BinaryPrimitives.ReadUInt16LittleEndian(buffer.AsSpan(offset)); offset += 2; }
-            else if (ft == typeof(int))    { if (offset + 4 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset)); offset += 4; }
-            else if (ft == typeof(uint))   { if (offset + 4 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BinaryPrimitives.ReadUInt32LittleEndian(buffer.AsSpan(offset)); offset += 4; }
-            else if (ft == typeof(float))  { if (offset + 4 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(buffer.AsSpan(offset))); offset += 4; }
-            else if (ft == typeof(long))   { if (offset + 8 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(offset)); offset += 8; }
-            else if (ft == typeof(ulong))  { if (offset + 8 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BinaryPrimitives.ReadUInt64LittleEndian(buffer.AsSpan(offset)); offset += 8; }
-            else if (ft == typeof(double)) { if (offset + 8 > buffer.Length) throw new InvalidOperationException("Buffer overflow in blittable read"); fieldValue = BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(buffer.AsSpan(offset))); offset += 8; }
-            else
-            {
-                // Nested blittable struct
-                var nested = CreateInstance(ft);
-                var nestedFields = ft.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                ReadPrimitiveOrStruct(buffer, ref offset, ft, ref nested, nestedFields);
-                fieldValue = nested;
-            }
-
-            fields[i].SetValue(instance, fieldValue);
-        }
     }
 
     private static byte[] LoadOrCreateSigningKey(string keyFilePath)
@@ -2166,25 +1866,44 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return hmac.GetHashAndReset();
     }
 
+    [UnconditionalSuppressMessage("Trimming", "IL2070",
+        Justification = "Fallback for non-entity types. Entity types use DataScaffold metadata. Result is cached per type.")]
     private static MemberAccessor[] BuildMemberAccessors([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicFields)] Type type)
     {
+        // Prefer DataScaffold metadata for registered entity types (no reflection)
+        var meta = DataScaffold.GetEntityByType(type);
+        if (meta != null)
+        {
+            var allProps = meta.AllProperties;
+            var list = new List<MemberAccessor>(allProps.Length);
+            foreach (var property in allProps)
+            {
+                if (property.GetIndexParameters().Length != 0 || !property.CanRead || !property.CanWrite)
+                    continue;
+                list.Add(CreateMemberAccessor(property));
+            }
+            list.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+            return list.ToArray();
+        }
+
+        // Fallback for non-entity types (reflection, cached)
         var properties = type.GetProperties(BindingFlags.Instance | BindingFlags.Public);
         var fields = type.GetFields(BindingFlags.Instance | BindingFlags.Public);
-        var list = new List<MemberAccessor>(properties.Length + fields.Length);
+        var result = new List<MemberAccessor>(properties.Length + fields.Length);
 
         for (int i = 0; i < properties.Length; i++)
         {
             var property = properties[i];
             if (property.GetIndexParameters().Length != 0 || !property.CanRead || !property.CanWrite)
                 continue;
-            list.Add(CreateMemberAccessor(property));
+            result.Add(CreateMemberAccessor(property));
         }
 
         for (int i = 0; i < fields.Length; i++)
-            list.Add(CreateMemberAccessor(fields[i]));
+            result.Add(CreateMemberAccessor(fields[i]));
 
-        list.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
-        return list.ToArray();
+        result.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+        return result.ToArray();
     }
 }
 
