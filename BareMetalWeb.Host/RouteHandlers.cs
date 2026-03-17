@@ -4638,8 +4638,7 @@ public sealed class RouteHandlers : IRouteHandlers
         SamplePackage? pkg;
         try
         {
-            pkg = JsonSerializer.Deserialize(packageJson,
-                SamplePackageJsonContext.Default.SamplePackage);
+            pkg = SamplePackageReader.ReadSamplePackage(packageJson);
         }
         catch (JsonException ex)
         {

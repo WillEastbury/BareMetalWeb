@@ -1,6 +1,4 @@
 using System.Runtime.InteropServices;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using BareMetalWeb.ControlPlane;
 
 namespace BareMetalWeb.Agent;
@@ -106,7 +104,7 @@ internal sealed class AgentConfig
             try
             {
                 var json = File.ReadAllText(cfg.StateFile);
-                cfg.Node = JsonSerializer.Deserialize(json, AgentJsonContext.Default.NodeIdentity);
+                cfg.Node = AgentJsonHelper.DeserializeNodeIdentity(json);
             }
             catch (Exception ex)
             {
@@ -138,11 +136,3 @@ internal sealed class AgentConfig
             "bmw", "runtime")
         : "/opt/bmw";
 }
-
-[JsonSerializable(typeof(NodeIdentity))]
-[JsonSerializable(typeof(NodeRegistrationRequest))]
-[JsonSerializable(typeof(NodeAttestationRequest))]
-[JsonSourceGenerationOptions(
-    WriteIndented = true,
-    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
-internal partial class AgentJsonContext : JsonSerializerContext { }

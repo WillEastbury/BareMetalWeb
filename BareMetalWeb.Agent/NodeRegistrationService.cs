@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using BareMetalWeb.ControlPlane;
 
 namespace BareMetalWeb.Agent;
@@ -161,7 +160,7 @@ internal sealed class NodeRegistrationService
             if (!string.IsNullOrEmpty(dir))
                 Directory.CreateDirectory(dir);
 
-            var json    = JsonSerializer.Serialize(identity, AgentJsonContext.Default.NodeIdentity);
+            var json    = AgentJsonHelper.SerializeNodeIdentity(identity);
             var tmpPath = _config.StateFile + ".tmp";
 
             // Atomic write: write to temp file then rename to avoid partial-write corruption
