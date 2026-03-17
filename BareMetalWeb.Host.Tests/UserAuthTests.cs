@@ -48,7 +48,9 @@ public class UserAuthTests : IDisposable
 
         // Assert
         Assert.NotNull(user);
-        Assert.Equal("chatgpt", UserAuth.GetUserName(user));
+        // DataScaffold metadata isn't registered in unit tests, so use the typed property
+        var resolved = Assert.IsType<SystemPrincipal>(user);
+        Assert.Equal("chatgpt", resolved.UserName);
     }
 
     [Fact]

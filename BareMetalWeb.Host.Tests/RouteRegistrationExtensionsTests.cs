@@ -452,7 +452,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         _server.RegisterAdminRoutes(_routeHandlers, _pageInfoFactory, _mainTemplate);
 
         // Assert
-        Assert.Equal(11, _server.routes.Count);
+        Assert.Equal(13, _server.routes.Count);
     }
 
     [Fact]
@@ -797,7 +797,7 @@ public class RouteRegistrationExtensionsTests : IDisposable
         Assert.True(afterAdmin > afterMonitoring);
         Assert.True(afterLookup > afterAdmin);
         Assert.True(total > afterLookup);
-        Assert.Equal(staticCount + 21 + 4 + 13 + 5 + 26, total);
+        Assert.Equal(staticCount + 20 + 6 + 13 + 5 + 27, total);
     }
 
     [Fact]
