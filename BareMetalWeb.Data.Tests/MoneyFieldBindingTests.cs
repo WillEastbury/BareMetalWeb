@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Text.Json;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Rendering.Models;
@@ -103,12 +102,11 @@ public class MoneyFieldBindingTests
         // Arrange – VNext SPA submits { "Price": { "amount": 250.00, "currency": "GBP" } }
         var meta = GetMeta();
         var instance = new MoneyTestEntity();
-        var json = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+        var json = ManualJsonHelper.ParseJsonElementDict(
             "{\"Price\":{\"amount\":250.00,\"currency\":\"GBP\"},\"Name\":\"Widget\"}");
-        Assert.NotNull(json);
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert – amount extracted from object
         Assert.Empty(errors);
@@ -121,12 +119,11 @@ public class MoneyFieldBindingTests
         // Arrange – plain decimal value (non-VNext or numeric field path)
         var meta = GetMeta();
         var instance = new MoneyTestEntity();
-        var json = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+        var json = ManualJsonHelper.ParseJsonElementDict(
             "{\"Price\":75.50,\"Name\":\"Widget\"}");
-        Assert.NotNull(json);
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert
         Assert.Empty(errors);
@@ -139,12 +136,11 @@ public class MoneyFieldBindingTests
         // Arrange – object without "amount" property should fail gracefully
         var meta = GetMeta();
         var instance = new MoneyTestEntity();
-        var json = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+        var json = ManualJsonHelper.ParseJsonElementDict(
             "{\"Price\":{\"value\":100},\"Name\":\"Widget\"}");
-        Assert.NotNull(json);
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert – error reported for the invalid Money field
         Assert.Contains(errors, e => e.Contains("Price"));

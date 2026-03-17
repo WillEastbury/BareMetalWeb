@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Text.Json;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
 using BareMetalWeb.Rendering.Models;
@@ -42,12 +41,11 @@ public class StringListFieldBindingTests
         // Arrange – JSON array (ideal case)
         var meta = GetMeta();
         var instance = new TagsTestEntity();
-        var json = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+        var json = ManualJsonHelper.ParseJsonElementDict(
             "{\"Tags\":[\"test\",\"test2\"],\"Name\":\"Widget\"}");
-        Assert.NotNull(json);
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert
         Assert.Empty(errors);
@@ -60,12 +58,11 @@ public class StringListFieldBindingTests
         // Arrange – VNext SPA sends textarea value as a plain newline-separated string
         var meta = GetMeta();
         var instance = new TagsTestEntity();
-        var json = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+        var json = ManualJsonHelper.ParseJsonElementDict(
             "{\"Tags\":\"test\\ntest2\",\"Name\":\"Widget\"}");
-        Assert.NotNull(json);
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert – must succeed and parse the tags
         Assert.Empty(errors);
@@ -78,12 +75,11 @@ public class StringListFieldBindingTests
         // Arrange – JS array toString produces "test,test2"
         var meta = GetMeta();
         var instance = new TagsTestEntity();
-        var json = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+        var json = ManualJsonHelper.ParseJsonElementDict(
             "{\"Tags\":\"test,test2\",\"Name\":\"Widget\"}");
-        Assert.NotNull(json);
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert
         Assert.Empty(errors);
@@ -96,12 +92,11 @@ public class StringListFieldBindingTests
         // Arrange – when Tags is cleared and not required, VNext sends null
         var meta = GetMeta();
         var instance = new TagsTestEntity();
-        var json = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+        var json = ManualJsonHelper.ParseJsonElementDict(
             "{\"Tags\":null,\"Name\":\"Widget\"}");
-        Assert.NotNull(json);
 
         // Act
-        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
+        var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json, forCreate: true, allowMissing: false);
 
         // Assert – null produces an empty list, no error
         Assert.Empty(errors);

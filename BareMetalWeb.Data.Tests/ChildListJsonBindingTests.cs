@@ -143,7 +143,7 @@ public class ChildListJsonBindingTests : IDisposable
         }
         """;
 
-        var doc = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!;
+        var doc = ManualJsonHelper.ParseJsonElementDict(json);
         var errors = DataScaffold.ApplyValuesFromJson(metadata, instance, doc, forCreate: true, allowMissing: true);
 
         // Should NOT contain "Order Rows is invalid."

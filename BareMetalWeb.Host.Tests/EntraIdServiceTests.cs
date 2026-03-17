@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
 using System.Text;
@@ -28,13 +29,13 @@ public class EntraIdServiceTests : IDisposable
     [Fact]
     public void DecodeIdToken_ExtractsClaimsFromJwt()
     {
-        var payload = new
+        var payload = new Dictionary<string, string>
         {
-            oid = "obj-123",
-            email = "user@example.com",
-            name = "Test User",
-            tid = "tenant-456",
-            nonce = "test-nonce-value"
+            ["oid"] = "obj-123",
+            ["email"] = "user@example.com",
+            ["name"] = "Test User",
+            ["tid"] = "tenant-456",
+            ["nonce"] = "test-nonce-value"
         };
 
         var token = BuildTestJwt(payload);
@@ -50,12 +51,12 @@ public class EntraIdServiceTests : IDisposable
     [Fact]
     public void DecodeIdToken_FallsBackToPreferredUsername()
     {
-        var payload = new
+        var payload = new Dictionary<string, string>
         {
-            oid = "obj-789",
-            preferred_username = "upn@example.com",
-            name = "UPN User",
-            tid = "tenant-abc"
+            ["oid"] = "obj-789",
+            ["preferred_username"] = "upn@example.com",
+            ["name"] = "UPN User",
+            ["tid"] = "tenant-abc"
         };
 
         var token = BuildTestJwt(payload);
@@ -137,7 +138,7 @@ public class EntraIdServiceTests : IDisposable
     [Fact]
     public void EntraIdUserInfo_NonceParsed()
     {
-        var payload = new { nonce = "abc123", email = "user@test.com" };
+        var payload = new Dictionary<string, string> { ["nonce"] = "abc123", ["email"] = "user@test.com" };
         var token = BuildTestJwt(payload);
         var userInfo = DecodeIdTokenViaReflection(token);
 
@@ -146,10 +147,18 @@ public class EntraIdServiceTests : IDisposable
 
     // ── Test helpers ──────────────────────────────────────────────────
 
-    private static string BuildTestJwt(object payload)
+    private static string BuildTestJwt(Dictionary<string, string> payload)
     {
         var header = Base64UrlEncode("{\"alg\":\"RS256\",\"typ\":\"JWT\"}");
-        var payloadJson = JsonSerializer.Serialize(payload);
+        using var buffer = new MemoryStream();
+        using (var w = new Utf8JsonWriter(buffer))
+        {
+            w.WriteStartObject();
+            foreach (var kvp in payload)
+                w.WriteString(kvp.Key, kvp.Value);
+            w.WriteEndObject();
+        }
+        var payloadJson = Encoding.UTF8.GetString(buffer.GetBuffer(), 0, (int)buffer.Length);
         var body = Base64UrlEncode(payloadJson);
         return $"{header}.{body}.fake-signature";
     }
