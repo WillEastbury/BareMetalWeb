@@ -10,10 +10,10 @@ namespace BareMetalWeb.Runtime.Tests;
 public class SampleGalleryServiceTests
 {
     [Fact]
-    public void GetAllPackages_Returns_FourPackages()
+    public void GetAllPackages_Returns_FivePackages()
     {
         var packages = SampleGalleryService.GetAllPackages();
-        Assert.Equal(4, packages.Count);
+        Assert.Equal(5, packages.Count);
     }
 
     [Theory]
@@ -21,6 +21,7 @@ public class SampleGalleryServiceTests
     [InlineData("todo")]
     [InlineData("employee")]
     [InlineData("school")]
+    [InlineData("deployment-rings")]
     public void GetAllPackages_ContainsExpectedSlug(string slug)
     {
         var packages = SampleGalleryService.GetAllPackages();
@@ -32,6 +33,7 @@ public class SampleGalleryServiceTests
     [InlineData("todo")]
     [InlineData("employee")]
     [InlineData("school")]
+    [InlineData("deployment-rings")]
     public void GetPackage_BySlug_ReturnsPackage(string slug)
     {
         var pkg = SampleGalleryService.GetPackage(slug);
@@ -51,6 +53,7 @@ public class SampleGalleryServiceTests
     [InlineData("todo")]
     [InlineData("employee")]
     [InlineData("school")]
+    [InlineData("deployment-rings")]
     public void GetPackage_HasEntitiesAndFields(string slug)
     {
         var pkg = SampleGalleryService.GetPackage(slug)!;
@@ -106,6 +109,7 @@ public class SampleGalleryServiceTests
     [InlineData("todo")]
     [InlineData("employee")]
     [InlineData("school")]
+    [InlineData("deployment-rings")]
     public void GetPackage_HasNonEmptyNameAndDescription(string slug)
     {
         var pkg = SampleGalleryService.GetPackage(slug)!;

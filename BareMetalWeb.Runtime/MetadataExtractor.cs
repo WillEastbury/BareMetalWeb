@@ -152,14 +152,18 @@ public static class MetadataExtractor
         foreach (var (prop, attr) in properties)
         {
             var dataIndex = prop.GetCustomAttribute<DataIndexAttribute>();
+            var lookupAttr = prop.GetCustomAttribute<DataLookupAttribute>();
+            bool hasLookup = lookupAttr != null;
+            string? lookupSlug = hasLookup ? ResolveEntitySlug(lookupAttr!.TargetType) : null;
+
             FormFieldType? explicitType = attr!.FieldType != FormFieldType.Unknown
                 ? attr.FieldType
                 : null;
-            string fieldTypeStr = MapFieldTypeString(prop.PropertyType, explicitType, hasLookup: false);
+            string fieldTypeStr = MapFieldTypeString(prop.PropertyType, explicitType, hasLookup);
 
             string? enumValues = null;
             var effectivePropType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
-            if (effectivePropType.IsEnum)
+            if (effectivePropType.IsEnum && !hasLookup)
                 enumValues = string.Join("|", Enum.GetNames(effectivePropType));
 
             bool isNullable = Nullable.GetUnderlyingType(prop.PropertyType) != null
@@ -181,7 +185,10 @@ public static class MetadataExtractor
                 Create = attr.Create,
                 ReadOnly = attr.ReadOnly,
                 Placeholder = attr.Placeholder,
-                EnumValues = enumValues
+                EnumValues = enumValues,
+                LookupEntitySlug = lookupSlug,
+                LookupValueField = hasLookup ? lookupAttr!.ValueField : null,
+                LookupDisplayField = hasLookup ? lookupAttr!.DisplayField : null
             });
 
             if (dataIndex != null)
