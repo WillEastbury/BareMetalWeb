@@ -337,18 +337,30 @@ public static class CalculatedFieldService
     private static Dictionary<string, object?> BuildContext(BaseDataObject instance, Type type)
     {
         var meta = DataScaffold.GetEntityByType(type);
-        if (meta == null)
-            return new Dictionary<string, object?> { ["Key"] = instance.Key };
-
-        var layout = EntityLayoutCompiler.GetOrCompile(meta);
-        var context = new Dictionary<string, object?>(layout.Fields.Length + 4);
-        context["Key"] = instance.Key;
-        foreach (var field in layout.Fields)
+        if (meta != null)
         {
-            try { context[field.Name] = field.Getter(instance); }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"CalculatedFieldService: field '{field.Name}' getter failed: {ex.Message}"); context[field.Name] = null; }
+            var layout = EntityLayoutCompiler.GetOrCompile(meta);
+            var context = new Dictionary<string, object?>(layout.Fields.Length + 4);
+            context["Key"] = instance.Key;
+            foreach (var field in layout.Fields)
+            {
+                try { context[field.Name] = field.Getter(instance); }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"CalculatedFieldService: field '{field.Name}' getter failed: {ex.Message}"); context[field.Name] = null; }
+            }
+            return context;
         }
-        return context;
+
+        // Fallback for types without DataScaffold metadata (e.g. test entities)
+        var props = type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+        var fallback = new Dictionary<string, object?>(props.Length + 4);
+        fallback["Key"] = instance.Key;
+        foreach (var prop in props)
+        {
+            if (!prop.CanRead) continue;
+            try { fallback[prop.Name] = prop.GetValue(instance); }
+            catch { fallback[prop.Name] = null; }
+        }
+        return fallback;
     }
 
     private static bool HasCycle(
