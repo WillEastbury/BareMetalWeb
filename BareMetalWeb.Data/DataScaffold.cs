@@ -15,7 +15,7 @@ using BareMetalWeb.Rendering.Models;
 namespace BareMetalWeb.Core;
 
 public sealed record DataFieldMetadata(
-    PropertyInfo Property,
+    Type ClrType,
     string Name,
     string Label,
     FormFieldType FieldType,
@@ -54,24 +54,45 @@ public sealed record DataFieldMetadata(
     /// When set, rendering prefers this list over <see cref="ClrType"/> for enum option building
     /// and for converting integer ordinals to display names (e.g. timetable day headers).
     /// </summary>
-    IReadOnlyList<string>? EnumValues = null
+    IReadOnlyList<string>? EnumValues = null,
+    /// <summary>
+    /// Storage ordinal in the entity's <c>_values[]</c> array.
+    /// -1 means ordinal-indexed access is not available (entity must provide GetFieldMap).
+    /// Set during entity compilation in DataScaffold.
+    /// </summary>
+    int StorageOrdinal = -1
 )
 {
-    /// <summary>CLR type of this field, captured once at registration to avoid PropertyInfo access.</summary>
-    public Type ClrType { get; } = Property.PropertyType;
-
-    // Lazily compiled delegates avoid per-call PropertyInfo.GetValue / PropertyInfo.SetValue
-    // reflection overhead in hot rendering paths.  The ??= assignment is not strictly thread-safe
-    // but is idempotent — the worst case is two threads each compile an equivalent delegate; the
-    // losing result is simply GC'd.
+    // Lazily compiled delegates — use ordinal-indexed _values[] when available,
+    // Ordinal-indexed getter/setter via _values[].
     private Func<object, object?>? _getValueFn;
     private Action<object, object?>? _setValueFn;
 
-    /// <summary>Reads this field's value from a boxed entity instance via a compiled delegate.</summary>
-    public Func<object, object?> GetValueFn => _getValueFn ??= PropertyAccessorFactory.BuildGetter(Property);
+    /// <summary>Reads this field's value from a boxed entity instance via ordinal-indexed _values access.</summary>
+    public Func<object, object?> GetValueFn => _getValueFn ??= BuildGetter();
 
-    /// <summary>Writes a value to this field on a boxed entity instance via a compiled delegate.</summary>
-    public Action<object, object?> SetValueFn => _setValueFn ??= PropertyAccessorFactory.BuildSetter(Property);
+    /// <summary>Writes a value to this field on a boxed entity instance via ordinal-indexed _values access.</summary>
+    public Action<object, object?> SetValueFn => _setValueFn ??= BuildSetter();
+
+    private Func<object, object?> BuildGetter()
+    {
+        if (StorageOrdinal < 0)
+            throw new InvalidOperationException(
+                $"Field '{Name}' has no storage ordinal. All entity properties must be backed by _values[]. " +
+                $"Ensure the entity class uses ordinal-indexed storage in BaseDataObject.");
+        var ord = StorageOrdinal;
+        return obj => ((BareMetalWeb.Data.BaseDataObject)obj).GetFieldValue(ord);
+    }
+
+    private Action<object, object?> BuildSetter()
+    {
+        if (StorageOrdinal < 0)
+            throw new InvalidOperationException(
+                $"Field '{Name}' has no storage ordinal. All entity properties must be backed by _values[]. " +
+                $"Ensure the entity class uses ordinal-indexed storage in BaseDataObject.");
+        var ord = StorageOrdinal;
+        return (obj, val) => ((BareMetalWeb.Data.BaseDataObject)obj).SetFieldValue(ord, val);
+    }
 }
 
 public sealed record DataEntityMetadata(
@@ -90,7 +111,8 @@ public sealed record DataEntityMetadata(
     IReadOnlyList<RemoteCommandMetadata> Commands,
     string? DefaultSortField = null,
     SortDirection DefaultSortDirection = SortDirection.Asc,
-    IReadOnlyList<DataFieldMetadata>? DocumentRelationFields = null
+    IReadOnlyList<DataFieldMetadata>? DocumentRelationFields = null,
+    IReadOnlyList<ValidationRuleAttribute>? EntityValidationRules = null
 )
 {
     private DataFieldMetadata[]? _listFields;
@@ -98,23 +120,6 @@ public sealed record DataEntityMetadata(
     private DataFieldMetadata[]? _createFields;
     private DataFieldMetadata[]? _editFields;
     private Dictionary<string, DataFieldMetadata>? _fieldsByName;
-    private PropertyInfo[]? _allProperties;
-
-    /// <summary>
-    /// All public instance properties on the CLR type, sorted by name (ordinal).
-    /// Cached to avoid repeated reflection in serialization paths.
-    /// </summary>
-    public PropertyInfo[] AllProperties
-    {
-        get
-        {
-            if (_allProperties != null) return _allProperties;
-            var props = Type.GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
-            Array.Sort(props, (a, b) => string.CompareOrdinal(a.Name, b.Name));
-            _allProperties = props;
-            return _allProperties;
-        }
-    }
 
     /// <summary>Fields visible in list views, pre-sorted by Order.</summary>
     public DataFieldMetadata[] ListFields => _listFields ??= BuildFilteredFields(f => f.List);
@@ -281,6 +286,9 @@ public static class DataScaffold
         EntitiesByType[type] = metadata;
         InvalidateEntityListCache();
 
+        // Ensure the serializer can instantiate this type without reflection
+        BinaryObjectSerializer.RegisterKnownType<T>();
+
         return true;
     }
 
@@ -391,7 +399,7 @@ public static class DataScaffold
                 foreach (var f in metadata.Fields)
                 {
                     if (f.IdGeneration == IdGenerationStrategy.Sequential &&
-                        string.Equals(f.Property.Name, nameof(BaseDataObject.Key), StringComparison.Ordinal))
+                        string.Equals(f.Name, nameof(BaseDataObject.Key), StringComparison.Ordinal))
                     {
                         seqField = f;
                         break;
@@ -1757,14 +1765,18 @@ public static class DataScaffold
                 valueGetter = PropertyAccessorCache.GetOrAdd((itemType, effectiveValueField),
                     static key =>
                     {
-                        var p = key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                        return p != null ? PropertyAccessorFactory.BuildGetter(p) : null;
+                        var m = DataScaffold.GetEntityByType(key.Item1);
+                        if (m == null) return null;
+                        var f = m.FindField(key.Item2);
+                        return f?.GetValueFn;
                     });
                 displayGetter = PropertyAccessorCache.GetOrAdd((itemType, displayField),
                     static key =>
                     {
-                        var p = key.Item1.GetProperty(key.Item2, BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase);
-                        return p != null ? PropertyAccessorFactory.BuildGetter(p) : null;
+                        var m = DataScaffold.GetEntityByType(key.Item1);
+                        if (m == null) return null;
+                        var f = m.FindField(key.Item2);
+                        return f?.GetValueFn;
                     });
             }
             if (valueGetter == null || displayGetter == null)
@@ -1919,8 +1931,8 @@ public static class DataScaffold
 
             // Don't resolve lookups in this simplified version
             fields.Add(new ChildFieldMeta(prop.Name, label, prop.PropertyType, required, effectiveFieldType, null, null, null, null, null, null, null,
-                PropertyAccessorFactory.BuildGetter(prop),
-                PropertyAccessorFactory.BuildSetter(prop)));
+                obj => prop.GetValue(obj),
+                (obj, val) => prop.SetValue(obj, val)));
         }
 
         return fields;
@@ -2006,8 +2018,8 @@ public static class DataScaffold
                 CopyFromParentField: copyFromParentAttr?.ParentFieldName,
                 CopyFromParentSlug: copyFromParentAttr?.EntitySlug,
                 CopyFromParentSourceField: copyFromParentAttr?.SourceFieldName,
-                Getter: PropertyAccessorFactory.BuildGetter(prop),
-                Setter: PropertyAccessorFactory.BuildSetter(prop)));
+                Getter: obj => prop.GetValue(obj),
+                Setter: (obj, val) => prop.SetValue(obj, val)));
         }
 
         return fields;
@@ -2635,9 +2647,27 @@ public static class DataScaffold
         if (entityAttribute == null)
             return null;
 
+        // Read entity-level validation rules at registration time (no runtime reflection)
+        List<ValidationRuleAttribute>? entityValidationRules = null;
+        foreach (var attr in type.GetCustomAttributes(false))
+        {
+            if (attr is ValidationRuleAttribute vr)
+            {
+                entityValidationRules ??= new List<ValidationRuleAttribute>();
+                entityValidationRules.Add(vr);
+            }
+        }
+
         var fields = new List<DataFieldMetadata>();
         var properties = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
         Array.Sort(properties, (a, b) => string.CompareOrdinal(a.Name, b.Name));
+
+        // Read ordinal mapping from entity's field lookup table (zero reflection)
+        var ordinalMap = new Dictionary<string, int>(32, StringComparer.Ordinal);
+        var probe = new T();
+        foreach (var slot in probe.GetFieldMap())
+            ordinalMap[slot.Name] = slot.Ordinal;
+
         for (int i = 0; i < properties.Length; i++)
         {
             var prop = properties[i];
@@ -2656,6 +2686,8 @@ public static class DataScaffold
             DataIndexAttribute? dataIndexAttribute = null;
             RelatedDocumentAttribute? relatedDocAttribute = null;
             SingletonFlagAttribute? singletonFlagAttribute = null;
+            List<ValidationAttribute>? validationAttrs = null;
+            List<ValidationRuleAttribute>? fieldExprRules = null;
             for (int j = 0; j < allAttrs.Length; j++)
             {
                 switch (allAttrs[j])
@@ -2670,6 +2702,14 @@ public static class DataScaffold
                     case DataIndexAttribute a: dataIndexAttribute = a; break;
                     case RelatedDocumentAttribute a: relatedDocAttribute = a; break;
                     case SingletonFlagAttribute a: singletonFlagAttribute = a; break;
+                    case ValidationAttribute va:
+                        validationAttrs ??= new List<ValidationAttribute>();
+                        validationAttrs.Add(va);
+                        break;
+                    case ValidationRuleAttribute vr:
+                        fieldExprRules ??= new List<ValidationRuleAttribute>();
+                        fieldExprRules.Add(vr);
+                        break;
                 }
             }
 
@@ -2761,7 +2801,7 @@ public static class DataScaffold
                 : null;
 
             fields.Add(new DataFieldMetadata(
-                prop,
+                prop.PropertyType,
                 prop.Name,
                 label,
                 fieldType,
@@ -2778,11 +2818,12 @@ public static class DataScaffold
                 computed,
                 upload,
                 calculatedAttribute,
-                ValidationService.BuildValidationConfig(prop),
+                BuildValidationConfigInline(validationAttrs, fieldExprRules),
                 dataIndexAttribute != null,
                 relatedDoc,
                 DataIndex: dataIndexAttribute,
-                HasSingletonFlag: hasSingletonFlag
+                HasSingletonFlag: hasSingletonFlag,
+                StorageOrdinal: ordinalMap.TryGetValue(prop.Name, out var storageOrd) ? storageOrd : -1
             ));
         }
 
@@ -2894,7 +2935,8 @@ public static class DataScaffold
             commands,
             defaultSortField,
             defaultSortDirection,
-            docRelFields
+            docRelFields,
+            entityValidationRules
         );
     }
 
@@ -2907,6 +2949,48 @@ public static class DataScaffold
             || property.Name == nameof(BaseDataObject.CreatedBy)
             || property.Name == nameof(BaseDataObject.UpdatedBy)
             || property.Name == nameof(BaseDataObject.ETag);
+    }
+
+    private static ValidationConfig? BuildValidationConfigInline(
+        List<ValidationAttribute>? validators, List<ValidationRuleAttribute>? expressionRules)
+    {
+        if ((validators == null || validators.Count == 0) && (expressionRules == null || expressionRules.Count == 0))
+            return null;
+
+        int? minLength = null;
+        int? maxLength = null;
+        double? rangeMin = null;
+        double? rangeMax = null;
+        string? regexPattern = null;
+        string? regexMessage = null;
+        bool isEmail = false;
+        bool isUrl = false;
+        bool isPhone = false;
+
+        if (validators != null)
+        {
+            foreach (var v in validators)
+            {
+                switch (v)
+                {
+                    case MinLengthAttribute ml: minLength = ml.Length; break;
+                    case MaxLengthAttribute mx: maxLength = mx.Length; break;
+                    case RangeAttribute r: rangeMin = r.Min; rangeMax = r.Max; break;
+                    case RegexPatternAttribute rp: regexPattern = rp.Pattern; regexMessage = rp.ErrorMessage; break;
+                    case EmailAddressAttribute: isEmail = true; break;
+                    case UrlAttribute: isUrl = true; break;
+                    case PhoneAttribute: isPhone = true; break;
+                }
+            }
+        }
+
+        return new ValidationConfig(
+            minLength, maxLength, rangeMin, rangeMax,
+            regexPattern, regexMessage,
+            isEmail, isUrl, isPhone,
+            (IReadOnlyList<ValidationAttribute>?)validators ?? Array.Empty<ValidationAttribute>(),
+            (IReadOnlyList<ValidationRuleAttribute>?)expressionRules ?? Array.Empty<ValidationRuleAttribute>()
+        );
     }
 
     private static bool IsNullable(PropertyInfo property)
@@ -3061,4 +3145,5 @@ public static class DataScaffold
     {
         return ValidationService.ValidateEntity(metadata, instance);
     }
+
 }

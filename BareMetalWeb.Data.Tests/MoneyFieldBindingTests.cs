@@ -17,11 +17,44 @@ public class MoneyFieldBindingTests
     [DataEntity("MoneyTestEntities")]
     private class MoneyTestEntity : BaseDataObject
     {
+        private const int Ord_Name = BaseFieldCount + 0;
+        private const int Ord_Price = BaseFieldCount + 1;
+        internal new const int TotalFieldCount = BaseFieldCount + 2;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("Price", Ord_Price),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public MoneyTestEntity() : base(TotalFieldCount) { }
+        public MoneyTestEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Price", FieldType = FormFieldType.Money, Order = 1)]
-        public decimal Price { get; set; }
+        public decimal Price
+        {
+            get => (decimal)(_values[Ord_Price] ?? 0m);
+            set => _values[Ord_Price] = value;
+        }
+
+
 
         [DataField(Label = "Name", Order = 2)]
-        public string Name { get; set; } = string.Empty;
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
     }
 
     private static DataEntityMetadata GetMeta()
@@ -153,10 +186,43 @@ public class MoneyFieldBindingTests
     [DataEntity("MoneyRequiredTestEntities")]
     private class MoneyRequiredEntity : BaseDataObject
     {
+        private const int Ord_Name = BaseFieldCount + 0;
+        private const int Ord_Price = BaseFieldCount + 1;
+        internal new const int TotalFieldCount = BaseFieldCount + 2;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("Price", Ord_Price),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public MoneyRequiredEntity() : base(TotalFieldCount) { }
+        public MoneyRequiredEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Price", FieldType = FormFieldType.Money, Order = 1, Required = true)]
-        public decimal Price { get; set; }
+        public decimal Price
+        {
+            get => (decimal)(_values[Ord_Price] ?? 0m);
+            set => _values[Ord_Price] = value;
+        }
+
+
 
         [DataField(Label = "Name", Order = 2)]
-        public string Name { get; set; } = string.Empty;
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
     }
 }

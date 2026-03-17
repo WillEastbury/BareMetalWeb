@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 
@@ -88,10 +87,7 @@ public sealed class ControlPlaneService
         var maxRecords = config.GetValue("ControlPlane.BufferMaxRecords", TelemetryBuffer.DefaultMaxRecords);
         _buffer = new TelemetryBuffer(resolvedBufferDir, maxRecords);
 
-        _version = Assembly.GetEntryAssembly()
-            ?.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-            ?? Assembly.GetEntryAssembly()?.GetName().Version?.ToString(3)
-            ?? "unknown";
+        _version = BuildInfo.Version;
     }
 
     /// <summary>Wire up optional data sources that live outside this library.</summary>

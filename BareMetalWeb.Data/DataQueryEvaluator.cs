@@ -399,6 +399,23 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
                     return true;
                 }
             }
+
+            // Fall back to ordinal lookup via entity's field map (covers non-[DataField] properties)
+            var fieldMap = dataObject.GetFieldMap();
+            int lo = 0, hi = fieldMap.Length - 1;
+            while (lo <= hi)
+            {
+                int mid = (lo + hi) >>> 1;
+                int cmp = string.Compare(fieldMap[mid].Name, field, StringComparison.OrdinalIgnoreCase);
+                if (cmp == 0)
+                {
+                    value = dataObject.GetFieldValue(fieldMap[mid].Ordinal);
+                    memberType = value?.GetType() ?? typeof(object);
+                    return true;
+                }
+                if (cmp < 0) lo = mid + 1;
+                else hi = mid - 1;
+            }
         }
 
         value = null;

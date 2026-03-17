@@ -14,46 +14,195 @@ namespace BareMetalWeb.Data.Tests;
 [DataEntity("Test Searchable Item", Slug = "testsearchableitem")]
 public class TestSearchableItem : BaseDataObject
 {
+    private const int Ord_Category = BaseFieldCount + 0;
+    private const int Ord_Description = BaseFieldCount + 1;
+    private const int Ord_Name = BaseFieldCount + 2;
+    private const int Ord_Tags = BaseFieldCount + 3;
+    internal new const int TotalFieldCount = BaseFieldCount + 4;
+
+    private static readonly FieldSlot[] _fieldMap = new[]
+    {
+        new FieldSlot("Category", Ord_Category),
+        new FieldSlot("CreatedBy", Ord_CreatedBy),
+        new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+        new FieldSlot("Description", Ord_Description),
+        new FieldSlot("ETag", Ord_ETag),
+        new FieldSlot("Identifier", Ord_Identifier),
+        new FieldSlot("Key", Ord_Key),
+        new FieldSlot("Name", Ord_Name),
+        new FieldSlot("Tags", Ord_Tags),
+        new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+        new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
+    };
+    protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+    public TestSearchableItem() : base(TotalFieldCount) { }
+    public TestSearchableItem(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
     [DataField] [DataIndex(IndexKind.Inverted)]
-    public string? Name { get; set; }
+    public string? Name
+    {
+        get => (string?)_values[Ord_Name];
+        set => _values[Ord_Name] = value;
+    }
+
+
 
     [DataField] [DataIndex(IndexKind.BTree)]
-    public string? Category { get; set; }
+    public string? Category
+    {
+        get => (string?)_values[Ord_Category];
+        set => _values[Ord_Category] = value;
+    }
+
+
 
     [DataField] [DataIndex(IndexKind.Treap)]
-    public string? Tags { get; set; }
+    public string? Tags
+    {
+        get => (string?)_values[Ord_Tags];
+        set => _values[Ord_Tags] = value;
+    }
+
+
 
     [DataField] [DataIndex(IndexKind.Bloom)]
-    public string? Description { get; set; }
+    public string? Description
+    {
+        get => (string?)_values[Ord_Description];
+        set => _values[Ord_Description] = value;
+    }
 }
 
 // Edge-case test entities — no shipped entity has these field types
 [DataEntity("List Field Test", Slug = "listfieldtest")]
 public class ListFieldEntity : BaseDataObject
 {
+    private const int Ord_Tags = BaseFieldCount + 0;
+    internal new const int TotalFieldCount = BaseFieldCount + 1;
+
+    private static readonly FieldSlot[] _fieldMap = new[]
+    {
+        new FieldSlot("CreatedBy", Ord_CreatedBy),
+        new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+        new FieldSlot("ETag", Ord_ETag),
+        new FieldSlot("Identifier", Ord_Identifier),
+        new FieldSlot("Key", Ord_Key),
+        new FieldSlot("Tags", Ord_Tags),
+        new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+        new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
+    };
+    protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+    public ListFieldEntity() : base(TotalFieldCount) { }
+    public ListFieldEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
     [DataField] [DataIndex]
-    public List<string> Tags { get; set; } = new();
+    public List<string> Tags
+    {
+        get => (List<string>?)_values[Ord_Tags] ?? new();
+        set => _values[Ord_Tags] = value;
+    }
 }
 
 [DataEntity("Nullable Int Test", Slug = "nullableinttest")]
 public class NullableIntEntity : BaseDataObject
 {
+    private const int Ord_Score = BaseFieldCount + 0;
+    internal new const int TotalFieldCount = BaseFieldCount + 1;
+
+    private static readonly FieldSlot[] _fieldMap = new[]
+    {
+        new FieldSlot("CreatedBy", Ord_CreatedBy),
+        new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+        new FieldSlot("ETag", Ord_ETag),
+        new FieldSlot("Identifier", Ord_Identifier),
+        new FieldSlot("Key", Ord_Key),
+        new FieldSlot("Score", Ord_Score),
+        new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+        new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
+    };
+    protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+    public NullableIntEntity() : base(TotalFieldCount) { }
+    public NullableIntEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
     [DataField] [DataIndex]
-    public int? Score { get; set; }
+    public int? Score
+    {
+        get => (int?)_values[Ord_Score];
+        set => _values[Ord_Score] = value;
+    }
 }
 
 [DataEntity("Int List Test", Slug = "intlisttest")]
 public class IntListEntity : BaseDataObject
 {
+    private const int Ord_Values = BaseFieldCount + 0;
+    internal new const int TotalFieldCount = BaseFieldCount + 1;
+
+    private static readonly FieldSlot[] _fieldMap = new[]
+    {
+        new FieldSlot("CreatedBy", Ord_CreatedBy),
+        new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+        new FieldSlot("ETag", Ord_ETag),
+        new FieldSlot("Identifier", Ord_Identifier),
+        new FieldSlot("Key", Ord_Key),
+        new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+        new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Values", Ord_Values),
+        new FieldSlot("Version", Ord_Version),
+    };
+    protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+    public IntListEntity() : base(TotalFieldCount) { }
+    public IntListEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
     [DataField] [DataIndex]
-    public List<int> Values { get; set; } = new();
+    public List<int> Values
+    {
+        get => (List<int>?)_values[Ord_Values] ?? new();
+        set => _values[Ord_Values] = value;
+    }
 }
 
 [DataEntity("BTree Test", Slug = "btreetest")]
 public class BTreeEntity : BaseDataObject
 {
+    private const int Ord_Label = BaseFieldCount + 0;
+    internal new const int TotalFieldCount = BaseFieldCount + 1;
+
+    private static readonly FieldSlot[] _fieldMap = new[]
+    {
+        new FieldSlot("CreatedBy", Ord_CreatedBy),
+        new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+        new FieldSlot("ETag", Ord_ETag),
+        new FieldSlot("Identifier", Ord_Identifier),
+        new FieldSlot("Key", Ord_Key),
+        new FieldSlot("Label", Ord_Label),
+        new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+        new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
+    };
+    protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+    public BTreeEntity() : base(TotalFieldCount) { }
+    public BTreeEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
     [DataField] [DataIndex(IndexKind.BTree)]
-    public string Label { get; set; } = string.Empty;
+    public string Label
+    {
+        get => (string?)_values[Ord_Label] ?? string.Empty;
+        set => _values[Ord_Label] = value;
+    }
 }
 
 public class SearchIndexingTests : IDisposable
@@ -314,7 +463,31 @@ public class SearchIndexingTests : IDisposable
 
     private class NoIndexEntity : BaseDataObject
     {
-        public string Value { get; set; } = string.Empty;
+        private const int Ord_Value = BaseFieldCount + 0;
+        internal new const int TotalFieldCount = BaseFieldCount + 1;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Value", Ord_Value),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public NoIndexEntity() : base(TotalFieldCount) { }
+        public NoIndexEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        public string Value
+        {
+            get => (string?)_values[Ord_Value] ?? string.Empty;
+            set => _values[Ord_Value] = value;
+        }
     }
 
     // --- HasIndexedFields ---

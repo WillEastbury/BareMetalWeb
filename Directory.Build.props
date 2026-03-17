@@ -13,4 +13,18 @@
     <RunAnalyzers>false</RunAnalyzers>
     <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
   </PropertyGroup>
+
+  <!-- Generate BuildInfo.cs with compile-time version constant (avoids System.Reflection at runtime) -->
+  <Target Name="GenerateBuildInfo" BeforeTargets="CoreCompile">
+    <PropertyGroup>
+      <_BuildVersion>$(InformationalVersion)</_BuildVersion>
+      <_BuildVersion Condition="'$(_BuildVersion)' == ''">$(Version)</_BuildVersion>
+      <_BuildVersion Condition="'$(_BuildVersion)' == ''">0.0.0</_BuildVersion>
+      <_BuildInfoFile>$(IntermediateOutputPath)BuildInfo.cs</_BuildInfoFile>
+    </PropertyGroup>
+    <WriteLinesToFile File="$(_BuildInfoFile)" Overwrite="true" Lines="namespace $(RootNamespace) { internal static class BuildInfo { internal const string Version = &quot;$(_BuildVersion)&quot;%3B internal const string AssemblyName = &quot;$(AssemblyName)&quot;%3B } }" />
+    <ItemGroup>
+      <Compile Include="$(_BuildInfoFile)" Condition="!@(Compile->AnyHaveMetadataValue('Identity', '$(_BuildInfoFile)'))" />
+    </ItemGroup>
+  </Target>
 </Project>

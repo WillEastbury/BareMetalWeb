@@ -8,44 +8,183 @@ namespace BareMetalWeb.Data.Tests;
 [DataEntity("Calculated Test", Slug = "calculatedtest")]
 public class CalculatedTestEntity : BaseDataObject
 {
-    [DataField] public int Quantity { get; set; }
-    [DataField] public decimal UnitPrice { get; set; }
-    [DataField] public decimal DiscountPercent { get; set; }
+    private const int Ord_DiscountPercent = BaseFieldCount + 0;
+    private const int Ord_LineTotal = BaseFieldCount + 1;
+    private const int Ord_Quantity = BaseFieldCount + 2;
+    private const int Ord_Subtotal = BaseFieldCount + 3;
+    private const int Ord_UnitPrice = BaseFieldCount + 4;
+    internal new const int TotalFieldCount = BaseFieldCount + 5;
+
+    private static readonly FieldSlot[] _fieldMap = new[]
+    {
+        new FieldSlot("CreatedBy", Ord_CreatedBy),
+        new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+        new FieldSlot("DiscountPercent", Ord_DiscountPercent),
+        new FieldSlot("ETag", Ord_ETag),
+        new FieldSlot("Identifier", Ord_Identifier),
+        new FieldSlot("Key", Ord_Key),
+        new FieldSlot("LineTotal", Ord_LineTotal),
+        new FieldSlot("Quantity", Ord_Quantity),
+        new FieldSlot("Subtotal", Ord_Subtotal),
+        new FieldSlot("UnitPrice", Ord_UnitPrice),
+        new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+        new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
+    };
+    protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+    public CalculatedTestEntity() : base(TotalFieldCount) { }
+    public CalculatedTestEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+    [DataField]
+    public int Quantity
+    {
+        get => (int)(_values[Ord_Quantity] ?? 0);
+        set => _values[Ord_Quantity] = value;
+    }
+
+    [DataField]
+    public decimal UnitPrice
+    {
+        get => (decimal)(_values[Ord_UnitPrice] ?? 0m);
+        set => _values[Ord_UnitPrice] = value;
+    }
+
+    [DataField]
+    public decimal DiscountPercent
+    {
+        get => (decimal)(_values[Ord_DiscountPercent] ?? 0m);
+        set => _values[Ord_DiscountPercent] = value;
+    }
+
+
 
     [DataField]
     [CalculatedField(Expression = "Quantity * UnitPrice")]
-    public decimal Subtotal { get; set; }
+    public decimal Subtotal
+    {
+        get => (decimal)(_values[Ord_Subtotal] ?? 0m);
+        set => _values[Ord_Subtotal] = value;
+    }
+
+
 
     [DataField]
     [CalculatedField(Expression = "Subtotal * (1 - DiscountPercent / 100)")]
-    public decimal LineTotal { get; set; }
+    public decimal LineTotal
+    {
+        get => (decimal)(_values[Ord_LineTotal] ?? 0m);
+        set => _values[Ord_LineTotal] = value;
+    }
 }
 
 [DataEntity("Circular Test", Slug = "circulartest")]
 public class CircularTestEntity : BaseDataObject
 {
+    private const int Ord_A = BaseFieldCount + 0;
+    private const int Ord_B = BaseFieldCount + 1;
+    internal new const int TotalFieldCount = BaseFieldCount + 2;
+
+    private static readonly FieldSlot[] _fieldMap = new[]
+    {
+        new FieldSlot("A", Ord_A),
+        new FieldSlot("B", Ord_B),
+        new FieldSlot("CreatedBy", Ord_CreatedBy),
+        new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+        new FieldSlot("ETag", Ord_ETag),
+        new FieldSlot("Identifier", Ord_Identifier),
+        new FieldSlot("Key", Ord_Key),
+        new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+        new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
+    };
+    protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+    public CircularTestEntity() : base(TotalFieldCount) { }
+    public CircularTestEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
     [DataField]
     [CalculatedField(Expression = "B + 1")]
-    public decimal A { get; set; }
+    public decimal A
+    {
+        get => (decimal)(_values[Ord_A] ?? 0m);
+        set => _values[Ord_A] = value;
+    }
+
+
 
     [DataField]
     [CalculatedField(Expression = "A + 1")]
-    public decimal B { get; set; }
+    public decimal B
+    {
+        get => (decimal)(_values[Ord_B] ?? 0m);
+        set => _values[Ord_B] = value;
+    }
 }
 
 [DataEntity("Independent Test", Slug = "independenttest")]
 public class IndependentFieldsTestEntity : BaseDataObject
 {
-    [DataField] public decimal Price { get; set; }
-    [DataField] public decimal Tax { get; set; }
+    private const int Ord_Price = BaseFieldCount + 0;
+    private const int Ord_PriceWithMarkup = BaseFieldCount + 1;
+    private const int Ord_Tax = BaseFieldCount + 2;
+    private const int Ord_TaxAmount = BaseFieldCount + 3;
+    internal new const int TotalFieldCount = BaseFieldCount + 4;
+
+    private static readonly FieldSlot[] _fieldMap = new[]
+    {
+        new FieldSlot("CreatedBy", Ord_CreatedBy),
+        new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+        new FieldSlot("ETag", Ord_ETag),
+        new FieldSlot("Identifier", Ord_Identifier),
+        new FieldSlot("Key", Ord_Key),
+        new FieldSlot("Price", Ord_Price),
+        new FieldSlot("PriceWithMarkup", Ord_PriceWithMarkup),
+        new FieldSlot("Tax", Ord_Tax),
+        new FieldSlot("TaxAmount", Ord_TaxAmount),
+        new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+        new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
+    };
+    protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+    public IndependentFieldsTestEntity() : base(TotalFieldCount) { }
+    public IndependentFieldsTestEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+    [DataField]
+    public decimal Price
+    {
+        get => (decimal)(_values[Ord_Price] ?? 0m);
+        set => _values[Ord_Price] = value;
+    }
+
+    [DataField]
+    public decimal Tax
+    {
+        get => (decimal)(_values[Ord_Tax] ?? 0m);
+        set => _values[Ord_Tax] = value;
+    }
+
+
 
     [DataField]
     [CalculatedField(Expression = "Price * 1.1")]
-    public decimal PriceWithMarkup { get; set; }
+    public decimal PriceWithMarkup
+    {
+        get => (decimal)(_values[Ord_PriceWithMarkup] ?? 0m);
+        set => _values[Ord_PriceWithMarkup] = value;
+    }
+
+
 
     [DataField]
     [CalculatedField(Expression = "Price * Tax")]
-    public decimal TaxAmount { get; set; }
+    public decimal TaxAmount
+    {
+        get => (decimal)(_values[Ord_TaxAmount] ?? 0m);
+        set => _values[Ord_TaxAmount] = value;
+    }
 }
 
 public class CalculatedFieldServiceTests

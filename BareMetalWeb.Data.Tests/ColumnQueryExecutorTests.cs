@@ -24,11 +24,68 @@ public sealed class ColumnQueryExecutorTests : IDisposable
     [DataEntity("SampleItems")]
     private class SampleItem : BaseDataObject
     {
-        [DataField] public string Name    { get; set; } = string.Empty;
-        [DataField] public int    Age     { get; set; }
-        [DataField] public double Score   { get; set; }
-        [DataField] public long   BigNum  { get; set; }
-        [DataField] public float  Ratio   { get; set; }
+        private const int Ord_Age = BaseFieldCount + 0;
+        private const int Ord_BigNum = BaseFieldCount + 1;
+        private const int Ord_Name = BaseFieldCount + 2;
+        private const int Ord_Ratio = BaseFieldCount + 3;
+        private const int Ord_Score = BaseFieldCount + 4;
+        internal new const int TotalFieldCount = BaseFieldCount + 5;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("Age", Ord_Age),
+            new FieldSlot("BigNum", Ord_BigNum),
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("Ratio", Ord_Ratio),
+            new FieldSlot("Score", Ord_Score),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public SampleItem() : base(TotalFieldCount) { }
+        public SampleItem(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        [DataField]
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
+
+        [DataField]
+        public int Age
+        {
+            get => (int)(_values[Ord_Age] ?? 0);
+            set => _values[Ord_Age] = value;
+        }
+
+        [DataField]
+        public double Score
+        {
+            get => (double)(_values[Ord_Score] ?? 0.0);
+            set => _values[Ord_Score] = value;
+        }
+
+        [DataField]
+        public long BigNum
+        {
+            get => (long)(_values[Ord_BigNum] ?? 0L);
+            set => _values[Ord_BigNum] = value;
+        }
+
+        [DataField]
+        public float Ratio
+        {
+            get => (float)(_values[Ord_Ratio] ?? 0f);
+            set => _values[Ord_Ratio] = value;
+        }
     }
 
     private static readonly Random _rng = new(42); // reserved for future randomised test helpers

@@ -1,8 +1,5 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics.CodeAnalysis;
-using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data.ExpressionEngine;
 
@@ -26,98 +23,12 @@ public sealed record ValidationConfig(
 );
 
 /// <summary>
-/// Server-side validation service. Validates field values using attribute-based rules
+/// Server-side validation service. Validates field values using metadata-driven rules
 /// and expression-based cross-field rules via the ExpressionParser.
+/// All validation config is built at entity registration time — zero runtime reflection.
 /// </summary>
 public static class ValidationService
 {
-    private static readonly ConcurrentDictionary<Type, IReadOnlyList<ValidationRuleAttribute>> _entityRulesCache = new();
-
-    /// <summary>
-    /// Build a ValidationConfig from a property's attributes.
-    /// Called at registration time only (not per-request).
-    /// </summary>
-    [RequiresUnreferencedCode("Attribute scanning requires property metadata to be preserved.")]
-    public static ValidationConfig? BuildValidationConfig(PropertyInfo property)
-    {
-        var validators = new List<ValidationAttribute>();
-        foreach (var attr in property.GetCustomAttributes())
-        {
-            if (attr is ValidationAttribute va)
-                validators.Add(va);
-        }
-
-        var expressionRules = new List<ValidationRuleAttribute>();
-        foreach (var rule in property.GetCustomAttributes<ValidationRuleAttribute>())
-            expressionRules.Add(rule);
-
-        if (validators.Count == 0 && expressionRules.Count == 0)
-            return null;
-
-        int? minLength = null;
-        int? maxLength = null;
-        double? rangeMin = null;
-        double? rangeMax = null;
-        string? regexPattern = null;
-        string? regexMessage = null;
-        bool isEmail = false;
-        bool isUrl = false;
-        bool isPhone = false;
-
-        foreach (var v in validators)
-        {
-            switch (v)
-            {
-                case MinLengthAttribute ml:
-                    minLength = ml.Length;
-                    break;
-                case MaxLengthAttribute mx:
-                    maxLength = mx.Length;
-                    break;
-                case RangeAttribute r:
-                    rangeMin = r.Min;
-                    rangeMax = r.Max;
-                    break;
-                case RegexPatternAttribute rp:
-                    regexPattern = rp.Pattern;
-                    regexMessage = rp.ErrorMessage;
-                    break;
-                case EmailAddressAttribute:
-                    isEmail = true;
-                    break;
-                case UrlAttribute:
-                    isUrl = true;
-                    break;
-                case PhoneAttribute:
-                    isPhone = true;
-                    break;
-            }
-        }
-
-        return new ValidationConfig(
-            minLength, maxLength, rangeMin, rangeMax,
-            regexPattern, regexMessage,
-            isEmail, isUrl, isPhone,
-            validators, expressionRules
-        );
-    }
-
-    /// <summary>
-    /// Get entity-level validation rules (applied to the class, not individual properties).
-    /// Results are cached per type to avoid repeated attribute scanning.
-    /// </summary>
-    [RequiresUnreferencedCode("Attribute scanning requires entity type metadata to be preserved.")]
-    public static IReadOnlyList<ValidationRuleAttribute> GetEntityRules(Type entityType)
-    {
-        return _entityRulesCache.GetOrAdd(entityType, static t =>
-        {
-            var rules = new List<ValidationRuleAttribute>();
-            foreach (var rule in t.GetCustomAttributes<ValidationRuleAttribute>())
-                rules.Add(rule);
-            return rules;
-        });
-    }
-
     /// <summary>
     /// Validate a single field value using its ValidationConfig.
     /// Returns a list of error messages (empty if valid).
@@ -186,12 +97,14 @@ public static class ValidationService
                 fieldErrors[field.Name] = errors;
         }
 
-        // Evaluate entity-level expression rules
-        var entityRules = GetEntityRules(metadata.Type);
-        foreach (var rule in entityRules)
+        // Evaluate entity-level expression rules (stored in metadata at registration time)
+        if (metadata.EntityValidationRules != null)
         {
-            if (!EvaluateExpressionRule(rule.Expression, context))
-                entityErrors.Add(rule.Message);
+            foreach (var rule in metadata.EntityValidationRules)
+            {
+                if (!EvaluateExpressionRule(rule.Expression, context))
+                    entityErrors.Add(rule.Message);
+            }
         }
 
         return new ValidationResult(fieldErrors, entityErrors);

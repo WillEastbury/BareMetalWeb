@@ -121,54 +121,59 @@ public static class BinaryApiHandlers
 
     private static MetadataWireSerializer.FieldPlan[] BuildPlanFromMetadata(DataEntityMetadata meta)
     {
-        // SECURITY TODO: No field-level write protection — all CanRead && CanWrite properties are
-        // included in the serialization plan. A caller with entity-level write permission can set
-        // any writable field, including sensitive ones (e.g. User.Permissions). Field-level
-        // permission annotations ([WritePermission], [ReadOnly] enforcement) are needed. See #1205.
+        // Build plan from metadata fields + base properties — zero reflection.
+        var descriptors = new List<MetadataWireSerializer.FieldPlanDescriptor>(meta.Fields.Count + 8);
 
-        // Build a lookup from metadata fields for getter/setter reuse
-        var metaFieldsByName = new Dictionary<string, DataFieldMetadata>(StringComparer.Ordinal);
-        foreach (var f in meta.Fields)
-            metaFieldsByName[f.Name] = f;
+        // Base properties
+        AddBaseDescriptor(descriptors, "CreatedBy", typeof(string), BareMetalWeb.Data.BaseDataObject.Ord_CreatedBy);
+        AddBaseDescriptor(descriptors, "CreatedOnUtc", typeof(DateTime), BareMetalWeb.Data.BaseDataObject.Ord_CreatedOnUtc);
+        AddBaseDescriptor(descriptors, "ETag", typeof(string), BareMetalWeb.Data.BaseDataObject.Ord_ETag);
+        AddBaseDescriptor(descriptors, "Identifier", typeof(BareMetalWeb.Data.IdentifierValue), BareMetalWeb.Data.BaseDataObject.Ord_Identifier);
+        AddBaseDescriptor(descriptors, "Key", typeof(uint), BareMetalWeb.Data.BaseDataObject.Ord_Key);
+        AddBaseDescriptor(descriptors, "UpdatedBy", typeof(string), BareMetalWeb.Data.BaseDataObject.Ord_UpdatedBy);
+        AddBaseDescriptor(descriptors, "UpdatedOnUtc", typeof(DateTime), BareMetalWeb.Data.BaseDataObject.Ord_UpdatedOnUtc);
+        AddBaseDescriptor(descriptors, "Version", typeof(uint), BareMetalWeb.Data.BaseDataObject.Ord_Version);
 
-        // Use pre-cached sorted properties from metadata (avoids per-call GetProperties reflection)
-        var props = meta.AllProperties;
-
-        var descriptors = new List<MetadataWireSerializer.FieldPlanDescriptor>(props.Length);
-        foreach (var prop in props)
+        // Entity-specific fields from metadata
+        foreach (var fieldMeta in meta.Fields)
         {
-            if (!prop.CanRead || !prop.CanWrite) continue;
+            if (fieldMeta.StorageOrdinal < 0)
+                continue;
 
-            var (wireType, isNullable, enumUnderlying) = MetadataWireSerializer.ResolveWireType(prop.PropertyType);
-            var effectiveType = Nullable.GetUnderlyingType(prop.PropertyType) ?? prop.PropertyType;
-
-            // Reuse pre-compiled delegates from metadata when available
-            Func<object, object?> getter;
-            Action<object, object?> setter;
-            if (metaFieldsByName.TryGetValue(prop.Name, out var fieldMeta))
-            {
-                getter = fieldMeta.GetValueFn;
-                setter = fieldMeta.SetValueFn;
-            }
-            else
-            {
-                getter = PropertyAccessorFactory.BuildGetter(prop);
-                setter = PropertyAccessorFactory.BuildSetter(prop);
-            }
+            var clrType = fieldMeta.ClrType;
+            var (wireType, isNullable, enumUnderlying) = MetadataWireSerializer.ResolveWireType(clrType);
+            var effectiveType = Nullable.GetUnderlyingType(clrType) ?? clrType;
 
             descriptors.Add(new MetadataWireSerializer.FieldPlanDescriptor
             {
-                Name = prop.Name,
+                Name = fieldMeta.Name,
                 WireType = wireType,
                 IsNullable = isNullable,
-                Getter = getter,
-                Setter = setter,
+                Getter = fieldMeta.GetValueFn,
+                Setter = fieldMeta.SetValueFn,
                 ClrType = effectiveType,
                 EnumUnderlying = enumUnderlying,
             });
         }
 
         return MetadataWireSerializer.BuildPlan(meta.Type, descriptors);
+    }
+
+    private static void AddBaseDescriptor(List<MetadataWireSerializer.FieldPlanDescriptor> descriptors, string name, Type clrType, int ordinal)
+    {
+        var (wireType, isNullable, enumUnderlying) = MetadataWireSerializer.ResolveWireType(clrType);
+        var effectiveType = Nullable.GetUnderlyingType(clrType) ?? clrType;
+        var ord = ordinal;
+        descriptors.Add(new MetadataWireSerializer.FieldPlanDescriptor
+        {
+            Name = name,
+            WireType = wireType,
+            IsNullable = isNullable,
+            Getter = obj => ((BareMetalWeb.Data.BaseDataObject)obj).GetFieldValue(ord),
+            Setter = (obj, val) => ((BareMetalWeb.Data.BaseDataObject)obj).SetFieldValue(ord, val),
+            ClrType = effectiveType,
+            EnumUnderlying = enumUnderlying,
+        });
     }
 
     private static MetadataWireSerializer.WireSchemaDescriptor GetOrBuildSchema(DataEntityMetadata meta)

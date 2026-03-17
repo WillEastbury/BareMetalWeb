@@ -1247,10 +1247,11 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             for (int i = 0; i < schema.FieldCount; i++)
             {
                 if (!schema.IsIndexed[i]) continue;
-                var newValue = record.GetValue(i)?.ToString() ?? string.Empty;
+                var ord = BaseDataObject.BaseFieldCount + i;
+                var newValue = record.GetValue(ord)?.ToString() ?? string.Empty;
                 if (oldRecord != null)
                 {
-                    var oldValue = oldRecord.GetValue(i)?.ToString() ?? string.Empty;
+                    var oldValue = oldRecord.GetValue(ord)?.ToString() ?? string.Empty;
                     if (string.Equals(oldValue, newValue, StringComparison.OrdinalIgnoreCase))
                         continue;
                     _indexStore.AppendEntry(entityName, schema.Names[i], oldValue, keyStr, 'D');
@@ -1439,7 +1440,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             for (int i = 0; i < schema.FieldCount; i++)
             {
                 if (!schema.IsIndexed[i]) continue;
-                var value = oldRecord.GetValue(i)?.ToString() ?? string.Empty;
+                var value = oldRecord.GetValue(BaseDataObject.BaseFieldCount + i)?.ToString() ?? string.Empty;
                 _indexStore.AppendEntry(entityName, schema.Names[i], value, keyStr, 'D');
             }
         }
@@ -1820,8 +1821,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
             typeFolder, GetSchemaFilePattern(type), SearchOption.TopDirectoryOnly))
         {
             if (!TryParseSchemaVersion(type, Path.GetFileName(file), out var version)) continue;
-            var schemaFile = LoadSchemaFile(file);
-            if (schemaFile == null) continue;
+            var schemaFile = LoadSchemaFile(file, type.Name, version);            if (schemaFile == null) continue;
             schemaFile.Version    = version;
             cache.Versions[version]           = schemaFile;
             cache.HashToVersion[schemaFile.Hash] = version;
@@ -1851,8 +1851,7 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         var filePath = GetSchemaFilePath(type, version);
         if (!File.Exists(filePath)) return null;
 
-        var schemaFile = LoadSchemaFile(filePath);
-        if (schemaFile == null) return null;
+        var schemaFile = LoadSchemaFile(filePath, type.Name, version);        if (schemaFile == null) return null;
 
         schemaFile.Version = version;
         lock (GetSchemaLock(type))
@@ -1864,12 +1863,11 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         return schemaFile;
     }
 
-    private SchemaDefinitionFile? LoadSchemaFile(string path)
+    private SchemaDefinitionFile? LoadSchemaFile(string path, string typeName, int version)
     {
         try
         {
-            var fileName = Path.GetFileNameWithoutExtension(path);
-            var fileContext = $"schema:{fileName}";
+            var fileContext = $"schema:{typeName}:{version}";
             var bytes = EncryptedFileIO.ReadDecrypted(path, fileContext);
             return JsonSerializer.Deserialize(bytes, BmwDataJsonContext.Default.SchemaDefinitionFile);
         }

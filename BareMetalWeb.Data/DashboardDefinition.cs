@@ -12,21 +12,53 @@ namespace BareMetalWeb.Data;
     Permissions = "admin", NavGroup = "Admin", NavOrder = 95)]
 public sealed class DashboardDefinition : BaseDataObject
 {
-    public DashboardDefinition() : base() { }
-    public DashboardDefinition(string createdBy) : base(createdBy) { }
+    private const int Ord_Name = BaseFieldCount + 0;
+    private const int Ord_Description = BaseFieldCount + 1;
+    private const int Ord_TilesJson = BaseFieldCount + 2;
+    internal new const int TotalFieldCount = BaseFieldCount + 3;
+    private static readonly FieldSlot[] _fieldMap = new[]
+    {
+        new FieldSlot("CreatedBy", Ord_CreatedBy),
+        new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+        new FieldSlot("Description", Ord_Description),
+        new FieldSlot("ETag", Ord_ETag),
+        new FieldSlot("Identifier", Ord_Identifier),
+        new FieldSlot("Key", Ord_Key),
+        new FieldSlot("Name", Ord_Name),
+        new FieldSlot("TilesJson", Ord_TilesJson),
+        new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+        new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
+    };
+    protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+    public DashboardDefinition() : base(TotalFieldCount) { }
+    public DashboardDefinition(string createdBy) : base(TotalFieldCount, createdBy) { }
 
     [DataField(Label = "Name", Order = 1, Required = true, List = true)]
-    public string Name { get; set; } = string.Empty;
+    public string Name
+    {
+        get => (string?)_values[Ord_Name] ?? string.Empty;
+        set => _values[Ord_Name] = value;
+    }
 
     [DataField(Label = "Description", Order = 2, FieldType = FormFieldType.TextArea)]
-    public string Description { get; set; } = string.Empty;
+    public string Description
+    {
+        get => (string?)_values[Ord_Description] ?? string.Empty;
+        set => _values[Ord_Description] = value;
+    }
 
     /// <summary>
     /// JSON-serialised list of <see cref="DashboardTile"/>.
     /// Each tile declares the entity, aggregate function and display options.
     /// </summary>
     [DataField(Label = "Tiles (JSON)", Order = 3, FieldType = FormFieldType.TextArea)]
-    public string TilesJson { get; set; } = "[]";
+    public string TilesJson
+    {
+        get => (string?)_values[Ord_TilesJson] ?? "[]";
+        set => _values[Ord_TilesJson] = value;
+    }
 
     /// <summary>Convenience accessor that deserialises <see cref="TilesJson"/>.</summary>
     [System.Text.Json.Serialization.JsonIgnore]

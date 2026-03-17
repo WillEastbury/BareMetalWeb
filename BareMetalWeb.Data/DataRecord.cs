@@ -3,14 +3,13 @@ using System.Runtime.CompilerServices;
 namespace BareMetalWeb.Data;
 
 /// <summary>
-/// A <see cref="BaseDataObject"/> that stores field values in an ordinal-indexed
-/// <c>object?[]</c> array.  Designed for ~1–2 ns per field access (same as compiled
-/// C# properties) while being fully metadata-driven and AOT-safe — no reflection,
-/// no <c>Expression.Compile</c>, no dictionaries on the hot path.
+/// A <see cref="BaseDataObject"/> for gallery-defined (virtual) entities.
+/// Uses the inherited <c>_values</c> ordinal-indexed array from <see cref="BaseDataObject"/>.
+/// Adds <see cref="EntityTypeName"/> for runtime entity routing and convenience
+/// name-based accessors that delegate to the base schema lookup.
 /// <para>
-/// Each instance is paired with an <see cref="EntitySchema"/> that describes the
-/// field layout. The schema provides the ordinal for named lookups at API
-/// boundaries; hot paths use raw ordinals captured in closures.
+/// ~1–2 ns per ordinal access, ~50 ns for name-based lookups via
+/// <see cref="BaseDataObject.GetFieldByName"/>. Fully metadata-driven, AOT-safe.
 /// </para>
 /// </summary>
 public sealed class DataRecord : BaseDataObject
@@ -21,36 +20,20 @@ public sealed class DataRecord : BaseDataObject
     /// </summary>
     public string EntityTypeName { get; set; } = string.Empty;
 
-    /// <summary>
-    /// Ordinal-indexed field values. <c>_values[ord]</c> holds the native CLR
-    /// value (string, int, decimal, DateTime, bool, …) for the field at that
-    /// ordinal. <c>null</c> means the field is not set.
-    /// </summary>
-    internal object?[] _values;
-
     /// <summary>Creates a new record with space for <paramref name="fieldCount"/> fields.</summary>
-    public DataRecord(int fieldCount)
+    public DataRecord(int fieldCount) : base(Math.Max(fieldCount, BaseFieldCount))
     {
-        _values = new object?[fieldCount];
     }
 
     /// <summary>Creates an empty record. The schema and values array must be set before use.</summary>
-    public DataRecord() : this(0) { }
+    public DataRecord() : this(BaseFieldCount) { }
 
     /// <summary>Creates a new record sized to match <paramref name="schema"/>.</summary>
-    public DataRecord(EntitySchema schema)
+    public DataRecord(EntitySchema schema) : base(BaseFieldCount + schema.FieldCount)
     {
         EntityTypeName = schema.EntityName;
         Schema = schema;
-        _values = new object?[schema.FieldCount];
     }
-
-    /// <summary>
-    /// The schema this record was created from, if any. Used by downstream code
-    /// (e.g. <see cref="DynamicPropertyInfo"/>) to resolve field names → ordinals
-    /// without requiring the schema to be passed explicitly.
-    /// </summary>
-    public EntitySchema? Schema { get; }
 
     // ── Hot-path accessors (ordinal) ───────────────────────────────────────
 
@@ -76,19 +59,11 @@ public sealed class DataRecord : BaseDataObject
     }
 
     /// <summary>
-    /// Returns the number of field slots in this record.
-    /// </summary>
-    public int FieldCount => _values.Length;
-
-    /// <summary>
     /// Grows the values array to accommodate a schema with more fields.
     /// Existing values at their ordinals are preserved.
     /// </summary>
     public void Resize(int newFieldCount)
     {
-        if (newFieldCount <= _values.Length) return;
-        var prev = _values;
-        _values = new object?[newFieldCount];
-        Array.Copy(prev, _values, prev.Length);
+        EnsureCapacity(newFieldCount);
     }
 }

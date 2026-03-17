@@ -533,16 +533,65 @@ public class ExpressionRelationshipTests
     [DataEntity("Order Line Test", Slug = "orderlinetest")]
     public class OrderLineEntity : BaseDataObject
     {
-        [DataField] public string ProductId { get; set; } = string.Empty;
-        [DataField] public decimal UnitPrice { get; set; }
+        private const int Ord_CustomerDiscount = BaseFieldCount + 0;
+        private const int Ord_DiscountedPrice = BaseFieldCount + 1;
+        private const int Ord_ProductId = BaseFieldCount + 2;
+        private const int Ord_UnitPrice = BaseFieldCount + 3;
+        internal new const int TotalFieldCount = BaseFieldCount + 4;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("CustomerDiscount", Ord_CustomerDiscount),
+            new FieldSlot("DiscountedPrice", Ord_DiscountedPrice),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("ProductId", Ord_ProductId),
+            new FieldSlot("UnitPrice", Ord_UnitPrice),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public OrderLineEntity() : base(TotalFieldCount) { }
+        public OrderLineEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        [DataField]
+        public string ProductId
+        {
+            get => (string?)_values[Ord_ProductId] ?? string.Empty;
+            set => _values[Ord_ProductId] = value;
+        }
+
+        [DataField]
+        public decimal UnitPrice
+        {
+            get => (decimal)(_values[Ord_UnitPrice] ?? 0m);
+            set => _values[Ord_UnitPrice] = value;
+        }
+
+
 
         [DataField]
         [CalculatedField(Expression = "Parent.DiscountPercent")]
-        public decimal CustomerDiscount { get; set; }
+        public decimal CustomerDiscount
+        {
+            get => (decimal)(_values[Ord_CustomerDiscount] ?? 0m);
+            set => _values[Ord_CustomerDiscount] = value;
+        }
+
+
 
         [DataField]
         [CalculatedField(Expression = "UnitPrice * (1 - Parent.DiscountPercent / 100)")]
-        public decimal DiscountedPrice { get; set; }
+        public decimal DiscountedPrice
+        {
+            get => (decimal)(_values[Ord_DiscountedPrice] ?? 0m);
+            set => _values[Ord_DiscountedPrice] = value;
+        }
     }
 
     [Fact]

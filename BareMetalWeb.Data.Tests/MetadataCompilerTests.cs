@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -25,7 +24,7 @@ public class MetadataCompilerTests
     private static DataFieldMetadata MakeField(string name, FormFieldType type = FormFieldType.String, int order = 0,
         bool required = false, bool readOnly = false, int columnSpan = 12) =>
         new(
-            Property: typeof(string).GetProperty(nameof(string.Length))!, // dummy PropertyInfo
+            ClrType: typeof(string),
             Name: name,
             Label: name,
             FieldType: type,

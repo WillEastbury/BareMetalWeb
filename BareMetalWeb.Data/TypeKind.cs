@@ -18,5 +18,6 @@ namespace BareMetalWeb.Data;
         List,
         Dictionary,
         Enum,
-        Object
+        Object,
+        IdentifierValue
     }

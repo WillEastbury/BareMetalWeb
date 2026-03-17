@@ -14,27 +14,141 @@ public class ExportTests
     [DataEntity("Test Order Rows", Slug = "test-export-order-rows")]
     private class TestOrderRow : BaseDataObject
     {
+        private const int Ord_LineTotal = BaseFieldCount + 0;
+        private const int Ord_Notes = BaseFieldCount + 1;
+        private const int Ord_ProductId = BaseFieldCount + 2;
+        private const int Ord_Quantity = BaseFieldCount + 3;
+        private const int Ord_UnitPrice = BaseFieldCount + 4;
+        internal new const int TotalFieldCount = BaseFieldCount + 5;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("LineTotal", Ord_LineTotal),
+            new FieldSlot("Notes", Ord_Notes),
+            new FieldSlot("ProductId", Ord_ProductId),
+            new FieldSlot("Quantity", Ord_Quantity),
+            new FieldSlot("UnitPrice", Ord_UnitPrice),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public TestOrderRow() : base(TotalFieldCount) { }
+        public TestOrderRow(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Product", Order = 1)]
         [DataLookup(typeof(BaseDataObject))]
-        public string ProductId { get; set; } = "";
-        [DataField(Label = "Quantity", Order = 2, FieldType = Rendering.Models.FormFieldType.Integer)] public int Quantity { get; set; }
-        [DataField(Label = "Unit Price", Order = 3, FieldType = Rendering.Models.FormFieldType.Decimal)] public decimal UnitPrice { get; set; }
-        [DataField(Label = "Notes", Order = 4)] public string Notes { get; set; } = "";
+        public string ProductId
+        {
+            get => (string?)_values[Ord_ProductId] ?? string.Empty;
+            set => _values[Ord_ProductId] = value;
+        }
+
+        public int Quantity
+        {
+            get => (int)(_values[Ord_Quantity] ?? 0);
+            set => _values[Ord_Quantity] = value;
+        }
+
+        public decimal UnitPrice
+        {
+            get => (decimal)(_values[Ord_UnitPrice] ?? 0m);
+            set => _values[Ord_UnitPrice] = value;
+        }
+
+        public string Notes
+        {
+            get => (string?)_values[Ord_Notes] ?? string.Empty;
+            set => _values[Ord_Notes] = value;
+        }
+
+
         [DataField(Label = "Line Total", Order = 5, FieldType = Rendering.Models.FormFieldType.Decimal)]
         [CalculatedField(Expression = "Quantity * UnitPrice")]
-        public decimal LineTotal { get; set; }
+        public decimal LineTotal
+        {
+            get => (decimal)(_values[Ord_LineTotal] ?? 0m);
+            set => _values[Ord_LineTotal] = value;
+        }
     }
 
     [DataEntity("Test Orders", Slug = "test-export-orders")]
     private class TestOrder : BaseDataObject
     {
-        [DataField(Label = "Order Number", Order = 1)] public string OrderNumber { get; set; } = "";
-        [DataField(Label = "Customer", Order = 2)] public string CustomerId { get; set; } = "";
-        [DataField(Label = "Order Date", Order = 3, FieldType = Rendering.Models.FormFieldType.DateOnly)] public DateOnly OrderDate { get; set; }
-        [DataField(Label = "Status", Order = 4)] public string Status { get; set; } = "";
-        [DataField(Label = "Currency", Order = 5)] public string CurrencyId { get; set; } = "";
+        private const int Ord_CurrencyId = BaseFieldCount + 0;
+        private const int Ord_CustomerId = BaseFieldCount + 1;
+        private const int Ord_OrderDate = BaseFieldCount + 2;
+        private const int Ord_OrderNumber = BaseFieldCount + 3;
+        private const int Ord_OrderRows = BaseFieldCount + 4;
+        private const int Ord_Status = BaseFieldCount + 5;
+        internal new const int TotalFieldCount = BaseFieldCount + 6;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("CurrencyId", Ord_CurrencyId),
+            new FieldSlot("CustomerId", Ord_CustomerId),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("OrderDate", Ord_OrderDate),
+            new FieldSlot("OrderNumber", Ord_OrderNumber),
+            new FieldSlot("OrderRows", Ord_OrderRows),
+            new FieldSlot("Status", Ord_Status),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public TestOrder() : base(TotalFieldCount) { }
+        public TestOrder(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        public string OrderNumber
+        {
+            get => (string?)_values[Ord_OrderNumber] ?? string.Empty;
+            set => _values[Ord_OrderNumber] = value;
+        }
+
+        public string CustomerId
+        {
+            get => (string?)_values[Ord_CustomerId] ?? string.Empty;
+            set => _values[Ord_CustomerId] = value;
+        }
+
+        public DateOnly OrderDate
+        {
+            get => _values[Ord_OrderDate] is DateOnly d ? d : default;
+            set => _values[Ord_OrderDate] = value;
+        }
+
+        public string Status
+        {
+            get => (string?)_values[Ord_Status] ?? string.Empty;
+            set => _values[Ord_Status] = value;
+        }
+
+        public string CurrencyId
+        {
+            get => (string?)_values[Ord_CurrencyId] ?? string.Empty;
+            set => _values[Ord_CurrencyId] = value;
+        }
+
+
         [DataField(Label = "Order Rows", Order = 6, FieldType = Rendering.Models.FormFieldType.ChildList)]
-        public List<TestOrderRow> OrderRows { get; set; } = new();
+        public List<TestOrderRow> OrderRows
+        {
+            get => (List<TestOrderRow>?)_values[Ord_OrderRows] ?? new();
+            set => _values[Ord_OrderRows] = value;
+        }
     }
 
     [Fact]

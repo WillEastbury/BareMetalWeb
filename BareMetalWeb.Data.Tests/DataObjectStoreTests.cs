@@ -13,14 +13,76 @@ public class DataObjectStoreTests
 {
     private class TestProduct : BaseDataObject
     {
-        public string Name { get; set; } = string.Empty;
-        public decimal Price { get; set; }
+        private const int Ord_Name = BaseFieldCount + 0;
+        private const int Ord_Price = BaseFieldCount + 1;
+        internal new const int TotalFieldCount = BaseFieldCount + 2;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("Price", Ord_Price),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public TestProduct() : base(TotalFieldCount) { }
+        public TestProduct(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
+
+        public decimal Price
+        {
+            get => (decimal)(_values[Ord_Price] ?? 0m);
+            set => _values[Ord_Price] = value;
+        }
     }
 
     private class TestCustomer : BaseDataObject
     {
-        public string CompanyName { get; set; } = string.Empty;
-        public string Email { get; set; } = string.Empty;
+        private const int Ord_CompanyName = BaseFieldCount + 0;
+        private const int Ord_Email = BaseFieldCount + 1;
+        internal new const int TotalFieldCount = BaseFieldCount + 2;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CompanyName", Ord_CompanyName),
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Email", Ord_Email),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public TestCustomer() : base(TotalFieldCount) { }
+        public TestCustomer(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+        public string CompanyName
+        {
+            get => (string?)_values[Ord_CompanyName] ?? string.Empty;
+            set => _values[Ord_CompanyName] = value;
+        }
+
+        public string Email
+        {
+            get => (string?)_values[Ord_Email] ?? string.Empty;
+            set => _values[Ord_Email] = value;
+        }
     }
 
     private class InMemoryDataProvider : IDataProvider

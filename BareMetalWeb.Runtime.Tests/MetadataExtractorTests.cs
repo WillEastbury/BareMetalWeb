@@ -21,21 +21,78 @@ public class MetadataExtractorTests
         IdGeneration = AutoIdStrategy.Sequential)]
     private class SampleWidget : BaseDataObject
     {
+        private const int Ord_Category = BaseFieldCount + 0;
+        private const int Ord_CreatedDate = BaseFieldCount + 1;
+        private const int Ord_IsActive = BaseFieldCount + 2;
+        private const int Ord_Name = BaseFieldCount + 3;
+        private const int Ord_Price = BaseFieldCount + 4;
+        internal new const int TotalFieldCount = BaseFieldCount + 5;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("Category", Ord_Category),
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedDate", Ord_CreatedDate),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("IsActive", Ord_IsActive),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("Price", Ord_Price),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public SampleWidget() : base(TotalFieldCount) { }
+        public SampleWidget(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Widget Name", Order = 1, Required = true)]
-        public string Name { get; set; } = string.Empty;
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
+
+
 
         [DataField(Label = "Price", Order = 2)]
-        public decimal Price { get; set; }
+        public decimal Price
+        {
+            get => (decimal)(_values[Ord_Price] ?? 0m);
+            set => _values[Ord_Price] = value;
+        }
+
+
 
         [DataField(Label = "Is Active", Order = 3)]
-        public bool IsActive { get; set; }
+        public bool IsActive
+        {
+            get => (bool)(_values[Ord_IsActive] ?? false);
+            set => _values[Ord_IsActive] = value;
+        }
+
+
 
         [DataField(Label = "Created Date", Order = 4)]
-        public DateTime? CreatedDate { get; set; }
+        public DateTime? CreatedDate
+        {
+            get => (DateTime?)_values[Ord_CreatedDate];
+            set => _values[Ord_CreatedDate] = value;
+        }
+
+
 
         [DataField(Order = 5)]
         [DataIndex]
-        public string Category { get; set; } = string.Empty;
+        public string Category
+        {
+            get => (string?)_values[Ord_Category] ?? string.Empty;
+            set => _values[Ord_Category] = value;
+        }
     }
 
     private enum SampleStatus { Pending, Active, Closed }
@@ -43,22 +100,88 @@ public class MetadataExtractorTests
     [DataEntity("Sample Orders", IdGeneration = AutoIdStrategy.Sequential)]
     private class SampleOrder : BaseDataObject
     {
+        private const int Ord_Description = BaseFieldCount + 0;
+        private const int Ord_DueDate = BaseFieldCount + 1;
+        private const int Ord_Status = BaseFieldCount + 2;
+        internal new const int TotalFieldCount = BaseFieldCount + 3;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("Description", Ord_Description),
+            new FieldSlot("DueDate", Ord_DueDate),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Status", Ord_Status),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public SampleOrder() : base(TotalFieldCount) { }
+        public SampleOrder(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Description", Order = 1, Required = true)]
-        public string Description { get; set; } = string.Empty;
+        public string Description
+        {
+            get => (string?)_values[Ord_Description] ?? string.Empty;
+            set => _values[Ord_Description] = value;
+        }
+
+
 
         [DataField(Order = 2)]
-        public SampleStatus Status { get; set; }
+        public SampleStatus Status
+        {
+            get => _values[Ord_Status] is SampleStatus v ? v : default;
+            set => _values[Ord_Status] = value;
+        }
+
+
 
         [DataField(Order = 3)]
         [DataIndex(IndexKind.BTree)]
-        public DateOnly DueDate { get; set; }
+        public DateOnly DueDate
+        {
+            get => _values[Ord_DueDate] is DateOnly d ? d : default;
+            set => _values[Ord_DueDate] = value;
+        }
     }
 
     // A class with no [DataEntity] attribute — uses convention-based naming
     private class ConventionEntity : BaseDataObject
     {
+        private const int Ord_Title = BaseFieldCount + 0;
+        internal new const int TotalFieldCount = BaseFieldCount + 1;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Title", Ord_Title),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public ConventionEntity() : base(TotalFieldCount) { }
+        public ConventionEntity(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Order = 1)]
-        public string Title { get; set; } = string.Empty;
+        public string Title
+        {
+            get => (string?)_values[Ord_Title] ?? string.Empty;
+            set => _values[Ord_Title] = value;
+        }
     }
 
     // ── EntityDefinition extraction tests ─────────────────────────────────────

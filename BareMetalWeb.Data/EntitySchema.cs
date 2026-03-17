@@ -156,7 +156,7 @@ public sealed class EntitySchema
 
         for (int i = 0; i < FieldCount; i++)
         {
-            int ord = i; // capture for closure
+            int ord = BaseDataObject.BaseFieldCount + i; // offset past base fields
             var (wireType, wireNullable, enumUnderlying) =
                 MetadataWireSerializer.ResolveWireType(ClrTypes[i]);
             descriptors[basePlans.Length + i] = new MetadataWireSerializer.FieldPlanDescriptor
@@ -252,10 +252,12 @@ public sealed class EntitySchema
             var names = _names.ToArray();
             var types = _types.ToArray();
 
-            // Build frozen name→ordinal dictionary
+            // Build frozen name→ordinal dictionary.
+            // Ordinals are offset by BaseFieldCount so schema fields don't collide
+            // with the base fields (Key, Identifier, timestamps, etc.) in _values[].
             var dict = new Dictionary<string, int>(count, StringComparer.OrdinalIgnoreCase);
             for (int i = 0; i < count; i++)
-                dict[names[i]] = i;
+                dict[names[i]] = BaseDataObject.BaseFieldCount + i;
 
             // Compute FNV-1a schema hash
             ulong hash = 14695981039346656037UL;

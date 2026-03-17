@@ -324,10 +324,25 @@ public static class CalculatedFieldService
                     context[field.Name] = null;
                 }
             }
+
+            // Also populate from field map to capture non-[DataField] properties used in expressions
+            var fieldMap = instance.GetFieldMap();
+            for (int i = 0; i < fieldMap.Length; i++)
+            {
+                if (!context.ContainsKey(fieldMap[i].Name))
+                    context[fieldMap[i].Name] = instance.GetFieldValue(fieldMap[i].Ordinal);
+            }
+
             return context;
         }
 
-        return new Dictionary<string, object?>(1) { ["Key"] = instance.Key };
+        // No metadata — populate context entirely from field map
+        var map = instance.GetFieldMap();
+        var ctx = new Dictionary<string, object?>(map.Length + 1);
+        ctx["Key"] = instance.Key;
+        for (int i = 0; i < map.Length; i++)
+            ctx[map[i].Name] = instance.GetFieldValue(map[i].Ordinal);
+        return ctx;
     }
 
     private static bool HasCycle(

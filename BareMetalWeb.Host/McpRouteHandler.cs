@@ -145,9 +145,7 @@ internal static class McpRouteHandler
 
     private static object BuildInitializeResult()
     {
-        // Use Assembly.GetName().Version — no reflection attribute scanning needed.
-        var version = typeof(McpRouteHandler).Assembly.GetName().Version;
-        var serverVersion = version != null ? $"{version.Major}.{version.Minor}.{version.Build}" : "1.0";
+        var serverVersion = BuildInfo.Version;
 
         return new
         {

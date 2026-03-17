@@ -253,7 +253,7 @@ public static class MetadataExtractor
             }
 
             bool isNullable = Nullable.GetUnderlyingType(f.ClrType) != null
-                || (!f.ClrType.IsValueType && IsNullableProperty(f.Property, _nullabilityCtx));
+                || !f.ClrType.IsValueType;
 
             fields.Add(new FieldDefinition
             {

@@ -77,10 +77,10 @@ public class EntitySchemaTests
         var schema = BuildCustomerSchema();
 
         Assert.True(schema.TryGetOrdinal("Name", out var ord));
-        Assert.Equal(0, ord);
+        Assert.Equal(BaseDataObject.BaseFieldCount + 0, ord);
 
         Assert.True(schema.TryGetOrdinal("Active", out ord));
-        Assert.Equal(3, ord);
+        Assert.Equal(BaseDataObject.BaseFieldCount + 3, ord);
     }
 
     [Fact]
@@ -92,9 +92,9 @@ public class EntitySchemaTests
         Assert.True(schema.TryGetOrdinal("NAME", out var ord2));
         Assert.True(schema.TryGetOrdinal("eMaIl", out var ord3));
 
-        Assert.Equal(0, ord1);
-        Assert.Equal(0, ord2);
-        Assert.Equal(1, ord3);
+        Assert.Equal(BaseDataObject.BaseFieldCount + 0, ord1);
+        Assert.Equal(BaseDataObject.BaseFieldCount + 0, ord2);
+        Assert.Equal(BaseDataObject.BaseFieldCount + 1, ord3);
     }
 
     [Fact]
@@ -165,7 +165,7 @@ public class EntitySchemaTests
         var schema = BuildCustomerSchema();
         var record = schema.CreateRecord();
 
-        Assert.Equal(4, record.FieldCount);
+        Assert.Equal(BaseDataObject.BaseFieldCount + 4, record.FieldCount);
         Assert.Equal("Customer", record.EntityTypeName);
     }
 
@@ -207,8 +207,8 @@ public class EntitySchemaTests
         Assert.Equal(true, descriptors[11].Getter(record));
 
         // Verify ordinal path matches
-        Assert.Equal("Alice", record.GetValue(0));
-        Assert.Equal(30, record.GetValue(2));
+        Assert.Equal("Alice", record.GetValue(BaseDataObject.BaseFieldCount + 0));
+        Assert.Equal(30, record.GetValue(BaseDataObject.BaseFieldCount + 2));
 
         // Base property closures work too
         descriptors[0].Setter(record, 42u); // __Key
@@ -246,10 +246,10 @@ public class EntitySchemaTests
         Assert.True(schema.TryGetOrdinal("Age", out var o2));
         Assert.True(schema.TryGetOrdinal("Active", out var o3));
 
-        Assert.Equal(0, o0);
-        Assert.Equal(1, o1);
-        Assert.Equal(2, o2);
-        Assert.Equal(3, o3);
+        Assert.Equal(BaseDataObject.BaseFieldCount + 0, o0);
+        Assert.Equal(BaseDataObject.BaseFieldCount + 1, o1);
+        Assert.Equal(BaseDataObject.BaseFieldCount + 2, o2);
+        Assert.Equal(BaseDataObject.BaseFieldCount + 3, o3);
     }
 
     // ── Empty schema ───────────────────────────────────────────────────────
@@ -269,7 +269,7 @@ public class EntitySchemaTests
     {
         var schema = new EntitySchema.Builder("Empty", "empty").Build();
         var record = schema.CreateRecord();
-        Assert.Equal(0, record.FieldCount);
+        Assert.Equal(BaseDataObject.BaseFieldCount, record.FieldCount);
     }
 
     // ── Scanning parallel arrays ───────────────────────────────────────────

@@ -3,7 +3,6 @@ using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Hashing;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
@@ -27,9 +26,30 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     // Maps (Type, schema-hash) → pre-built ordinal array so schema-based deserialization
     // uses array indexing instead of a per-field dictionary lookup.
     private static readonly ConcurrentDictionary<(Type Type, uint SchemaHash), MemberAccessor?[]> SchemaOrdinalCache = new();
-    // Cached compiled factory delegates — avoids per-call Activator.CreateInstance overhead.
     private static readonly ConcurrentDictionary<Type, Func<object>> InstanceFactory = new();
+    // Explicit member accessors for non-entity types (registered at startup, zero reflection).
+    private static readonly ConcurrentDictionary<Type, MemberAccessor[]> ExplicitMemberCache = new();
     private static readonly Encoding Utf8 = Encoding.UTF8;
+
+    static BinaryObjectSerializer()
+    {
+        // Register IdentifierValue (readonly struct) as a known type.
+        // Serialization/deserialization is handled inline as two ulongs.
+        InstanceFactory.TryAdd(typeof(IdentifierValue), () => default(IdentifierValue));
+    }
+
+    // Base property accessors for BaseDataObject — ordinal-indexed, zero reflection.
+    private static readonly MemberAccessor[] BasePropertyAccessors = new[]
+    {
+        new MemberAccessor("CreatedBy",    typeof(string),          obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_CreatedBy),    (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_CreatedBy, val)),
+        new MemberAccessor("CreatedOnUtc", typeof(DateTime),        obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_CreatedOnUtc), (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_CreatedOnUtc, val)),
+        new MemberAccessor("ETag",         typeof(string),          obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_ETag),         (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_ETag, val)),
+        new MemberAccessor("Identifier",   typeof(IdentifierValue), obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_Identifier),  (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_Identifier, val)),
+        new MemberAccessor("Key",          typeof(uint),            obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_Key),          (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_Key, val)),
+        new MemberAccessor("UpdatedBy",    typeof(string),          obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_UpdatedBy),    (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_UpdatedBy, val)),
+        new MemberAccessor("UpdatedOnUtc", typeof(DateTime),        obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_UpdatedOnUtc), (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_UpdatedOnUtc, val)),
+        new MemberAccessor("Version",      typeof(uint),            obj => ((BaseDataObject)obj).GetFieldValue(BaseDataObject.Ord_Version),      (obj, val) => ((BaseDataObject)obj).SetFieldValue(BaseDataObject.Ord_Version, val)),
+    };
     private const int Magic = 0x314F5342; // "BSO1" in little-endian
     private const int CurrentVersion = 3;
     private const int MaxDepth = 32;
@@ -350,6 +370,13 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
                 writer.Write(ts.Ticks);
                 return;
             }
+            case TypeKind.IdentifierValue:
+            {
+                var id = (IdentifierValue)(value ?? default(IdentifierValue));
+                writer.Write(id.Hi);
+                writer.Write(id.Lo);
+                return;
+            }
             case TypeKind.Half:
             {
                 var half = (Half)(value ?? default(Half));
@@ -520,6 +547,13 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
                 writer.WriteInt64(ts.Ticks);
                 return;
             }
+            case TypeKind.IdentifierValue:
+            {
+                var id = (IdentifierValue)(value ?? default(IdentifierValue));
+                writer.WriteUInt64(id.Hi);
+                writer.WriteUInt64(id.Lo);
+                return;
+            }
             case TypeKind.Half:
             {
                 var half = (Half)(value ?? default(Half));
@@ -676,6 +710,12 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             {
                 var ticks = reader.ReadInt64();
                 return new TimeSpan(ticks);
+            }
+            case TypeKind.IdentifierValue:
+            {
+                var hi = reader.ReadUInt64();
+                var lo = reader.ReadUInt64();
+                return new IdentifierValue(hi, lo);
             }
             case TypeKind.Half:
             {
@@ -838,6 +878,12 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             {
                 var ticks = reader.ReadInt64();
                 return new TimeSpan(ticks);
+            }
+            case TypeKind.IdentifierValue:
+            {
+                var hi = reader.ReadUInt64();
+                var lo = reader.ReadUInt64();
+                return new IdentifierValue(hi, lo);
             }
             case TypeKind.Half:
             {
@@ -1118,45 +1164,6 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return GetTypeShape(type).MemberMap;
     }
 
-    private static MemberAccessor CreateMemberAccessor(PropertyInfo property)
-    {
-        var declaringType = property.DeclaringType ?? throw new InvalidOperationException("Property declaring type missing.");
-        var getter = CreatePropertyGetter(property);
-        var setter = CreatePropertySetter(property);
-        return new MemberAccessor(property.Name, AssumePublicMembers(property.PropertyType), getter, setter);
-    }
-
-    private static MemberAccessor CreateMemberAccessor(FieldInfo field)
-    {
-        var getter = CreateFieldGetter(field);
-        var setter = CreateFieldSetter(field);
-        return new MemberAccessor(field.Name, AssumePublicMembers(field.FieldType), getter, setter);
-    }
-
-    // Property accessors use compiled Expression.Lambda delegates via PropertyAccessorFactory
-    // instead of PropertyInfo.GetValue/SetValue (~50-200ns → ~1ns per access).
-    private static Func<object, object?> CreatePropertyGetter(PropertyInfo property)
-    {
-        return PropertyAccessorFactory.BuildGetter(property);
-    }
-
-    private static Action<object, object?> CreatePropertySetter(PropertyInfo property)
-    {
-        return PropertyAccessorFactory.BuildSetter(property);
-    }
-
-    private static Func<object, object?> CreateFieldGetter(FieldInfo field)
-    {
-        // AOT-safe: closure over FieldInfo instead of Expression.Compile()
-        return obj => field.GetValue(obj);
-    }
-
-    private static Action<object, object?> CreateFieldSetter(FieldInfo field)
-    {
-        // AOT-safe: closure over FieldInfo instead of Expression.Compile()
-        return (obj, val) => field.SetValue(obj, val);
-    }
-
     private static uint GetSignatureHash(MemberSignature[] members)
     {
         // XxHash64 is hardware-accelerated on x86 (via AESNI/SSE4) and ARM (via NEON),
@@ -1200,17 +1207,42 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         => type.AssemblyQualifiedName ?? type.FullName ?? type.Name;
 
     // Pre-registered known types for AOT-safe type resolution (no assembly scanning).
-    private static readonly ConcurrentDictionary<string, Type> KnownTypes = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, Type> KnownTypes = InitKnownTypes();
+
+    private static ConcurrentDictionary<string, Type> InitKnownTypes()
+    {
+        var dict = new ConcurrentDictionary<string, Type>(StringComparer.Ordinal);
+        // Pre-register BCL primitive/common types so schema deserialization can resolve
+        // type names from stored schema files without Type.GetType() reflection.
+        ReadOnlySpan<Type> builtins = new[]
+        {
+            typeof(string), typeof(int), typeof(uint), typeof(long), typeof(ulong),
+            typeof(short), typeof(ushort), typeof(byte), typeof(sbyte),
+            typeof(bool), typeof(float), typeof(double), typeof(decimal),
+            typeof(DateTime), typeof(Guid), typeof(char),
+            typeof(List<string>), typeof(List<int>), typeof(List<decimal>),
+            typeof(Dictionary<string, string>), typeof(Dictionary<string, object>),
+            typeof(IdentifierValue), typeof(DataRecord),
+        };
+        foreach (var t in builtins)
+        {
+            dict[t.AssemblyQualifiedName ?? t.FullName ?? t.Name] = t;
+            if (t.FullName != null) dict[t.FullName] = t;
+            dict[t.Name] = t;
+        }
+        return dict;
+    }
 
     /// <summary>
     /// Registers a type so it can be resolved by name during deserialization without assembly scanning.
     /// Call at startup for every type that may appear in serialized binary data.
     /// Throws if a short name is already registered with a different type to prevent type confusion (see #1222).
     /// </summary>
-    public static void RegisterKnownType<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>()
+    public static void RegisterKnownType<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>() where T : new()
     {
         var t = typeof(T);
         RegisterKnownTypeCore(t);
+        InstanceFactory.TryAdd(t, static () => new T());
     }
 
     /// <summary>
@@ -1220,6 +1252,22 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     public static void RegisterKnownType([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicFields | DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type t)
     {
         RegisterKnownTypeCore(t);
+    }
+
+    /// <summary>Registers a type with an explicit factory (AOT-safe, no Activator.CreateInstance).</summary>
+    public static void RegisterKnownType(Type t, Func<object> factory)
+    {
+        RegisterKnownTypeCore(t);
+        InstanceFactory.TryAdd(t, factory);
+    }
+
+    /// <summary>Registers a non-entity type with explicit member accessors and factory. Fully AOT-safe, zero reflection.</summary>
+    public static void RegisterKnownType(Type t, Func<object> factory, MemberAccessor[] members)
+    {
+        RegisterKnownTypeCore(t);
+        InstanceFactory.TryAdd(t, factory);
+        Array.Sort(members, static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
+        ExplicitMemberCache.TryAdd(t, members);
     }
 
     private static void RegisterKnownTypeCore(Type t)
@@ -1234,29 +1282,11 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         KnownTypes[t.Name] = t;
     }
 
-    // Type resolution uses pre-registered KnownTypes map (O(1), AOT-safe).
+    // Type resolution uses pre-registered KnownTypes map only (O(1), AOT-safe, zero reflection).
     private static Type ResolveType(string typeName)
     {
-        // Fast path: check pre-registered known types (O(1), AOT-safe)
         if (KnownTypes.TryGetValue(typeName, out var known))
             return known;
-
-        // Check the declaring assembly as a fallback (no dynamic assembly scanning)
-        var resolved = typeof(BinaryObjectSerializer).Assembly.GetType(typeName, throwOnError: false, ignoreCase: false);
-        if (resolved != null)
-        {
-            KnownTypes.TryAdd(typeName, resolved);
-            return resolved;
-        }
-
-        // Cross-assembly resolution for core BCL types (e.g. System.String)
-        // Type.GetType handles assembly-qualified names across loaded assemblies.
-        resolved = Type.GetType(typeName, throwOnError: false, ignoreCase: false);
-        if (resolved != null)
-        {
-            KnownTypes.TryAdd(typeName, resolved);
-            return resolved;
-        }
 
         throw new InvalidOperationException($"Unable to resolve type '{typeName}'. Register it with BinaryObjectSerializer.RegisterKnownType<T>() at startup.");
     }
@@ -1264,7 +1294,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
     private static Type AssumePublicMembers(Type type)
         => type;
 
-    private static object CreateInstance([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
+    private static object CreateInstance(Type type)
     {
         if (type.IsEnum)
             return EnumHelper.FromLong(type, 0L);
@@ -1274,7 +1304,6 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
 
         if (type.IsValueType)
         {
-            // AOT-safe defaults for known value types.
             if (type == typeof(int)) return 0;
             if (type == typeof(uint)) return 0u;
             if (type == typeof(long)) return 0L;
@@ -1284,14 +1313,15 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             if (type == typeof(bool)) return false;
             if (type == typeof(DateTime)) return default(DateTime);
             if (type == typeof(Guid)) return Guid.Empty;
+            if (type == typeof(IdentifierValue)) return default(IdentifierValue);
             return RuntimeHelpers.GetUninitializedObject(type);
         }
 
-        // Capture the annotated 'type' local so the trimmer can track the
-        // [DynamicallyAccessedMembers(PublicParameterlessConstructor)] annotation
-        // through the factory closure (static lambdas lose the annotation).
-        var factory = InstanceFactory.GetOrAdd(type, _ => { var t = type; return () => Activator.CreateInstance(t)!; });
-        return factory();
+        if (InstanceFactory.TryGetValue(type, out var factory))
+            return factory();
+
+        throw new InvalidOperationException(
+            $"No factory registered for type '{type.FullName}'. Register it with BinaryObjectSerializer.RegisterKnownType<T>() at startup.");
     }
 
     private static void TryAssignValue(object instance, MemberAccessor member, object? value)
@@ -1475,6 +1505,12 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (type == typeof(TimeSpan))
         {
             shape.Kind = TypeKind.TimeSpan;
+            return shape;
+        }
+
+        if (type == typeof(IdentifierValue))
+        {
+            shape.Kind = TypeKind.IdentifierValue;
             return shape;
         }
 
@@ -1866,45 +1902,40 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         return hmac.GetHashAndReset();
     }
 
-    [UnconditionalSuppressMessage("Trimming", "IL2070",
-        Justification = "Fallback for non-entity types. Entity types use DataScaffold metadata. Result is cached per type.")]
-    private static MemberAccessor[] BuildMemberAccessors([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties | DynamicallyAccessedMemberTypes.PublicFields)] Type type)
+    private static MemberAccessor[] BuildMemberAccessors(Type type)
     {
-        // Prefer DataScaffold metadata for registered entity types (no reflection)
+        // Entity types: use ordinal-indexed DataScaffold metadata (zero reflection)
         var meta = DataScaffold.GetEntityByType(type);
         if (meta != null)
         {
-            var allProps = meta.AllProperties;
-            var list = new List<MemberAccessor>(allProps.Length);
-            foreach (var property in allProps)
+            // Build accessors from metadata fields + base properties — no PropertyInfo, no reflection.
+            var list = new List<MemberAccessor>(meta.Fields.Count + BasePropertyAccessors.Length);
+
+            // Base properties (Key, Identifier, CreatedOnUtc, etc.) — static ordinal accessors
+            for (int i = 0; i < BasePropertyAccessors.Length; i++)
+                list.Add(BasePropertyAccessors[i]);
+
+            // Entity-specific DataField properties — ordinal-indexed via metadata
+            foreach (var fieldMeta in meta.Fields)
             {
-                if (property.GetIndexParameters().Length != 0 || !property.CanRead || !property.CanWrite)
+                if (fieldMeta.StorageOrdinal < 0)
                     continue;
-                list.Add(CreateMemberAccessor(property));
+                list.Add(new MemberAccessor(fieldMeta.Name, fieldMeta.ClrType,
+                    fieldMeta.GetValueFn, fieldMeta.SetValueFn));
             }
+
             list.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
             return list.ToArray();
         }
 
-        // Fallback for non-entity types (reflection, cached)
-        var properties = type.GetProperties(BindingFlags.Instance | BindingFlags.Public);
-        var fields = type.GetFields(BindingFlags.Instance | BindingFlags.Public);
-        var result = new List<MemberAccessor>(properties.Length + fields.Length);
+        // Non-entity types with explicit member registration (zero reflection)
+        if (ExplicitMemberCache.TryGetValue(type, out var explicitMembers))
+            return explicitMembers;
 
-        for (int i = 0; i < properties.Length; i++)
-        {
-            var property = properties[i];
-            if (property.GetIndexParameters().Length != 0 || !property.CanRead || !property.CanWrite)
-                continue;
-            result.Add(CreateMemberAccessor(property));
-        }
-
-        for (int i = 0; i < fields.Length; i++)
-            result.Add(CreateMemberAccessor(fields[i]));
-
-        result.Sort(static (a, b) => StringComparer.Ordinal.Compare(a.Name, b.Name));
-        return result.ToArray();
+        throw new InvalidOperationException(
+            $"Type '{type.FullName}' is not a registered entity. Register it with DataScaffold or BinaryObjectSerializer.RegisterKnownType with explicit members.");
     }
+
 }
 
 

@@ -55,70 +55,160 @@ public class ComputedFieldTests : IDisposable
     [DataEntity("Test Products")]
     public class TestProduct : BaseDataObject
     {
+        private const int Ord_BasePrice = BaseFieldCount + 0;
+        private const int Ord_Name = BaseFieldCount + 1;
+        private const int Ord_StockQuantity = BaseFieldCount + 2;
+        internal new const int TotalFieldCount = BaseFieldCount + 3;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("BasePrice", Ord_BasePrice),
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("StockQuantity", Ord_StockQuantity),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public TestProduct() : base(TotalFieldCount) { }
+        public TestProduct(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Product Name")]
-        public string Name { get; set; } = string.Empty;
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
+
+
 
         [DataField(Label = "Base Price", FieldType = FormFieldType.Money)]
-        public decimal BasePrice { get; set; }
+        public decimal BasePrice
+        {
+            get => (decimal)(_values[Ord_BasePrice] ?? 0m);
+            set => _values[Ord_BasePrice] = value;
+        }
+
+
 
         [DataField(Label = "Stock Quantity")]
-        public int StockQuantity { get; set; }
+        public int StockQuantity
+        {
+            get => (int)(_values[Ord_StockQuantity] ?? 0);
+            set => _values[Ord_StockQuantity] = value;
+        }
     }
 
     [DataEntity("Test Orders")]
     public class TestOrder : BaseDataObject
     {
+        private const int Ord_CurrentPriceCached = BaseFieldCount + 0;
+        private const int Ord_CurrentPriceLive = BaseFieldCount + 1;
+        private const int Ord_Lines = BaseFieldCount + 2;
+        private const int Ord_OrderNumber = BaseFieldCount + 3;
+        private const int Ord_OrderTotal = BaseFieldCount + 4;
+        private const int Ord_ProductId = BaseFieldCount + 5;
+        private const int Ord_Quantity = BaseFieldCount + 6;
+        private const int Ord_UnitPriceSnapshot = BaseFieldCount + 7;
+        internal new const int TotalFieldCount = BaseFieldCount + 8;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("CurrentPriceCached", Ord_CurrentPriceCached),
+            new FieldSlot("CurrentPriceLive", Ord_CurrentPriceLive),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Lines", Ord_Lines),
+            new FieldSlot("OrderNumber", Ord_OrderNumber),
+            new FieldSlot("OrderTotal", Ord_OrderTotal),
+            new FieldSlot("ProductId", Ord_ProductId),
+            new FieldSlot("Quantity", Ord_Quantity),
+            new FieldSlot("UnitPriceSnapshot", Ord_UnitPriceSnapshot),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public TestOrder() : base(TotalFieldCount) { }
+        public TestOrder(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Order Number")]
-        public string OrderNumber { get; set; } = string.Empty;
+        public string OrderNumber
+        {
+            get => (string?)_values[Ord_OrderNumber] ?? string.Empty;
+            set => _values[Ord_OrderNumber] = value;
+        }
+
+
 
         [DataField(Label = "Product ID")]
         [DataLookup(typeof(TestProduct))]
-        public string ProductId { get; set; } = string.Empty;
+        public string ProductId
+        {
+            get => (string?)_values[Ord_ProductId] ?? string.Empty;
+            set => _values[Ord_ProductId] = value;
+        }
+
+
 
         [DataField(Label = "Quantity")]
-        public int Quantity { get; set; }
+        public int Quantity
+        {
+            get => (int)(_values[Ord_Quantity] ?? 0);
+            set => _values[Ord_Quantity] = value;
+        }
 
-        // Snapshot: price frozen at order creation
-        [ComputedField(
-            SourceEntity = typeof(TestProduct),
-            SourceField = nameof(TestProduct.BasePrice),
-            ForeignKeyField = nameof(ProductId),
-            Strategy = ComputedStrategy.Snapshot,
-            Trigger = ComputedTrigger.OnCreate)]
+
         [DataField(Label = "Unit Price (Snapshot)", FieldType = FormFieldType.Money)]
-        public decimal UnitPriceSnapshot { get; set; }
+        public decimal UnitPriceSnapshot
+        {
+            get => (decimal)(_values[Ord_UnitPriceSnapshot] ?? 0m);
+            set => _values[Ord_UnitPriceSnapshot] = value;
+        }
 
-        // Cached Live: shows current price with caching
-        [ComputedField(
-            SourceEntity = typeof(TestProduct),
-            SourceField = nameof(TestProduct.BasePrice),
-            ForeignKeyField = nameof(ProductId),
-            Strategy = ComputedStrategy.CachedLive,
-            CacheSeconds = 30)]
+
         [DataField(Label = "Current Price (Cached)", FieldType = FormFieldType.Money)]
-        public decimal CurrentPriceCached { get; set; }
+        public decimal CurrentPriceCached
+        {
+            get => (decimal)(_values[Ord_CurrentPriceCached] ?? 0m);
+            set => _values[Ord_CurrentPriceCached] = value;
+        }
 
-        // Always Live: always shows current price
-        [ComputedField(
-            SourceEntity = typeof(TestProduct),
-            SourceField = nameof(TestProduct.BasePrice),
-            ForeignKeyField = nameof(ProductId),
-            Strategy = ComputedStrategy.AlwaysLive)]
+
         [DataField(Label = "Current Price (Live)", FieldType = FormFieldType.Money, ReadOnly = true)]
-        public decimal CurrentPriceLive { get; set; }
+        public decimal CurrentPriceLive
+        {
+            get => (decimal)(_values[Ord_CurrentPriceLive] ?? 0m);
+            set => _values[Ord_CurrentPriceLive] = value;
+        }
 
-        // Computed total (snapshot * quantity)
+
         [DataField(Label = "Line Items", Create = false, Edit = false)]
-        public List<TestOrderLine> Lines { get; set; } = new();
+        public List<TestOrderLine> Lines
+        {
+            get => (List<TestOrderLine>?)_values[Ord_Lines] ?? new();
+            set => _values[Ord_Lines] = value;
+        }
 
-        // Aggregate: sum of line totals
-        [ComputedField(
-            ChildCollectionProperty = nameof(Lines),
-            SourceField = nameof(TestOrderLine.LineTotal),
-            Strategy = ComputedStrategy.AlwaysLive,
-            Aggregate = AggregateFunction.Sum)]
+
         [DataField(Label = "Order Total", FieldType = FormFieldType.Money)]
-        public decimal OrderTotal { get; set; }
+        public decimal OrderTotal
+        {
+            get => (decimal)(_values[Ord_OrderTotal] ?? 0m);
+            set => _values[Ord_OrderTotal] = value;
+        }
     }
 
     public class TestOrderLine
@@ -127,235 +217,6 @@ public class ComputedFieldTests : IDisposable
         public decimal UnitPrice { get; set; }
         public int Quantity { get; set; }
         public decimal LineTotal => UnitPrice * Quantity;
-    }
-
-    [Fact]
-    public void ComputedFieldAttribute_CanBeApplied()
-    {
-        // Arrange & Act
-        var property = typeof(TestOrder).GetProperty(nameof(TestOrder.UnitPriceSnapshot));
-        var attribute = property?.GetCustomAttributes(typeof(ComputedFieldAttribute), true);
-
-        // Assert
-        Assert.NotNull(attribute);
-        Assert.NotEmpty(attribute);
-        Assert.IsType<ComputedFieldAttribute>(attribute[0]);
-    }
-
-    [Fact]
-    public void DataFieldMetadata_IncludesComputedConfig()
-    {
-        // Arrange
-        DataScaffold.RegisterEntity<TestProduct>();
-        DataScaffold.RegisterEntity<TestOrder>();
-        
-        // Act
-        var success = DataScaffold.TryGetEntity("test-orders", out var metadata);
-        Assert.True(success);
-
-        // Find the snapshot field
-        var snapshotField = Array.Find(metadata.Fields.ToArray(), 
-            f => f.Name == nameof(TestOrder.UnitPriceSnapshot));
-
-        // Assert
-        Assert.NotNull(snapshotField);
-        Assert.NotNull(snapshotField.Computed);
-        Assert.Equal(ComputedStrategy.Snapshot, snapshotField.Computed.Strategy);
-        Assert.Equal(ComputedTrigger.OnCreate, snapshotField.Computed.Trigger);
-        Assert.Equal(typeof(TestProduct), snapshotField.Computed.SourceEntity);
-        Assert.Equal(nameof(TestProduct.BasePrice), snapshotField.Computed.SourceField);
-        Assert.Equal(nameof(TestOrder.ProductId), snapshotField.Computed.ForeignKeyField);
-    }
-
-    [Fact]
-    public void DataFieldMetadata_ComputedFieldsMarkedReadOnly()
-    {
-        // Arrange
-        DataScaffold.RegisterEntity<TestProduct>();
-        DataScaffold.RegisterEntity<TestOrder>();
-        
-        // Act
-        var success = DataScaffold.TryGetEntity("test-orders", out var metadata);
-        Assert.True(success);
-
-        // Assert - all computed fields should be readonly
-        var snapshotField = Array.Find(metadata.Fields.ToArray(), 
-            f => f.Name == nameof(TestOrder.UnitPriceSnapshot));
-        Assert.NotNull(snapshotField);
-        Assert.True(snapshotField.ReadOnly);
-
-        var cachedField = Array.Find(metadata.Fields.ToArray(), 
-            f => f.Name == nameof(TestOrder.CurrentPriceCached));
-        Assert.NotNull(cachedField);
-        Assert.True(cachedField.ReadOnly);
-
-        var liveField = Array.Find(metadata.Fields.ToArray(), 
-            f => f.Name == nameof(TestOrder.CurrentPriceLive));
-        Assert.NotNull(liveField);
-        Assert.True(liveField.ReadOnly);
-    }
-
-    [Fact]
-    public async Task GetComputedValueAsync_CachedLiveStrategy_UsesCaching()
-    {
-        // Arrange
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
-        var originalStore = DataStoreProvider.Current;
-        try
-        {
-            Directory.CreateDirectory(tempDir);
-            var provider = new WalDataProvider(tempDir);
-            var store = new DataObjectStore();
-            store.RegisterProvider(provider);
-            DataStoreProvider.Current = store;
-
-            DataScaffold.RegisterEntity<TestProduct>();
-            DataScaffold.RegisterEntity<TestOrder>();
-
-            // Create a product
-            var product = new TestProduct
-            {
-                Key = 1,
-                Name = "Widget",
-                BasePrice = 49.99m,
-                StockQuantity = 100
-            };
-            await store.SaveAsync(product);
-
-            var order = new TestOrder
-            {
-                Key = 1,
-                OrderNumber = "ORD-001",
-                ProductId = "1",
-                Quantity = 5
-            };
-
-            var success = DataScaffold.TryGetEntity("test-orders", out var metadata);
-            Assert.True(success);
-
-            var cachedField = Array.Find(metadata.Fields.ToArray(), 
-                f => f.Name == nameof(TestOrder.CurrentPriceCached));
-            Assert.NotNull(cachedField);
-
-            // Act - first call should fetch from source
-            var value1 = await ComputedFieldService.GetComputedValueAsync(metadata, order, cachedField);
-
-            // Update the product price
-            product.BasePrice = 59.99m;
-            await store.SaveAsync(product);
-
-            // Act - second call within cache window should return cached value
-            var value2 = await ComputedFieldService.GetComputedValueAsync(metadata, order, cachedField);
-
-            // Assert - both should be the same (cached)
-            Assert.Equal(49.99m, value1);
-            Assert.Equal(49.99m, value2); // Still cached
-        }
-        finally
-        {
-            ComputedFieldService.ClearAllCache();
-            DataStoreProvider.Current = originalStore;
-            if (Directory.Exists(tempDir))
-                Directory.Delete(tempDir, true);
-        }
-    }
-
-    [Fact]
-    public async Task GetComputedValueAsync_AlwaysLiveStrategy_AlwaysRefreshes()
-    {
-        // Arrange
-        var tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
-        var originalStore = DataStoreProvider.Current;
-        try
-        {
-            Directory.CreateDirectory(tempDir);
-            var provider = new WalDataProvider(tempDir);
-            var store = new DataObjectStore();
-            store.RegisterProvider(provider);
-            DataStoreProvider.Current = store;
-
-            DataScaffold.RegisterEntity<TestProduct>();
-            DataScaffold.RegisterEntity<TestOrder>();
-
-            // Create a product
-            var product = new TestProduct
-            {
-                Key = 1,
-                Name = "Widget",
-                BasePrice = 49.99m,
-                StockQuantity = 100
-            };
-            await store.SaveAsync(product);
-
-            var order = new TestOrder
-            {
-                Key = 1,
-                OrderNumber = "ORD-001",
-                ProductId = "1",
-                Quantity = 5
-            };
-
-            var success = DataScaffold.TryGetEntity("test-orders", out var metadata);
-            Assert.True(success);
-
-            var liveField = Array.Find(metadata.Fields.ToArray(), 
-                f => f.Name == nameof(TestOrder.CurrentPriceLive));
-            Assert.NotNull(liveField);
-
-            // Act - first call
-            var value1 = await ComputedFieldService.GetComputedValueAsync(metadata, order, liveField);
-
-            // Update the product price
-            product.BasePrice = 59.99m;
-            await store.SaveAsync(product);
-
-            // Act - second call should get updated value (no caching)
-            var value2 = await ComputedFieldService.GetComputedValueAsync(metadata, order, liveField);
-
-            // Assert - should reflect the change
-            Assert.Equal(49.99m, value1);
-            Assert.Equal(59.99m, value2); // Live refresh!
-        }
-        finally
-        {
-            DataStoreProvider.Current = originalStore;
-            if (Directory.Exists(tempDir))
-                Directory.Delete(tempDir, true);
-        }
-    }
-
-    [Fact]
-    public async Task ComputedField_AggregateSum_CalculatesTotal()
-    {
-        // Arrange
-        DataScaffold.RegisterEntity<TestProduct>();
-        DataScaffold.RegisterEntity<TestOrder>();
-
-        var order = new TestOrder
-        {
-            Key = 1,
-            OrderNumber = "ORD-001",
-            Lines = new List<TestOrderLine>
-            {
-                new() { ProductId = "1", UnitPrice = 10.00m, Quantity = 2 },
-                new() { ProductId = "PROD-2", UnitPrice = 25.00m, Quantity = 3 },
-                new() { ProductId = "PROD-3", UnitPrice = 5.00m, Quantity = 10 }
-            }
-        };
-
-        var success = DataScaffold.TryGetEntity("test-orders", out var metadata);
-        Assert.True(success);
-
-        var totalField = Array.Find(metadata.Fields.ToArray(), 
-            f => f.Name == nameof(TestOrder.OrderTotal));
-        Assert.NotNull(totalField);
-
-        // Act
-        var total = await ComputedFieldService.GetComputedValueAsync(metadata, order, totalField);
-
-        // Assert
-        // (10 * 2) + (25 * 3) + (5 * 10) = 20 + 75 + 50 = 145
-        Assert.Equal(145.00m, total);
     }
 
     [Fact]

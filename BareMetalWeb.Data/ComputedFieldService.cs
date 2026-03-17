@@ -173,10 +173,14 @@ public static class ComputedFieldService
                 return EntityLayoutCompiler.GetOrCompile(meta).FieldByName(key.Item2)?.Getter;
             }
 
-            // Fallback for POCO child types not registered with DataScaffold.
-            // Cached — reflection runs once per (type, name) pair.
-            var prop = key.Item1.GetProperty(key.Item2);
-            return prop != null ? PropertyAccessorFactory.BuildGetter(prop) : null;
+            // POCO child types: lookup via DataScaffold metadata (no reflection)
+            var childMeta = DataScaffold.GetEntityByType(key.Item1);
+            if (childMeta != null)
+            {
+                var childField = childMeta.FindField(key.Item2);
+                if (childField != null) return childField.GetValueFn;
+            }
+            return null;
         });
     }
 

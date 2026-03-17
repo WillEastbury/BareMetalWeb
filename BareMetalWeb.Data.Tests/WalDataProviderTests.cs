@@ -20,6 +20,7 @@ public sealed class WalDataProviderTests : IDisposable
     {
         _dir = Path.Combine(Path.GetTempPath(), "BmwWalProviderTests_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
+        BareMetalWeb.Core.DataScaffold.RegisterEntity<AppSetting>();
     }
 
     public void Dispose()

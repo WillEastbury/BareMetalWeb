@@ -39,30 +39,120 @@ public sealed class ViewEngineTests : IDisposable
     [DataEntity("View Test Products", Slug = "view-test-products")]
     public class ViewTestProduct : BaseDataObject
     {
+        private const int Ord_Category = BaseFieldCount + 0;
+        private const int Ord_Name = BaseFieldCount + 1;
+        private const int Ord_Price = BaseFieldCount + 2;
+        private const int Ord_Stock = BaseFieldCount + 3;
+        internal new const int TotalFieldCount = BaseFieldCount + 4;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("Category", Ord_Category),
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("Name", Ord_Name),
+            new FieldSlot("Price", Ord_Price),
+            new FieldSlot("Stock", Ord_Stock),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public ViewTestProduct() : base(TotalFieldCount) { }
+        public ViewTestProduct(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Name")]
-        public string Name { get; set; } = string.Empty;
+        public string Name
+        {
+            get => (string?)_values[Ord_Name] ?? string.Empty;
+            set => _values[Ord_Name] = value;
+        }
+
+
 
         [DataField(Label = "Category")]
-        public string Category { get; set; } = string.Empty;
+        public string Category
+        {
+            get => (string?)_values[Ord_Category] ?? string.Empty;
+            set => _values[Ord_Category] = value;
+        }
+
+
 
         [DataField(Label = "Price")]
-        public decimal Price { get; set; }
+        public decimal Price
+        {
+            get => (decimal)(_values[Ord_Price] ?? 0m);
+            set => _values[Ord_Price] = value;
+        }
+
+
 
         [DataField(Label = "Stock")]
-        public int Stock { get; set; }
+        public int Stock
+        {
+            get => (int)(_values[Ord_Stock] ?? 0);
+            set => _values[Ord_Stock] = value;
+        }
     }
 
     [DataEntity("View Test Orders", Slug = "view-test-orders")]
     public class ViewTestOrder : BaseDataObject
     {
+        private const int Ord_ProductId = BaseFieldCount + 0;
+        private const int Ord_Quantity = BaseFieldCount + 1;
+        private const int Ord_Status = BaseFieldCount + 2;
+        internal new const int TotalFieldCount = BaseFieldCount + 3;
+
+        private static readonly FieldSlot[] _fieldMap = new[]
+        {
+            new FieldSlot("CreatedBy", Ord_CreatedBy),
+            new FieldSlot("CreatedOnUtc", Ord_CreatedOnUtc),
+            new FieldSlot("ETag", Ord_ETag),
+            new FieldSlot("Identifier", Ord_Identifier),
+            new FieldSlot("Key", Ord_Key),
+            new FieldSlot("ProductId", Ord_ProductId),
+            new FieldSlot("Quantity", Ord_Quantity),
+            new FieldSlot("Status", Ord_Status),
+            new FieldSlot("UpdatedBy", Ord_UpdatedBy),
+            new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+            new FieldSlot("Version", Ord_Version),
+        };
+        protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
+
+        public ViewTestOrder() : base(TotalFieldCount) { }
+        public ViewTestOrder(string createdBy) : base(TotalFieldCount, createdBy) { }
+
+
         [DataField(Label = "Product Id")]
-        public string ProductId { get; set; } = string.Empty;
+        public string ProductId
+        {
+            get => (string?)_values[Ord_ProductId] ?? string.Empty;
+            set => _values[Ord_ProductId] = value;
+        }
+
+
 
         [DataField(Label = "Quantity")]
-        public int Quantity { get; set; }
+        public int Quantity
+        {
+            get => (int)(_values[Ord_Quantity] ?? 0);
+            set => _values[Ord_Quantity] = value;
+        }
+
+
 
         [DataField(Label = "Status")]
-        public string Status { get; set; } = "Pending";
+        public string Status
+        {
+            get => (string?)_values[Ord_Status] ?? string.Empty;
+            set => _values[Ord_Status] = value;
+        }
     }
 
     private void RegisterAndSeedEntities()
