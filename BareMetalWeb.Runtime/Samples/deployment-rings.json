@@ -281,7 +281,6 @@
       "UpdatedBy": "",
       "ETag": ""
     },
-
     {
       "FieldId": "b2000001-0001-4000-8000-000000000001",
       "EntityId": "a1b2c3d4-0002-4000-8000-000000000002",
@@ -475,7 +474,7 @@
       "Edit": true,
       "Create": true,
       "ReadOnly": false,
-      "EnumValues": "Active|Disabled|Draining|Decommissioned",
+      "EnumValues": "Active|Disabled|Draining|Upgrading|Decommissioned",
       "DefaultValue": "Active",
       "Multiline": false,
       "Id": "b200000100094000800000000000f009",
@@ -553,7 +552,6 @@
       "UpdatedBy": "",
       "ETag": ""
     },
-
     {
       "FieldId": "b3000001-0001-4000-8000-000000000001",
       "EntityId": "a1b2c3d4-0003-4000-8000-000000000003",
@@ -738,7 +736,6 @@
       "UpdatedBy": "",
       "ETag": ""
     },
-
     {
       "FieldId": "b4000001-0001-4000-8000-000000000001",
       "EntityId": "a1b2c3d4-0004-4000-8000-000000000004",
@@ -965,6 +962,140 @@
       "CreatedBy": "",
       "UpdatedBy": "",
       "ETag": ""
+    },
+    {
+      "FieldId": "b2000001-000d-4000-8000-00000000000d",
+      "EntityId": "a1b2c3d4-0002-4000-8000-000000000002",
+      "Name": "DeploymentType",
+      "Label": "Deployment Type",
+      "Ordinal": 13,
+      "Type": "enum",
+      "IsNullable": false,
+      "Required": true,
+      "List": true,
+      "View": true,
+      "Edit": true,
+      "Create": true,
+      "ReadOnly": false,
+      "EnumValues": "AppService|AKS",
+      "DefaultValue": "AKS",
+      "Multiline": false,
+      "Id": "b20000010d04000800000000000f000d",
+      "CreatedOnUtc": "2026-03-14T13:00:00Z",
+      "UpdatedOnUtc": "2026-03-14T13:00:00Z",
+      "CreatedBy": "",
+      "UpdatedBy": "",
+      "ETag": ""
+    },
+    {
+      "FieldId": "b2000001-000e-4000-8000-00000000000e",
+      "EntityId": "a1b2c3d4-0002-4000-8000-000000000002",
+      "Name": "ClusterName",
+      "Label": "AKS Cluster",
+      "Ordinal": 14,
+      "Type": "string",
+      "IsNullable": true,
+      "Required": false,
+      "List": true,
+      "View": true,
+      "Edit": true,
+      "Create": true,
+      "ReadOnly": false,
+      "Multiline": false,
+      "Id": "b20000010e04000800000000000f000e",
+      "CreatedOnUtc": "2026-03-14T13:00:00Z",
+      "UpdatedOnUtc": "2026-03-14T13:00:00Z",
+      "CreatedBy": "",
+      "UpdatedBy": "",
+      "ETag": ""
+    },
+    {
+      "FieldId": "b2000001-000f-4000-8000-00000000000f",
+      "EntityId": "a1b2c3d4-0002-4000-8000-000000000002",
+      "Name": "Namespace",
+      "Label": "AKS Namespace",
+      "Ordinal": 15,
+      "Type": "string",
+      "IsNullable": true,
+      "Required": false,
+      "List": true,
+      "View": true,
+      "Edit": true,
+      "Create": true,
+      "ReadOnly": false,
+      "Multiline": false,
+      "Id": "b20000010f04000800000000000f000f",
+      "CreatedOnUtc": "2026-03-14T13:00:00Z",
+      "UpdatedOnUtc": "2026-03-14T13:00:00Z",
+      "CreatedBy": "",
+      "UpdatedBy": "",
+      "ETag": ""
+    },
+    {
+      "FieldId": "b2000001-0010-4000-8000-000000000010",
+      "EntityId": "a1b2c3d4-0002-4000-8000-000000000002",
+      "Name": "ImageTag",
+      "Label": "Current Image Tag",
+      "Ordinal": 16,
+      "Type": "string",
+      "IsNullable": true,
+      "Required": false,
+      "List": true,
+      "View": true,
+      "Edit": false,
+      "Create": false,
+      "ReadOnly": true,
+      "Multiline": false,
+      "Id": "b200000110040008000000000000f010",
+      "CreatedOnUtc": "2026-03-14T13:00:00Z",
+      "UpdatedOnUtc": "2026-03-14T13:00:00Z",
+      "CreatedBy": "",
+      "UpdatedBy": "",
+      "ETag": ""
+    },
+    {
+      "FieldId": "b2000001-0011-4000-8000-000000000011",
+      "EntityId": "a1b2c3d4-0002-4000-8000-000000000002",
+      "Name": "DesiredImageTag",
+      "Label": "Desired Image Tag",
+      "Ordinal": 17,
+      "Type": "string",
+      "IsNullable": true,
+      "Required": false,
+      "List": true,
+      "View": true,
+      "Edit": true,
+      "Create": true,
+      "ReadOnly": false,
+      "Multiline": false,
+      "Id": "b200000111040008000000000000f011",
+      "CreatedOnUtc": "2026-03-14T13:00:00Z",
+      "UpdatedOnUtc": "2026-03-14T13:00:00Z",
+      "CreatedBy": "",
+      "UpdatedBy": "",
+      "ETag": ""
+    },
+    {
+      "FieldId": "b2000001-0012-4000-8000-000000000012",
+      "EntityId": "a1b2c3d4-0002-4000-8000-000000000002",
+      "Name": "StatefulSetName",
+      "Label": "StatefulSet Name",
+      "Ordinal": 18,
+      "Type": "string",
+      "IsNullable": true,
+      "Required": false,
+      "List": false,
+      "View": true,
+      "Edit": true,
+      "Create": true,
+      "ReadOnly": false,
+      "Multiline": false,
+      "Id": "b200000112040008000000000000f012",
+      "CreatedOnUtc": "2026-03-14T13:00:00Z",
+      "UpdatedOnUtc": "2026-03-14T13:00:00Z",
+      "CreatedBy": "",
+      "UpdatedBy": "",
+      "ETag": ""
     }
   ],
   "indexes": [
@@ -1061,6 +1192,15 @@
       "Permission": "Deployment Targets",
       "EnabledWhen": "Status == 'Active'",
       "Version": 1
+    },
+    {
+      "EntityId": "a1b2c3d4-0002-4000-8000-000000000002",
+      "Name": "Upgrade",
+      "Label": "🚀 Upgrade",
+      "Icon": "bi-arrow-up-circle",
+      "Permission": "Deployment Targets",
+      "EnabledWhen": "Status == 'Active' && DesiredImageTag != '' && DesiredImageTag != ImageTag",
+      "Version": 1
     }
   ],
   "actionCommands": [
@@ -1087,6 +1227,14 @@
       "Condition": "",
       "FieldId": "Status",
       "ValueExpression": "Draining"
+    },
+    {
+      "ActionId": "Upgrade",
+      "CommandType": "SetIf",
+      "Order": 1,
+      "Condition": "",
+      "FieldId": "Status",
+      "ValueExpression": "Upgrading"
     }
   ],
   "reports": [
