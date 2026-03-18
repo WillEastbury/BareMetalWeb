@@ -1,0 +1,208 @@
+# ────────────────────────────────────────────────────────────────────────────────
+# CD — Canary Deployment
+#
+# Triggered automatically when CI2 (AOT Builds & Container) passes on main.
+# Deploys the JIT build to canary-ring Azure Web Apps defined in deploy-list.json,
+# then runs a health check against each target.
+# ────────────────────────────────────────────────────────────────────────────────
+name: "3 · CD Canary"
+
+run-name: "3 · CD Canary — V${{ vars.MAJOR_VERSION || '1' }}.${{ github.run_number }}"
+
+on:
+  workflow_run:
+    workflows: ["2 · CI2 — AOT Builds & Agent Container"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: cd-canary-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+
+jobs:
+  # ── Gate: skip if CI2 failed ────────────────────────────────────────────
+  gate:
+    name: Check CI2 result
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - run: echo "CI2 passed — proceeding with canary deployment"
+
+  # ── Version ─────────────────────────────────────────────────────────────
+  version:
+    name: Compute version
+    needs: gate
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - name: Compute version
+        id: version
+        run: |
+          MAJOR="${{ vars.MAJOR_VERSION || '1' }}"
+          DATE="$(date +%Y%m%d)"
+          BUILD="${{ github.run_number }}"
+          echo "tag=${MAJOR}.${DATE}.${BUILD}" >> $GITHUB_OUTPUT
+
+  # ── Build JIT publish ──────────────────────────────────────────────────
+  build:
+    name: JIT publish
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: nuget-
+
+      - name: Publish (JIT)
+        run: |
+          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
+            --configuration Release \
+            --output ./publish
+
+      - name: Upload publish artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: publish-jit
+          path: ./publish
+          retention-days: 7
+
+  # ── Deploy to canary targets ───────────────────────────────────────────
+  deploy-canary:
+    name: "Deploy canary · ${{ matrix.target.name }}"
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - name: "Canary Ring 0"
+            app_name: baremetalweb-canary
+            resource_group: baremetalweb-rg
+            url: "https://baremetalweb-canary.azurewebsites.net"
+            secret_name: AZURE_CREDENTIALS_CANARY
+          - name: "Staging"
+            app_name: baremetalweb
+            resource_group: baremetalweb-rg
+            url: "https://baremetalweb.azurewebsites.net"
+            secret_name: AZURE_CREDENTIALS
+    steps:
+      - name: Download publish artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: publish-jit
+          path: ./publish
+
+      - name: Create deploy zip
+        run: |
+          cd ./publish
+          zip -r ../deploy.zip .
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets[matrix.target.secret_name] }}
+
+      - name: Stop Web App
+        run: |
+          az webapp stop \
+            --name "${{ matrix.target.app_name }}" \
+            --resource-group "${{ matrix.target.resource_group }}"
+
+      - name: Configure Web App
+        run: |
+          az webapp config appsettings set \
+            --name "${{ matrix.target.app_name }}" \
+            --resource-group "${{ matrix.target.resource_group }}" \
+            --settings \
+              WEBSITE_RUN_FROM_PACKAGE=0 \
+              ControlPlane__InstanceId="${{ matrix.target.app_name }}" \
+            --output none
+
+          az webapp config set \
+            --name "${{ matrix.target.app_name }}" \
+            --resource-group "${{ matrix.target.resource_group }}" \
+            --startup-file "dotnet BareMetalWeb.Host.dll" \
+            --output none
+
+      - name: Deploy zip
+        run: |
+          az webapp deploy \
+            --name "${{ matrix.target.app_name }}" \
+            --resource-group "${{ matrix.target.resource_group }}" \
+            --src-path deploy.zip \
+            --type zip \
+            --clean true
+
+      - name: Start Web App
+        run: |
+          az webapp start \
+            --name "${{ matrix.target.app_name }}" \
+            --resource-group "${{ matrix.target.resource_group }}"
+
+      - name: Health check
+        run: |
+          sleep 30
+          for attempt in 1 2 3 4 5 6; do
+            status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 '${{ matrix.target.url }}' || echo 000)"
+            echo "Attempt ${attempt}: HTTP ${status}"
+            if [[ "${status}" == "200" || "${status}" == "302" ]]; then
+              echo "✅ Health check passed for ${{ matrix.target.app_name }}"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Health check failed for ${{ matrix.target.app_name }}"
+          exit 1
+
+  # ── Summary ────────────────────────────────────────────────────────────
+  summary:
+    name: Canary summary
+    needs: [version, deploy-canary]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if gate was skipped
+        if: needs.version.result == 'skipped'
+        run: |
+          echo "::error::CI2 did not pass — canary deploy skipped."
+          exit 1
+
+      - name: Summary
+        if: needs.version.result != 'skipped'
+        run: |
+          TAG="${{ needs.version.outputs.tag }}"
+          echo "### 🐤 Canary Deployment Summary (${TAG})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Target | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Canary Ring 0 | ${{ needs.deploy-canary.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Staging | ${{ needs.deploy-canary.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "${{ needs.deploy-canary.result }}" == "success" ]]; then
+            echo "✅ All canary targets deployed and health-checked." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ One or more canary targets failed." >> $GITHUB_STEP_SUMMARY
+          fi
