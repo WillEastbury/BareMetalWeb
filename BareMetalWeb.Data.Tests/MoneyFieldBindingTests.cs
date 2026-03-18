@@ -103,9 +103,8 @@ public class MoneyFieldBindingTests
         // Arrange – VNext SPA submits { "Price": { "amount": 250.00, "currency": "GBP" } }
         var meta = GetMeta();
         var instance = new MoneyTestEntity();
-        var json = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+        var json = JsonDocToDict(
             "{\"Price\":{\"amount\":250.00,\"currency\":\"GBP\"},\"Name\":\"Widget\"}");
-        Assert.NotNull(json);
 
         // Act
         var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
@@ -121,9 +120,8 @@ public class MoneyFieldBindingTests
         // Arrange – plain decimal value (non-VNext or numeric field path)
         var meta = GetMeta();
         var instance = new MoneyTestEntity();
-        var json = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+        var json = JsonDocToDict(
             "{\"Price\":75.50,\"Name\":\"Widget\"}");
-        Assert.NotNull(json);
 
         // Act
         var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
@@ -139,9 +137,8 @@ public class MoneyFieldBindingTests
         // Arrange – object without "amount" property should fail gracefully
         var meta = GetMeta();
         var instance = new MoneyTestEntity();
-        var json = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+        var json = JsonDocToDict(
             "{\"Price\":{\"value\":100},\"Name\":\"Widget\"}");
-        Assert.NotNull(json);
 
         // Act
         var errors = DataScaffold.ApplyValuesFromJson(meta, instance, json!, forCreate: true, allowMissing: false);
@@ -158,5 +155,14 @@ public class MoneyFieldBindingTests
 
         [DataField(Label = "Name", Order = 2)]
         public string Name { get; set; } = string.Empty;
+    }
+
+    private static Dictionary<string, JsonElement> JsonDocToDict(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var dict = new Dictionary<string, JsonElement>();
+        foreach (var prop in doc.RootElement.EnumerateObject())
+            dict[prop.Name] = prop.Value.Clone();
+        return dict;
     }
 }

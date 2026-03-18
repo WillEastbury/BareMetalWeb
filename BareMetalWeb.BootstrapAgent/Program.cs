@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 
 const string DefaultControlPlane = "https://cluster.bmw.mesh";
 const string StateFile = "/var/lib/bmw/node.json";
@@ -20,8 +19,7 @@ if (!File.Exists(stateFile))
     return 1;
 }
 
-var node = JsonSerializer.Deserialize(
-    File.ReadAllText(stateFile), SourceGenContext.Default.NodeIdentity)!;
+var node = DeserializeNodeIdentity(File.ReadAllText(stateFile))!;
 
 Log("Agent started");
 Log($"Node: {node.NodeId} → {controlPlane}");
@@ -97,7 +95,7 @@ static async Task<RuntimeResponse> PollDesiredRuntime(NodeIdentity node, string 
     var json = await http.GetStringAsync(
         $"{controlPlane}/api/runtime/desired/{node.NodeId}");
 
-    return JsonSerializer.Deserialize(json, SourceGenContext.Default.RuntimeResponse)!;
+    return DeserializeRuntimeResponse(json)!;
 }
 
 static async Task DownloadRuntime(RuntimeResponse r, NodeIdentity node, string controlPlane)
@@ -181,22 +179,32 @@ static void Log(string msg)
     Console.WriteLine($"{DateTime.UtcNow:O} | {msg}");
 }
 
-// AOT-compatible JSON serialization
-[JsonSerializable(typeof(NodeIdentity))]
-[JsonSerializable(typeof(RuntimeResponse))]
-internal partial class SourceGenContext : JsonSerializerContext;
+// ── Manual JSON deserialization (replaces JsonSerializer + source-gen) ────────
 
-record NodeIdentity(
-    [property: JsonPropertyName("nodeId")] string NodeId,
-    [property: JsonPropertyName("servicePrincipal")] string ServicePrincipal,
-    [property: JsonPropertyName("secret")] string Secret,
-    [property: JsonPropertyName("clusterEndpoint")] string ClusterEndpoint,
-    [property: JsonPropertyName("certFingerprint")] string CertFingerprint
-);
+static NodeIdentity DeserializeNodeIdentity(string json)
+{
+    using var doc = JsonDocument.Parse(json);
+    var r = doc.RootElement;
+    return new NodeIdentity(
+        r.TryGetProperty("nodeId", out var ni) ? ni.GetString() ?? "" : "",
+        r.TryGetProperty("servicePrincipal", out var sp) ? sp.GetString() ?? "" : "",
+        r.TryGetProperty("secret", out var s) ? s.GetString() ?? "" : "",
+        r.TryGetProperty("clusterEndpoint", out var ce) ? ce.GetString() ?? "" : "",
+        r.TryGetProperty("certFingerprint", out var cf) ? cf.GetString() ?? "" : ""
+    );
+}
 
-record RuntimeResponse(
-    [property: JsonPropertyName("desiredVersion")] string? DesiredVersion,
-    [property: JsonPropertyName("sha256")] string? Sha256,
-    [property: JsonPropertyName("downloadUrl")] string? DownloadUrl,
-    [property: JsonPropertyName("pollSeconds")] int PollSeconds
-);
+static RuntimeResponse DeserializeRuntimeResponse(string json)
+{
+    using var doc = JsonDocument.Parse(json);
+    var r = doc.RootElement;
+    return new RuntimeResponse(
+        r.TryGetProperty("desiredVersion", out var dv) ? dv.GetString() : null,
+        r.TryGetProperty("sha256", out var sh) ? sh.GetString() : null,
+        r.TryGetProperty("downloadUrl", out var du) ? du.GetString() : null,
+        r.TryGetProperty("pollSeconds", out var ps) ? ps.GetInt32() : 0
+    );
+}
+
+record NodeIdentity(string NodeId, string ServicePrincipal, string Secret, string ClusterEndpoint, string CertFingerprint);
+record RuntimeResponse(string? DesiredVersion, string? Sha256, string? DownloadUrl, int PollSeconds);

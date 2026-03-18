@@ -1,6 +1,5 @@
 using System.Net.Http;
 using System.Text;
-using System.Text.Json;
 using BareMetalWeb.Core;
 using BareMetalWeb.Core.Interfaces;
 
@@ -29,12 +28,6 @@ public sealed class ControlPlaneClient
         Timeout = TimeSpan.FromSeconds(10),
     };
 
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
-        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
-    };
-
     public ControlPlaneClient(string baseUrl, string apiKey, IBufferedLogger? logger = null)
     {
         _baseUrl = baseUrl.TrimEnd('/');
@@ -46,19 +39,19 @@ public sealed class ControlPlaneClient
     public bool IsConfigured => !string.IsNullOrEmpty(_baseUrl) && !string.IsNullOrEmpty(_apiKey);
 
     public void SendHeartbeat(InstanceHeartbeat heartbeat)
-        => PostFireAndForget("InstanceHeartbeat", heartbeat);
+        => PostFireAndForget("InstanceHeartbeat", ControlPlaneJson.Serialize(heartbeat));
 
     public void SendTelemetry(TelemetrySnapshot snapshot)
-        => PostFireAndForget("TelemetrySnapshot", snapshot);
+        => PostFireAndForget("TelemetrySnapshot", ControlPlaneJson.Serialize(snapshot));
 
     public void SendError(ErrorEvent error)
-        => PostFireAndForget("ErrorEvent", error);
+        => PostFireAndForget("ErrorEvent", ControlPlaneJson.Serialize(error));
 
     public void SendBackupRecord(BackupRecord record)
-        => PostFireAndForget("BackupRecord", record);
+        => PostFireAndForget("BackupRecord", ControlPlaneJson.Serialize(record));
 
     public void SendUpgradeVerification(UpgradeVerificationRecord record)
-        => PostFireAndForget("UpgradeVerificationRecord", record);
+        => PostFireAndForget("UpgradeVerificationRecord", ControlPlaneJson.Serialize(record));
 
     // ── Retry-capable async sends ─────────────────────────────────────────────
 
@@ -95,24 +88,37 @@ public sealed class ControlPlaneClient
         }
     }
 
-    /// <summary>Serialise <paramref name="payload"/> and attempt to POST it; returns success.</summary>
-    public Task<bool> TrySendAsync<T>(string entityType, T payload)
-    {
-        if (!IsConfigured) return Task.FromResult(false);
-        var json = JsonSerializer.Serialize(payload, JsonOpts);
-        return TrySendRawAsync(entityType, json);
-    }
+    /// <summary>Serialise and attempt to POST an InstanceHeartbeat; returns success.</summary>
+    public Task<bool> TrySendAsync(string entityType, InstanceHeartbeat payload)
+        => TrySendRawAsync(entityType, ControlPlaneJson.Serialize(payload));
 
-    /// <summary>Serialise <paramref name="payload"/> to a JSON string without sending it.</summary>
-    public string Serialize<T>(T payload) => JsonSerializer.Serialize(payload, JsonOpts);
+    /// <summary>Serialise and attempt to POST a TelemetrySnapshot; returns success.</summary>
+    public Task<bool> TrySendAsync(string entityType, TelemetrySnapshot payload)
+        => TrySendRawAsync(entityType, ControlPlaneJson.Serialize(payload));
+
+    /// <summary>Serialise and attempt to POST an ErrorEvent; returns success.</summary>
+    public Task<bool> TrySendAsync(string entityType, ErrorEvent payload)
+        => TrySendRawAsync(entityType, ControlPlaneJson.Serialize(payload));
+
+    /// <summary>Serialise an InstanceHeartbeat to a JSON string without sending it.</summary>
+    public string Serialize(InstanceHeartbeat payload) => ControlPlaneJson.Serialize(payload);
+
+    /// <summary>Serialise a TelemetrySnapshot to a JSON string without sending it.</summary>
+    public string Serialize(TelemetrySnapshot payload) => ControlPlaneJson.Serialize(payload);
+
+    /// <summary>Serialise an ErrorEvent to a JSON string without sending it.</summary>
+    public string Serialize(ErrorEvent payload) => ControlPlaneJson.Serialize(payload);
 
     /// <summary>
     /// Query the control plane for the upgrade status of a specific instance.
     /// Returns null if the control plane is unreachable or not configured.
     /// </summary>
-    public Task<UpgradeStatus?> GetUpgradeStatusAsync(string instanceId, string targetVersion)
-        => GetAsync<UpgradeStatus>(
-            $"/api/_cluster/upgrade-status?instanceId={Uri.EscapeDataString(instanceId)}&targetVersion={Uri.EscapeDataString(targetVersion)}");
+    public async Task<UpgradeStatus?> GetUpgradeStatusAsync(string instanceId, string targetVersion)
+    {
+        var path = $"/api/_cluster/upgrade-status?instanceId={Uri.EscapeDataString(instanceId)}&targetVersion={Uri.EscapeDataString(targetVersion)}";
+        var json = await GetRawAsync(path).ConfigureAwait(false);
+        return ControlPlaneJson.DeserializeUpgradeStatus(json);
+    }
 
     // ── Agent polling ────────────────────────────────────────────────────────
 
@@ -140,7 +146,7 @@ public sealed class ControlPlaneClient
                 return null;
             }
             var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            return JsonSerializer.Deserialize<RuntimeResponse>(json, JsonOpts);
+            return ControlPlaneJson.DeserializeRuntimeResponse(json);
         }
         catch (HttpRequestException ex)
         {
@@ -217,7 +223,7 @@ public sealed class ControlPlaneClient
     {
         try
         {
-            var json    = JsonSerializer.Serialize(request, JsonOpts);
+            var json    = ControlPlaneJson.Serialize(request);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             using var req = new HttpRequestMessage(
                 HttpMethod.Post,
@@ -238,7 +244,7 @@ public sealed class ControlPlaneClient
             }
 
             var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-            return JsonSerializer.Deserialize<NodeIdentity>(body, JsonOpts);
+            return ControlPlaneJson.DeserializeNodeIdentity(body);
         }
         catch (Exception ex)
         {
@@ -262,7 +268,7 @@ public sealed class ControlPlaneClient
     {
         try
         {
-            var json    = JsonSerializer.Serialize(request, JsonOpts);
+            var json    = ControlPlaneJson.Serialize(request);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
             using var req = new HttpRequestMessage(
                 HttpMethod.Post,
@@ -285,15 +291,14 @@ public sealed class ControlPlaneClient
         }
     }
 
-    private void PostFireAndForget<T>(string entityType, T payload)
+    private void PostFireAndForget(string entityType, string serializedJson)
     {
         if (!IsConfigured) return;
         _ = Task.Run(async () =>
         {
             try
             {
-                var json = JsonSerializer.Serialize(payload, JsonOpts);
-                using var content = new StringContent(json, Encoding.UTF8, "application/json");
+                using var content = new StringContent(serializedJson, Encoding.UTF8, "application/json");
                 using var request = new HttpRequestMessage(HttpMethod.Post,
                     $"{_baseUrl}/api/data/{entityType}");
                 request.Headers.TryAddWithoutValidation("ApiKey", _apiKey);
@@ -314,30 +319,11 @@ public sealed class ControlPlaneClient
 
     // ── GET operations (synchronous, awaitable) ─────────────────────────────
 
-    /// <summary>GET a typed response from the control plane. Returns null on any failure.</summary>
-    public async Task<T?> GetAsync<T>(string path) where T : class
+    /// <summary>GET gallery listings from the control plane. Returns null on any failure.</summary>
+    public async Task<List<GalleryListing>?> GetGalleryListingsAsync(string path)
     {
-        if (!IsConfigured) return null;
-        try
-        {
-            using var request = new HttpRequestMessage(HttpMethod.Get, $"{_baseUrl}{path}");
-            request.Headers.TryAddWithoutValidation("ApiKey", _apiKey);
-            using var response = await Http.SendAsync(request).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
-            {
-                _logger?.Log(BmwLogLevel.Debug,
-                    $"[BMW ControlPlane] GET {path} returned {(int)response.StatusCode}");
-                return null;
-            }
-            var json = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            return JsonSerializer.Deserialize<T>(json, JsonOpts);
-        }
-        catch (Exception ex)
-        {
-            _logger?.Log(BmwLogLevel.Debug,
-                $"[BMW ControlPlane] GET {path} failed: {ex.Message}");
-            return null;
-        }
+        var json = await GetRawAsync(path).ConfigureAwait(false);
+        return ControlPlaneJson.DeserializeGalleryListings(json);
     }
 
     /// <summary>GET raw JSON string from the control plane. Returns null on any failure.</summary>
