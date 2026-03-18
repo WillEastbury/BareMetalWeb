@@ -56,5 +56,13 @@ public class EntityDefinition : BaseDataObject
     [DataField(Label = "Form Layout", Order = 11, Placeholder = "Standard | Wizard")]
     public string FormLayout { get; set; } = "Standard";
 
+    /// <summary>
+    /// When true, registers a GET-based ingress route (<c>/api/{slug}/_ingest?text=…</c>
+    /// and <c>/queryinput/{slug}?text=…</c>) that creates a record by populating
+    /// the field marked <see cref="FieldDefinition.IsIngressTarget"/>.
+    /// </summary>
+    [DataField(Label = "Enable GET Ingress", Order = 12)]
+    public bool EnableGetIngress { get; set; } = false;
+
     public override string ToString() => Name;
 }
