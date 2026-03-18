@@ -66,5 +66,6 @@ public sealed record RuntimeFieldModel(
     string? CascadeFromField = null,
     string? CascadeFilterField = null,
     string? FieldGroup = null,
-    int ColumnSpan = 12
+    int ColumnSpan = 12,
+    bool IsIngressTarget = false
 );

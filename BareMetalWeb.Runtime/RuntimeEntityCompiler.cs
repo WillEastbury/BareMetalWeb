@@ -118,7 +118,8 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
                 CascadeFromField: f.CascadeFromField,
                 CascadeFilterField: f.CascadeFilterField,
                 FieldGroup: f.FieldGroup,
-                ColumnSpan: f.ColumnSpan
+                ColumnSpan: f.ColumnSpan,
+                IsIngressTarget: f.IsIngressTarget
             ));
         }
 
@@ -186,6 +187,7 @@ public sealed class RuntimeEntityCompiler : IRuntimeEntityCompiler
             version: entity.Version,
             schemaHash: schemaHash,
             formLayout: entity.FormLayout ?? "Standard",
+            enableGetIngress: entity.EnableGetIngress,
             fields: compiledFields.AsReadOnly(),
             indexes: compiledIndexes.AsReadOnly(),
             actions: compiledActions.AsReadOnly()
