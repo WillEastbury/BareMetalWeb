@@ -542,6 +542,14 @@ public class BareMetalWebServer : IBareWebHost
         var deployWatcherTask = new DeploymentWatcherService(BufferedLogger).RunAsync(cts.Token);
         _backgroundTasks.Add(("DeploymentWatcher", deployWatcherTask));
 
+        // ACR release polling — auto-promotes canary on new image tags
+        var releasePollingTask = new ReleasePollingService(BufferedLogger, Configuration).RunAsync(cts.Token);
+        _backgroundTasks.Add(("ReleasePolling", releasePollingTask));
+
+        // Ring promotion — auto-promotes through rings after monitoring window
+        var ringPromotionTask = new RingPromotionService(BufferedLogger).RunAsync(cts.Token);
+        _backgroundTasks.Add(("RingPromotion", ringPromotionTask));
+
         // Control plane telemetry streaming
         if (ControlPlane is not null)
         {
