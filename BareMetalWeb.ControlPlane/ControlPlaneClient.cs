@@ -39,19 +39,19 @@ public sealed class ControlPlaneClient
     public bool IsConfigured => !string.IsNullOrEmpty(_baseUrl) && !string.IsNullOrEmpty(_apiKey);
 
     public void SendHeartbeat(InstanceHeartbeat heartbeat)
-        => PostFireAndForget("InstanceHeartbeat", ControlPlaneJson.Serialize(heartbeat));
+        => PostFireAndForget("instance-heartbeats", ControlPlaneJson.Serialize(heartbeat));
 
     public void SendTelemetry(TelemetrySnapshot snapshot)
-        => PostFireAndForget("TelemetrySnapshot", ControlPlaneJson.Serialize(snapshot));
+        => PostFireAndForget("telemetry-snapshots", ControlPlaneJson.Serialize(snapshot));
 
     public void SendError(ErrorEvent error)
-        => PostFireAndForget("ErrorEvent", ControlPlaneJson.Serialize(error));
+        => PostFireAndForget("error-events", ControlPlaneJson.Serialize(error));
 
     public void SendBackupRecord(BackupRecord record)
-        => PostFireAndForget("BackupRecord", ControlPlaneJson.Serialize(record));
+        => PostFireAndForget("backup-records", ControlPlaneJson.Serialize(record));
 
     public void SendUpgradeVerification(UpgradeVerificationRecord record)
-        => PostFireAndForget("UpgradeVerificationRecord", ControlPlaneJson.Serialize(record));
+        => PostFireAndForget("upgrade-verification-records", ControlPlaneJson.Serialize(record));
 
     // ── Retry-capable async sends ─────────────────────────────────────────────
 
@@ -60,14 +60,14 @@ public sealed class ControlPlaneClient
     /// Returns <c>true</c> on HTTP 2xx; <c>false</c> on network error or non-success status.
     /// Never throws — the caller (ControlPlaneService) decides how to buffer/retry.
     /// </summary>
-    public async Task<bool> TrySendRawAsync(string entityType, string json)
+    public async Task<bool> TrySendRawAsync(string entitySlug, string json)
     {
         if (!IsConfigured) return false;
         try
         {
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
             using var request = new HttpRequestMessage(HttpMethod.Post,
-                $"{_baseUrl}/api/data/{entityType}");
+                $"{_baseUrl}/api/_binary/{entitySlug}");
             request.Headers.TryAddWithoutValidation("ApiKey", _apiKey);
             request.Content = content;
             using var response = await Http.SendAsync(request,
@@ -75,7 +75,7 @@ public sealed class ControlPlaneClient
             if (!response.IsSuccessStatusCode)
             {
                 _logger?.Log(BmwLogLevel.Debug,
-                    $"[BMW ControlPlane] POST {entityType} returned {(int)response.StatusCode}");
+                    $"[BMW ControlPlane] POST {entitySlug} returned {(int)response.StatusCode}");
                 return false;
             }
             return true;
@@ -83,7 +83,7 @@ public sealed class ControlPlaneClient
         catch (Exception ex)
         {
             _logger?.Log(BmwLogLevel.Debug,
-                $"[BMW ControlPlane] POST {entityType} failed: {ex.Message}");
+                $"[BMW ControlPlane] POST {entitySlug} failed: {ex.Message}");
             return false;
         }
     }
@@ -291,7 +291,7 @@ public sealed class ControlPlaneClient
         }
     }
 
-    private void PostFireAndForget(string entityType, string serializedJson)
+    private void PostFireAndForget(string entitySlug, string serializedJson)
     {
         if (!IsConfigured) return;
         _ = Task.Run(async () =>
@@ -300,19 +300,19 @@ public sealed class ControlPlaneClient
             {
                 using var content = new StringContent(serializedJson, Encoding.UTF8, "application/json");
                 using var request = new HttpRequestMessage(HttpMethod.Post,
-                    $"{_baseUrl}/api/data/{entityType}");
+                    $"{_baseUrl}/api/_binary/{entitySlug}");
                 request.Headers.TryAddWithoutValidation("ApiKey", _apiKey);
                 request.Content = content;
                 using var response = await Http.SendAsync(request,
                     HttpCompletionOption.ResponseHeadersRead).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                     _logger?.Log(BmwLogLevel.Debug,
-                        $"[BMW ControlPlane] POST {entityType} returned {(int)response.StatusCode}");
+                        $"[BMW ControlPlane] POST {entitySlug} returned {(int)response.StatusCode}");
             }
             catch (Exception ex)
             {
                 _logger?.Log(BmwLogLevel.Debug,
-                    $"[BMW ControlPlane] POST {entityType} failed: {ex.Message}");
+                    $"[BMW ControlPlane] POST {entitySlug} failed: {ex.Message}");
             }
         });
     }

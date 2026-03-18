@@ -285,9 +285,9 @@ public sealed class ControlPlaneService
             Timestamp = DateTime.UtcNow.ToString("O"),
         };
 
-        var ok = await _client.TrySendAsync("InstanceHeartbeat", heartbeat).ConfigureAwait(false);
+        var ok = await _client.TrySendAsync("instance-heartbeats", heartbeat).ConfigureAwait(false);
         if (!ok)
-            _buffer.TryEnqueue(_client.Serialize(heartbeat).PrependEntityType("InstanceHeartbeat"));
+            _buffer.TryEnqueue(_client.Serialize(heartbeat).PrependEntityType("instance-heartbeats"));
         return ok;
     }
 
@@ -330,9 +330,9 @@ public sealed class ControlPlaneService
         _prevWalCommits = engine.CommitCount;
         _prevWalCompactions = engine.CompactionCount;
 
-        var ok = await _client.TrySendAsync("TelemetrySnapshot", telemetry).ConfigureAwait(false);
+        var ok = await _client.TrySendAsync("telemetry-snapshots", telemetry).ConfigureAwait(false);
         if (!ok)
-            _buffer.TryEnqueue(_client.Serialize(telemetry).PrependEntityType("TelemetrySnapshot"));
+            _buffer.TryEnqueue(_client.Serialize(telemetry).PrependEntityType("telemetry-snapshots"));
         return ok;
     }
 
@@ -341,10 +341,10 @@ public sealed class ControlPlaneService
         bool allOk = true;
         while (_errorBuffer.TryDequeue(out var error))
         {
-            var ok = await _client.TrySendAsync("ErrorEvent", error).ConfigureAwait(false);
+            var ok = await _client.TrySendAsync("error-events", error).ConfigureAwait(false);
             if (!ok)
             {
-                _buffer.TryEnqueue(_client.Serialize(error).PrependEntityType("ErrorEvent"));
+                _buffer.TryEnqueue(_client.Serialize(error).PrependEntityType("error-events"));
                 allOk = false;
             }
         }
