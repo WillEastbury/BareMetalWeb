@@ -1,9 +1,9 @@
 # ────────────────────────────────────────────────────────────────────────────────
-# CD — Canary Deployment
+# CD — Canary Deployment (AKS)
 #
 # Triggered automatically when CI2 (AOT Builds & Container) passes on main.
-# Deploys the JIT build to canary-ring Azure Web Apps defined in deploy-list.json,
-# then runs a health check against each target.
+# Updates the baremetalweb statefulset image tag on AKS to the freshly pushed
+# container image, then waits for the rollout and health-checks the pod.
 # ────────────────────────────────────────────────────────────────────────────────
 name: "3 · CD Canary"
 
@@ -26,8 +26,11 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  DOTNET_NOLOGO: true
-  DOTNET_CLI_TELEMETRY_OPTOUT: 1
+  ACR_LOGIN_SERVER: metalclusterregistry.azurecr.io
+  ACR_IMAGE: baremetalweb
+  AKS_CLUSTER: metalcluster
+  AKS_RG: Personal
+  NAMESPACE: baremetalweb
 
 jobs:
   # ── Gate: skip if CI2 failed ────────────────────────────────────────────
@@ -40,169 +43,79 @@ jobs:
     steps:
       - run: echo "CI2 passed — proceeding with canary deployment"
 
-  # ── Version ─────────────────────────────────────────────────────────────
-  version:
-    name: Compute version
+  # ── Deploy to AKS ─────────────────────────────────────────────────────
+  deploy:
+    name: Deploy canary
     needs: gate
     runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.version.outputs.tag }}
     steps:
-      - name: Compute version
-        id: version
+      - name: Compute image tag
+        id: tag
         run: |
           MAJOR="${{ vars.MAJOR_VERSION || '1' }}"
           DATE="$(date +%Y%m%d)"
-          BUILD="${{ github.run_number }}"
-          echo "tag=${MAJOR}.${DATE}.${BUILD}" >> $GITHUB_OUTPUT
-
-  # ── Build JIT publish ──────────────────────────────────────────────────
-  build:
-    name: JIT publish
-    needs: gate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v5
-        with:
-          dotnet-version: '10.0.x'
-
-      - name: Cache NuGet packages
-        uses: actions/cache@v5
-        with:
-          path: ~/.nuget/packages
-          key: nuget-${{ hashFiles('**/*.csproj') }}
-          restore-keys: nuget-
-
-      - name: Publish (JIT)
-        run: |
-          dotnet publish BareMetalWeb.Host/BareMetalWeb.Host.csproj \
-            --configuration Release \
-            --output ./publish
-
-      - name: Upload publish artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: publish-jit
-          path: ./publish
-          retention-days: 7
-
-  # ── Deploy to canary targets ───────────────────────────────────────────
-  deploy-canary:
-    name: "Deploy canary · ${{ matrix.target.name }}"
-    needs: [version, build]
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        target:
-          - name: "Canary Ring 0"
-            app_name: baremetalweb-canary
-            resource_group: baremetalweb-rg
-            url: "https://baremetalweb-canary.azurewebsites.net"
-            secret_name: AZURE_CREDENTIALS_CANARY
-          - name: "Staging"
-            app_name: baremetalweb
-            resource_group: baremetalweb-rg
-            url: "https://baremetalweb.azurewebsites.net"
-            secret_name: AZURE_CREDENTIALS
-    steps:
-      - name: Download publish artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: publish-jit
-          path: ./publish
-
-      - name: Create deploy zip
-        run: |
-          cd ./publish
-          zip -r ../deploy.zip .
+          # CI2 run number is passed via the triggering workflow_run event;
+          # for workflow_dispatch fall back to this run's number.
+          BUILD="${{ github.event.workflow_run.run_number || github.run_number }}"
+          TAG="${MAJOR}.${DATE}.${BUILD}"
+          IMAGE="${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${TAG}-linux-arm64"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "image=${IMAGE}" >> $GITHUB_OUTPUT
+          echo "Deploying image: ${IMAGE}"
 
       - name: Azure Login
         uses: azure/login@v2
         with:
-          creds: ${{ secrets[matrix.target.secret_name] }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Stop Web App
+      - name: Get AKS credentials
         run: |
-          az webapp stop \
-            --name "${{ matrix.target.app_name }}" \
-            --resource-group "${{ matrix.target.resource_group }}"
-
-      - name: Configure Web App
-        run: |
-          az webapp config appsettings set \
-            --name "${{ matrix.target.app_name }}" \
-            --resource-group "${{ matrix.target.resource_group }}" \
-            --settings \
-              WEBSITE_RUN_FROM_PACKAGE=0 \
-              ControlPlane__InstanceId="${{ matrix.target.app_name }}" \
+          az aks get-credentials \
+            --name "${{ env.AKS_CLUSTER }}" \
+            --resource-group "${{ env.AKS_RG }}" \
+            --overwrite-existing \
             --output none
 
-          az webapp config set \
-            --name "${{ matrix.target.app_name }}" \
-            --resource-group "${{ matrix.target.resource_group }}" \
-            --startup-file "dotnet BareMetalWeb.Host.dll" \
-            --output none
-
-      - name: Deploy zip
+      - name: Update statefulset image
         run: |
-          az webapp deploy \
-            --name "${{ matrix.target.app_name }}" \
-            --resource-group "${{ matrix.target.resource_group }}" \
-            --src-path deploy.zip \
-            --type zip \
-            --clean true
+          kubectl set image statefulset/baremetalweb \
+            baremetalweb="${{ steps.tag.outputs.image }}" \
+            --namespace "${{ env.NAMESPACE }}"
 
-      - name: Start Web App
+      - name: Wait for rollout
         run: |
-          az webapp start \
-            --name "${{ matrix.target.app_name }}" \
-            --resource-group "${{ matrix.target.resource_group }}"
+          kubectl rollout status statefulset/baremetalweb \
+            --namespace "${{ env.NAMESPACE }}" \
+            --timeout=300s
 
       - name: Health check
         run: |
-          sleep 30
+          POD=$(kubectl get pod -n "${{ env.NAMESPACE }}" \
+            -l app.kubernetes.io/name=baremetalweb \
+            -o jsonpath='{.items[0].metadata.name}')
           for attempt in 1 2 3 4 5 6; do
-            status="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 '${{ matrix.target.url }}' || echo 000)"
-            echo "Attempt ${attempt}: HTTP ${status}"
-            if [[ "${status}" == "200" || "${status}" == "302" ]]; then
-              echo "✅ Health check passed for ${{ matrix.target.app_name }}"
+            STATUS=$(kubectl exec -n "${{ env.NAMESPACE }}" "${POD}" -- \
+              wget -q -O- --timeout=5 http://localhost:5232/health 2>/dev/null || true)
+            if [[ -n "${STATUS}" ]]; then
+              echo "✅ Health check passed (attempt ${attempt})"
               exit 0
             fi
+            echo "Attempt ${attempt}/6 — waiting 10s..."
             sleep 10
           done
-          echo "::error::Health check failed for ${{ matrix.target.app_name }}"
-          exit 1
-
-  # ── Summary ────────────────────────────────────────────────────────────
-  summary:
-    name: Canary summary
-    needs: [version, deploy-canary]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Fail if gate was skipped
-        if: needs.version.result == 'skipped'
-        run: |
-          echo "::error::CI2 did not pass — canary deploy skipped."
+          echo "::error::Health check failed after 6 attempts"
           exit 1
 
       - name: Summary
-        if: needs.version.result != 'skipped'
+        if: always()
         run: |
-          TAG="${{ needs.version.outputs.tag }}"
-          echo "### 🐤 Canary Deployment Summary (${TAG})" >> $GITHUB_STEP_SUMMARY
+          echo "### 🐤 Canary Deployment" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Target | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Canary Ring 0 | ${{ needs.deploy-canary.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Staging | ${{ needs.deploy-canary.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [[ "${{ needs.deploy-canary.result }}" == "success" ]]; then
-            echo "✅ All canary targets deployed and health-checked." >> $GITHUB_STEP_SUMMARY
-          else
-            echo "❌ One or more canary targets failed." >> $GITHUB_STEP_SUMMARY
-          fi
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${{ steps.tag.outputs.image }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Cluster** | ${{ env.AKS_CLUSTER }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Namespace** | ${{ env.NAMESPACE }} |" >> $GITHUB_STEP_SUMMARY
+          kubectl get pods -n "${{ env.NAMESPACE }}" -o wide 2>/dev/null >> $GITHUB_STEP_SUMMARY || true
