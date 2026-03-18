@@ -8,7 +8,7 @@ metadata:
     baremetalweb/tenant: ${TENANT_NAME}
 spec:
   serviceName: ${TENANT_NAME}-headless
-  replicas: ${REPLICAS:-1}
+  replicas: ${REPLICAS}
   podManagementPolicy: Parallel
   selector:
     matchLabels:
@@ -45,7 +45,7 @@ spec:
             allowPrivilegeEscalation: false
       containers:
         - name: ${TENANT_NAME}
-          image: ${ACR_LOGIN_SERVER:-metalclusterregistry.azurecr.io}/baremetalweb:${IMAGE_TAG}
+          image: ${ACR_LOGIN_SERVER}/baremetalweb:${IMAGE_TAG}
           imagePullPolicy: Always
           ports:
             - name: http
@@ -70,11 +70,11 @@ spec:
                   fieldPath: status.podIP
           resources:
             requests:
-              cpu: ${CPU_REQUEST:-100m}
-              memory: ${MEM_REQUEST:-128Mi}
+              cpu: ${CPU_REQUEST}
+              memory: ${MEM_REQUEST}
             limits:
-              cpu: ${CPU_LIMIT:-1}
-              memory: ${MEM_LIMIT:-512Mi}
+              cpu: ${CPU_LIMIT}
+              memory: ${MEM_LIMIT}
           livenessProbe:
             httpGet:
               path: /health
@@ -127,4 +127,4 @@ spec:
         storageClassName: managed-csi
         resources:
           requests:
-            storage: ${STORAGE:-10Gi}
+            storage: ${STORAGE}
