@@ -37,6 +37,18 @@ public abstract class BaseDataObject : IBaseDataObject
     /// </summary>
     public EntitySchema? Schema { get; internal set; }
 
+    /// <summary>
+    /// The entity type name for this instance (e.g. "Orders", "Customer").
+    /// Set during construction for DataRecord or during RegisterEntity for compiled types.
+    /// Used to locate entity metadata without runtime type detection (.GetType()).
+    /// </summary>
+    public virtual string EntityTypeName
+    {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        get => Schema?.EntityName ?? string.Empty;
+        set { } // Compiled entities ignore sets — name comes from Schema
+    }
+
     // ── Base CLR properties backed by _values ────────────────────────────────
 
     public uint Key

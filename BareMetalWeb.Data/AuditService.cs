@@ -377,7 +377,7 @@ public sealed class AuditService
         try
         {
             // For simple types, use ToString
-            if (value is string || value.GetType().IsPrimitive || value is DateTime || value is Guid)
+            if (value is string || value is bool || value is byte || value is sbyte || value is short || value is ushort || value is int || value is uint || value is long || value is ulong || value is float || value is double || value is decimal || value is char || value is DateTime || value is Guid)
                 return value.ToString();
 
             // For complex types, use JSON

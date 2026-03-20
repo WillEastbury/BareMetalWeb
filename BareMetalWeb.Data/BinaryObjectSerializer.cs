@@ -1333,8 +1333,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             return;
         }
 
-        var valueType = value.GetType();
-        if (member.MemberType.IsAssignableFrom(valueType))
+        if (member.MemberType.IsInstanceOfType(value))
         {
             member.Setter(instance, value);
             return;

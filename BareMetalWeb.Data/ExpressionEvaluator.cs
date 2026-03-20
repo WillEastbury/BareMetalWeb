@@ -39,7 +39,7 @@ public sealed class ExpressionEvaluator
                 ? Evaluate(cond.Then, entity, currentItem)
                 : Evaluate(cond.Else, entity, currentItem),
             AggregateExpr agg => EvaluateAggregate(agg, entity),
-            _ => throw new InvalidOperationException($"Unknown expression type: {expr.GetType().Name}"),
+            _ => throw new InvalidOperationException($"Unknown expression type: {expr}"),
         };
     }
 

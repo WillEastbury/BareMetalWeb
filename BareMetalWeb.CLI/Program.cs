@@ -501,13 +501,13 @@ internal static class Program
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Error: {ex.GetType().Name}: {ex.Message}");
+            Console.Error.WriteLine($"Error: {ex.Message}");
             return 1;
         }
         } // end outer try
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Fatal: {ex.GetType().Name}: {ex.Message}\n{ex.StackTrace}");
+            Console.Error.WriteLine($"Fatal: {ex.Message}\n{ex.StackTrace}");
             return 255;
         }
     }

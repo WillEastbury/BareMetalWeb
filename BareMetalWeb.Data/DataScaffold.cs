@@ -173,6 +173,7 @@ public sealed record DataEntityHandlers(
 public static class DataScaffold
 {
     private static readonly ConcurrentDictionary<string, DataEntityMetadata> EntitiesBySlug = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, DataEntityMetadata> EntitiesByName = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<Type, DataEntityMetadata> EntitiesByType = new();
     private static readonly NullabilityInfoContext NullabilityContext = new();
     private static readonly ConcurrentDictionary<string, LookupCacheEntry> LookupCache = new(StringComparer.OrdinalIgnoreCase);
@@ -192,7 +193,7 @@ public static class DataScaffold
     private static long _lastLookupCachePruneTicks;
     private static readonly IIdGenerator IdGenerator = new DefaultIdGenerator();
     // Cached compiled property accessor delegates — avoids per-call PropertyInfo.GetValue reflection.
-    private static readonly ConcurrentDictionary<(Type, string), Func<object, object?>?> PropertyAccessorCache = new();
+    private static readonly ConcurrentDictionary<(string, string), Func<object, object?>?> PropertyAccessorCache = new();
     private static readonly ConcurrentDictionary<Type, Func<object>> ListFactoryCache = new();
     private static readonly ConcurrentDictionary<Type, Func<object>> InstanceFactoryCache = new();
     private static readonly ConcurrentDictionary<(Type, Type), Func<object>> DictFactoryCache = new();
@@ -283,8 +284,24 @@ public static class DataScaffold
         if (metadata == null)
             return false;
 
-        EntitiesBySlug[metadata.Slug] = metadata;
-        EntitiesByType[type] = metadata;
+        // Build EntitySchema for compiled entities so every instance carries its
+        // entity name via BaseDataObject.Schema — eliminating .GetType() lookups.
+        var schema = BuildSchemaFromMetadata(metadata);
+        var originalCreate = metadata.Handlers.Create;
+        var wrappedHandlers = metadata.Handlers with
+        {
+            Create = () =>
+            {
+                var instance = originalCreate();
+                instance.Schema = schema;
+                return instance;
+            }
+        };
+        var enriched = metadata with { Handlers = wrappedHandlers };
+
+        EntitiesBySlug[enriched.Slug] = enriched;
+        EntitiesByName[enriched.Name] = enriched;
+        EntitiesByType[type] = enriched;
         InvalidateEntityListCache();
 
         // Ensure the serializer can instantiate this type without reflection
@@ -304,6 +321,7 @@ public static class DataScaffold
             return false;
 
         EntitiesBySlug[metadata.Slug] = metadata;
+        EntitiesByName[metadata.Name] = metadata;
         InvalidateEntityListCache();
 
         return true;
@@ -471,6 +489,59 @@ public static class DataScaffold
     public static DataEntityMetadata? GetEntityByType(Type type)
     {
         return EntitiesByType.TryGetValue(type, out var metadata) ? metadata : null;
+    }
+
+    /// <summary>
+    /// Looks up entity metadata by entity name (e.g. "Orders", "Customer").
+    /// Preferred over <see cref="GetEntityByType"/> — avoids runtime type detection.
+    /// </summary>
+    public static DataEntityMetadata? GetEntityByName(string name)
+    {
+        if (string.IsNullOrEmpty(name))
+            return null;
+        return EntitiesByName.TryGetValue(name, out var metadata) ? metadata : null;
+    }
+
+    /// <summary>
+    /// Builds an <see cref="EntitySchema"/> from compiled entity metadata.
+    /// Allows compiled entities to carry Schema on every instance,
+    /// enabling name-based entity identification without .GetType().
+    /// </summary>
+    private static EntitySchema BuildSchemaFromMetadata(DataEntityMetadata metadata)
+    {
+        var builder = new EntitySchema.Builder(metadata.Name, metadata.Slug);
+        foreach (var f in metadata.Fields)
+        {
+            var fieldType = MapClrTypeToFieldType(f.ClrType);
+            builder.AddField(
+                name: f.Name,
+                type: fieldType,
+                clrType: f.ClrType,
+                nullable: Nullable.GetUnderlyingType(f.ClrType) != null,
+                required: f.Required);
+        }
+        return builder.Build();
+    }
+
+    /// <summary>Maps a CLR type to the compact FieldType used in schemas.</summary>
+    private static FieldType MapClrTypeToFieldType(Type clrType)
+    {
+        var effective = Nullable.GetUnderlyingType(clrType) ?? clrType;
+        if (effective == typeof(bool)) return FieldType.Bool;
+        if (effective == typeof(int)) return FieldType.Int32;
+        if (effective == typeof(uint)) return FieldType.UInt32;
+        if (effective == typeof(long)) return FieldType.Int64;
+        if (effective == typeof(decimal)) return FieldType.Decimal;
+        if (effective == typeof(DateTime)) return FieldType.DateTime;
+        if (effective == typeof(DateOnly)) return FieldType.DateOnly;
+        if (effective == typeof(TimeOnly)) return FieldType.TimeOnly;
+        if (effective == typeof(double)) return FieldType.Float64;
+        if (effective == typeof(float)) return FieldType.Float32;
+        if (effective == typeof(Guid)) return FieldType.Guid;
+        if (effective == typeof(byte)) return FieldType.Byte;
+        if (effective == typeof(short)) return FieldType.Int16;
+        if (effective.IsEnum) return FieldType.EnumInt32;
+        return FieldType.StringUtf8;
     }
 
     private const int MaxPageSize = 10000;
@@ -1727,7 +1798,7 @@ public static class DataScaffold
         var seenKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         Func<object, object?>? valueGetter = null;
         Func<object, object?>? displayGetter = null;
-        Type? cachedType = null;
+        string? cachedType = null;
 
         // Normalize "Id" → "Key" for DataRecord compatibility
         var effectiveValueField = valueField;
@@ -1759,22 +1830,23 @@ public static class DataScaffold
             }
 
             // Compiled entities: use cached compiled delegates
-            var itemType = item.GetType();
-            if (itemType != cachedType)
+            var itemEntityName = (item is BaseDataObject bdoItem) ? bdoItem.EntityTypeName : string.Empty;
+            if (string.IsNullOrEmpty(itemEntityName)) continue;
+            if (itemEntityName != cachedType)
             {
-                cachedType = itemType;
-                valueGetter = PropertyAccessorCache.GetOrAdd((itemType, effectiveValueField),
+                cachedType = itemEntityName;
+                valueGetter = PropertyAccessorCache.GetOrAdd((itemEntityName, effectiveValueField),
                     static key =>
                     {
-                        var m = DataScaffold.GetEntityByType(key.Item1);
+                        var m = DataScaffold.GetEntityByName(key.Item1);
                         if (m == null) return null;
                         var f = m.FindField(key.Item2);
                         return f?.GetValueFn;
                     });
-                displayGetter = PropertyAccessorCache.GetOrAdd((itemType, displayField),
+                displayGetter = PropertyAccessorCache.GetOrAdd((itemEntityName, displayField),
                     static key =>
                     {
-                        var m = DataScaffold.GetEntityByType(key.Item1);
+                        var m = DataScaffold.GetEntityByName(key.Item1);
                         if (m == null) return null;
                         var f = m.FindField(key.Item2);
                         return f?.GetValueFn;

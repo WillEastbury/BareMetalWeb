@@ -14,11 +14,17 @@ namespace BareMetalWeb.Data;
 /// </summary>
 public sealed class DataRecord : BaseDataObject
 {
+    private string _entityTypeName = string.Empty;
+
     /// <summary>
     /// The name of the entity type this instance belongs to (e.g. "Customer").
     /// Used to locate entity metadata and route to the correct storage.
     /// </summary>
-    public string EntityTypeName { get; set; } = string.Empty;
+    public override string EntityTypeName
+    {
+        get => _entityTypeName;
+        set => _entityTypeName = value;
+    }
 
     /// <summary>Creates a new record with space for <paramref name="fieldCount"/> fields.</summary>
     public DataRecord(int fieldCount) : base(Math.Max(fieldCount, BaseFieldCount))

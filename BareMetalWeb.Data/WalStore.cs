@@ -295,7 +295,7 @@ public sealed class WalStore : IDisposable
                 try { WalSnapshot.Write(_directory, _visibleCommitPtr, HeadMap); }
                 catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
                 {
-                    System.Diagnostics.Debug.WriteLine($"WalStore: snapshot on shutdown failed: {ex.GetType().Name}: {ex.Message}");
+                    System.Diagnostics.Debug.WriteLine($"WalStore: snapshot on shutdown failed: {ex.Message}");
                 }
             }
 

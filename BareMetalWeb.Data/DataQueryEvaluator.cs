@@ -388,7 +388,7 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
     {
         if (obj is BaseDataObject dataObject)
         {
-            var meta = DataScaffold.GetEntityByType(dataObject.GetType());
+            var meta = DataScaffold.GetEntityByName(dataObject.EntityTypeName);
             if (meta != null)
             {
                 var fieldMeta = meta.FindField(field);
@@ -435,7 +435,7 @@ public sealed class DataQueryEvaluator : IDataQueryEvaluator
             return null;
 
         var effectiveType = Nullable.GetUnderlyingType(targetType) ?? targetType;
-        if (effectiveType.IsAssignableFrom(value.GetType()))
+        if (effectiveType.IsInstanceOfType(value))
             return value;
 
         if (value is string s)

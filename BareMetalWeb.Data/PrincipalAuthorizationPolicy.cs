@@ -178,7 +178,7 @@ public static class PrincipalAuthorizationPolicy
         if (record == null)
             return null;
 
-        var meta = DataScaffold.GetEntityByType(record.GetType());
+        var meta = DataScaffold.GetEntityByName(record.EntityTypeName);
         if (meta != null)
             return meta;
 

@@ -155,7 +155,7 @@ public sealed class ControlPlaneClient
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BMW Agent] Poll error: {ex.GetType().Name}: {ex.Message}");
+            Console.Error.WriteLine($"[BMW Agent] Poll error: {ex.Message}");
             return null;
         }
     }
@@ -197,7 +197,7 @@ public sealed class ControlPlaneClient
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[BMW Agent] Download error: {ex.GetType().Name}: {ex.Message}");
+            Console.Error.WriteLine($"[BMW Agent] Download error: {ex.Message}");
             TryDeleteTmp(tmpPath);
             return false;
         }
@@ -249,7 +249,7 @@ public sealed class ControlPlaneClient
         catch (Exception ex)
         {
             Console.Error.WriteLine(
-                $"[BMW Agent] Register error: {ex.GetType().Name}: {ex.Message}");
+                $"[BMW Agent] Register error: {ex.Message}");
             return null;
         }
     }
@@ -286,7 +286,7 @@ public sealed class ControlPlaneClient
         catch (Exception ex)
         {
             Console.Error.WriteLine(
-                $"[BMW Agent] Attest error: {ex.GetType().Name}: {ex.Message}");
+                $"[BMW Agent] Attest error: {ex.Message}");
             return false;
         }
     }
