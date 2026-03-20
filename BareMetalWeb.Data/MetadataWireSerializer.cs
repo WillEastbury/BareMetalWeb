@@ -544,15 +544,19 @@ public sealed class MetadataWireSerializer
 
     /// <summary>
     /// AOT-safe entity instance creation. Returns a <see cref="DataRecord"/> when the
-    /// target type is DataRecord; falls back to <see cref="RuntimeHelpers.GetUninitializedObject"/>
-    /// for compiled entity types.
+    /// target type is DataRecord; uses metadata factory for registered entity types.
     /// </summary>
     private static object CreateEntityInstance(Type entityType)
     {
         if (entityType == typeof(DataRecord))
             return new DataRecord();
 
-        return System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(entityType);
+        var meta = DataScaffold.GetEntityByType(entityType);
+        if (meta != null)
+            return meta.Handlers.Create();
+
+        throw new InvalidOperationException(
+            $"No metadata registered for entity type '{entityType.FullName}'. Register with DataScaffold.RegisterEntity<T>() at startup.");
     }
 
     private static object? ReadFieldValue(ref SpanReader reader, FieldPlan fp, int depth)

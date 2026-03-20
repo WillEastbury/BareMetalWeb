@@ -1254,7 +1254,7 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         RegisterKnownTypeCore(t);
     }
 
-    /// <summary>Registers a type with an explicit factory (AOT-safe, no Activator.CreateInstance).</summary>
+    /// <summary>Registers a type with an explicit factory (AOT-safe, zero reflection).</summary>
     public static void RegisterKnownType(Type t, Func<object> factory)
     {
         RegisterKnownTypeCore(t);
@@ -1314,7 +1314,18 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             if (type == typeof(DateTime)) return default(DateTime);
             if (type == typeof(Guid)) return Guid.Empty;
             if (type == typeof(IdentifierValue)) return default(IdentifierValue);
-            return RuntimeHelpers.GetUninitializedObject(type);
+            if (type == typeof(byte)) return (byte)0;
+            if (type == typeof(short)) return (short)0;
+            if (type == typeof(ushort)) return (ushort)0;
+            if (type == typeof(ulong)) return 0UL;
+            if (type == typeof(sbyte)) return (sbyte)0;
+            if (type == typeof(char)) return '\0';
+            if (type == typeof(DateTimeOffset)) return default(DateTimeOffset);
+            if (type == typeof(DateOnly)) return default(DateOnly);
+            if (type == typeof(TimeOnly)) return default(TimeOnly);
+            if (type == typeof(TimeSpan)) return TimeSpan.Zero;
+            throw new InvalidOperationException(
+                $"Unknown value type '{type.FullName}' — add an explicit default above or register with RegisterKnownType<T>() at startup.");
         }
 
         if (InstanceFactory.TryGetValue(type, out var factory))
@@ -1437,8 +1448,10 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (type == typeof(Half)) return default(Half);
         if (type == typeof(IntPtr)) return IntPtr.Zero;
         if (type == typeof(UIntPtr)) return UIntPtr.Zero;
+        if (type == typeof(IdentifierValue)) return default(IdentifierValue);
 
-        return RuntimeHelpers.GetUninitializedObject(type);
+        throw new InvalidOperationException(
+            $"Unknown value type '{type.FullName}' — add an explicit default to GetDefaultValueForType() or register with RegisterKnownType<T>() at startup.");
     }
 
     private static TypeShape GetTypeShape(Type type)
@@ -1547,7 +1560,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             var listType = type;
             // Capture the annotated 'listType' local so the trimmer tracks the
             // [DynamicallyAccessedMembers(PublicParameterlessConstructor)] annotation.
-            var listFactory = InstanceFactory.GetOrAdd(listType, _ => { var t = listType; return () => Activator.CreateInstance(t)!; });
+            var listFactory = InstanceFactory.GetOrAdd(listType, _ =>
+                throw new InvalidOperationException(
+                    $"No factory registered for list type '{listType.FullName}'. Register with RegisterKnownType<T>() at startup."));
             shape.ListFactory = _ => (System.Collections.IList)listFactory();
             return shape;
         }
@@ -1560,7 +1575,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             var dictType = type;
             // Capture the annotated 'dictType' local so the trimmer tracks the
             // [DynamicallyAccessedMembers(PublicParameterlessConstructor)] annotation.
-            var dictFactory = InstanceFactory.GetOrAdd(dictType, _ => { var t = dictType; return () => Activator.CreateInstance(t)!; });
+            var dictFactory = InstanceFactory.GetOrAdd(dictType, _ =>
+                throw new InvalidOperationException(
+                    $"No factory registered for dictionary type '{dictType.FullName}'. Register with RegisterKnownType<T>() at startup."));
             shape.DictionaryFactory = _ => (System.Collections.IDictionary)dictFactory();
             return shape;
         }

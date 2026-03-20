@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using BareMetalWeb.Core;
 using BareMetalWeb.Data;
@@ -113,7 +114,7 @@ public static class MetadataExtractor
         EntityDefinition Entity,
         IReadOnlyList<FieldDefinition> Fields,
         IReadOnlyList<IndexDefinition> Indexes)
-        ExtractFromType(Type type)
+        ExtractFromType([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type type)
     {
         var entityAttr = type.GetCustomAttribute<DataEntityAttribute>();
 
@@ -247,9 +248,16 @@ public static class MetadataExtractor
             var effectivePropType = Nullable.GetUnderlyingType(f.ClrType) ?? f.ClrType;
             if (effectivePropType.IsEnum && !hasLookup)
             {
-                var enumNames = Enum.GetNames(effectivePropType);
-                if (enumNames.Length > 0)
-                    enumValues = string.Join("|", enumNames);
+                if (f.EnumValues is { Count: > 0 })
+                {
+                    enumValues = string.Join("|", f.EnumValues);
+                }
+                else
+                {
+                    var enumNames = Enum.GetNames(effectivePropType);
+                    if (enumNames.Length > 0)
+                        enumValues = string.Join("|", enumNames);
+                }
             }
 
             bool isNullable = Nullable.GetUnderlyingType(f.ClrType) != null

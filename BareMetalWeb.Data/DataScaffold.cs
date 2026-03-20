@@ -215,11 +215,20 @@ public static class DataScaffold
         });
     }
 
-    /// <summary>Compile Expression.New for a type and return a cached factory delegate (no Activator.CreateInstance).</summary>
+    /// <summary>Create a factory delegate for the given type. The type MUST have a public parameterless constructor.</summary>
     private static Func<object> CompileFactory([DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type type)
     {
-        // AOT-safe: use Activator.CreateInstance instead of Expression.Lambda.Compile()
-        return () => Activator.CreateInstance(type)!;
+        // The [DynamicallyAccessedMembers] annotation ensures the trimmer preserves the
+        // parameterless constructor. We use a compiled expression tree (built once at
+        // startup, cached) so there is zero reflection on the hot path.
+        var ctor = type.GetConstructor(Type.EmptyTypes);
+        if (ctor == null)
+            throw new InvalidOperationException(
+                $"Type '{type.FullName}' has no public parameterless constructor. Register an explicit factory at startup.");
+        var lambda = System.Linq.Expressions.Expression.Lambda<Func<object>>(
+            System.Linq.Expressions.Expression.Convert(
+                System.Linq.Expressions.Expression.New(ctor), typeof(object)));
+        return lambda.Compile();
     }
 
     /// <summary>
@@ -1822,9 +1831,18 @@ public static class DataScaffold
         if (effectiveType == typeof(Guid)) return (Guid)value == Guid.Empty;
         if (effectiveType == typeof(byte)) return (byte)value == 0;
         if (effectiveType == typeof(short)) return (short)value == 0;
+        if (effectiveType == typeof(ushort)) return (ushort)value == 0;
+        if (effectiveType == typeof(ulong)) return (ulong)value == 0UL;
+        if (effectiveType == typeof(sbyte)) return (sbyte)value == 0;
+        if (effectiveType == typeof(char)) return (char)value == '\0';
+        if (effectiveType == typeof(TimeSpan)) return (TimeSpan)value == TimeSpan.Zero;
+        if (effectiveType == typeof(DateOnly)) return (DateOnly)value == default;
+        if (effectiveType == typeof(TimeOnly)) return (TimeOnly)value == default;
+        if (effectiveType == typeof(IdentifierValue)) return (IdentifierValue)value == default;
 
-        var defaultValue = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(effectiveType);
-        return Equals(value, defaultValue);
+        // All known value types are covered above. Unknown types cannot be compared.
+        throw new InvalidOperationException(
+            $"Unknown value type '{effectiveType.FullName}' in IsDefaultValue — add an explicit check above.");
     }
 
     public static string? GetIdValue(BaseDataObject instance)
@@ -3013,7 +3031,8 @@ public static class DataScaffold
         {
             instance = declaringType == typeof(DataRecord)
                 ? new DataRecord()
-                : System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(declaringType);
+                // Startup-only: use compiled factory to create instance for default-value inspection.
+                : CompileFactory(declaringType)();
         }
         catch
         {

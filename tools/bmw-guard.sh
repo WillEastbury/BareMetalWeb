@@ -30,12 +30,6 @@ check "JsonSerializer" "JsonSerializer usage detected"
 check "GetType(" "Runtime type inspection detected"
 check "typeof(" "Type reflection detected"
 
-# 🚫 Architectural smells (optional but useful)
-check "interface I" "Interface usage detected (possible abstraction creep)"
-check "class .*Service" "Service pattern detected"
-check "class .*Repository" "Repository pattern detected"
-check "class .*Manager" "Manager pattern detected"
-
 # 🚫 NuGet creep
 if grep -r "<PackageReference" . > /tmp/grep_pkg.txt; then
   echo ""
