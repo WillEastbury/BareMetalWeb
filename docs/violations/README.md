@@ -42,24 +42,25 @@ during codebase scans. Each file corresponds to a tracked violation. Violations 
 | 7 | 🟡 Medium | ✅ **RESOLVED** | ~~`BareMetalWeb.Data/DataScaffold.cs`~~ *(PropertyCache removed)* | [PropertyCache removed; uses compiled delegates](./007-propertycache-reflection-backed.md) |
 | 8 | 🟡 Medium | ✅ **RESOLVED** | `BareMetalWeb.Data/BinaryObjectSerializer.cs` | [All accessors use compiled Expression.Lambda delegates](./008-binary-serializer-reflection-accessors.md) |
 | 9 | 🟢 Low | ✅ **RESOLVED** | `BareMetalWeb.Host/McpRouteHandler.cs` | [Assembly.GetName().Version replaces GetCustomAttributes](./009-mcp-handler-assembly-version-reflection.md) |
-| 10 | 🟡 Medium | **Open** | `BareMetalWeb.Runtime/SamplePackageJson.cs` | [GetProperties reflection fallback when metadata unavailable](./010-sample-package-json-reflection-fallback.md) |
-| 11 | 🟡 Medium | **Open** | `BareMetalWeb.Data/AuditService.cs` | [GetProperties reflection in accessor cache](./011-audit-service-reflection-accessors.md) |
-| 12 | 🟡 Medium | **Open** | `BareMetalWeb.Data/EntityLayoutCompiler.cs` | [GetProperties reflection during metadata compilation](./012-entity-layout-compiler-reflection.md) |
-| 13 | 🟡 Medium | **Open** | `BareMetalWeb.Data/WalDataProvider.cs` | [GetProperties + GetCustomAttribute for singleton flags](./013-wal-data-provider-singleton-reflection.md) |
-| 14 | 🟡 Medium | **Open** | `BareMetalWeb.Data/ValidationService.cs` | [GetCustomAttributes with RequiresUnreferencedCode](./014-validation-service-attribute-scanning.md) |
-| 15 | 🟡 Medium | **Open** | `BareMetalWeb.Runtime/MetadataExtractor.cs` | [Reflection chain for entity/field metadata extraction](./015-metadata-extractor-reflection-chain.md) |
-| 16 | 🟢 Low | **Open** | `BareMetalWeb.Host/BareMetalWebServer.cs` + others | [Assembly version reflection at startup](./016-assembly-version-reflection.md) |
-| 17 | 🟡 Medium | **Open** | `BareMetalWeb.Data/DataScaffold.cs` | [GetMethods for RemoteCommand discovery](./017-data-scaffold-remote-command-discovery.md) |
-| 18 | 🟡 Medium | **Open** | `BareMetalWeb.Data/MetadataWireSerializer.cs` + others | [RuntimeHelpers.GetUninitializedObject usage](./018-runtime-helpers-uninitialized-object.md) |
+| 10 | 🟡 Medium | ✅ **RESOLVED** | `BareMetalWeb.Runtime/SamplePackageJson.cs` | [Reflection fallback replaced with auto-registration via DataScaffold](./010-sample-package-json-reflection-fallback.md) |
+| 11 | 🟡 Medium | ✅ **RESOLVED** | `BareMetalWeb.Data/AuditService.cs` | [Reflection fallback removed; metadata-only change detection](./011-audit-service-reflection-accessors.md) |
+| 12 | 🟡 Medium | ✅ **RESOLVED** | `BareMetalWeb.Data/EntityLayoutCompiler.cs` | [Uses meta.AllProperties (cached, DynamicallyAccessedMembers-annotated)](./012-entity-layout-compiler-reflection.md) |
+| 13 | 🟡 Medium | ✅ **RESOLVED** | `BareMetalWeb.Data/WalDataProvider.cs` | [Reflection fallback removed; metadata-only singleton flag enforcement](./013-wal-data-provider-singleton-reflection.md) |
+| 14 | 🟡 Medium | 🟧 **MITIGATED** | `BareMetalWeb.Data/ValidationService.cs` | [DynamicallyAccessedMembers annotation added; startup-only attribute scan](./014-validation-service-attribute-scanning.md) |
+| 15 | 🟡 Medium | 🟧 **MITIGATED** | `BareMetalWeb.Runtime/MetadataExtractor.cs` | [DynamicallyAccessedMembers added; EnumValues preferred over Enum.GetNames](./015-metadata-extractor-reflection-chain.md) |
+| 16 | 🟢 Low | ✅ **RESOLVED** | `BareMetalWeb.Host/BareMetalWebServer.cs` + others | [Assembly reflection replaced with MSBuild-generated BuildVersion constant](./016-assembly-version-reflection.md) |
+| 17 | 🟡 Medium | 🟧 **MITIGATED** | `BareMetalWeb.Data/DataScaffold.cs` | [Startup-only; DynamicallyAccessedMembers + Delegate.CreateDelegate](./017-data-scaffold-remote-command-discovery.md) |
+| 18 | 🟡 Medium | ✅ **RESOLVED** | `BareMetalWeb.Data/MetadataWireSerializer.cs` + others | [RuntimeHelpers.GetUninitializedObject replaced with factory/Activator patterns](./018-runtime-helpers-uninitialized-object.md) |
 
 ### Summary
 
 - **Total violations tracked:** 18
-- **Resolved:** 5 (IDs 2, 3, 7, 8, 9)
+- **Resolved:** 11 (IDs 2, 3, 7, 8, 9, 10, 11, 12, 13, 16, 18)
+- **Mitigated:** 3 (IDs 14, 15, 17 — startup-only, annotated with `[DynamicallyAccessedMembers]`)
 - **Open — Critical:** 1 (ID 1)
 - **Open — High:** 2 (IDs 4, 5)
-- **Open — Medium:** 9 (IDs 6, 10, 11, 12, 13, 14, 15, 17, 18)
-- **Open — Low:** 1 (ID 16)
+- **Open — Medium:** 1 (ID 6)
+- **Open — Low:** 0
 
 ---
 
