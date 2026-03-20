@@ -9,11 +9,10 @@
 #   • aot-linux-arm64-bookworm — BareMetalWeb.Host AOT binary (Debian bookworm, glibc 2.36)
 #   • bmw-agent-linux-x64    — bmw-agent AOT binary
 #   • bmw-agent-linux-arm64  — bmw-agent AOT binary
-#   • Container image (glibc 2.38) pushed to ACR as baremetalweb:{tag}-linux-arm64
-#   • Container image (glibc 2.36) pushed to ACR as baremetalweb:{tag}-linux-arm64-bookworm
 #
 # All artifacts are uploaded to GitHub Actions for later use by the agent bootstrap
-# system.  Container images are pushed to ACR for AKS deployment.
+# system.  There is NO deployment step — the agent downloads and installs the
+# correct versioned binary itself.
 # ────────────────────────────────────────────────────────────────────────────────
 name: "2 · CI2 — AOT Builds & Agent Container"
 
@@ -32,13 +31,9 @@ concurrency:
 
 permissions:
   contents: read
-  id-token: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  ACR_NAME: metalclusterregistry
-  ACR_LOGIN_SERVER: metalclusterregistry.azurecr.io
-  ACR_IMAGE: baremetalweb
 
 jobs:
   # ── Gate: skip if CI1 failed ────────────────────────────────────────────
@@ -299,94 +294,6 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
 
-  # ── Container: Linux arm64 (glibc 2.38, Ubuntu 24.04) ────────────────────
-  container-linux-arm64-glibc238:
-    name: "Container · linux-arm64 (glibc 2.38)"
-    needs: [version, aot-host-linux-arm64]
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download AOT artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: aot-linux-arm64
-          path: ./publish
-
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Log in to ACR
-        run: az acr login --name ${{ env.ACR_NAME }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.prebuilt
-          platforms: linux/arm64
-          push: true
-          build-args: PUBLISH_DIR=./publish
-          tags: |
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-arm64
-          labels: |
-            org.opencontainers.image.title=BareMetalWeb
-            org.opencontainers.image.version=${{ needs.version.outputs.tag }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp || github.event.workflow_run.created_at }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-
-  # ── Container: Linux arm64 (glibc 2.36, Debian bookworm) ────────────────
-  container-linux-arm64-glibc236:
-    name: "Container · linux-arm64 (glibc 2.36)"
-    needs: [version, aot-host-linux-arm64-bookworm]
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download AOT artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: aot-linux-arm64-bookworm
-          path: ./publish
-
-      - name: Azure Login
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Log in to ACR
-        run: az acr login --name ${{ env.ACR_NAME }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.prebuilt
-          platforms: linux/arm64
-          push: true
-          build-args: PUBLISH_DIR=./publish
-          tags: |
-            ${{ env.ACR_LOGIN_SERVER }}/${{ env.ACR_IMAGE }}:${{ needs.version.outputs.tag }}-linux-arm64-bookworm
-          labels: |
-            org.opencontainers.image.title=BareMetalWeb
-            org.opencontainers.image.version=${{ needs.version.outputs.tag }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp || github.event.workflow_run.created_at }}
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-
   # ── Summary ────────────────────────────────────────────────────────────
   summary:
     name: Build summary
@@ -398,8 +305,6 @@ jobs:
       - aot-agent-linux-x64
       - aot-agent-linux-arm64
       - agent-container
-      - container-linux-arm64-glibc238
-      - container-linux-arm64-glibc236
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -423,8 +328,6 @@ jobs:
           echo "| AOT Agent linux-x64 | ${{ needs.aot-agent-linux-x64.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| AOT Agent linux-arm64 | ${{ needs.aot-agent-linux-arm64.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Agent container build | ${{ needs.agent-container.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Container linux-arm64 (glibc 2.38) | ${{ needs.container-linux-arm64-glibc238.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Container linux-arm64 (glibc 2.36) | ${{ needs.container-linux-arm64-glibc236.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "All artifacts available for download from this run." >> $GITHUB_STEP_SUMMARY
           echo "The agent self-registers and downloads the correct binary at runtime — no CD step needed." >> $GITHUB_STEP_SUMMARY
