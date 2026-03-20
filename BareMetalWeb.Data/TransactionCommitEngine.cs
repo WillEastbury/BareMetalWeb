@@ -223,7 +223,7 @@ public sealed class TransactionCommitEngine
     private static BaseDataObject CloneEntity(BaseDataObject source, DataEntityMetadata meta)
     {
         // AOT-safe: DataRecord clones via schema-aware constructor; compiled entities
-        // fall back to RuntimeHelpers (no parameterless-ctor requirement).
+        // use the registered Handlers.Create() delegate from DataScaffold.
         BaseDataObject clone;
         if (source is DataRecord dr && dr.Schema is { } schema)
         {
@@ -231,8 +231,7 @@ public sealed class TransactionCommitEngine
         }
         else
         {
-            clone = (BaseDataObject)System.Runtime.CompilerServices.RuntimeHelpers
-                .GetUninitializedObject(source.GetType());
+            clone = meta.Handlers.Create();
         }
 
         clone.Key = source.Key;

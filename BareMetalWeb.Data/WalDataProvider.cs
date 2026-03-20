@@ -2050,59 +2050,26 @@ public sealed class WalDataProvider : IDataProvider, IRawBinaryProvider, IDispos
         var type = typeof(T);
         // Use DataScaffold metadata (compiled delegates) instead of raw reflection
         var meta = DataScaffold.GetEntityByType(type);
-        if (meta != null)
+        if (meta == null) return; // Entity type not registered — skip singleton clearing
+
+        var singletonFields = new List<DataFieldMetadata>();
+        foreach (var f in meta.Fields)
         {
-            var singletonFields = new List<DataFieldMetadata>();
-            foreach (var f in meta.Fields)
-            {
-                if (f.HasSingletonFlag && f.ClrType == typeof(bool) && true.Equals(f.GetValueFn(obj)))
-                    singletonFields.Add(f);
-            }
-
-            if (singletonFields.Count == 0) return;
-
-            foreach (var record in Query<T>())
-            {
-                if (record.Key == obj.Key) continue;
-                bool changed = false;
-                foreach (var f in singletonFields)
-                {
-                    if (true.Equals(f.GetValueFn(record)))
-                    {
-                        f.SetValueFn(record, false);
-                        changed = true;
-                    }
-                }
-                if (changed) Save(record);
-            }
-            return;
+            if (f.HasSingletonFlag && f.ClrType == typeof(bool) && true.Equals(f.GetValueFn(obj)))
+                singletonFields.Add(f);
         }
 
-        // Fallback for entities not registered with DataScaffold: use live reflection on the CLR type.
-        var props = type.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-        var singletonProps = new List<PropertyInfo>();
-        foreach (var p in props)
-        {
-            if (p.PropertyType == typeof(bool)
-                && p.GetCustomAttribute<SingletonFlagAttribute>() != null
-                && p.CanRead && p.CanWrite
-                && true.Equals(p.GetValue(obj)))
-            {
-                singletonProps.Add(p);
-            }
-        }
-
-        if (singletonProps.Count == 0) return;
+        if (singletonFields.Count == 0) return;
 
         foreach (var record in Query<T>())
         {
             if (record.Key == obj.Key) continue;
             bool changed = false;
-            foreach (var prop in singletonProps)
+            foreach (var f in singletonFields)
             {
-                if (true.Equals(prop.GetValue(record)))
+                if (true.Equals(f.GetValueFn(record)))
                 {
-                    prop.SetValue(record, false);
+                    f.SetValueFn(record, false);
                     changed = true;
                 }
             }

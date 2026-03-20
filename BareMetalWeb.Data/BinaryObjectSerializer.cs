@@ -1342,7 +1342,18 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             if (type == typeof(bool)) return false;
             if (type == typeof(DateTime)) return default(DateTime);
             if (type == typeof(Guid)) return Guid.Empty;
-            return RuntimeHelpers.GetUninitializedObject(type);
+            if (type == typeof(byte)) return (byte)0;
+            if (type == typeof(short)) return (short)0;
+            if (type == typeof(ushort)) return (ushort)0;
+            if (type == typeof(ulong)) return 0UL;
+            if (type == typeof(sbyte)) return (sbyte)0;
+            if (type == typeof(char)) return '\0';
+            if (type == typeof(DateTimeOffset)) return default(DateTimeOffset);
+            if (type == typeof(DateOnly)) return default(DateOnly);
+            if (type == typeof(TimeOnly)) return default(TimeOnly);
+            if (type == typeof(TimeSpan)) return TimeSpan.Zero;
+            // Fallback for user-defined structs — use Activator since we have the annotation.
+            return Activator.CreateInstance(type)!;
         }
 
         // Capture the annotated 'type' local so the trimmer can track the
@@ -1466,7 +1477,12 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (type == typeof(IntPtr)) return IntPtr.Zero;
         if (type == typeof(UIntPtr)) return UIntPtr.Zero;
 
-        return RuntimeHelpers.GetUninitializedObject(type);
+        // Enum types: default is the zero value
+        if (type.IsEnum)
+            return EnumHelper.FromLong(type, 0L);
+
+        // Fallback for user-defined value types — return null (no RuntimeHelpers needed)
+        return null;
     }
 
     private static TypeShape GetTypeShape(Type type)

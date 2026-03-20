@@ -28,6 +28,7 @@ public sealed class AuditServiceTests : IDisposable
         DataStoreProvider.Current = _store;
 
         DataScaffold.RegisterEntity<AuditEntry>();
+        DataScaffold.RegisterEntity<TestEntity>();
         
         _auditService = new AuditService(_store) { RunSynchronously = true };
     }

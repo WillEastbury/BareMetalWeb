@@ -107,7 +107,8 @@ public static class ValidationService
     /// Results are cached per type to avoid repeated attribute scanning.
     /// </summary>
     [RequiresUnreferencedCode("Attribute scanning requires entity type metadata to be preserved.")]
-    public static IReadOnlyList<ValidationRuleAttribute> GetEntityRules(Type entityType)
+    public static IReadOnlyList<ValidationRuleAttribute> GetEntityRules(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] Type entityType)
     {
         return _entityRulesCache.GetOrAdd(entityType, static t =>
         {

@@ -1810,9 +1810,20 @@ public static class DataScaffold
         if (effectiveType == typeof(Guid)) return (Guid)value == Guid.Empty;
         if (effectiveType == typeof(byte)) return (byte)value == 0;
         if (effectiveType == typeof(short)) return (short)value == 0;
+        if (effectiveType == typeof(ushort)) return (ushort)value == 0;
+        if (effectiveType == typeof(ulong)) return (ulong)value == 0UL;
+        if (effectiveType == typeof(sbyte)) return (sbyte)value == 0;
+        if (effectiveType == typeof(char)) return (char)value == '\0';
+        if (effectiveType == typeof(TimeSpan)) return (TimeSpan)value == TimeSpan.Zero;
+        if (effectiveType == typeof(DateOnly)) return (DateOnly)value == default;
+        if (effectiveType == typeof(TimeOnly)) return (TimeOnly)value == default;
 
-        var defaultValue = System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(effectiveType);
-        return Equals(value, defaultValue);
+        // Enum types: default is the zero value
+        if (effectiveType.IsEnum)
+            return Convert.ToInt64(value) == 0;
+
+        // Fallback: assume non-default for unknown value types (avoids RuntimeHelpers.GetUninitializedObject)
+        return false;
     }
 
     public static string? GetIdValue(BaseDataObject instance)
@@ -2922,14 +2933,16 @@ public static class DataScaffold
             || nullability.WriteState == NullabilityState.Nullable;
     }
 
-    private static bool HasDefaultValue(Type declaringType, PropertyInfo property)
+    private static bool HasDefaultValue(
+        [DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] Type declaringType,
+        PropertyInfo property)
     {
         object? instance = null;
         try
         {
             instance = declaringType == typeof(DataRecord)
                 ? new DataRecord()
-                : System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(declaringType);
+                : System.Activator.CreateInstance(declaringType)!;
         }
         catch
         {

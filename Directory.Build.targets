@@ -1,0 +1,28 @@
+<Project>
+  <!-- Generate a compile-time version constant so callers never need
+       Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>().
+       Resolves AOT/trimming violation #016. -->
+  <Target Name="_GenerateBuildVersion" BeforeTargets="CoreCompile"
+          Condition="!$(MSBuildProjectName.EndsWith('.Tests'))">
+    <PropertyGroup>
+      <_BmwVersion>$(InformationalVersion)</_BmwVersion>
+      <_BmwVersion Condition="'$(_BmwVersion)' == ''">$(Version)</_BmwVersion>
+      <_BmwVersion Condition="'$(_BmwVersion)' == ''">0.0.0-local</_BmwVersion>
+      <!-- Use project-specific namespace to avoid CS0436 conflicts across assemblies -->
+      <_BmwVersionNs>$(RootNamespace)</_BmwVersionNs>
+      <_BmwVersionNs Condition="'$(_BmwVersionNs)' == ''">$(MSBuildProjectName.Replace('.', '_'))</_BmwVersionNs>
+    </PropertyGroup>
+    <ItemGroup>
+      <_BVLine Include="// &lt;auto-generated /&gt;" />
+      <_BVLine Include="namespace $(_BmwVersionNs)%3B" />
+      <_BVLine Include="internal static partial class BuildVersion { internal const string Value = &quot;$(_BmwVersion)&quot;%3B }" />
+    </ItemGroup>
+    <WriteLinesToFile
+      File="$(IntermediateOutputPath)BuildVersion.g.cs"
+      Overwrite="true"
+      Lines="@(_BVLine)" />
+    <ItemGroup>
+      <Compile Include="$(IntermediateOutputPath)BuildVersion.g.cs" />
+    </ItemGroup>
+  </Target>
+</Project>

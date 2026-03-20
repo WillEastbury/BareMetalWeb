@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Runtime.CompilerServices;
 using BareMetalWeb.Core;
 
 namespace BareMetalWeb.Data.ExpressionEngine;
@@ -381,9 +380,19 @@ public static class CalculatedFieldService
             if (targetType == typeof(byte)) return (byte)0;
             if (targetType == typeof(short)) return (short)0;
             if (targetType == typeof(TimeSpan)) return TimeSpan.Zero;
+            if (targetType == typeof(ushort)) return (ushort)0;
+            if (targetType == typeof(ulong)) return 0UL;
+            if (targetType == typeof(sbyte)) return (sbyte)0;
+            if (targetType == typeof(char)) return '\0';
+            if (targetType == typeof(DateOnly)) return default(DateOnly);
+            if (targetType == typeof(TimeOnly)) return default(TimeOnly);
 
-            // Fallback for unknown value types — still needed for user-defined structs.
-            return RuntimeHelpers.GetUninitializedObject(targetType);
+            // Enum types: default is the zero value
+            if (targetType.IsEnum)
+                return Enum.ToObject(targetType, 0);
+
+            // Fallback for unknown value types — return null (no RuntimeHelpers needed)
+            return null;
         }
 
         var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;

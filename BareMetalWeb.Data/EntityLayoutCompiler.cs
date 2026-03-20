@@ -48,8 +48,9 @@ public static class EntityLayoutCompiler
         foreach (var f in meta.Fields)
             metaFieldsByName[f.Name] = f;
 
-        var allProps = meta.Type
-            .GetProperties(BindingFlags.Public | BindingFlags.Instance);
+        // Use the cached AllProperties from metadata (already sorted, annotation-safe via
+        // [DynamicallyAccessedMembers] on DataEntityMetadata.Type) instead of raw reflection.
+        var allProps = meta.AllProperties;
         var propList = new List<PropertyInfo>(allProps.Length);
         foreach (var p in allProps)
         {

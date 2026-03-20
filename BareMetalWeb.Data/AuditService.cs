@@ -1,7 +1,5 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using BareMetalWeb.Core;
@@ -17,24 +15,6 @@ namespace BareMetalWeb.Data;
 public sealed class AuditService
 {
     private readonly IBufferedLogger? _logger;
-
-    // Cache of compiled property accessors per type — avoids per-call GetProperties/GetValue reflection
-    private static readonly ConcurrentDictionary<Type, (string Name, Func<object, object?> Getter)[]> _accessorCache = new();
-
-    private static (string Name, Func<object, object?> Getter)[] GetCachedAccessors(Type type)
-    {
-        return _accessorCache.GetOrAdd(type, static t =>
-        {
-            var props = t.GetProperties(BindingFlags.Public | BindingFlags.Instance);
-            var list = new List<(string, Func<object, object?>)>(props.Length);
-            foreach (var p in props)
-            {
-                if (!p.CanRead || !p.CanWrite) continue;
-                list.Add((p.Name, PropertyAccessorFactory.BuildGetter(p)));
-            }
-            return list.ToArray();
-        });
-    }
 
     /// <summary>
     /// When true, audit saves are awaited directly instead of fire-and-forget.
@@ -285,50 +265,23 @@ public sealed class AuditService
 
         // Use DataScaffold metadata (compiled delegates) instead of raw reflection
         var meta = DataScaffold.GetEntityByType(type);
-        if (meta != null)
+        if (meta == null)
+            return changes; // Entity type not registered — skip change detection
+
+        foreach (var field in meta.Fields)
         {
-            foreach (var field in meta.Fields)
-            {
-                if (skipFields.Contains(field.Name))
-                    continue;
-
-                try
-                {
-                    var oldValue = field.GetValueFn(oldEntity);
-                    var newValue = field.GetValueFn(newEntity);
-
-                    if (!AreEqual(oldValue, newValue))
-                    {
-                        changes.Add(new FieldChange(
-                            field.Name,
-                            SerializeValue(oldValue),
-                            SerializeValue(newValue)
-                        ));
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger?.LogError($"Failed to detect change for property {field.Name}: {ex.Message}", ex);
-                }
-            }
-            return changes;
-        }
-
-        // Fallback for unregistered types — uses cached compiled delegates
-        foreach (var (name, getter) in GetCachedAccessors(type))
-        {
-            if (skipFields.Contains(name))
+            if (skipFields.Contains(field.Name))
                 continue;
 
             try
             {
-                var oldValue = getter(oldEntity);
-                var newValue = getter(newEntity);
+                var oldValue = field.GetValueFn(oldEntity);
+                var newValue = field.GetValueFn(newEntity);
 
                 if (!AreEqual(oldValue, newValue))
                 {
                     changes.Add(new FieldChange(
-                        name,
+                        field.Name,
                         SerializeValue(oldValue),
                         SerializeValue(newValue)
                     ));
@@ -336,7 +289,7 @@ public sealed class AuditService
             }
             catch (Exception ex)
             {
-                _logger?.LogError($"Failed to detect change for property {name}: {ex.Message}", ex);
+                _logger?.LogError($"Failed to detect change for property {field.Name}: {ex.Message}", ex);
             }
         }
 

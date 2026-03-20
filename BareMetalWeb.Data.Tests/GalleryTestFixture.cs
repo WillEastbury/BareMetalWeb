@@ -34,6 +34,9 @@ internal static class GalleryTestFixture
         DataScaffold.RegisterEntity<IndexDefinition>();
         DataScaffold.RegisterEntity<ActionDefinition>();
         DataScaffold.RegisterEntity<ActionCommandDefinition>();
+        DataScaffold.RegisterEntity<AggregationDefinition>();
+        DataScaffold.RegisterEntity<ScheduledActionDefinition>();
+        DataScaffold.RegisterEntity<DomainEventSubscription>();
 
         // Compile entities directly from gallery JSON (bypass binary store)
         var compiler = new RuntimeEntityCompiler();

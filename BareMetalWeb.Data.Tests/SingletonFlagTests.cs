@@ -46,6 +46,9 @@ public class SingletonFlagTests : IDisposable
         _testRoot = Path.Combine(Path.GetTempPath(), "BareMetalWeb_SingletonTests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_testRoot);
         _provider = new WalDataProvider(_testRoot);
+        // Register entity types so metadata-driven singleton flag enforcement works
+        DataScaffold.RegisterEntity<SingletonTestItem>();
+        DataScaffold.RegisterEntity<MultiSingletonTestItem>();
     }
 
     public void Dispose()
