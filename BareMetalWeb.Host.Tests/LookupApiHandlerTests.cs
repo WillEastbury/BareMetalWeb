@@ -112,7 +112,7 @@ public class LookupApiHandlerTests : IDisposable
         }
     }
 
-    [DataEntity("Orders", Slug = "orders")]
+    [DataEntity("Lookup Test Orders", Slug = "lookup-test-orders")]
     private class Order : BaseDataObject
     {
         private const int Ord_CustomerId = BaseFieldCount + 0;
@@ -190,7 +190,7 @@ public class LookupApiHandlerTests : IDisposable
             UserName = "admin",
             DisplayName = "Admin",
             Email = "admin@test.com",
-            Permissions = new[] { "admin", "monitoring", "Products", "Customers", "Orders" },
+            Permissions = new[] { "admin", "monitoring", "Products", "Customers", "Orders", "Lookup Test Orders" },
             IsActive = true
         };
         _testStore.Save(rootUser);
@@ -571,8 +571,8 @@ public class LookupApiHandlerTests : IDisposable
         // Arrange — 'orders' entity has CustomerId lookup to 'customers', but NOT to 'products'
         _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
-        // from=orders&via=CustomerId but target is 'products' — no such relationship
-        var context = CreateHttpContext("GET", "/api/_lookup/products?from=orders&via=CustomerId");
+        // from=lookup-test-orders&via=CustomerId but target is 'products' — no such relationship
+        var context = CreateHttpContext("GET", "/api/_lookup/products?from=lookup-test-orders&via=CustomerId");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -588,7 +588,7 @@ public class LookupApiHandlerTests : IDisposable
         _testStore.Save(new Product { Key = 1, Name = "Widget" });
 
         // Providing 'from' without 'via' should fail validation (incomplete relationship context)
-        var context = CreateHttpContext("GET", "/api/_lookup/products?from=orders");
+        var context = CreateHttpContext("GET", "/api/_lookup/products?from=lookup-test-orders");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -604,8 +604,8 @@ public class LookupApiHandlerTests : IDisposable
         var customer = new Customer { Key = 100, Name = "Acme Corp" };
         _testStore.Save(customer);
 
-        // from=orders&via=CustomerId with target 'customers' — valid relationship
-        var context = CreateHttpContext("GET", "/api/_lookup/customers?from=orders&via=CustomerId");
+        // from=lookup-test-orders&via=CustomerId with target 'customers' — valid relationship
+        var context = CreateHttpContext("GET", "/api/_lookup/customers?from=lookup-test-orders&via=CustomerId");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -628,7 +628,7 @@ public class LookupApiHandlerTests : IDisposable
         var order = new Order { Key = 101, OrderNumber = "ORD-001", CustomerId = "100", Status = "Open" };
         _testStore.Save(order);
 
-        var context = CreateHttpContext("GET", "/api/_lookup/orders/101?traverseRelationships=true");
+        var context = CreateHttpContext("GET", "/api/_lookup/lookup-test-orders/101?traverseRelationships=true");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -656,7 +656,7 @@ public class LookupApiHandlerTests : IDisposable
         var order = new Order { Key = 201, OrderNumber = "ORD-002", CustomerId = "200", Status = "Open" };
         _testStore.Save(order);
 
-        var context = CreateHttpContext("GET", "/api/_lookup/orders/201");
+        var context = CreateHttpContext("GET", "/api/_lookup/lookup-test-orders/201");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -680,7 +680,7 @@ public class LookupApiHandlerTests : IDisposable
         var order = new Order { Key = 301, OrderNumber = "ORD-003", CustomerId = "300", Status = "Open" };
         _testStore.Save(order);
 
-        var context = CreateHttpContext("GET", "/api/_lookup/orders?traverseRelationships=true&filter=OrderNumber:ORD-003");
+        var context = CreateHttpContext("GET", "/api/_lookup/lookup-test-orders?traverseRelationships=true&filter=OrderNumber:ORD-003");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -707,7 +707,7 @@ public class LookupApiHandlerTests : IDisposable
         var order = new Order { Key = 401, OrderNumber = "ORD-004", CustomerId = "400", Status = "Open" };
         _testStore.Save(order);
 
-        var context = CreatePostHttpContext("/api/_lookup/orders/_batch?traverseRelationships=true", "{\"ids\":[\"401\"]}");
+        var context = CreatePostHttpContext("/api/_lookup/lookup-test-orders/_batch?traverseRelationships=true", "{\"ids\":[\"401\"]}");
 
         // Act
         await _server.RequestHandler(context.ToBmw());
@@ -729,7 +729,7 @@ public class LookupApiHandlerTests : IDisposable
         var order = new Order { Key = 501, OrderNumber = "ORD-005", CustomerId = "999", Status = "Open" };
         _testStore.Save(order);
 
-        var context = CreateHttpContext("GET", "/api/_lookup/orders/501?traverseRelationships=true");
+        var context = CreateHttpContext("GET", "/api/_lookup/lookup-test-orders/501?traverseRelationships=true");
 
         // Act — should not throw; missing related entity is silently skipped
         await _server.RequestHandler(context.ToBmw());

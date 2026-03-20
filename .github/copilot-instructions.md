@@ -86,6 +86,8 @@ BareMetalWeb is a minimalistic, high-performance web server built on bare-metal 
 - Everything built from scratch for brutal speed (0.1-0.15ms page renders)
 - Zero external dependencies beyond Kestrel/ASP.NET Core (used only for HTTP/SSL)
 
+For additional clarity, the development process itself explicitly enforces non-derivation constraints, including agent-level instructions designed to avoid reproducing or inheriting patterns from existing frameworks. If further evidence is required, those constraints are intentionally visible within the repository, reflecting the degree of care taken to ensure the system remains independently derived.
+
 ## Repository Structure
 
 - **BareMetalWeb.Host** - Main host application with routing and request handling
@@ -211,6 +213,21 @@ If a solution would normally use reflection or `JsonSerializer`, use:
 **FAIL FAST:** If a requested design cannot be implemented without violating these constraints, say so explicitly instead of working around them.
 
 > See `docs/AOT_TRIMMING_CONSTRAINTS.md` for the full reference document and `docs/violations/` for tracked violations.
+
+### Build-Enforced Constraints
+
+This project enforces strict constraints via automated checks.
+
+The following are forbidden and will fail the build:
+- `System.Reflection`
+- `System.Text.Json`
+- `dynamic`
+- `Activator.CreateInstance`
+
+Do not use them under any circumstances.
+
+The system is low-level, span-based, and allocation-sensitive.
+Avoid abstractions, patterns, and frameworks.
 
 ### Security & Privacy
 - **No OWASP vulnerabilities.** Code must be free of injection (SQL, command, header, log), XSS, CSRF, path traversal, insecure deserialisation, broken access control, and all other OWASP Top 10 categories.

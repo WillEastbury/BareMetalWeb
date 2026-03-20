@@ -35,6 +35,7 @@ public class ActionDefinition : BaseDataObject
         new FieldSlot("Permission", Ord_Permission),
         new FieldSlot("UpdatedBy", Ord_UpdatedBy),
         new FieldSlot("UpdatedOnUtc", Ord_UpdatedOnUtc),
+        new FieldSlot("Version", Ord_Version),
     };
     protected internal override ReadOnlySpan<FieldSlot> GetFieldMap() => _fieldMap;
 

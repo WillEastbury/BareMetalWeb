@@ -1302,6 +1302,9 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (type == typeof(DataRecord))
             return new DataRecord();
 
+        if (InstanceFactory.TryGetValue(type, out var factory))
+            return factory();
+
         if (type.IsValueType)
         {
             if (type == typeof(int)) return 0;
@@ -1314,11 +1317,15 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
             if (type == typeof(DateTime)) return default(DateTime);
             if (type == typeof(Guid)) return Guid.Empty;
             if (type == typeof(IdentifierValue)) return default(IdentifierValue);
-            return RuntimeHelpers.GetUninitializedObject(type);
+
+            throw new InvalidOperationException(
+                $"No default factory for value type '{type.FullName}'. Add it to the known-type list or register it at startup.");
         }
 
-        if (InstanceFactory.TryGetValue(type, out var factory))
-            return factory();
+        // Entity types must be registered — metadata system knows all persistable types
+        var meta = DataScaffold.GetEntityByType(type);
+        if (meta != null)
+            return meta.Handlers.Create();
 
         throw new InvalidOperationException(
             $"No factory registered for type '{type.FullName}'. Register it with BinaryObjectSerializer.RegisterKnownType<T>() at startup.");
@@ -1437,7 +1444,8 @@ public sealed class BinaryObjectSerializer : ISchemaAwareObjectSerializer
         if (type == typeof(IntPtr)) return IntPtr.Zero;
         if (type == typeof(UIntPtr)) return UIntPtr.Zero;
 
-        return RuntimeHelpers.GetUninitializedObject(type);
+        throw new InvalidOperationException(
+            $"No default value known for type '{type.FullName}'. Add it to the known-type list in CreateDefaultInstance.");
     }
 
     private static TypeShape GetTypeShape(Type type)

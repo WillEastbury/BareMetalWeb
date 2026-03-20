@@ -1,5 +1,33 @@
 # BareMetalWeb
 
+```
+    ┌─────────────────────────────────────────────────────────────┐
+    │                                                             │
+    │   REQUEST ──► ROUTE ──► HANDLER ──► RENDER ──► RESPONSE     │
+    │                                                             │
+    │   No DI. No middleware. No magic. Just metal.               │
+    │                                                             │
+    │   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐   │
+    │   │ Kestrel  │  │ Metadata │  │ Binary   │  │ Template │   │
+    │   │ HTTP/SSL │─►│ Driven   │─►│ Wire     │─►│ Streamer │   │
+    │   │ Only     │  │ Routing  │  │ Format   │  │ PipeIO   │   │
+    │   └──────────┘  └──────────┘  └──────────┘  └──────────┘   │
+    │                                                             │
+    └─────────────────────────────────────────────────────────────┘
+```
+
+> **Independent research project** — developed in a personal capacity. No Microsoft compute, code, or confidential information are used or developed within.
+
+This project is an attempt to build a vertically integrated web-reporting-business-query-database-distributed compute fabric on top of .NET, targeting maximum possible performance by taking a fundamentally different approach from existing web servers. It explores an alternative compute paradigm by reducing the development model to a simple, explicit state machine driven by metadata rather than layered abstractions.
+
+The system deliberately rejects dependency injection, middleware pipelines, and convention-based abstractions in favour of explicit, deterministic control over execution flow. Each request is processed through a well-defined lifecycle rather than implicit framework behaviour or chained components. This removes hidden cost, reduces cognitive overhead, and ensures that what executes is exactly what is written.
+
+A custom binary serialization format is used in place of JSON for internal data handling, eliminating unnecessary encoding overhead, reducing allocations, and enabling predictable, high-performance data access patterns. Where JSON interoperability is required, it is handled via a metadata-driven streaming transformation layer operating at wire speed, completely avoiding reflection-based serialization. Data is projected directly to and from the wire format with minimal overhead, preserving performance while maintaining compatibility with external systems.
+
+The design prioritises mechanical sympathy, transparency, and raw performance over flexibility or developer convenience. All behaviours are explicit, all costs are visible, and the system is constructed from first principles rather than derived from existing framework conventions.
+
+---
+
 **A raw, high-performance web framework built on bare-metal ASP.NET Core.**
 
 No MVC. No middleware pipeline. No DI containers. No Razor. No magic.

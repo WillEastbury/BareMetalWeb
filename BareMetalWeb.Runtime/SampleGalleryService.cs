@@ -22,6 +22,8 @@ public static class SampleGalleryService
     /// </summary>
     public static IReadOnlyList<SamplePackage> GetAllPackages()
     {
+        EnsurePackageTypesRegistered();
+
         var assembly = typeof(SampleGalleryService).Assembly;
         var packages = new List<SamplePackage>();
 
@@ -52,6 +54,7 @@ public static class SampleGalleryService
     public static SamplePackage? GetPackage(string slug)
     {
         ArgumentNullException.ThrowIfNull(slug);
+        EnsurePackageTypesRegistered();
 
         var assembly = typeof(SampleGalleryService).Assembly;
         string? resourceName = null;
@@ -70,6 +73,29 @@ public static class SampleGalleryService
         if (stream == null) return null;
 
         return SamplePackageJson.Deserialize(stream);
+    }
+
+    // ── Registration ────────────────────────────────────────────────────────
+
+    private static int _registered;
+
+    /// <summary>
+    /// Ensures the package definition entity types (EntityDefinition, FieldDefinition, etc.)
+    /// are registered with DataScaffold. Called once, idempotent.
+    /// </summary>
+    private static void EnsurePackageTypesRegistered()
+    {
+        if (Interlocked.CompareExchange(ref _registered, 1, 0) != 0)
+            return;
+
+        DataScaffold.RegisterEntity<EntityDefinition>();
+        DataScaffold.RegisterEntity<FieldDefinition>();
+        DataScaffold.RegisterEntity<IndexDefinition>();
+        DataScaffold.RegisterEntity<ActionDefinition>();
+        DataScaffold.RegisterEntity<ActionCommandDefinition>();
+        DataScaffold.RegisterEntity<AggregationDefinition>();
+        DataScaffold.RegisterEntity<ScheduledActionDefinition>();
+        DataScaffold.RegisterEntity<DomainEventSubscription>();
     }
 
     // ── Deployment ───────────────────────────────────────────────────────────

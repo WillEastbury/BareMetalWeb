@@ -69,42 +69,30 @@ public static class SamplePackageJson
     /// <summary>
     /// Metadata-driven entity deserialization: uses DataScaffold field metadata and compiled
     /// setter delegates to populate entity properties from JSON without reflection.
+    /// The entity type must be registered with DataScaffold before calling this method.
     /// </summary>
     private static List<T> ReadEntityList<T>(JsonElement arr) where T : BaseDataObject, new()
     {
         if (arr.ValueKind != JsonValueKind.Array) return new List<T>();
 
-        var meta = DataScaffold.GetEntityByType(typeof(T));
-        var list = new List<T>(arr.GetArrayLength());
+        var meta = DataScaffold.GetEntityByType(typeof(T))
+            ?? throw new InvalidOperationException(
+                $"Entity type '{typeof(T).Name}' is not registered with DataScaffold. " +
+                "Register it before deserializing sample packages.");
 
-        // Build property setter cache when DataScaffold metadata is unavailable (e.g. unit tests)
-        Dictionary<string, (System.Reflection.PropertyInfo Prop, Type ClrType)>? propCache = null;
-        if (meta == null)
-        {
-            propCache = new(StringComparer.OrdinalIgnoreCase);
-            foreach (var p in typeof(T).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
-                if (p.CanWrite) propCache[p.Name] = (p, p.PropertyType);
-        }
+        var list = new List<T>(arr.GetArrayLength());
 
         foreach (var el in arr.EnumerateArray())
         {
             if (el.ValueKind != JsonValueKind.Object) continue;
-            var entity = new T();
+            var entity = (T)meta.Handlers.Create();
 
             foreach (var prop in el.EnumerateObject())
             {
-                if (meta != null)
-                {
-                    var field = meta.FindField(prop.Name);
-                    if (field == null) continue;
-                    if (DataScaffold.TryConvertJson(prop.Value, field.ClrType, out var converted))
-                        field.SetValueFn(entity, converted);
-                }
-                else if (propCache!.TryGetValue(prop.Name, out var pi))
-                {
-                    if (DataScaffold.TryConvertJson(prop.Value, pi.ClrType, out var converted))
-                        pi.Prop.SetValue(entity, converted);
-                }
+                var field = meta.FindField(prop.Name);
+                if (field == null) continue;
+                if (DataScaffold.TryConvertJson(prop.Value, field.ClrType, out var converted))
+                    field.SetValueFn(entity, converted);
             }
 
             list.Add(entity);
